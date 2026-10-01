@@ -274,6 +274,9 @@ function formatWeatherData(data: any) {
 
   const code = data.daily.weather_code[0];
   const temp = data.daily.temperature_2m_max[0];
+  // Open-Meteo répond 200 avec des valeurs nulles quand la date n'est pas (ou
+  // plus) couverte : ce n'est pas une météo « variable ».
+  if (code == null) return { meteo: "Inconnu", temperature: null };
 
   const weatherMap: Record<number, string> = {
     0: "Ciel dégagé",
@@ -293,13 +296,22 @@ function formatWeatherData(data: any) {
     75: "Neige forte",
     80: "Averses de pluie faibles",
     81: "Averses de pluie modérées",
+    56: "Bruine verglaçante",
+    57: "Bruine verglaçante dense",
+    66: "Pluie verglaçante",
+    67: "Pluie verglaçante forte",
+    77: "Grains de neige",
     82: "Averses de pluie violentes",
+    85: "Averses de neige faibles",
+    86: "Averses de neige fortes",
     95: "Orage",
+    96: "Orage avec grêle",
+    99: "Orage violent avec grêle",
   };
 
   return {
     meteo: weatherMap[code] || "Variable",
-    temperature: temp
+    temperature: temp == null ? null : Math.round(temp)
   };
 }
 
@@ -471,19 +483,20 @@ export function registerGeoProxyRoutes(app: Express) {
       const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto&start_date=${date}&end_date=${date}`;
 
       const weatherRes = await fetchWithTimeout(weatherUrl, {}, 5000);
-      if (!weatherRes.ok) {
-        // If forecast API fails (maybe date is too far in the past), try archive API
-        const archiveUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto&start_date=${date}&end_date=${date}`;
-        const archiveRes = await fetchWithTimeout(archiveUrl, {}, 5000);
-        if (!archiveRes.ok) {
-          throw new Error("Weather API failed");
-        }
-        const archiveData = await archiveRes.json();
-        return res.json(formatWeatherData(archiveData));
+      let forecastData: any = null;
+      if (weatherRes.ok) {
+        forecastData = await weatherRes.json();
+        const first = forecastData?.daily?.weather_code?.[0];
+        if (first != null) return res.json(formatWeatherData(forecastData));
       }
-
-      const weatherData = await weatherRes.json();
-      res.json(formatWeatherData(weatherData));
+      // Prévision en erreur ou sans valeur pour cette date : archive.
+      const archiveUrl = `https://archive-api.open-meteo.com/v1/archive?latitude=${lat}&longitude=${lon}&daily=weather_code,temperature_2m_max&timezone=auto&start_date=${date}&end_date=${date}`;
+      const archiveRes = await fetchWithTimeout(archiveUrl, {}, 5000);
+      if (!archiveRes.ok) {
+        if (forecastData) return res.json(formatWeatherData(forecastData));
+        throw new Error("Weather API failed");
+      }
+      res.json(formatWeatherData(await archiveRes.json()));
     } catch (error: any) {
       console.error("Error in /api/weather:", error);
       res.status(500).json({ error: "Failed to fetch weather data" });

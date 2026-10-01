@@ -7,7 +7,8 @@ import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
-import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
+import type { Proposal, Contact, Milestone, MiqcpAssessment, ProjectTemplate } from '../types';
+import { OPERATION_LABELS, feeDistributionFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
 import { GeoportailMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
@@ -94,6 +95,8 @@ export default function Proposals() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [templateId, setTemplateId] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
@@ -174,14 +177,17 @@ export default function Proposals() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [proposalsData, contactsData, milestonesData] = await Promise.all([
+        const [proposalsData, contactsData, milestonesData, templatesData] = await Promise.all([
           fetchJson<Proposal[]>('/api/proposals'),
           fetchJson<Contact[]>('/api/contacts'),
-          fetchJson<Milestone[]>('/api/milestones')
+          fetchJson<Milestone[]>('/api/milestones'),
+          // Les modèles sont un confort : leur absence n'empêche pas d'ouvrir les devis.
+          fetchJson<ProjectTemplate[]>('/api/project-templates').catch(() => [] as ProjectTemplate[]),
         ]);
         setProposals(proposalsData);
         setContacts(contactsData);
         setMilestones(milestonesData);
+        setTemplates(templatesData);
       } catch (err) {
         console.error('Proposals data fetch failed:', err);
       }
@@ -250,6 +256,7 @@ export default function Proposals() {
         setIsModalOpen(false);
         setEditingProposal(null);
         setNewProposal(initialProposalState);
+        setTemplateId('');
         setCostMode('manual');
       } else {
         const errBody = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
@@ -269,7 +276,25 @@ export default function Proposals() {
     setIsModalOpen(true);
   };
 
+  // Un modèle de projet pose le type d'opération et la répartition des
+  // honoraires par mission (montants calculés sur le total déjà saisi, sinon
+  // à zéro : ils se recalculent d'eux-mêmes quand les honoraires changent).
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const template = templates.find(t => t.id === id);
+    if (!template) return;
+    setNewProposal(prev => {
+      const fee = feeDistributionFromTemplate(template.default_missions, prev.amount || 0, prev.decimal_precision ?? 2);
+      return {
+        ...prev,
+        ...(template.operation_type && template.operation_type !== 'autre' ? { type_projet: OPERATION_LABELS[template.operation_type] } : {}),
+        ...(fee ? { fee_distribution: fee } : {}),
+      };
+    });
+  };
+
   const handleOpenCreateModal = () => {
+    setTemplateId('');
     setEditingProposal(null);
     setNewProposal(initialProposalState);
     setCostMode('manual');
@@ -452,7 +477,9 @@ export default function Proposals() {
             }
             // If current total is 0, use default percentages
             if (currentBaseTotal === 0) {
-              const defaultPct = DEFAULT_MISSIONS.find(dm => dm.id === m.id)?.default_pct || (100 / baseMissions.length);
+              // Le pourcentage propre à la mission (posé par un modèle de projet) prime
+              // sur celui de la liste par défaut, qui ne connaît que les missions MOP.
+              const defaultPct = (m.default_pct ?? DEFAULT_MISSIONS.find(dm => dm.id === m.id)?.default_pct) || (100 / baseMissions.length);
               return { ...m, amount: Number((targetBaseTotal * (defaultPct / 100)).toFixed(newProposal.decimal_precision || 2)) };
             }
             // Otherwise distribute based on relative percentage
@@ -701,6 +728,25 @@ export default function Proposals() {
                     {t('proposals_section_general')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {!editingProposal && templates.length > 0 && (
+                      <div className="md:col-span-3">
+                        <FormField
+                          label="Modèle de projet"
+                          type="select"
+                          options={templates.map(tpl => ({ id: tpl.id, name: tpl.name }))}
+                          value={templateId}
+                          onChange={applyTemplate}
+                        />
+                        {(() => {
+                          const summary = summarizeTemplate({ default_missions: templates.find(tpl => tpl.id === templateId)?.default_missions });
+                          return summary ? (
+                            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                              Type d'opération et répartition des honoraires par mission repris du modèle ({summary}).
+                            </p>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
                     <FormField label="Référence" value={newProposal.reference} onChange={(v: any) => setNewProposal(prev => ({...prev, reference: v}))} />
                     <div className="md:col-span-2">
                       <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />

@@ -145,6 +145,27 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (statut !== undefined) update.statut = statut;
       if (decisions !== undefined) update.decisions = decisions;
       if (lot_tracking !== undefined) update.lot_tracking = lot_tracking;
+      // Le client renvoie le CR entier à chaque sauvegarde : une date absente ou
+      // non conforme (ancienne valeur) est simplement ignorée, jamais un refus.
+      if (typeof req.body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date) && !Number.isNaN(Date.parse(`${req.body.date}T00:00:00Z`))) {
+        update.date = req.body.date;
+      }
+      // Numéro de CR modifiable à la main : entier ≥ 1, unique dans l'affaire.
+      if (req.body.report_number !== undefined) {
+        const number = Number(req.body.report_number);
+        const { data: current } = await supabaseAdmin.from('site_reports').select('project_id, report_number').eq('id', reportId).eq('tenant_id', tenantId).maybeSingle();
+        if (!current) return res.status(404).json({ error: 'Compte-rendu introuvable.' });
+        if (!Number.isInteger(number) || number < 1) {
+          return res.status(400).json({ error: 'Le numéro de compte-rendu doit être un entier supérieur ou égal à 1.' });
+        }
+        if (number !== Number((current as any).report_number)) {
+          const { data: siblings } = await supabaseAdmin.from('site_reports').select('id, report_number').eq('project_id', (current as any).project_id).eq('tenant_id', tenantId);
+          if ((siblings || []).some((r: any) => r.id !== reportId && Number(r.report_number) === number)) {
+            return res.status(409).json({ error: 'Ce numéro de compte-rendu est déjà utilisé dans cette affaire.' });
+          }
+          update.report_number = number;
+        }
+      }
       const { error } = await supabaseAdmin.from('site_reports').update(update).eq('id', reportId).eq('tenant_id', tenantId);
       if (error) throw error;
       const { data: updatedReport } = await supabaseAdmin.from('site_reports').select('*').eq('id', reportId).eq('tenant_id', tenantId).single();

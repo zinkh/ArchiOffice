@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyTenantAdmins } from './mailer';
 import { notifyTenantAdminsPush } from './push';
+import { dispatchWebhookEvent } from './webhookDispatch';
 
 const DEFAULT_CHECK_INTERVAL_HOURS = 6;
 
@@ -508,6 +509,11 @@ export async function runAlertCycleForTenant(supabaseAdmin: SupabaseClient, tena
         `[ArchiOffice] ${alert.title}`,
         `<p>${alert.message}</p><p style="color:#666;font-size:12px">Alerte automatique ArchiOffice (règle ${alert.code}).</p>`
       ).catch(() => {});
+    }
+    if (alert.code === 'facture_echue') {
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'invoice.overdue', {
+        id: alert.targetId ?? null, title: alert.title, message: alert.message,
+      });
     }
   }
 

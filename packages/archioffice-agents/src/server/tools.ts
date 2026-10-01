@@ -6,6 +6,7 @@ import { buildGeoTools, executeGeoTool, GEO_TOOL_NAMES } from './geoTools.js';
 import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES, buildWriteProjectDocTools, executeWriteProjectDocTool, PROJECT_DOC_WRITE_TOOL_NAMES } from './projectDocTools.js';
 import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './delegateTools.js';
 import { buildNotifyTools, executeNotifyTool, NOTIFY_TOOL_NAMES } from './notifyTools.js';
+import { buildLearningTools, executeLearningTool, LEARNING_TOOL_NAMES } from './learningTools.js';
 import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
@@ -168,6 +169,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   if (caps.docsWrite) tools.push(...buildWriteProjectDocTools());
   if (caps.delegate) tools.push(...buildDelegateTools());
   if (caps.notifyUsers) tools.push(...buildNotifyTools());
+  if (caps.learning) tools.push(...buildLearningTools());
 
   return tools;
 }
@@ -493,6 +495,13 @@ export async function executeAgentAction(
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     if (!selfAgent) return { response: { error: 'Identité agent manquante — action impossible.' } };
     return executeNotifyTool(baseUrl, auth, name, args, selfAgent.id);
+  }
+
+  if (name && LEARNING_TOOL_NAMES.includes(name)) {
+    if (!caps.learning) return { response: { error: "La proposition d'améliorations n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    if (!selfAgent) return { response: { error: 'Identité agent manquante — action impossible.' } };
+    return executeLearningTool(baseUrl, auth, name, args, selfAgent.id);
   }
 
   const resourceKey = String(args.resource || '');

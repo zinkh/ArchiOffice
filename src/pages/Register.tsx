@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { IconCommand, IconMailCheck } from '@tabler/icons-react';
+import { IconMailCheck } from '@tabler/icons-react';
+import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 
 export default function Register() {
   const [form, setForm] = useState({
@@ -133,9 +134,7 @@ export default function Register() {
     <div className="min-h-svh flex items-center justify-center bg-zinc-50 dark:bg-[#050505] py-12">
       <div className="w-full max-w-lg p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
         <div className="flex justify-center mb-6">
-          <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
-            <IconCommand size={32} />
-          </div>
+          <ArchiOfficeLogo size={48} />
         </div>
         <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-2">
           Créer votre cabinet

@@ -1769,7 +1769,7 @@ export default function ProjectDetail() {
         />
       </div>
 
-      <div className="flex-1 lg:min-h-0 lg:overflow-hidden">
+      <div className={`flex-1 ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
         {activeTab === 'INFOS' && !showFullEditor ? (
           <ProjectOverview
             project={project}
@@ -4695,7 +4695,7 @@ export default function ProjectDetail() {
 
             {activeTab === 'CORRESPONDANCE' && (
               <div className="space-y-8">
-                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} />
+                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} relatedKeywords={[project?.name, project?.project_code, project?.reference].filter(Boolean) as string[]} />
               </div>
             )}
             {activeTab === 'AOR' && (

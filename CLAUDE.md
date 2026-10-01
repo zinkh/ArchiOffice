@@ -419,6 +419,39 @@ attendre qu'ils soient chargés recrée le bug.
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
 
+### Ordre des lots : la liste des lots du projet fait foi
+
+`LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
+pointeur (`startPressDrag`, poignée à gauche de chaque ligne). Pas de colonne
+de rang : `PUT /api/projects/:projectId/lots/order` reçoit les ids dans leur
+nouvel ordre et renumérote `lot_number` en « 01 », « 02 »... ; le numéro EST
+l'ordre (`GET` trie par numéro naturel). Aucune migration SQL.
+`src/lib/lotsOrder.ts::appliquerOrdreLots()` reporte ensuite cet ordre et ces
+numéros sur le DPGF (donc le CCTP, même document) et le bordereau, chapitres
+et articles compris (seul le préfixe « ancien. » est remplacé, un code de
+bibliothèque n'est jamais touché). Rattachement par `projectLotId`, à défaut par
+intitulé, et le lien est alors posé ; un lot du document absent du projet garde
+son numéro et passe en dernier. `ProTab.synchroniserLots` fait cette
+propagation, l'autosauvegarde enregistre.
+
+**Numéros et intitulés de lots strictement identiques partout** (liste, CCTP,
+DPGF, estimation, BPU/DQE). Deux sens, jamais de suppression silencieuse :
+
+- **Liste → documents** (cas normal : on crée d'abord les lots) :
+  `appliquerOrdreLots()` donne à chaque lot du document le numéro et l'intitulé
+  EXACTS du projet et crée les lots manquants (vides). Appliqué à chaque
+  modification de la vue LOTS et une fois à l'ouverture, mais seulement si le
+  document ne diverge pas (`lotsDivergent()` : aucun lot du document sans
+  rattachement `projectLotId` à un lot existant).
+- **Document → liste** (CCTP rédigé avant les lots) : si le document diverge, un
+  bandeau (ProTab) propose « Remplir la liste des lots depuis le CCTP »
+  (`planImportLots()` + `PUT /api/lots/:id` / `POST`, les lots existants
+  rapprochés par intitulé identique puis proche prennent numéro et intitulé du
+  document) ou « Aligner le CCTP sur la liste » (retire les lots hors liste,
+  après confirmation qui cite ceux qui portent du contenu).
+
+Un projet sans lot ne touche jamais aux documents.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes
@@ -1148,6 +1181,54 @@ plusieurs centaines de pages : ce dépôt n'a pas de recherche par mots-clés
 ni d'embeddings, tout document déposé est relu en entier. `/agents/:id/edit`
 le dit explicitement dans le texte d'aide du réglage.
 
+### Apprentissage des agents : proposer, jamais appliquer
+
+Un agent qui se voyait corrigé, ou qui butait sur une capacité qu'il n'avait
+pas, n'avait aucun moyen de le retenir au-delà de la conversation en cours —
+au tour suivant, il repartait de zéro. `learning_enabled`
+(`supabase/migrate_agent_learning.sql`), une colonne de plus sur `agents`
+réglable depuis `/agents/:id/edit`, off par défaut et jamais héritée d'un
+template (même traitement que `knowledge_enabled`), donne accès à l'outil
+`suggerer_amelioration(kind, titre, contenu, capacite_suggeree?)`
+(`packages/archioffice-agents/src/server/learningTools.ts`).
+
+**Trois natures de proposition**, jamais appliquées seules — même principe
+que `needs_confirmation` sur `create_record` : mémoriser une correction,
+signaler une capacité manquante ou rédiger une note change durablement le
+comportement d'un agent, ça se confirme, ça ne se déduit jamais.
+
+- `correction` — l'utilisateur vient de corriger une réponse ou une
+  hypothèse de l'agent.
+- `missing_capability` — l'agent n'a pas pu répondre correctement faute d'un
+  outil ou d'un accès qu'il n'a pas ; `capacite_suggeree` nomme la colonne
+  concernée (`mail_enabled`, `geo_enabled`...) pour que l'écran de revue
+  pointe directement vers `/agents/:id/edit`.
+- `knowledge_note` — l'agent propose lui-même une note pour sa mémoire (une
+  règle ou une préférence du cabinet apprise en tâche).
+
+**Une file d'attente, pas une écriture définitive.** L'outil dépose la
+proposition dans `agent_learning_suggestions`, statut `pending` — jamais dans
+`documents` ni dans le prompt. L'architecte la revoit depuis
+`/agents/apprentissage` (`AgentLearning.tsx`) et l'approuve ou la rejette
+(`PUT /api/agent-learning-suggestions/:id`) ; `POST` (appelé par l'outil,
+`as_agent_id`) revalide l'agent comme `POST /api/feed/posts` revalide
+`as_agent_id` — introuvable, inactif ou sans `learning_enabled` est refusé.
+Une proposition déjà traitée ne peut pas être retraitée (409).
+
+**Seule une proposition *approuvée* devient mémoire, et seulement pour
+`correction`/`knowledge_note`.** `buildAgentContext()` (`context.ts`) relit,
+quand `learningEnabled` est vrai, les lignes `agent_learning_suggestions` de
+CET agent au statut `approved` de ces deux natures, dans
+`ctx.learningNotes` — auto-injecté à chaque tour comme
+`knowledgeDocuments`, jamais via un `tool`, jamais tant que le statut reste
+`pending` (`MÉMOIRE D'APPRENTISSAGE`, `systemPrompts.ts`, plafonné à
+`MAX_LEARNING_NOTES`/`MAX_LEARNING_NOTE_CHARS` — du texte court déjà en base,
+pas un document à extraire). Une proposition `missing_capability` approuvée
+ne déclenche RIEN d'automatique côté agent : approuver documente seulement
+que l'architecte a vu la demande, activer la capacité reste un geste
+volontaire distinct depuis `/agents/:id/edit` — jamais l'écran de revue lui-
+même.
+
 ### Lecture des pièces jointes de messagerie par les agents
 
 `read_email` (`mail_enabled`) rapportait déjà les pièces jointes d'un
@@ -1426,6 +1507,74 @@ porte pas les références de résultat de recherche que ces tools renvoient.
 sans effet — dégradé, mais honnête, plutôt qu'un réglage qui échouerait
 silencieusement ou ferait échouer l'appel API — tant qu'un cabinet fait
 tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
+
+### Modèles de projet : une trame d'affaire, pas un préremplissage
+
+Un modèle (`project_templates`, `/templates`) ne se limitait à quatre valeurs
+de formulaire (nom, statut, budget, description) : il ne créait ni lots, ni
+jalons, ni tâches, donc rien de ce qu'il faut réellement ressaisir à chaque
+affaire. `supabase/migrate_project_templates_structure.sql` lui ajoute
+`operation_type` (`neuf`, `rehabilitation`, `extension`, `maison_individuelle`,
+`permis_seul`, `autre`), `marche_type` (`prive`, `public`), trois listes jsonb
+(`default_lots`, `default_milestones`, `default_tasks`) et `catalog_key`.
+
+**Application : `POST /api/projects` reçoit `template_id`, rien d'autre.**
+`server/projectTemplateApply.ts` relit le modèle en base (vérifié dans le
+cabinet, 400 sinon) et crée lots, jalons et tâches APRÈS l'affaire, en
+meilleur effort : un échec est rapporté dans `template_applied.failed`, jamais
+au prix de l'affaire déjà créée. Un modèle `public` pose `is_public_client`,
+et `type_projet` se déduit du type d'opération quand le corps n'en porte pas.
+Le client ne fait que désigner le modèle : il ne peut pas faire écrire autre
+chose que ce que le cabinet a enregistré.
+
+**Délais relatifs, jamais de dates.** Jalons et tâches portent des décalages en
+jours depuis `start_date` (`addDaysIso`, `src/lib/projectTemplates.ts`). Les
+listes sont assainies à l'écriture (`sanitizeLots/Milestones/Tasks`,
+`server/routes/projectTemplates.ts`) : bornées, typées, priorités filtrées.
+
+**Trois origines.** Saisi à la main ; installé depuis le catalogue de démarrage
+(`server/projectTemplateCatalog.ts`, huit trames : neuf, réhabilitation,
+extension en privé et en public, maison individuelle, permis de construire
+seul) ; ou tiré d'une affaire (`POST /api/project-templates/from-project/:id`,
+lots, jalons et tâches en décalages, sans montants). `catalog_key` sous index
+unique partiel `(tenant_id, catalog_key)` empêche d'installer deux fois la même
+entrée, sans dépendre du nom que le cabinet a pu changer. Le catalogue n'est
+qu'une copie de départ : une fois installé, le modèle appartient au cabinet.
+
+**À ne pas défaire.** Les jalons du catalogue portent des intitulés
+d'événements (« Dépôt du permis », « Réception des travaux »), jamais le nom
+d'une mission du contrat MOE (« Esquisse (ESQ) ») : `ProjectDetail.tsx` crée un
+jalon par mission incluse et apparie par titre, un doublon de nom serait fusionné
+avec lui (verrouillé par un test). Le public diffère du privé par la procédure
+de passation (publication de l'avis, commission d'analyse, notification) et non
+par le fond des lots. Les délais d'instruction d'un permis suivent le Code de
+l'urbanisme (1 mois DP, 2 mois PC de maison individuelle, 3 mois les autres).
+
+**Les missions MOE suivent le modèle jusque dans les contrats et les
+propositions** (`default_missions`, jsonb, `supabase/migrate_project_templates_missions.sql`).
+La liste a la forme de `contrats_moe.missions_list` (id, name, pct, incluse,
+category) : un contrat MOE la reprend TELLE QUELLE (`contratDefaultsFromTemplate`,
+`src/lib/projectTemplates.ts`, avec le type de contrat et le type de maître
+d'ouvrage), et une proposition la CONVERTIT en répartition d'honoraires
+(`feeDistributionFromTemplate`). Deux conversions à ne pas défaire :
+
+- **Base ET exécution partent sous « Mission base »** dans la proposition : c'est
+  la seule catégorie dont le montant suit le total des honoraires (effet de
+  synchronisation de `Proposals.tsx`), et c'est déjà ce que fait la répartition
+  par défaut des propositions. Seules les missions complémentaires restent à
+  part, à chiffrer à la main. L'id `pro` devient `projet`, comme dans
+  `feeDistribution.ts`.
+- **Un modèle n'invente pas de type de contrat** : extension et maison
+  individuelle sont des constructions neuves au contrat, un permis seul aussi
+  (c'est sa répartition, esquisse + avant-projet + dossier de permis, qui en
+  porte la portée réelle).
+
+La synchronisation de `Proposals.tsx` lit désormais le `default_pct` propre à la
+mission avant celui de `DEFAULT_MISSIONS` : sans cela, une mission hors MOP
+(diagnostic, dossier de permis) retombait sur une part égale. Le sélecteur de
+modèle n'apparaît qu'à la CRÉATION d'un contrat ou d'une proposition, jamais sur
+un document existant : le choisir remplace sa répartition. Un modèle tiré d'une
+affaire reprend les missions de son contrat MOE principal.
 
 ### Bibliothèque d'ouvrages
 
@@ -1872,6 +2021,72 @@ permettre `calendarList.list` — un compte connecté avant cet ajout garde
 l'ancien scope, plus étroit, et `calendarList` échoue alors en 403 avec la
 même forme que Gmail/Outlook (`isInsufficientScopeError`), proposant de
 reconnecter plutôt que d'échouer sans explication.
+
+### Aperçu d'opération, brouillons, signature et classement des emails
+
+**Volet « Plan d'actions »** (`ProjectOverview.tsx`, colonne D). Quatre gestes
+ouvrent une autre page déjà **rattachée à l'opération** par l'adresse, jamais
+par une sélection à refaire :
+
+| Bouton | Destination | Rattachement |
+|---|---|---|
+| Courrier | `/document_templates?project=<id>` | `DocumentTemplates` préremplit le sélecteur d'affaire ET coche « enregistrer dans le projet » |
+| Réunion | `/reunions?parent=project:<id>&new=1` | `Reunions.tsx` sélectionne l'affaire (mécanisme `?parent=` des liens d'agent) puis ouvre le formulaire de création ; `new` est posé APRÈS `selectProject`, qui referme ce formulaire |
+
+Sous « Prochains jalons », **« Prochaines tâches »** lit `useTasks({ projectId })` :
+les 5 premières tâches non terminées, échéance la plus proche d'abord (sans
+échéance en dernier), en rouge si dépassée ; un clic mène à `?tab=TACHES`. Ce sont
+bien des TÂCHES (`tasks`), distinctes des jalons (`milestones`) au-dessus.
+
+**Brouillons modifiables** (`CorrespondenceTab.tsx`, `MailDraftEditModal.tsx`,
+`server/mailDraft.ts`, `server/routes/mailDrafts.ts`). Un brouillon vit dans la
+boîte du fournisseur et n'est **jamais copié en base** : `GET /api/mail/drafts?
+account_id=` (20 récents), `GET /api/mail/drafts/:id?account_id=` (À, Cc, objet,
+corps) et `PUT /api/mail/drafts/:id` (réécrit, n'envoie jamais). `account_id` est
+toujours relu parmi les comptes de l'utilisateur. Gmail : `drafts.update` ; Outlook :
+`PATCH /me/messages/:id` (le corps repasse en texte brut) ; IMAP : pas de mise à
+jour possible, donc APPEND de la nouvelle version PUIS suppression de l'ancienne
+(un échec entre les deux laisse un doublon, jamais un brouillon perdu) et l'uid
+change. Aucun lien brouillon → opération n'est stocké (aucune migration) :
+l'onglet montre par défaut les brouillons adressés au client de l'affaire ou dont
+l'objet/l'extrait mentionne son nom, son code ou sa référence
+(`relatedKeywords`), avec un bascule « tous les brouillons ».
+
+**Signature de courrier** : `profiles.mail_signature` (TEXT,
+`migrate_profile_mail_signature.sql`), personnelle et non par cabinet (même
+principe que `show_personal_contacts`), réglée dans Réglages > Mon profil, lue et
+écrite par `GET /api/me` / `PUT /api/team/:id` (`mailSignature`, 2000 caractères
+maximum). `MailComposeModal` la pose sous le corps d'un nouveau message ou d'une
+réponse ; elle reste modifiable avant l'envoi. Les envois automatiques hors
+session (relances, alertes) ne la portent pas : aucune personne à qui l'attribuer.
+
+**Rattacher un email à une opération le classe dans sa boîte d'origine**
+(`server/mailFiling.ts`, appelé par `POST /api/mail/links`). Uniquement pour
+`local_type = 'project'`, avec un `connection_id`, sauf `file_in_mailbox: false` :
+
+| Fournisseur | Emplacement | Effet |
+|---|---|---|
+| Gmail | libellé `ArchiOffice/<code> - <nom>` | libellé posé ET `INBOX` retiré (le message quitte la boîte de réception) |
+| Outlook | dossier `<code> - <nom>` sous un dossier racine `ArchiOffice` | déplacement |
+| IMAP | dossier `ArchiOffice<délimiteur><code> - <nom>` (préfixe `INBOX.` si le serveur l'impose) | déplacement, dossier abonné |
+
+Dossier et libellé sont créés à la demande, retrouvés par leur nom exact sinon ;
+`projectFolderName()` retire séparateurs et caractères réservés (`/ \ : * ? " < > | .`)
+et plafonne à 60 caractères. Trois règles à ne pas défaire :
+
+1. **Outlook et IMAP renumérotent le message déplacé** (id Graph, uid). C'est le
+   NOUVEL identifiant qui est enregistré dans `email_links.external_message_id`
+   (rendu aussi dans la réponse) ; sans cela le lien ne rouvrirait plus rien. IMAP
+   lit `uidMap` et, sans UIDPLUS, retrouve le message par son Message-ID. Gmail
+   garde son id : un libellé n'est pas un déplacement. Le front retire le résultat
+   de la liste plutôt que de laisser un bouton sur l'ancien emplacement.
+2. **Meilleur effort, jamais bloquant.** Le rattachement est enregistré même si le
+   classement échoue ; la réponse porte `filing: { status: 'filed' | 'failed' |
+   'skipped', folder?, error? }` et l'écran affiche l'erreur. Cas typique : un compte
+   Gmail connecté avant `gmail.modify` ou un jeton Outlook sans `Mail.ReadWrite`
+   (proposer de reconnecter, comme pour l'archivage).
+3. **Retirer le lien ne remet pas le message en place** : le classement dans la
+   boîte est un geste de l'architecte, pas un état que l'application maintient.
 
 ### OCR
 

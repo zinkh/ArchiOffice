@@ -12,11 +12,13 @@ import {
   addDays,
   parseISO,
   differenceInCalendarDays,
+  getISOWeek,
 } from 'date-fns';
 import { fr, enUS } from 'date-fns/locale';
 import { IconChevronLeft, IconChevronRight, IconFlag3, IconChecklist, IconCircleCheck, IconCalendar, IconPlus, IconBrandGoogle, IconRefresh, IconLoader2 } from '@tabler/icons-react';
 import { fetchJson, apiFetch } from '../lib/api';
 import { useDragToZone } from '../hooks/useDragToZone';
+import { useSwipeNav } from '../hooks/useSwipeNav';
 import type { Project, Milestone, Task, TeamMember } from '../types';
 import { ErrorState, Skeleton } from '../components/DataState';
 import { cn } from '../lib/utils';
@@ -25,6 +27,7 @@ import TeamWeekSchedule from '../components/TeamWeekSchedule';
 import { CalendarEventModal, type CalendarEventInitial } from '../components/CalendarEventModal';
 import { TaskFormModal, type TaskFormInitial } from '../components/tasks/TaskFormModal';
 import { CalendarAccountsPanel } from '../components/CalendarAccountsPanel';
+import { CalendarWeekStrip } from '../components/CalendarWeekStrip';
 import { IconSettings } from '@tabler/icons-react';
 
 interface CalEvent {
@@ -368,9 +371,49 @@ export default function CalendarPage() {
   const activeGridView: CalendarGridView = isCalendarGridView ? view : 'month';
   const visibleRange = getCalendarRange(activeGridView, viewDate);
   const days = eachDayOfInterval({ start: visibleRange.start, end: visibleRange.end });
+  // Déplace la période affichée. Hors vue mensuelle, le jour sélectionné
+  // suit du même écart : sa liste (sous la bande de jours sur téléphone)
+  // doit toujours porter sur un jour de la période visible.
+  const shiftView = (direction: -1 | 1) => {
+    const next = navigateCalendarDate(activeGridView, viewDate, direction);
+    if (activeGridView !== 'month') setSelectedDay(prev => addDays(prev, differenceInCalendarDays(next, viewDate)));
+    setViewDate(next);
+  };
+  const swipeProps = useSwipeNav({
+    onPrev: () => shiftView(-1),
+    onNext: () => shiftView(1),
+    disabled: !!drag,
+  });
+
+  // Passer de la vue mensuelle à 3 ou 5 jours (ou choisir une date) peut
+  // laisser le jour sélectionné hors de la période : on le ramène dedans.
+  const rangeStartMs = visibleRange.start.getTime();
+  useEffect(() => {
+    if (!isCalendarGridView || activeGridView === 'month') return;
+    if (days.some(d => isSameDay(d, selectedDay))) return;
+    setSelectedDay(days.find(d => dfIsToday(d)) ?? days[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, rangeStartMs]);
+
+  const stripDots = (day: Date) => {
+    const evs = eventsByDay.get(format(day, 'yyyy-MM-dd')) || [];
+    const colors = evs.slice(0, 3).map(ev => (ev.overdue ? '#c92a2a' : colorForEvent(ev)));
+    return { colors, extra: Math.max(0, evs.length - 3) };
+  };
   const navigationLabel = activeGridView === 'month'
     ? format(viewDate, 'MMMM yyyy', { locale })
     : `${format(visibleRange.start, 'd MMM', { locale })} – ${format(visibleRange.end, 'd MMM yyyy', { locale })}`;
+  // Une ligne de la grille = une semaine en vue mensuelle (7 colonnes), toute
+  // la plage sinon. C'est aussi ce qui porte le numéro de semaine ISO.
+  const columnCount = activeGridView === 'month' ? 7 : days.length;
+  const weekRows = useMemo(() => {
+    const rows: Date[][] = [];
+    for (let i = 0; i < days.length; i += columnCount) rows.push(days.slice(i, i + columnCount));
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleRange.start.getTime(), visibleRange.end.getTime(), columnCount]);
+  const gridColumns = `1.75rem repeat(${columnCount}, minmax(0, 1fr))`;
+  const currentWeekNumber = getISOWeek(new Date());
 
   const weekStart = startOfWeek(new Date(), { weekStartsOn: 1 });
   const weekEnd = addDays(weekStart, 6);
@@ -381,7 +424,7 @@ export default function CalendarPage() {
     })
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const selectedDayEvents = (eventsByDay.get(format(selectedDay, 'yyyy-MM-dd')) || []).sort((a, b) => a.title.localeCompare(b.title));
+  const selectedDayEvents = [...(eventsByDay.get(format(selectedDay, 'yyyy-MM-dd')) || [])].sort((a, b) => a.title.localeCompare(b.title));
 
   // Agenda view: overdue items surfaced first (a plain chronological list
   // would bury old overdue items among more recent future ones), then
@@ -435,15 +478,15 @@ export default function CalendarPage() {
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('calendar')}</h1>
           <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_page_subtitle')}</p>
         </div>
         {isCalendarGridView && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => setViewDate(navigateCalendarDate(activeGridView, viewDate, -1))}
+              onClick={() => shiftView(-1)}
               className="p-1.5 rounded-lg transition-colors"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
             >
@@ -457,16 +500,21 @@ export default function CalendarPage() {
               {t('calendar_today_btn')}
             </button>
             <button
-              onClick={() => setViewDate(navigateCalendarDate(activeGridView, viewDate, 1))}
+              onClick={() => shiftView(1)}
               className="p-1.5 rounded-lg transition-colors"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
             >
               <IconChevronRight size={16} />
             </button>
-            <span className="text-sm font-semibold capitalize ml-1" style={{ color: 'var(--tblr-text)' }}>
+            <span className="text-sm font-semibold capitalize ml-1 whitespace-nowrap" style={{ color: 'var(--tblr-text)' }}>
               {navigationLabel}
+              {activeGridView !== 'month' && (
+                <span className="ml-1.5 text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-full normal-case" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }} title={t('calendar_week_number', { week: getISOWeek(visibleRange.start) }) as string}>
+                  {t('calendar_week_short')}{getISOWeek(visibleRange.start)}
+                </span>
+              )}
             </span>
-            <div className="relative flex items-center ml-1">
+            <div className="relative flex items-center ml-1 shrink-0">
               <IconCalendar size={14} className="absolute left-2 pointer-events-none" style={{ color: 'var(--tblr-muted)' }} />
               <input
                 type="date"
@@ -499,7 +547,7 @@ export default function CalendarPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-1 p-1 rounded-lg w-fit" style={{ background: 'var(--tblr-surface-2)' }}>
+        <div className="flex items-center gap-1 p-1 rounded-lg w-fit max-w-full overflow-x-auto [&>button]:whitespace-nowrap [&>button]:shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
           <button
             onClick={() => setView('month')}
             className="px-3 py-1.5 rounded-md text-xs font-medium transition-colors"
@@ -548,11 +596,11 @@ export default function CalendarPage() {
         )}
 
         {(isCalendarGridView || view === 'agenda') && (
-          <div className="flex flex-wrap items-center gap-2 ml-auto">
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto min-w-0 max-w-full">
             <select
               value={filterProjectId}
               onChange={e => setFilterProjectId(e.target.value)}
-              className="px-2.5 py-1.5 rounded-lg text-xs outline-none"
+              className="px-2.5 py-1.5 rounded-lg text-xs outline-none min-w-0 max-w-full"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)' }}
             >
               <option value="all">{t('calendar_filter_all_projects')}</option>
@@ -581,11 +629,11 @@ export default function CalendarPage() {
           </div>
         )}
 
-        <div className={cn('flex items-center gap-2', !isCalendarGridView && view !== 'agenda' && 'ml-auto')}>
+        <div className={cn('flex flex-wrap items-center gap-2 min-w-0 max-w-full', !isCalendarGridView && view !== 'agenda' && 'sm:ml-auto')}>
           {googleStatus?.connected ? (
             <>
-              <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }} title={googleStatus.email || ''}>
-                <IconBrandGoogle size={13} /> {googleStatus.email || t('calendar_google_connected')}
+              <span className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs min-w-0 max-w-full" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }} title={googleStatus.email || ''}>
+                <IconBrandGoogle size={13} className="shrink-0" /> <span className="truncate">{googleStatus.email || t('calendar_google_connected')}</span>
               </span>
               <button
                 onClick={syncGoogleCalendar}
@@ -729,120 +777,124 @@ export default function CalendarPage() {
 
       {isCalendarGridView && (
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-4">
+        {/* ── Téléphone, vues 3 et 5 jours : bande de jours + liste du jour ── */}
+        {activeGridView !== 'month' && (
+          <CalendarWeekStrip
+            days={days}
+            selectedDay={selectedDay}
+            onSelect={setSelectedDay}
+            onPrev={() => shiftView(-1)}
+            onNext={() => shiftView(1)}
+            dotsFor={stripDots}
+            locale={locale}
+          />
+        )}
+
         {/* ── Calendar grid ── */}
-        <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-          <div className="grid" style={{ borderBottom: '1px solid var(--tblr-border)', gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}>
+        <div {...swipeProps} className={cn('rounded-xl overflow-hidden', activeGridView !== 'month' && 'hidden sm:block')} style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+          <div className="grid" style={{ borderBottom: '1px solid var(--tblr-border)', gridTemplateColumns: gridColumns }}>
+            <div className="px-0.5 py-2 text-center text-[0.6875rem] font-bold uppercase" style={{ color: 'var(--tblr-muted)' }} title={t('calendar_week_column') as string}>
+              {t('calendar_week_short')}
+            </div>
             {(activeGridView === 'month' ? weekdayLabels : days.map(day => format(day, 'EEE d', { locale }))).map((label, i) => (
-              <div key={i} className="px-2 py-2 text-center text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
+              <div key={i} className="px-0.5 sm:px-2 py-2 text-center text-[0.6875rem] font-bold uppercase tracking-wider truncate" style={{ color: 'var(--tblr-muted)' }}>
                 {label}
               </div>
             ))}
           </div>
-          <div className="grid" style={{ gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))` }}>
-            {days.map((day) => {
-              const key = format(day, 'yyyy-MM-dd');
-              const dayEvents = eventsByDay.get(key) || [];
-              const inMonth = activeGridView !== 'month' || isSameMonth(day, viewDate);
-              const selected = isSameDay(day, selectedDay);
-              const today = dfIsToday(day);
-              return (
-                // A <div> here (not a <button>) so the hover "+" below can be
-                // a real nested <button> — a <button> can't legally contain
-                // another interactive element.
+          {weekRows.map(week => {
+            const weekNumber = getISOWeek(week[0]);
+            return (
+              <div key={format(week[0], 'yyyy-MM-dd')} className="grid" style={{ gridTemplateColumns: gridColumns }}>
                 <div
-                  key={key}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => setSelectedDay(day)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedDay(day); } }}
-                  {...zoneProps(key)}
-                  className={cn('group relative p-1.5 flex flex-col items-start text-left transition-colors cursor-pointer', activeGridView === 'month' ? 'min-h-[92px]' : 'min-h-[180px]')}
+                  className="flex items-start justify-center pt-2 text-[0.6875rem] font-semibold"
                   style={{
+                    background: 'var(--tblr-surface-2)',
+                    color: weekNumber === currentWeekNumber && week.some(d => dfIsToday(d)) ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                     borderRight: '1px solid var(--tblr-border)',
                     borderBottom: '1px solid var(--tblr-border)',
-                    background: dragOverKey === key ? 'var(--tblr-primary-lt)' : selected ? 'var(--tblr-primary-lt)' : 'transparent',
-                    opacity: inMonth ? 1 : 0.4,
-                    outline: dragOverKey === key ? '2px dashed var(--tblr-primary)' : 'none',
-                    outlineOffset: '-2px',
                   }}
+                  title={t('calendar_week_number', { week: weekNumber }) as string}
                 >
-                  <button
-                    onClick={e => { e.stopPropagation(); openCreateMilestone(day); }}
-                    className="absolute top-1 right-1 w-4 h-4 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-primary)' }}
-                    title={t('calendar_add_event') as string}
-                  >
-                    <IconPlus size={11} />
-                  </button>
-                  <span
-                    className={cn('text-[0.6875rem] font-semibold w-5 h-5 flex items-center justify-center rounded-full mb-1')}
-                    style={today ? { background: 'var(--tblr-primary)', color: 'white' } : { color: 'var(--tblr-text)' }}
-                  >
-                    {format(day, 'd')}
-                  </span>
-                  <div className="flex flex-col gap-0.5 w-full">
-                    {dayEvents.slice(0, activeGridView === 'month' ? 3 : 8).map(ev => (
-                      <span
-                        key={ev.id}
-                        {...itemProps(ev.id, key, { disabled: ev.type === 'google' })}
-                        onClick={e => { e.stopPropagation(); openEditEvent(ev); }}
-                        className="text-[0.6875rem] px-1 py-0.5 rounded truncate w-full cursor-pointer"
-                        style={{
-                          background: colorForEvent(ev) + '22',
-                          color: colorForEvent(ev),
-                          textDecoration: ev.completed ? 'line-through' : 'none',
-                          borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none',
-                          opacity: drag?.id === ev.id ? 0.4 : 1,
-                        }}
-                        title={ev.overdue ? `${ev.title} — ${t('calendar_overdue')}` : ev.title}
-                      >
-                        {ev.title}
-                      </span>
-                    ))}
-                    {dayEvents.length > (activeGridView === 'month' ? 3 : 8) && (
-                      <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
-                        +{dayEvents.length - (activeGridView === 'month' ? 3 : 8)}
-                      </span>
-                    )}
-                  </div>
+                  {weekNumber}
                 </div>
-              );
-            })}
-          </div>
+                {week.map((day) => {
+                  const key = format(day, 'yyyy-MM-dd');
+                  const dayEvents = eventsByDay.get(key) || [];
+                  const inMonth = activeGridView !== 'month' || isSameMonth(day, viewDate);
+                  const selected = isSameDay(day, selectedDay);
+                  const today = dfIsToday(day);
+                  const maxChips = activeGridView === 'month' ? 3 : 8;
+                  return (
+                    // A <div> here (not a <button>) so the hover "+" below can be
+                    // a real nested <button> — a <button> can't legally contain
+                    // another interactive element.
+                    <div
+                      key={key}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedDay(day)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedDay(day); } }}
+                      {...zoneProps(key)}
+                      className={cn('group relative min-w-0 p-0.5 sm:p-1.5 flex flex-col items-start text-left transition-colors cursor-pointer', activeGridView === 'month' ? 'min-h-[88px] sm:min-h-[92px]' : 'min-h-[180px]')}
+                      style={{
+                        borderRight: '1px solid var(--tblr-border)',
+                        borderBottom: '1px solid var(--tblr-border)',
+                        background: dragOverKey === key ? 'var(--tblr-primary-lt)' : selected ? 'var(--tblr-primary-lt)' : 'transparent',
+                        opacity: inMonth ? 1 : 0.4,
+                        outline: dragOverKey === key ? '2px dashed var(--tblr-primary)' : 'none',
+                        outlineOffset: '-2px',
+                      }}
+                    >
+                      <button
+                        onClick={e => { e.stopPropagation(); openCreateMilestone(day); }}
+                        className="absolute top-1 right-1 w-4 h-4 rounded hidden sm:flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-primary)' }}
+                        title={t('calendar_add_event') as string}
+                      >
+                        <IconPlus size={11} />
+                      </button>
+                      <span
+                        className={cn('text-[0.6875rem] font-semibold w-5 h-5 flex items-center justify-center rounded-full mb-1 self-center sm:self-start')}
+                        style={today ? { background: 'var(--tblr-primary)', color: 'white' } : { color: 'var(--tblr-text)' }}
+                      >
+                        {format(day, 'd')}
+                      </span>
+                      <div className="flex flex-col gap-0.5 w-full min-w-0">
+                        {dayEvents.slice(0, maxChips).map(ev => (
+                          <span
+                            key={ev.id}
+                            {...itemProps(ev.id, key, { disabled: ev.type === 'google' })}
+                            onClick={e => { e.stopPropagation(); openEditEvent(ev); }}
+                            className="text-[0.6875rem] leading-tight px-0.5 sm:px-1 py-0.5 rounded truncate w-full cursor-pointer"
+                            style={{
+                              background: colorForEvent(ev) + '22',
+                              color: colorForEvent(ev),
+                              textDecoration: ev.completed ? 'line-through' : 'none',
+                              borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none',
+                              opacity: drag?.id === ev.id ? 0.4 : 1,
+                            }}
+                            title={ev.overdue ? `${ev.title} — ${t('calendar_overdue')}` : ev.title}
+                          >
+                            {ev.title}
+                          </span>
+                        ))}
+                        {dayEvents.length > maxChips && (
+                          <span className="text-[0.6875rem] text-center sm:text-left w-full" style={{ color: 'var(--tblr-muted)' }}>
+                            +{dayEvents.length - maxChips}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
         </div>
 
-        {/* ── Sidebar: this week + selected day detail ── */}
+        {/* ── Sidebar: selected day first, then this week ── */}
         <div className="space-y-4">
-          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <h2 className="text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--tblr-text)' }}>{t('calendar_this_week')}</h2>
-            {thisWeekEvents.length === 0 ? (
-              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_no_events_week')}</p>
-            ) : (
-              <div className="space-y-2">
-                {thisWeekEvents.map(ev => (
-                  <div
-                    key={ev.id}
-                    onClick={() => openEditEvent(ev)}
-                    className="flex items-start gap-2 cursor-pointer"
-                    style={{ borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none', paddingLeft: ev.overdue ? 6 : 0 }}
-                  >
-                    {ev.type === 'milestone' ? (
-                      <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
-                    ) : (
-                      <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{ev.title}</p>
-                      <p className="text-[0.6875rem]" style={{ color: ev.overdue ? '#c92a2a' : 'var(--tblr-muted)' }}>
-                        {format(new Date(ev.date), 'EEE d MMM', { locale })}{ev.projectName ? ` · ${ev.projectName}` : ''}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-[0.8125rem] font-semibold mb-1" style={{ color: 'var(--tblr-text)' }}>
               {format(selectedDay, 'EEEE d MMMM', { locale })}
@@ -880,6 +932,38 @@ export default function CalendarPage() {
               </div>
             )}
           </div>
+          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-[0.8125rem] font-semibold mb-3" style={{ color: 'var(--tblr-text)' }}>{t('calendar_this_week')}
+              <span className="ml-2 text-[0.6875rem] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }} title={t('calendar_week_number', { week: currentWeekNumber }) as string}>{t('calendar_week_short')}{currentWeekNumber}</span>
+            </h2>
+            {thisWeekEvents.length === 0 ? (
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('calendar_no_events_week')}</p>
+            ) : (
+              <div className="space-y-2">
+                {thisWeekEvents.map(ev => (
+                  <div
+                    key={ev.id}
+                    onClick={() => openEditEvent(ev)}
+                    className="flex items-start gap-2 cursor-pointer"
+                    style={{ borderLeft: ev.overdue ? '2px solid #c92a2a' : 'none', paddingLeft: ev.overdue ? 6 : 0 }}
+                  >
+                    {ev.type === 'milestone' ? (
+                      <IconFlag3 size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
+                    ) : (
+                      <IconChecklist size={14} className="mt-0.5 shrink-0" style={{ color: ev.overdue ? '#c92a2a' : colorForEvent(ev) }} />
+                    )}
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{ev.title}</p>
+                      <p className="text-[0.6875rem]" style={{ color: ev.overdue ? '#c92a2a' : 'var(--tblr-muted)' }}>
+                        {format(new Date(ev.date), 'EEE d MMM', { locale })}{ev.projectName ? ` · ${ev.projectName}` : ''}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
         </div>
       </div>
       )}

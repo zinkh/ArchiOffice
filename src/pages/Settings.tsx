@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
+import { supabase } from '../lib/supabase';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
@@ -26,6 +27,7 @@ import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
+import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
 import { SwapText } from '../components/ui/SwapText';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
@@ -469,6 +471,8 @@ export default function Settings() {
   const [newProjectCategoryName, setNewProjectCategoryName] = useState('');
 
   const [userSettings, setUserSettings] = useState({
+    name: '',
+    email: '',
     senderOption: 'agency' as 'agency' | 'personal',
     defaultEmailTemplate: '',
     phone: '',
@@ -477,7 +481,9 @@ export default function Settings() {
     department: '',
     avatar: '',
     showPersonalContacts: true,
+    mailSignature: '',
   });
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -566,6 +572,8 @@ export default function Settings() {
     }
     if (currentUser) {
       setUserSettings({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
         senderOption: currentUser.senderOption || 'agency',
         defaultEmailTemplate: currentUser.defaultEmailTemplate || '',
         phone: currentUser.phone || '',
@@ -574,6 +582,7 @@ export default function Settings() {
         department: currentUser.department || '',
         avatar: currentUser.avatar || '',
         showPersonalContacts: currentUser.showPersonalContacts ?? true,
+        mailSignature: currentUser.mailSignature || '',
       });
     }
   }, [currentUser]);
@@ -1200,8 +1209,20 @@ export default function Settings() {
     if (!currentUser) return;
     setSectionStatus(prev => ({ ...prev, profile: { saving: true, error: null, success: false } }));
     try {
-      await apiPutWithDeadline(`/api/team/${currentUser.id}`, userSettings);
-      setCurrentUser({ ...currentUser, ...userSettings } as any);
+      const { email: requestedEmail, ...profileFields } = userSettings;
+      await apiPutWithDeadline(`/api/team/${currentUser.id}`, profileFields);
+      // L'adresse sert d'identifiant de connexion : Supabase envoie un lien de
+      // confirmation à la NOUVELLE adresse et ne la change qu'une fois ouvert.
+      const wantedEmail = requestedEmail.trim().toLowerCase();
+      if (wantedEmail && wantedEmail !== (currentUser.email || '').toLowerCase()) {
+        const { error: emailErr } = await supabase.auth.updateUser(
+          { email: wantedEmail },
+          { emailRedirectTo: `${window.location.origin}/settings` },
+        );
+        if (emailErr) throw new Error(emailErr.message);
+        setEmailNotice(`Un lien de confirmation a été envoyé à ${wantedEmail}. L'adresse actuelle reste valable jusqu'à sa validation.`);
+      }
+      setCurrentUser({ ...currentUser, ...profileFields } as any);
       setSectionStatus(prev => ({ ...prev, profile: { saving: false, error: null, success: true } }));
       setTimeout(() => setSectionStatus(prev => ({ ...prev, profile: { ...prev.profile, success: false } })), 3000);
     } catch (err: any) {
@@ -2923,6 +2944,12 @@ export default function Settings() {
               </div>
             )}
           </div>
+
+          {/* n8n / IFTTT / tout automate HTTP — clé d'API entrante + webhooks
+              sortants. Ni l'un ni l'autre n'est un plugin du catalogue
+              ci-dessus (pas de connecteur à choisir : n'importe quel service
+              HTTP externe peut s'en servir), d'où une carte à part. */}
+          <AutomationIntegrationsCard />
         </>
       )}
 
@@ -3267,6 +3294,9 @@ export default function Settings() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Nom et prénom" aria-label="Nom et prénom" maxLength={120} value={userSettings.name} onChange={e => setUserSettings({...userSettings, name: e.target.value})} />
+          <input type="email" className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Adresse e-mail (identifiant de connexion)" aria-label="Adresse e-mail" maxLength={254} value={userSettings.email} onChange={e => setUserSettings({...userSettings, email: e.target.value})} />
+          {emailNotice && <p className="md:col-span-2 text-xs" role="status" style={{ color: 'var(--tblr-muted)' }}>{emailNotice}</p>}
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
@@ -3315,6 +3345,26 @@ export default function Settings() {
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           placeholder={t('default_email_template')} value={userSettings.defaultEmailTemplate ?? ''}
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
+      </div>
+
+      {/* ── Signature de courrier ── */}
+      <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="flex items-center gap-2">
+          <IconMailbox size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_title')}</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_desc')}</p>
+          </div>
+        </div>
+        <textarea
+          rows={6}
+          maxLength={2000}
+          value={userSettings.mailSignature}
+          onChange={e => setUserSettings({ ...userSettings, mailSignature: e.target.value })}
+          placeholder={t('settings_mail_signature_placeholder') as string}
+          className="w-full p-2.5 rounded-lg text-sm resize-y"
+          style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+        />
       </div>
 
       {/* ── Contacts personnels ── */}

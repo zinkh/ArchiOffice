@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { IconArrowLeft, IconCommand } from '@tabler/icons-react';
+import { IconArrowLeft } from '@tabler/icons-react';
+import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 
 const content = {
   en: {
@@ -296,9 +297,7 @@ export default function TermsOfUse() {
               {lang === 'fr' ? 'Retour' : 'Back'}
             </Link>
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
-                <IconCommand size={14} className="text-white" />
-              </div>
+              <ArchiOfficeLogo size={24} />
               <span className="font-semibold text-gray-900 text-sm">ArchiOffice</span>
             </div>
           </div>

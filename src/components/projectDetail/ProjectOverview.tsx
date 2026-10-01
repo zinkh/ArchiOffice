@@ -15,8 +15,11 @@ import {
   IconDots,
   IconEdit,
   IconBuilding,
+  IconCalendarEvent,
 } from '@tabler/icons-react';
 import { formatCurrency } from '../../lib/utils';
+import { useTasks } from '../../hooks/useTasks';
+import { getTaskStatus, taskDeadline } from '../tasks/taskDisplay';
 import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
 
 const PHASE_LABELS: Record<string, string> = {
@@ -129,16 +132,29 @@ export function ProjectOverview({
     }
     return [...map.entries()].map(([label, entries]) => ({ label, entries }));
   }, [projectActivity]);
+  // Prochaines tâches : celles de CETTE opération, non terminées, l'échéance
+  // la plus proche d'abord (sans échéance en dernier).
+  const { tasks } = useTasks({ projectId: project.id });
+  const upcomingTasks = useMemo(() => {
+    const time = (task: (typeof tasks)[number]) => {
+      const d = taskDeadline(task);
+      return d ? new Date(d).getTime() : Number.POSITIVE_INFINITY;
+    };
+    return tasks
+      .filter(task => getTaskStatus(task) !== 'done')
+      .sort((a, b) => time(a) - time(b))
+      .slice(0, 5);
+  }, [tasks]);
   const daysToDeadline = project.end_date ? Math.ceil((new Date(project.end_date).getTime() - Date.now()) / 86400000) : null;
 
   const observationsField: 'etudes_notes' | 'chantier_notes' = isChantierPhase ? 'chantier_notes' : 'etudes_notes';
 
   return (
-    <div className="flex flex-col lg:h-full lg:flex-row overflow-visible lg:overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
+    <div className="flex flex-col xl:h-full xl:flex-row overflow-visible xl:overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
 
       {/* ── Column A — identity / admin ───────────────────────────── */}
       <div
-        className="w-full lg:w-[280px] lg:shrink-0 border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4"
+        className="w-full xl:w-[280px] xl:shrink-0 border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <div className="flex items-start gap-3 mb-3">
@@ -226,7 +242,7 @@ export function ProjectOverview({
 
       {/* ── Column B — historique ──────────────────────────────────── */}
       <div
-        className="w-full lg:w-[320px] lg:shrink-0 border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4"
+        className="w-full xl:w-[320px] xl:shrink-0 border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <div className="font-bold text-[0.9375rem] mb-3" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_history_title')}</div>
@@ -259,7 +275,7 @@ export function ProjectOverview({
 
       {/* ── Column C — note de phase ───────────────────────────────── */}
       <div
-        className="w-full lg:flex-1 lg:min-w-[380px] border-b lg:border-b-0 lg:border-r overflow-visible lg:overflow-y-auto p-4 lg:p-6"
+        className="w-full xl:flex-1 xl:min-w-[380px] border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4 xl:p-6"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <div className="font-bold text-base mb-4" style={{ color: 'var(--tblr-text)' }}>
@@ -335,7 +351,7 @@ export function ProjectOverview({
       </div>
 
       {/* ── Column D — plan d'actions ──────────────────────────────── */}
-      <div className="w-full lg:w-[260px] lg:shrink-0 overflow-visible lg:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
+      <div className="w-full xl:w-[260px] xl:shrink-0 overflow-visible xl:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
         <div className="font-bold text-[0.9375rem] mb-3.5" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_plan')}</div>
         <div className="grid grid-cols-2 gap-2 mb-5">
           <button
@@ -349,12 +365,21 @@ export function ProjectOverview({
           </button>
           <button
             type="button"
-            onClick={() => navigate('/document_templates')}
+            onClick={() => navigate(`/document_templates?project=${encodeURIComponent(project.id)}`)}
             className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconMail size={17} style={{ color: 'var(--tblr-muted)' }} />
             <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Courrier</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate(`/reunions?parent=project:${encodeURIComponent(project.id)}&new=1`)}
+            className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)' }}
+          >
+            <IconCalendarEvent size={17} style={{ color: 'var(--tblr-muted)' }} />
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Réunion</span>
           </button>
           <button
             type="button"
@@ -440,6 +465,32 @@ export function ProjectOverview({
           <IconPlus size={14} style={{ color: 'var(--tblr-primary)' }} />
           {t('project_overview_add_task')}
         </button>
+
+        <div className="text-[0.6875rem] font-bold uppercase tracking-wider mt-5 mb-2.5" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_upcoming_tasks')}</div>
+        <div className="flex flex-col gap-0.5">
+          {upcomingTasks.length === 0 && (
+            <p className="text-xs italic py-2" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_no_upcoming_tasks')}</p>
+          )}
+          {upcomingTasks.map(task => {
+            const deadline = taskDeadline(task);
+            const late = !!deadline && new Date(deadline).getTime() < Date.now();
+            return (
+              <div
+                key={task.id}
+                onClick={() => navigate(`/projects/${encodeURIComponent(project.id)}?tab=TACHES`)}
+                className="flex items-start justify-between gap-2 py-1.5 border-t cursor-pointer"
+                style={{ borderColor: 'var(--tblr-surface-2)' }}
+              >
+                <span className="text-[0.78125rem] leading-snug" style={{ color: 'var(--tblr-text)' }}>{task.title}</span>
+                {deadline && (
+                  <span className="font-mono text-[0.6875rem] whitespace-nowrap shrink-0 mt-0.5" style={{ color: late ? '#dc2626' : 'var(--tblr-muted)' }}>
+                    {new Date(deadline).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

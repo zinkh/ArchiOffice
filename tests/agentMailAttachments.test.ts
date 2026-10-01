@@ -35,7 +35,7 @@ function stub(extra: (url: string, opts: any) => any) {
 
 const baseCaps = (mailAttachments: boolean): AgentCapabilities => ({
   actionScopes: [], webFetch: false, mailRead: true, mailSend: false, mailAttachments,
-  geo: false, docsRead: false, docsWrite: false, delegate: false, notifyUsers: false, webSearch: false, knowledge: false,
+  geo: false, docsRead: false, docsWrite: false, delegate: false, notifyUsers: false, webSearch: false, knowledge: false, learning: false,
 });
 
 describe('executeMailAttachmentTool', () => {

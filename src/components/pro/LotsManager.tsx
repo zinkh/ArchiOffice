@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { IconTrash, IconPlus, IconRefresh } from '@tabler/icons-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { IconTrash, IconPlus, IconRefresh, IconGripVertical } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
+import { startPressDrag } from '../../lib/pressDrag';
+import { comparerNumerosDeLot, type LotProjet } from '../../lib/lotsOrder';
 
 interface Lot {
   id: string;
@@ -11,8 +13,12 @@ interface Lot {
 
 interface LotsManagerProps {
   projectId: string;
-  /** Rappelé après chaque création/suppression, pour que le parent resynchronise sa propre copie des lots. */
-  onChange?: () => void;
+  /**
+   * Rappelé après chaque création/suppression/réorganisation, pour que le
+   * parent resynchronise sa propre copie des lots. La liste à jour (dans
+   * l'ordre) est fournie pour répercuter ordre et numéros sur le DPGF/CCTP.
+   */
+  onChange?: (lots: LotProjet[]) => void;
 }
 
 export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange }) => {
@@ -23,13 +29,69 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
   const fetchLots = useCallback(async () => {
     setLoading(true);
     try {
-      setLots(await apiFetch<Lot[]>(`/api/projects/${projectId}/lots`));
+      const rows = await apiFetch<Lot[]>(`/api/projects/${projectId}/lots`);
+      const tries = [...rows].sort((a, b) => comparerNumerosDeLot(a.lot_number, b.lot_number));
+      setLots(tries);
+      return tries;
     } catch (err) {
       console.error('Failed to fetch lots:', err);
+      return null;
     } finally {
       setLoading(false);
     }
   }, [projectId]);
+
+  const notifier = (rows: Lot[] | null) => { if (rows) onChange?.(rows); };
+
+  // ── Réorganisation par glisser-déposer ──────────────────────────────────────
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const lotsRef = useRef<Lot[]>([]);
+  lotsRef.current = lots;
+
+  const persistOrder = async (ordered: Lot[]) => {
+    try {
+      const rows = await apiFetch<Lot[]>(`/api/projects/${projectId}/lots/order`, {
+        method: 'PUT',
+        body: JSON.stringify({ ids: ordered.map(l => l.id) }),
+      });
+      setLots(rows);
+      onChange?.(rows);
+    } catch (err) {
+      console.error('Failed to reorder lots:', err);
+      await fetchLots();
+    }
+  };
+
+  const startReorder = (e: React.PointerEvent<HTMLElement>, id: string) => {
+    const avant = lotsRef.current.map(l => l.id).join();
+    startPressDrag(e, {
+      onLift: () => setDraggingId(id),
+      onMove: ({ y }) => {
+        const courant = lotsRef.current;
+        const de = courant.findIndex(l => l.id === id);
+        // Rang visé : nombre de lignes (hors celle tenue) dont le milieu est au-dessus du pointeur.
+        let vers = 0;
+        for (const l of courant) {
+          if (l.id === id) continue;
+          const r = rowRefs.current.get(l.id)?.getBoundingClientRect();
+          if (r && y > r.top + r.height / 2) vers++;
+        }
+        if (vers === de) return;
+        const next = [...courant];
+        const [tenu] = next.splice(de, 1);
+        next.splice(vers, 0, tenu);
+        // Numéros affichés en direct, l'enregistrement se fait au relâché.
+        setLots(next.map((l, i) => ({ ...l, lot_number: String(i + 1).padStart(2, '0') })));
+      },
+      onEnd: ({ cancelled }) => {
+        setDraggingId(null);
+        const ordered = lotsRef.current;
+        if (cancelled || ordered.map(l => l.id).join() === avant) { if (cancelled) void fetchLots(); return; }
+        void persistOrder(ordered);
+      },
+    });
+  };
 
   useEffect(() => { fetchLots(); }, [fetchLots]);
 
@@ -41,8 +103,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
         body: JSON.stringify({ lot_number: newLot.number, lot_title: newLot.title }),
       });
       setNewLot({ number: '', title: '' });
-      await fetchLots();
-      onChange?.();
+      notifier(await fetchLots());
     } catch (err) {
       console.error('Failed to add lot:', err);
     }
@@ -52,8 +113,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
     if (!confirm('Supprimer ce lot ?')) return;
     try {
       await apiFetch(`/api/lots/${id}`, { method: 'DELETE' });
-      await fetchLots();
-      onChange?.();
+      notifier(await fetchLots());
     } catch (err) {
       console.error('Failed to delete lot:', err);
     }
@@ -72,8 +132,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
           body: JSON.stringify({ lot_number: lot.number, lot_title: lot.title }),
         });
       }
-      await fetchLots();
-      onChange?.();
+      notifier(await fetchLots());
     } catch (err) {
       console.error('Failed to generate default lots:', err);
     }
@@ -102,6 +161,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
         <table className="min-w-full text-left border-collapse">
           <thead>
             <tr className="border-b" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+              <th className="p-4 w-10" aria-label="Déplacer" />
               <th className="p-4 font-bold text-sm">N°</th>
               <th className="p-4 font-bold text-sm">Intitulé</th>
               <th className="p-4 font-bold text-sm text-right">Actions</th>
@@ -109,7 +169,24 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
           </thead>
           <tbody>
             {lots.map((lot) => (
-              <tr key={lot.id} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors" style={{ borderColor: 'var(--tblr-border)' }}>
+              <tr
+                key={lot.id}
+                ref={el => { if (el) rowRefs.current.set(lot.id, el); else rowRefs.current.delete(lot.id); }}
+                className={`border-b hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors ${draggingId === lot.id ? 'bg-zinc-100 dark:bg-zinc-800 shadow-md relative' : ''}`}
+                style={{ borderColor: 'var(--tblr-border)' }}
+              >
+                <td className="p-2 w-10 text-center">
+                  <button
+                    type="button"
+                    data-no-drag
+                    aria-label={`Déplacer le lot ${lot.lot_title}`}
+                    title="Glisser pour réorganiser (renumérotation automatique)"
+                    onPointerDown={e => startReorder(e, lot.id)}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-grab active:cursor-grabbing touch-none"
+                  >
+                    <IconGripVertical size={18} />
+                  </button>
+                </td>
                 <td className="p-4 text-sm font-medium">{lot.lot_number}</td>
                 <td className="p-4 text-sm">{lot.lot_title}</td>
                 <td className="p-4 text-right">
@@ -124,12 +201,13 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
             ))}
             {lots.length === 0 && !loading && (
               <tr>
-                <td colSpan={3} className="p-8 text-center italic" style={{ color: 'var(--tblr-muted)' }}>
+                <td colSpan={4} className="p-8 text-center italic" style={{ color: 'var(--tblr-muted)' }}>
                   Aucun lot défini pour ce projet.
                 </td>
               </tr>
             )}
             <tr style={{ background: 'var(--tblr-surface-2)' }}>
+              <td />
               <td className="p-4">
                 <input
                   type="text"

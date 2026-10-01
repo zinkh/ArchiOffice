@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { IconCommand } from '@tabler/icons-react';
+import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { getImportProgress, getExportProgress, retryImport, ImportJobStatus, ExportJobStatus, ImportJobWarning } from '../lib/cloudSync';
 
 type Phase = 'export' | 'import';
@@ -148,9 +148,7 @@ export default function CloudImportProgress() {
     <div className="min-h-svh flex items-center justify-center bg-zinc-50 dark:bg-[#050505]">
       <div className="w-full max-w-md p-8 bg-white dark:bg-zinc-900 rounded-xl shadow-lg border border-zinc-200 dark:border-zinc-800">
         <div className="flex justify-center mb-6">
-          <div className="w-12 h-12 bg-blue-600 rounded flex items-center justify-center text-white">
-            <IconCommand size={32} />
-          </div>
+          <ArchiOfficeLogo size={48} />
         </div>
         <h2 className="text-2xl font-bold text-center text-zinc-900 dark:text-white mb-6">
           {t(titleKey)}

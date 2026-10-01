@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconEdit, IconCopy, IconFileText, IconDownload, IconStar, IconStarFilled,
@@ -18,6 +19,10 @@ const emptyForm = (): Partial<DocumentTemplate> => ({
 export default function DocumentTemplates() {
   const { t } = useTranslation();
   const { settings } = useSettings();
+  // ?project=<id> : lettre lancée depuis l'aperçu d'une opération, le document
+  // est rattaché d'office à cette affaire (sélecteur prérempli, dépôt coché).
+  const [searchParams] = useSearchParams();
+  const presetProjectId = searchParams.get('project') || '';
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
@@ -105,8 +110,8 @@ export default function DocumentTemplates() {
     const defaults: Record<string, string> = {};
     for (const v of tpl.variables) if (v.default_value) defaults[v.key] = v.default_value;
     setGenValues(defaults);
-    setGenProjectId('');
-    setGenSaveToProject(false);
+    setGenProjectId(presetProjectId);
+    setGenSaveToProject(!!presetProjectId);
     setGenError(null);
   };
 

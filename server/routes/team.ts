@@ -60,9 +60,18 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
 
   app.get("/api/me", async (req: any, res: any) => {
     try {
-      const { data, error } = await supabaseAdmin.from('profiles').select('id, tenant_id, name, email, role, system_role, manager_id, avatar, sender_option, default_email_template, phone, address, job_title, department, show_personal_contacts').eq('id', req.user.id).single();
+      const { data, error } = await supabaseAdmin.from('profiles').select('id, tenant_id, name, email, role, system_role, manager_id, avatar, sender_option, default_email_template, phone, address, job_title, department, show_personal_contacts, mail_signature').eq('id', req.user.id).single();
       if (error && error.code !== 'PGRST116') throw error;
       if (!data) return res.json(null);
+
+      // Une adresse changée depuis « Mon profil » n'est effective côté Supabase
+      // Auth qu'une fois le lien de confirmation ouvert : on recopie alors
+      // l'adresse confirmée dans le profil, qui sert aux recherches par e-mail.
+      const authEmail = typeof req.user.email === 'string' ? req.user.email.toLowerCase() : null;
+      if (authEmail && authEmail !== (data.email || '').toLowerCase()) {
+        const { error: syncErr } = await supabaseAdmin.from('profiles').update({ email: authEmail }).eq('id', req.user.id);
+        if (!syncErr) data.email = authEmail;
+      }
 
       // Les cabinets de la personne, et celui qui sert cette requête. Le
       // client s'en sert pour son sélecteur de cabinet et pour savoir quel
@@ -95,6 +104,7 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
         defaultEmailTemplate: data.default_email_template,
         jobTitle: data.job_title,
         showPersonalContacts: data.show_personal_contacts,
+        mailSignature: data.mail_signature ?? '',
         // Platform back-office access — an orthogonal, cross-tenant concept
         // from system_role (see server/superAdminAuth.ts). Drives whether the
         // frontend renders the /admin back-office link at all.
@@ -118,8 +128,12 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (!(await findMembership(supabaseAdmin, req.params.id, tenantId))) {
         return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
       }
-      const { senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts } = req.body;
+      const { name, senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature } = req.body;
+      if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
+        return res.status(400).json({ error: 'Le nom et prénom ne peut pas être vide' });
+      }
       const { data, error } = await supabaseAdmin.from('profiles').update({
+        ...(typeof name === 'string' ? { name: name.trim().slice(0, 120) } : {}),
         sender_option: senderOption,
         default_email_template: defaultEmailTemplate,
         phone: phone || null,
@@ -128,6 +142,7 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
         department: department || null,
         ...(avatar !== undefined ? { avatar: avatar || null } : {}),
         ...(showPersonalContacts !== undefined ? { show_personal_contacts: !!showPersonalContacts } : {}),
+        ...(typeof mailSignature === 'string' ? { mail_signature: mailSignature.slice(0, 2000) || null } : {}),
       }).eq('id', req.params.id).select().single();
       if (error) throw error;
       res.json(data);

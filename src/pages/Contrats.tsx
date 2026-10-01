@@ -8,7 +8,8 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
-import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project } from '../types';
+import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project, ProjectTemplate } from '../types';
+import { contratDefaultsFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -304,6 +305,7 @@ function ContratModal({
   contrat,
   contacts,
   projects,
+  templates,
   onSave,
   onClose,
   onContactCreated,
@@ -311,6 +313,7 @@ function ContratModal({
   contrat: Partial<ContratMOE> | null;
   contacts: Contact[];
   projects: Project[];
+  templates: ProjectTemplate[];
   onSave: (c: Partial<ContratMOE>) => Promise<void>;
   onClose: () => void;
   onContactCreated: (c: Contact) => void;
@@ -335,6 +338,7 @@ function ContratModal({
   const [showContactModal, setShowContactModal] = useState(false);
   const [pendingContactTarget, setPendingContactTarget] = useState<{ type: 'cotraitant' | 'sous_traitant'; id: string } | null>(null);
   const [tab, setTab] = useState<'general' | 'missions' | 'honoraires' | 'equipe' | 'clauses'>('general');
+  const [templateId, setTemplateId] = useState('');
 
   const set = (key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
 
@@ -373,6 +377,15 @@ function ContratModal({
       category,
     };
     setForm((f: Partial<ContratMOE>) => ({ ...f, missions_list: [...(f.missions_list || DEFAULT_MISSIONS), mission] }));
+  };
+
+  // Un modèle de projet fixe d'un geste le type de contrat, le type de maître
+  // d'ouvrage et la répartition des missions (un modèle sans missions ne touche
+  // pas à celles du formulaire).
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const template = templates.find(t => t.id === id);
+    if (template) setForm(f => ({ ...f, ...contratDefaultsFromTemplate(template) }));
   };
 
   const applyPreset = (cats: readonly ContratMissionCategory[]) => {
@@ -504,6 +517,23 @@ function ContratModal({
               {/* TAB: Général */}
               {tab === 'general' && (
                 <div className="space-y-4">
+                  {!contrat?.id && templates.length > 0 && (
+                    <Field label="Modèle de projet">
+                      <select className={inputCls} style={inputStyle} value={templateId} onChange={e => applyTemplate(e.target.value)}>
+                        <option value="">— Aucun —</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      {(() => {
+                        const chosen = templates.find(t => t.id === templateId);
+                        const summary = chosen ? summarizeTemplate({ default_missions: chosen.default_missions }) : '';
+                        return summary ? (
+                          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                            Type de contrat, maître d'ouvrage et répartition des missions repris du modèle ({summary}).
+                          </p>
+                        ) : null;
+                      })()}
+                    </Field>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="N° de contrat">
                       <input className={inputCls} style={inputStyle} value={form.numero || ''} onChange={e => set('numero', e.target.value)} placeholder="ex : MOE-2026-001" />
@@ -1080,6 +1110,7 @@ export default function Contrats() {
   const [contrats, setContrats] = useState<ContratMOE[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContrat, setEditingContrat] = useState<ContratMOE | null>(null);
@@ -1090,14 +1121,17 @@ export default function Contrats() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, contacts, projects] = await Promise.all([
+      const [c, contacts, projects, templates] = await Promise.all([
         fetchJson<ContratMOE[]>('/api/contrats_moe'),
         fetchJson<Contact[]>('/api/contacts'),
         fetchJson<Project[]>('/api/projects'),
+        // Les modèles sont un confort : leur absence n'empêche pas d'ouvrir les contrats.
+        fetchJson<ProjectTemplate[]>('/api/project-templates').catch(() => [] as ProjectTemplate[]),
       ]);
       setContrats(c);
       setContacts(contacts);
       setProjects(projects);
+      setTemplates(templates);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1356,6 +1390,7 @@ export default function Contrats() {
             contrat={editingContrat}
             contacts={contacts}
             projects={projects}
+            templates={templates}
             onSave={handleSave}
             onClose={closeModal}
             onContactCreated={(c) => setContacts(prev => [...prev, c])}

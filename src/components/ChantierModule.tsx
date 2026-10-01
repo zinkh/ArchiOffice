@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconTrash, IconCamera,
@@ -203,7 +203,8 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
       const res = await fetch(`/api/weather?q=${encodeURIComponent(project.address)}&date=${report.date}`);
       if (!res.ok) return;
       const data = await res.json();
-      const updated = { ...report, meteo: data.meteo, temperature: data.temperature };
+      if (!data.meteo || data.meteo === 'Inconnu') return;
+      const updated = { ...report, meteo: data.meteo, temperature: data.temperature ?? report.temperature };
       setReports(prev => prev.map(r => (r.id === report.id ? updated : r)));
       const saveRes = await fetch(`/api/reports/${report.id}`, {
         method: 'PUT',
@@ -218,6 +219,78 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
       console.error('Failed to refresh weather:', err);
     } finally {
       setWeatherLoading(false);
+    }
+  };
+
+  // Météo automatique : un CR dont la météo n'a jamais été renseignée
+  // (« Inconnu », vide) est complété une seule fois à son ouverture.
+  const autoWeatherTried = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!selectedReport || selectedReport.pendingSync || !project.address) return;
+    const unknown = !selectedReport.meteo || selectedReport.meteo === 'Inconnu';
+    if (!unknown || autoWeatherTried.current.has(selectedReport.id)) return;
+    autoWeatherTried.current.add(selectedReport.id);
+    refreshWeather(selectedReport);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedReport?.id, selectedReport?.meteo, project.address]);
+
+  // Numéro de CR : saisie libre, enregistrée à la sortie du champ. Refus
+  // serveur (doublon dans l'affaire) : on annonce et on rétablit l'ancien.
+  const [numberDraft, setNumberDraft] = useState('');
+  useEffect(() => { setNumberDraft(selectedReport ? String(selectedReport.report_number ?? '') : ''); }, [selectedReport?.id, selectedReport?.report_number]);
+  const commitReportNumber = async () => {
+    if (!selectedReport) return;
+    const n = parseInt(numberDraft, 10);
+    if (!Number.isInteger(n) || n < 1) { setNumberDraft(String(selectedReport.report_number ?? '')); return; }
+    if (n === selectedReport.report_number) return;
+    const res = await fetch(`/api/reports/${selectedReport.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...selectedReport, report_number: n }),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
+    } else {
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || 'Impossible de modifier le numéro.');
+      setNumberDraft(String(selectedReport.report_number ?? ''));
+    }
+  };
+
+  // La météo est celle du jour du compte-rendu : changer la date la recalcule.
+  // Si elle est introuvable, on ne garde pas la météo d'un autre jour.
+  const changeReportDate = async (date: string) => {
+    if (!selectedReport || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date === selectedReport.date) return;
+    let meteo = 'Inconnu';
+    let temperature: number | null = null;
+    if (project.address) {
+      setWeatherLoading(true);
+      try {
+        const res = await fetch(`/api/weather?q=${encodeURIComponent(project.address)}&date=${date}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.meteo) { meteo = data.meteo; temperature = data.temperature ?? null; }
+        }
+      } catch (err) {
+        console.error('Failed to fetch weather:', err);
+      } finally {
+        setWeatherLoading(false);
+      }
+    }
+    const updated: SiteReport = { ...selectedReport, date, meteo, temperature: temperature ?? undefined };
+    setReports(prev => prev.map(r => (r.id === selectedReport.id ? updated : r)));
+    // null (et non undefined) pour que le serveur efface l'ancienne température.
+    const res = await fetch(`/api/reports/${selectedReport.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...updated, temperature }),
+    });
+    if (res.ok) {
+      const saved = await res.json();
+      setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
+    } else {
+      setReports(prev => prev.map(r => (r.id === selectedReport.id ? selectedReport : r)));
     }
   };
 
@@ -554,7 +627,17 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         ><IconChevronLeft size={18} /></button>
                         <div>
                           <h3 className="text-lg font-bold text-[var(--tblr-text)]">
-                            Compte-rendu de visite n° {selectedReport.report_number}
+                            Compte-rendu de visite n°{' '}
+                            <input
+                              type="number" min={1}
+                              aria-label="Numéro du compte-rendu"
+                              title="Modifier le numéro du compte-rendu"
+                              className="w-16 bg-transparent border-b border-dashed border-[var(--tblr-border)] focus:border-blue-500 outline-none font-bold text-lg text-center"
+                              value={numberDraft}
+                              onChange={e => setNumberDraft(e.target.value)}
+                              onBlur={commitReportNumber}
+                              onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                            />
                           </h3>
                           <span className={cn('text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[selectedReport.statut || 'brouillon'])}>
                             {STATUT_CR_LABELS[selectedReport.statut || 'brouillon']}
@@ -586,7 +669,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     </div>
 
                     <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-[var(--tblr-muted)]">
-                      <span>{selectedReport.date}</span>
+                      <input
+                        type="date"
+                        aria-label="Date du compte-rendu"
+                        title="La météo suit la date du compte-rendu"
+                        className="bg-transparent border-none outline-none"
+                        value={selectedReport.date || ''}
+                        onChange={e => changeReportDate(e.target.value)}
+                      />
                       <span className="flex items-center gap-1"><IconCloud size={14} />
                         <input className="bg-transparent border-none outline-none w-28"
                           value={selectedReport.meteo || ''} onChange={e => updateReportField('meteo', e.target.value)} />
@@ -595,16 +685,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         <input type="number" className="bg-transparent border-none outline-none w-14"
                           value={selectedReport.temperature ?? ''} onChange={e => updateReportField('temperature', parseInt(e.target.value) || 0)} />°C
                       </span>
-                      {project.address && (
-                        <button
-                          onClick={() => refreshWeather(selectedReport)}
-                          disabled={weatherLoading}
-                          title="Actualiser la météo pour la date du compte-rendu"
-                          className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-                        >
-                          <IconRefresh size={13} className={weatherLoading ? 'animate-spin' : ''} /> Actualiser
-                        </button>
-                      )}
+                      <button
+                        onClick={() => refreshWeather(selectedReport)}
+                        disabled={weatherLoading || !project.address}
+                        title={project.address ? 'Actualiser la météo pour la date du compte-rendu' : "Renseignez l'adresse de l'affaire (onglet INFOS) pour récupérer la météo"}
+                        className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline"
+                      >
+                        <IconRefresh size={13} className={weatherLoading ? 'animate-spin' : ''} /> Actualiser
+                      </button>
                     </div>
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">

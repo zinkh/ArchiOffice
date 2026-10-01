@@ -12,6 +12,7 @@ import { assertTenantEntity } from '../assertTenantEntity';
 import { getActiveAccountingProvider, syncInvoiceToAccounting } from '../invoiceAccountingSync';
 import { loadInvoiceClientContact, resolveInvoiceClientId } from '../invoiceClientContact';
 import { computeInvoiceDueDate, resolveInvoicePaymentTermsDays } from '../invoiceDueDate';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -220,6 +221,11 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       const loggedNumber = (invoice as any)?.invoice_number || id.slice(0, 8);
       logActivity(tenantId, req.user.id, userNameInv, `Création de la ${invLabel.toLowerCase()} N° ${loggedNumber}`, project_name || '', id, 'invoice', 'Factures');
 
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'invoice.created', {
+        id, invoice_number: (invoice as any)?.invoice_number || null, project_id, project_name,
+        amount: amount || 0, status: finalStatus, due_date: finalDueDate,
+      });
+
       res.status(201).json({
         ...rest, project_name, items: invoice_items || [],
         accounting_sync: accountingProvider === 'none' ? null : { provider: accountingProvider, ...accountingSyncResult },
@@ -366,6 +372,14 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       const { data: invoice } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)').eq('id', id).eq('tenant_id', tenantId).single();
       const project_name = (invoice as any)?.projects?.name || null;
       const { projects: _p, invoice_items, ...rest } = (invoice as any) || {};
+
+      if (existing.status !== 'Paid' && (invoice as any)?.status === 'Paid') {
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'invoice.paid', {
+          id, invoice_number: (invoice as any)?.invoice_number || null, project_id: finalProjectId, project_name,
+          amount: (invoice as any)?.amount || 0,
+        });
+      }
+
       res.json({ ...rest, project_name, items: invoice_items || [] });
     } catch (error: any) {
       captureWithContext(error, { route: 'PUT /api/invoices/:id', tenantId, userId: req.user?.id });
