@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
 import { BPUWorkspace } from './BPUWorkspace';
 import { LotsManager } from './LotsManager';
-import { appliquerOrdreLots, type LotProjet } from '../../lib/lotsOrder';
+import { appliquerOrdreLots, comparerNumerosDeLot, lotsDivergent, planImportLots, type LotProjet } from '../../lib/lotsOrder';
 import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne, type OffreDocument } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
@@ -165,11 +165,103 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
 
   // La liste des lots du projet fait foi : son ordre et ses numéros sont
   // reportés sur le DPGF (donc le CCTP, même document) et sur le bordereau.
+  // Lots du projet : source de vérité, lus avant tout alignement.
+  const [projectLots, setProjectLots] = useState<LotProjet[]>([]);
+  const [projectLotsLoaded, setProjectLotsLoaded] = useState(false);
+  useEffect(() => {
+    let annule = false;
+    setProjectLotsLoaded(false);
+    apiFetch<any[]>(`/api/projects/${projectId}/lots`)
+      .then(rows => {
+        if (annule) return;
+        setProjectLots((rows ?? [])
+          .map(r => ({ id: r.id, lot_number: r.lot_number, lot_title: r.lot_title }))
+          .sort((a, b) => comparerNumerosDeLot(a.lot_number, b.lot_number)));
+        setProjectLotsLoaded(true);
+      })
+      .catch(() => { if (!annule) setProjectLotsLoaded(true); });
+    return () => { annule = true; };
+  }, [projectId]);
+
+  // Le document et la liste des lots divergent (CCTP rédigé avant la liste, par
+  // exemple) : rien n'est modifié en silence, l'architecte choisit le sens.
+  const divergence = projectLotsLoaded && !dpgfLoading && lotsDivergent(dpgf, projectLots);
+  const [lotsVersion, setLotsVersion] = useState(0);
+
+  // Sans lot au projet, les documents ne sont pas touchés : une liste vide
+  // ne doit pas vider un CCTP déjà rédigé.
   const synchroniserLots = useCallback((lotsProjet: LotProjet[]) => {
-    if (dpgf && dpgf.lots.length) setDpgf(appliquerOrdreLots(dpgf, lotsProjet));
-    if (bpuTouched && bpu && bpu.lots.length) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+    setProjectLots(lotsProjet);
+    if (lotsProjet.length) {
+      if (dpgf && !lotsDivergent(dpgf, lotsProjet)) setDpgf(appliquerOrdreLots(dpgf, lotsProjet));
+      if (bpuTouched && bpu && !lotsDivergent(bpu, lotsProjet)) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+    }
     onLotsChanged?.();
   }, [dpgf, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
+
+  // À l'ouverture, un document dont les lots sont tous rattachés à la liste
+  // (ou sans lot) est aligné une seule fois : numéros et intitulés identiques.
+  const lotsAlignesPour = useRef<string | null>(null);
+  useEffect(() => {
+    if (dpgfLoading || !dpgf || !projectLotsLoaded) return;
+    if (lotsAlignesPour.current === projectId) return;
+    lotsAlignesPour.current = projectId;
+    if (projectLots.length && !lotsDivergent(dpgf, projectLots)) setDpgf(appliquerOrdreLots(dpgf, projectLots));
+  }, [dpgfLoading, dpgf, projectLotsLoaded, projectLots, projectId, setDpgf]);
+  useEffect(() => { lotsAlignesPour.current = null; }, [projectId]);
+
+  /** Sens document → liste : la liste des lots reprend numéros et intitulés du CCTP/DPGF. */
+  const importerLotsDuDocument = useCallback(async () => {
+    if (!dpgf) return;
+    const plan = planImportLots(dpgf, projectLots);
+    try {
+      const rattachement = new Map<string, string>();
+      for (const l of plan) {
+        if (l.projectLotId) {
+          await apiFetch(`/api/lots/${l.projectLotId}`, { method: 'PUT', body: JSON.stringify({ lot_number: l.numero, lot_title: l.titre }) });
+          rattachement.set(l.lotDocId, l.projectLotId);
+        } else {
+          const { id } = await apiFetch<{ id: string }>(`/api/projects/${projectId}/lots`, { method: 'POST', body: JSON.stringify({ lot_number: l.numero, lot_title: l.titre }) });
+          rattachement.set(l.lotDocId, id);
+        }
+      }
+      const rows = await apiFetch<any[]>(`/api/projects/${projectId}/lots`);
+      const lotsProjet = (rows ?? [])
+        .map(r => ({ id: r.id, lot_number: r.lot_number, lot_title: r.lot_title }))
+        .sort((a, b) => comparerNumerosDeLot(a.lot_number, b.lot_number));
+      const lie = { ...dpgf, lots: dpgf.lots.map(l => ({ ...l, projectLotId: rattachement.get(l.id) ?? l.projectLotId })) };
+      setProjectLots(lotsProjet);
+      setDpgf(appliquerOrdreLots(lie, lotsProjet));
+      if (bpuTouched && bpu && !lotsDivergent(bpu, lotsProjet)) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+      setLotsVersion(v => v + 1);
+      onLotsChanged?.();
+    } catch (e: any) {
+      window.alert(`Import des lots impossible : ${e?.message ?? e}`);
+    }
+  }, [dpgf, projectLots, projectId, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
+
+  /** Sens liste → document : le document reprend exactement la liste (lots hors liste retirés après confirmation). */
+  const alignerDocumentSurListe = useCallback(() => {
+    if (!dpgf) return;
+    const apres = appliquerOrdreLots(dpgf, projectLots, { rapprocher: true, retirerHorsProjet: true });
+    const perdus = dpgf.lots.length - apres.lots.filter(l => dpgf.lots.some(x => x.id === l.id)).length;
+    const avecContenu = dpgf.lots.filter(l => !apres.lots.some(x => x.id === l.id) && (l.chapitres ?? []).some(c => c.lignes?.length || (c.cctpDescription ?? '').trim()));
+    const msg = `Aligner le CCTP/DPGF sur la liste des lots ?\n${perdus} lot(s) absent(s) de la liste seront retirés`
+      + (avecContenu.length ? `, dont ${avecContenu.length} avec du contenu (${avecContenu.map(l => `${l.numero} ${l.titre}`).slice(0, 5).join(' ; ')}).` : '.');
+    if (!window.confirm(msg)) return;
+    setDpgf(apres);
+    if (bpuTouched && bpu) setBpu(appliquerOrdreLots(bpu, projectLots, { rapprocher: true, retirerHorsProjet: true }));
+  }, [dpgf, projectLots, setDpgf, bpuTouched, bpu, setBpu]);
+
+  // Le bordereau, chargé plus tard, est aligné de la même façon à son ouverture.
+  const bpuAligne = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bpuTouched || bpuLoading || !bpu || !projectLotsLoaded) return;
+    if (bpuAligne.current === projectId) return;
+    bpuAligne.current = projectId;
+    if (projectLots.length && bpu.lots.length && !lotsDivergent(bpu, projectLots)) setBpu(appliquerOrdreLots(bpu, projectLots));
+  }, [bpuTouched, bpuLoading, bpu, projectLotsLoaded, projectLots, projectId, setBpu]);
+  useEffect(() => { bpuAligne.current = null; }, [projectId]);
   useEffect(() => { if (isBpuTab) setBpuTouched(true); }, [isBpuTab]);
 
   // Initialise le bordereau depuis le DPGF, en préservant tout ce qui a déjà
@@ -216,18 +308,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       await exportBPUtoPDF(avecRefs, { mode, projectName, settings: settings ?? {}, vierge });
     }
   }, [bpu, setBpu, projectName, settings]);
-
-  // Lots du projet, pour rattacher les lots du bordereau : c'est ce
-  // rattachement que le versement vers le comparatif ACT vient chercher.
-  const [projectLots, setProjectLots] = useState<{ id: string; lot_number: string; lot_title: string }[]>([]);
-  useEffect(() => {
-    if (!bpuTouched) return;
-    apiFetch<any[]>(`/api/projects/${projectId}/lots`)
-      .then(rows => setProjectLots((rows ?? []).map(r => ({
-        id: r.id, lot_number: r.lot_number, lot_title: r.lot_title,
-      }))))
-      .catch(() => { /* le rattachement reste possible plus tard */ });
-  }, [projectId, bpuTouched]);
 
   /** Envoie les articles sélectionnés vers la bibliothèque de prix du cabinet. */
   const envoyerVersBibliotheque = useCallback(async (lignes: any[]) => {
@@ -464,12 +544,25 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       </div>}
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
+      {divergence && !isBpuTab && (
+        <div className="px-4 py-2 flex flex-wrap items-center gap-3 text-sm border-b" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+          <span className="flex-1 min-w-[16rem]">
+            Les lots du CCTP/DPGF ne correspondent pas à la liste des lots du projet (numéros et intitulés doivent être identiques partout).
+          </span>
+          <button type="button" className="btn btn-sm" onClick={() => void importerLotsDuDocument()}>
+            Remplir la liste des lots depuis le CCTP
+          </button>
+          <button type="button" className="btn btn-sm" onClick={alignerDocumentSurListe}>
+            Aligner le CCTP sur la liste
+          </button>
+        </div>
+      )}
       <div className="flex-1 overflow-hidden flex">
 
         {/* LOTS */}
         {activeSubTab === 'LOTS' && (
           <div className="flex-1 overflow-y-auto px-4">
-            <LotsManager projectId={projectId} onChange={synchroniserLots} />
+            <LotsManager key={lotsVersion} projectId={projectId} onChange={synchroniserLots} />
           </div>
         )}
 

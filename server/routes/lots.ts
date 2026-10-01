@@ -37,6 +37,23 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
     }
   });
 
+  // Renomme / renumérote un lot (utilisé quand la liste se remplit depuis le CCTP).
+  app.put("/api/lots/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const patch: Record<string, string> = {};
+      if (typeof req.body?.lot_number === 'string') patch.lot_number = req.body.lot_number.trim();
+      if (typeof req.body?.lot_title === 'string') patch.lot_title = req.body.lot_title.trim();
+      if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
+      const { error } = await supabaseAdmin.from('project_lots').update(patch).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error) {
+      console.error("[PUT /api/lots/:id]", error);
+      res.status(500).json({ error: "Failed to update lot" });
+    }
+  });
+
   // Réorganise les lots d'un projet : `ids` donne le nouvel ordre, les numéros
   // sont réattribués automatiquement (01, 02, ...). Aucune colonne de rang :
   // le numéro est l'ordre.
