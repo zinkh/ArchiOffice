@@ -55,17 +55,48 @@ export interface DocumentDiffusion {
   notes?: string;
 }
 
+export type TemplateOperationType = 'neuf' | 'rehabilitation' | 'extension' | 'maison_individuelle' | 'permis_seul' | 'autre';
+export type TemplateMarcheType = 'prive' | 'public';
+
+export interface TemplateLot { lot_number: string; lot_title: string }
+/** Délais relatifs à la date de démarrage de l'affaire (jours calendaires). */
+export interface TemplateMilestone { title: string; due_date_offset_days: number }
+export interface TemplateTask {
+  title: string;
+  description?: string;
+  start_offset_days: number;
+  duration_days: number;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+}
+
 export interface ProjectTemplate {
   id: string;
   name: string;
   description: string;
-  // Default values
+  operation_type?: TemplateOperationType;
+  marche_type?: TemplateMarcheType;
+  // Valeurs par défaut
   default_status: 'Planning' | 'In Progress' | 'Completed' | 'On Hold';
   default_budget: number;
-  default_category?: string;
-  default_lots_list?: ProjectLot[];
-  default_milestones?: { title: string; due_date_offset_days: number }[];
   default_description: string;
+  // Structure créée avec l'affaire (jsonb côté base)
+  default_lots?: TemplateLot[];
+  default_milestones?: TemplateMilestone[];
+  default_tasks?: TemplateTask[];
+  /**
+   * Répartition des missions MOE (même forme que `ContratMOE.missions_list`,
+   * donc reprise telle quelle par un contrat ; convertie en répartition
+   * d'honoraires pour une proposition, voir `feeDistributionFromTemplate`).
+   */
+  default_missions?: ContratMOEMission[];
+  /** Modèle issu du catalogue de démarrage (clé stable), sinon absent. */
+  catalog_key?: string | null;
+}
+
+/** Entrée du catalogue de démarrage, proposée tant qu'elle n'a pas été installée. */
+export interface ProjectTemplateCatalogEntry extends Omit<ProjectTemplate, 'id'> {
+  catalog_key: string;
+  installed?: boolean;
 }
 
 export interface DocumentTemplateVariable {
@@ -261,6 +292,8 @@ export interface Project {
   client_vat_number?: string;
   client_email?: string;
   is_public_client?: boolean;
+  /** Modèle de projet à appliquer à la création (lots, jalons, tâches types). Jamais relu. */
+  template_id?: string;
   is_complete_mission?: boolean;
   is_chantier?: boolean;
   /** Précharge ce projet en lecture seule dans le cache hors-ligne (voir src/lib/offlinePrefetch.ts). */

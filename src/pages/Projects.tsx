@@ -6,6 +6,7 @@ import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
 import { useTranslation } from 'react-i18next';
+import { OPERATION_LABELS, summarizeTemplate } from '../lib/projectTemplates';
 import { useUser } from '../UserContext';
 import { db } from '../db';
 import { queuedJsonRequest } from '../lib/offlineQueue';
@@ -997,22 +998,37 @@ export default function Projects() {
                     <label className="block text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">{t('projects_use_template')}</label>
                     <select
                       className="w-full p-2 border rounded bg-white dark:bg-zinc-800"
+                      value={editForm?.template_id ?? ''}
                       onChange={e => {
                         const template = templates.find(t => t.id === e.target.value);
                         if (template) {
+                          // Le nom du modèle n'est qu'un point de départ : on ne
+                          // l'impose pas si l'architecte a déjà nommé l'affaire.
                           setEditForm(prev => prev ? ({
                             ...prev,
-                            name: template.name,
-                            description: template.default_description,
-                            budget: template.default_budget,
-                            status: template.default_status
+                            template_id: template.id,
+                            name: prev.name.trim() ? prev.name : template.name,
+                            description: template.default_description || template.description || prev.description,
+                            budget: template.default_budget || prev.budget,
+                            status: template.default_status,
+                            is_public_client: template.marche_type === 'public' ? true : prev.is_public_client,
+                            ...(template.operation_type && template.operation_type !== 'autre' ? { type_projet: OPERATION_LABELS[template.operation_type] } : {}),
                           }) : null);
+                        } else {
+                          setEditForm(prev => prev ? ({ ...prev, template_id: undefined }) : null);
                         }
                       }}
                     >
                       <option value="">{t('projects_select_template')}</option>
-                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      {templates.map(tpl => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
                     </select>
+                    {(() => {
+                      const chosen = templates.find(tpl => tpl.id === editForm?.template_id);
+                      const summary = chosen ? summarizeTemplate(chosen) : '';
+                      return summary ? (
+                        <p className="mt-2 text-xs text-blue-900 dark:text-blue-100">{t('ptpl_applied_label', { summary })}</p>
+                      ) : null;
+                    })()}
                   </div>
                 )}
                 <div className="flex items-center justify-between mb-6">

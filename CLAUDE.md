@@ -1490,6 +1490,74 @@ sans effet — dégradé, mais honnête, plutôt qu'un réglage qui échouerait
 silencieusement ou ferait échouer l'appel API — tant qu'un cabinet fait
 tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
+### Modèles de projet : une trame d'affaire, pas un préremplissage
+
+Un modèle (`project_templates`, `/templates`) ne se limitait à quatre valeurs
+de formulaire (nom, statut, budget, description) : il ne créait ni lots, ni
+jalons, ni tâches, donc rien de ce qu'il faut réellement ressaisir à chaque
+affaire. `supabase/migrate_project_templates_structure.sql` lui ajoute
+`operation_type` (`neuf`, `rehabilitation`, `extension`, `maison_individuelle`,
+`permis_seul`, `autre`), `marche_type` (`prive`, `public`), trois listes jsonb
+(`default_lots`, `default_milestones`, `default_tasks`) et `catalog_key`.
+
+**Application : `POST /api/projects` reçoit `template_id`, rien d'autre.**
+`server/projectTemplateApply.ts` relit le modèle en base (vérifié dans le
+cabinet, 400 sinon) et crée lots, jalons et tâches APRÈS l'affaire, en
+meilleur effort : un échec est rapporté dans `template_applied.failed`, jamais
+au prix de l'affaire déjà créée. Un modèle `public` pose `is_public_client`,
+et `type_projet` se déduit du type d'opération quand le corps n'en porte pas.
+Le client ne fait que désigner le modèle : il ne peut pas faire écrire autre
+chose que ce que le cabinet a enregistré.
+
+**Délais relatifs, jamais de dates.** Jalons et tâches portent des décalages en
+jours depuis `start_date` (`addDaysIso`, `src/lib/projectTemplates.ts`). Les
+listes sont assainies à l'écriture (`sanitizeLots/Milestones/Tasks`,
+`server/routes/projectTemplates.ts`) : bornées, typées, priorités filtrées.
+
+**Trois origines.** Saisi à la main ; installé depuis le catalogue de démarrage
+(`server/projectTemplateCatalog.ts`, huit trames : neuf, réhabilitation,
+extension en privé et en public, maison individuelle, permis de construire
+seul) ; ou tiré d'une affaire (`POST /api/project-templates/from-project/:id`,
+lots, jalons et tâches en décalages, sans montants). `catalog_key` sous index
+unique partiel `(tenant_id, catalog_key)` empêche d'installer deux fois la même
+entrée, sans dépendre du nom que le cabinet a pu changer. Le catalogue n'est
+qu'une copie de départ : une fois installé, le modèle appartient au cabinet.
+
+**À ne pas défaire.** Les jalons du catalogue portent des intitulés
+d'événements (« Dépôt du permis », « Réception des travaux »), jamais le nom
+d'une mission du contrat MOE (« Esquisse (ESQ) ») : `ProjectDetail.tsx` crée un
+jalon par mission incluse et apparie par titre, un doublon de nom serait fusionné
+avec lui (verrouillé par un test). Le public diffère du privé par la procédure
+de passation (publication de l'avis, commission d'analyse, notification) et non
+par le fond des lots. Les délais d'instruction d'un permis suivent le Code de
+l'urbanisme (1 mois DP, 2 mois PC de maison individuelle, 3 mois les autres).
+
+**Les missions MOE suivent le modèle jusque dans les contrats et les
+propositions** (`default_missions`, jsonb, `supabase/migrate_project_templates_missions.sql`).
+La liste a la forme de `contrats_moe.missions_list` (id, name, pct, incluse,
+category) : un contrat MOE la reprend TELLE QUELLE (`contratDefaultsFromTemplate`,
+`src/lib/projectTemplates.ts`, avec le type de contrat et le type de maître
+d'ouvrage), et une proposition la CONVERTIT en répartition d'honoraires
+(`feeDistributionFromTemplate`). Deux conversions à ne pas défaire :
+
+- **Base ET exécution partent sous « Mission base »** dans la proposition : c'est
+  la seule catégorie dont le montant suit le total des honoraires (effet de
+  synchronisation de `Proposals.tsx`), et c'est déjà ce que fait la répartition
+  par défaut des propositions. Seules les missions complémentaires restent à
+  part, à chiffrer à la main. L'id `pro` devient `projet`, comme dans
+  `feeDistribution.ts`.
+- **Un modèle n'invente pas de type de contrat** : extension et maison
+  individuelle sont des constructions neuves au contrat, un permis seul aussi
+  (c'est sa répartition, esquisse + avant-projet + dossier de permis, qui en
+  porte la portée réelle).
+
+La synchronisation de `Proposals.tsx` lit désormais le `default_pct` propre à la
+mission avant celui de `DEFAULT_MISSIONS` : sans cela, une mission hors MOP
+(diagnostic, dossier de permis) retombait sur une part égale. Le sélecteur de
+modèle n'apparaît qu'à la CRÉATION d'un contrat ou d'une proposition, jamais sur
+un document existant : le choisir remplace sa répartition. Un modèle tiré d'une
+affaire reprend les missions de son contrat MOE principal.
+
 ### Bibliothèque d'ouvrages
 
 `/specifications` (« Bibliothèque d'ouvrages ») n'est plus un éditeur de
