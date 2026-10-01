@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
+import { supabase } from '../lib/supabase';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
@@ -482,6 +483,7 @@ export default function Settings() {
     showPersonalContacts: true,
     mailSignature: '',
   });
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1207,8 +1209,20 @@ export default function Settings() {
     if (!currentUser) return;
     setSectionStatus(prev => ({ ...prev, profile: { saving: true, error: null, success: false } }));
     try {
-      await apiPutWithDeadline(`/api/team/${currentUser.id}`, userSettings);
-      setCurrentUser({ ...currentUser, ...userSettings } as any);
+      const { email: requestedEmail, ...profileFields } = userSettings;
+      await apiPutWithDeadline(`/api/team/${currentUser.id}`, profileFields);
+      // L'adresse sert d'identifiant de connexion : Supabase envoie un lien de
+      // confirmation à la NOUVELLE adresse et ne la change qu'une fois ouvert.
+      const wantedEmail = requestedEmail.trim().toLowerCase();
+      if (wantedEmail && wantedEmail !== (currentUser.email || '').toLowerCase()) {
+        const { error: emailErr } = await supabase.auth.updateUser(
+          { email: wantedEmail },
+          { emailRedirectTo: `${window.location.origin}/settings` },
+        );
+        if (emailErr) throw new Error(emailErr.message);
+        setEmailNotice(`Un lien de confirmation a été envoyé à ${wantedEmail}. L'adresse actuelle reste valable jusqu'à sa validation.`);
+      }
+      setCurrentUser({ ...currentUser, ...profileFields } as any);
       setSectionStatus(prev => ({ ...prev, profile: { saving: false, error: null, success: true } }));
       setTimeout(() => setSectionStatus(prev => ({ ...prev, profile: { ...prev.profile, success: false } })), 3000);
     } catch (err: any) {
@@ -3282,6 +3296,7 @@ export default function Settings() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <input className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Nom et prénom" aria-label="Nom et prénom" maxLength={120} value={userSettings.name} onChange={e => setUserSettings({...userSettings, name: e.target.value})} />
           <input type="email" className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Adresse e-mail (identifiant de connexion)" aria-label="Adresse e-mail" maxLength={254} value={userSettings.email} onChange={e => setUserSettings({...userSettings, email: e.target.value})} />
+          {emailNotice && <p className="md:col-span-2 text-xs" role="status" style={{ color: 'var(--tblr-muted)' }}>{emailNotice}</p>}
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
