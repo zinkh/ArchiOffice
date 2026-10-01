@@ -2,6 +2,7 @@ import * as React from 'react';
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useSearchParams } from 'react-router-dom';
+import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
 import { JOIN_REQUESTS_CHANGED } from '../components/Sidebar';
@@ -87,7 +88,12 @@ export default function Team() {
     setDecidingId(id);
     try {
       await decideJoinRequest(id, decision);
+      const decided = joinRequests.find(r => r.id === id);
       setJoinRequests(prev => prev.filter(r => r.id !== id));
+      setNotice({
+        kind: 'success',
+        text: t(decision === 'approve' ? 'team_request_approved' : 'team_request_rejected', { name: decided?.name || decided?.email || '' }),
+      });
       // Fait retomber le compteur du menu latéral, qui vit dans un autre
       // composant sans état partagé avec celui-ci.
       window.dispatchEvent(new Event(JOIN_REQUESTS_CHANGED));
@@ -163,7 +169,7 @@ export default function Team() {
   else body = activeView === 'registry' ? <TeamRegistry {...viewProps} /> : <TeamCards {...viewProps} />;
 
   return (
-    <div className="mx-auto max-w-[88rem] space-y-8 pb-10">
+    <div className={cn('mx-auto max-w-[88rem] space-y-8', notice ? 'pb-28' : 'pb-10')}>
       <TeamHeader
         headcount={team.length}
         admins={team.filter((m) => m.system_role === 'admin').length}

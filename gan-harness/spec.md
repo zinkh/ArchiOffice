@@ -9,16 +9,18 @@ l'ouvrir. L'objectif PRINCIPAL est l'excellence visuelle. Un écran superbe et p
 fonctionnel et banal. Viser des choix créatifs (mise en page éditoriale, hiérarchie typographique, détails de
 tracé façon plan d'architecte) tout en restant sobre.
 
-## Contraintes de charte (impératives, préférences de l'utilisateur)
-- Présentation sobre, NOIR ET BLANC et nuances de gris. Pas de fonds de tableau colorés.
-- La couleur n'est permise que pour de la donnée qui l'exige (ex. pastille d'état, alerte). Pas de bleu décoratif
-  (supprimer les `bg-blue-600`, ombres bleues, etc.).
-- Textes en français avec TOUS les accents. Jamais de tiret quadratin (—). Utiliser virgule, deux-points, parenthèses.
-- Mode clair ET sombre (classes `dark:` Tailwind 4, comme le reste de l'app).
+## Contraintes de charte (révisées à l'itération 3)
+- La règle « noir et blanc » ne concerne QUE les documents PDF et DOCX générés. Elle ne s'applique PAS à l'écran.
+- L'écran doit respecter le code couleur de l'application et le design Tabler (voir CLAUDE.md, section Mouvement,
+  `src/index.css`, `@theme`, classes `.btn`, `.btn-*`, `.card`, badges, et les pages voisines comme Projects, Contacts,
+  Settings). Reprendre la couleur primaire de l'app (bleu des boutons principaux), les couleurs sémantiques Tabler
+  (succès, avertissement, danger, info) pour les états et les rôles, les gris zinc, les rayons et bordures Tabler.
+  Aucune couleur inventée : utiliser les tokens et classes existants.
+- Textes en français avec TOUS les accents. Jamais de tiret quadratin. Mode clair ET sombre.
 - Tabler Icons uniquement, Tailwind uniquement, `clsx`/`cn`, `motion/react` pour le mouvement.
-- Mouvement : ressorts (`DEFAULT_SPRING` de `src/lib/motion.ts`), pas d'apparition en cascade à chaque visite,
-  respect de `prefers-reduced-motion`. Tailles de texte en rem, 11 px minimum (`text-[0.6875rem]`).
-- Responsive téléphone d'abord : cartes ou liste empilée sur mobile, tableau dense au bureau, hauteurs en `dvh`.
+- Mouvement : ressorts (`DEFAULT_SPRING`), pas d'apparition en cascade, `prefers-reduced-motion`. Texte en rem, 11 px minimum.
+- Responsive téléphone d'abord, hauteurs en `dvh`.
+- Le sens ne doit jamais reposer sur la seule couleur (garder glyphes et libellés pour les rôles).
 
 ## Fonctionnalités à conserver (aucune régression de logique)
 Reprendre tel quel le comportement de `Team.tsx` : chargement `getAllUsers`, droits `isAdmin`, mise en évidence

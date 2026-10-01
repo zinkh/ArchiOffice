@@ -10,7 +10,7 @@ import './preview.css';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.classList.toggle('dark', params.get('theme') === 'dark');
-document.body.className = 'bg-[#f4f6fb] text-zinc-900 dark:bg-[#182433] dark:text-zinc-100 antialiased';
+document.body.className = '';
 const lang = params.get('lang');
 
 (async () => {

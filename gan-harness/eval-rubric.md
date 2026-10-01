@@ -1,12 +1,14 @@
 # Grille d'évaluation (design) : gestion des utilisateurs
 
 Seuil de réussite : 7,5 / 10 (note pondérée). Question directrice : « Cet écran gagnerait-il un prix de design ? »
-Contrainte transversale : charte noir et blanc sobre (nuances de gris, couleur seulement pour la donnée),
-français accentué, aucun tiret quadratin. Toute violation plafonne Design Quality à 6.
+Contrainte transversale (révisée itération 3) : l'écran respecte le code couleur de l'application et le design Tabler
+(couleur primaire, couleurs sémantiques, composants et rayons existants, cohérence avec les pages voisines). Le noir et
+blanc ne concerne que les PDF et DOCX générés, pas l'écran. Français accentué, aucun tiret quadratin. Toute
+incohérence avec le design de l'app (couleur inventée, composant hors Tabler) plafonne Design Quality à 6.
 
 ### Design Quality (poids 0,35)
 Cohérence visuelle, hiérarchie typographique, espacement, rythme, contraste, lisibilité en clair ET sombre,
-sobriété de la charte, qualité du responsive téléphone et bureau.
+fidélité au design Tabler et au code couleur de l'app, qualité du responsive téléphone et bureau.
 
 ### Originality (poids 0,30)
 Choix créatifs propres à un cabinet d'architecture (références au plan, au trait, à la trame), évite le gabarit

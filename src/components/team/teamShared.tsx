@@ -10,34 +10,56 @@ export const ROLES: SystemRole[] = ['admin', 'manager', 'pm', 'user'];
 
 export const ROLE_RANK: Record<SystemRole, number> = { admin: 0, manager: 1, pm: 2, user: 3 };
 
-/** Trait fin, comme une ligne de plan : encre en clair, craie en sombre. */
-export const INK_LINE = 'border-zinc-900/80 dark:border-zinc-100/70';
-export const HAIRLINE = 'border-zinc-300 dark:border-zinc-700';
-export const MONO_LABEL = 'font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-zinc-500 dark:text-zinc-400';
-/** Champs : le trait de focus se pose DANS le cadre (double filet), pour se distinguer de l'anneau décalé des boutons. */
-export const FOCUS_FIELD =
-  'focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-zinc-900 dark:focus-visible:outline-white focus-visible:border-zinc-900 dark:focus-visible:border-white';
+/**
+ * Teinte sémantique Tabler de chaque niveau d'accès. La couleur n'est jamais seule
+ * porteuse du sens : le glyphe, la hachure et le libellé disent la même chose.
+ */
+const ROLE_TONE: Record<SystemRole, string> = {
+  admin: 'var(--tblr-primary)',
+  manager: 'var(--tblr-warning)',
+  pm: 'var(--tblr-success)',
+  user: 'var(--tblr-muted)',
+};
+export const roleTone = (role: SystemRole): string => ROLE_TONE[role];
+export const tint = (color: string, pct = 14): string => `color-mix(in srgb, ${color} ${pct}%, transparent)`;
+
+/** Trait de planche : bleu primaire atténué (les cotes et cadres du dessin). */
+export const INK_LINE = 'border-[var(--tblr-primary)]/45';
+export const HAIRLINE = 'border-[var(--tblr-border)]';
+export const SURFACE = 'bg-[var(--tblr-surface)]';
+/** Même enveloppe que `.card` (surface, bordure, ombre, rayon), sans son remplissage. */
+export const PANEL = 'bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded-[var(--tblr-radius)] shadow-[var(--tblr-shadow)]';
+export const TEXT = 'text-[var(--tblr-text)]';
+export const TEXT_SOFT = 'text-zinc-600 dark:text-zinc-400';
+export const MONO_LABEL = 'font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-zinc-600 dark:text-zinc-400';
+
+/** Anneau décalé des boutons et liens. */
 export const FOCUS_RING =
-  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-zinc-900 dark:focus-visible:outline-white';
+  'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--tblr-primary)]';
+/** Champs : filet intérieur et halo, comme `.tblr-input:focus`. */
+export const FOCUS_FIELD =
+  'focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-[var(--tblr-primary)] focus-visible:border-[var(--tblr-primary)] focus-visible:shadow-[0_0_0_3px_var(--tblr-primary-lt)]';
 
 /**
- * Chaque niveau d'accès a sa hachure, comme les matériaux d'une coupe :
- * vide (collaborateur), traits (chef de projet), croisillons (manager),
- * plein (administrateur). La nuance de gris ne porte jamais seule le sens.
+ * Chaque niveau a sa hachure, comme les matériaux d'une coupe : vide, traits,
+ * croisillons, plein. Elle prend la teinte courante (`color`).
  */
 export function hatchStyle(role: SystemRole): CSSProperties {
+  const color = roleTone(role);
   switch (role) {
     case 'admin':
-      return { backgroundColor: 'currentColor' };
+      return { color, backgroundColor: 'currentColor' };
     case 'manager':
       return {
+        color,
+        backgroundColor: tint(color, 10),
         backgroundImage:
           'repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 4px), repeating-linear-gradient(-45deg, currentColor 0 1px, transparent 1px 4px)',
       };
     case 'pm':
-      return { backgroundImage: 'repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 4px)' };
+      return { color, backgroundColor: tint(color, 10), backgroundImage: 'repeating-linear-gradient(45deg, currentColor 0 1px, transparent 1px 4px)' };
     default:
-      return {};
+      return { color, backgroundColor: tint(color, 10) };
   }
 }
 
@@ -52,12 +74,13 @@ export function RoleGlyph({ role, size = 14, className }: { role: SystemRole; si
       strokeWidth={1.25}
       shapeRendering="crispEdges"
       aria-hidden="true"
+      style={{ color: roleTone(role) }}
       className={cn('shrink-0', className)}
     >
       {role === 'admin' ? (
         <>
           <rect x="1" y="1" width="12" height="12" fill="currentColor" />
-          <rect x="4" y="4" width="6" height="6" className="stroke-white dark:stroke-zinc-900" />
+          <rect x="4" y="4" width="6" height="6" stroke="var(--tblr-surface)" />
         </>
       ) : (
         <rect x="1" y="1" width="12" height="12" />
@@ -68,6 +91,19 @@ export function RoleGlyph({ role, size = 14, className }: { role: SystemRole; si
   );
 }
 
+/** Pastille de rôle : glyphe, libellé, fond teinté (le style des `tblr-badge`). */
+export function RoleBadge({ role, label }: { role: SystemRole; label: string }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-[var(--tblr-radius)] px-2 py-0.5 text-xs font-medium text-[var(--tblr-text)]"
+      style={{ backgroundColor: tint(roleTone(role), 14) }}
+    >
+      <RoleGlyph role={role} size={12} />
+      {label}
+    </span>
+  );
+}
+
 export function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -75,30 +111,23 @@ export function initialsOf(name: string): string {
   return letters.toUpperCase();
 }
 
-/** Monogramme carré : une photo passe en niveaux de gris, sans photo on garde les initiales sur une trame. */
+/** Monogramme : une photo reste en couleur, sans photo on garde les initiales sur une trame primaire. */
 export function Avatar({ member, size = 40 }: { member: Pick<UserProfile, 'name' | 'avatar'>; size?: number }) {
-  const px = { width: size, height: size };
   return (
     <span
-      style={px}
-      className={cn(
-        'relative inline-flex shrink-0 items-center justify-center overflow-hidden border bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100',
-        INK_LINE,
-      )}
+      style={{ width: size, height: size }}
+      className="relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-[var(--tblr-radius)] border border-[var(--tblr-border)] bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]"
     >
       {member.avatar ? (
-        <img src={member.avatar} alt="" className="h-full w-full object-cover grayscale" />
+        <img src={member.avatar} alt="" className="h-full w-full object-cover" />
       ) : (
         <>
           <span
             aria-hidden="true"
-            className="absolute inset-0 opacity-[0.12]"
+            className="absolute inset-0 opacity-[0.16]"
             style={{ backgroundImage: 'repeating-linear-gradient(135deg, currentColor 0 1px, transparent 1px 5px)' }}
           />
-          <span
-            className="relative font-mono font-medium tracking-tight"
-            style={{ fontSize: Math.max(11, Math.round(size * 0.34)) }}
-          >
+          <span className="relative font-mono font-medium tracking-tight" style={{ fontSize: Math.max(11, Math.round(size * 0.34)) }}>
             {initialsOf(member.name)}
           </span>
         </>
@@ -107,9 +136,9 @@ export function Avatar({ member, size = 40 }: { member: Pick<UserProfile, 'name'
   );
 }
 
-/** Repères de coupe aux quatre angles d'une fiche, comme sur une planche. */
+/** Repères de coupe aux quatre angles d'une planche. */
 export function CropMarks() {
-  const base = 'pointer-events-none absolute h-2 w-2 border-zinc-900 dark:border-zinc-100';
+  const base = 'pointer-events-none absolute h-2 w-2 border-[var(--tblr-primary)]';
   return (
     <>
       <span aria-hidden="true" className={cn(base, '-left-px -top-px border-l border-t')} />

@@ -27,3 +27,12 @@
 - Tiret quadratin retire de `team_schedule_empty` (FR et EN). Placeholder de recherche raccourci.
 - Banc : `?failwrite=1` fait echouer le changement de role (test du bandeau).
 - Captures : `gan-harness/screenshots/i2-*.png`.
+
+## Iteration 003 : design Tabler
+- Charte revisee : couleurs Tabler a l'ecran (le noir et blanc ne vaut que pour PDF/DOCX). Aucune couleur inventee : `--tblr-primary`, `--tblr-success`, `--tblr-warning`, `--tblr-danger`, `--tblr-muted`, surfaces et bordures, `.btn`, `.btn-*`, `.tblr-input`, `.tblr-badge`, ombre et rayon Tabler.
+- Planche conservee : trame de points, cotes, hachures, glyphes, numerotation, repères de coupe, organigramme, en bleu primaire.
+- Roles : admin = primaire, manager = avertissement, chef de projet = succes, collaborateur = muted, toujours avec glyphe, hachure et libelle.
+- Cote de repartition cliquable (segment = filtre de role), puces en legende. Registre : carte Tabler a filet primaire.
+- Fiches compactes depliables (9 fiches ≈ 2000 px a 390 px au lieu de 4500). « Manager rattache » renomme « Responsable » (FR) / « Reports to » (EN).
+- Approbation/refus : bandeau de confirmation (succes). Pas d'annulation : l'API n'a pas d'endpoint de retour. Erreurs persistantes jusqu'a fermeture. Gris secondaires releves (zinc-600).
+- Captures : `gan-harness/screenshots/i3-*.png`.

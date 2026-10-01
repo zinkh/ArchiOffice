@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
 import type { UserProfile } from '../../services/userService';
 import type { MemberViewProps } from './memberViewTypes';
-import { Avatar, FOCUS_RING, HAIRLINE, MONO_LABEL, RoleGlyph } from './teamShared';
+import { Avatar, FOCUS_RING, MONO_LABEL, PANEL, RoleGlyph } from './teamShared';
 
 interface Branch {
   member: UserProfile;
@@ -41,7 +41,7 @@ function Node({ branch, highlightId, memberRefs, depth }: { branch: Branch } & P
       className={cn(
         'relative',
         depth > 0 &&
-          'pl-4 sm:pl-6 before:absolute before:bottom-0 before:left-0 before:top-0 before:border-l before:border-zinc-400 last:before:bottom-auto last:before:h-[1.625rem] after:absolute after:left-0 after:top-[1.625rem] after:w-3 sm:after:w-5 after:border-t after:border-zinc-400 dark:before:border-zinc-600 dark:after:border-zinc-600',
+          'pl-4 sm:pl-6 before:absolute before:bottom-0 before:left-0 before:top-0 before:border-l before:border-[var(--tblr-primary)]/45 last:before:bottom-auto last:before:h-[1.625rem] after:absolute after:left-0 after:top-[1.625rem] after:w-3 sm:after:w-5 after:border-t after:border-[var(--tblr-primary)]/45',
       )}
     >
       <Link
@@ -49,18 +49,18 @@ function Node({ branch, highlightId, memberRefs, depth }: { branch: Branch } & P
         ref={(el) => { memberRefs.current[member.id] = el; }}
         aria-current={highlighted ? 'true' : undefined}
         className={cn(
-          'my-1 inline-flex min-w-0 max-w-full items-center gap-3 border bg-white py-1.5 pl-1.5 pr-4 transition-colors duration-100 dark:bg-zinc-900',
-          highlighted ? 'border-zinc-900 outline-2 outline-offset-2 outline-zinc-900 dark:border-white dark:outline-white' : HAIRLINE,
-          '[@media(hover:hover)]:hover:border-zinc-900 dark:[@media(hover:hover)]:hover:border-zinc-100',
+          PANEL,
+          'my-1 inline-flex min-w-0 max-w-full items-center gap-3 py-1.5 pl-1.5 pr-4 transition-colors duration-100',
+          highlighted ? 'border-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]' : '[@media(hover:hover)]:hover:border-[var(--tblr-primary)]',
           FOCUS_RING,
         )}
       >
         <Avatar member={member} size={36} />
         <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold leading-tight tracking-tight text-zinc-900 dark:text-white">{member.name}</span>
-          <span className="block truncate text-xs text-zinc-500 dark:text-zinc-400">{member.role || t('team_no_function')}</span>
+          <span className="block truncate text-sm font-semibold leading-tight tracking-tight text-[var(--tblr-text)]">{member.name}</span>
+          <span className="block truncate text-xs text-zinc-600 dark:text-zinc-400">{member.role || t('team_no_function')}</span>
         </span>
-        <RoleGlyph role={member.system_role} className="ml-1 text-zinc-900 dark:text-zinc-100" />
+        <RoleGlyph role={member.system_role} className="ml-1" />
         <span className="sr-only">{t(`team_role_short_${member.system_role}`)}</span>
       </Link>
       {branch.children.length > 0 && (
@@ -93,7 +93,7 @@ export default function TeamOrgChart({ team, highlightId, memberRefs }: Pick<Mem
         ))}
       </div>
       {alone.length > 0 && (
-        <div className="mt-10 border-t border-dashed border-zinc-300 pt-4 dark:border-zinc-700">
+        <div className="mt-10 border-t border-dashed border-[var(--tblr-border)] pt-4">
           <p className={cn(MONO_LABEL, 'mb-3')}>{t('team_org_unassigned')}</p>
           <ul className="flex flex-wrap gap-x-4">
             {alone.map((b) => (
