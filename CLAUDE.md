@@ -434,15 +434,23 @@ intitulé, et le lien est alors posé ; un lot du document absent du projet gard
 son numéro et passe en dernier. `ProTab.synchroniserLots` fait cette
 propagation, l'autosauvegarde enregistre.
 
-**La vue LOTS est la source de vérité de l'ensemble**, pas seulement de l'ordre :
-`appliquerOrdreLots()` crée dans le document le lot du projet qui lui manque
-(vide), reprend l'intitulé du projet, rattache un lot par intitulé identique puis
-proche (« Charpente » ↔ « CHARPENTE BOIS »), et retire un lot du document absent
-du projet **seulement s'il est vide** (sans article ni texte CCTP) : un lot
-rédigé reste en fin de liste plutôt que de disparaître en silence. L'alignement
-tourne aussi une fois à l'ouverture de chaque document (DPGF/CCTP, puis BPU/DQE
-à son premier affichage), pas seulement quand on modifie la vue LOTS. Un projet
-sans lot ne touche jamais aux documents.
+**Numéros et intitulés de lots strictement identiques partout** (liste, CCTP,
+DPGF, estimation, BPU/DQE). Deux sens, jamais de suppression silencieuse :
+
+- **Liste → documents** (cas normal : on crée d'abord les lots) :
+  `appliquerOrdreLots()` donne à chaque lot du document le numéro et l'intitulé
+  EXACTS du projet et crée les lots manquants (vides). Appliqué à chaque
+  modification de la vue LOTS et une fois à l'ouverture, mais seulement si le
+  document ne diverge pas (`lotsDivergent()` : aucun lot du document sans
+  rattachement `projectLotId` à un lot existant).
+- **Document → liste** (CCTP rédigé avant les lots) : si le document diverge, un
+  bandeau (ProTab) propose « Remplir la liste des lots depuis le CCTP »
+  (`planImportLots()` + `PUT /api/lots/:id` / `POST`, les lots existants
+  rapprochés par intitulé identique puis proche prennent numéro et intitulé du
+  document) ou « Aligner le CCTP sur la liste » (retire les lots hors liste,
+  après confirmation qui cite ceux qui portent du contenu).
+
+Un projet sans lot ne touche jamais aux documents.
 
 ### Groupement vs agence dans les notes d'honoraires
 

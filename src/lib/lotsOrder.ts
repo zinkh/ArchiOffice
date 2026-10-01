@@ -40,7 +40,7 @@ const renumeroterLignes = (lignes: LigneNumerotee[] | undefined, ancien: string,
   }));
 
 /** Un lot « vide » ne porte aucun article ni aucun texte : le retirer ne fait rien perdre. */
-const lotEstVide = (l: LotDocument & { cctpDescription?: string }): boolean =>
+export const lotEstVide = (l: LotDocument & { cctpDescription?: string }): boolean =>
   !(l.cctpDescription ?? '').trim() &&
   (l.chapitres ?? []).every((c: any) =>
     !(c.cctpDescription ?? '').trim() && !(c.lignes?.length));
@@ -54,18 +54,33 @@ const intitulesProches = (a: string, b: string): boolean => {
 let _compteurLot = 0;
 const nouvelId = () => `lot_${Date.now()}_${_compteurLot++}`;
 
+export interface OptionsAlignement {
+  /** Rapproche aussi les intitulés proches (« Charpente » / « CHARPENTE BOIS »). */
+  rapprocher?: boolean;
+  /** Retire les lots du document absents du projet (geste explicite, jamais par défaut). */
+  retirerHorsProjet?: boolean;
+}
+
+/**
+ * Le document et la liste des lots du projet divergent : au moins un lot du
+ * document n'est pas rattaché à un lot existant du projet. Un document sans
+ * lot ne diverge pas, il se remplit simplement depuis la liste.
+ */
+export const lotsDivergent = (doc: { lots: any[] } | null | undefined, lotsProjet: LotProjet[]): boolean => {
+  if (!doc?.lots?.length) return false;
+  const ids = new Set(lotsProjet.map(p => p.id));
+  return (doc.lots as LotDocument[]).some(l => !l.projectLotId || !ids.has(l.projectLotId));
+};
+
 /**
  * Range les lots d'un document (DPGF/CCTP ou BPU) dans l'ordre des lots du
- * projet et leur donne le numéro correspondant, chapitres et articles compris.
- * La liste des lots du projet fait foi :
- * - rattachement par `projectLotId`, à défaut par intitulé identique, puis
- *   par intitulé proche (sans casse ni accents) ; le rattachement est posé ;
- * - un lot du projet absent du document y est créé, vide ;
- * - un lot du document sans équivalent dans le projet est retiré s'il est
- *   vide ; s'il porte du contenu il est conservé après les autres, pour ne
- *   rien perdre en silence.
+ * projet et leur donne EXACTEMENT leur numéro et leur intitulé, chapitres et
+ * articles compris. Rattachement : `projectLotId`, à défaut intitulé identique
+ * (sans casse ni accents), puis proche si `rapprocher`. Un lot du projet absent
+ * du document y est créé, vide. Un lot du document sans équivalent est conservé
+ * après les autres, jamais supprimé sauf `retirerHorsProjet`.
  */
-export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet: LotProjet[]): D {
+export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet: LotProjet[], opts: OptionsAlignement = {}): D {
   const restants = [...(doc.lots as LotDocument[])];
   const pris = new Set<string>();
   const ordonnes: LotDocument[] = [];
@@ -86,7 +101,7 @@ export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet
     const numero = p.lot_number || numeroDeLot(index);
     const l = explicites.get(p.id)
       ?? prendre(x => !x.projectLotId && norm(x.titre) === norm(p.lot_title))
-      ?? prendre(x => !x.projectLotId && intitulesProches(x.titre, p.lot_title));
+      ?? (opts.rapprocher ? prendre(x => !x.projectLotId && intitulesProches(x.titre, p.lot_title)) : undefined);
     if (!l) {
       ordonnes.push({
         id: nouvelId(), numero, titre: p.lot_title, projectLotId: p.id,
@@ -106,6 +121,32 @@ export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet
       })),
     });
   }
-  const horsProjet = restants.filter(l => !pris.has(l.id) && !lotEstVide(l));
+  const horsProjet = opts.retirerHorsProjet ? [] : restants.filter(l => !pris.has(l.id));
   return { ...doc, lots: [...ordonnes, ...horsProjet] };
+}
+
+export interface LotAImporter { lotDocId: string; projectLotId?: string; numero: string; titre: string }
+
+/**
+ * Sens inverse : la liste des lots se remplit depuis un document (cas d'un
+ * CCTP rédigé avant d'avoir saisi les lots). Chaque lot du document, dans son
+ * ordre, reprend un lot existant du projet (rattachement, intitulé identique,
+ * puis proche) dont le numéro et l'intitulé deviennent ceux du document, ou
+ * donne un nouveau lot. Un numéro absent ou en double reçoit le rang suivant.
+ */
+export function planImportLots(doc: { lots: any[] }, lotsProjet: LotProjet[]): LotAImporter[] {
+  const utilises = new Set<string>();
+  const libre = (p: LotProjet) => !utilises.has(p.id);
+  const numeros = new Set<string>();
+  return (doc.lots as LotDocument[]).map((l, index) => {
+    const existant =
+      lotsProjet.find(p => libre(p) && p.id === l.projectLotId)
+      ?? lotsProjet.find(p => libre(p) && norm(p.lot_title) === norm(l.titre))
+      ?? lotsProjet.find(p => libre(p) && intitulesProches(p.lot_title, l.titre));
+    if (existant) utilises.add(existant.id);
+    let numero = (l.numero ?? '').trim();
+    if (!numero || numeros.has(numero)) numero = numeroDeLot(index);
+    numeros.add(numero);
+    return { lotDocId: l.id, projectLotId: existant?.id, numero, titre: l.titre };
+  });
 }
