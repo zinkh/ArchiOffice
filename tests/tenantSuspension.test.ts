@@ -6,7 +6,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
 import { invalidateSuspensionCache } from '../server/tenantSuspension';
-import { purgeExpiredTenants } from '../server/tenantPurge';
+import { freezeExpiredTenants } from '../server/tenantPurge';
 
 let app: Express;
 const SUPER_ADMIN_EMAIL = 'super-admin@archioffice.test';
@@ -153,14 +153,55 @@ describe('Super-Admin : suspendre et lever la suspension', () => {
   });
 });
 
-describe('Cabinet suspendu : aucune purge automatique', () => {
-  it("ne purge jamais un cabinet suspendu dont la fermeture est échue", async () => {
+describe('Fermeture de cabinet : le délai de grâce gèle, il ne supprime jamais', () => {
+  const longAgo = () => new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+
+  it("gèle un cabinet dont la fermeture est échue, sans rien supprimer", async () => {
     const tenantId = makeTenant();
     const tenant = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!;
-    tenant.deletion_requested_at = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
-    suspendInDb(tenantId);
+    tenant.deletion_requested_at = longAgo();
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p-keep', tenant_id: tenantId, name: 'Villa' }]);
 
-    await purgeExpiredTenants(fakeSupabaseAdmin as any);
-    expect(fakeSupabaseAdmin.getTable('tenants').some(t => t.id === tenantId)).toBe(true);
+    const frozen = await freezeExpiredTenants(fakeSupabaseAdmin as any);
+    expect(frozen).toBeGreaterThanOrEqual(1);
+    const after = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId);
+    expect(after).toBeTruthy();
+    expect(after?.suspended_at).toBeTruthy();
+    expect(after?.suspension_reason).toContain('courrier recommandé');
+    expect(fakeSupabaseAdmin.getTable('projects').some(p => p.id === 'p-keep')).toBe(true);
+  });
+
+  it('bloque ensuite tous ses membres', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!.deletion_requested_at = longAgo();
+
+    await freezeExpiredTenants(fakeSupabaseAdmin as any);
+    const res = await request(app).get('/api/team').set(authHeader(token));
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe('TENANT_SUSPENDED');
+  });
+
+  it("ne touche pas à un cabinet déjà suspendu par le superadmin", async () => {
+    const tenantId = makeTenant();
+    const tenant = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!;
+    tenant.deletion_requested_at = longAgo();
+    tenant.suspension_reason = 'Décision de justice';
+    suspendInDb(tenantId);
+    const suspendedAt = tenant.suspended_at;
+
+    await freezeExpiredTenants(fakeSupabaseAdmin as any);
+    const after = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!;
+    expect(after.suspended_at).toBe(suspendedAt);
+    expect(after.suspension_reason).toBe('Décision de justice');
+  });
+
+  it("laisse tranquille un cabinet dont le délai de grâce court encore", async () => {
+    const tenantId = makeTenant();
+    const tenant = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!;
+    tenant.deletion_requested_at = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+
+    await freezeExpiredTenants(fakeSupabaseAdmin as any);
+    expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)?.suspended_at).toBeFalsy();
   });
 });

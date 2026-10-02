@@ -144,13 +144,101 @@ describe('Super-Admin tenant mutations', () => {
     expect(dup.status).toBe(400);
   });
 
-  it('deletes a tenant', async () => {
-    const tenantId = makeTenant();
-    const token = makeSuperAdminToken();
+  // Aucune suppression automatique : l'effacement d'un cabinet n'a lieu que sur
+  // demande par courrier recommandé, et seulement sur un cabinet gelé.
+  describe('effacement définitif (courrier recommandé)', () => {
+    const rar = { rar_reference: 'RAR 1A 234 567 8901 2', rar_received_on: '2026-09-30' };
 
-    const res = await request(app).delete(`/api/admin/tenants/${tenantId}`).set(authHeader(token));
-    expect(res.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)).toBeUndefined();
+    function suspendedTenant(name = 'Cabinet à effacer') {
+      const tenantId = makeTenant();
+      const tenant = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!;
+      tenant.name = name;
+      tenant.suspended_at = new Date().toISOString();
+      return { tenantId, name };
+    }
+    const erase = (tenantId: string, body: Record<string, unknown>) =>
+      request(app).delete(`/api/admin/tenants/${tenantId}`).set(authHeader(makeSuperAdminToken())).send(body);
+    const stillThere = (tenantId: string) => fakeSupabaseAdmin.getTable('tenants').some(t => t.id === tenantId);
+
+    it('efface un cabinet suspendu avec la référence du courrier et le nom exact', async () => {
+      const { tenantId, name } = suspendedTenant();
+      const res = await erase(tenantId, { ...rar, confirm_name: name });
+      expect(res.status).toBe(200);
+      expect(stillThere(tenantId)).toBe(false);
+    });
+
+    it('refuse sans référence de courrier recommandé', async () => {
+      const { tenantId, name } = suspendedTenant();
+      const res = await erase(tenantId, { confirm_name: name });
+      expect(res.status).toBe(400);
+      expect(stillThere(tenantId)).toBe(true);
+    });
+
+    it('refuse une date de réception dans le futur', async () => {
+      const { tenantId, name } = suspendedTenant();
+      const res = await erase(tenantId, { ...rar, rar_received_on: '2999-01-01', confirm_name: name });
+      expect(res.status).toBe(400);
+      expect(stillThere(tenantId)).toBe(true);
+    });
+
+    it('refuse si le nom du cabinet est mal retapé', async () => {
+      const { tenantId } = suspendedTenant();
+      const res = await erase(tenantId, { ...rar, confirm_name: 'Autre nom' });
+      expect(res.status).toBe(400);
+      expect(stillThere(tenantId)).toBe(true);
+    });
+
+    it("refuse un cabinet qui n'est pas suspendu", async () => {
+      const tenantId = makeTenant();
+      const tenant = fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)!;
+      tenant.name = 'Cabinet actif';
+      const res = await erase(tenantId, { ...rar, confirm_name: 'Cabinet actif' });
+      expect(res.status).toBe(409);
+      expect(stillThere(tenantId)).toBe(true);
+    });
+
+    it('refuse tant que des pièces comptables ont moins de 10 ans', async () => {
+      const { tenantId, name } = suspendedTenant();
+      const recent = new Date(Date.now() - 2 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      fakeSupabaseAdmin.seed('invoices', [{ id: crypto.randomUUID(), tenant_id: tenantId, status: 'Sent', issue_date: recent }]);
+
+      const res = await erase(tenantId, { ...rar, confirm_name: name });
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('ACCOUNTING_RETENTION');
+      expect(res.body.retention_ends_on).toBeTruthy();
+      expect(stillThere(tenantId)).toBe(true);
+    });
+
+    it('ne compte ni les brouillons ni les factures de plus de 10 ans', async () => {
+      const { tenantId, name } = suspendedTenant();
+      const old = new Date(Date.now() - 11 * 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+      const recent = new Date().toISOString().slice(0, 10);
+      fakeSupabaseAdmin.seed('invoices', [
+        { id: crypto.randomUUID(), tenant_id: tenantId, status: 'Paid', issue_date: old },
+        { id: crypto.randomUUID(), tenant_id: tenantId, status: 'Draft', issue_date: recent },
+      ]);
+
+      const res = await erase(tenantId, { ...rar, confirm_name: name });
+      expect(res.status).toBe(200);
+      expect(stillThere(tenantId)).toBe(false);
+    });
+
+    it('efface aussi les sauvegardes du cabinet', async () => {
+      const { tenantId, name } = suspendedTenant();
+      fakeSupabaseAdmin.seed('tenant_backups', [{ id: crypto.randomUUID(), tenant_id: tenantId, status: 'failed', trigger: 'manual', data_path: null }]);
+
+      const res = await erase(tenantId, { ...rar, confirm_name: name });
+      expect(res.status).toBe(200);
+      expect(fakeSupabaseAdmin.getTable('tenant_backups').some(b => b.tenant_id === tenantId)).toBe(false);
+    });
+
+    it('est fermé à un administrateur de cabinet', async () => {
+      const { tenantId, name } = suspendedTenant();
+      const { token } = makeUser(tenantId, 'admin');
+      const res = await request(app).delete(`/api/admin/tenants/${tenantId}`).set(authHeader(token)).send({ ...rar, confirm_name: name });
+      expect(res.status).toBe(403);
+      expect(stillThere(tenantId)).toBe(true);
+    });
   });
 });
 

@@ -1,16 +1,35 @@
-// RGPD — purge automatisée des cabinets dont la fermeture a été demandée
-// (Settings > Zone dangereuse, server/routes/settings.ts's
-// /api/settings/tenant-deletion). A tenant admin sets tenants.deletion_requested_at
-// and gets a 30-day grace period to cancel; once elapsed, this job hard-deletes
-// the tenant permanently: its auth users (cascades their profiles row per
-// `profiles.id REFERENCES auth.users(id) ON DELETE CASCADE`), its storage
-// files, then the tenants row itself — which cascades essentially every
-// business table via their `tenant_id ... ON DELETE CASCADE` foreign key.
-// Same setInterval-on-boot pattern as server/tenderRssPoller.ts.
+// Fermeture et effacement d'un cabinet.
+//
+// POLITIQUE (décision du 2 octobre 2026) : AUCUNE suppression automatique.
+//
+//   1. Un administrateur demande la fermeture du cabinet (Réglages > Zone
+//      dangereuse, server/routes/settings.ts). Une sauvegarde permanente est
+//      prise aussitôt (server/tenantBackup.ts).
+//   2. À l'issue du délai de grâce de 30 jours, ce traitement GÈLE le cabinet
+//      (suspension, voir server/tenantSuspension.ts) au lieu de l'effacer. Les
+//      données sont conservées intactes.
+//   3. L'effacement définitif n'a lieu que sur demande écrite du cabinet par
+//      courrier recommandé avec accusé de réception, exécutée à la main par le
+//      superadmin (DELETE /api/admin/tenants/:id) : il saisit la référence du
+//      courrier, sa date de réception, et retape le nom du cabinet.
+//   4. Les pièces comptables restent protégées 10 ans (Code de commerce) : tant
+//      qu'une facture émise depuis moins de 10 ans existe, l'effacement complet
+//      est refusé. L'effacement partiel (tout sauf les pièces comptables) n'est
+//      pas encore construit — voir ROADMAP.md.
+//
+// Pourquoi pas une purge automatique : une demande de fermeture peut être
+// malveillante (un associé qui nuit à l'autre) ou prématurée, et une purge
+// automatique la rendrait irréversible au bout de 30 jours sans que personne
+// d'autre que l'auteur de la demande n'ait eu son mot à dire.
+//
+// Même patron setInterval-au-démarrage que server/tenderRssPoller.ts.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { listUsersOnlyIn } from './tenantMemberships';
+import { createTenantBackupInBackground, deleteTenantBackups } from './tenantBackup';
+import { invalidateSuspensionCache } from './tenantSuspension';
 
 const GRACE_PERIOD_DAYS = 30;
+export const ACCOUNTING_RETENTION_YEARS = 10;
 const DEFAULT_CHECK_INTERVAL_HOURS = 24;
 // Buckets whose files are namespaced by `${tenantId}/...` (see server.ts's
 // uploadToStorage call sites) — best-effort cleanup, not privacy-critical
@@ -39,7 +58,42 @@ async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: st
   }
 }
 
-async function purgeTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
+/**
+ * La date de la dernière pièce comptable du cabinet : sa dernière facture émise
+ * (un brouillon n'est pas une pièce comptable). Null s'il n'en a aucune.
+ */
+export async function latestAccountingRecordDate(supabaseAdmin: SupabaseClient, tenantId: string): Promise<Date | null> {
+  const { data } = await supabaseAdmin
+    .from('invoices').select('status, issue_date, created_at').eq('tenant_id', tenantId);
+  let latest: Date | null = null;
+  for (const row of (data || []) as { status: string | null; issue_date: string | null; created_at: string | null }[]) {
+    if (row.status === 'Draft') continue;
+    const date = new Date(row.issue_date || row.created_at || '');
+    if (Number.isNaN(date.getTime())) continue;
+    if (!latest || date > latest) latest = date;
+  }
+  return latest;
+}
+
+/**
+ * Jusqu'à quand les pièces comptables du cabinet sont protégées, ou null si
+ * elles ne le sont plus (ou n'existent pas).
+ */
+export async function accountingRetentionEnd(supabaseAdmin: SupabaseClient, tenantId: string, now = new Date()): Promise<Date | null> {
+  const latest = await latestAccountingRecordDate(supabaseAdmin, tenantId);
+  if (!latest) return null;
+  const end = new Date(latest);
+  end.setFullYear(end.getFullYear() + ACCOUNTING_RETENTION_YEARS);
+  return end > now ? end : null;
+}
+
+/**
+ * EFFACEMENT DÉFINITIF d'un cabinet : comptes, fichiers, lignes ET sauvegardes
+ * (une demande d'effacement n'est pas honorée si les sauvegardes restent). À ne
+ * jamais appeler sans les garde-fous de la route superadmin (courrier
+ * recommandé, pièces comptables, cabinet suspendu).
+ */
+export async function eraseTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
   // Seuls les comptes dont c'est le SEUL cabinet sont supprimés : une
   // personne qui exerce aussi ailleurs garde le sien, sinon fermer une
   // structure la déconnecterait de l'autre (server/tenantMemberships.ts).
@@ -55,40 +109,58 @@ async function purgeTenant(supabaseAdmin: SupabaseClient, tenantId: string): Pro
   // DELETE CASCADE` (projects, invoices, documents, contacts, ... — see
   // supabase/schema.sql) — this is the actual purge of all professional data.
   const { error } = await supabaseAdmin.from('tenants').delete().eq('id', tenantId);
-  if (error) {
-    console.error(`[tenantPurge] Failed to delete tenant ${tenantId}:`, error.message);
-    return;
-  }
-  console.log(`[tenantPurge] Purged tenant ${tenantId} (deletion grace period elapsed)`);
+  if (error) throw new Error(`Suppression du cabinet impossible : ${error.message}`);
+
+  await deleteTenantBackups(supabaseAdmin, tenantId);
+  invalidateSuspensionCache();
+  console.log(`[tenantPurge] Cabinet ${tenantId} effacé (demande par courrier recommandé)`);
 }
 
-export async function purgeExpiredTenants(supabaseAdmin: SupabaseClient): Promise<void> {
+/**
+ * Gèle les cabinets dont le délai de grâce de fermeture est écoulé. Ne supprime
+ * rien : voir la politique en tête de fichier.
+ */
+export async function freezeExpiredTenants(supabaseAdmin: SupabaseClient): Promise<number> {
   const cutoff = new Date(Date.now() - GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabaseAdmin
     .from('tenants')
-    .select('id')
+    .select('id, deletion_requested_at')
     .not('deletion_requested_at', 'is', null)
-    // Un cabinet suspendu par le superadmin (litige, piratage) n'est jamais
-    // purgé, même si une fermeture a été demandée avant ou pendant la
-    // suspension : c'est précisément le cas où la demande peut être
-    // malveillante. Ses données restent intactes jusqu'à décision du superadmin.
+    // Déjà suspendu (par le superadmin ou par un passage précédent) : rien à faire.
     .is('suspended_at', null)
     .lte('deletion_requested_at', cutoff);
   if (error) {
-    console.error('[tenantPurge] Failed to list tenants pending deletion:', error.message);
-    return;
+    console.error('[tenantPurge] Failed to list tenants pending closure:', error.message);
+    return 0;
   }
-  for (const tenant of (data || []) as { id: string }[]) {
-    await purgeTenant(supabaseAdmin, tenant.id);
+  let frozen = 0;
+  for (const tenant of (data || []) as { id: string; deletion_requested_at: string }[]) {
+    const requestedOn = new Date(tenant.deletion_requested_at).toLocaleDateString('fr-FR');
+    const { error: updateError } = await supabaseAdmin.from('tenants').update({
+      suspended_at: new Date().toISOString(),
+      suspended_by: null,
+      suspension_reason: `Fermeture demandée le ${requestedOn}, délai de grâce de ${GRACE_PERIOD_DAYS} jours écoulé. `
+        + "Données conservées : l'effacement définitif n'a lieu que sur demande du cabinet par courrier recommandé.",
+    }).eq('id', tenant.id).is('suspended_at', null);
+    if (updateError) {
+      console.error(`[tenantPurge] Failed to freeze tenant ${tenant.id}:`, updateError.message);
+      continue;
+    }
+    invalidateSuspensionCache();
+    // État figé du cabinet, hors de portée de ses administrateurs.
+    void createTenantBackupInBackground(supabaseAdmin, tenant.id, 'suspension');
+    frozen += 1;
+    console.log(`[tenantPurge] Cabinet ${tenant.id} gelé (fermeture demandée le ${requestedOn}, rien n'est supprimé)`);
   }
+  return frozen;
 }
 
-export function startTenantPurge(supabaseAdmin: SupabaseClient): void {
+export function startTenantClosure(supabaseAdmin: SupabaseClient): void {
   const intervalHours = parseInt(process.env.TENANT_PURGE_INTERVAL_HOURS || '', 10) || DEFAULT_CHECK_INTERVAL_HOURS;
   const intervalMs = intervalHours * 60 * 60 * 1000;
 
-  purgeExpiredTenants(supabaseAdmin).catch(e => console.error('[tenantPurge] Initial purge check failed:', e.message));
+  freezeExpiredTenants(supabaseAdmin).catch(e => console.error('[tenantPurge] Initial closure check failed:', e.message));
   setInterval(() => {
-    purgeExpiredTenants(supabaseAdmin).catch(e => console.error('[tenantPurge] Purge cycle failed:', e.message));
+    freezeExpiredTenants(supabaseAdmin).catch(e => console.error('[tenantPurge] Closure cycle failed:', e.message));
   }, intervalMs);
 }

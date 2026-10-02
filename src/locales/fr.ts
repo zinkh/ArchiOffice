@@ -2072,7 +2072,7 @@ export default {
       "projects_save_offline": "Vous êtes hors ligne. Le projet a été enregistré localement et sera synchronisé une fois en ligne.",
       "projects_confirm_delete_category": "Êtes-vous sûr de vouloir supprimer cette catégorie ?",
       "settings_tenant_export_failed": "Échec de l'export des données du cabinet.",
-      "settings_confirm_tenant_deletion_request": "Demander la fermeture du cabinet ? Toutes les données du cabinet (projets, factures, documents, contacts...) seront définitivement supprimées automatiquement dans 30 jours, sauf annulation d'ici là. Avez-vous utilisé le bouton « Exporter toutes les données du cabinet » ci-dessus ? La loi française impose la conservation des documents comptables pendant 10 ans, indépendamment de cette suppression.",
+      "settings_confirm_tenant_deletion_request": "Demander la fermeture du cabinet ? Après un délai de grâce de 30 jours (annulable), l'accès au cabinet sera bloqué pour tous ses membres. Aucune donnée n'est supprimée automatiquement : l'effacement définitif n'a lieu que sur demande écrite par courrier recommandé avec accusé de réception. Les pièces comptables sont conservées 10 ans, la loi française l'imposant. Avez-vous utilisé le bouton « Exporter toutes les données du cabinet » ci-dessus ?",
       "settings_tenant_deletion_request_failed": "Échec de la demande de fermeture.",
       "settings_tenant_deletion_cancel_failed": "Échec de l'annulation.",
       "settings_confirm_storage_disable": "Déconnecter cet espace ?\n\nLes nouveaux documents et plans repartiront dans ArchiOffice. Ceux déjà déposés chez vous resteront consultables.",

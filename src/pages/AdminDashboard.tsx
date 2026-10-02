@@ -55,6 +55,7 @@ export interface TenantRow {
   ai_credit_balance_eur_cents?: number;
   owner_email?: string | null;
   owner_name?: string | null;
+  suspended_at?: string | null;
 }
 
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -411,14 +412,20 @@ function DeleteConfirmDialog({ tenant, onClose, onDeleted }: {
   tenant: TenantRow; onClose: () => void; onDeleted: () => void;
 }) {
   const [confirm, setConfirm] = useState('');
+  const [rarReference, setRarReference] = useState('');
+  const [rarReceivedOn, setRarReceivedOn] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const ready = confirm === tenant.name && rarReference.trim().length >= 5 && !!rarReceivedOn;
 
   async function handleDelete() {
     setLoading(true);
     setError(null);
     try {
-      await apiFetch(`/api/admin/tenants/${tenant.id}`, { method: 'DELETE' });
+      await apiFetch(`/api/admin/tenants/${tenant.id}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirm_name: confirm, rar_reference: rarReference, rar_received_on: rarReceivedOn }),
+      });
       onDeleted();
       onClose();
     } catch (e: any) {
@@ -427,6 +434,9 @@ function DeleteConfirmDialog({ tenant, onClose, onDeleted }: {
       setLoading(false);
     }
   }
+
+  const field = 'w-full p-2 rounded-lg text-sm mb-3';
+  const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
@@ -439,34 +449,40 @@ function DeleteConfirmDialog({ tenant, onClose, onDeleted }: {
         </button>
         <div className="flex items-center gap-2 mb-3">
           <IconAlertTriangle size={20} className="text-red-500" />
-          <h2 className="text-base font-bold text-red-600">Supprimer le cabinet</h2>
+          <h2 className="text-base font-bold text-red-600">Effacer définitivement le cabinet</h2>
         </div>
-        <p className="text-sm mb-1" style={{ color: 'var(--tblr-text)' }}>
-          Cette action est <strong>irréversible</strong>. Toutes les données du cabinet <strong>{tenant.name}</strong> seront supprimées ({tenant.user_count} utilisateurs, {tenant.project_count} projets).
+        <p className="text-sm mb-2" style={{ color: 'var(--tblr-text)' }}>
+          Cette action est <strong>irréversible</strong>. Toutes les données du cabinet <strong>{tenant.name}</strong> et ses sauvegardes seront effacées ({tenant.user_count} utilisateurs, {tenant.project_count} projets).
         </p>
         <p className="text-xs mb-3" style={{ color: 'var(--tblr-muted)' }}>
-          Saisissez <strong>{tenant.slug}</strong> pour confirmer :
+          À n'utiliser que sur demande écrite du cabinet par courrier recommandé avec accusé de réception. Le cabinet doit être suspendu, et aucune pièce comptable de moins de 10 ans ne doit exister.
         </p>
+        {!tenant.suspended_at && (
+          <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 mb-3">
+            Ce cabinet n'est pas suspendu : suspendez-le d'abord depuis sa fiche.
+          </div>
+        )}
         {error && <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 mb-3">{error}</div>}
-        <input
-          className="w-full p-2 rounded-lg text-sm mb-4 font-mono"
-          style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-          value={confirm}
-          onChange={e => setConfirm(e.target.value)}
-          placeholder={tenant.slug}
-        />
+        <label className="block text-xs font-bold mb-1" style={{ color: 'var(--tblr-muted)' }}>Référence du courrier recommandé</label>
+        <input className={field} style={fieldStyle} value={rarReference} onChange={e => setRarReference(e.target.value)} placeholder="N° de l'AR" />
+        <label className="block text-xs font-bold mb-1" style={{ color: 'var(--tblr-muted)' }}>Date de réception</label>
+        <input type="date" className={field} style={fieldStyle} value={rarReceivedOn} onChange={e => setRarReceivedOn(e.target.value)} />
+        <p className="text-xs mb-1" style={{ color: 'var(--tblr-muted)' }}>
+          Saisissez le nom du cabinet <strong>{tenant.name}</strong> pour confirmer :
+        </p>
+        <input className={`${field} mb-4`} style={fieldStyle} value={confirm} onChange={e => setConfirm(e.target.value)} placeholder={tenant.name} />
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2 rounded-lg text-sm border" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
             Annuler
           </button>
           <button
             onClick={handleDelete}
-            disabled={loading || confirm !== tenant.slug}
+            disabled={loading || !ready}
             className="flex-1 py-2 rounded-lg text-sm font-semibold flex items-center justify-center gap-2"
-            style={{ background: '#ef4444', color: '#fff', opacity: (loading || confirm !== tenant.slug) ? 0.5 : 1 }}
+            style={{ background: '#ef4444', color: '#fff', opacity: (loading || !ready) ? 0.5 : 1 }}
           >
             {loading ? <IconLoader2 size={14} className="animate-spin" /> : <IconTrash size={14} />}
-            Supprimer
+            Effacer
           </button>
         </div>
       </div>

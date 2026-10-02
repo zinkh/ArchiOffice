@@ -3228,9 +3228,9 @@ export default function Settings() {
               <div className="space-y-2">
                 <p className="text-sm" style={{ color: 'var(--tblr-text)' }}>
                   Fermeture du cabinet demandée le {new Date(tenantDeletion.deletion_requested_at).toLocaleDateString('fr-FR')}.
-                  Toutes les données seront définitivement supprimées le{' '}
+                  Le cabinet sera bloqué pour tous ses membres le{' '}
                   {new Date(new Date(tenantDeletion.deletion_requested_at).getTime() + tenantDeletion.grace_period_days * 86400000).toLocaleDateString('fr-FR')}
-                  {' '}sauf annulation avant cette date.
+                  {' '}sauf annulation avant cette date. Aucune donnée n'est supprimée automatiquement.
                 </p>
                 <button
                   type="button"
@@ -3245,10 +3245,11 @@ export default function Settings() {
             ) : (
               <div className="space-y-2">
                 <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
-                  Supprime définitivement le cabinet et toutes ses données (projets, factures, documents, contacts, comptes utilisateurs...)
-                  après un délai de grâce de 30 jours, annulable à tout moment d'ici là. Utilisez le bouton « Exporter toutes les données
-                  du cabinet » ci-dessus au préalable : la loi française impose la conservation des documents comptables pendant 10 ans,
-                  indépendamment de cette suppression.
+                  Bloque l'accès au cabinet pour tous ses membres après un délai de grâce de 30 jours, annulable à tout moment d'ici là.
+                  Aucune donnée n'est supprimée automatiquement : les données sont conservées et sauvegardées. L'effacement définitif
+                  (projets, factures, documents, contacts, comptes utilisateurs...) n'a lieu que sur demande écrite par courrier recommandé
+                  avec accusé de réception. Les pièces comptables sont conservées 10 ans, la loi française l'imposant. Utilisez le bouton
+                  « Exporter toutes les données du cabinet » ci-dessus pour garder une copie.
                 </p>
                 <button
                   type="button"

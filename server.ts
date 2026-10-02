@@ -124,7 +124,7 @@ import { startAgentMailReview } from "./server/agentMailReview";
 import { registerAgentMailReviewRoutes } from "./server/routes/agentMailReview";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
-import { startTenantPurge } from "./server/tenantPurge";
+import { startTenantClosure } from "./server/tenantPurge";
 import { startTenantBackups } from "./server/tenantBackup";
 import { startNotificationArchiver } from "./server/notificationArchiver";
 import { startLifecycleEmails } from "./server/lifecycleEmails";
@@ -1247,9 +1247,10 @@ async function startServer() {
     // Démarré ici (pas plus tôt) car en mode offline, supabaseAdmin boucle sur le
     // shim REST de ce même serveur, qui n'accepte les requêtes qu'une fois à l'écoute.
     startTenderRssPolling(supabaseAdmin);
-    // RGPD — purge automatisée des cabinets dont le délai de grâce de
-    // fermeture (30 jours, server/routes/settings.ts) est écoulé.
-    startTenantPurge(supabaseAdmin);
+    // Fermeture de cabinet — à l'issue du délai de grâce (30 jours,
+    // server/routes/settings.ts) le cabinet est GELÉ, jamais supprimé : voir la
+    // politique en tête de server/tenantPurge.ts.
+    startTenantClosure(supabaseAdmin);
     // Sauvegardes par cabinet (server/tenantBackup.ts) — nocturnes, restaurables
     // par le superadmin seul. Pas en mode hors-ligne : le client de bureau n'a
     // ni bucket de sauvegarde ni copie de stockage côté serveur.

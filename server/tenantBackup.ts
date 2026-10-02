@@ -467,6 +467,25 @@ export async function restoreTenantBackup(
   return summary;
 }
 
+/**
+ * Efface TOUTES les sauvegardes d'un cabinet : instantanés, fichiers de la
+ * réserve et inventaire. Appelée par l'effacement définitif du cabinet — une
+ * demande d'effacement n'est pas honorée si ses sauvegardes survivent.
+ */
+export async function deleteTenantBackups(supabaseAdmin: any, tenantId: string): Promise<{ snapshots: number; files: number }> {
+  const { data: backups } = await supabaseAdmin.from('tenant_backups').select('id, data_path').eq('tenant_id', tenantId);
+  const snapshotPaths = ((backups as { data_path: string | null }[]) || []).map(b => b.data_path).filter((p): p is string => !!p);
+  for (const paths of chunk(snapshotPaths, DB_CHUNK)) await supabaseAdmin.storage.from(BACKUP_BUCKET).remove(paths);
+  await supabaseAdmin.from('tenant_backups').delete().eq('tenant_id', tenantId);
+
+  const { data: pooled } = await supabaseAdmin.from('tenant_backup_files').select('bucket, path').eq('tenant_id', tenantId);
+  const filePaths = ((pooled as { bucket: string; path: string }[]) || []).map(f => filePoolPath(tenantId, f.bucket, f.path));
+  for (const paths of chunk(filePaths, DB_CHUNK)) await supabaseAdmin.storage.from(BACKUP_BUCKET).remove(paths);
+  await supabaseAdmin.from('tenant_backup_files').delete().eq('tenant_id', tenantId);
+
+  return { snapshots: snapshotPaths.length, files: filePaths.length };
+}
+
 // ---------------------------------------------------------------------------
 // Rétention et déclenchement nocturne
 // ---------------------------------------------------------------------------

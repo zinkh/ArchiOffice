@@ -12,6 +12,7 @@ import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
 import { sendPlatformMail } from '../mailer';
 import { invalidateSuspensionCache } from '../tenantSuspension';
+import { accountingRetentionEnd, eraseTenant } from '../tenantPurge';
 import {
   createTenantBackup,
   createTenantBackupInBackground,
@@ -19,7 +20,7 @@ import {
   listTenantBackups,
   restoreTenantBackup,
 } from '../tenantBackup';
-import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn, updateMembership } from '../tenantMemberships';
+import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, updateMembership } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -456,23 +457,57 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       console.error("[POST /api/admin/tenants]", e); res.status(500).json({ error: e.message }); }
   });
 
+  // EFFACEMENT DÉFINITIF d'un cabinet. Aucune suppression automatique n'existe
+  // (voir la politique en tête de server/tenantPurge.ts) : celle-ci n'a lieu que
+  // sur demande écrite du cabinet par courrier recommandé avec accusé de
+  // réception, et seulement si :
+  //   - le cabinet est déjà suspendu (donc sauvegardé et gelé) ;
+  //   - le superadmin a saisi la référence du courrier et sa date de réception ;
+  //   - il a retapé le nom exact du cabinet ;
+  //   - aucune pièce comptable de moins de 10 ans n'existe (Code de commerce).
+  const MIN_RAR_REFERENCE_LENGTH = 5;
+
   app.delete('/api/admin/tenants/:id', requireSuperAdmin, async (req: any, res: any) => {
     try {
       const { id } = req.params;
-      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, slug').eq('id', id).maybeSingle();
-      // Seuls les comptes dont c'est le SEUL cabinet : quelqu'un qui exerce
-      // aussi ailleurs garde le sien (server/tenantMemberships.ts).
-      const exclusiveUserIds = await listUsersOnlyIn(supabaseAdmin, id);
-      for (const userId of exclusiveUserIds) {
-        await supabaseAdmin.auth.admin.deleteUser(userId).catch(() => {});
+      const rarReference = typeof req.body?.rar_reference === 'string' ? req.body.rar_reference.trim() : '';
+      const rarReceivedOn = typeof req.body?.rar_received_on === 'string' ? req.body.rar_received_on.trim() : '';
+      const confirmName = typeof req.body?.confirm_name === 'string' ? req.body.confirm_name.trim() : '';
+
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('name, slug, suspended_at').eq('id', id).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
+
+      if (!confirmName || confirmName !== String((tenant as any).name ?? '').trim()) {
+        return res.status(400).json({ error: 'Saisissez le nom exact du cabinet pour confirmer' });
       }
-      const { error } = await supabaseAdmin.from('tenants').delete().eq('id', id);
-      if (error) throw error;
+      if (rarReference.length < MIN_RAR_REFERENCE_LENGTH) {
+        return res.status(400).json({ error: "La référence du courrier recommandé avec accusé de réception est obligatoire" });
+      }
+      const received = new Date(rarReceivedOn);
+      if (!rarReceivedOn || Number.isNaN(received.getTime()) || received.getTime() > Date.now()) {
+        return res.status(400).json({ error: "La date de réception du courrier recommandé est obligatoire et ne peut pas être dans le futur" });
+      }
+      if (!(tenant as any).suspended_at) {
+        return res.status(409).json({ error: "Suspendez d'abord le cabinet : l'effacement ne s'applique qu'à un cabinet gelé et sauvegardé" });
+      }
+      const retentionEnd = await accountingRetentionEnd(supabaseAdmin, id);
+      if (retentionEnd) {
+        return res.status(409).json({
+          code: 'ACCOUNTING_RETENTION',
+          error: `Des pièces comptables de moins de 10 ans existent : l'effacement complet n'est possible qu'à partir du ${retentionEnd.toLocaleDateString('fr-FR')}.`,
+          retention_ends_on: retentionEnd.toISOString().slice(0, 10),
+        });
+      }
+
+      await eraseTenant(supabaseAdmin, id);
       // Logged after the tenant row is gone — admin_audit_log.target_tenant_id
       // is ON DELETE SET NULL, so this row survives as an orphaned record of
       // the deletion itself (name/slug captured in details since the FK will
-      // no longer resolve).
-      await logAdminAction(supabaseAdmin, req.user, 'tenant.deleted', null, { tenant_id: id, name: (tenant as any)?.name, slug: (tenant as any)?.slug });
+      // no longer resolve). La référence du courrier prouve la demande.
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.deleted', null, {
+        tenant_id: id, name: (tenant as any).name, slug: (tenant as any).slug,
+        rar_reference: rarReference, rar_received_on: rarReceivedOn,
+      });
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[DELETE /api/admin/tenants/:id]", e); res.status(500).json({ error: e.message }); }

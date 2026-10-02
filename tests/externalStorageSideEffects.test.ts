@@ -82,12 +82,20 @@ describe('fermeture de cabinet', () => {
     expect(memoryDrive.livePaths()).toHaveLength(1);
 
     // On passe par le vrai point d'entrée du traitement de fond, en datant la
-    // demande de fermeture au-delà du délai de grâce de 30 jours.
+    // demande de fermeture au-delà du délai de grâce de 30 jours : le cabinet
+    // est gelé, pas effacé.
     const tenantRow = fakeSupabaseAdmin.getTable('tenants').find((t) => t.id === tenantId);
     tenantRow!.deletion_requested_at = new Date(Date.now() - 40 * 24 * 3600 * 1000).toISOString();
-    const { purgeExpiredTenants } = await import('../server/tenantPurge');
-    await purgeExpiredTenants(fakeSupabaseAdmin as any);
+    const { freezeExpiredTenants, eraseTenant } = await import('../server/tenantPurge');
+    await freezeExpiredTenants(fakeSupabaseAdmin as any);
 
+    expect(memoryDrive.deleteCalls).toBe(0);
+    expect(memoryDrive.livePaths()).toHaveLength(1);
+
+    // Même l'effacement définitif, demandé par courrier recommandé, ne touche
+    // jamais à l'espace de stockage du cabinet.
+    await eraseTenant(fakeSupabaseAdmin as any, tenantId);
+    expect(fakeSupabaseAdmin.getTable('tenants').some((t) => t.id === tenantId)).toBe(false);
     expect(memoryDrive.deleteCalls).toBe(0);
     expect(memoryDrive.livePaths()).toHaveLength(1);
   });

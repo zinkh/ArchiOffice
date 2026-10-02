@@ -1916,7 +1916,7 @@ export default {
       "projects_save_offline": "You are offline. Project saved locally and will sync when online.",
       "projects_confirm_delete_category": "Are you sure you want to delete this category?",
       "settings_tenant_export_failed": "Failed to export the firm's data.",
-      "settings_confirm_tenant_deletion_request": "Request closure of the firm? All of the firm's data (projects, invoices, documents, contacts...) will be permanently and automatically deleted in 30 days unless cancelled before then. Have you used the \"Export all firm data\" button above? French law requires accounting documents to be kept for 10 years, independently of this deletion.",
+      "settings_confirm_tenant_deletion_request": "Request closure of the firm? After a 30-day grace period (can be cancelled), access to the firm will be blocked for all its members. No data is deleted automatically: permanent erasure only happens on written request by registered letter with acknowledgement of receipt. Accounting documents are kept for 10 years, as French law requires. Have you used the \"Export all firm data\" button above?",
       "settings_tenant_deletion_request_failed": "Failed to request closure.",
       "settings_tenant_deletion_cancel_failed": "Failed to cancel.",
       "settings_confirm_storage_disable": "Disconnect this storage space?\n\nNew documents and plans will go back to being stored in ArchiOffice. Files already deposited on your storage will remain accessible.",

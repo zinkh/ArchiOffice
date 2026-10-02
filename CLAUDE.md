@@ -1918,6 +1918,62 @@ avec les mentions « pas de rate limiting » et « CORS reflète n'importe quell
 origine », toutes deux également obsolètes (`server/rateLimit.ts` et
 l'allow-list CORS de `server.ts` existent déjà).
 
+### Suspension, sauvegardes et effacement d'un cabinet
+
+Un associé qui nuit à l'autre, un compte administrateur piraté : seul le
+superadmin plateforme (`/admin`) peut intervenir, par quatre leviers.
+
+**Nommer un administrateur** (`POST /api/admin/tenants/:id/members/:userId/
+appoint-admin`) quand un cabinet n'a plus d'administrateur utilisable. Le
+dernier administrateur d'un cabinet ne peut pas être rétrogradé
+(`PUT /api/team/:id/role` renvoie 409 `LAST_ADMIN`), et l'écran Équipe demande
+confirmation avant toute rétrogradation d'un admin.
+
+**Suspension** (`server/tenantSuspension.ts`, `tenants.suspended_at`). Un
+cabinet suspendu est bloqué pour TOUS ses membres, administrateurs compris :
+toute requête `/api` qui le vise répond 403 `TENANT_SUSPENDED`. Le contrôle vit
+dans le middleware d'authentification de `server.ts` (`proceed()`), pour tous
+les modes d'authentification (session, jetons `mcp_at_`, `tg_at_`, `mail_at_`,
+`auto_at_`), jamais route par route. Exemptés : `/api/health`, `/api/admin/*`,
+`GET /api/me`, `GET /api/tenants`, `GET /api/tenants/active` et
+`POST /api/tenants/switch`, pour qu'un membre voie l'écran de blocage et
+bascule sur son autre cabinet. Le superadmin garde la main. La liste des cabinets
+suspendus est relue toutes les 10 s (`loadSuspendedTenants`), donc le coût d'une
+requête est nul tant qu'aucun cabinet n'est suspendu. Motif et justificatif
+obligatoires (`suspension_reason`, jamais montré aux membres), journal d'audit,
+levée par le superadmin seul. Les alertes métier et les e-mails de cycle de vie
+ignorent un cabinet suspendu ; trois tâches de fond restent à exclure (voir
+ROADMAP.md).
+
+**Sauvegardes** (`server/tenantBackup.ts`, tables `tenant_backups` et
+`tenant_backup_files`, bucket privé `tenant-backups`). Lignes de toutes les
+tables du cabinet en JSON compressé, triées par `id`, et fichiers des buckets
+Supabase copiés côté serveur (`storage.copy`, jamais téléchargés en mémoire),
+une seule fois par fichier. Secrets des intégrations masqués comme dans
+l'export RGPD : après une restauration, reconnecter boîtes mail et connecteurs.
+Pas de clé étrangère vers `tenants` : une sauvegarde survit à la suppression du
+cabinet. Déclencheurs : nocturne (cycle de 6 h, cabinet repris si sa dernière
+sauvegarde a plus de 20 h, cabinets suspendus exclus), à la suspension, à toute
+demande de fermeture, ou à la demande du superadmin. Conservation glissante de
+30 jours ; les sauvegardes de suspension et de fermeture n'ont pas d'échéance
+(`expires_at` NULL) et protègent tous les fichiers du cabinet. Les fichiers
+déposés sur l'espace de stockage du cabinet (Drive, Dropbox...) ne sont pas
+sauvegardés : ils lui appartiennent. **Restauration non destructive** : elle
+remet les lignes et fichiers manquants, en plusieurs passes pour les clés
+étrangères, sans jamais écraser ce qui existe ni réécrire une valeur masquée ;
+aperçu par défaut (`dry_run: false` pour appliquer). Superadmin uniquement.
+
+**Aucune suppression automatique.** `server/tenantPurge.ts` ne supprime plus
+rien : à l'issue du délai de grâce de 30 jours d'une demande de fermeture, le
+cabinet est GELÉ (`freezeExpiredTenants`). L'effacement définitif
+(`DELETE /api/admin/tenants/:id`, `eraseTenant`) n'a lieu que sur demande écrite
+du cabinet par courrier recommandé avec accusé de réception, et exige : cabinet
+déjà suspendu, référence et date de réception du courrier, nom exact du cabinet
+retapé, et aucune pièce comptable de moins de 10 ans (une facture émise, hors
+brouillon, plus récente que 10 ans : 409 `ACCOUNTING_RETENTION`). Il efface
+aussi les sauvegardes, sans quoi la demande ne serait pas honorée. L'effacement
+partiel (tout sauf les pièces comptables) n'est pas construit : voir ROADMAP.md.
+
 ### Plusieurs cabinets pour une même personne
 
 Un architecte exerce parfois dans deux structures (la sienne et une SCPA, un
