@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
@@ -32,7 +33,7 @@ export function useAgentChat() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function AgentAvatar({ agent, size = 32 }: { agent: Agent; size?: number }) {
+export function AgentAvatar({ agent, size = 32 }: { agent: Agent; size?: number }) {
   return (
     <div
       className="flex items-center justify-center rounded-full shrink-0 font-bold text-white"
@@ -43,58 +44,87 @@ function AgentAvatar({ agent, size = 32 }: { agent: Agent; size?: number }) {
   );
 }
 
-function ArtifactCard({ artifact }: { artifact: AgentArtifact }) {
-  const icons: Record<string, React.ReactNode> = {
-    excel: <IconFileSpreadsheet size={20} color="#217346" />,
-    csv: <IconFileTypeCsv size={20} color="#217346" />,
-    docx: <IconFileText size={20} color="#2b5797" />,
-    pdf: <IconFileTypePdf size={20} color="#b02a2a" />,
-  };
+const ARTIFACT_ICONS: Record<string, React.ReactNode> = {
+  excel: <IconFileSpreadsheet size={20} color="#217346" />,
+  csv: <IconFileTypeCsv size={20} color="#217346" />,
+  docx: <IconFileText size={20} color="#2b5797" />,
+  pdf: <IconFileTypePdf size={20} color="#b02a2a" />,
+};
 
-  const typeLabels: Record<string, string> = {
-    excel: 'Fichier Excel',
-    csv: 'Fichier CSV',
-    docx: 'Document Word',
-    pdf: 'Document PDF',
-  };
+export const ARTIFACT_TYPE_LABELS: Record<string, string> = {
+  excel: 'Fichier Excel',
+  csv: 'Fichier CSV',
+  docx: 'Document Word',
+  pdf: 'Document PDF',
+};
 
-  const download = () => {
-    const bytes = Uint8Array.from(atob(artifact.data), c => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type: artifact.mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = artifact.filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+export function downloadArtifact(artifact: AgentArtifact): void {
+  const bytes = Uint8Array.from(atob(artifact.data), c => c.charCodeAt(0));
+  const blob = new Blob([bytes], { type: artifact.mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = artifact.filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
+/**
+ * Un clic ouvre l'aperçu (onPreview) quand la page qui l'affiche en propose
+ * un — la page dédiée à deux volets, notamment — et télécharge directement
+ * sinon, comme dans le panneau flottant où il n'y a pas d'endroit où
+ * afficher un aperçu.
+ */
+export function ArtifactCard({ artifact, onPreview }: { artifact: AgentArtifact; onPreview?: (artifact: AgentArtifact) => void }) {
   return (
     <div
       className="flex items-center gap-3 px-3 py-2.5 rounded-xl mt-2 border cursor-pointer hover:opacity-80 transition-opacity"
       style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
-      onClick={download}
-      title={`Télécharger ${artifact.filename}`}
+      onClick={() => (onPreview ? onPreview(artifact) : downloadArtifact(artifact))}
+      title={onPreview ? `Aperçu de ${artifact.filename}` : `Télécharger ${artifact.filename}`}
     >
-      {icons[artifact.type] ?? <IconFileText size={20} />}
+      {ARTIFACT_ICONS[artifact.type] ?? <IconFileText size={20} />}
       <div className="flex-1 min-w-0">
         <div className="text-[12px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{artifact.filename}</div>
         <div className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
-          {typeLabels[artifact.type] ?? 'Document'}
+          {ARTIFACT_TYPE_LABELS[artifact.type] ?? 'Document'}
         </div>
       </div>
-      <IconDownload size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />
+      {onPreview
+        ? <IconArrowsMaximize size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />
+        : <IconDownload size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />}
     </div>
   );
 }
 
-function MessageBubble({ msg, agentColor, speech }: { msg: AgentMessage & { artifact?: AgentArtifact }; agentColor: string; speech: Speech }) {
+/** Arrivée d'un nouveau message : discrète, le chat servant plusieurs dizaines de fois par jour. */
+const NEW_MESSAGE_SPRING = { type: 'spring', bounce: 0, visualDuration: 0.2 } as const;
+const NEW_MESSAGE_WINDOW_MS = 4000;
+
+export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
+  msg: AgentMessage & { artifact?: AgentArtifact };
+  agentColor: string;
+  speech: Speech;
+  onPreviewArtifact?: (artifact: AgentArtifact) => void;
+}) {
   const isUser = msg.role === 'user';
   // La lecture à voix haute ne sert que les réponses de l'agent : ce que
   // l'utilisateur a écrit, il vient de le formuler lui-même.
   const isSpeaking = !isUser && speech.activeId === msg.id;
+  // Seul un message qui vient d'arriver glisse en place : l'historique
+  // rechargé à l'ouverture d'une conversation s'affiche tel quel. Décidé une
+  // fois, au montage, d'après l'âge du message.
+  const [isNew] = useState(() => {
+    const age = Date.now() - new Date(msg.created_at).getTime();
+    return age >= 0 && age < NEW_MESSAGE_WINDOW_MS;
+  });
   return (
-    <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <motion.div
+      className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}
+      initial={isNew ? { opacity: 0, y: 6 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={NEW_MESSAGE_SPRING}
+    >
       {!isUser && (
         <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5" style={{ background: agentColor }}>
           <IconRobot size={13} color="white" />
@@ -111,7 +141,7 @@ function MessageBubble({ msg, agentColor, speech }: { msg: AgentMessage & { arti
         >
           {msg.content}
         </div>
-        {msg.artifact && <ArtifactCard artifact={msg.artifact} />}
+        {msg.artifact && <ArtifactCard artifact={msg.artifact} onPreview={onPreviewArtifact} />}
         {!isUser && msg.content && (
           <button
             onClick={() => speech.toggle(msg.id, msg.content)}
@@ -130,25 +160,25 @@ function MessageBubble({ msg, agentColor, speech }: { msg: AgentMessage & { arti
           </button>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
 // ── Document picker ───────────────────────────────────────────────────────────
 
-interface DocMeta { id: string; name: string; phase?: string }
+export interface DocMeta { id: string; name: string; phase?: string }
 
 /** Raccorde une bribe dictée à ce qui est déjà dans la zone de saisie.
  *  La dictée complète le texte au lieu de le remplacer : on peut commencer au
  *  clavier, continuer à la voix, et reprendre au clavier. */
-function appendDictated(current: string, addition: string): string {
+export function appendDictated(current: string, addition: string): string {
   const clean = addition.trim();
   if (!clean) return current;
   if (!current) return clean;
   return /\s$/.test(current) ? current + clean : `${current} ${clean}`;
 }
 
-function DocumentPicker({ attached, onAttach, onDetach }: {
+export function DocumentPicker({ attached, onAttach, onDetach }: {
   attached: DocMeta[];
   onAttach: (doc: DocMeta) => void;
   onDetach: (id: string) => void;
@@ -246,7 +276,7 @@ function draftStorageKey(agentId: string): string {
   return `agent_chat_draft_${agentId}`;
 }
 
-function loadDraft(agentId: string): string {
+export function loadDraft(agentId: string): string {
   try {
     return localStorage.getItem(draftStorageKey(agentId)) ?? '';
   } catch {
@@ -254,7 +284,7 @@ function loadDraft(agentId: string): string {
   }
 }
 
-function saveDraft(agentId: string, value: string): void {
+export function saveDraft(agentId: string, value: string): void {
   try {
     if (value) localStorage.setItem(draftStorageKey(agentId), value);
     else localStorage.removeItem(draftStorageKey(agentId));
@@ -265,6 +295,7 @@ function saveDraft(agentId: string, value: string): void {
 
 export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -595,10 +626,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     <AgentChatContext.Provider value={{ openChat, closeChat, refreshCopilotSuggestions: loadCopilotSuggestions }}>
       {children}
 
-      {/* Floating trigger */}
+      {/* Floating trigger — desktop only : sur mobile, l'icône Agents de la
+          pastille de raccourcis (MobileShortcutBar, src/App.tsx) rouvre ce
+          même panneau via useAgentChat() plutôt que de dupliquer ce bouton. */}
       <button
         onClick={() => setIsOpen(o => !o)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
+        className="hidden md:flex fixed bottom-6 right-6 z-40 items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
         style={{ background: 'var(--tblr-primary)', color: 'white' }}
         title={copilotSuggestions.length > 0 ? t('agent_chat_suggestions_badge', { count: copilotSuggestions.length }) : t('agents')}
       >
@@ -618,17 +651,23 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 40 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed bottom-20 right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden transition-[width,height] duration-200"
+            initial={{ opacity: 0, transform: 'translateX(40px)' }}
+            animate={{ opacity: 1, transform: 'translateX(0px)' }}
+            exit={{ opacity: 0, transform: 'translateX(40px)' }}
+            transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+            className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden"
             style={expanded ? {
+              bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(900px, calc(100vw - 24px))',
               height: 'min(88vh, calc(100vh - 40px))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             } : {
+              // Sur mobile, ce panneau s'ouvre depuis la pastille de
+              // raccourcis flottante en bas d'écran (MobileShortcutBar) et
+              // non plus depuis un bouton juste en dessous : il lui faut
+              // une marge basse plus généreuse pour ne pas la recouvrir.
+              bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(420px, calc(100vw - 24px))',
               height: 'min(640px, calc(100vh - 100px))',
               background: 'var(--tblr-surface)',
@@ -682,6 +721,15 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   {activeAgent ? activeAgent.role_title : ''}
                 </div>
               </div>
+              {activeAgent && (
+                <button
+                  onClick={() => { closeChat(); navigate(`/agents/${activeAgent.id}/chat`); }}
+                  className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors"
+                  title={t('agent_chat_open_page') as string}
+                >
+                  <IconExternalLink size={16} style={{ color: 'var(--tblr-muted)' }} />
+                </button>
+              )}
               <button
                 onClick={() => setExpanded(e => !e)}
                 className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors"

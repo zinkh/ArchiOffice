@@ -57,6 +57,40 @@ export function zohoDate(value: unknown): string | undefined {
 }
 
 /**
+ * Repère d'affaire d'une facture, transmis jusqu'à la construction de
+ * l'article Zoho de chaque ligne (server/routes/{zohoInvoice,zohoBooks}.ts) —
+ * numéro et nom d'affaire dans le NOM de l'article (directement visibles
+ * dans la liste des articles de Zoho), adresse dans sa description. Une
+ * facture sans projet (facture générale, ou antérieure à `client_id`) n'a
+ * pas de numéro d'affaire à indiquer : `zohoItemIdentity()` retombe alors sur
+ * le seul intitulé de la ligne, comme avant l'introduction des articles.
+ */
+export interface ZohoAffaireInfo {
+  projectCode?: string | null;
+  projectName?: string | null;
+  projectAddress?: string | null;
+}
+
+/**
+ * Nom et description de l'article Zoho pour une ligne de facture donnée.
+ * Le numéro/nom d'affaire vit dans le NOM plutôt que dans la seule
+ * description : Zoho exige un nom d'article unique par organisation, et
+ * l'utilisateur veut ce repère visible d'un coup d'œil dans la liste des
+ * articles — pas seulement en ouvrant la fiche. Une même ligne (même
+ * intitulé) réutilisée sur une même affaire (un second acompte, par exemple)
+ * retrouve donc le même article plutôt que d'en créer un nouveau à chaque
+ * facture (voir getOrCreateZohoItem/getOrCreateZohoBooksItem).
+ */
+export function zohoItemIdentity(lineDescription: string | undefined, affaire: ZohoAffaireInfo | undefined): { name: string; description?: string } {
+  const base = lineDescription || 'Honoraires';
+  const affaireLabel = [affaire?.projectCode, affaire?.projectName].filter(Boolean).join(' ');
+  return {
+    name: affaireLabel ? `${base} — ${affaireLabel}` : base,
+    description: affaire?.projectAddress || undefined,
+  };
+}
+
+/**
  * Line items for a Zoho invoice payload, from our own invoice row. Falls back
  * to a single line carrying the invoice total when the row has no itemised
  * breakdown.
@@ -118,6 +152,49 @@ export async function localInvoicesByZohoId(
 }
 
 /**
+ * Signale les factures locales dont le pendant Zoho a disparu (supprimé côté
+ * Zoho) — voir supabase/migrate_invoice_zoho_deleted.sql. Ne supprime jamais
+ * rien localement : une facture déjà numérotée doit rester dans la séquence
+ * légale, seul un humain doit décider quoi en faire.
+ *
+ * `seenZohoIds` doit couvrir la liste ENTIÈRE renvoyée par Zoho pour cet
+ * appel — un appelant qui n'a récupéré qu'une partie des pages (plafond
+ * ZOHO_MAX_PULL_PAGES atteint) doit s'abstenir d'appeler cette fonction :
+ * un id absent de la page fournie n'est pas forcément supprimé, seulement
+ * pas encore lu.
+ */
+export async function flagInvoicesDeletedUpstream(
+  supabaseAdmin: any,
+  tenantId: string,
+  seenZohoIds: string[],
+): Promise<number> {
+  const seen = new Set(seenZohoIds.filter(Boolean));
+  const { data: linked, error } = await supabaseAdmin
+    .from('invoices')
+    .select('id, zoho_invoice_id')
+    .eq('tenant_id', tenantId)
+    .not('zoho_invoice_id', 'is', null)
+    .is('accounting_deleted_at', null);
+  if (error) throw new Error(`Lecture des factures liées à Zoho échouée: ${error.message}`);
+
+  const missingIds = (linked || [])
+    .filter((row: any) => row.zoho_invoice_id && !seen.has(row.zoho_invoice_id))
+    .map((row: any) => row.id);
+  if (!missingIds.length) return 0;
+
+  const now = new Date().toISOString();
+  for (let i = 0; i < missingIds.length; i += ZOHO_PAGE_SIZE) {
+    const { error: updErr } = await supabaseAdmin
+      .from('invoices')
+      .update({ accounting_deleted_at: now })
+      .eq('tenant_id', tenantId)
+      .in('id', missingIds.slice(i, i + ZOHO_PAGE_SIZE));
+    if (updErr) throw new Error(`Marquage des factures supprimées côté Zoho échoué: ${updErr.message}`);
+  }
+  return missingIds.length;
+}
+
+/**
  * A local `invoices` row built from a Zoho invoice that ArchiOffice has never
  * seen. Zoho's list payload is the only source here — fetching each invoice's
  * detail would cost one API call per invoice — so the untaxed/tax split falls
@@ -128,8 +205,13 @@ export async function localInvoicesByZohoId(
  * reference that already exists and break the sequential numbering the local
  * series guarantees. project_id stays null — Zoho has a customer, not one of
  * our projects, and guessing the link would be worse than leaving it unset.
+ * client_id, unlike project_id, IS resolved (see the `clientId` param):
+ * unlike a project, a Zoho customer maps onto exactly the same kind of
+ * entity as a `contacts` row, so there's a real match/create to attempt
+ * rather than a guess to avoid — see resolveOrCreateContactFromExternal in
+ * server/invoiceClientContact.ts.
  */
-export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string): Record<string, unknown> {
+export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string, clientId: string | null = null): Record<string, unknown> {
   const total = Number(zohoInv?.total ?? 0);
   const untaxed = zohoInv?.sub_total != null ? Number(zohoInv.sub_total) : null;
   const tax = zohoInv?.tax_total != null
@@ -142,6 +224,13 @@ export function zohoInvoiceToLocalRow(zohoInv: any, tenantId: string): Record<st
     zoho_invoice_id: zohoInv.invoice_id,
     invoice_number: zohoInv.invoice_number || null,
     project_id: null,
+    // The Maître d'Ouvrage this invoice is billed to — resolved by the
+    // caller (server/routes/zohoInvoice.ts, zohoBooks.ts) via
+    // resolveOrCreateContactFromExternal before this row is built, since
+    // that resolution needs DB round trips this pure mapping function
+    // shouldn't make. Still null when the caller couldn't identify a
+    // customer at all (no name and no email on the Zoho side).
+    client_id: clientId,
     amount: untaxed ?? total,
     tax_amount: tax,
     total_amount: total,

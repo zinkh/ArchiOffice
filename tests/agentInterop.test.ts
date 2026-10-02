@@ -53,7 +53,7 @@ describe('executeAgentAction — consulter_agent', () => {
   it("refuse l'appel quand la capacité n'est pas activée, sans toucher le réseau", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', capabilitiesFromAgent(NO_CAPS), {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, capabilitiesFromAgent(NO_CAPS), {
       name: 'consulter_agent', args: { agent_id: 'agent-marc', message: 'Question' },
     });
     expect(result.response.error).toMatch(/pas activée/);
@@ -71,7 +71,7 @@ describe('executeAgentAction — consulter_agent', () => {
       return { ok: true, json: async () => ({ reply: '42 € HT le m².' }) } as any;
     }));
 
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'consulter_agent', args: { agent_id: 'agent-marc', message: 'Quel est le prix du m² de chape fluide ?' },
     });
 
@@ -83,7 +83,7 @@ describe('executeAgentAction — consulter_agent', () => {
   it('refuse un collègue inexistant sans jamais appeler sa conversation', async () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [] } as any));
     vi.stubGlobal('fetch', fetchMock);
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'consulter_agent', args: { agent_id: 'agent-inconnu', message: 'Question' },
     });
     expect(result.response.error).toMatch(/Aucun collègue actif/);
@@ -93,7 +93,7 @@ describe('executeAgentAction — consulter_agent', () => {
 
   it('refuse un collègue désactivé', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => [{ id: 'agent-marc', name: 'Marc', is_active: false }] } as any)));
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'consulter_agent', args: { agent_id: 'agent-marc', message: 'Question' },
     });
     expect(result.response.error).toMatch(/Aucun collègue actif/);
@@ -104,7 +104,7 @@ describe('executeAgentAction — consulter_agent', () => {
       if (String(url).endsWith('/api/agents')) return { ok: true, json: async () => [{ id: 'agent-marc', name: 'Marc', is_active: true }] } as any;
       return { ok: false, status: 402, json: async () => ({ error: 'Crédit IA épuisé.' }) } as any;
     }));
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'consulter_agent', args: { agent_id: 'agent-marc', message: 'Question' },
     });
     expect(result.response.error).toContain('Marc');
@@ -119,7 +119,7 @@ describe('executeAgentAction — consulter_agent', () => {
       err.name = 'AbortError';
       throw err;
     }));
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'consulter_agent', args: { agent_id: 'agent-marc', message: 'Question' },
     });
     expect(result.response.error).toMatch(/Marc n'a pas répondu à temps/);
@@ -128,8 +128,8 @@ describe('executeAgentAction — consulter_agent', () => {
 
   it('exige agent_id et message', async () => {
     vi.stubGlobal('fetch', vi.fn());
-    expect((await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'consulter_agent', args: { message: 'Question' } })).response.error).toMatch(/agent_id/);
-    expect((await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'consulter_agent', args: { agent_id: 'agent-marc' } })).response.error).toMatch(/message/);
+    expect((await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'consulter_agent', args: { message: 'Question' } })).response.error).toMatch(/agent_id/);
+    expect((await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'consulter_agent', args: { agent_id: 'agent-marc' } })).response.error).toMatch(/message/);
   });
 });
 
@@ -140,7 +140,7 @@ describe('executeAgentAction — publier_flux_activite', () => {
   it("refuse l'appel quand la capacité n'est pas activée, sans toucher le réseau", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', capabilitiesFromAgent(NO_CAPS), {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, capabilitiesFromAgent(NO_CAPS), {
       name: 'publier_flux_activite', args: { message: 'Bonjour' },
     }, self);
     expect(result.response.error).toMatch(/pas activée/);
@@ -154,7 +154,7 @@ describe('executeAgentAction — publier_flux_activite', () => {
       return { ok: true, json: async () => ({ id: 'post-1' }) } as any;
     }));
 
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'publier_flux_activite', args: { message: 'Le devis est prêt @Khaldoun Sektaoui' },
     }, self);
 
@@ -165,7 +165,7 @@ describe('executeAgentAction — publier_flux_activite', () => {
   it('exige un identifiant agent appelant, faute de quoi l\'attribution serait impossible', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'publier_flux_activite', args: { message: 'Bonjour' },
     } /* pas de selfAgent */);
     expect(result.response.error).toMatch(/Identité agent manquante/);
@@ -174,7 +174,7 @@ describe('executeAgentAction — publier_flux_activite', () => {
 
   it('exige un message', async () => {
     vi.stubGlobal('fetch', vi.fn());
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'publier_flux_activite', args: {},
     }, self);
     expect(result.response.error).toMatch(/message/);
@@ -183,7 +183,7 @@ describe('executeAgentAction — publier_flux_activite', () => {
   it('refuse un message trop long avant tout appel réseau', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'publier_flux_activite', args: { message: 'a'.repeat(3000) },
     }, self);
     expect(result.response.error).toMatch(/trop long/);
@@ -192,7 +192,7 @@ describe('executeAgentAction — publier_flux_activite', () => {
 
   it('remonte le refus du serveur (agent invalide, etc.) tel quel', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({ error: 'Agent introuvable ou inactif pour ce cabinet.' }) } as any)));
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'publier_flux_activite', args: { message: 'Bonjour' },
     }, self);
     expect(result.response.error).toBe('Agent introuvable ou inactif pour ce cabinet.');

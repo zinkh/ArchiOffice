@@ -27,11 +27,14 @@ const makeDpgf = (): DPGF => ({
 
 describe('dpgfToBpu', () => {
   it('reprend l’arbre en conservant les identifiants', () => {
-    const bpu = dpgfToBpu(makeDpgf());
+    const dpgf = makeDpgf();
+    dpgf.lots[0].chapitres[0].lignes[0].articleTypeId = 'bibliotheque-1';
+    const bpu = dpgfToBpu(dpgf);
     expect(bpu.lots[0].chapitres[0].lignes.map(l => l.id)).toEqual(['a1', 'a2']);
     expect(bpu.lots[0].chapitres[0].lignes[1].children![0].id).toBe('a2a');
     expect(bpu.dpgfId).toBe('d1');
     expect(bpu.lots[0].chapitres[0].lignes[0].nature).toBe('base');
+    expect(bpu.lots[0].chapitres[0].lignes[0].articleTypeId).toBe('bibliotheque-1');
   });
 
   it('calcule les sous-totaux en descendant dans les sous-articles', () => {

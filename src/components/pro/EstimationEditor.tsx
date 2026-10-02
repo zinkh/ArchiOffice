@@ -3,12 +3,14 @@ import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconLayoutColumns, IconRefresh, IconX, IconDeviceFloppy,
+  IconMapPin,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot } from '../../types/dpgf';
 import { evalFormula } from './treeOps';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
 import { formatCurrency } from '../../lib/utils';
+import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const [editCell, setEditCell] = useState<{ rowId: string; field: string; value: string } | null>(null);
   const [tvaDraft, setTvaDraft] = useState(String(dpgf.TVA));
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [breakdown, setBreakdown] = useState<{ lotIdx: number; chapIdx: number; ligneIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   const fmt2 = (n: number) =>
@@ -235,7 +238,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         {/* ── Left tree ──────────────────────────────────────────────────── */}
         {showTree && (
           <div className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm">
-            <div className="px-3 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
+            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
               Lots / Chapitres
             </div>
             {dpgf.lots.map(lot => (
@@ -255,7 +258,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                   <span className="text-[#1e5090] font-mono shrink-0 ml-1">{formatCurrency(lot.sousTotal)}</span>
                 </button>
                 {expandedLots.has(lot.id) && lot.chapitres.filter(chap => !chap.cctpOnly).map(chap => (
-                  <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
+                  <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[0.6875rem] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
                     <span className="truncate">{chap.numero} {chap.titre}</span>
                   </div>
                 ))}
@@ -263,7 +266,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
             ))}
             {/* TVA control */}
             <div className="border-t border-zinc-200 dark:border-zinc-700 mt-2 p-2">
-              <div className="text-[11px] text-zinc-500 mb-1">TVA (%)</div>
+              <div className="text-[0.6875rem] text-zinc-500 mb-1">TVA (%)</div>
               <div className="flex gap-1">
                 <input
                   type="number"
@@ -364,7 +367,10 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             <td className="px-2 py-0.5 text-center text-xs text-zinc-500">{ligne.unite}</td>
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
-                                <EditNum rowId={rowId} field="quantite" value={ligne.quantite} />
+                                <div className="flex items-center gap-1">
+                                  <div className="flex-1"><EditNum rowId={rowId} field="quantite" value={ligne.quantite} /></div>
+                                  <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: lgi })}><IconMapPin size={13} /></button>
+                                </div>
                               </td>
                             )}
                             {showQtyPU && (
@@ -431,6 +437,14 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
           </table>
         </div>
       </div>
+      {breakdown && (() => {
+        const ligne = dpgf.lots[breakdown.lotIdx].chapitres[breakdown.chapIdx].lignes[breakdown.ligneIdx];
+        return <QuantityBreakdownDialog document={dpgf} ligne={ligne} onClose={() => setBreakdown(null)} onSave={details => {
+          const quantite = details.reduce((s, d) => s + Number(d.quantite || 0), 0);
+          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, breakdown.ligneIdx, { quantiteDetails: details, quantite });
+          setBreakdown(null);
+        }} />;
+      })()}
     </div>
   );
 };

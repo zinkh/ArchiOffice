@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconRobot, IconChevronDown, IconAlertTriangle } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
+import { ResourceAttachments } from '@/src/components/ResourceAttachments';
 import type { Agent, AgentContextScope, AgentActionScope } from '../types.js';
 import { AGENT_RESOURCES } from '../types.js';
 
@@ -43,10 +44,15 @@ export default function AgentConfig() {
   const [webFetchEnabled, setWebFetchEnabled] = useState(false);
   const [mailEnabled, setMailEnabled] = useState(false);
   const [mailSendEnabled, setMailSendEnabled] = useState(false);
+  const [mailAttachmentsEnabled, setMailAttachmentsEnabled] = useState(false);
   const [geoEnabled, setGeoEnabled] = useState(false);
   const [docsReadEnabled, setDocsReadEnabled] = useState(false);
+  const [docsWriteEnabled, setDocsWriteEnabled] = useState(false);
   const [delegateEnabled, setDelegateEnabled] = useState(false);
   const [notifyUsersEnabled, setNotifyUsersEnabled] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  const [knowledgeEnabled, setKnowledgeEnabled] = useState(false);
+  const [learningEnabled, setLearningEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -66,10 +72,15 @@ export default function AgentConfig() {
         setWebFetchEnabled(!!found.web_fetch_enabled);
         setMailEnabled(!!found.mail_enabled);
         setMailSendEnabled(!!found.mail_send_enabled);
+        setMailAttachmentsEnabled(!!found.mail_attachments_enabled);
         setGeoEnabled(!!found.geo_enabled);
         setDocsReadEnabled(!!found.docs_read_enabled);
+        setDocsWriteEnabled(!!found.docs_write_enabled);
         setDelegateEnabled(!!found.delegate_enabled);
         setNotifyUsersEnabled(!!found.notify_users_enabled);
+        setWebSearchEnabled(!!found.web_search_enabled);
+        setKnowledgeEnabled(!!found.knowledge_enabled);
+        setLearningEnabled(!!found.learning_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -106,10 +117,15 @@ export default function AgentConfig() {
           web_fetch_enabled: webFetchEnabled,
           mail_enabled: mailEnabled,
           mail_send_enabled: mailEnabled && mailSendEnabled,
+          mail_attachments_enabled: mailEnabled && mailAttachmentsEnabled,
           geo_enabled: geoEnabled,
           docs_read_enabled: docsReadEnabled,
+          docs_write_enabled: docsReadEnabled && docsWriteEnabled,
           delegate_enabled: delegateEnabled,
           notify_users_enabled: notifyUsersEnabled,
+          web_search_enabled: webSearchEnabled,
+          knowledge_enabled: knowledgeEnabled,
+          learning_enabled: learningEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -171,7 +187,7 @@ export default function AgentConfig() {
               <button
                 key={c}
                 onClick={() => setAvatarColor(c)}
-                className="w-7 h-7 rounded-full border-2 transition-all"
+                className="w-7 h-7 rounded-full border-2 transition"
                 style={{ background: c, borderColor: avatarColor === c ? 'var(--tblr-text)' : 'transparent' }}
               />
             ))}
@@ -295,6 +311,21 @@ export default function AgentConfig() {
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_mail_send')}</span>
           </label>
 
+          {/* Autre second palier sous la lecture : ouvrir une pièce jointe
+              télécharge des octets externes et peut passer par l'OCR, plus
+              coûteux qu'une simple lecture de corps de message. */}
+          <label className={`flex items-center gap-3 pl-7 ${mailEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+            <input
+              type="checkbox"
+              disabled={!mailEnabled}
+              checked={mailEnabled && mailAttachmentsEnabled}
+              onChange={() => setMailAttachmentsEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_mail_attachments')}</span>
+          </label>
+
           <label className="flex items-center gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -315,6 +346,31 @@ export default function AgentConfig() {
               style={{ accentColor: 'var(--tblr-primary)' }}
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_read')}</span>
+          </label>
+
+          {/* L'écriture est un second palier, comme l'envoi de mail : sans
+              lecture, elle n'a pas de sens et le serveur la refuserait. */}
+          <label className={`flex items-center gap-3 pl-7 ${docsReadEnabled ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}>
+            <input
+              type="checkbox"
+              disabled={!docsReadEnabled}
+              checked={docsReadEnabled && docsWriteEnabled}
+              onChange={() => setDocsWriteEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: '#c92a2a' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_docs_write')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={webSearchEnabled}
+              onChange={() => setWebSearchEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_web_search')}</span>
           </label>
 
           <label className="flex items-center gap-3 cursor-pointer">
@@ -338,12 +394,56 @@ export default function AgentConfig() {
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_notify_users')}</span>
           </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={knowledgeEnabled}
+              onChange={() => setKnowledgeEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_knowledge')}</span>
+          </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={learningEnabled}
+              onChange={() => setLearningEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_learning')}</span>
+          </label>
         </div>
+
+        {learningEnabled && (
+          <p className="text-[11px] pt-1 border-t mt-3" style={{ color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}>
+            {t('agent_config_learning_hint')}
+          </p>
+        )}
+
+        {knowledgeEnabled && (
+          <div className="pt-1 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+            <p className="text-[11px] mb-2 mt-3" style={{ color: 'var(--tblr-muted)' }}>{t('agent_config_knowledge_hint')}</p>
+            {agent
+              ? <ResourceAttachments resourceType="agents" resourceId={agent.id} />
+              : <p className="text-[12px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('agent_config_knowledge_save_first')}</p>}
+          </div>
+        )}
 
         {mailEnabled && mailSendEnabled && (
           <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>
             <IconAlertTriangle size={18} style={{ color: '#c92a2a', flexShrink: 0, marginTop: 1 }} />
             <p className="text-[12px] leading-snug" style={{ color: '#c92a2a' }}>{t('agent_config_mail_send_warning')}</p>
+          </div>
+        )}
+
+        {docsReadEnabled && docsWriteEnabled && (
+          <div className="flex items-start gap-2.5 p-3 rounded-lg" style={{ background: 'rgba(201,42,42,0.06)', border: '1px solid #ffc9c9' }}>
+            <IconAlertTriangle size={18} style={{ color: '#c92a2a', flexShrink: 0, marginTop: 1 }} />
+            <p className="text-[12px] leading-snug" style={{ color: '#c92a2a' }}>{t('agent_config_docs_write_warning')}</p>
           </div>
         )}
       </section>

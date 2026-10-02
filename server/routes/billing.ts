@@ -11,10 +11,12 @@ import type { Express } from 'express';
 import express from 'express';
 import crypto from 'crypto';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { tenantSupabaseStorageBytes } from '../externalStorage/storageUsage';
 import { billingWebhookLimiter } from '../rateLimit';
 import type { PlanLimits } from '../../src/lib/billing';
 import { notifyTenantAdmins } from '../mailer';
 import { emailShell, ctaButton, appUrl } from '../lifecycleEmails';
+import { listTenantMemberIds } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -66,11 +68,18 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { data: tenant } = await supabaseAdmin.from('tenants')
         .select('name, plan, trial_ends_at, stancer_customer_id, ai_credit_balance_eur_cents, pending_plan, plan_change_requested_at').eq('id', tenantId).single();
-      const [projectsRes, usersRes, docsRes, versionsRes, lastCheckoutRes] = await Promise.all([
+      const [projectsRes, memberIds, docsRes, usedBytes, lastCheckoutRes] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('*', { count: 'exact', head: true }),
-        tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('*', { count: 'exact', head: true }),
+        // Les comptes du cabinet, adhésions comprises : une personne qui y
+        // exerce sans l'avoir en cabinet par défaut occupe bien un poste.
+        listTenantMemberIds(supabaseAdmin, tenantId),
         tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('*', { count: 'exact', head: true }),
-        tenantScopedFrom(supabaseAdmin, tenantId, 'document_versions').select('size_bytes'),
+        // Les octets réellement hébergés CHEZ NOUS : un cabinet qui a branché
+        // son propre espace de stockage ne doit pas voir sa jauge monter pour
+        // des fichiers qui ne nous coûtent rien, sans quoi il ne verrait jamais
+        // l'économie qu'il vient de faire. Même filtre que le plafond de
+        // server.ts::checkStorageQuota, et pour la même raison.
+        tenantSupabaseStorageBytes(supabaseAdmin, tenantId),
         // Dunning: a tenant is in an unresolved payment-failed state exactly
         // when their MOST RECENT subscription checkout attempt failed — a
         // successful retry (a newer row) or an in-flight one both self-
@@ -83,7 +92,6 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       const is_expired = isTrial && trial_ends_at && new Date(trial_ends_at) < new Date();
       const effectivePlan = is_expired ? 'expired' : plan;
       const limits = PLAN_LIMITS[effectivePlan] ?? PLAN_LIMITS.trial;
-      const usedBytes = ((versionsRes.data as any[]) || []).reduce((sum, r) => sum + (r.size_bytes || 0), 0);
       const lastCheckout = (lastCheckoutRes.data as any[])?.[0];
       const payment_failed = lastCheckout?.status === 'failed';
       res.json({
@@ -97,7 +105,7 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
         failed_plan_id: payment_failed ? lastCheckout.plan_id : null,
         usage: {
           projects:  { used: projectsRes.count ?? 0, limit: limits.projects },
-          users:     { used: usersRes.count ?? 0, limit: limits.users },
+          users:     { used: memberIds.length, limit: limits.users },
           documents: { used: docsRes.count ?? 0, limit: limits.documents },
           storage:   { used: Math.round(usedBytes / 1024 / 1024), limit: limits.storage_mb },
         },

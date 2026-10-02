@@ -34,17 +34,16 @@ export function ThemeProvider({
 
     root.classList.remove('light', 'dark');
 
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)')
-        .matches
-        ? 'dark'
-        : 'light';
+    const applied = theme === 'system'
+      ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      : theme;
+    root.classList.add(applied);
 
-      root.classList.add(systemTheme);
-      return;
-    }
-
-    root.classList.add(theme);
+    // La barre d'état du téléphone prend la couleur de l'en-tête. Le thème
+    // étant posé par classe et non par le réglage du système, les deux
+    // balises theme-color (une par media) suivent le thème réellement appliqué.
+    const headerColor = applied === 'dark' ? '#243044' : '#ffffff';
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute('content', headerColor));
   }, [theme]);
 
   const value = {

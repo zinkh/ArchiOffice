@@ -94,9 +94,31 @@ describe('Observations', () => {
 });
 
 describe('Meetings', () => {
+  it('classe les réunions selon le dossier parent, même si un ancien client envoie « projet »', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('proposals', [{ id: 'prop-meeting-type', tenant_id: tenantId }]);
+    fakeSupabaseAdmin.seed('tenders', [{ id: 'tender-meeting-type', tenant_id: tenantId }]);
+
+    const proposal = await request(app).post('/api/meetings').set(authHeader(token)).send({ proposal_id: 'prop-meeting-type', type: 'projet', title: 'Visite proposition', date: '2026-09-23' });
+    const tender = await request(app).post('/api/meetings').set(authHeader(token)).send({ tender_id: 'tender-meeting-type', title: 'Visite candidature', date: '2026-09-23' });
+
+    expect(proposal.status).toBe(201);
+    expect(tender.status).toBe(201);
+    expect(proposal.body.type).toBe('visite_proposition');
+    expect(tender.body.type).toBe('visite_candidature');
+    expect(fakeSupabaseAdmin.getTable('meetings').find((m: any) => m.id === proposal.body.id)?.type).toBe('visite_proposition');
+    expect(fakeSupabaseAdmin.getTable('meetings').find((m: any) => m.id === tender.body.id)?.type).toBe('visite_candidature');
+
+    fakeSupabaseAdmin.seed('meetings', [{ id: 'old-proposal-meeting', tenant_id: tenantId, proposal_id: 'prop-meeting-type', type: 'projet', title: 'Ancienne visite', date: '2026-01-01' }]);
+    const historical = await request(app).get('/api/meetings/old-proposal-meeting').set(authHeader(token));
+    expect(historical.body.type).toBe('visite_proposition');
+  });
+
   it('creates, reads, updates, and deletes a meeting within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p1', tenant_id: tenantId }]);
 
     const created = await request(app).post('/api/meetings').set(authHeader(token)).send({ project_id: 'p1', type: 'chantier', title: 'Réunion de chantier n°1', date: '2026-01-15' });
     expect(created.status).toBe(201);
@@ -211,6 +233,29 @@ describe('Meeting Attendees', () => {
     expect(res.body.contact.first_name).toBe('Marie');
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === res.body.contact_id)?.tenant_id).toBe(tenantId);
     expect(fakeSupabaseAdmin.getTable('meeting_attendees').find(a => a.id === res.body.id)?.tenant_id).toBe(tenantId);
+  });
+
+  it('attaches a contact created from a project meeting as a project stakeholder too', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('meetings', [{ id: 'meeting-proj', tenant_id: tenantId, project_id: 'project-1', type: 'projet', title: 'Réunion', date: '2026-01-01' }]);
+
+    const res = await request(app).post('/api/meetings/meeting-proj/attendees/new-contact').set(authHeader(token))
+      .send({ first_name: 'Yohan', last_name: 'Medina', company_name: 'XEO', role: 'BET sol' });
+    expect(res.status).toBe(201);
+
+    const stakeholder = fakeSupabaseAdmin.getTable('project_stakeholders').find(s => s.contact_id === res.body.contact_id);
+    expect(stakeholder).toBeDefined();
+    expect(stakeholder?.tenant_id).toBe(tenantId);
+    expect(stakeholder?.project_id).toBe('project-1');
+    expect(stakeholder?.name).toBe('Yohan Medina');
+    expect(stakeholder?.role).toBe('BET sol');
+
+    // Adding a second contact for the same project meeting must not duplicate the first stakeholder link
+    const dupContactAgain = await request(app).post('/api/meetings/meeting-proj/attendees/new-contact').set(authHeader(token))
+      .send({ first_name: 'Autre', last_name: 'Personne' });
+    expect(dupContactAgain.status).toBe(201);
+    expect(fakeSupabaseAdmin.getTable('project_stakeholders').filter(s => s.project_id === 'project-1').length).toBe(2);
   });
 
   it('never removes another tenant\'s meeting attendee', async () => {

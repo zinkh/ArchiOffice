@@ -3,26 +3,53 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
+import { supabase } from '../lib/supabase';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
   IconRefresh, IconSearch, IconTrash, IconTag, IconAlertTriangle, IconDownload,
-  IconArchive, IconCloud
+  IconArchive, IconCloud, IconFolder, IconFolderOpen, IconAddressBook,
+  IconBuilding, IconRobot, IconCalendarTime, IconMailbox, IconBell,
+  IconShieldLock, IconUserCircle
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
-import { checkCloudLinkStatus, upgradeToCloud } from '../lib/cloudSync';
+import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
+import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
+import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
+import { McpConnectionsCard } from '../components/McpConnectionsCard';
+import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
+import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
+import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
+import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
+import { SwapText } from '../components/ui/SwapText';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
 type PluginCategory = 'all' | 'accounting' | 'storage' | 'crm' | 'communication' | 'compliance' | 'veille';
 type PluginStatus = 'active' | 'coming_soon';
+
+/** Ce que GET /api/external-storage/status rend — jamais un secret, seulement
+ *  de quoi afficher l'état (voir publicView dans server/routes/externalStorage.ts). */
+interface ExternalStorageStatus {
+  connected: boolean;
+  id?: string;
+  provider?: 'google_drive' | 'dropbox' | 'webdav';
+  webdavFlavor?: 'nextcloud' | 'kdrive' | null;
+  displayName?: string | null;
+  account?: string | null;
+  baseUrl?: string | null;
+  rootFolderPath?: string;
+  status?: 'ok' | 'needs_reauth' | 'error';
+  lastError?: string | null;
+  credentialsPresent?: boolean;
+}
 
 interface PluginDef {
   id: string;
@@ -85,9 +112,9 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     id: 'google_drive',
     name: 'Google Drive',
     vendor: 'Google',
-    description: 'Sauvegardez et partagez vos plans et documents directement sur Google Drive.',
+    description: 'Enregistrez vos documents et vos plans sur le Google Drive du cabinet, classés par affaire et par phase.',
     category: 'storage',
-    status: 'coming_soon',
+    status: 'active',
     iconBg: 'bg-blue-50',
     iconColor: 'text-blue-600',
     iconLabel: 'GD',
@@ -96,12 +123,34 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     id: 'dropbox',
     name: 'Dropbox',
     vendor: 'Dropbox',
-    description: 'Stockez vos plans et documents ArchiOffice directement sur Dropbox.',
+    description: 'Enregistrez vos documents et vos plans sur le Dropbox du cabinet, classés par affaire et par phase.',
     category: 'storage',
-    status: 'coming_soon',
+    status: 'active',
     iconBg: 'bg-blue-50',
     iconColor: 'text-blue-600',
     iconLabel: 'Db',
+  },
+  {
+    id: 'nextcloud',
+    name: 'Nextcloud',
+    vendor: 'Nextcloud GmbH',
+    description: 'Enregistrez vos documents et vos plans sur votre propre serveur Nextcloud, classés par affaire et par phase.',
+    category: 'storage',
+    status: 'active',
+    iconBg: 'bg-sky-50',
+    iconColor: 'text-sky-600',
+    iconLabel: 'NC',
+  },
+  {
+    id: 'kdrive',
+    name: 'kDrive',
+    vendor: 'Infomaniak',
+    description: 'Enregistrez vos documents et vos plans sur votre kDrive Infomaniak, hébergé en Suisse, classés par affaire et par phase.',
+    category: 'storage',
+    status: 'active',
+    iconBg: 'bg-indigo-50',
+    iconColor: 'text-indigo-600',
+    iconLabel: 'kD',
   },
   {
     id: 'salesforce',
@@ -203,6 +252,17 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconLabel: 'BO',
   },
   {
+    id: 'google_contacts',
+    name: 'Google Contacts (bidirectionnel)',
+    vendor: 'Google',
+    description: "Choisissez quelles catégories de contacts du cabinet sont poussées vers Google Contacts lors d'une synchronisation (import Google → ArchiOffice déjà actif sans réglage). Le contact modifié le plus récemment l'emporte en cas de conflit.",
+    category: 'crm',
+    status: 'active',
+    iconBg: 'bg-yellow-50',
+    iconColor: 'text-yellow-700',
+    iconLabel: 'GC',
+  },
+  {
     id: 'ted',
     name: 'TED (API)',
     vendor: 'Office des publications de l\'Union européenne',
@@ -272,6 +332,7 @@ export default function Settings() {
     numAffaireSepPrefix: true,
     numAffaireSepSeq: true,
     numAffaireDigits: 3,
+    invoicePaymentTermsDays: 30,
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -299,7 +360,9 @@ export default function Settings() {
     notificationArchiveDays: {} as Record<string, number>,
     tender_boamp_enabled: false,
     tender_ted_enabled: false,
+    googleContactsSyncCategories: [] as string[],
   });
+  const [contactCategories, setContactCategories] = useState<{ id: string; name: string }[]>([]);
 
   const [isTestingSmtp, setIsTestingSmtp] = useState(false);
   const [smtpTestResult, setSmtpTestResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -340,14 +403,46 @@ export default function Settings() {
   const [isDisconnectingSuperpdp, setIsDisconnectingSuperpdp] = useState(false);
   const [superpdpNotice, setSuperpdpNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
+  // Stockage externe — l'espace de stockage du cabinet (Nextcloud, kDrive).
+  // Un seul espace actif à la fois, tous fournisseurs confondus : c'est un
+  // réglage du cabinet, pas un par personne.
+  const [externalStorage, setExternalStorage] = useState<ExternalStorageStatus | null>(null);
+  const [storageForm, setStorageForm] = useState({ baseUrl: '', username: '', password: '', rootFolderPath: 'ArchiOffice' });
+  const [isSavingStorage, setIsSavingStorage] = useState(false);
+  const [isTestingStorage, setIsTestingStorage] = useState(false);
+  const [storageNotice, setStorageNotice] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [storageCallbackUrl, setStorageCallbackUrl] = useState<string>('');
+
   // RGPD — fermeture de cabinet (Zone dangereuse)
   const [tenantDeletion, setTenantDeletion] = useState<{ deletion_requested_at: string | null; grace_period_days: number } | null>(null);
   const [isRequestingDeletion, setIsRequestingDeletion] = useState(false);
   const [isCancelingDeletion, setIsCancelingDeletion] = useState(false);
   const [isExportingTenant, setIsExportingTenant] = useState(false);
 
+  // Client Electron — emplacement local de la base et des documents, choisi
+  // au premier lancement (electron/dataLocation.cjs). Lu via le pont IPC,
+  // pas l'API HTTP : ce sont des chemins du poste, pas une donnée du cabinet.
+  const [dataLocation, setDataLocation] = useState<{ dbDataDir: string; storageDataDir: string } | null>(null);
+
   // Client Electron "compte local" — bascule vers un compte cloud existant
   const [cloudLinked, setCloudLinked] = useState<boolean | null>(null);
+  // Un import initial qui a échoué (voir server/initialImport.ts) laisse ce
+  // poste "lié" pour toujours sans jamais activer la synchro (server.ts ne
+  // la démarre que si importCompleted) — d'où ce champ distinct de
+  // cloudLinked, pour offrir une relance plutôt qu'un poste bloqué sans
+  // aucune donnée ni aucun moyen de le savoir depuis l'écran Projets.
+  const [cloudImportCompleted, setCloudImportCompleted] = useState<boolean | null>(null);
+  const [cloudLinkedEmail, setCloudLinkedEmail] = useState<string | null>(null);
+  const [isRetryingCloudImport, setIsRetryingCloudImport] = useState(false);
+  const [retryCloudImportError, setRetryCloudImportError] = useState<string | null>(null);
+  // Le message d'erreur de /cloud-link-retry-import invite déjà à se
+  // reconnecter quand le jeton stocké n'est plus valide — ce formulaire est
+  // le recours que ce message promettait sans qu'aucune route ne
+  // l'implémente jusqu'ici (voir server/cloudLinkRoutes.ts).
+  const [showCloudReconnectForm, setShowCloudReconnectForm] = useState(false);
+  const [cloudReconnectPassword, setCloudReconnectPassword] = useState('');
+  const [isReconnectingCloud, setIsReconnectingCloud] = useState(false);
+  const [cloudReconnectError, setCloudReconnectError] = useState<string | null>(null);
   const [showCloudUpgradeForm, setShowCloudUpgradeForm] = useState(false);
   const [cloudUpgradeEmail, setCloudUpgradeEmail] = useState('');
   const [cloudUpgradePassword, setCloudUpgradePassword] = useState('');
@@ -376,6 +471,8 @@ export default function Settings() {
   const [newProjectCategoryName, setNewProjectCategoryName] = useState('');
 
   const [userSettings, setUserSettings] = useState({
+    name: '',
+    email: '',
     senderOption: 'agency' as 'agency' | 'personal',
     defaultEmailTemplate: '',
     phone: '',
@@ -383,7 +480,10 @@ export default function Settings() {
     jobTitle: '',
     department: '',
     avatar: '',
+    showPersonalContacts: true,
+    mailSignature: '',
   });
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -417,6 +517,9 @@ export default function Settings() {
         }
       })
       .catch(() => {});
+    apiFetch('/api/contact-categories')
+      .then((c: any) => setContactCategories(Array.isArray(c) ? c : []))
+      .catch(() => {});
     if (currentUser?.system_role === 'admin') {
       apiFetch('/api/zoho/status')
         .then(s => setZohoStatus(s))
@@ -445,18 +548,32 @@ export default function Settings() {
       apiFetch('/api/chorus-pro/status')
         .then(s => setChorusProStatus(s))
         .catch(() => {});
+      apiFetch('/api/external-storage/status')
+        .then((s: any) => setExternalStorage(s))
+        .catch(() => {});
+      apiFetch('/api/external-storage/callback-url')
+        .then((d: any) => setStorageCallbackUrl(d.url))
+        .catch(() => {});
       apiFetch('/api/settings/tenant-deletion')
         .then((s: any) => setTenantDeletion(s))
         .catch(() => {});
       fetchProjectCategories();
       if (isOfflineBuild()) {
         checkCloudLinkStatus()
-          .then((s) => setCloudLinked(s.linked))
-          .catch(() => setCloudLinked(null));
+          .then((s) => { setCloudLinked(s.linked); setCloudImportCompleted(s.importCompleted); setCloudLinkedEmail(s.email); })
+          .catch(() => { setCloudLinked(null); setCloudImportCompleted(null); setCloudLinkedEmail(null); });
+      }
+      const bridge = desktopBridge();
+      if (bridge) {
+        bridge.getDataLocation()
+          .then((loc) => { if (loc.dbDataDir && loc.storageDataDir) setDataLocation(loc); })
+          .catch(() => {});
       }
     }
     if (currentUser) {
       setUserSettings({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
         senderOption: currentUser.senderOption || 'agency',
         defaultEmailTemplate: currentUser.defaultEmailTemplate || '',
         phone: currentUser.phone || '',
@@ -464,6 +581,8 @@ export default function Settings() {
         jobTitle: currentUser.jobTitle || '',
         department: currentUser.department || '',
         avatar: currentUser.avatar || '',
+        showPersonalContacts: currentUser.showPersonalContacts ?? true,
+        mailSignature: currentUser.mailSignature || '',
       });
     }
   }, [currentUser]);
@@ -474,10 +593,14 @@ export default function Settings() {
   // across — and report per-invoice failures instead of claiming success.
   const zohoSyncNotice = (
     prefix: string,
-    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[] },
+    data: { pushed?: number; pulled?: number; remaining?: number; errors?: string[]; deletedUpstream?: number },
   ): { type: 'success' | 'error'; message: string } => {
     const parts = [`${prefix} — ${data.pushed ?? 0} envoyées, ${data.pulled ?? 0} importées.`];
     if (data.remaining) parts.push(`${data.remaining} restante(s) : relancez la synchronisation.`);
+    // Jamais supprimées automatiquement ici (voir flagInvoicesDeletedUpstream,
+    // server/zohoSync.ts) — juste signalées, à traiter dans la liste des
+    // factures.
+    if (data.deletedUpstream) parts.push(`${data.deletedUpstream} facture(s) introuvable(s) côté Zoho, signalée(s) dans la liste des factures.`);
     const errors = data.errors ?? [];
     if (errors.length) parts.push(`Erreurs : ${errors.slice(0, 3).join(' | ')}`);
     return { type: errors.length ? 'error' : 'success', message: parts.join(' ') };
@@ -544,6 +667,18 @@ export default function Settings() {
     } else if (booksError) {
       setZohoBooksNotice({ type: 'error', message: zohoConnectErrorMessage(booksError) });
       setOpenPlugin('zoho_books');
+      window.history.replaceState({}, '', '/settings');
+    // Retour du consentement Google Drive. L'état est rechargé plutôt que
+    // deviné : le callback a pu remplacer un espace précédent, et seul le
+    // serveur sait lequel est désormais actif.
+    } else if (params.get('external_storage_connected') === '1') {
+      apiFetch('/api/external-storage/status')
+        .then((st: any) => setExternalStorage(st))
+        .catch(() => {});
+      setStorageNotice({ type: 'success', message: 'Espace de stockage connecté. Les nouveaux documents et plans y seront enregistrés.' });
+      window.history.replaceState({}, '', '/settings');
+    } else if (params.get('external_storage_error')) {
+      setStorageNotice({ type: 'error', message: "La connexion à l'espace de stockage a échoué. Réessayez, ou vérifiez que l'URL de redirection est bien déclarée chez le fournisseur." });
       window.history.replaceState({}, '', '/settings');
     }
   }, [location.search, t]);
@@ -811,25 +946,20 @@ export default function Settings() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err?.message || "Échec de l'export des données du cabinet.");
+      alert(err?.message || t('settings_tenant_export_failed'));
     } finally {
       setIsExportingTenant(false);
     }
   };
 
   const handleRequestTenantDeletion = async () => {
-    if (!window.confirm(
-      "Demander la fermeture du cabinet ? Toutes les données du cabinet (projets, factures, documents, contacts...) seront " +
-      "définitivement supprimées automatiquement dans 30 jours, sauf annulation d'ici là. " +
-      "Avez-vous utilisé le bouton « Exporter toutes les données du cabinet » ci-dessus ? La loi française impose la " +
-      "conservation des documents comptables pendant 10 ans, indépendamment de cette suppression."
-    )) return;
+    if (!window.confirm(t('settings_confirm_tenant_deletion_request'))) return;
     setIsRequestingDeletion(true);
     try {
       const res = await apiFetch<{ deletion_requested_at: string }>('/api/settings/tenant-deletion', { method: 'POST' });
       setTenantDeletion(prev => ({ deletion_requested_at: res.deletion_requested_at, grace_period_days: prev?.grace_period_days || 30 }));
     } catch (err: any) {
-      alert(err?.message || "Échec de la demande de fermeture.");
+      alert(err?.message || t('settings_tenant_deletion_request_failed'));
     } finally {
       setIsRequestingDeletion(false);
     }
@@ -841,9 +971,40 @@ export default function Settings() {
       await apiFetch('/api/settings/tenant-deletion', { method: 'DELETE' });
       setTenantDeletion(prev => ({ deletion_requested_at: null, grace_period_days: prev?.grace_period_days || 30 }));
     } catch (err: any) {
-      alert(err?.message || "Échec de l'annulation.");
+      alert(err?.message || t('settings_tenant_deletion_cancel_failed'));
     } finally {
       setIsCancelingDeletion(false);
+    }
+  };
+
+  const handleRetryCloudImport = async () => {
+    setRetryCloudImportError(null);
+    setIsRetryingCloudImport(true);
+    try {
+      const result = await retryImport();
+      navigate(`/cloud-import-progress?jobId=${result.importJobId}`);
+    } catch (err: any) {
+      setRetryCloudImportError(err?.message || "Échec de la relance de l'import.");
+      setIsRetryingCloudImport(false);
+    }
+  };
+
+  const handleReconnectCloud = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCloudReconnectError(null);
+    setIsReconnectingCloud(true);
+    try {
+      await reconnectCloud(cloudReconnectPassword);
+      setCloudReconnectPassword('');
+      setShowCloudReconnectForm(false);
+      // La session cloud est rétablie — enchaîner directement sur la relance
+      // de l'import plutôt que de laisser l'utilisateur recliquer un second
+      // bouton pour la même intention.
+      await handleRetryCloudImport();
+    } catch (err: any) {
+      setCloudReconnectError(err?.message || 'Échec de la reconnexion.');
+    } finally {
+      setIsReconnectingCloud(false);
     }
   };
 
@@ -1028,10 +1189,12 @@ export default function Settings() {
     return (
       <div className="flex items-center gap-2 flex-wrap">
         <button type="button" disabled={status.saving} onClick={onSave}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
+          className="relative overflow-hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
           style={status.success ? { background: 'var(--tblr-success)', color: '#fff' } : { background: 'var(--tblr-primary)', color: '#fff' }}>
-          {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
-          {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+          <SwapText swapKey={status.saving ? 'saving' : status.success ? 'success' : 'idle'}>
+            {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
+            {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+          </SwapText>
         </button>
         {status.error && <span className="text-xs font-medium" style={{ color: 'var(--tblr-danger)' }}>{status.error}</span>}
       </div>
@@ -1046,8 +1209,20 @@ export default function Settings() {
     if (!currentUser) return;
     setSectionStatus(prev => ({ ...prev, profile: { saving: true, error: null, success: false } }));
     try {
-      await apiPutWithDeadline(`/api/team/${currentUser.id}`, userSettings);
-      setCurrentUser({ ...currentUser, ...userSettings } as any);
+      const { email: requestedEmail, ...profileFields } = userSettings;
+      await apiPutWithDeadline(`/api/team/${currentUser.id}`, profileFields);
+      // L'adresse sert d'identifiant de connexion : Supabase envoie un lien de
+      // confirmation à la NOUVELLE adresse et ne la change qu'une fois ouvert.
+      const wantedEmail = requestedEmail.trim().toLowerCase();
+      if (wantedEmail && wantedEmail !== (currentUser.email || '').toLowerCase()) {
+        const { error: emailErr } = await supabase.auth.updateUser(
+          { email: wantedEmail },
+          { emailRedirectTo: `${window.location.origin}/settings` },
+        );
+        if (emailErr) throw new Error(emailErr.message);
+        setEmailNotice(`Un lien de confirmation a été envoyé à ${wantedEmail}. L'adresse actuelle reste valable jusqu'à sa validation.`);
+      }
+      setCurrentUser({ ...currentUser, ...profileFields } as any);
       setSectionStatus(prev => ({ ...prev, profile: { saving: false, error: null, success: true } }));
       setTimeout(() => setSectionStatus(prev => ({ ...prev, profile: { ...prev.profile, success: false } })), 3000);
     } catch (err: any) {
@@ -1057,6 +1232,28 @@ export default function Settings() {
   };
 
   const isAdmin = currentUser?.system_role === 'admin';
+
+  // ── Navigation par onglets verticaux ────────────────────────────────────────
+  // Découpe la page (auparavant un unique défilement de 16 sections) en
+  // catégories, sur le modèle d'un back-office de type Zoho : un menu vertical
+  // à gauche, une seule catégorie affichée à la fois à droite. Les onglets
+  // 1 à 7 sont réservés à l'administrateur du cabinet ; « Mon profil » reste
+  // visible de tous, comme l'était la section « Informations utilisateur ».
+  const SETTINGS_TABS = [
+    { key: 'cabinet', label: 'Cabinet', icon: IconBuilding, adminOnly: true },
+    { key: 'agents', label: 'Agents IA', icon: IconRobot, adminOnly: true },
+    { key: 'rh', label: 'RH', icon: IconCalendarTime, adminOnly: true },
+    { key: 'communication', label: 'Communication', icon: IconMailbox, adminOnly: true },
+    { key: 'notifications', label: 'Notifications', icon: IconBell, adminOnly: true },
+    { key: 'integrations', label: 'Intégrations', icon: IconPuzzle, adminOnly: true },
+    { key: 'donnees', label: 'Données et RGPD', icon: IconShieldLock, adminOnly: true },
+    { key: 'profil', label: 'Mon profil', icon: IconUserCircle, adminOnly: false },
+  ] as const;
+  const visibleTabs = SETTINGS_TABS.filter(tab => isAdmin || !tab.adminOnly);
+  const [activeTab, setActiveTab] = useState<string>('cabinet');
+  useEffect(() => {
+    if (!isAdmin && activeTab !== 'profil') setActiveTab('profil');
+  }, [isAdmin]);
 
   // ── Marketplace helpers ────────────────────────────────────────────────────
 
@@ -1070,6 +1267,12 @@ export default function Settings() {
     if (id === 'chorus_pro') return !!(chorusProStatus?.connected);
     if (id === 'boamp') return !!(settings as any).tender_boamp_enabled;
     if (id === 'ted') return !!(settings as any).tender_ted_enabled;
+    // Un seul espace de stockage est actif à la fois : seule la carte du
+    // fournisseur réellement branché s'affiche comme connectée.
+    if (id === 'nextcloud') return externalStorage?.connected === true && externalStorage.webdavFlavor === 'nextcloud';
+    if (id === 'kdrive') return externalStorage?.connected === true && externalStorage.webdavFlavor === 'kdrive';
+    if (id === 'google_drive') return externalStorage?.connected === true && externalStorage.provider === 'google_drive';
+    if (id === 'dropbox') return externalStorage?.connected === true && externalStorage.provider === 'dropbox';
     return false;
   };
 
@@ -1152,7 +1355,312 @@ export default function Settings() {
   // saved, permanently disabling "Connecter Zoho" until the user retypes it.
   const hasZohoSecret = !!settings.zoho_client_secret || !!(settings as any).zoho_client_secretSet;
 
+  // ── Stockage externe (Nextcloud, kDrive) ──────────────────────────────────
+  // Les deux offres parlent le même WebDAV et partagent donc un seul
+  // formulaire ; elles ne diffèrent que par le gabarit d'URL proposé.
+  // Google Drive se branche par consentement OAuth et non par formulaire : le
+  // cabinet ne saisit qu'un dossier racine, puis part chez Google.
+  const handleStorageOAuthConnect = async (provider: 'google_drive' | 'dropbox') => {
+    setIsSavingStorage(true);
+    setStorageNotice(null);
+    try {
+      const { url } = await apiFetch<{ url: string }>(
+        `/api/external-storage/${provider}/auth?rootFolderPath=${encodeURIComponent(storageForm.rootFolderPath)}`,
+      );
+      window.location.href = url;
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Connexion impossible.' });
+      setIsSavingStorage(false);
+    }
+  };
+
+  const refreshExternalStorage = async () => {
+    try {
+      setExternalStorage(await apiFetch('/api/external-storage/status'));
+    } catch { /* l'état précédent reste affiché */ }
+  };
+
+  const handleStorageConnect = async (flavor: 'nextcloud' | 'kdrive') => {
+    setIsSavingStorage(true);
+    setStorageNotice(null);
+    try {
+      await apiFetch('/api/external-storage/webdav', {
+        method: 'POST',
+        body: JSON.stringify({ flavor, ...storageForm }),
+      });
+      setStorageForm({ ...storageForm, password: '' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Espace de stockage connecté. Les nouveaux documents et plans y seront enregistrés.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Connexion impossible.' });
+    } finally {
+      setIsSavingStorage(false);
+    }
+  };
+
+  const handleStorageTest = async () => {
+    setIsTestingStorage(true);
+    setStorageNotice(null);
+    try {
+      await apiFetch('/api/external-storage/test', { method: 'POST' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Connexion vérifiée.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Test échoué.' });
+    } finally {
+      setIsTestingStorage(false);
+    }
+  };
+
+  // Deux gestes distincts, et c'est volontaire : déconnecter arrête les
+  // écritures, révoquer coupe aussi la lecture des fichiers déjà déposés.
+  const handleStorageDisable = async () => {
+    if (!externalStorage?.id) return;
+    if (!window.confirm(t('settings_confirm_storage_disable'))) return;
+    try {
+      await apiFetch(`/api/external-storage/${externalStorage.id}/disable`, { method: 'POST' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Espace déconnecté. Les nouveaux fichiers repartent dans ArchiOffice.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Déconnexion impossible.' });
+    }
+  };
+
+  const handleStorageRevoke = async () => {
+    if (!externalStorage?.id) return;
+    if (!window.confirm(t('settings_confirm_storage_revoke'))) return;
+    try {
+      await apiFetch(`/api/external-storage/${externalStorage.id}`, { method: 'DELETE' });
+      await refreshExternalStorage();
+      setStorageNotice({ type: 'success', message: 'Accès révoqués.' });
+    } catch (err: any) {
+      setStorageNotice({ type: 'error', message: err?.message || 'Révocation impossible.' });
+    }
+  };
+
+  const STORAGE_CARDS: Record<string, { label: string; flavor: 'nextcloud' | 'kdrive' | null }> = {
+    nextcloud: { label: 'Nextcloud', flavor: 'nextcloud' },
+    kdrive: { label: 'kDrive', flavor: 'kdrive' },
+    google_drive: { label: 'Google Drive', flavor: null },
+    dropbox: { label: 'Dropbox', flavor: null },
+  };
+
+  const renderStorageConfig = (pluginId: string) => {
+    const { label, flavor } = STORAGE_CARDS[pluginId];
+    const connectedHere = flavor
+      ? externalStorage?.connected && externalStorage.webdavFlavor === flavor
+      : externalStorage?.connected && externalStorage.provider === pluginId;
+    // Un seul espace actif à la fois, tous fournisseurs confondus.
+    const otherConnected = externalStorage?.connected && !connectedHere;
+    const otherName = externalStorage?.displayName || externalStorage?.provider || 'un autre espace';
+    const canSubmitWebdav = !!(storageForm.baseUrl && storageForm.username && storageForm.password);
+
+    /** Rappel commun aux quatre cartes : rien n'est déplacé rétroactivement. */
+    const migrationNotice = (
+      <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+        Seuls les <strong>nouveaux</strong> documents et plans partiront sur votre espace. Ceux déjà enregistrés
+        dans ArchiOffice y restent et continuent de s'ouvrir normalement.
+      </div>
+    );
+
+    const rootFolderField = (
+      <div>
+        <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Dossier racine</label>
+        <input
+          className="w-full p-2 rounded-lg text-sm font-mono"
+          style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+          value={storageForm.rootFolderPath}
+          onChange={e => setStorageForm({ ...storageForm, rootFolderPath: e.target.value })}
+        />
+        <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          ArchiOffice y créera un dossier par affaire, avec un sous-dossier par phase.
+        </p>
+      </div>
+    );
+
+    return (
+      <div className="space-y-4">
+        {storageNotice && (
+          <div className="text-sm p-3 rounded-lg border" style={storageNotice.type === 'success'
+            ? { background: '#d3f9d8', borderColor: '#a9e9b0', color: '#2f9e44' }
+            : { background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            {storageNotice.message}
+          </div>
+        )}
+
+        {connectedHere && externalStorage?.status !== 'ok' && (
+          <div className="text-sm p-3 rounded-lg border" style={{ background: '#ffe0e0', borderColor: '#fca5a5', color: '#c92a2a' }}>
+            <p className="font-bold">Cet espace ne répond plus.</p>
+            <p className="mt-1 opacity-90">
+              {externalStorage?.lastError || "L'accès a peut-être été révoqué."} Reconnectez-le pour reprendre les dépôts.
+            </p>
+          </div>
+        )}
+
+        {otherConnected ? (
+          <div className="text-sm p-3 rounded-lg border" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            Déconnectez d'abord <strong>{otherName}</strong> : un seul espace de stockage peut être actif à la fois.
+          </div>
+        ) : connectedHere ? (
+          <div className="space-y-3">
+            <div className="text-sm p-3 rounded-lg border" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+              <p>Connecté en tant que <strong>{externalStorage?.account || label}</strong></p>
+              <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Dossier racine : <code>{externalStorage?.rootFolderPath}</code> — vos documents et plans y sont classés par affaire puis par phase.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                disabled={isTestingStorage}
+                onClick={handleStorageTest}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                {isTestingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester la connexion
+              </button>
+              <button
+                type="button"
+                onClick={handleStorageDisable}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>
+                <IconPlugConnectedX size={13} /> Déconnecter
+              </button>
+              <button
+                type="button"
+                onClick={handleStorageRevoke}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>
+                <IconTrash size={13} /> Révoquer les accès
+              </button>
+            </div>
+            {/* Les deux gestes ne font pas la même chose, et la différence
+                compte : révoquer coupe aussi la LECTURE des fichiers déjà
+                déposés. Le dire ici évite de le découvrir après coup. */}
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Déconnecter renvoie les nouveaux fichiers dans ArchiOffice ; ceux déjà déposés chez vous restent consultables.
+              Révoquer efface en plus les accès enregistrés : les fichiers déjà déposés ne seront plus consultables
+              depuis ArchiOffice, mais ils restent dans votre espace.
+            </p>
+          </div>
+        ) : flavor ? (
+          <>
+            {flavor === 'nextcloud' ? (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>URL WebDAV</label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm font-mono"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  placeholder="https://cloud.moncabinet.fr/remote.php/dav/files/identifiant/"
+                  value={storageForm.baseUrl}
+                  onChange={e => setStorageForm({ ...storageForm, baseUrl: e.target.value })}
+                />
+                <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  Dans Nextcloud : Fichiers → Paramètres, en bas à gauche, « WebDAV ».
+                </p>
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Identifiant kDrive</label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm font-mono"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  placeholder="123456"
+                  value={storageForm.baseUrl.replace('https://connect.drive.infomaniak.com/', '').replace(/\/$/, '')}
+                  onChange={e => setStorageForm({ ...storageForm, baseUrl: `https://connect.drive.infomaniak.com/${e.target.value.trim()}/` })}
+                />
+                <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                  Le numéro de votre kDrive, visible dans l'adresse de kdrive.infomaniak.com. L'hôte, lui, est toujours le même.
+                </p>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+                  {flavor === 'kdrive' ? 'Adresse e-mail Infomaniak' : 'Identifiant'}
+                </label>
+                <input
+                  className="w-full p-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={storageForm.username}
+                  onChange={e => setStorageForm({ ...storageForm, username: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Mot de passe d'application</label>
+                <input
+                  type="password"
+                  className="w-full p-2 rounded-lg text-sm"
+                  style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  value={storageForm.password}
+                  onChange={e => setStorageForm({ ...storageForm, password: e.target.value })}
+                />
+              </div>
+            </div>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Utilisez un <strong>mot de passe d'application</strong>, jamais celui de votre compte : il se révoque
+              séparément et ne donne accès à rien d'autre.
+              {flavor === 'kdrive'
+                ? " Manager Infomaniak → Mon profil → Mot de passe d'application."
+                : " Nextcloud → Paramètres → Sécurité → Créer un mot de passe d’application."}
+            </p>
+
+            {rootFolderField}
+            {migrationNotice}
+
+            <button
+              type="button"
+              disabled={isSavingStorage || !canSubmitWebdav}
+              onClick={() => handleStorageConnect(flavor)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              {isSavingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Tester et connecter {label}
+            </button>
+          </>
+        ) : (
+          <>
+            {rootFolderField}
+            {/* Scope drive.file : ArchiOffice ne voit que ce qu'il a lui-même
+                créé, donc il crée ce dossier plutôt que d'en désigner un
+                existant. C'est aussi ce qui lui interdit de lire le reste du
+                Drive du cabinet — ça vaut d'être dit avant le consentement. */}
+            {pluginId === 'google_drive' && (
+              <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+                ArchiOffice crée ce dossier dans votre Drive et n'accède qu'aux fichiers qu'il y dépose lui-même.
+                Le reste de votre Drive lui reste invisible.
+              </div>
+            )}
+            {migrationNotice}
+            {storageCallbackUrl && (
+              <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-primary-lt)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-primary)' }}>
+                <p className="font-bold mb-1">URL de redirection OAuth</p>
+                <code className="block px-2 py-1.5 rounded border font-mono break-all select-all" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+                  {storageCallbackUrl}
+                </code>
+                <p className="mt-1 opacity-75">
+                  {pluginId === 'google_drive'
+                    ? 'À déclarer dans la console Google Cloud → Identifiants → URI de redirection autorisés.'
+                    : 'À déclarer dans la console Dropbox → App Console → OAuth 2 → Redirect URIs.'}
+                </p>
+              </div>
+            )}
+            <button
+              type="button"
+              disabled={isSavingStorage}
+              onClick={() => handleStorageOAuthConnect(pluginId as 'google_drive' | 'dropbox')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              {isSavingStorage ? <IconLoader2 size={13} className="animate-spin" /> : <IconPlugConnected size={13} />} Connecter {label}
+            </button>
+          </>
+        )}
+      </div>
+    );
+  };
+
   const renderPluginConfig = (pluginId: string) => {
+    if (STORAGE_CARDS[pluginId]) return renderStorageConfig(pluginId);
+
     if (pluginId === 'zoho_invoice') return (
       <div className="space-y-4">
         {zohoNotice && (
@@ -1315,7 +1823,7 @@ export default function Settings() {
               checked={!!(settings as any).maf_enabled}
               onChange={e => setSettings({ ...settings, maf_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1381,7 +1889,7 @@ export default function Settings() {
               checked={!!(settings as any).tender_boamp_enabled}
               onChange={e => setSettings({ ...settings, tender_boamp_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
@@ -1390,6 +1898,43 @@ export default function Settings() {
         </div>
         {renderSaveButton('boamp', () => saveSection('boamp', {
           tender_boamp_enabled: !!(settings as any).tender_boamp_enabled,
+        }))}
+      </div>
+    );
+
+    if (pluginId === 'google_contacts') return (
+      <div className="space-y-4">
+        <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+          <p className="font-bold mb-1" style={{ color: 'var(--tblr-text)' }}>Import et export</p>
+          <p>L'import (Google → ArchiOffice) reste actif sans réglage, comme aujourd'hui. Les catégories cochées ci-dessous sont en plus poussées vers Google Contacts à chaque synchronisation. Aucune catégorie cochée : rien n'est poussé.</p>
+        </div>
+        {contactCategories.length === 0 ? (
+          <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>
+            Aucune catégorie de contact définie pour l'instant — créez-en depuis Contacts › Catégories.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {contactCategories.map(cat => {
+              const selected = (settings as any).googleContactsSyncCategories.includes(cat.name);
+              return (
+                <label key={cat.id} className="flex items-center justify-between p-2.5 rounded-lg border cursor-pointer" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
+                  <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{cat.name}</span>
+                  <input
+                    type="checkbox"
+                    checked={selected}
+                    onChange={e => {
+                      const current: string[] = (settings as any).googleContactsSyncCategories;
+                      const next = e.target.checked ? [...current, cat.name] : current.filter(n => n !== cat.name);
+                      setSettings({ ...settings, googleContactsSyncCategories: next } as any);
+                    }}
+                  />
+                </label>
+              );
+            })}
+          </div>
+        )}
+        {renderSaveButton('google_contacts', () => saveSection('google_contacts', {
+          googleContactsSyncCategories: (settings as any).googleContactsSyncCategories,
         }))}
       </div>
     );
@@ -1408,7 +1953,7 @@ export default function Settings() {
               checked={!!(settings as any).tender_ted_enabled}
               onChange={e => setSettings({ ...settings, tender_ted_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
@@ -1795,11 +2340,37 @@ export default function Settings() {
   // ─── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6 max-w-4xl">
-      {isAdmin && (
-        <>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('general_settings')}</h1>
+    <div className="max-w-6xl">
+      <h1 className="text-2xl font-bold mb-6" style={{ color: 'var(--tblr-text)' }}>{t('general_settings')}</h1>
+      <div className="flex flex-col md:flex-row gap-6 items-start">
+        {/* ── Navigation verticale ── */}
+        <nav className="w-full md:w-56 shrink-0 space-y-1">
+          {visibleTabs.map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+                className={cn(
+                  'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-left transition-colors',
+                  isActive
+                    ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
+                    : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
+                )}
+              >
+                <Icon size={16} className={isActive ? 'text-[var(--tblr-primary)]' : ''} />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </nav>
 
+        {/* ── Contenu de l'onglet actif ── */}
+        <div className="flex-1 min-w-0 space-y-6">
+      {isAdmin && activeTab === 'cabinet' && (
+        <>
           {/* ── Agency info ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Informations du cabinet</h2>
@@ -1835,7 +2406,39 @@ export default function Settings() {
               logoUrl: settings.logoUrl,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'agents' && (
+        <>
+          {/* ── Agents IA ── */}
+          <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Agents IA</h2>
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+              Créez et configurez les agents du cabinet (métier, capacités, accès aux outils), et consultez leurs alertes.
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => navigate('/agents')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                <IconExternalLink size={13} /> Gérer les agents
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/agents/alertes')}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}>
+                <IconExternalLink size={13} /> Alertes des agents
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {isAdmin && activeTab === 'cabinet' && (
+        <>
           {/* ── Numérotation des documents ── */}
           <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -1977,6 +2580,44 @@ export default function Settings() {
             }))}
           </div>
 
+          {/* ── Facturation : délai de paiement par défaut ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Facturation — Délai de paiement</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                Nombre de jours ajoutés à la date d'émission pour calculer la date d'échéance d'une facture
+                quand elle n'est pas saisie à la main (facture créée depuis une note d'honoraires, par exemple).
+                Ce même délai part avec la facture vers Zoho Invoice, Zoho Books ou Odoo si un connecteur comptable
+                est actif.
+              </p>
+            </div>
+            <div className="max-w-xs">
+              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Délai de paiement (jours)</label>
+              <input
+                type="number"
+                min={0}
+                max={365}
+                className="w-full p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={settings.invoicePaymentTermsDays ?? 30}
+                onChange={e => setSettings({ ...settings, invoicePaymentTermsDays: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+              />
+            </div>
+            {renderSaveButton('invoicePaymentTerms', () => saveSection('invoicePaymentTerms', {
+              invoicePaymentTermsDays: settings.invoicePaymentTermsDays,
+            }))}
+          </div>
+
+          {/* Bibliothèque de notes méthodologiques — action immédiate
+              (dépôt/suppression de fichiers), pas de formulaire via
+              saveSection/renderSaveButton, même principe que les cartes de
+              connexion ci-dessous. */}
+          <AgencyMethodologyLibraryCard />
+        </>
+      )}
+
+      {isAdmin && activeTab === 'rh' && (
+        <>
           {/* ── RH : congés par défaut ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -2006,7 +2647,11 @@ export default function Settings() {
               defaultLeaveDaysRtt: settings.defaultLeaveDaysRtt,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'communication' && (
+        <>
           {/* ── SMTP ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -2063,6 +2708,13 @@ export default function Settings() {
             }))}
           </div>
 
+          {/* ── Modèles de mails ── */}
+          <EmailTemplatesSettings />
+        </>
+      )}
+
+      {isAdmin && activeTab === 'cabinet' && (
+        <>
           {/* ── Domaines et catégories ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div className="flex items-center gap-2">
@@ -2098,7 +2750,11 @@ export default function Settings() {
               ))}
             </div>
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'notifications' && (
+        <>
           {/* ── Notifications système (Web Push / client de bureau) ── */}
           <PushNotificationsCard />
 
@@ -2147,7 +2803,11 @@ export default function Settings() {
               notificationArchiveDays: settings.notificationArchiveDays,
             }))}
           </div>
+        </>
+      )}
 
+      {isAdmin && activeTab === 'integrations' && (
+        <>
           {/* ══════════════════ INTEGRATIONS MARKETPLACE ══════════════════ */}
           <div className="space-y-4">
             {/* Header */}
@@ -2219,22 +2879,22 @@ export default function Settings() {
                         </div>
                         {/* Status badge */}
                         {plugin.status === 'coming_soon' ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             Bientôt
                           </span>
                         ) : isConnected ? (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                          <span className="flex items-center gap-1 text-[0.6875rem] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
                             <IconPlugConnected size={10} /> Connecté
                           </span>
                         ) : (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          <span className="flex items-center gap-1 text-[0.6875rem] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             <IconPlugConnectedX size={10} /> Non connecté
                           </span>
                         )}
                       </div>
 
                       <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{plugin.name}</p>
-                      <p className="text-[11px] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
+                      <p className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
                       <p className="text-xs leading-relaxed" style={{ color: 'var(--tblr-muted)' }}>{plugin.description}</p>
                     </div>
 
@@ -2256,7 +2916,7 @@ export default function Settings() {
                         <span className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Disponible prochainement</span>
                       )}
                       <span className={cn(
-                        "text-[10px] font-medium px-2 py-0.5 rounded-full",
+                        "text-[0.6875rem] font-medium px-2 py-0.5 rounded-full",
                         plugin.category === 'accounting' ? "bg-blue-50 text-blue-600" :
                         plugin.category === 'storage' ? "bg-teal-50 text-teal-600" :
                         plugin.category === 'crm' ? "bg-purple-50 text-purple-600" :
@@ -2285,6 +2945,16 @@ export default function Settings() {
             )}
           </div>
 
+          {/* n8n / IFTTT / tout automate HTTP — clé d'API entrante + webhooks
+              sortants. Ni l'un ni l'autre n'est un plugin du catalogue
+              ci-dessus (pas de connecteur à choisir : n'importe quel service
+              HTTP externe peut s'en servir), d'où une carte à part. */}
+          <AutomationIntegrationsCard />
+        </>
+      )}
+
+      {isAdmin && activeTab === 'donnees' && (
+        <>
           {/* ── Archivage — RGPD : export complet de l'activité du cabinet ── */}
           <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Archivage</h2>
@@ -2305,6 +2975,168 @@ export default function Settings() {
               {isExportingTenant ? 'Génération de l\'archive...' : 'Exporter toutes les données du cabinet'}
             </button>
           </div>
+
+          {/* ── Client Electron — emplacement local des données ── */}
+          {dataLocation && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <IconFolder size={15} /> Emplacement des données locales
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Choisi lors de l'installation de ce poste, une fois pour toutes. Pour en changer, réinstallez
+                l'application sur un poste neuf : déplacer une base de données déjà en service comporte un risque
+                réel de perte de données que l'application ne peut pas prendre en charge automatiquement.
+              </p>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>Base de données</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }} title={dataLocation.dbDataDir}>{dataLocation.dbDataDir}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => desktopBridge()?.openDataFolder('db')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
+                    style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    <IconFolderOpen size={13} /> Ouvrir
+                  </button>
+                </div>
+                <div className="flex items-center justify-between gap-3 p-2.5 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
+                  <div className="min-w-0">
+                    <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>Documents (devis, plans, photos…)</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }} title={dataLocation.storageDataDir}>{dataLocation.storageDataDir}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => desktopBridge()?.openDataFolder('storage')}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors"
+                    style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    <IconFolderOpen size={13} /> Ouvrir
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Poste lié au cloud mais dont l'import initial n'a jamais abouti ──
+              server.ts ne démarre /api/sync que si importCompleted est vrai :
+              un échec au premier lien (server/initialImport.ts) laisse donc ce
+              poste "lié" mais silencieusement jamais synchronisé — projets,
+              factures, contacts... restés vides indéfiniment, sans aucun autre
+              écran pour le relancer une fois passé l'écran d'import initial. */}
+          {isOfflineBuild() && cloudLinked === true && cloudImportCompleted === false && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-warning, #f59f00)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-warning, #f59f00)' }}>
+                <IconCloud size={15} /> Import cloud incomplet
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste est relié à votre compte cloud, mais la récupération initiale de vos données (projets,
+                factures, contacts...) ne s'est jamais terminée avec succès — c'est pourquoi certains écrans peuvent
+                rester vides. Vous pouvez relancer cet import ; il reprend ce qui manque sans dupliquer ce qui a déjà
+                été récupéré.
+              </p>
+              {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
+              {!showCloudReconnectForm ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRetryCloudImport}
+                    disabled={isRetryingCloudImport}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                    style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                  >
+                    {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                    Relancer l'import
+                  </button>
+                  {/* La session cloud (jeton de rafraîchissement) peut avoir expiré
+                      ou avoir été révoquée entre-temps — dans ce cas la relance
+                      ci-dessus échoue avec un message qui invite justement à se
+                      reconnecter ici. Toujours visible (pas seulement après un
+                      échec) : pas de raison de faire deviner ce recours. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCloudReconnectForm(true)}
+                    className="text-xs font-medium underline"
+                    style={{ color: 'var(--tblr-muted)' }}
+                  >
+                    Se reconnecter au cloud
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleReconnectCloud} className="space-y-3 max-w-sm">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>
+                      Mot de passe du compte cloud{cloudLinkedEmail ? ` (${cloudLinkedEmail})` : ''}
+                    </label>
+                    <input
+                      type="password"
+                      value={cloudReconnectPassword}
+                      onChange={(e) => setCloudReconnectPassword(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  {cloudReconnectError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudReconnectError}</p>}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={isReconnectingCloud}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                    >
+                      {isReconnectingCloud ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                      Se reconnecter et relancer l'import
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowCloudReconnectForm(false); setCloudReconnectPassword(''); setCloudReconnectError(null); }}
+                      disabled={isReconnectingCloud}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* ── Poste lié au cloud : resynchronisation forcée à la demande ──
+              La synchro continue (server/cloudSync.ts) suit sync_log depuis
+              un filigrane et rattrape le flux normal, mais rien ne permettait
+              jusqu'ici de rejouer l'import complet une fois importCompleted
+              passé à vrai — utile pour un diagnostic (le job précédent, en
+              mémoire du process serveur, ne survit pas à un redémarrage de
+              l'appli) ou pour rattraper des lignes qu'un import antérieur
+              aurait laissées de côté sans avertissement remarqué à l'écran. */}
+          {isOfflineBuild() && cloudLinked === true && cloudImportCompleted === true && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <IconCloud size={15} /> Synchronisation cloud
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste est relié et synchronisé. En cas de doute sur des données manquantes, vous pouvez forcer une
+                resynchronisation complète — elle reprend tout ce que le cloud porte pour ce cabinet sans dupliquer ce
+                qui est déjà présent ici.
+              </p>
+              {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
+              <button
+                type="button"
+                onClick={handleRetryCloudImport}
+                disabled={isRetryingCloudImport}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+              >
+                {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                Forcer une resynchronisation complète
+              </button>
+            </div>
+          )}
 
           {/* ── Client Electron "compte local" — bascule vers un compte cloud ── */}
           {isOfflineBuild() && cloudLinked === false && (
@@ -2433,7 +3265,9 @@ export default function Settings() {
       )}
 
       {/* ── User section ── */}
-      <h2 className="text-xl font-bold mt-8" style={{ color: 'var(--tblr-text)' }}>{t('user_information')}</h2>
+      {activeTab === 'profil' && (
+        <>
+      <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('user_information')}</h2>
 
       <div className="rounded-xl p-5 space-y-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         {/* Avatar */}
@@ -2445,7 +3279,7 @@ export default function Settings() {
               alt={currentUser?.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
               <IconCamera size={18} className="text-white" />
-              <span className="text-white text-[10px] font-medium">Modifier</span>
+              <span className="text-white text-[0.6875rem] font-medium">Modifier</span>
             </div>
           </button>
           <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
@@ -2460,6 +3294,9 @@ export default function Settings() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Nom et prénom" aria-label="Nom et prénom" maxLength={120} value={userSettings.name} onChange={e => setUserSettings({...userSettings, name: e.target.value})} />
+          <input type="email" className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Adresse e-mail (identifiant de connexion)" aria-label="Adresse e-mail" maxLength={254} value={userSettings.email} onChange={e => setUserSettings({...userSettings, email: e.target.value})} />
+          {emailNotice && <p className="md:col-span-2 text-xs" role="status" style={{ color: 'var(--tblr-muted)' }}>{emailNotice}</p>}
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
@@ -2510,15 +3347,72 @@ export default function Settings() {
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
       </div>
 
-      {/* Informations utilisateur + Mes paramètres email share the same profile
-          row (PUT /api/team/:id) — one save action for both, entirely separate
-          from every tenant-settings section above. */}
+      {/* ── Signature de courrier ── */}
+      <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="flex items-center gap-2">
+          <IconMailbox size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_title')}</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_desc')}</p>
+          </div>
+        </div>
+        <textarea
+          rows={6}
+          maxLength={2000}
+          value={userSettings.mailSignature}
+          onChange={e => setUserSettings({ ...userSettings, mailSignature: e.target.value })}
+          placeholder={t('settings_mail_signature_placeholder') as string}
+          className="w-full p-2.5 rounded-lg text-sm resize-y"
+          style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+        />
+      </div>
+
+      {/* ── Contacts personnels ── */}
+      <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="flex items-center gap-2">
+          <IconAddressBook size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_personal_contacts_title')}</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_personal_contacts_desc')}</p>
+          </div>
+        </div>
+        <label className="flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+          <span className="text-sm" style={{ color: 'var(--tblr-text)' }}>{t('settings_show_personal_contacts')}</span>
+          <input
+            type="checkbox"
+            checked={userSettings.showPersonalContacts}
+            onChange={e => setUserSettings({ ...userSettings, showPersonalContacts: e.target.checked })}
+          />
+        </label>
+      </div>
+
+      {/* Informations utilisateur + Mes paramètres email + contacts personnels
+          share the same profile row (PUT /api/team/:id) — one save action for
+          all three, entirely separate from every tenant-settings section above. */}
       {renderSaveButton('profile', () => saveProfile())}
 
       {/* Mes boîtes mail — état géré par son propre hook (useMailAccounts),
           pas par saveSection/renderSaveButton : connecter/déconnecter/définir
           par défaut sont des actions immédiates, pas un formulaire à valider. */}
       <MailAccountsCard />
+
+      {/* Liaison Gemini (MCP) — même principe : action immédiate (révoquer),
+          pas de formulaire à valider via saveSection/renderSaveButton. */}
+      <McpConnectionsCard />
+
+      {/* Bot Telegram — même principe : actions immédiates (générer un code,
+          révoquer), pas de formulaire via saveSection/renderSaveButton. */}
+      <TelegramConnectionsCard />
+
+      {/* Courrier entrant — même principe : choisir l'agent de triage est
+          une action immédiate, pas un champ du grand formulaire. Ne
+          s'affiche que si l'instance a un domaine de réception configuré
+          (server/agentMailInbox.ts). */}
+      <AgentMailInboxCard />
+        </>
+      )}
+        </div>
+      </div>
     </div>
   );
 }

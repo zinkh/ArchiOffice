@@ -8,6 +8,8 @@
 // domain) — so they're passed in as dependencies rather than duplicated.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { listTenantProfiles } from '../tenantMemberships';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -32,6 +34,9 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
     try {
       const tenantId = await getTenantId(req.user.id);
       const { project_id, description } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { data: open } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('id').eq('user_id', req.user.id).is('end_time', null).maybeSingle();
       if (open) return res.status(409).json({ error: 'Vous êtes déjà pointé(e)' });
       const id = crypto.randomUUID();
@@ -92,6 +97,9 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const { entry_date, start_time, end_time, project_id, description } = req.body;
       if (!entry_date || !start_time || !end_time) return res.status(400).json({ error: 'entry_date, start_time et end_time requis' });
       if (new Date(end_time) <= new Date(start_time)) return res.status(400).json({ error: "L'heure de fin doit être après l'heure de début" });
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').insert({
@@ -112,6 +120,9 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       if (!existing) return res.status(404).json({ error: 'Entrée introuvable' });
       await requireManagerOf(tenantId, existing.user_id, req.user.id);
       const { entry_date, start_time, end_time, project_id, description } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').update({
         entry_date, start_time, end_time: end_time || null, project_id: project_id || null,
         description: description || null, updated_at: new Date().toISOString(),
@@ -172,8 +183,11 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const reportIds = await resolveReportIds(tenantId, req.user.id, scope === 'all');
       if (reportIds.length === 0) {
         if (!(await isAdmin(tenantId, req.user.id))) {
-          const { data: anyReport } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id').eq('manager_id', req.user.id).limit(1);
-          if (!anyReport || anyReport.length === 0) return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+          // « Quelqu'un me reporte-t-il dans CE cabinet ? » — le lien
+          // hiérarchique se lit sur les adhésions, il diffère d'un cabinet à
+          // l'autre (server/tenantMemberships.ts).
+          const reports = await resolveReportIds(tenantId, req.user.id, false);
+          if (reports.length === 0) return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
         }
         return res.json([]);
       }
@@ -182,7 +196,7 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const { data: entries, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('*').in('user_id', reportIds)
         .gte('entry_date', start.toISOString().split('T')[0]).lte('entry_date', end.toISOString().split('T')[0]);
       if (error) throw error;
-      const { data: profiles } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id, name').in('id', reportIds);
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name').in('id', reportIds);
       const nameById: Record<string, string> = Object.fromEntries((profiles || []).map((p: any) => [p.id, p.name]));
       const result = reportIds.map(uid => ({
         user_id: uid, name: nameById[uid] || uid,
@@ -210,7 +224,7 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const startStr = start.toISOString().split('T')[0];
       const endStr = end.toISOString().split('T')[0];
 
-      const { data: profiles } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id, name, job_title, department').in('id', reportIds);
+      const { data: profiles } = await supabaseAdmin.from('profiles').select('id, name, job_title, department').in('id', reportIds);
       const { data: entries, error: entriesErr } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('id, user_id, entry_date, start_time, end_time, project_id')
         .in('user_id', reportIds).gte('entry_date', startStr).lte('entry_date', endStr);
       if (entriesErr) throw entriesErr;
@@ -234,7 +248,7 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const { data: entries, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('user_id, project_id, start_time, end_time')
         .gte('entry_date', start_date as string).lte('entry_date', end_date as string);
       if (error) throw error;
-      const { data: profiles } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id, name');
+      const profiles = await listTenantProfiles(supabaseAdmin, tenantId, 'id, name');
       const { data: projects } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name');
       const cellMap: Record<string, number> = {};
       for (const e of entries || []) {
@@ -265,7 +279,7 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       const { data: entries, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('user_id, start_time, end_time')
         .gte('entry_date', monthStart).lte('entry_date', monthEnd);
       if (error) throw error;
-      const { data: profiles } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id, name');
+      const profiles = await listTenantProfiles(supabaseAdmin, tenantId, 'id, name');
       const totalsByUser: Record<string, number> = {};
       for (const e of entries || []) {
         if (!e.end_time) continue;

@@ -46,8 +46,13 @@ function loadEmbeddedPostgres(resourcesDir) {
  * @param {string} dataDir Persistent app data directory (e.g. Electron's app.getPath('userData'))
  * @param {(msg: string) => void} [log]
  * @param {string | null} [resourcesDir]
+ * @param {(id: string, status: 'active'|'done'|'error', detail?: string) => void} [reportStep]
+ *   Fait vivre l'écran de démarrage (electron/splash.html) — voir son en-tête
+ *   pour la liste des identifiants d'étape. Optionnel : un no-op par défaut,
+ *   pour que ce module reste appelable sans Electron (aucun test de ce repo
+ *   ne le fait aujourd'hui, mais rien ne doit l'en empêcher).
  */
-async function startLocalPostgres(dataDir, log = console.log, resourcesDir = null) {
+async function startLocalPostgres(dataDir, log = console.log, resourcesDir = null, reportStep = () => {}) {
   const EmbeddedPostgres = loadEmbeddedPostgres(resourcesDir);
   const databaseDir = path.join(dataDir, 'pgdata');
   const isFirstRun = !fs.existsSync(databaseDir);
@@ -67,11 +72,17 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
     initdbFlags: ['--encoding=UTF8', '--locale=C'],
   });
 
+  reportStep('db', 'active', isFirstRun
+    ? 'Initialisation de PostgreSQL (premier lancement)…'
+    : 'Démarrage de PostgreSQL…');
+
   if (isFirstRun) {
     log('[pgBootstrap] first launch — initialising local Postgres');
     await pg.initialise();
   }
   await pg.start();
+  reportStep('db', 'done', 'PostgreSQL embarqué prêt');
+  reportStep('schema', 'active', 'Vérification des migrations…');
 
   // Runs every launch, not just the first: applyLocalSchema() only actually
   // applies whatever migrate_*.sql files aren't yet recorded as applied (see
@@ -90,6 +101,7 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
     } finally {
       await client.end();
     }
+    reportStep('schema', 'done');
   } catch (err) {
     if (isFirstRun) {
       // Without this, a failed first run leaves a half-initialised pgdata/
@@ -103,6 +115,7 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
       // data in it yet — see the non-first-run branch below for why this must
       // never happen to an existing install.
       log('[pgBootstrap] first-run setup failed, cleaning up for a fresh retry on next launch:', err);
+      reportStep('schema', 'error', err.message);
       await pg.stop().catch(() => {});
       fs.rmSync(databaseDir, { recursive: true, force: true });
       throw err;
@@ -121,6 +134,11 @@ async function startLocalPostgres(dataDir, log = console.log, resourcesDir = nul
     // better, e.g. the network is back, if that's what caused this — picks
     // up exactly where this one left off instead of starting over.
     log('[pgBootstrap] schema update failed on an existing install — continuing with the current local schema, will retry on next launch:', err);
+    // L'application reste utilisable (schéma existant, non cassé) : cette
+    // étape se termine donc en 'done', pas en 'error' — le journal garde le
+    // détail pour un diagnostic ultérieur, mais rien ici n'empêche de
+    // continuer le démarrage.
+    reportStep('schema', 'done', 'Mise à jour différée — voir le journal');
   }
 
   return pg;
@@ -219,11 +237,23 @@ function startPostgrest(log = console.log, resourcesDir = null) {
  * @param {string} dataDir
  * @param {(msg: string) => void} [log]
  * @param {string | null} [resourcesDir]
+ * @param {(id: string, status: 'active'|'done'|'error', detail?: string) => void} [reportStep]
  */
-async function startOfflineDataStack(dataDir, log = console.log, resourcesDir = null) {
-  const pg = await startLocalPostgres(dataDir, log, resourcesDir);
+async function startOfflineDataStack(dataDir, log = console.log, resourcesDir = null, reportStep = () => {}) {
+  const pg = await startLocalPostgres(dataDir, log, resourcesDir, reportStep);
+  // Une seule étape « Démarrage du serveur applicatif » côté écran de
+  // démarrage couvre PostgREST ET le serveur Node lancé juste après par
+  // electron/main.cjs — cette fonction la laisse 'active' en sortant ;
+  // c'est main.cjs qui la marque 'done', une fois SON propre serveur passé
+  // le contrôle de santé (le vrai signal que l'API est utilisable).
+  reportStep('app-server', 'active', 'Démarrage de PostgREST…');
   const postgrest = startPostgrest(log, resourcesDir);
-  await waitForHttp(`http://127.0.0.1:${POSTGREST_PORT}/`, 15000);
+  try {
+    await waitForHttp(`http://127.0.0.1:${POSTGREST_PORT}/`, 15000);
+  } catch (err) {
+    reportStep('app-server', 'error', err.message);
+    throw err;
+  }
   log('[pgBootstrap] PostgREST ready');
   return {
     postgrestUrl: `http://127.0.0.1:${POSTGREST_PORT}`,

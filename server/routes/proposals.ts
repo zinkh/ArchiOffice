@@ -7,6 +7,8 @@ import type { Express } from 'express';
 import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
+import { assertTenantEntity } from '../assertTenantEntity';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -41,6 +43,12 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
+      // `client_id` is a contacts.id accepted straight from the body — a
+      // devis would otherwise happily point at another tenant's contact,
+      // and the GET /api/proposals join would leak that contact's name back.
+      if (proposalData.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', proposalData.client_id, tenantId))) {
+        return res.status(400).json({ error: "Client introuvable pour ce cabinet." });
+      }
       // Auto-generate readable reference if not provided
       if (!proposalData.reference) {
         proposalData.reference = await getNextDocNumber(tenantId, 'num_prefix_devis', 'proposals', 'DEVIS');
@@ -75,6 +83,9 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
 
       const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, construction_cost_num: _ccn2, ...updateData } = p;
+      if (updateData.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', updateData.client_id, tenantId))) {
+        return res.status(400).json({ error: "Client introuvable pour ce cabinet." });
+      }
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 
@@ -132,9 +143,19 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
             const totalBaseAmount = missions
               .filter((m: any) => m.category === 'Mission base')
               .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+            // Les catégories de la répartition des propositions (libellés en
+            // clair) se traduisent dans le vocabulaire fermé du contrat
+            // (`ContratMissionCategory`) : les deux écrans classent alors les
+            // missions de la même façon, sans que le contrat hérite de
+            // libellés d'affichage.
+            const categoryOf = (label?: string) =>
+              label === 'Mission Exécution' ? 'exe'
+                : label === 'Missions complémentaires' ? 'complementaire'
+                : 'base';
             const missions_list = missions.map((m: any) => ({
               id: m.id, name: m.name, incluse: true,
               pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
+              category: categoryOf(m.category),
             }));
             const totalHonoraires = p.amount || totalBaseAmount || 1;
             const cotraitants = (specialties_list || []).map((spec: any) => {
@@ -156,6 +177,9 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         } catch (err) {
           console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
         }
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.accepted', { id, title: p.title, amount: p.amount, client_id: p.client_id || null, project_id: projectId });
+      } else if (p.status === 'Rejected' && oldProposal?.status !== 'Rejected') {
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.declined', { id, title: p.title, amount: p.amount, client_id: p.client_id || null });
       }
 
       const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).eq('tenant_id', tenantId).single();

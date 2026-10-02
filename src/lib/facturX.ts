@@ -144,11 +144,17 @@ export function buildFacturXCiiXml(data: FacturXInvoiceData): string {
         </ram:SpecifiedTaxRegistration>
       </ram:SellerTradeParty>
       <ram:BuyerTradeParty>
-        <ram:Name>${escapeXml(data.buyer.name || 'Client')}</ram:Name>
+        <ram:Name>${escapeXml(data.buyer.name || 'Client')}</ram:Name>${data.buyer.siret ? `
+        <ram:SpecifiedLegalOrganization>
+          <ram:ID schemeID="0002">${escapeXml(data.buyer.siret.replace(/\s/g, ''))}</ram:ID>
+        </ram:SpecifiedLegalOrganization>` : ''}
         <ram:PostalTradeAddress>
           <ram:LineOne>${escapeXml(data.buyer.address || '')}</ram:LineOne>
           <ram:CountryID>FR</ram:CountryID>
-        </ram:PostalTradeAddress>
+        </ram:PostalTradeAddress>${data.buyer.vatNumber ? `
+        <ram:SpecifiedTaxRegistration>
+          <ram:ID schemeID="VA">${escapeXml(data.buyer.vatNumber.replace(/\s/g, ''))}</ram:ID>
+        </ram:SpecifiedTaxRegistration>` : ''}
       </ram:BuyerTradeParty>
     </ram:ApplicableHeaderTradeAgreement>
     <ram:ApplicableHeaderTradeSettlement>
@@ -196,7 +202,12 @@ export interface EnInvoiceJson {
     vat_identifier?: string;
     legal_registration_identifier?: { value: string; scheme: string };
   };
-  buyer: { name: string; postal_address: { country_code: string } };
+  buyer: {
+    name: string;
+    postal_address: { address_line1?: string; country_code: string };
+    vat_identifier?: string;
+    legal_registration_identifier?: { value: string; scheme: string };
+  };
   totals: {
     sum_invoice_lines_amount: string;
     total_without_vat: string;
@@ -259,9 +270,14 @@ export function buildEnInvoiceData(data: FacturXInvoiceData): EnInvoiceJson {
       ...(data.seller.vatNumber ? { vat_identifier: data.seller.vatNumber } : {}),
       ...(data.seller.siret ? { legal_registration_identifier: { value: data.seller.siret, scheme: '0002' } } : {}),
     },
+    // A French invoice's Maître d'Ouvrage carries the same legal mentions as
+    // the seller when it's a company (SIRET, VAT number) — this used to be
+    // dropped entirely regardless of what the caller passed in `data.buyer`.
     buyer: {
       name: data.buyer.name || 'Client',
-      postal_address: { country_code: 'FR' },
+      postal_address: { address_line1: data.buyer.address || '', country_code: 'FR' },
+      ...(data.buyer.vatNumber ? { vat_identifier: data.buyer.vatNumber } : {}),
+      ...(data.buyer.siret ? { legal_registration_identifier: { value: data.buyer.siret, scheme: '0002' } } : {}),
     },
     totals: {
       sum_invoice_lines_amount: net.toFixed(2),

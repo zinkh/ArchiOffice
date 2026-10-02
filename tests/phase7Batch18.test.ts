@@ -78,6 +78,18 @@ describe('Team member creation', () => {
     expect(created?.system_role).toBe('user');
   });
 
+  // Une nouvelle recrue reçoit un lien d'invitation à usage unique, jamais un
+  // mot de passe généré côté serveur transitant en clair par e-mail.
+  it('invites a new team member via a Supabase link instead of a generated password', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+
+    const res = await request(app).post('/api/team').set(authHeader(token)).send({ name: 'Invité', email: 'invite@example.test', role: 'Member', system_role: 'user' });
+    expect(res.status).toBe(201);
+    expect(res.body).not.toHaveProperty('password');
+    expect(JSON.stringify(res.body)).not.toMatch(/temporary|temporaire/i);
+  });
+
   it('rejects creation by a non-admin', async () => {
     const tenantId = makeTenant({ plan: 'pro' });
     const { token } = makeUser(tenantId, 'user');
@@ -171,7 +183,9 @@ describe('Join requests', () => {
     expect(fakeSupabaseAdmin.getTable('join_requests').find(j => j.id === 'jr1')?.status).toBe('approved');
   });
 
-  it('refuses to approve a request for a user already attached to a tenant', async () => {
+  // Rejoindre un second cabinet est justement ce que la demande sert à faire :
+  // l'adhésion s'ajoute, et le cabinet d'ouverture de session ne bouge pas.
+  it('attaches a user who already belongs to another tenant, without moving their default', async () => {
     const tenantId = makeTenant({ plan: 'pro' });
     const { token } = makeUser(tenantId, 'admin');
     const otherTenant = makeTenant();
@@ -179,8 +193,14 @@ describe('Join requests', () => {
     fakeSupabaseAdmin.seed('join_requests', [{ id: 'jr2', tenant_id: tenantId, user_id: 'requester2', email: 'req2@example.test', name: 'Requester2', status: 'pending' }]);
 
     const res = await request(app).post('/api/team/join-requests/jr2/approve').set(authHeader(token));
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
     expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === 'requester2')?.tenant_id).toBe(otherTenant);
+    // Le demandeur n'existait ici que par son profil (cas d'une instance pas
+    // encore migrée) : l'approbation ajoute l'adhésion au cabinet visé, et
+    // `profiles.tenant_id` continue de désigner son cabinet d'origine.
+    const memberships = fakeSupabaseAdmin.getTable('tenant_memberships').filter(m => m.user_id === 'requester2');
+    expect(memberships.map(m => m.tenant_id)).toEqual([tenantId]);
+    expect(memberships[0].is_default).toBe(false);
   });
 
   it('rejects a join request', async () => {

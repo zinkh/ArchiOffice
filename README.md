@@ -12,22 +12,26 @@
 - **Contacts & team** — a lightweight CRM for clients and contractors, plus team/role management per cabinet.
 - **Maps & urban planning data** — cadastral parcel maps, PLU zoning lookups, heritage monument and geological risk data via French government APIs (IGN, APICARTO, Géorisques).
 - **Document generation & export** — PDF export throughout, plus Word (.docx) export for meeting minutes. (Word/Excel export from the Specifications page is a known gap — see [ROADMAP.md](ROADMAP.md#document-export).)
+- **Your own file storage (optional)** — connect the cabinet's Google Drive, Dropbox, Nextcloud or kDrive, and new documents and plans are written there instead, one folder per affaire and one sub-folder per mission phase.
 - **Offline-first desktop option** — an Electron build with local storage and cloud sync for working without a constant connection.
 
 Want the full picture of what's implemented vs. still planned? See [ROADMAP.md](ROADMAP.md). Building an integration or calling the API directly? See [API.md](API.md).
 
 ## Screenshots
 
-<!--
-  TODO: Add screenshots or a short demo GIF here once you have a running
-  instance with sample data. Recommended shots: the Dashboard, a Project
-  detail view (Gantt/Kanban), a CCTP/DPGF editor, and the Invoices list.
-  Drop image files under docs/screenshots/ and reference them below, e.g.:
+**Dashboard**: collected revenue, overdue invoices, 12-month billing, projects by status and category.
 
-  ![Dashboard](docs/screenshots/dashboard.png)
-  ![Project Gantt view](docs/screenshots/gantt.png)
--->
-*Screenshots coming soon — see the TODO above if you'd like to contribute some from a running instance.*
+![ArchiOffice dashboard](docs/screenshots/dashboard.webp)
+
+**Sign-up**: create your practice with a 14-day free trial, no credit card required.
+
+![Create your practice](docs/screenshots/register.webp)
+
+**Design mockups**: explorations for the dashboard and the projects view (sample data; the name shown on these mockups is a working title).
+
+![Dashboard mockup](docs/screenshots/mockup-dashboard.webp)
+
+![Projects mockup](docs/screenshots/mockup-projects.webp)
 
 ## Tech stack
 
@@ -89,13 +93,16 @@ npm run dev
 
 This starts a single process (`tsx server.ts`) that serves the Vite dev server (with HMR) and the `/api/**` REST backend together at `http://localhost:3000`.
 
-### 4. Type-check
+### 4. Type-check and test
 
-There's no test suite or linter beyond TypeScript's own checks:
+There's no ESLint or Prettier, but there is a Vitest suite covering server routes end-to-end and pure frontend logic:
 
 ```bash
-npm run lint   # tsc --noEmit
+npm run lint   # tsc --noEmit — type check only, doesn't run the tests
+npm test       # vitest run
 ```
+
+CI (`.github/workflows/*.yml`) runs both, in that order, before `npm run build`.
 
 ### 5. Build for production
 
@@ -140,7 +147,16 @@ Everything above is reachable from four sidebar groups: **Gestion** (Dashboard, 
 
 ### 4. Connect integrations (optional)
 
-**Paramètres → Intégrations** (`/settings`) lists third-party connectors. Some are fully wired up today (Zoho Invoice, Zoho Books, Odoo, Ragic, Super PDP, Chorus Pro, MAF declaration); others are shown as **"coming soon"** placeholders in the UI with no backend yet (Stripe, QuickBooks, Google Drive, Dropbox, Salesforce, Slack, Microsoft Teams) — see [ROADMAP.md](ROADMAP.md) for current status before relying on one of those.
+**Paramètres → Intégrations** (`/settings`) lists third-party connectors. Some are fully wired up today (Zoho Invoice, Zoho Books, Odoo, Ragic, Super PDP, Chorus Pro, MAF declaration, and the four storage connectors below); others are shown as **"coming soon"** placeholders in the UI with no backend yet (Stripe, QuickBooks, Salesforce, Slack, Microsoft Teams) — see [ROADMAP.md](ROADMAP.md) for current status before relying on one of those.
+
+**Store your files on your own space (optional).** A cabinet can connect its
+**Google Drive**, **Dropbox**, **Nextcloud** or **kDrive**, and ArchiOffice then
+writes its new documents and plans there — one folder per affaire, one
+sub-folder per mission phase — instead of on the platform's storage. Files
+uploaded before the connection stay where they are and keep opening normally;
+nothing is migrated behind your back. Nextcloud and kDrive need nothing but an
+app password. Google Drive and Dropbox need OAuth credentials on the instance
+(see `.env.example`).
 
 ## Docker
 

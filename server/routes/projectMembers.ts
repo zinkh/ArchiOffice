@@ -4,6 +4,7 @@
 // environments where the project_members migration hasn't been applied.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { findMembership } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -43,6 +44,9 @@ export function registerProjectMemberRoutes(app: Express, { supabaseAdmin, getTe
       const tenantId = await getTenantId(req.user.id);
       const { user_id, role } = req.body;
       if (!user_id) return res.status(400).json({ error: 'user_id is required' });
+      if (!(await findMembership(supabaseAdmin, user_id, tenantId))) {
+        return res.status(400).json({ error: "Membre introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'project_members')
         .insert({ id: crypto.randomUUID(), project_id: req.params.id, user_id, role: role || 'member' })
         .select().single();

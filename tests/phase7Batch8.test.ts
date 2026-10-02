@@ -15,9 +15,15 @@ beforeAll(async () => {
   app = await getTestApp();
 });
 
+// Le lien hiérarchique vit sur l'adhésion au cabinet (il diffère d'un cabinet
+// à l'autre — voir server/tenantMemberships.ts) ; `profiles.manager_id` reste
+// tenu en accord, comme le fait PUT /api/team/:id/manager.
 function setManager(userId: string, managerId: string) {
   const profile = fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId);
   if (profile) profile.manager_id = managerId;
+  fakeSupabaseAdmin.getTable('tenant_memberships')
+    .filter(m => m.user_id === userId)
+    .forEach(m => { m.manager_id = managerId; });
 }
 
 describe('Time Tracking — clock in/out', () => {

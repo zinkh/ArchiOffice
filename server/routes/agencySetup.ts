@@ -7,19 +7,66 @@
 // of the deferred auth/team cluster).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
+import { addMembership, findMembership, listMemberships, listTenantAdminIds } from '../tenantMemberships';
+import { notifyUsers } from '../push';
 
 export interface RouteDeps {
   supabaseAdmin: any;
 }
 
-async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subject: string, html: string) {
+/**
+ * Les adresses des administrateurs du cabinet.
+ *
+ * `profiles.email` n'est renseigné que par certains chemins de création
+ * (invitation depuis la page Équipe, back-office plateforme) : un compte né
+ * d'une inscription ou d'une connexion Google a cette colonne vide, et son
+ * adresse ne vit que dans `auth.users`. Une demande de rattachement visant un
+ * cabinet dont l'administrateur est dans ce cas ne partait donc à personne,
+ * alors que l'écran annonçait « votre demande a été transmise ». D'où le repli
+ * sur l'adresse du compte d'authentification.
+ */
+async function adminRecipients(supabaseAdmin: any, adminIds: string[]): Promise<string[]> {
+  if (!adminIds.length) return [];
+  const { data: admins } = await supabaseAdmin.from('profiles').select('id, email').in('id', adminIds);
+  const profileEmails = new Map<string, string | null>((admins || []).map((a: any) => [a.id, a.email ?? null]));
+  const recipients: string[] = [];
+  for (const id of adminIds) {
+    const fromProfile = profileEmails.get(id);
+    if (fromProfile) { recipients.push(fromProfile); continue; }
+    try {
+      const { data } = await supabaseAdmin.auth.admin.getUserById(id);
+      const authEmail = data?.user?.email;
+      if (authEmail) recipients.push(authEmail);
+    } catch {
+      // Un compte d'authentification illisible ne doit pas priver les autres
+      // administrateurs de la notification.
+    }
+  }
+  return [...new Set(recipients)];
+}
+
+async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subject: string, html: string, inApp?: { title: string; body: string }) {
   try {
-    const { data: admins } = await supabaseAdmin
-      .from('profiles')
-      .select('email')
-      .eq('tenant_id', tenantId)
-      .eq('system_role', 'admin');
-    const recipients = (admins || []).map((a: any) => a.email).filter(Boolean);
+    // Les administrateurs se lisent sur les adhésions : un gérant qui a ce
+    // cabinet en second n'en est pas moins celui qui doit être prévenu.
+    const adminIds = await listTenantAdminIds(supabaseAdmin, tenantId);
+    if (!adminIds.length) return;
+
+    // Le canal système d'abord : il ne dépend d'aucun SMTP configuré, et il
+    // dépose la notification dans l'application (et sur le poste de travail)
+    // là où l'administrateur peut agir. Le mail reste utile quand personne
+    // n'a l'application ouverte.
+    if (inApp) {
+      await notifyUsers(supabaseAdmin, tenantId, adminIds, {
+        title: inApp.title,
+        body: inApp.body,
+        url: '/team',
+        category: 'Équipe',
+        tag: `join-request:${tenantId}`,
+      });
+    }
+
+    const recipients = await adminRecipients(supabaseAdmin, adminIds);
     if (!recipients.length) return;
     const smtpHost = process.env.SMTP_HOST;
     const smtpUser = process.env.SMTP_USER;
@@ -40,8 +87,8 @@ async function bestEffortNotifyAdmins(supabaseAdmin: any, tenantId: string, subj
 export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: RouteDeps) {
   app.get("/api/agency-setup/status", async (req: any, res: any) => {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
-      if (profile?.tenant_id) return res.json({ hasTenant: true, pendingRequest: null });
+      const memberships = await listMemberships(supabaseAdmin, req.user.id);
+      if (memberships.length) return res.json({ hasTenant: true, pendingRequest: null });
 
       const { data: pending } = await supabaseAdmin
         .from('join_requests')
@@ -76,9 +123,9 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
 
   app.post("/api/agency-setup/create", async (req: any, res: any) => {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
-      if (profile?.tenant_id) return res.status(409).json({ error: 'Ce compte est déjà rattaché à une agence' });
-
+      // Un compte déjà rattaché peut créer un cabinet DE PLUS : un architecte
+      // qui monte une seconde structure (SCPA, groupement) reste la même
+      // personne, avec le même compte.
       const agencyName = String(req.body?.agencyName || '').trim();
       if (!agencyName) return res.status(400).json({ error: "Le nom de l'agence est requis" });
       const address = req.body?.address ? String(req.body.address) : null;
@@ -98,10 +145,17 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(req.user.id);
       const displayName = authUser?.user?.user_metadata?.name || req.user.email?.split('@')[0] || agencyName;
 
+      // Le cabinet qu'on vient de créer devient celui sur lequel on travaille
+      // (et donc le cabinet par défaut du profil) : c'est ce qu'on attend
+      // juste après l'avoir créé, y compris quand ce n'est pas le premier.
       const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
         id: req.user.id, tenant_id: tenant.id, name: displayName, email: req.user.email, role: 'admin', system_role: 'admin',
       });
       if (profileErr) return res.status(500).json({ error: profileErr.message });
+
+      await addMembership(supabaseAdmin, {
+        userId: req.user.id, tenantId: tenant.id, role: 'admin', systemRole: 'admin', makeDefault: true,
+      });
 
       if (address || phone || email) {
         await supabaseAdmin.from('settings').upsert({ tenant_id: tenant.id, agency_name: agencyName, address, phone, email });
@@ -117,13 +171,16 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
 
   app.post("/api/agency-setup/join", async (req: any, res: any) => {
     try {
-      const { data: profile } = await supabaseAdmin.from('profiles').select('tenant_id').eq('id', req.user.id).single();
-      if (profile?.tenant_id) return res.status(409).json({ error: 'Ce compte est déjà rattaché à une agence' });
-
       const tenantId = String(req.body?.tenantId || '');
       if (!tenantId) return res.status(400).json({ error: 'Agence requise' });
       const { data: tenant } = await supabaseAdmin.from('tenants').select('id, name').eq('id', tenantId).single();
       if (!tenant) return res.status(404).json({ error: 'Agence introuvable' });
+
+      // Demander à rejoindre un cabinet dont on fait déjà partie n'a pas
+      // d'objet — demander à en rejoindre un second, si.
+      if (await findMembership(supabaseAdmin, req.user.id, tenantId)) {
+        return res.status(409).json({ error: 'Vous appartenez déjà à ce cabinet' });
+      }
 
       // Une seule demande en attente à la fois : on remplace l'ancienne si elle vise une autre agence.
       await supabaseAdmin.from('join_requests').delete().eq('user_id', req.user.id).eq('status', 'pending');
@@ -140,7 +197,11 @@ export function registerAgencySetupRoutes(app: Express, { supabaseAdmin }: Route
         supabaseAdmin,
         tenantId,
         'Nouvelle demande de rattachement — ArchiOffice',
-        `<p>${name || req.user.email} (${req.user.email}) demande à rejoindre votre agence <strong>${tenant.name}</strong> sur ArchiOffice.</p><p>Rendez-vous sur la page Équipe pour approuver ou refuser cette demande.</p>`
+        `<p>${name || req.user.email} (${req.user.email}) demande à rejoindre votre agence <strong>${tenant.name}</strong> sur ArchiOffice.</p><p>Rendez-vous sur la page Équipe pour approuver ou refuser cette demande.</p>`,
+        {
+          title: 'Demande de rattachement',
+          body: `${name || req.user.email} demande à rejoindre ${tenant.name}. À valider depuis la page Équipe.`,
+        }
       );
 
       res.json({ success: true, requestId: request.id, tenantName: tenant.name });

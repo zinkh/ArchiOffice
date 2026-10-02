@@ -7,6 +7,21 @@
 // only the read lookups had never been extracted).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
+import { attachReservePhotos } from '../reservePhotos';
+import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
+import { dispatchWebhookEvent } from '../webhookDispatch';
+import { applyTemplateToProject } from '../projectTemplateApply';
+import { OPERATION_LABELS } from '../../src/lib/projectTemplates';
+import type { TemplateOperationType } from '../../src/types';
+
+/** Validates every `contact_id` in a list of cotraitants/lots/stakeholders belongs to this tenant. */
+async function assertListContacts(supabaseAdmin: any, tenantId: string, list: any[] | undefined): Promise<boolean> {
+  for (const item of list || []) {
+    if (item?.contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', item.contact_id, tenantId))) return false;
+  }
+  return true;
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -19,22 +34,39 @@ export interface RouteDeps {
 }
 
 export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole }: RouteDeps) {
+  // Liste allégée : plus de join sur cotraitants/lots/stakeholders/catégories
+  // — porté sur CHAQUE projet à chaque appel, alors qu'une bonne vingtaine
+  // de pages (Dashboard, Gantt, Documents, ...) n'utilisent cette route que
+  // comme un annuaire id→nom, et que même la page Projets ne s'en sert que
+  // pour LE projet ouvert dans sa modale (voir GET /api/projects/:id/full,
+  // qui porte désormais ce même join). Voir CLAUDE.md.
+  //
+  // `limit`/`cursor` (curseur opaque sur `id` — la table n'a pas de colonne
+  // de date de création, et l'id est du type `p<horodatage>...`, donc
+  // approximativement ordonné dans le temps) sont optionnels et
+  // rétrocompatibles, même principe que GET /api/invoices juste au-dessus.
   app.get("/api/projects", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data, error } = await supabaseAdmin
-        .from('projects')
-        .select('*, project_cotraitants(*), project_lots(*), project_stakeholders(*), project_categories_junction(category_id)')
-        .eq('tenant_id', tenantId);
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(String(req.query.limit), 10) || 0, 1), 500) : undefined;
+      let query = supabaseAdmin.from('projects').select('*').eq('tenant_id', tenantId).order('id', { ascending: false });
+      if (req.query.cursor) {
+        const cursorId = Buffer.from(String(req.query.cursor), 'base64url').toString('utf8');
+        query = query.lt('id', cursorId);
+      }
+      if (limit) query = query.limit(limit);
+      const { data: rows, error } = await query;
       if (error) throw error;
-      const projectsWithDetails = (data || []).map((p: any) => ({
-        ...p,
-        cotraitants_list: p.project_cotraitants || [],
-        lots_list: p.project_lots || [],
-        stakeholders_list: p.project_stakeholders || [],
-        categories_list: (p.project_categories_junction || []).map((j: any) => j.category_id),
-      }));
-      res.json(projectsWithDetails);
+      // `last_opened_at` : la dernière ouverture de chaque affaire PAR la
+      // personne qui demande la liste — c'est le classement par défaut de
+      // /projects (« ouverts récemment »).
+      const data = await attachLastOpenedAt(supabaseAdmin, tenantId, req.user.id, rows || []);
+      if (!limit) return res.json(data || []);
+      const last = (data || [])[data.length - 1];
+      const nextCursor = data.length === limit && last?.id
+        ? Buffer.from(last.id, 'utf8').toString('base64url')
+        : null;
+      res.json({ data: data || [], nextCursor });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch projects" });
@@ -45,19 +77,39 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { data: project, error: pe } = await supabaseAdmin.from('projects').select('*').eq('id', id).eq('tenant_id', tenantId).single();
-      if (pe || !project) return res.status(404).json({ error: "Project not found" });
-      const [milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans] = await Promise.all([
+      // Le même join que l'ancienne liste GET /api/projects portait sur
+      // CHAQUE ligne — coûteux là-bas (voir CLAUDE.md, « pagination et
+      // fan-out »), légitime ici puisqu'il ne porte plus que sur le seul
+      // projet ouvert.
+      const { data: projectRow, error: pe } = await supabaseAdmin.from('projects')
+        .select('*, project_cotraitants(*), project_lots(*), project_stakeholders(*), project_categories_junction(category_id)')
+        .eq('id', id).eq('tenant_id', tenantId).single();
+      if (pe || !projectRow) return res.status(404).json({ error: "Project not found" });
+      const { project_cotraitants, project_lots, project_stakeholders, project_categories_junction, ...projectFields } = projectRow as any;
+      const project = {
+        ...projectFields,
+        cotraitants_list: project_cotraitants || [],
+        lots_list: project_lots || [],
+        stakeholders_list: project_stakeholders || [],
+        categories_list: (project_categories_junction || []).map((j: any) => j.category_id),
+      };
+      // Ouvrir la fiche complète, c'est ouvrir l'affaire : c'est ce qui
+      // alimente le classement « ouverts récemment ». Meilleur effort : une
+      // instance non migrée ne doit pas perdre l'accès à ses projets pour ça.
+      recordProjectOpened(supabaseAdmin, tenantId, req.user.id, id).catch(() => {});
+      const [milestones, invoices, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reservesRows, plans] = await Promise.all([
         supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
-        supabaseAdmin.from('specifications').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('ordres_de_service').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
+        supabaseAdmin.from('avenants_moe').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
+        supabaseAdmin.from('marches_entreprises').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('visas').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('receptions').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('reserves').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('plans').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
       ]);
-      res.json({ project, milestones, invoices, specifications, ordres_de_service, visas, receptions, reserves, plans });
+      const reserves = await attachReservePhotos(supabaseAdmin, tenantId, 'opr', reservesRows);
+      res.json({ project, milestones, invoices, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch project details" });
@@ -89,7 +141,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       await checkQuota(tenantId, 'projects');
       const {
-        id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
+        id: bodyId, name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
@@ -99,9 +151,26 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, template_id
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      // Modèle de projet : lu ici depuis la base (jamais depuis le corps), et
+      // vérifié comme toute référence inter-ressources. Ses lots, jalons et
+      // tâches sont appliqués une fois l'affaire créée, plus bas.
+      let template: any = null;
+      if (template_id) {
+        const { data: tpl } = await tenantScopedFrom(supabaseAdmin, tenantId, 'project_templates').select('*').eq('id', template_id).maybeSingle();
+        if (!tpl) return res.status(400).json({ error: "Modèle de projet introuvable pour ce cabinet." });
+        template = tpl;
+      }
+      if (client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       // Generate project code — format PREFIX[-]YEAR[-]NNN, each dash and the
       // digit count of NNN independently configurable per tenant (Onboarding
       // wizard / Settings: num_prefix_affaire, num_affaire_sep_prefix,
@@ -128,17 +197,19 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const project_code = affairePrefix ? `${affairePrefix}${sepPrefix ? '-' : ''}${yearPart}` : yearPart;
       const id = bodyId || crypto.randomUUID();
       const { error: pe } = await supabaseAdmin.from('projects').insert({
-        id, tenant_id: tenantId, name, client, status: status || 'Planning', budget: budget || 0,
+        id, tenant_id: tenantId, name, client, client_id: client_id || null, status: status || 'Planning', budget: budget || 0,
         category: category || null, start_date: start_date || new Date().toISOString().split('T')[0],
         end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
         image_url: image_url || null, project_code, address: address || null,
-        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes,
+        is_public_client: !!is_public_client || template?.marche_type === 'public',
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat,
+        type_projet: type_projet || (template?.operation_type && template.operation_type !== 'autre' ? OPERATION_LABELS[template.operation_type as TemplateOperationType] : undefined),
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
@@ -156,11 +227,18 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       if (categories_list?.length) {
         await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
       }
+      // Lots, jalons et tâches du modèle, datés depuis le démarrage de l'affaire.
+      let templateApplied: Awaited<ReturnType<typeof applyTemplateToProject>> | undefined;
+      if (template) {
+        templateApplied = await applyTemplateToProject(supabaseAdmin, tenantId, req.user.id, id, template, start_date || new Date().toISOString().split('T')[0]);
+        if (templateApplied.failed.length) console.error('[POST /api/projects] modèle appliqué partiellement', templateApplied.failed);
+      }
       // Log activity
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
+      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"${template ? ` (modèle « ${template.name} »)` : ''}`, name, id, 'project', 'Projets');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'project.created', { id, name, project_code, client, status: status || 'Planning' });
 
-      res.status(201).json({ id, project_code });
+      res.status(201).json({ id, project_code, ...(templateApplied ? { template_applied: templateApplied } : {}) });
     } catch (error: any) {
       console.error("Error creating project:", error);
       res.status(error.status || 500).json({ error: error.message || "Failed to create project" });
@@ -172,8 +250,8 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
-        name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, is_chantier, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
+        name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
+        is_complete_mission, is_chantier, offline_enabled, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -184,10 +262,27 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       } = req.body;
-      if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      // Une mise à jour partielle (un agent qui ne touche qu'un champ, par
+      // exemple) ne doit pas être bloquée faute de renvoyer le nom et le
+      // client déjà en base : ils ne sont exigés qu'à la création. Absents du
+      // corps de la requête, on retombe sur les valeurs déjà enregistrées.
+      const { data: existingProject } = await supabaseAdmin.from('projects').select('name, client, client_id')
+        .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      const finalName = name ?? (existingProject as any)?.name;
+      const finalClient = client ?? (existingProject as any)?.client;
+      const finalClientId = client_id !== undefined ? client_id : (existingProject as any)?.client_id;
+      if (!finalName || !finalClient) return res.status(400).json({ error: "Name and client are required" });
+      if (finalClientId && !(await assertTenantEntity(supabaseAdmin, 'contacts', finalClientId, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
+          || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       const { error: ue } = await supabaseAdmin.from('projects').update({
-        name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        name: finalName, client: finalClient, client_id: finalClientId || null, status, budget, category, start_date, end_date, description, image_url, address,
+        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, offline_enabled: !!offline_enabled, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
@@ -231,7 +326,6 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       await Promise.all([
         supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('milestones').delete().eq('project_id', id).eq('tenant_id', tenantId),
-        supabaseAdmin.from('specifications').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId),
       ]);
       const { error } = await supabaseAdmin.from('projects').delete().eq('id', id).eq('tenant_id', tenantId);

@@ -8,13 +8,23 @@
 // business table via their `tenant_id ... ON DELETE CASCADE` foreign key.
 // Same setInterval-on-boot pattern as server/tenderRssPoller.ts.
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { listUsersOnlyIn } from './tenantMemberships';
 
 const GRACE_PERIOD_DAYS = 30;
 const DEFAULT_CHECK_INTERVAL_HOURS = 24;
 // Buckets whose files are namespaced by `${tenantId}/...` (see server.ts's
 // uploadToStorage call sites) — best-effort cleanup, not privacy-critical
 // once the referencing rows are gone, but avoids leaving orphaned files.
-const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'logos', 'support-attachments'];
+const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'logos', 'support-attachments'];
+
+// Ce qui N'EST PAS supprimé, et ne doit pas l'être : les fichiers qu'un cabinet
+// a fait déposer sur SON propre espace de stockage (Google Drive, Dropbox,
+// Nextcloud, kDrive — voir server/externalStorage/). Ils vivent sur un compte
+// qui lui appartient ; les détruire reviendrait à anéantir son bien hors de
+// notre système, alors que l'effacement RGPD porte sur les données que NOUS
+// détenons. Les lignes external_storage_connections / external_storage_folders
+// disparaissent seules par la cascade sur tenants — c'est-à-dire qu'on oublie
+// comment aller chercher ces fichiers, sans y toucher.
 
 async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
   for (const bucket of TENANT_PREFIXED_BUCKETS) {
@@ -30,10 +40,13 @@ async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: st
 }
 
 async function purgeTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
-  const { data: profiles } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId);
-  for (const profile of (profiles || []) as { id: string }[]) {
-    const { error } = await supabaseAdmin.auth.admin.deleteUser(profile.id);
-    if (error) console.error(`[tenantPurge] Failed to delete auth user ${profile.id}:`, error.message);
+  // Seuls les comptes dont c'est le SEUL cabinet sont supprimés : une
+  // personne qui exerce aussi ailleurs garde le sien, sinon fermer une
+  // structure la déconnecterait de l'autre (server/tenantMemberships.ts).
+  const exclusiveUserIds = await listUsersOnlyIn(supabaseAdmin, tenantId);
+  for (const userId of exclusiveUserIds) {
+    const { error } = await supabaseAdmin.auth.admin.deleteUser(userId);
+    if (error) console.error(`[tenantPurge] Failed to delete auth user ${userId}:`, error.message);
   }
 
   await purgeStorageForTenant(supabaseAdmin, tenantId);

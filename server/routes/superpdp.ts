@@ -8,10 +8,12 @@
 import type { Express } from 'express';
 import { buildEnInvoiceData } from '../../src/lib/facturX';
 import { computeEtatAcompte, buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
 }
 
 const SUPERPDP_BASE = 'https://api.superpdp.tech';
@@ -44,11 +46,17 @@ async function superpdpFetch(token: string, path: string, opts: RequestInit = {}
 // shared FacturXInvoiceData contract — see src/lib/facturX.ts for why this
 // and the client-side XML export (InvoiceGenerator.tsx) now share one
 // implementation instead of two that could silently drift apart.
-function buildEnInvoice(invoice: any, items: any[], settings: any): any {
+async function buildEnInvoice(supabaseAdmin: any, tenantId: string, invoice: any, items: any[], settings: any): Promise<any> {
   const vatRate = invoice.vat_rate ?? 20;
   const amountHT = parseFloat(invoice.amount ?? 0);
   const taxAmount = parseFloat(invoice.tax_amount ?? amountHT * vatRate / 100);
   const totalTTC = parseFloat(invoice.total_amount ?? amountHT + taxAmount);
+  // `invoice.client_name` never existed as a column (see supabase/schema.sql)
+  // — this always fell through to mission_name/'Client', so every invoice
+  // submitted to SuperPDP carried no real buyer identity, SIRET or address
+  // at all. invoices.client_id (supabase/migrate_invoice_client_link.sql)
+  // is what actually resolves one now.
+  const client = await loadInvoiceClientContact(supabaseAdmin, tenantId, invoice);
 
   return buildEnInvoiceData({
     invoiceNumber: invoice.invoice_number || invoice.id,
@@ -76,12 +84,16 @@ function buildEnInvoice(invoice: any, items: any[], settings: any): any {
       email: settings.email || '',
     },
     buyer: {
-      name: invoice.client_name || invoice.mission_name || 'Client',
+      name: client?.name || invoice.mission_name || 'Client',
+      address: [client?.address, [client?.zip, client?.city].filter(Boolean).join(' ')].filter(Boolean).join(', ') || undefined,
+      siret: client?.siret || undefined,
+      vatNumber: client?.vat_number || undefined,
+      email: client?.email || undefined,
     },
   });
 }
 
-export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
+export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin }: RouteDeps) {
   // GET /api/superpdp/status
   app.get('/api/superpdp/status', async (req: any, res: any) => {
     try {
@@ -96,17 +108,17 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
   // DELETE /api/superpdp/disconnect
   app.delete('/api/superpdp/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({ superpdp_client_id: null, superpdp_client_secret: null }).eq('tenant_id', tenantId);
       res.json({ success: true });
     } catch (e: any) {
-      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(500).json({ error: e.message }); }
+      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // POST /api/superpdp/test — verify credentials by fetching company info
   app.post('/api/superpdp/test', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
       const cfg = s as any;
       if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Configuration incomplète' });
@@ -114,7 +126,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       const company = await superpdpFetch(token, '/v1.beta/companies/me');
       res.json({ connected: true, company: company?.formal_name || company?.name || 'SuperPDP' });
     } catch (e: any) {
-      console.error("[POST /api/superpdp/test]", e); res.status(400).json({ connected: false, error: e.message }); }
+      console.error("[POST /api/superpdp/test]", e); res.status(e.status || 400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/superpdp/send/:invoiceId — send one invoice to SuperPDP
@@ -136,7 +148,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
 
       const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
-      const enInvoice = buildEnInvoice(invoice, items, cfg);
+      const enInvoice = await buildEnInvoice(supabaseAdmin, tenantId, invoice, items, cfg);
 
       // Convert en16931 JSON → CII XML
       const ciiXml = await superpdpFetch(token, '/v1.beta/invoices/convert?from=en16931&to=cii', {

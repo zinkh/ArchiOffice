@@ -2,10 +2,12 @@ import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck, IconClock } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { useSearchParams, Link } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
+import { JOIN_REQUESTS_CHANGED } from '../components/Sidebar';
 import { useUser } from '../UserContext';
 
 export default function Team() {
@@ -21,7 +23,7 @@ export default function Team() {
     name: '',
     email: '',
     system_role: 'user',
-    role: 'Member'
+    role: ''
   });
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
@@ -48,9 +50,12 @@ export default function Team() {
     try {
       await decideJoinRequest(id, decision);
       setJoinRequests(prev => prev.filter(r => r.id !== id));
+      // Fait retomber le compteur du menu latéral, qui vit dans un autre
+      // composant sans état partagé avec celui-ci.
+      window.dispatchEvent(new Event(JOIN_REQUESTS_CHANGED));
       if (decision === 'approve') getAllUsers().then(setTeam).catch(console.error);
     } catch (err: any) {
-      alert(err.message || 'Erreur lors du traitement de la demande.');
+      alert(err.message || t('team_join_request_process_failed'));
     } finally {
       setDecidingId(null);
     }
@@ -62,7 +67,7 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, system_role: newRole } : member));
     } catch (err) {
       console.error(err);
-      alert('Failed to update role.');
+      alert(t('team_update_role_failed'));
     }
   };
 
@@ -72,7 +77,7 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, manager_id: managerId || null } : member));
     } catch (err) {
       console.error(err);
-      alert('Failed to update manager.');
+      alert(t('team_update_manager_failed'));
     }
   };
 
@@ -83,16 +88,16 @@ export default function Team() {
       const result = await createUser(newUser) as any;
       setTeam([...team, result]);
       setIsModalOpen(false);
-      setNewUser({ name: '', email: '', system_role: 'user', role: 'Member' });
+      setNewUser({ name: '', email: '', system_role: 'user', role: '' });
       
       if (result.emailSent) {
-        alert('User created successfully. Credentials have been sent by email.');
+        alert(t('team_user_created_email_sent'));
       } else {
-        alert(`User created successfully, but email could not be sent: ${result.emailError || 'Unknown error'}. Please provide the credentials manually.`);
+        alert(t('team_user_created_email_failed', { error: result.emailError || t('team_unknown_error') }));
       }
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Failed to create user.');
+      alert(err.message || t('team_create_user_failed'));
     } finally {
       setIsSubmitting(false);
     }
@@ -108,7 +113,7 @@ export default function Team() {
         {isAdmin && (
           <button
             onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-lg shadow-blue-500/20"
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition shadow-lg shadow-blue-500/20"
           >
             <IconUserPlus size={18} />
             {t('team_add_member_btn')}
@@ -154,13 +159,10 @@ export default function Team() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {team.map((member, i) => (
+        {team.map(member => (
           <motion.div
             key={member.id}
             ref={el => { memberRefs.current[member.id] = el; }}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.05 }}
             className={cn(
               "bg-white dark:bg-zinc-800 rounded-xl border p-6 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden",
               member.id === highlightId ? "border-blue-500 ring-2 ring-blue-400/60" : "border-zinc-200 dark:border-zinc-700"
@@ -184,7 +186,7 @@ export default function Team() {
             </Link>
 
             <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
+              <label className="block text-[0.6875rem] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
               {isAdmin ? (
                 <select
                   value={member.system_role}
@@ -198,14 +200,14 @@ export default function Team() {
                 </select>
               ) : (
                 <div className="px-3 py-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-xs font-medium border border-zinc-100 dark:border-zinc-800">
-                  {member.system_role.toUpperCase()}
+                  {t(`team_role_${member.system_role}` as const, { defaultValue: member.system_role })}
                 </div>
               )}
             </div>
 
             {isAdmin && (
               <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_manager_label')}</label>
+                <label className="block text-[0.6875rem] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_manager_label')}</label>
                 <select
                   value={member.manager_id || ''}
                   onChange={(e) => handleManagerChange(member.id, e.target.value)}
@@ -226,9 +228,10 @@ export default function Team() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
             >
               <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
@@ -294,7 +297,7 @@ export default function Team() {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
                   >
                     {isSubmitting ? (
                       <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />

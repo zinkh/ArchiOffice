@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconDeviceMobile, IconTrash, IconShieldCheck } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
 
@@ -17,6 +18,7 @@ interface TotpFactor {
 // Supabase session to attach a factor to — Profile.tsx only renders this
 // component outside isOfflineBuild().
 export default function MfaSettings() {
+  const { t } = useTranslation();
   const [factors, setFactors] = useState<TotpFactor[] | null>(null);
   const [enrolling, setEnrolling] = useState<{ factorId: string; qrCode: string; secret: string } | null>(null);
   const [code, setCode] = useState('');
@@ -78,7 +80,7 @@ export default function MfaSettings() {
 
   const disableFactor = async (factorId: string) => {
     if (!window.confirm(
-      'Désactiver la double authentification ? Votre compte ne sera plus protégé que par votre mot de passe.'
+      t('mfa_settings_confirm_disable')
     )) return;
     setBusy(true);
     setError(null);

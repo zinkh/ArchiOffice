@@ -53,14 +53,11 @@ describe('Projects CRUD', () => {
     expect(res.status).toBe(402);
   });
 
-  it('lists projects, defaulting the sub-list fields to empty arrays', async () => {
-    // Not asserting the sub-lists are actually populated: `project_lots(*)`
-    // etc. are embedded relations, which the fake doesn't resolve (see
-    // fakeSupabaseAdmin.ts's file header) — it returns the flat project
-    // row, so `p.project_lots` stays undefined and the route's own
-    // `p.project_lots || []` fallback kicks in regardless of what's seeded.
-    // This still exercises the real behavior worth locking in here: the
-    // list endpoint itself, tenant-scoped, with the flattening in place.
+  it('lists projects as a lightweight row, without the cotraitants/lots/stakeholders/categories join', async () => {
+    // GET /api/projects dropped this join (see CLAUDE.md, "pagination et
+    // fan-out") — it's now on GET /api/projects/:id/full instead, fetched
+    // only for the one project actually opened. The list stays a flat
+    // project row.
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('projects', [{ id: 'p4', tenant_id: tenantId, name: 'Extension', client: 'M. Martin' }]);
@@ -69,8 +66,42 @@ describe('Projects CRUD', () => {
     const res = await request(app).get('/api/projects').set(authHeader(token));
     expect(res.status).toBe(200);
     const project = res.body.find((p: any) => p.id === 'p4');
-    expect(project.lots_list).toEqual([]);
+    expect(project.lots_list).toBeUndefined();
     expect(fakeSupabaseAdmin.getTable('project_lots').some(l => l.project_id === 'p4')).toBe(true);
+  });
+
+  it('paginates the list with an opaque cursor when limit is passed', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [
+      { id: 'p-a', tenant_id: tenantId, name: 'A', client: 'C' },
+      { id: 'p-b', tenant_id: tenantId, name: 'B', client: 'C' },
+      { id: 'p-c', tenant_id: tenantId, name: 'C', client: 'C' },
+    ]);
+
+    const page1 = await request(app).get('/api/projects?limit=2').set(authHeader(token));
+    expect(page1.status).toBe(200);
+    expect(page1.body.data).toHaveLength(2);
+    expect(page1.body.nextCursor).toBeTruthy();
+
+    const page2 = await request(app).get(`/api/projects?limit=2&cursor=${encodeURIComponent(page1.body.nextCursor)}`).set(authHeader(token));
+    expect(page2.status).toBe(200);
+    expect(page2.body.data.length).toBeGreaterThan(0);
+    // No project should appear on both pages.
+    const ids1 = page1.body.data.map((p: any) => p.id);
+    const ids2 = page2.body.data.map((p: any) => p.id);
+    expect(ids1.some((id: string) => ids2.includes(id))).toBe(false);
+  });
+
+  it('/full includes the joined sub-lists that the list endpoint no longer does', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'p5', tenant_id: tenantId, name: 'Rénovation', client: 'M. Petit' }]);
+    fakeSupabaseAdmin.seed('project_lots', [{ id: 'lot2', tenant_id: tenantId, project_id: 'p5', lot_number: '01', lot_title: 'Gros œuvre' }]);
+
+    const res = await request(app).get('/api/projects/p5/full').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.project.lots_list).toEqual([]);
   });
 
   it('never lists another tenant\'s projects', async () => {

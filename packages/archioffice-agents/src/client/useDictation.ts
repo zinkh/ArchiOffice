@@ -59,6 +59,29 @@ export interface Dictation {
   toggle: () => void;
 }
 
+/**
+ * Retire d'un résultat cumulatif Android les mots déjà déposés. Certains
+ * Chromium mobiles redonnent, après une relance silencieuse, toute la phrase
+ * depuis le début au lieu de la seule nouvelle bribe.
+ */
+export function cumulativeDictationDelta(previous: string, candidate: string): string {
+  const previousWords = previous.trim().split(/\s+/).filter(Boolean);
+  const candidateWords = candidate.trim().split(/\s+/).filter(Boolean);
+  if (!candidateWords.length) return '';
+  if (!previousWords.length) return candidateWords.join(' ');
+
+  const comparable = (word: string) => word.toLocaleLowerCase().replace(/^[.,;:!?…«»"'’()-]+|[.,;:!?…«»"'’()-]+$/g, '');
+  const commonPrefix = Math.min(previousWords.length, candidateWords.length);
+  for (let i = 0; i < commonPrefix; i++) {
+    if (comparable(previousWords[i]) !== comparable(candidateWords[i])) return candidateWords.join(' ');
+  }
+
+  // Une version identique ou plus courte est une répétition/correction d'un
+  // texte déjà rendu, pas une nouvelle dictée à concaténer.
+  if (candidateWords.length <= previousWords.length) return '';
+  return candidateWords.slice(previousWords.length).join(' ');
+}
+
 /** Durée maximale d'un enregistrement serveur. Une dictée de plus de trois
  *  minutes n'est plus une instruction mais un oubli d'arrêter le micro, et
  *  chaque seconde enregistrée se facture. */
@@ -99,6 +122,18 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
   const autoStopRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Nombre de résultats déjà rendus définitifs dans la session de
+  // reconnaissance EN COURS. Chrome referme puis rouvre la session tout seul
+  // après un silence (voir onend) : ses indices internes repartent alors de
+  // zéro, et `event.resultIndex` redevient peu fiable — sans ce compteur,
+  // les phrases déjà finalisées étaient renvoyées comme neuves à chaque
+  // relance, d'où une dictée qui se répète en boule de neige. Remis à zéro à
+  // chaque (re)démarrage réel du moteur, jamais à l'arrêt.
+  const finalizedCountRef = useRef(0);
+  // Texte déjà rendu pendant le clic micro courant. Il survit aux relances
+  // automatiques du moteur afin de reconnaître les résultats cumulatifs
+  // propres à Chrome Android, mais repart à zéro au prochain clic utilisateur.
+  const emittedBrowserTextRef = useRef('');
   // Distingue « le moteur s'est arrêté tout seul » (silence prolongé, ce que
   // Chrome fait même en mode continu) de « l'utilisateur a coupé le micro ».
   const wantListeningRef = useRef(false);
@@ -133,11 +168,28 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
 
     recognition.onresult = (event: any) => {
       let pending = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      // On relit systématiquement depuis le début de `event.results` plutôt
+      // que depuis `event.resultIndex` (peu fiable après un redémarrage
+      // silencieux, voir finalizedCountRef) et on ne renvoie comme définitif
+      // que ce qui ne l'a pas déjà été dans CETTE session.
+      for (let i = 0; i < event.results.length; i++) {
         const result = event.results[i];
         const text = result[0]?.transcript ?? '';
-        if (result.isFinal) onTranscriptRef.current(text.trim());
-        else pending += text;
+        if (result.isFinal) {
+          if (i >= finalizedCountRef.current) {
+            const clean = text.trim();
+            const addition = cumulativeDictationDelta(emittedBrowserTextRef.current, clean);
+            if (addition) {
+              onTranscriptRef.current(addition);
+              emittedBrowserTextRef.current = emittedBrowserTextRef.current
+                ? `${emittedBrowserTextRef.current} ${addition}`
+                : addition;
+            }
+            finalizedCountRef.current = i + 1;
+          }
+        } else {
+          pending += text;
+        }
       }
       setInterim(pending.trim());
     };
@@ -171,7 +223,11 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
       // mode continu : tant que le micro n'a pas été coupé volontairement, on
       // rouvre, sinon une pause dans la phrase interromprait la dictée.
       if (wantListeningRef.current && recognitionRef.current === recognition) {
-        try { recognition.start(); return; } catch { /* déjà relancée */ }
+        try {
+          finalizedCountRef.current = 0;
+          recognition.start();
+          return;
+        } catch { /* déjà relancée */ }
       }
       recognitionRef.current = null;
       setInterim('');
@@ -179,6 +235,8 @@ export function useDictation({ language = 'fr-FR', onTranscript, agentId }: UseD
     };
 
     recognitionRef.current = recognition;
+    finalizedCountRef.current = 0;
+    emittedBrowserTextRef.current = '';
     recognition.start();
     return true;
   }, [language]);

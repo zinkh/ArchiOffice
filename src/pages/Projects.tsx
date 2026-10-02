@@ -1,13 +1,18 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
 import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
 import { useTranslation } from 'react-i18next';
+import { OPERATION_LABELS, summarizeTemplate } from '../lib/projectTemplates';
 import { useUser } from '../UserContext';
 import { db } from '../db';
-import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
+import { queuedJsonRequest } from '../lib/offlineQueue';
+import { refreshOfflineProjects } from '../lib/offlinePrefetch';
+import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
+import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -38,6 +43,19 @@ const PROJECT_SORT_OPTIONS: { key: keyof Project; labelKey: string; type: SortTy
   { key: 'start_date', labelKey: 'projects_sort_start_date', type: 'date' },
   { key: 'end_date', labelKey: 'deadline', type: 'date' },
 ];
+
+/**
+ * Classement par défaut de la liste : les affaires ouvertes le plus
+ * récemment PAR LA PERSONNE CONNECTÉE en tête (`last_opened_at`, posé par le
+ * serveur à chaque ouverture de la fiche complète), celles jamais ouvertes
+ * ensuite, dans l'ordre où l'API les rend. Un tri explicite du sélecteur
+ * remplace ce classement.
+ */
+function compareRecentlyOpened(a: Project, b: Project): number {
+  const ta = a.last_opened_at ? new Date(a.last_opened_at).getTime() : 0;
+  const tb = b.last_opened_at ? new Date(b.last_opened_at).getTime() : 0;
+  return tb - ta;
+}
 
 const PROJECT_SORT_TYPES = new Map<keyof Project, SortType>(
   PROJECT_SORT_OPTIONS.map(option => [option.key, option.type]),
@@ -74,8 +92,24 @@ function compareProjects(a: Project, b: Project, key: keyof Project, direction: 
   return direction === 'asc' ? result : -result;
 }
 
+// Le statut d'un projet est stocké en anglais (Planning/In Progress/
+// Completed/On Hold) — ce mapping traduit l'affichage sans toucher à la
+// valeur stockée, pour ne plus le laisser fuiter tel quel à l'écran (badge
+// de fiche, filtre) à côté du <select> d'édition, qui lui passait déjà par
+// ces mêmes clés i18n.
+const PROJECT_STATUS_KEYS: Record<string, string> = {
+  Planning: 'projects_status_planning',
+  'In Progress': 'projects_status_in_progress',
+  Completed: 'projects_status_completed',
+  'On Hold': 'projects_status_on_hold',
+};
+
 export default function Projects() {
   const { t } = useTranslation();
+  const projectStatusLabel = (status: string) => {
+    const key = PROJECT_STATUS_KEYS[status];
+    return key ? t(key) : status;
+  };
   const { currentUser } = useUser();
   const [projects, setProjects] = useState<Project[]>([]);
   const [team, setTeam] = useState<any[]>([]);
@@ -89,6 +123,9 @@ export default function Projects() {
   // sans elle le nouveau contact sortait aussitôt des listes filtrées.
   const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_CLIENT);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -156,7 +193,7 @@ export default function Projects() {
       setEditForm(prev => prev ? ({ ...prev, image_url: optimizedBase64 }) : null);
     } catch (err) {
       console.error('Failed to optimize image:', err);
-      alert('Failed to process image. Please try another one.');
+      alert(t('projects_image_process_failed'));
     }
   };
 
@@ -225,7 +262,7 @@ export default function Projects() {
     const matchesCategory = filterCategory === 'All' || project.category === filterCategory;
     const matchesProjectManager = filterProjectManager === 'All' || project.project_manager === filterProjectManager;
     return matchesSearch && matchesStatus && matchesCategory && matchesProjectManager;
-  }).sort((a, b) => (sortConfig ? compareProjects(a, b, sortConfig.key, sortConfig.direction) : 0));
+  }).sort((a, b) => (sortConfig ? compareProjects(a, b, sortConfig.key, sortConfig.direction) : compareRecentlyOpened(a, b)));
 
   const projectsPagination = usePagination(filteredProjects);
 
@@ -299,6 +336,10 @@ export default function Projects() {
 
         // 4. Update UI
         if (Array.isArray(data)) setProjects(data.map((p: any) => ({ ...p, is_complete_mission: !!p.is_complete_mission })));
+        // Rafraîchit en tâche de fond le cache hors-ligne des projets cochés
+        // « disponible hors connexion » (src/lib/offlinePrefetch.ts) — jamais
+        // bloquant pour l'affichage de la liste, no-op si aucun projet coché.
+        if (Array.isArray(data)) refreshOfflineProjects(data).catch(() => {});
       } catch (err) {
         console.error(err);
         // Only surface the error if we have nothing (even stale/local) to show —
@@ -348,12 +389,30 @@ export default function Projects() {
     }
   };
 
-  const handleProjectClick = (project: Project) => {
+  // La liste (GET /api/projects) ne porte plus les cotraitants/lots/
+  // intervenants/catégories de chaque projet — voir CLAUDE.md — donc ouvrir
+  // la modale va les chercher à part, sur le seul projet ouvert, plutôt que
+  // de compter sur ce que la liste avait déjà.
+  const handleProjectClick = async (project: Project) => {
     setSelectedProject(project);
     setEditForm(project);
     setIsEditing(false);
     setIsModalOpen(true);
     fetchMilestones(project.id);
+    try {
+      const full = await fetchJson<{ project: Project }>(`/api/projects/${project.id}/full`);
+      const enriched = {
+        ...project,
+        cotraitants_list: full.project.cotraitants_list,
+        lots_list: full.project.lots_list,
+        stakeholders_list: full.project.stakeholders_list,
+        categories_list: full.project.categories_list,
+      };
+      setSelectedProject(enriched);
+      setEditForm(enriched);
+    } catch (err) {
+      console.error('Failed to fetch project relations:', err);
+    }
   };
 
   const fetchMilestones = async (projectId: string) => {
@@ -417,7 +476,7 @@ export default function Projects() {
   };
 
   const handleDeleteMilestone = async (id: string) => {
-    if (!confirm('Delete this milestone?')) return;
+    if (!confirm(t('projects_confirm_delete_milestone'))) return;
     try {
       const res = await fetch(`/api/milestones/${id}`, {
         method: 'DELETE'
@@ -467,7 +526,7 @@ export default function Projects() {
 
     // Basic validation
     if (!editForm.name.trim() || !editForm.client.trim()) {
-      alert('Project name and client are required');
+      alert(t('projects_name_client_required'));
       return;
     }
 
@@ -492,10 +551,7 @@ export default function Projects() {
       try {
         const res = await fetch(url, {
           method,
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-user-role': currentUser?.system_role || 'user'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(editForm)
         });
 
@@ -517,12 +573,13 @@ export default function Projects() {
         }
       } catch (err) {
         console.error('Failed to save project:', err);
-        alert('Failed to save project to server. It has been saved locally and will sync when online.');
+        alert(t('projects_save_server_failed'));
       }
     } else {
-      // 3. Queue for sync
-      await db.syncQueue.add({ table: 'projects', method, data: editForm });
-      alert('You are offline. Project saved locally and will sync when online.');
+      // 3. Queue for sync — rejouée par src/lib/offlineQueue.ts au retour du
+      // réseau (l'ancienne db.syncQueue n'était jamais relue par personne).
+      await queuedJsonRequest({ entity: 'project', id: editForm.id, method, url, body: editForm });
+      alert(t('projects_save_offline'));
       setIsEditing(false);
       if (isNew) setIsModalOpen(false);
     }
@@ -546,7 +603,7 @@ export default function Projects() {
   };
 
   const handleDeleteCategory = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this category?')) return;
+    if (!confirm(t('projects_confirm_delete_category'))) return;
     try {
       await apiFetch(`/api/project_categories/${id}`, { method: 'DELETE' });
       fetchCategories();
@@ -555,32 +612,29 @@ export default function Projects() {
     }
   };
 
-  const handleDeleteProject = async (id: string) => {
-    console.log('handleDeleteProject called for id:', id);
-    if (!confirm('Are you sure you want to delete this project? This action cannot be undone.')) return;
+  const deleteConfirmWord = t('projects_delete_confirm_word');
 
+  const handleDeleteProject = async (id: string) => {
+    setIsDeletingProject(true);
     try {
-      console.log('Sending DELETE request for project:', id);
-      const res = await fetch(`/api/projects/${id}`, {
-        method: 'DELETE',
-        headers: {
-          'x-user-role': currentUser?.system_role || 'user'
-        }
-      });
+      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
 
       if (res.ok) {
-        console.log('Delete successful, updating state');
         setProjects(prev => prev.filter(p => p.id !== id));
         setIsModalOpen(false);
         setSelectedProject(null);
+        setDeleteTarget(null);
+        setDeleteConfirmInput('');
       } else {
         const errorData = await res.json();
         console.error('Delete failed:', errorData.error);
-        alert(`Failed to delete project: ${errorData.error}`);
+        window.alert(t('projects_delete_failed', { error: errorData.error || '' }));
       }
     } catch (err) {
       console.error('Failed to delete project:', err);
-      alert('Failed to delete project. Please try again.');
+      window.alert(t('projects_delete_failed_retry'));
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -624,7 +678,7 @@ export default function Projects() {
             <button 
               onClick={() => setViewMode('grid')}
               className={cn(
-                "p-1.5 rounded-md transition-all",
+                "p-1.5 rounded-md transition",
                 viewMode === 'grid' ? "bg-white dark:bg-zinc-700 shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700"
               )}
             >
@@ -633,7 +687,7 @@ export default function Projects() {
             <button 
               onClick={() => setViewMode('table')}
               className={cn(
-                "p-1.5 rounded-md transition-all",
+                "p-1.5 rounded-md transition",
                 viewMode === 'table' ? "bg-white dark:bg-zinc-700 shadow-sm text-blue-600" : "text-zinc-500 hover:text-zinc-700"
               )}
             >
@@ -672,7 +726,7 @@ export default function Projects() {
             placeholder={t('search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full pl-9 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition"
             style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
@@ -685,7 +739,7 @@ export default function Projects() {
               : { border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}
           >
             <IconFilter size={16} />
-            {filterStatus === 'All' ? t('projects_filter_status') : filterStatus}
+            {filterStatus === 'All' ? t('projects_filter_status') : projectStatusLabel(filterStatus)}
           </button>
           <button
             onClick={cycleCategoryFilter}
@@ -725,7 +779,7 @@ export default function Projects() {
               id="projects-sort"
               value={sortConfig?.key ?? ''}
               onChange={(e) => changeSortKey(e.target.value)}
-              className="px-3 py-2 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+              className="px-3 py-2 rounded-lg text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500/20 transition"
               style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               <option value="">{t('projects_sort_default')}</option>
@@ -755,12 +809,9 @@ export default function Projects() {
         <ProjectCardSkeletonGrid />
       ) : projectsError && projects.length === 0 ? null : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {projectsPagination.pageItems.map((project, i) => (
+          {projectsPagination.pageItems.map(project => (
             <motion.div
               key={project.id}
-              initial={{ opacity: 0, scale: 0.97 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: i * 0.04 }}
               onClick={() => handleProjectClick(project)}
               className="rounded-lg overflow-hidden group flex flex-col cursor-pointer transition-shadow hover:shadow-md"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
@@ -773,20 +824,20 @@ export default function Projects() {
                   referrerPolicy="no-referrer"
                 />
                 <div className="absolute top-3 left-3">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
+                  <span className="px-2 py-0.5 rounded text-[0.6875rem] font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
                     #{project.project_code || '---'}
                   </span>
                 </div>
                 <div className="absolute top-3 right-3 flex flex-col gap-1.5 items-end">
-                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-md" style={
+                  <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold backdrop-blur-md" style={
                     project.status === 'In Progress' ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' } :
                     project.status === 'Completed' ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' } :
                     { background: 'rgba(255,255,255,0.85)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }
                   }>
-                    {project.status}
+                    {projectStatusLabel(project.status)}
                   </span>
                   {project.category && (
-                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold backdrop-blur-md" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}>
+                    <span className="px-2 py-0.5 rounded text-[0.6875rem] font-semibold backdrop-blur-md" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}>
                       {project.category}
                     </span>
                   )}
@@ -795,14 +846,14 @@ export default function Projects() {
               <div className="p-4 flex-1 flex flex-col">
                 <div className="flex items-start justify-between mb-2">
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-[15px] font-semibold truncate transition-colors" style={{ color: 'var(--tblr-text)' }}>{project.name}</h3>
+                    <h3 className="text-[0.9375rem] font-semibold truncate transition-colors" style={{ color: 'var(--tblr-text)' }}>{project.name}</h3>
                     <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{project.client}</p>
                   </div>
                   <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                     <Link
                       to={`/projects/${project.id}`}
                       onClick={(e) => e.stopPropagation()}
-                      className="p-1.5 rounded-lg transition-all"
+                      className="p-1.5 rounded-lg transition"
                       style={{ color: 'var(--tblr-muted)' }}
                       onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-primary)')}
                       onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
@@ -817,11 +868,11 @@ export default function Projects() {
                 </p>
                 <div className="flex items-center justify-between pt-3 mt-auto" style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <div className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
-                    <p className="font-semibold text-[13px]" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(project.budget)}</p>
+                    <p className="font-semibold text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(project.budget)}</p>
                     <p>{t('budget')}</p>
                   </div>
                   <div className="text-xs text-right" style={{ color: 'var(--tblr-muted)' }}>
-                    <p className="font-semibold text-[13px]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString()}</p>
+                    <p className="font-semibold text-[0.8125rem]" style={{ color: 'var(--tblr-text)' }}>{new Date(project.end_date).toLocaleDateString('fr-FR')}</p>
                     <p>{t('deadline')}</p>
                   </div>
                 </div>
@@ -915,10 +966,11 @@ export default function Projects() {
         {isModalOpen && selectedProject && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col"
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-hidden flex flex-col"
             >
               <div className="relative h-48 bg-zinc-100 dark:bg-zinc-800 shrink-0">
                 <img 
@@ -946,22 +998,37 @@ export default function Projects() {
                     <label className="block text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">{t('projects_use_template')}</label>
                     <select
                       className="w-full p-2 border rounded bg-white dark:bg-zinc-800"
+                      value={editForm?.template_id ?? ''}
                       onChange={e => {
                         const template = templates.find(t => t.id === e.target.value);
                         if (template) {
+                          // Le nom du modèle n'est qu'un point de départ : on ne
+                          // l'impose pas si l'architecte a déjà nommé l'affaire.
                           setEditForm(prev => prev ? ({
                             ...prev,
-                            name: template.name,
-                            description: template.default_description,
-                            budget: template.default_budget,
-                            status: template.default_status
+                            template_id: template.id,
+                            name: prev.name.trim() ? prev.name : template.name,
+                            description: template.default_description || template.description || prev.description,
+                            budget: template.default_budget || prev.budget,
+                            status: template.default_status,
+                            is_public_client: template.marche_type === 'public' ? true : prev.is_public_client,
+                            ...(template.operation_type && template.operation_type !== 'autre' ? { type_projet: OPERATION_LABELS[template.operation_type] } : {}),
                           }) : null);
+                        } else {
+                          setEditForm(prev => prev ? ({ ...prev, template_id: undefined }) : null);
                         }
                       }}
                     >
                       <option value="">{t('projects_select_template')}</option>
-                      {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      {templates.map(tpl => <option key={tpl.id} value={tpl.id}>{tpl.name}</option>)}
                     </select>
+                    {(() => {
+                      const chosen = templates.find(tpl => tpl.id === editForm?.template_id);
+                      const summary = chosen ? summarizeTemplate(chosen) : '';
+                      return summary ? (
+                        <p className="mt-2 text-xs text-blue-900 dark:text-blue-100">{t('ptpl_applied_label', { summary })}</p>
+                      ) : null;
+                    })()}
                   </div>
                 )}
                 <div className="flex items-center justify-between mb-6">
@@ -1006,10 +1073,10 @@ export default function Projects() {
                   </div>
                   <div className="flex items-center gap-2">
                     {currentUser?.system_role === 'admin' && !isEditing && (
-                      <button 
-                        onClick={() => handleDeleteProject(selectedProject.id)}
+                      <button
+                        onClick={() => { setDeleteTarget(selectedProject); setDeleteConfirmInput(''); }}
                         className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                        title="Delete Project"
+                        title={t('projects_delete_title')}
                       >
                         <IconTrash size={20} />
                       </button>
@@ -1074,7 +1141,7 @@ export default function Projects() {
                               onChange={handleImageUpload}
                             />
                           </label>
-                          <p className="text-[10px] text-zinc-500 mt-2">{t('projects_image_hint')}</p>
+                          <p className="text-[0.6875rem] text-zinc-500 mt-2">{t('projects_image_hint')}</p>
                         </div>
                       </div>
                     </div>
@@ -1099,7 +1166,7 @@ export default function Projects() {
                         selectedProject.status === 'Completed' ? "bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800" :
                         "bg-zinc-50 dark:bg-zinc-900/30 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800"
                       )}>
-                        {selectedProject.status}
+                        {projectStatusLabel(selectedProject.status)}
                       </div>
                     )}
                   </div>
@@ -1143,7 +1210,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, start_date: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.start_date).toLocaleDateString()}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.start_date).toLocaleDateString('fr-FR')}</p>
                     )}
                   </div>
                   <div className="space-y-1">
@@ -1156,7 +1223,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, end_date: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.end_date).toLocaleDateString()}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.end_date).toLocaleDateString('fr-FR')}</p>
                     )}
                   </div>
 
@@ -1184,7 +1251,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, construction_cost: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.construction_cost || 0)}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.construction_cost)}</p>
                     )}
                   </div>
 
@@ -1198,7 +1265,7 @@ export default function Projects() {
                         onChange={e => setEditForm(prev => prev ? ({...prev, remuneration: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.remuneration || 0)}</p>
+                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.remuneration)}</p>
                     )}
                   </div>
 
@@ -1239,7 +1306,8 @@ export default function Projects() {
                   <div className="space-y-1">
                     <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_cotraitants_table')}</label>
                     <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
+                      <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
                         <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                           <tr>
                             <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_specialty_label')}</th>
@@ -1318,6 +1386,7 @@ export default function Projects() {
                           )}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </div>
                   <div className="space-y-1">
@@ -1439,7 +1508,8 @@ export default function Projects() {
                       )}
                     </div>
                     <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
-                      <table className="w-full text-sm">
+                      <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
                         <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
                           <tr>
                             <th className="px-3 py-2 text-left font-medium text-zinc-500 w-16">{t('projects_num_short')}</th>
@@ -1526,6 +1596,7 @@ export default function Projects() {
                           )}
                         </tbody>
                       </table>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1540,15 +1611,25 @@ export default function Projects() {
                 {(selectedProject.address || (isEditing && editForm?.address)) && (
                   <div className="mt-6">
                     <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2 block">{t('projects_location_label')}</label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
-                      <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-full">
-                        <InfoPanelBoundary label="Cadastre"><GeoportailMap address={isEditing ? editForm?.address || '' : selectedProject.address || ''} /></InfoPanelBoundary>
-                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
-                      </div>
-                      <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-full">
-                        <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={isEditing ? editForm?.address || '' : selectedProject.address || ''} /></InfoPanelBoundary>
-                        <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_google_maps_label')}</div>
-                      </div>
+                    <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-[400px]">
+                      <InfoPanelBoundary label="Cadastre">
+                        <GeoportailMap
+                          address={isEditing ? editForm?.address || '' : selectedProject.address || ''}
+                          onParcelSelect={isEditing ? (parcel: CadastreParcel) => {
+                            const reference = [
+                              parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
+                              parcel.section,
+                              parcel.numero,
+                            ].filter(Boolean).join(' ');
+                            setEditForm(prev => prev ? ({
+                              ...prev,
+                              ref_cadastrale: reference || prev.ref_cadastrale,
+                              surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                            }) : null);
+                          } : undefined}
+                        />
+                      </InfoPanelBoundary>
+                      <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
                     </div>
                   </div>
                 )}
@@ -1568,7 +1649,7 @@ export default function Projects() {
                     <div className="bg-zinc-50 dark:bg-zinc-900/50 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800 mb-4 space-y-3">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="col-span-2">
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_milestone_title_label')}</label>
+                          <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_milestone_title_label')}</label>
                           <input
                             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
                             placeholder={t('projects_milestone_example')}
@@ -1577,7 +1658,7 @@ export default function Projects() {
                           />
                         </div>
                         <div>
-                          <label className="text-[10px] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_due_date_label')}</label>
+                          <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_due_date_label')}</label>
                           <input 
                             type="date"
                             className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
@@ -1609,7 +1690,7 @@ export default function Projects() {
                         <div 
                           key={milestone.id}
                           className={cn(
-                            "flex items-center justify-between p-3 rounded-xl border transition-all",
+                            "flex items-center justify-between p-3 rounded-xl border transition",
                             milestone.completed 
                               ? "bg-green-50/30 dark:bg-green-900/10 border-green-100 dark:border-green-900/30 opacity-75" 
                               : "bg-white dark:bg-zinc-800 border-zinc-100 dark:border-zinc-700"
@@ -1632,9 +1713,9 @@ export default function Projects() {
                               )}>
                                 {milestone.title}
                               </p>
-                              <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+                              <div className="flex items-center gap-1 text-[0.6875rem] text-zinc-400">
                                 <IconCalendar size={10} />
-                                <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString()}</span>
+                                <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString('fr-FR')}</span>
                               </div>
                             </div>
                           </div>
@@ -1661,53 +1742,109 @@ export default function Projects() {
       </AnimatePresence>
 
       {/* Category Management Modal */}
-      {isCategoryModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90vh] overflow-hidden flex flex-col"
-          >
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>
-              <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
-                ✕
-              </button>
-            </div>
-            <div className="p-6 flex-1 overflow-y-auto">
-              <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
-                <input 
-                  className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
-                  placeholder={t('projects_new_domain_placeholder')}
-                  value={newCategoryName}
-                  onChange={e => setNewCategoryName(e.target.value)}
-                />
-                <button 
-                  type="submit"
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  {t('btn_add')}
+      <AnimatePresence>
+        {isCategoryModalOpen && (
+          <motion.div key="project-category-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div 
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
+                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>
+                <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
+                  ✕
                 </button>
-              </form>
-              <div className="space-y-2">
-                {categories.map(cat => (
-                  <div key={cat.id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
-                    <span className="text-zinc-700 dark:text-zinc-300">{cat.name}</span>
-                    <button 
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      className="text-zinc-400 hover:text-red-500 transition-colors"
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  </div>
-                ))}
               </div>
-            </div>
+              <div className="p-6 flex-1 overflow-y-auto">
+                <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
+                  <input 
+                    className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
+                    placeholder={t('projects_new_domain_placeholder')}
+                    value={newCategoryName}
+                    onChange={e => setNewCategoryName(e.target.value)}
+                  />
+                  <button 
+                    type="submit"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    {t('btn_add')}
+                  </button>
+                </form>
+                <div className="space-y-2">
+                  {categories.map(cat => (
+                    <div key={cat.id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
+                      <span className="text-zinc-700 dark:text-zinc-300">{cat.name}</span>
+                      <button 
+                        onClick={() => handleDeleteCategory(cat.id)}
+                        className="text-zinc-400 hover:text-red-500 transition-colors"
+                      >
+                        <IconTrash size={16} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
-      <ContactModal 
+      {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
+      <AnimatePresence>
+        {deleteTarget && (
+          <motion.div key="project-delete-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+            <motion.div
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-700">
+                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('projects_delete_confirm_title')}</h3>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                  {t('projects_delete_confirm_body', { name: deleteTarget.name })}
+                </p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
+                  {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
+                </p>
+                <input
+                  autoFocus
+                  className="mt-3 w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-zinc-900 dark:text-white"
+                  value={deleteConfirmInput}
+                  onChange={e => setDeleteConfirmInput(e.target.value)}
+                  placeholder={deleteConfirmWord}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
+                      handleDeleteProject(deleteTarget.id);
+                    }
+                  }}
+                />
+              </div>
+              <div className="p-6 pt-4 flex justify-end gap-2">
+                <button
+                  onClick={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
+                >
+                  {t('btn_cancel')}
+                </button>
+                <button
+                  disabled={deleteConfirmInput.trim().toLowerCase() !== deleteConfirmWord.toLowerCase() || isDeletingProject}
+                  onClick={() => handleDeleteProject(deleteTarget.id)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <ContactModal
         isOpen={isContactModalOpen}
         initialCategory={contactModalCategory}
         onClose={() => setIsContactModalOpen(false)}

@@ -26,18 +26,233 @@ import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthSt
 import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
-  mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
-  zohoInvoiceToLocalRow,
+  mapZohoStatus, zohoDate, zohoLineItems, zohoItemIdentity, localInvoicesByZohoId, isRateLimited,
+  zohoInvoiceToLocalRow, flagInvoicesDeletedUpstream, type ZohoAffaireInfo,
 } from '../zohoSync';
+import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
+
+/**
+ * A Zoho Invoice contact payload from our own client info — shared by the
+ * per-invoice push (pushInvoiceToZohoInvoice) and the bulk backlog push
+ * (getOrCreateZohoCustomer below), so a customer created either way carries
+ * the same mentions. Zoho Invoice's contact object has no native French
+ * SIRET field, so it's recorded in `notes` — still visible on the contact
+ * record in Zoho, rather than silently dropped.
+ */
+function buildZohoContactPayload(info: ClientContactInfo) {
+  const hasAddress = !!(info.address || info.city || info.zip || info.country);
+  return {
+    contact_name: info.name,
+    company_name: info.name,
+    contact_type: 'customer',
+    email: info.email || undefined,
+    phone: info.phone || undefined,
+    billing_address: hasAddress ? {
+      address: info.address || undefined, city: info.city || undefined,
+      zip: info.zip || undefined, country: info.country || undefined,
+    } : undefined,
+    notes: info.siret ? `SIRET : ${info.siret}` : undefined,
+  };
+}
+
+/**
+ * Retrouve ou crée l'« article » (Items) Zoho correspondant à une ligne de
+ * facture ArchiOffice — pour que la ligne facturée soit réellement inscrite
+ * au catalogue d'articles du cabinet dans Zoho, et pas seulement une ligne
+ * libre propre à cette facture. Recherché par nom exact avant création,
+ * comme getOrCreateZohoCustomer ci-dessous : une même ligne réutilisée sur
+ * la même affaire (un second acompte, par exemple) retrouve et réutilise le
+ * même article.
+ *
+ * Best-effort à dessein : un article est un ajout, pas une condition à la
+ * facturation — un échec (réseau, quota, nom déjà pris par un article que le
+ * filtre par nom exact n'aurait pas reconnu) ne doit jamais faire échouer la
+ * facture elle-même. `undefined` renvoyé ici laisse la ligne repartir libre,
+ * exactement comme avant l'introduction des articles.
+ */
+async function getOrCreateZohoItem(apiBase: string, headers: any, name: string, description: string | undefined, rate: number): Promise<string | undefined> {
+  try {
+    const search = await axios.get(`${apiBase}/items`, {
+      headers, params: { name, per_page: ZOHO_PAGE_SIZE }, timeout: ZOHO_TIMEOUT_MS,
+    });
+    const match = (search.data?.items || []).find(
+      (it: any) => typeof it?.name === 'string' && it.name.trim() === name.trim(),
+    );
+    if (match) return match.item_id;
+    const create = await axios.post(`${apiBase}/items`, { name, description, rate }, { headers, timeout: ZOHO_TIMEOUT_MS });
+    return create.data?.item?.item_id;
+  } catch (err: any) {
+    console.error('[getOrCreateZohoItem]', err.response?.data ?? err.message);
+    return undefined;
+  }
+}
+
+/**
+ * Les lignes de zohoLineItems, chacune reliée à son article Zoho (`item_id`)
+ * quand la résolution réussit — le numéro/nom d'affaire vit dans le nom de
+ * l'article, l'adresse dans sa description (zohoItemIdentity), tandis que le
+ * montant/la quantité/la TVA de LA FACTURE restent portés par la ligne
+ * elle-même : `item_id` fixe l'article facturé, il ne fige pas son prix.
+ */
+async function buildZohoLineItemsWithArticles(apiBase: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
+  const lines = zohoLineItems(inv);
+  return Promise.all(lines.map(async (line) => {
+    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const item_id = await getOrCreateZohoItem(apiBase, headers, name, description, line.rate);
+    return item_id ? { ...line, item_id } : line;
+  }));
+}
+
+/** Best-effort: a contact that vanished or errors out just falls back to the bare name on the invoice. */
+async function fetchZohoContactDetail(apiBase: string, headers: any, contactId: string | undefined): Promise<any | null> {
+  if (!contactId) return null;
+  try {
+    const resp = await axios.get(`${apiBase}/contacts/${contactId}`, { headers, timeout: ZOHO_TIMEOUT_MS });
+    return resp.data?.contact || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Zoho's contact detail has no native SIRET field either (see
+ * buildZohoContactPayload above) — read back from the same `notes`
+ * convention this integration writes on push, so a round trip (push then
+ * pull, or a contact a human typed the SIRET into by hand the same way)
+ * doesn't lose it.
+ */
+function zohoContactToClientInfo(contact: any, fallbackName: string): ClientContactInfo {
+  const addr = contact?.billing_address || {};
+  const notesSiret = typeof contact?.notes === 'string' ? contact.notes.match(/SIRET\s*:\s*(\S+)/i)?.[1] : undefined;
+  return {
+    name: contact?.contact_name || contact?.company_name || fallbackName,
+    email: contact?.email || undefined,
+    phone: contact?.phone || contact?.mobile || undefined,
+    address: addr.address || undefined,
+    city: addr.city || undefined,
+    zip: addr.zip || undefined,
+    country: addr.country || undefined,
+    siret: notesSiret,
+  };
+}
+
+/**
+ * The local contact a pulled Zoho invoice's customer resolves to — matched
+ * or created via resolveOrCreateContactFromExternal. One extra Zoho call
+ * (contact detail), only for a customer this pull hasn't resolved yet.
+ */
+async function resolveZohoCustomerAsLocalContact(
+  apiBase: string, headers: any, supabaseAdmin: any, tenantId: string,
+  customerId: string | undefined, customerName: string | undefined,
+): Promise<string | null> {
+  if (!customerId && !customerName) return null;
+  const detail = await fetchZohoContactDetail(apiBase, headers, customerId);
+  const info = zohoContactToClientInfo(detail, customerName || '');
+  return resolveOrCreateContactFromExternal(supabaseAdmin, tenantId, info);
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
-export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+/**
+ * Pushes ONE invoice to Zoho Invoice at creation time, for
+ * server/invoiceAccountingSync.ts — distinct from the bulk `/api/zoho/sync`
+ * loop above (which pushes a backlog and has its own rate-limit/pagination
+ * concerns). No token cache here: this runs at most once per invoice
+ * creation, not per sync run, so the extra token refresh is not worth the
+ * cross-request cache's staleness/leak surface (see the module header on
+ * why that cache is keyed by tenant).
+ *
+ * Idempotent by construction: `reference_number` carries the caller's
+ * `idempotencyKey` (the local invoice id), and Zoho invoices are searched by
+ * it before creating — a retry after a lost response (network cut after
+ * Zoho accepted the invoice but before we read the reply) finds and reuses
+ * the same Zoho invoice instead of creating a second one.
+ */
+export async function pushInvoiceToZohoInvoice(
+  supabaseAdmin: any,
+  tenantId: string,
+  inv: any,
+  idempotencyKey: string,
+): Promise<{ external_id: string; invoice_number: string; status: string }> {
+  const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+  const s = settings as any;
+  if (!s?.zoho_refresh_token) throw new Error('Zoho Invoice non connecté');
+
+  const dc = s.zoho_data_center || 'com';
+  const params = new URLSearchParams({
+    refresh_token: decryptSecretMaybe(s.zoho_refresh_token),
+    client_id: s.zoho_client_id,
+    client_secret: s.zoho_client_secret,
+    grant_type: 'refresh_token',
+  });
+  const tokenResp = await axios.post(
+    `https://accounts.zoho.${dc}/oauth/v2/token`, params.toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: ZOHO_TIMEOUT_MS },
+  );
+  const accessToken = tokenResp.data?.access_token;
+  if (!accessToken) throw new Error(`Échec du rafraîchissement du jeton Zoho${tokenResp.data?.error ? ` (${tokenResp.data.error})` : ''}`);
+
+  const apiBase = `https://invoice.zoho.${dc}/api/v3`;
+  const headers = {
+    Authorization: `Zoho-oauthtoken ${accessToken}`,
+    'X-com-zoho-invoice-organizationid': s.zoho_org_id,
+    'Content-Type': 'application/json',
+  };
+
+  // Idempotency check: an invoice already carrying this reference_number
+  // means a previous attempt succeeded on Zoho's side even if we never saw
+  // the response — reuse it rather than create a duplicate.
+  const existing = await axios.get(`${apiBase}/invoices`, {
+    headers, params: { reference_number: idempotencyKey, per_page: 1 }, timeout: ZOHO_TIMEOUT_MS,
+  });
+  const already = (existing.data?.invoices || [])[0];
+  if (already) {
+    return { external_id: already.invoice_id, invoice_number: already.invoice_number, status: mapZohoStatus(already.status) || 'Draft' };
+  }
+
+  // The invoice's Maître d'Ouvrage, resolved from invoices.client_id (or its
+  // project's client) — falls back to the old bare-name behaviour only when
+  // neither the invoice nor its project has a contact at all, so an invoice
+  // that predates client_id (or a general one with no contact chosen) still
+  // pushes rather than failing outright.
+  const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+  const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+  const search = await axios.get(`${apiBase}/contacts`, {
+    headers, params: { contact_name: customerName, per_page: ZOHO_PAGE_SIZE }, timeout: ZOHO_TIMEOUT_MS,
+  });
+  const match = (search.data.contacts || []).find(
+    (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === customerName.trim(),
+  );
+  const customerId = match
+    ? match.contact_id
+    : (await axios.post(
+        `${apiBase}/contacts`,
+        buildZohoContactPayload(clientInfo || { name: customerName }),
+        { headers, timeout: ZOHO_TIMEOUT_MS },
+      )).data.contact.contact_id;
+
+  const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
+  const payload: any = {
+    customer_id: customerId,
+    reference_number: idempotencyKey,
+    date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
+    due_date: zohoDate(inv.due_date),
+    line_items: await buildZohoLineItemsWithArticles(apiBase, headers, inv, affaire),
+    notes: inv.description || undefined,
+  };
+  const resp = await axios.post(`${apiBase}/invoices`, payload, { headers, timeout: ZOHO_TIMEOUT_MS });
+  const created = resp.data?.invoice;
+  if (!created?.invoice_id) throw new Error(resp.data?.message || 'Création Zoho échouée');
+  return { external_id: created.invoice_id, invoice_number: created.invoice_number, status: mapZohoStatus(created.status) || 'Draft' };
+}
+
+export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // Keyed by tenantId — this cache is shared by every request the process
   // handles across every tenant. A single unkeyed value here previously meant
   // whichever tenant refreshed last "won" the cache for up to an hour: any
@@ -77,18 +292,18 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     return access_token;
   }
 
-  async function getOrCreateZohoCustomer(apiBase: string, headers: any, name: string): Promise<string> {
+  async function getOrCreateZohoCustomer(apiBase: string, headers: any, info: ClientContactInfo): Promise<string> {
     // contact_name_contains matched substrings, so an invoice for "Dupont" bound
     // itself to an existing "Dupont-Martin" — the wrong client, silently, and
     // permanently once the invoice carried that contact_id. Ask Zoho for the
     // exact name and verify it, since contact_name is what we'd create anyway.
     const search = await axios.get(`${apiBase}/contacts`, {
       headers,
-      params: { contact_name: name, per_page: ZOHO_PAGE_SIZE },
+      params: { contact_name: info.name, per_page: ZOHO_PAGE_SIZE },
       timeout: ZOHO_TIMEOUT_MS,
     });
     const match = (search.data.contacts || []).find(
-      (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === name.trim(),
+      (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === info.name.trim(),
     );
     if (match) return match.contact_id;
 
@@ -96,10 +311,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
     // meant a transient Zoho error created a duplicate contact every time it
     // happened. Letting it throw fails this one invoice and leaves the next
     // sync able to find the contact that already exists.
-    const create = await axios.post(`${apiBase}/contacts`, {
-      contact_name: name,
-      contact_type: 'customer'
-    }, { headers, timeout: ZOHO_TIMEOUT_MS });
+    const create = await axios.post(`${apiBase}/contacts`, buildZohoContactPayload(info), { headers, timeout: ZOHO_TIMEOUT_MS });
     return create.data.contact.contact_id;
   }
 
@@ -112,7 +324,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         connected: !!(settings as any)?.zoho_refresh_token,
         has_credentials: !!((settings as any)?.zoho_client_id && (settings as any)?.zoho_client_secret && (settings as any)?.zoho_org_id),
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[GET /api/zoho/status]", error);
       res.status(500).json({ error: 'Failed to get Zoho status' });
     }
@@ -137,7 +349,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
   // to the returned URL itself.
   app.get('/api/zoho/auth', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_client_id || !(settings as any)?.zoho_client_secret || !(settings as any)?.zoho_org_id) {
         return res.status(400).json({ error: 'Veuillez d\'abord enregistrer vos identifiants Zoho dans les Paramètres.' });
@@ -155,9 +367,9 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       // One-time nonce mapping back to this tenant — see server/oauthState.ts.
       authUrl.searchParams.set('state', await createOAuthState(tenantId));
       res.json({ url: authUrl.toString() });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[GET /api/zoho/auth]", error);
-      res.status(500).json({ error: 'Erreur lors de la connexion à Zoho' });
+      res.status(error.status || 500).json({ error: 'Erreur lors de la connexion à Zoho' });
     }
   });
 
@@ -219,22 +431,22 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
   // DELETE /api/zoho/disconnect
   app.delete('/api/zoho/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       zohoAccessTokenCache.delete(tenantId);
       await supabaseAdmin.from('settings').update({ zoho_refresh_token: null }).eq('tenant_id', tenantId);
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Zoho', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
-    } catch (error) {
+    } catch (error: any) {
       console.error("[DELETE /api/zoho/disconnect]", error);
-      res.status(500).json({ error: 'Failed to disconnect Zoho' });
+      res.status(error.status || 500).json({ error: 'Failed to disconnect Zoho' });
     }
   });
 
   // POST /api/zoho/sync  — bidirectional sync
   app.post('/api/zoho/sync', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_refresh_token) {
         return res.status(400).json({ error: 'Zoho non connecté. Veuillez vous connecter dans les Paramètres.' });
@@ -252,10 +464,11 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       const errors: string[] = [];
       let pushed = 0;
       let pulled = 0;
+      let deletedUpstream = 0;
 
       // 1. Push local invoices not yet in Zoho
       const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
-        .from('invoices').select('*, projects(name)').eq('tenant_id', tenantId)
+        .from('invoices').select('*, projects(name, project_code, address)').eq('tenant_id', tenantId)
         .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
       // A failed query (e.g. a column PostgREST doesn't recognise — this table
       // was missing zoho_invoice_id in production for a while, see
@@ -263,7 +476,10 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
       // treated as "no invoices to push", which let a completely broken sync
       // report success. Throw instead.
       if (localInvoicesErr) throw new Error(`Lecture des factures locales échouée: ${localInvoicesErr.message}`);
-      const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
+      const invoicesArr = (localInvoices || []).map((inv: any) => ({
+        ...inv, project_name: inv.projects?.name || null,
+        project_code: inv.projects?.project_code || null, project_address: inv.projects?.address || null,
+      }));
       // Bounded per run: the browser is waiting on this request, and each push
       // costs up to 3 Zoho calls. Each id is persisted as it goes, so the next
       // sync picks up exactly where this one stopped.
@@ -272,14 +488,16 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
 
       for (const inv of toPush) {
         try {
-          const customerName = inv.project_name || inv.description || 'Client';
-          const customerId = await getOrCreateZohoCustomer(apiBase, headers, customerName);
+          const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+          const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+          const customerId = await getOrCreateZohoCustomer(apiBase, headers, clientInfo || { name: customerName });
 
+          const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
           const payload: any = {
             customer_id: customerId,
             date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
             due_date: zohoDate(inv.due_date),
-            line_items: zohoLineItems(inv),
+            line_items: await buildZohoLineItemsWithArticles(apiBase, headers, inv, affaire),
             notes: inv.description || undefined,
           };
           if (inv.invoice_number) payload.invoice_number = inv.invoice_number;
@@ -309,6 +527,11 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
         // tenant past 200 invoices in Zoho silently stopped receiving status
         // updates for everything after the first page.
         const zohoInvoices: any[] = [];
+        // Ne vaut « liste complète » que si la dernière page dit elle-même
+        // qu'il n'y en a plus — sinon le plafond a coupé la pagination avant
+        // la fin, et un id absent de ce lot ne veut rien dire (voir
+        // flagInvoicesDeletedUpstream, server/zohoSync.ts).
+        let fullyFetched = false;
         for (let page = 1; page <= ZOHO_MAX_PULL_PAGES; page++) {
           const resp = await axios.get(`${apiBase}/invoices`, {
             headers,
@@ -316,7 +539,7 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
             timeout: ZOHO_TIMEOUT_MS,
           });
           zohoInvoices.push(...(resp.data?.invoices || []));
-          if (!resp.data?.page_context?.has_more_page) break;
+          if (!resp.data?.page_context?.has_more_page) { fullyFetched = true; break; }
         }
 
         // One query for the whole batch instead of one per Zoho invoice.
@@ -332,8 +555,17 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
             // skip these (`continue`), so nothing already sitting in Zoho at
             // connection time ever showed up in ArchiOffice — only invoices
             // pushed FROM here and then re-pulled came back with status updates.
+            //
+            // The customer isn't just a name here: without a matching or new
+            // local contact, an imported invoice would carry no Maître
+            // d'Ouvrage identity at all — no SIRET, address or phone, and no
+            // way to attach one short of typing it by hand. One extra call
+            // per genuinely new customer (never per invoice already known)
+            // fetches the full Zoho contact so the local one is created with
+            // real legal details instead of a bare name.
+            const clientId = await resolveZohoCustomerAsLocalContact(apiBase, headers, supabaseAdmin, tenantId, zohoInv.customer_id, zohoInv.customer_name);
             const { error: importErr } = await supabaseAdmin
-              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId));
+              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId, clientId));
             if (importErr) {
               console.error("[POST /api/zoho/sync] import", importErr);
               errors.push(`Import échoué (${zohoInv.invoice_number || zohoInv.invoice_id}): ${importErr.message}`);
@@ -348,19 +580,31 @@ export function registerZohoInvoiceRoutes(app: Express, { supabaseAdmin, getTena
             pulled++;
           }
         }
+
+        // Une facture supprimée côté Zoho disparaît simplement de cette
+        // liste — sans ce passage, la ligne locale restait figée à son
+        // dernier statut connu pour toujours, sans que rien ne le signale.
+        // Seulement quand la pagination a couvert la liste entière : un
+        // plafond atteint en cours de route ne dit rien sur les pages
+        // restantes.
+        if (fullyFetched) {
+          deletedUpstream = await flagInvoicesDeletedUpstream(
+            supabaseAdmin, tenantId, zohoInvoices.map((z: any) => z.invoice_id),
+          );
+        }
       } catch (err: any) {
         console.error("[POST /api/zoho/sync]", err);
         errors.push(`Récupération échouée: ${err.response?.data?.message || err.message}`);
       }
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho (${pushed} envoyée(s), ${pulled} reçue(s)${deletedUpstream ? `, ${deletedUpstream} signalée(s) supprimée(s) côté Zoho` : ''})`, '', tenantId, 'integration', 'Intégrations');
       // `remaining` lets the UI say another run is needed instead of leaving the
       // user to guess why not everything went across.
-      res.json({ pushed, pulled, remaining, errors });
+      res.json({ pushed, pulled, deletedUpstream, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho sync error]', error.message);
-      res.status(500).json({ error: error.message || 'Sync échouée' });
+      res.status(error.status || 500).json({ error: error.message || 'Sync échouée' });
     }
   });
 }

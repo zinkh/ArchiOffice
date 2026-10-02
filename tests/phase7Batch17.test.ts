@@ -153,11 +153,42 @@ describe('Agency setup', () => {
     expect(fakeSupabaseAdmin.getTable('settings').find(s => s.tenant_id === tenantId)?.agency_name).toBe('Nouveau Cabinet');
   });
 
-  it('refuses to create a second agency for an already-attached account', async () => {
-    const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+  // Un architecte qui monte une seconde structure reste la même personne :
+  // le second cabinet s'ajoute au premier, il ne le remplace pas, et c'est
+  // le nouveau qui devient celui sur lequel la session travaille.
+  it('creates a second agency for an already-attached account', async () => {
+    const firstTenantId = makeTenant();
+    const { token, userId } = makeUser(firstTenantId);
     const res = await request(app).post('/api/agency-setup/create').set(authHeader(token)).send({ agencyName: 'Autre Cabinet' });
-    expect(res.status).toBe(409);
+    expect(res.status).toBe(200);
+    const secondTenantId = res.body.tenantId;
+    expect(secondTenantId).not.toBe(firstTenantId);
+
+    const memberships = fakeSupabaseAdmin.getTable('tenant_memberships').filter(m => m.user_id === userId);
+    expect(memberships.map(m => m.tenant_id).sort()).toEqual([firstTenantId, secondTenantId].sort());
+    expect(memberships.find(m => m.tenant_id === secondTenantId)?.is_default).toBe(true);
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.tenant_id).toBe(secondTenantId);
+  });
+
+  // Le demandeur lit « votre demande a été transmise à l'administrateur » :
+  // encore faut-il qu'elle lui parvienne. `profiles.email` est vide pour un
+  // compte né d'une inscription ou d'une connexion Google — l'adresse ne vit
+  // alors que dans auth.users — et la notification ne partait à personne.
+  it('prévient l\'administrateur dans l\'application, même sans email sur son profil', async () => {
+    const targetTenantId = makeTenant({ name: 'Cabinet Sans Email' });
+    const { userId: adminId } = makeUser(targetTenantId, 'admin');
+    const adminProfile = fakeSupabaseAdmin.getTable('profiles').find(p => p.id === adminId)!;
+    adminProfile.email = null;
+
+    const { token } = makeTenantlessUser();
+    const res = await request(app).post('/api/agency-setup/join').set(authHeader(token))
+      .send({ tenantId: targetTenantId });
+    expect(res.status).toBe(200);
+
+    const notifications = fakeSupabaseAdmin.getTable('notification_outbox').filter(n => n.user_id === adminId);
+    expect(notifications).toHaveLength(1);
+    // Le lien mène là où la demande se valide.
+    expect(notifications[0].url).toBe('/team');
   });
 
   it('files a join request against an existing tenant', async () => {

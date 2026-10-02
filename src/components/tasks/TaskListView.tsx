@@ -67,12 +67,12 @@ export function TaskListView({ tasks, projects, team, onOpen, onStatusChange, em
   ];
 
   if (sorted.length === 0) {
-    return <p className="text-[13px] text-center py-10" style={{ color: 'var(--tblr-muted)' }}>{emptyLabel || t('kanban_empty')}</p>;
+    return <p className="text-[0.8125rem] text-center py-10" style={{ color: 'var(--tblr-muted)' }}>{emptyLabel || t('kanban_empty')}</p>;
   }
 
   return (
     <div className="overflow-x-auto rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-      <table className="w-full text-sm">
+      <table className="min-w-full text-sm">
         <thead>
           <tr style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             {columns.map(col => {

@@ -37,7 +37,20 @@ function toMistralMessages(system: string | undefined, messages: LlmMessage[]): 
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      out.push({ role: 'user', content: msg.content });
+      if (!msg.images || msg.images.length === 0) {
+        out.push({ role: 'user', content: msg.content });
+        continue;
+      }
+      // Une image jointe part en data URI dans `image_url` — une chaîne
+      // simple (pas un objet {url: ...} comme chez OpenAI), voir
+      // docs.mistral.ai/studio/conversations/vision. Le texte d'abord, comme
+      // dans l'exemple de cette doc.
+      const content: any[] = [];
+      if (msg.content) content.push({ type: 'text', text: msg.content });
+      for (const img of msg.images) {
+        content.push({ type: 'image_url', image_url: `data:${img.mimeType};base64,${img.data.toString('base64')}` });
+      }
+      out.push({ role: 'user', content });
       continue;
     }
 
@@ -95,6 +108,22 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
   return {
     id: 'mistral',
     model,
+    // Les trois alias -latest du catalogue (mistral-large/medium/small)
+    // pointent vers des versions vision-capables (Large 3, Medium 3.1,
+    // Small 3.2 — docs.mistral.ai/studio/conversations/vision) : contrairement
+    // à ce qu'on pensait au moment d'ajouter cette capacité (seul Pixtral
+    // saurait lire une image), Mistral l'a depuis étendue à sa gamme
+    // généraliste. À revoir si un -latest change de version sous-jacente
+    // sans le redevenir.
+    supportsVision: true,
+    // Pas de supportsWebSearch : `web_search`/`web_search_premium` de Mistral
+    // ne fonctionnent qu'avec son API Conversations (/v1/conversations), pas
+    // avec l'endpoint Chat Completions que cet adaptateur appelle — la
+    // réponse de Chat Completions ne porte pas les références de résultat de
+    // recherche que ces tools renvoient (docs.mistral.ai/studio/agents/agent-
+    // tools#websearch). routes.ts n'envoie donc jamais `webSearch: true` à ce
+    // fournisseur ; web_search_enabled reste sans effet tant qu'un cabinet
+    // fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
     async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {

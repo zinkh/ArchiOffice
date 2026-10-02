@@ -57,6 +57,32 @@ export default defineConfig(({mode}) => {
           scope: '/',
           start_url: '/',
           orientation: 'portrait-primary',
+          share_target: {
+            action: '/share-target',
+            method: 'POST',
+            enctype: 'multipart/form-data',
+            params: {
+              title: 'title',
+              text: 'text',
+              url: 'url',
+              files: [
+                {
+                  name: 'files',
+                  accept: [
+                    'image/*',
+                    'application/pdf',
+                    'text/plain',
+                    'text/csv',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/zip',
+                  ],
+                },
+              ],
+            },
+          },
           icons: [
             { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
             { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
@@ -82,7 +108,14 @@ export default defineConfig(({mode}) => {
           // Using NetworkOnly would still intercept the request and emit a
           // "no-response" SW error when the network fails; no registered route
           // means the browser handles /api/ natively with its own error path.
-          navigateFallbackDenylist: [/^\/api\//],
+          // /auth/ is excluded for a different reason: OAuth popup callbacks
+          // (src/pages/GoogleAuthCallback.tsx) MUST hit the live server on
+          // every navigation — the navigateFallback precache response was
+          // observed serving a stale cached document (and stale bundled JS)
+          // for this route, silently keeping a popup on a pre-fix version no
+          // matter how many times the server and client code were fixed and
+          // redeployed, since the browser never even asked the network.
+          navigateFallbackDenylist: [/^\/api\//, /^\/auth\//],
           runtimeCaching: [
             {
               urlPattern: /^https:\/\/fonts\.googleapis\.com\//,

@@ -12,6 +12,7 @@
 // tenant before inserting the link row.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
@@ -50,10 +51,27 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { lot_id, contact_id, texte, statut, due_date, created_report_id, type, urgence } = req.body;
+      const { id: bodyId, lot_id, contact_id, texte, statut, due_date, created_report_id, type, urgence } = req.body;
+      // Id fourni par le client (file de synchro hors-ligne) : rejouer la
+      // même création après une coupure réseau ne doit ni créer une seconde
+      // observation, ni consommer un second numéro dans la séquence du projet.
+      if (bodyId) {
+        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('*').eq('id', bodyId).maybeSingle();
+        if (existing) return res.status(200).json(existing);
+      }
+      if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
+        return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
+      }
+      if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      if (created_report_id) {
+        const { data: report } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').select('project_id').eq('id', created_report_id).maybeSingle();
+        if (!report || (report as any).project_id !== projectId) return res.status(400).json({ error: "Compte rendu introuvable pour cette opération." });
+      }
       const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
       const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
-      const id = `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const id = bodyId || `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert({
         id, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
         texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
@@ -78,6 +96,15 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { lot_id, contact_id, texte, statut, due_date, resolved_report_id, type, urgence, photos } = req.body;
+      if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
+        return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
+      }
+      if (contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+      if (statut === 'Levée' && resolved_report_id && !(await assertTenantEntity(supabaseAdmin, 'site_reports', resolved_report_id, tenantId))) {
+        return res.status(400).json({ error: "Compte rendu introuvable pour ce cabinet." });
+      }
       const update: any = {};
       if (lot_id !== undefined) update.lot_id = lot_id || null;
       if (contact_id !== undefined) update.contact_id = contact_id || null;
@@ -112,11 +139,23 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       }
       const { data: obs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('photos').eq('id', id).maybeSingle();
       if (!obs) return res.status(404).json({ error: "Observation not found" });
+      // Id fourni par le client (file de synchro hors-ligne). Les photos
+      // d'observation vivent dans un simple tableau d'URL (`photos:
+      // text[]`), pas une table dédiée avec sa propre clé — l'idempotence
+      // se fait donc en reconnaissant l'id dans le chemin de stockage déjà
+      // posé plus bas (`${photoId}-${nomFichier}`) : un envoi rejoué après
+      // coupure réseau retrouve la photo déjà déposée au lieu de la reposer
+      // une seconde fois.
+      const clientPhotoId = typeof req.body?.id === 'string' && req.body.id ? req.body.id : null;
+      const existingPhotos: string[] = (obs as any).photos || [];
+      if (clientPhotoId && existingPhotos.some(url => url.includes(`/${clientPhotoId}-`))) {
+        return res.status(200).json({ photos: existingPhotos });
+      }
       const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
-      const photoId = crypto.randomUUID();
+      const photoId = clientPhotoId || crypto.randomUUID();
       const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('meeting-photos', storagePath, buffer, mimetype);
-      const photos = [...((obs as any).photos || []), file_url];
+      const photos = [...existingPhotos, file_url];
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update({ photos }).eq('id', id);
       if (error) throw error;
       res.status(201).json({ photos });

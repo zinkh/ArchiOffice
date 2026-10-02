@@ -3,6 +3,8 @@
 // real Supabase/PostgREST backend — see fakeSupabaseAdmin.ts for why.
 import { vi } from 'vitest';
 import { FakeSupabaseAdmin } from './fakeSupabaseAdmin';
+import { registerMemoryProvider } from '../server/externalStorage/memoryProvider';
+import { invalidateConnectionCache } from '../server/externalStorage/externalConnection';
 
 export const fakeSupabaseAdmin = new FakeSupabaseAdmin();
 
@@ -27,6 +29,11 @@ export async function getTestApp() {
       process.env.MAIL_ENCRYPTION_KEY ||= Buffer.alloc(32, 7).toString('base64');
       const mod = await import('../server');
       const { app } = await mod.createApp();
+      // Aucun drive réel n'est joignable depuis les tests : les trois types de
+      // fournisseur sont servis par le double en mémoire. APRÈS l'import de
+      // server.ts, qui enregistre les vrais adaptateurs — sinon ce sont eux qui
+      // gagneraient, et les tests tenteraient de vraies requêtes réseau.
+      registerMemoryProvider();
       return app;
     })();
   }
@@ -46,16 +53,78 @@ export function makeTenant(overrides: Record<string, any> = {}) {
   return id;
 }
 
-/** Seeds a profile row + auth token for a user belonging to `tenantId`, and returns { userId, token }. */
+/**
+ * Seeds a profile row, its tenant membership + an auth token for a user
+ * belonging to `tenantId`, and returns { userId, token }.
+ *
+ * The membership row mirrors a migrated instance (see
+ * supabase/migrate_tenant_memberships.sql): `profiles.tenant_id` is only the
+ * default cabinet, `tenant_memberships` is what says where someone actually
+ * works. Seed a profile without a membership — as tests/tenantMemberships.test.ts
+ * does on purpose — to exercise the compatibility fallback instead.
+ */
 export function makeUser(tenantId: string, systemRole: 'admin' | 'manager' | 'pm' | 'user' = 'user') {
   const userId = uniqueId('user');
   const email = `${userId}@example.test`;
   const token = uniqueId('token');
   fakeSupabaseAdmin.seed('profiles', [{ id: userId, tenant_id: tenantId, email, system_role: systemRole }]);
+  fakeSupabaseAdmin.seed('tenant_memberships', [{
+    id: uniqueId('membership'), user_id: userId, tenant_id: tenantId,
+    role: 'Member', system_role: systemRole, manager_id: null, is_default: true,
+  }]);
   fakeSupabaseAdmin.registerUser(token, { id: userId, email });
   return { userId, token };
 }
 
+/** Rattache un utilisateur déjà créé à un cabinet DE PLUS (jamais son défaut). */
+export function addMembership(
+  userId: string, tenantId: string,
+  systemRole: 'admin' | 'manager' | 'pm' | 'user' = 'user',
+  overrides: Record<string, any> = {},
+) {
+  fakeSupabaseAdmin.seed('tenant_memberships', [{
+    id: uniqueId('membership'), user_id: userId, tenant_id: tenantId,
+    role: 'Member', system_role: systemRole, manager_id: null, is_default: false, ...overrides,
+  }]);
+}
+
+/** L'en-tête par lequel le client désigne le cabinet sur lequel il travaille. */
+export function tenantHeader(tenantId: string) {
+  return { 'X-Tenant-Id': tenantId };
+}
+
 export function authHeader(token: string) {
   return { Authorization: `Bearer ${token}` };
+}
+
+/**
+ * Branche un espace de stockage externe sur un cabinet, servi par le
+ * fournisseur en mémoire (server/externalStorage/memoryProvider.ts).
+ *
+ * fakeSupabaseAdmin émule PostgREST et Supabase Storage, mais aucun drive :
+ * sans ce double, impossible de vérifier qu'un dépôt part réellement chez le
+ * cabinet, que l'arborescence créée est la bonne, ou que le cache de dossiers
+ * évite bien des appels.
+ */
+export function connectExternalStorage(
+  tenantId: string,
+  overrides: Record<string, any> = {},
+): string {
+  const id = uniqueId('storage-conn');
+  fakeSupabaseAdmin.seed('external_storage_connections', [{
+    id,
+    tenant_id: tenantId,
+    provider: 'webdav',
+    webdav_flavor: 'nextcloud',
+    root_folder_path: 'ArchiOffice',
+    root_folder_external_id: null,
+    is_active: true,
+    status: 'ok',
+    ...overrides,
+  }]);
+  // getActiveConnection met en cache 30 s, y compris l'absence de connexion :
+  // un test qui aurait déjà déposé un fichier pour ce cabinet doit voir le
+  // branchement immédiatement.
+  invalidateConnectionCache(tenantId);
+  return id;
 }

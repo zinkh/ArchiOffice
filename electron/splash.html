@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>ArchiOffice</title>
+<style>
+  :root {
+    --blue: #2a85ce;
+    --blue-dark: #1d68a6;
+    --green: #2fb344;
+    --red: #d6336c;
+    --text: #1c2433;
+    --muted: #6b7690;
+    --muted-2: #9aa3ba;
+    --card-border: rgba(42, 133, 206, 0.12);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    /* Un dégradé doux qui dérive très lentement — juste assez pour que
+       l'écran se sente vivant sans distraire de la lecture des étapes. */
+    background: radial-gradient(circle at 30% 20%, #eef4fc 0%, #f7f4fc 45%, #fbfbff 100%);
+    background-size: 160% 160%;
+    animation: drift 14s ease-in-out infinite alternate;
+    -webkit-app-region: drag;
+    user-select: none;
+  }
+
+  @keyframes drift {
+    from { background-position: 0% 0%; }
+    to   { background-position: 100% 60%; }
+  }
+
+  .card {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 44px 40px 28px;
+  }
+
+  .icon-tile {
+    /* flex-shrink:0 + une base explicite, plutôt que compter sur
+       flex-basis:auto (dérivé de width/height) : sur le tout premier passage
+       de mise en page, Chromium peut sous-dimensionner un enfant flex qui
+       est lui-même un conteneur flex avant que sa taille explicite ne soit
+       pleinement honorée — reproductible en isolant cette tuile sans cette
+       ligne. Une base explicite lève l'ambiguïté dès la première passe. */
+    flex: 0 0 84px;
+    width: 84px;
+    height: 84px;
+    border-radius: 22px;
+    background: linear-gradient(145deg, var(--blue), var(--blue-dark));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 12px 28px -10px rgba(42, 133, 206, 0.55);
+    animation: breathe 3.2s ease-in-out infinite;
+  }
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.045); }
+  }
+
+  .icon-tile svg { width: 42px; height: 42px; }
+
+  h1 {
+    margin: 18px 0 2px;
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  .tagline {
+    margin: 0 0 22px;
+    font-size: 12.5px;
+    color: var(--muted-2);
+    text-align: center;
+  }
+
+  .status {
+    font-size: 14px;
+    font-weight: 700;
+    text-align: center;
+    min-height: 20px;
+    margin-bottom: 4px;
+    transition: opacity 0.25s ease;
+  }
+  .status.is-error { color: var(--red); }
+
+  .progress-track {
+    width: 100%;
+    max-width: 340px;
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(42, 133, 206, 0.12);
+    overflow: hidden;
+    margin: 6px 0 22px;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--blue), #57a8e6);
+    transition: width 0.5s cubic-bezier(.4,0,.2,1);
+  }
+  .progress-fill.is-error { background: var(--red); }
+
+  .steps {
+    width: 100%;
+    max-width: 360px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .step {
+    display: flex;
+    align-items: flex-start;
+    gap: 11px;
+    padding: 7px 10px;
+    border-radius: 10px;
+    transition: background 0.25s ease, opacity 0.3s ease;
+    opacity: 0.55;
+  }
+  .step.is-active,
+  .step.is-done,
+  .step.is-error { opacity: 1; }
+  .step.is-active { background: rgba(42, 133, 206, 0.08); }
+  .step.is-error  { background: rgba(214, 51, 108, 0.08); }
+
+  .step-icon {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-top: 1px;
+    position: relative;
+  }
+
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--muted-2);
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    transition: opacity 0.2s;
+  }
+
+  .spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 2px solid rgba(42, 133, 206, 0.2);
+    border-top-color: var(--blue);
+    position: absolute;
+    top: 0;
+    left: 0;
+    opacity: 0;
+    animation: spin 0.85s linear infinite;
+    transition: opacity 0.15s;
+  }
+  .step.is-active .spinner { opacity: 1; }
+  .step.is-active .dot { opacity: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .check {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 18px;
+    height: 18px;
+    opacity: 0;
+    transform: scale(0.4);
+    transition: opacity 0.2s ease, transform 0.28s cubic-bezier(.34,1.56,.64,1);
+  }
+  .step.is-done .check { opacity: 1; transform: scale(1); }
+  .step.is-done .dot, .step.is-done .spinner { opacity: 0; }
+
+  .cross {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 18px;
+    height: 18px;
+    opacity: 0;
+    transform: scale(0.4);
+    transition: opacity 0.2s ease, transform 0.28s cubic-bezier(.34,1.56,.64,1);
+  }
+  .step.is-error .cross { opacity: 1; transform: scale(1); }
+  .step.is-error .dot, .step.is-error .spinner { opacity: 0; }
+
+  .step-text { min-width: 0; flex: 1; }
+  .step-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    line-height: 1.35;
+    transition: color 0.2s ease;
+  }
+  .step.is-active .step-label,
+  .step.is-done .step-label { color: var(--text); }
+  .step.is-error .step-label { color: var(--red); }
+
+  .step-detail {
+    font-size: 11.5px;
+    color: var(--muted-2);
+    margin-top: 1px;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.25s ease, opacity 0.2s ease;
+    word-break: break-word;
+  }
+  .step-detail.is-shown { max-height: 40px; opacity: 1; }
+  .step.is-error .step-detail { color: var(--red); }
+
+  .footer {
+    margin-top: auto;
+    padding-top: 18px;
+    font-size: 11px;
+    color: var(--muted-2);
+    text-align: center;
+    max-width: 340px;
+    transition: opacity 0.3s ease;
+  }
+
+  .fatal {
+    margin-top: 14px;
+    width: 100%;
+    max-width: 360px;
+    background: rgba(214, 51, 108, 0.08);
+    border: 1px solid rgba(214, 51, 108, 0.25);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: none;
+  }
+  .fatal.is-shown { display: block; animation: fatalIn 0.3s ease; }
+  @keyframes fatalIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .fatal-title { font-size: 12.5px; font-weight: 700; color: var(--red); margin: 0 0 4px; }
+  .fatal-log { font-size: 10.5px; color: var(--muted); word-break: break-all; margin: 0 0 10px; }
+  .fatal button {
+    -webkit-app-region: no-drag;
+    border: none;
+    background: var(--red);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 7px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .fatal button:hover { filter: brightness(1.08); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-tile">
+      <svg viewBox="0 0 419.89 385.53" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path fill="#fff" d="m66.72,260.99h83.26c15.35,0,25.07,16.47,17.65,29.91l-46.53,84.22c-3.55,6.42-10.31,10.41-17.65,10.41H20.19c-15.35,0-25.07-16.47-17.65-29.91l46.53-84.22c3.55-6.42,10.31-10.41,17.65-10.41Z"/>
+        <path fill="#fff" d="m83.9,208.36L192.41,11.96c8.81-15.94,31.72-15.94,40.53,0l38.21,69.17c3.85,6.97,3.85,15.42,0,22.39l-70.29,127.23c-4.08,7.38-11.84,11.96-20.26,11.96h-76.43c-17.63,0-28.79-18.92-20.26-34.34Z"/>
+        <path fill="#fff" d="m335.24,385.53c-13.2,0-29.22-9.45-35.61-21.01l-67.8-122.73c-4.66-8.43-4.66-18.66,0-27.09l32.04-57.99c10.66-19.29,38.38-19.29,49.04,0l103.45,187.25c10.31,18.67-3.19,41.56-24.52,41.56h-56.6Z"/>
+      </svg>
+    </div>
+
+    <h1>ArchiOffice</h1>
+    <p class="tagline" id="tagline">Gestion de cabinet d'architecture</p>
+
+    <p class="status" id="status">Démarrage…</p>
+    <div class="progress-track"><div class="progress-fill" id="progress"></div></div>
+
+    <div class="steps" id="steps"></div>
+
+    <div class="fatal" id="fatal">
+      <p class="fatal-title">ArchiOffice n'a pas pu démarrer</p>
+      <p class="fatal-log" id="fatal-log"></p>
+      <button id="fatal-quit" type="button">Quitter</button>
+    </div>
+
+    <p class="footer" id="footer">
+      Le premier lancement configure votre base de données locale. Cela peut prendre une minute ou deux.
+    </p>
+  </div>
+
+<script>
+  const CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M5 12.5l4.5 4.5L19 7" stroke="#2fb344" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#d6336c" stroke-width="2.6" stroke-linecap="round"/></svg>';
+
+  const stepsEl = document.getElementById('steps');
+  const statusEl = document.getElementById('status');
+  const progressEl = document.getElementById('progress');
+  const footerEl = document.getElementById('footer');
+  const fatalEl = document.getElementById('fatal');
+  const fatalLogEl = document.getElementById('fatal-log');
+
+  /** @type {{id: string, label: string}[]} */
+  let steps = [];
+  const rowById = new Map();
+  const stateById = new Map();
+
+  function renderSteps() {
+    stepsEl.innerHTML = '';
+    rowById.clear();
+    for (const step of steps) {
+      const row = document.createElement('div');
+      row.className = 'step';
+      row.innerHTML = `
+        <span class="step-icon">
+          <span class="dot"></span>
+          <span class="spinner"></span>
+          <span class="check">${CHECK_SVG}</span>
+          <span class="cross">${CROSS_SVG}</span>
+        </span>
+        <span class="step-text">
+          <div class="step-label">${step.label}</div>
+          <div class="step-detail"></div>
+        </span>
+      `;
+      stepsEl.appendChild(row);
+      rowById.set(step.id, row);
+    }
+  }
+
+  function friendlyStatus() {
+    // La ligne de statut en gras reprend l'étape active ; sur erreur, un
+    // message générique (le détail précis reste lisible dans la liste et,
+    // pour une panne fatale, dans le bandeau rouge du bas).
+    const errored = steps.find((s) => stateById.get(s.id)?.status === 'error');
+    if (errored) return { text: 'Un problème est survenu', isError: true };
+    const active = [...steps].reverse().find((s) => stateById.get(s.id)?.status === 'active');
+    if (active) return { text: active.label, isError: false };
+    const allDone = steps.length > 0 && steps.every((s) => stateById.get(s.id)?.status === 'done');
+    if (allDone) return { text: 'Prêt', isError: false };
+    return { text: 'Démarrage…', isError: false };
+  }
+
+  function updateStatusLine() {
+    const { text, isError } = friendlyStatus();
+    if (statusEl.textContent !== text) {
+      statusEl.style.opacity = '0';
+      setTimeout(() => { statusEl.textContent = text; statusEl.style.opacity = '1'; }, 120);
+    }
+    statusEl.classList.toggle('is-error', isError);
+
+    const doneCount = steps.filter((s) => stateById.get(s.id)?.status === 'done').length;
+    const pct = steps.length ? Math.round((doneCount / steps.length) * 100) : 0;
+    progressEl.style.width = pct + '%';
+    progressEl.classList.toggle('is-error', isError);
+  }
+
+  function applyUpdate({ id, status, detail }) {
+    stateById.set(id, { status, detail });
+    const row = rowById.get(id);
+    if (!row) return;
+    row.classList.remove('is-active', 'is-done', 'is-error');
+    row.classList.add('is-' + status);
+    const detailEl = row.querySelector('.step-detail');
+    if (detail) {
+      detailEl.textContent = detail;
+      detailEl.classList.add('is-shown');
+    } else {
+      detailEl.classList.remove('is-shown');
+    }
+    updateStatusLine();
+  }
+
+  window.archiofficeSplash?.onInit((payload) => {
+    steps = payload.steps || [];
+    if (payload.appName) document.querySelector('h1').textContent = payload.appName;
+    if (payload.tagline) document.getElementById('tagline').textContent = payload.tagline;
+    renderSteps();
+    updateStatusLine();
+  });
+
+  window.archiofficeSplash?.onUpdate((payload) => applyUpdate(payload));
+
+  window.archiofficeSplash?.onFatal(({ message, logPath }) => {
+    footerEl.style.opacity = '0';
+    fatalLogEl.textContent = logPath ? `Journal détaillé : ${logPath}` : (message || '');
+    fatalEl.classList.add('is-shown');
+  });
+
+  document.getElementById('fatal-quit').addEventListener('click', () => {
+    window.archiofficeSplash?.quit();
+  });
+</script>
+</body>
+</html>

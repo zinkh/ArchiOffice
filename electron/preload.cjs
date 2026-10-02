@@ -29,4 +29,12 @@ contextBridge.exposeInMainWorld('archiofficeDesktop', {
     ipcRenderer.on('desktop:notification-click', listener);
     return () => ipcRenderer.removeListener('desktop:notification-click', listener);
   },
+
+  /** Les dossiers résolus au premier lancement — voir electron/dataLocation.cjs. */
+  getDataLocation: () => ipcRenderer.invoke('desktop:get-data-location'),
+
+  /** Ouvre le dossier de la base ('db') ou des documents ('storage') dans
+   *  l'explorateur de fichiers du système. Le chemin réel n'est jamais
+   *  transmis au renderer : celui-ci ne fait que désigner LEQUEL ouvrir. */
+  openDataFolder: (kind) => ipcRenderer.invoke('desktop:open-data-folder', kind),
 });

@@ -19,6 +19,7 @@
 // Sans ce garde-fou, deux agents qui se renvoient la question boucleraient
 // indéfiniment, chaque tour étant facturé.
 import type { FunctionDeclarationLike, ToolOutcome } from './toolTypes.js';
+import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 export const DELEGATE_TOOL_NAMES = ['consulter_agent'];
 
@@ -51,7 +52,7 @@ interface TenantAgentSummary { id: string; name: string; is_active: boolean }
 
 export async function executeDelegateTool(
   baseUrl: string,
-  authHeader: string,
+  auth: InternalAuth,
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolOutcome> {
@@ -64,7 +65,7 @@ export async function executeDelegateTool(
 
   let target: TenantAgentSummary | undefined;
   try {
-    const listRes = await fetch(baseUrl + '/api/agents', { headers: { Authorization: authHeader } });
+    const listRes = await fetch(baseUrl + '/api/agents', { headers: internalHeaders(auth) });
     const list: TenantAgentSummary[] = listRes.ok ? await listRes.json().catch(() => []) : [];
     target = list.find(a => a.id === agentId);
   } catch {
@@ -79,14 +80,13 @@ export async function executeDelegateTool(
   try {
     const res = await fetch(`${baseUrl}/api/agents/${encodeURIComponent(target.id)}/chat`, {
       method: 'POST',
-      headers: {
+      headers: internalHeaders(auth, {
         'Content-Type': 'application/json',
-        Authorization: authHeader,
         // Lu par la route de chat pour retirer consulter_agent des outils de
         // ce tour, quelle que soit la capacité du collègue — voir l'en-tête
         // du fichier.
         'X-Agent-Delegation': '1',
-      },
+      }),
       body: JSON.stringify({ message }),
       signal: controller.signal,
     });

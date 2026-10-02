@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, ChangeEvent, useRef } from 'react';
 import CreatableSelect from 'react-select/creatable';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
   IconArrowLeft, 
   IconDeviceFloppy, 
@@ -48,15 +48,20 @@ import {
   IconMail,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
-import type { Project, Milestone, Invoice, ProjectCategory, Specification, OrdreDeService, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offlinePrefetch';
+import { db } from '../db';
+import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
-import { GeoportailMap, GoogleMap, RNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
+import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import ACTModule from '../components/ACTModule';
@@ -81,12 +86,13 @@ import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
+import { ResourceAttachments } from '../components/ResourceAttachments';
 
 import { useTranslation } from 'react-i18next';
 
 const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id }: any) => (
   <div className="space-y-1">
-    <label className="block text-[10px] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">
+    <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">
       {label} {required && <span className="text-red-500">*</span>}
     </label>
     {type === 'select' ? (
@@ -171,8 +177,12 @@ export default function ProjectDetail() {
   const [projectMembers, setProjectMembers] = useState<any[]>([]);
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  // Vrai une fois les jalons du projet réellement lus en base : la
+  // synchronisation avec le contrat MOE (plus bas) ne doit jamais tourner
+  // sur la liste vide initiale.
+  const [milestonesLoaded, setMilestonesLoaded] = useState(false);
+  const milestoneCreationsInFlight = useRef<Set<string>>(new Set());
   const [invoices, setInvoices] = useState<Invoice[]>([]);
-  const [specifications, setSpecifications] = useState<Specification[]>([]);
   const [visas, setVisas] = useState<Visa[]>([]);
   const [receptions, setReceptions] = useState<Reception[]>([]);
   const [reserves, setReserves] = useState<Reserve[]>([]);
@@ -184,6 +194,8 @@ export default function ProjectDetail() {
   const [categories, setCategories] = useState<ProjectCategory[]>([]);
   const [contacts, setContacts] = useState<any[]>([]);
   const [ordresDeService, setOrdresDeService] = useState<OrdreDeService[]>([]);
+  const [avenantsMoe, setAvenantsMoe] = useState<AvenantMoe[]>([]);
+  const [marchesTravaux, setMarchesTravaux] = useState<any[]>([]);
   const [linkedContratsMoe, setLinkedContratsMoe] = useState<any[]>([]);
   const [notesHonoraires, setNotesHonoraires] = useState<any[]>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
@@ -193,6 +205,7 @@ export default function ProjectDetail() {
   const [newOs, setNewOs] = useState({
     title: '',
     os_number: '',
+    marche_id: '',
     lot: '',
     entreprise: '',
     maitrise_oeuvre: '',
@@ -204,9 +217,17 @@ export default function ProjectDetail() {
     delai_unit: 'jours',
     objet: '',
   });
+  // Formulaire de création rapide d'un marché travaux, ouvert depuis le
+  // formulaire OS quand le projet n'en a encore aucun — un OS doit toujours
+  // être rattaché à un marché (server/routes/ordresDeService.ts).
+  const [isAddingMarche, setIsAddingMarche] = useState(false);
+  const [newMarche, setNewMarche] = useState({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
 
   // AR modal state
   const [arOsTarget, setArOsTarget] = useState<OrdreDeService | null>(null);
+  const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
+  const [deleteProjectConfirmInput, setDeleteProjectConfirmInput] = useState('');
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [arForm, setArForm] = useState({ date_ar: new Date().toISOString().slice(0, 10), date_execution: '', notes_ar: '' });
   const [arSaving, setArSaving] = useState(false);
 
@@ -243,10 +264,9 @@ export default function ProjectDetail() {
   });
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
-  const [isAddingSpec, setIsAddingSpec] = useState(false);
-  const [newSpecTitle, setNewSpecTitle] = useState('');
   const [isAddingPermit, setIsAddingPermit] = useState(false);
   const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
+  const [expandedPermitId, setExpandedPermitId] = useState<string | null>(null);
   const [isAddingRfi, setIsAddingRfi] = useState(false);
   const [newRfi, setNewRfi] = useState({ question: '', asked_by: '', due_date: '' });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
@@ -282,6 +302,37 @@ export default function ProjectDetail() {
   });
   const [pvForm, setPvForm] = useState(defaultPvForm());
 
+  // Extrait de l'onClick « Modifier » d'un PV de réception (onglet AOR) pour
+  // être réutilisable depuis le lien direct d'un agent (?open=receptions:<id>
+  // sur cette page, voir recordLinks.ts et l'effet de lien direct plus bas).
+  const openReceptionForm = (rec: Reception) => {
+    setEditingReceptionId(rec.id);
+    const existingReserves = reserves.filter(r => r.reception_id === rec.id);
+    setPvForm({
+      reference_pv: rec.reference_pv || '',
+      type: rec.type,
+      date: rec.date,
+      lieu: rec.lieu || '',
+      date_limite_levee: rec.date_limite_levee || '',
+      has_reserves: rec.has_reserves,
+      reserves_count: rec.reserves_count || 0,
+      signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
+      observations: rec.observations || '',
+      pv_valide: rec.pv_valide || false,
+      reserves_list: existingReserves.map(r => ({
+        id: r.id,
+        title: r.title,
+        batiment: r.batiment || '',
+        local: r.local || '',
+        lots: (() => { try { const p = JSON.parse(r.lots); return Array.isArray(p) ? p.join(', ') : r.lots; } catch { return r.lots || ''; } })(),
+        entreprises: (() => { try { const p = JSON.parse(r.entreprises); return Array.isArray(p) ? p.join(', ') : r.entreprises; } catch { return r.entreprises || ''; } })(),
+        due_date: r.due_date || '',
+        status: r.status,
+      })),
+    });
+    setShowPvForm(true);
+  };
+
   // DOE documents state
   const [doeDocuments, setDoeDocuments] = useState<any[]>([]);
   const doeInputRef = useRef<HTMLInputElement>(null);
@@ -298,6 +349,44 @@ export default function ProjectDetail() {
     }
   }, [project?.is_chantier, activeTab]);
 
+  // Lien direct depuis un agent (?tab=<ONGLET>&open=<resourceKey>:<id>, voir
+  // recordLinks.ts côté serveur) : sept ressources n'ont pas de page propre
+  // et vivent comme onglets de cette fiche. `openResourceKey`/`openRecordId`
+  // sont calculés au rendu (pas dans un effet) pour rester disponibles dès
+  // le premier rendu du prop `initialOpenReserveId` de ReserveTracker plus
+  // bas, qui gère lui-même 'reserves'.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openParam = searchParams.get('open') || '';
+  const [openResourceKey, openRecordId] = openParam.split(':');
+
+  useEffect(() => {
+    const tab = searchParams.get('tab');
+    if (!tab || !project) return;
+    setActiveTab(tab);
+    setSearchParams(prev => { prev.delete('tab'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, searchParams]);
+
+  useEffect(() => {
+    if (!openParam) return;
+    if (openResourceKey === 'visas') {
+      if (visas.length === 0) return; // pas encore chargées — on réessaiera au prochain rendu
+      const visa = visas.find(v => v.id === openRecordId);
+      if (visa) { setEditingVisa(visa); setIsVisaModalOpen(true); }
+    } else if (openResourceKey === 'receptions') {
+      if (receptions.length === 0) return;
+      const rec = receptions.find(r => r.id === openRecordId);
+      if (rec) openReceptionForm(rec);
+    }
+    // 'reserves' est consommé directement par ReserveTracker via son prop
+    // initialOpenReserveId (calculé ci-dessus) ; milestones/permits/
+    // marches_entreprises/notes_honoraires n'ont que l'onglet déjà posé par
+    // l'effet précédent (voir recordLinks.ts) — rien de plus à faire ici
+    // dans les deux cas, seulement nettoyer le paramètre.
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visas, receptions, searchParams]);
+
   useEffect(() => {
     // Unconditional (not tab-gated): the "Phase actuelle" buttons (INFOS tab)
     // and the mission→milestone sync below both need this regardless of
@@ -313,17 +402,27 @@ export default function ProjectDetail() {
   // Keep project milestones in sync with the missions included in the linked
   // ContratMOE (one milestone per included mission, matched by title — same
   // principle used for proposal milestones in Proposals.tsx's FeeDistributionGrid).
+  //
+  // Cet effet ne tourne qu'une fois les jalons LUS EN BASE (`milestonesLoaded`) :
+  // il se déclenchait auparavant dès l'arrivée du contrat, alors que la liste
+  // des jalons était encore vide, et recréait donc TOUS les jalons de mission
+  // à chaque ouverture de la fiche — d'où les « Esquisse (ESQ) » en double,
+  // triple, dans « Prochains jalons ». `milestoneCreationsInFlight` évite le
+  // même doublon entre deux exécutions rapprochées de l'effet (le contrat
+  // relu avant que la création précédente n'ait répondu).
   useEffect(() => {
-    if (!id) return;
+    if (!id || !milestonesLoaded) return;
     const primaryContrat = linkedContratsMoe[0];
     if (!primaryContrat) return;
     const includedMissions: any[] = (primaryContrat.missions_list || []).filter((m: any) => m.incluse);
     if (includedMissions.length === 0) return;
 
     const projectMilestones = milestones.filter(m => m.project_id === id);
+    const inFlight = milestoneCreationsInFlight.current;
 
     includedMissions.forEach(mission => {
-      if (!projectMilestones.some(m => m.title === mission.name)) {
+      if (!projectMilestones.some(m => m.title === mission.name) && !inFlight.has(mission.name)) {
+        inFlight.add(mission.name);
         fetch('/api/milestones', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -331,18 +430,115 @@ export default function ProjectDetail() {
         })
           .then(res => res.ok ? res.json() : null)
           .then(created => { if (created) setMilestones(prev => [...prev, { ...created, completed: !!created.completed }]); })
-          .catch(console.error);
+          .catch(console.error)
+          .finally(() => inFlight.delete(mission.name));
       }
     });
 
-    projectMilestones.forEach(m => {
-      if (!includedMissions.some(mission => mission.name === m.title)) {
-        fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
-          .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)))
-          .catch(console.error);
-      }
+    // Les doublons laissés par l'ancien comportement : pour chaque mission du
+    // contrat, un seul jalon reste — celui déjà coché, sinon le plus ancien
+    // — les autres sont supprimés.
+    const toDelete = new Set<string>();
+    includedMissions.forEach(mission => {
+      const sameTitle = projectMilestones.filter(m => m.title === mission.name);
+      if (sameTitle.length <= 1) return;
+      const keep = sameTitle.find(m => m.completed)
+        || [...sameTitle].sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))[0];
+      sameTitle.forEach(m => { if (m.id !== keep.id) toDelete.add(m.id); });
     });
-  }, [linkedContratsMoe, id]);
+
+    projectMilestones.forEach(m => {
+      if (!includedMissions.some(mission => mission.name === m.title)) toDelete.add(m.id);
+    });
+
+    toDelete.forEach(milestoneId => {
+      fetch(`/api/milestones/${milestoneId}`, { method: 'DELETE' })
+        .then(() => setMilestones(prev => prev.filter(x => x.id !== milestoneId)))
+        .catch(console.error);
+    });
+  }, [linkedContratsMoe, id, milestonesLoaded]);
+
+  // Le contrat MOE fait foi pour les montants d'honoraires du projet : le
+  // contrat signé s'il en existe un, à défaut le premier contrat lié.
+  const contratHonoraires = useMemo(
+    () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
+    [linkedContratsMoe],
+  );
+
+  // Onglets de phase chantier gouvernés par une mission du contrat MOE : le
+  // contrat fait foi (même principe que HONOS ci-dessus), donc un onglet
+  // sans mission incluse est masqué — sauf s'il porte déjà des données,
+  // pour ne jamais donner l'impression qu'elles ont disparu (il reste alors
+  // affiché avec un badge « hors mission »). Sans contrat lié, impossible de
+  // savoir si la mission est prévue : on garde le repli historique (gate sur
+  // is_chantier seul). RDT n'a pas de mission MOP dédiée et suit DET.
+  const CHANTIER_TAB_MISSION_ID: Partial<Record<string, string>> = {
+    ACT: 'act', VISA: 'visa', DET: 'det', RDT: 'det', AOR: 'aor',
+  };
+  const chantierTabState = useMemo(() => {
+    const missionsList = contratHonoraires?.missions_list;
+    const hasData: Record<string, boolean> = {
+      ACT: marchesTravaux.length > 0,
+      VISA: visas.length > 0,
+      DET: ordresDeService.length > 0 || marchesTravaux.length > 0,
+      RDT: ordresDeService.length > 0 || marchesTravaux.length > 0,
+      AOR: receptions.length > 0 || reserves.length > 0,
+    };
+    const result: Record<string, { visible: boolean; horsMission: boolean }> = {};
+    for (const tabId of Object.keys(CHANTIER_TAB_MISSION_ID)) {
+      if (!contratHonoraires || !missionsList) {
+        result[tabId] = { visible: true, horsMission: false };
+        continue;
+      }
+      const missionId = CHANTIER_TAB_MISSION_ID[tabId]!;
+      const incluse = missionsList.some((m: any) => m.id === missionId && m.incluse);
+      result[tabId] = incluse
+        ? { visible: true, horsMission: false }
+        : { visible: hasData[tabId], horsMission: hasData[tabId] };
+    }
+    return result;
+  }, [contratHonoraires, marchesTravaux, visas, ordresDeService, receptions, reserves]);
+
+  // Rapatrie les honoraires initiaux et le coût travaux prévisionnel depuis le
+  // contrat MOE lié, plutôt que de laisser ces montants — déjà saisis dans le
+  // contrat — à ressaisir manuellement ici. Dès qu'un contrat est lié, c'est
+  // LUI qui fait foi : la synchronisation est inconditionnelle (elle ne se
+  // limite plus aux champs restés vides côté projet) et les deux champs
+  // passent en lecture seule dans l'onglet HONOS, pour qu'une valeur saisie
+  // ici ne puisse plus diverger de la pièce contractuelle. Les avenants, eux,
+  // continuent de s'ajouter par-dessus (`honRevises`) sans toucher au montant
+  // initial.
+  useEffect(() => {
+    if (!project) return;
+    if (!contratHonoraires) return;
+
+    setProject(prev => {
+      if (!prev) return prev;
+      // En mode pourcentage, le budget travaux du contrat prime, mais un coût
+      // travaux déjà saisi côté projet (avant même la liaison au contrat)
+      // reste utilisable pour calculer le montant tant que le contrat n'en
+      // porte pas un lui-même.
+      const budgetTravaux = contratHonoraires.budget_previsionnel || prev.construction_cost;
+      const honorairesContrat = contratHonoraires.mode_honoraires === 'forfait'
+        ? contratHonoraires.montant_honoraires
+        : (budgetTravaux && contratHonoraires.taux_honoraires ? budgetTravaux * contratHonoraires.taux_honoraires / 100 : undefined);
+
+      const patch: Partial<Project> = {};
+      if (honorairesContrat && prev.remuneration !== honorairesContrat) patch.remuneration = honorairesContrat;
+      if (contratHonoraires.budget_previsionnel && prev.construction_cost !== contratHonoraires.budget_previsionnel) {
+        patch.construction_cost = contratHonoraires.budget_previsionnel;
+      }
+      return Object.keys(patch).length > 0 ? { ...prev, ...patch } : prev;
+    });
+    // `project?.remuneration`/`construction_cost` sont bien des dépendances,
+    // pas seulement le résultat de cet effet : `fetchFullProject()` recharge
+    // le projet en entier (cache Dexie, puis réseau) de façon indépendante et
+    // peut résoudre APRÈS cette synchronisation, écrasant alors le montant
+    // repris du contrat par la valeur non persistée côté base (0). Sans ces
+    // dépendances, l'effet ne se redéclenche jamais pour corriger ce retour
+    // en arrière — c'est exactement le bug observé (montant du contrat
+    // affiché puis retombé à 0,00 €).
+  }, [contratHonoraires, project?.id, project?.remuneration, project?.construction_cost]);
 
   useEffect(() => {
     if (activeTab === 'HONOS' && id) {
@@ -379,10 +575,7 @@ export default function ProjectDetail() {
   // in several places in the JSX below (up to 4x for the MOE avenants alone),
   // rescanning ordresDeService/invoices/reserves on every render even when
   // typing in an unrelated form field elsewhere in this component.
-  const moeAvenants = useMemo(
-    () => ordresDeService.filter(o => o.type === 'contrat_moe'),
-    [ordresDeService]
-  );
+  const moeAvenants = avenantsMoe;
   const moeAvenantsApprouves = useMemo(
     () => moeAvenants.filter(o => o.status === 'approved'),
     [moeAvenants]
@@ -445,37 +638,54 @@ export default function ProjectDetail() {
         setViewedPhase(null); // resync the overview's note column to the new actual phase
       } else {
         const err = await res.json().catch(() => null);
-        alert(`Erreur lors du changement de phase : ${err?.error || res.statusText}`);
+        alert(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }));
       }
     } catch (err) {
       console.error('Failed to update project phase:', err);
-      alert('Erreur lors du changement de phase.');
+      alert(t('projectdetail_phase_change_failed'));
     }
   };
 
+  const applyFullProjectData = (data: any) => {
+    setProject({
+      ...data.project,
+      is_complete_mission: isFlagTrue(data.project.is_complete_mission),
+      is_chantier: isFlagTrue(data.project.is_chantier),
+    });
+    setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
+    setMilestonesLoaded(true);
+    setInvoices(data.invoices);
+    setOrdresDeService(data.ordres_de_service);
+    setAvenantsMoe(data.avenants_moe || []);
+    setMarchesTravaux(data.marches_entreprises || []);
+    setVisas(data.visas);
+    setReceptions(data.receptions);
+    setReserves(data.reserves);
+    setPlans(data.plans);
+  };
+
+  // Cache d'abord (src/lib/offlinePrefetch.ts) : un projet ouvert en ligne au
+  // moins une fois — coché « disponible hors connexion » ou non — garde un
+  // instantané consultable si le réseau tombe ensuite. Pour un projet
+  // volontairement préchargé, l'instantané peut même dater d'avant la toute
+  // première ouverture de sa fiche aujourd'hui.
   const fetchFullProject = async () => {
+    const cached = await cachedProjectSnapshot(id!);
+    if (cached) applyFullProjectData(cached);
+    if (!navigator.onLine) return;
     try {
       const res = await fetch(`/api/projects/${id}/full`);
       if (res.ok) {
         const data = await res.json();
-        setProject({
-          ...data.project,
-          is_complete_mission: isFlagTrue(data.project.is_complete_mission),
-          is_chantier: isFlagTrue(data.project.is_chantier),
-        });
-        setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
-        setInvoices(data.invoices);
-        setSpecifications(data.specifications);
-        setOrdresDeService(data.ordres_de_service);
-        setVisas(data.visas);
-        setReceptions(data.receptions);
-        setReserves(data.reserves);
-        setPlans(data.plans);
-      } else {
+        applyFullProjectData(data);
+        await db.projectSnapshots.put({ id: id!, data, cachedAt: Date.now() });
+      } else if (!cached) {
         navigate('/projects');
       }
     } catch (err) {
       console.error('Failed to fetch full project:', err);
+      // Coupure réseau après le rendu depuis le cache (s'il y en avait un) :
+      // on garde ce qui est déjà affiché plutôt que de naviguer ailleurs.
     }
   };
 
@@ -497,10 +707,11 @@ export default function ProjectDetail() {
     }
   };
 
+  // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les réserves
+  // déjà consultées pour cette affaire restent affichées.
   const fetchReserves = async () => {
     try {
-      const res = await fetch(`/api/reserves?project_id=${id}`);
-      if (res.ok) setReserves(await res.json());
+      await cachedListFirst(db.reservesCache, r => r.project_id === id, `/api/reserves?project_id=${id}`, setReserves);
     } catch (err) {
       console.error(err);
     }
@@ -508,8 +719,7 @@ export default function ProjectDetail() {
 
   const fetchGpaReserves = async () => {
     try {
-      const res = await fetch(`/api/gpa-reserves?project_id=${id}`);
-      if (res.ok) setGpaReserves(await res.json());
+      await cachedListFirst(db.gpaReservesCache, r => r.project_id === id, `/api/gpa-reserves?project_id=${id}`, setGpaReserves);
     } catch (err) {
       console.error(err);
     }
@@ -594,6 +804,24 @@ export default function ProjectDetail() {
     }
   };
 
+  const fetchAvenantsMoe = async () => {
+    try {
+      const res = await fetch(`/api/avenants_moe?project_id=${id}`);
+      if (res.ok) setAvenantsMoe(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const fetchMarchesTravaux = async () => {
+    try {
+      const res = await fetch(`/api/marches-entreprises/${id}`);
+      if (res.ok) setMarchesTravaux(await res.json());
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchContacts = async () => {
     try {
       const res = await fetch('/api/contacts');
@@ -622,7 +850,7 @@ export default function ProjectDetail() {
         const text = await res.text();
         try {
           const data = JSON.parse(text);
-          if (Array.isArray(data)) setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed })));
+          if (Array.isArray(data)) { setMilestones(data.map((m: any) => ({ ...m, completed: !!m.completed }))); setMilestonesLoaded(true); }
         } catch (e) {
           console.error("Failed to parse milestones JSON:", text);
         }
@@ -640,33 +868,48 @@ export default function ProjectDetail() {
     }
   }, [project]);
 
-  const getNextOsNumber = (entreprise: string) => {
-    if (!entreprise) return '';
-    const companyOs = ordresDeService.filter(os => os.entreprise === entreprise);
-    const nextNum = companyOs.length + 1;
-    return nextNum.toString().padStart(2, '0');
+  // Numérotation par marché, plutôt que par nom d'entreprise en texte libre :
+  // un OS s'adresse toujours à un marché de travaux (marche_id).
+  const getNextOsNumberForMarche = (marcheId: string) => {
+    if (!marcheId) return '';
+    const count = ordresDeService.filter(os => os.marche_id === marcheId).length;
+    return (count + 1).toString().padStart(2, '0');
   };
 
-  const handleLotChange = (lotNumber: string) => {
-    const lot = project?.lots_list?.find(l => l.lot_number === lotNumber);
-    const entreprise = lot?.contact_name || '';
-    const nextOsNum = getNextOsNumber(entreprise);
-    
+  const handleMarcheChange = (marcheId: string) => {
+    const marche = marchesTravaux.find((m: any) => m.id === marcheId);
+    const entreprise = marche?.entreprise_nom || '';
+    const lot = marche ? [marche.lot_numero, marche.lot_titre].filter(Boolean).join(' — ') : '';
     setNewOs(prev => ({
       ...prev,
-      lot: lotNumber,
-      entreprise: entreprise,
-      os_number: nextOsNum
-    }));
-  };
-
-  const handleEntrepriseChange = (entreprise: string) => {
-    const nextOsNum = getNextOsNumber(entreprise);
-    setNewOs(prev => ({
-      ...prev,
+      marche_id: marcheId,
+      lot,
       entreprise,
-      os_number: nextOsNum
+      destinataire_os: entreprise,
+      os_number: getNextOsNumberForMarche(marcheId),
     }));
+  };
+
+  const handleCreateMarche = async () => {
+    if (!id || !newMarche.entreprise_nom) return;
+    const res = await fetch('/api/marches-entreprises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: id, entreprise_nom: newMarche.entreprise_nom,
+        lot_numero: newMarche.lot_numero, lot_titre: newMarche.lot_titre,
+        montant_ht: Number(newMarche.montant_ht) || 0,
+      }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      await fetchMarchesTravaux();
+      handleMarcheChange(created.id);
+      setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
+      setIsAddingMarche(false);
+    } else {
+      alert(t('projectdetail_marche_create_failed'));
+    }
   };
 
   const fetchInvoices = async () => {
@@ -677,18 +920,6 @@ export default function ProjectDetail() {
       }
     } catch (err) {
       console.error('Failed to fetch invoices:', err);
-    }
-  };
-
-  const fetchSpecifications = async () => {
-    try {
-      const res = await fetch(`/api/specifications?project_id=${id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setSpecifications(data.map((s: any) => ({ ...s, is_template: !!s.is_template })));
-      }
-    } catch (err) {
-      console.error('Failed to fetch specifications:', err);
     }
   };
 
@@ -716,34 +947,40 @@ export default function ProjectDetail() {
     try {
       const res = await fetch(`/api/projects/${project.id}`, {
         method: 'PUT',
-        headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': currentUser?.system_role || 'user'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(project)
       });
       if (res.ok) {
-        alert('Project saved successfully');
+        alert(t('projectdetail_project_saved_successfully'));
+      } else {
+        // Un échec passait jusqu'ici totalement inaperçu : ni alerte ni
+        // console.error, seule l'absence du message de succès habituel — un
+        // changement (le client du projet, par exemple) restait alors non
+        // enregistré sans que rien ne le signale, et la prochaine ouverture
+        // de la fiche le perdait silencieusement.
+        const err = await res.json().catch(() => null);
+        alert(err?.error || 'Échec de l\'enregistrement du projet.');
       }
     } catch (err) {
       console.error(err);
+      alert((err as any)?.message || 'Échec de l\'enregistrement du projet.');
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!project || !confirm('Are you sure you want to delete this project?')) return;
+    if (!project) return;
+    setIsDeletingProject(true);
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
-        method: 'DELETE',
-        headers: { 'x-user-role': currentUser?.system_role || 'user' }
-      });
+      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
       if (res.ok) {
         navigate('/projects');
       }
     } catch (err) {
       console.error(err);
+    } finally {
+      setIsDeletingProject(false);
     }
   };
 
@@ -772,37 +1009,6 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleCreateSpec = async () => {
-    if (!id || !newSpecTitle) return;
-    try {
-      const newSpecId = `spec-${Date.now()}`;
-      const res = await fetch('/api/specifications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: newSpecId,
-          project_id: id,
-          title: newSpecTitle,
-          content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]),
-          last_updated: new Date().toISOString()
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSpecifications(prev => [...prev, { id: newSpecId, project_id: id, title: newSpecTitle, content: JSON.stringify([{ id: `section-${Date.now()}`, title: 'General Provisions', items: [] }]), last_updated: data.last_updated }]);
-        setNewSpecTitle('');
-        setIsAddingSpec(false);
-      } else {
-        const errorText = await res.text();
-        console.error('Failed to create specification:', res.status, errorText);
-        alert(`Erreur lors de la création du cahier des charges: ${errorText}`);
-      }
-    } catch (err) {
-      console.error('Error creating specification:', err);
-      alert('Une erreur est survenue lors de la création du cahier des charges.');
-    }
-  };
-
   const handleToggleMilestone = async (milestone: Milestone) => {
     try {
       const res = await fetch(`/api/milestones/${milestone.id}`, {
@@ -819,13 +1025,14 @@ export default function ProjectDetail() {
   };
 
   const handleCreateOs = async () => {
-    if (!id || !newOs.title || !newOs.os_number) return;
+    if (!id || !newOs.title || !newOs.os_number || !newOs.marche_id) return;
     try {
       const res = await fetch('/api/ordres_de_service', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: id,
+          marche_id: newOs.marche_id,
           os_number: newOs.os_number,
           title: newOs.title,
           lot: newOs.lot,
@@ -845,8 +1052,11 @@ export default function ProjectDetail() {
       });
       if (res.ok) {
         await fetchOrdresDeService();
-        setNewOs({ title: '', os_number: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
+        setNewOs({ title: '', os_number: '', marche_id: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
         setIsAddingOs(false);
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || t('projectdetail_os_create_failed'));
       }
     } catch (err) {
       console.error(err);
@@ -855,12 +1065,15 @@ export default function ProjectDetail() {
 
   const handleCreateOsMoe = async () => {
     if (!id || !newOsMoe.title || !newOsMoe.os_number) return;
+    const contratMoeId = (linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0])?.id;
+    if (!contratMoeId) return;
     try {
-      const res = await fetch('/api/ordres_de_service', {
+      const res = await fetch('/api/avenants_moe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: id,
+          contrat_moe_id: contratMoeId,
           os_number: newOsMoe.os_number,
           title: newOsMoe.title,
           objet: newOsMoe.objet || null,
@@ -873,20 +1086,22 @@ export default function ProjectDetail() {
           delai_execution: newOsMoe.delai_execution ? Number(newOsMoe.delai_execution) : null,
           montant_devis_presente: Number(newOsMoe.montant_devis_presente) || null,
           status: 'draft',
-          type: 'contrat_moe',
         })
       });
       if (res.ok) {
-        await fetchOrdresDeService();
+        await fetchAvenantsMoe();
         setNewOsMoe({ title: '', os_number: '', montant_devis_presente: '', objet: 'extension_mission', description: '', origine_demande: 'maitrise_ouvrage', date: new Date().toISOString().split('T')[0], date_signature: '', incidences_delais_type: 'non', incidences_delais_details: '', delai_execution: '' });
         setIsAddingOsMoe(false);
+      } else {
+        const err = await res.json().catch(() => null);
+        alert(err?.error || t('projectdetail_avenant_create_failed'));
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  const generateAvenantPdf = async (os: OrdreDeService, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
+  const generateAvenantPdf = async (os: AvenantMoe, projectName: string, honorairesInitiaux: number, cumulAvenants: number) => {
     const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
       import('jspdf'),
       import('jspdf-autotable'),
@@ -1043,6 +1258,36 @@ export default function ProjectDetail() {
       }
     } catch (err) { console.error(err); }
     finally { setArSaving(false); }
+  };
+
+  // Distincts des transitions de statut d'un OS travaux ci-dessus : un
+  // avenant MOE n'a pas d'accusé de réception d'entreprise (concept propre
+  // au marché de travaux) — approuver un avenant est une simple transition
+  // de statut, immédiate.
+  const handleUpdateAvenantStatus = async (avenantId: string, newStatus: AvenantMoe['status']) => {
+    try {
+      const avenant = avenantsMoe.find(a => a.id === avenantId);
+      const body: any = { status: newStatus };
+      if (newStatus === 'approved') body.montant_devis_accepte = avenant?.montant_devis_accepte ?? avenant?.montant_devis_presente ?? undefined;
+      const res = await fetch(`/api/avenants_moe/${avenantId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        setAvenantsMoe(prev => prev.map(a => a.id === avenantId
+          ? { ...a, status: newStatus, montant_devis_accepte: body.montant_devis_accepte ?? a.montant_devis_accepte }
+          : a));
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleDeleteAvenant = async (avenantId: string) => {
+    if (!confirm(t('projectdetail_confirm_delete_avenant'))) return;
+    try {
+      const res = await fetch(`/api/avenants_moe/${avenantId}`, { method: 'DELETE' });
+      if (res.ok) setAvenantsMoe(prev => prev.filter(a => a.id !== avenantId));
+    } catch (err) { console.error(err); }
   };
 
   const generateOsPdf = async (os: OrdreDeService) => {
@@ -1250,7 +1495,7 @@ export default function ProjectDetail() {
   };
 
   const handleDeleteOs = async (osId: string) => {
-    if (!confirm('Supprimer cet ordre de service ?')) return;
+    if (!confirm(t('projectdetail_confirm_delete_os'))) return;
     try {
       const res = await fetch(`/api/ordres_de_service/${osId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -1269,7 +1514,7 @@ export default function ProjectDetail() {
       rejected:  { label: 'Annulé',    cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
     };
     const { label, cls } = map[status] ?? map.draft;
-    return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${cls}`}>{label}</span>;
+    return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider ${cls}`}>{label}</span>;
   };
 
   const handleCreateInvoice = async () => {
@@ -1374,7 +1619,7 @@ export default function ProjectDetail() {
           setUpdatingPlanId(null);
         } else {
           const err = await res.json().catch(() => null);
-          alert(`Erreur lors de l'upload du plan : ${err?.error || res.statusText}`);
+          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
         }
       } else {
         // Create a new plan
@@ -1389,12 +1634,12 @@ export default function ProjectDetail() {
           setPlans(prev => [...prev, data]);
         } else {
           const err = await res.json().catch(() => null);
-          alert(`Erreur lors de l'upload du plan : ${err?.error || res.statusText}`);
+          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
         }
       }
     } catch (err) {
       console.error(err);
-      alert("Erreur lors de l'upload du plan.");
+      alert(t('projectdetail_plan_upload_failed'));
     } finally {
       setPlanUploading(false);
       if (planInputRef.current) planInputRef.current.value = '';
@@ -1419,12 +1664,12 @@ export default function ProjectDetail() {
           <IconArrowLeft size={18} />
         </button>
         <div className="flex items-baseline gap-2.5 min-w-0">
-          <span className="font-bold text-[15px] truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</span>
+          <span className="font-bold text-[0.9375rem] truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</span>
           {(project.project_code || project.reference) && (
-            <span className="font-mono text-[11px] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || project.reference}</span>
+            <span className="font-mono text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || project.reference}</span>
           )}
           <span
-            className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold shrink-0 whitespace-nowrap"
+            className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[0.6875rem] font-semibold shrink-0 whitespace-nowrap"
             style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
           >
             {project.is_chantier ? 'Mission chantier active' : project.status}
@@ -1440,7 +1685,11 @@ export default function ProjectDetail() {
             const filteredPhases = MISSION_PHASES.filter(phase =>
               !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
             );
-            const actualCurrentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+            // Sans historique de phase (affaire créée avant le suivi, ou jamais
+            // passée de phase), la fiche affiche déjà « Phase ESQ » — la première
+            // mission est donc la mission en cours, et le stepper doit la montrer
+            // comme telle plutôt que tous les jalons en attente.
+            const actualCurrentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || filteredPhases[0];
             const displayedPhase = viewedPhase || actualCurrentPhase;
             return (
               <PhaseStepper
@@ -1461,8 +1710,8 @@ export default function ProjectDetail() {
         <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
           {currentUser?.system_role === 'admin' && (
             <button
-              onClick={handleDelete}
-              className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+              onClick={() => { setDeleteProjectConfirmInput(''); setShowDeleteProjectConfirm(true); }}
+              className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
               title={t('delete')}
             >
               <IconTrash size={18} />
@@ -1470,7 +1719,7 @@ export default function ProjectDetail() {
           )}
           <button
             onClick={() => navigate('/projects')}
-            className="h-8 px-3 rounded-lg text-[13px] font-medium border transition-colors hover:bg-[var(--tblr-surface-2)]"
+            className="h-8 px-3 rounded-lg text-[0.8125rem] font-medium border transition-colors hover:bg-[var(--tblr-surface-2)]"
             style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
           >
             Annuler
@@ -1478,7 +1727,7 @@ export default function ProjectDetail() {
           <button
             onClick={handleSave}
             disabled={isSaving}
-            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[13px] font-semibold text-white transition-all disabled:opacity-50"
+            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
             style={{ background: 'var(--tblr-primary)' }}
           >
             {isSaving ? (
@@ -1509,13 +1758,18 @@ export default function ProjectDetail() {
             { id: 'RDT', label: 'RDT', icon: IconReportMoney },
             { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
             { id: 'CORRESPONDANCE', label: t('correspondence_title') as string, icon: IconMail },
-          ] as PillTabItem[]).filter(tab =>
-            !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) && !project.is_chantier)
-          )}
+          ] as PillTabItem[])
+            .map(tab =>
+              chantierTabState[tab.id]?.horsMission ? { ...tab, badge: 'hors mission' } : tab
+            )
+            .filter(tab =>
+              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) &&
+                (!project.is_chantier || chantierTabState[tab.id]?.visible === false))
+            )}
         />
       </div>
 
-      <div className="flex-1 lg:min-h-0 lg:overflow-hidden">
+      <div className={`flex-1 ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
         {activeTab === 'INFOS' && !showFullEditor ? (
           <ProjectOverview
             project={project}
@@ -1561,7 +1815,7 @@ export default function ProjectDetail() {
                     title="Contrat de Maîtrise d'Œuvre"
                     description="Contrat(s) associés à ce projet depuis la boîte à outils MOE"
                     action={
-                      <a href="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all">
+                      <a href="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} />
                         Gérer les contrats
                       </a>
@@ -1588,9 +1842,9 @@ export default function ProjectDetail() {
                           <div key={c.id} className="p-5 flex items-start gap-4">
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap mb-1">
-                                {c.numero && <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]">{c.numero}</span>}
-                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider", STATUS_COLORS[c.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{c.status}</span>
-                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600">{TYPE_LABELS[c.type_contrat] || c.type_contrat}</span>
+                                {c.numero && <span className="text-[0.6875rem] font-mono px-2 py-0.5 rounded bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]">{c.numero}</span>}
+                                <span className={cn("text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider", STATUS_COLORS[c.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{c.status}</span>
+                                <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600">{TYPE_LABELS[c.type_contrat] || c.type_contrat}</span>
                               </div>
                               <p className="font-semibold text-[var(--tblr-text)] text-sm">{c.intitule_projet || c.project_name || '—'}</p>
                               <div className="flex flex-wrap gap-4 mt-1 text-xs text-[var(--tblr-muted)]">
@@ -1603,7 +1857,7 @@ export default function ProjectDetail() {
                               {missionsIncluses.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mt-2">
                                   {missionsIncluses.map((m: any) => (
-                                    <span key={m.id} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-medium">
+                                    <span key={m.id} className="text-[0.6875rem] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-medium">
                                       {m.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}{m.pct ? ` ${m.pct}%` : ''}
                                     </span>
                                   ))}
@@ -1648,40 +1902,61 @@ export default function ProjectDetail() {
                       );
                     })()}
 
-                    {/* Champ rémunération éditable */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-[var(--tblr-border)]">
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Honoraires initiaux HT (€)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                          <input type="number"
-                            className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
-                            value={project.remuneration || 0}
-                            onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
+                    {/* Honoraires initiaux et coût travaux : issus du contrat MOE
+                        lié (donc en lecture seule ici, à corriger dans le
+                        contrat). Ils ne redeviennent saisissables que si aucun
+                        contrat n'est lié à l'affaire. */}
+                    {(() => {
+                      const verrouille = !!contratHonoraires;
+                      const readOnlyCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default';
+                      const editCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold';
+                      const origine = verrouille
+                        ? `Issu du contrat ${contratHonoraires.numero || 'MOE'}`
+                        : undefined;
+                      return (
+                        <div className="space-y-2 pt-2 border-t border-[var(--tblr-border)]">
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Honoraires initiaux HT (€)</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                                <input type="number" readOnly={verrouille} title={origine}
+                                  className={verrouille ? readOnlyCls : editCls}
+                                  value={project.remuneration || 0}
+                                  onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Coût travaux prévisionnel HT (€)</label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                                <input type="number" readOnly={verrouille} title={origine}
+                                  className={verrouille ? readOnlyCls : editCls}
+                                  value={project.construction_cost || 0}
+                                  onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux honoraires (%)</label>
+                              <div className="relative">
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
+                                <input type="number" readOnly
+                                  className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default"
+                                  value={project.construction_cost && project.remuneration
+                                    ? Number(((project.remuneration / project.construction_cost) * 100).toFixed(10))
+                                    : '—'} />
+                              </div>
+                            </div>
+                          </div>
+                          {verrouille && (
+                            <p className="text-xs text-[var(--tblr-muted)]">
+                              Ces montants proviennent du contrat {contratHonoraires.numero ? `N° ${contratHonoraires.numero}` : 'de maîtrise d\'œuvre'} lié à cette affaire.
+                              {' '}<Link to="/contrats" className="underline hover:text-[var(--tblr-primary)]">Modifier le contrat</Link> pour les corriger.
+                            </p>
+                          )}
                         </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Coût travaux prévisionnel HT (€)</label>
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                          <input type="number"
-                            className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
-                            value={project.construction_cost || 0}
-                            onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux honoraires (%)</label>
-                        <div className="relative">
-                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
-                          <input type="number" readOnly
-                            className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default"
-                            value={project.construction_cost && project.remuneration
-                              ? ((project.remuneration / project.construction_cost) * 100).toFixed(2)
-                              : '—'} />
-                        </div>
-                      </div>
-                    </div>
+                      );
+                    })()}
 
                     {/* Répartition par phases */}
                     {(() => {
@@ -1691,19 +1966,18 @@ export default function ProjectDetail() {
                         { id: 'act', name: 'ACT', pct: 7 },  { id: 'visa', name: 'VISA', pct: 7 },
                         { id: 'det', name: 'DET', pct: 25 }, { id: 'aor', name: 'AOR', pct: 7 },
                       ];
-                      const honRevises = (Number(project.remuneration) || 0) +
-                        ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s, o) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                      const honRevises = (Number(project.remuneration) || 0) + cumulAvenantsApprouves;
                       if (honRevises <= 0) return null;
                       const phases = linkedContratsMoe[0]?.missions_list?.filter((m: any) => m.incluse) ?? DEFAULT_PHASES;
                       return (
                         <div className="pt-2 border-t border-[var(--tblr-border)]">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Répartition indicative par phase (base mission complète)</p>
+                          <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Répartition indicative par phase (base mission complète)</p>
                           <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
                             {phases.map((phase: any) => (
                               <div key={phase.id} className="text-center p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
-                                <p className="text-[10px] font-black uppercase text-[var(--tblr-muted)]">{phase.name}</p>
+                                <p className="text-[0.6875rem] font-black uppercase text-[var(--tblr-muted)]">{phase.name}</p>
                                 <p className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-1">{phase.pct} %</p>
-                                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">{new Intl.NumberFormat('fr-FR', { notation: 'compact', currency: 'EUR', style: 'currency' }).format(honRevises * phase.pct / 100)}</p>
+                                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">{new Intl.NumberFormat('fr-FR', { notation: 'compact', currency: 'EUR', style: 'currency' }).format(honRevises * phase.pct / 100)}</p>
                               </div>
                             ))}
                           </div>
@@ -1719,9 +1993,7 @@ export default function ProjectDetail() {
                     icon={IconClipboardList}
                     title="Avenants Contrat MOE"
                     description={(() => {
-                      const moeApprouves = ordresDeService
-                        .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
-                        .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                      const moeApprouves = cumulAvenantsApprouves;
                       const honorairesInitiaux = Number(project.remuneration) || 0;
                       if (moeApprouves !== 0 || honorairesInitiaux !== 0) return (
                         <span className="font-semibold" style={{ color: 'var(--tblr-primary)' }}>
@@ -1739,7 +2011,7 @@ export default function ProjectDetail() {
                     ) : (
                       <button
                         onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Nouvel avenant
@@ -1750,13 +2022,13 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">N° Avenant *</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° Avenant *</label>
                           <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.os_number} onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
                             placeholder={`A${String(moeAvenants.length + 1).padStart(2, '0')}`} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Type d'avenant</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Type d'avenant</label>
                           <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.objet} onChange={e => setNewOsMoe({...newOsMoe, objet: e.target.value})}>
                             <option value="extension_mission">Extension de mission</option>
@@ -1767,12 +2039,12 @@ export default function ProjectDetail() {
                           </select>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
                           <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.date} onChange={e => setNewOsMoe({...newOsMoe, date: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Origine</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Origine</label>
                           <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.origine_demande} onChange={e => setNewOsMoe({...newOsMoe, origine_demande: e.target.value})}>
                             <option value="maitrise_ouvrage">Maîtrise d'ouvrage</option>
@@ -1784,13 +2056,13 @@ export default function ProjectDetail() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Intitulé de l'avenant *</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Intitulé de l'avenant *</label>
                           <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.title} onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
                             placeholder="ex: Extension de mission OPC + coordination sécurité" />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Motif détaillé</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Motif détaillé</label>
                           <textarea rows={2} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                             value={newOsMoe.description} onChange={e => setNewOsMoe({...newOsMoe, description: e.target.value})}
                             placeholder="Contexte, raisons justifiant l'avenant…" />
@@ -1798,18 +2070,18 @@ export default function ProjectDetail() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Impact honoraires HT (€)</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Impact honoraires HT (€)</label>
                           <input type="number" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.montant_devis_presente} onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
                             placeholder="ex: 3 500 (négatif si réduction)" />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date signature MOA</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date signature MOA</label>
                           <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.date_signature} onChange={e => setNewOsMoe({...newOsMoe, date_signature: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Impact sur délais</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Impact sur délais</label>
                           <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.incidences_delais_type} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_type: e.target.value as 'non' | 'oui'})}>
                             <option value="non">Sans incidence</option>
@@ -1818,7 +2090,7 @@ export default function ProjectDetail() {
                         </div>
                         {newOsMoe.incidences_delais_type === 'oui' && (
                           <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Prolongation (jours)</label>
+                            <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Prolongation (jours)</label>
                             <input type="number" min={0} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newOsMoe.delai_execution} onChange={e => setNewOsMoe({...newOsMoe, delai_execution: e.target.value})} placeholder="nb de jours" />
                           </div>
@@ -1826,7 +2098,7 @@ export default function ProjectDetail() {
                       </div>
                       {newOsMoe.incidences_delais_type === 'oui' && (
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Justification de l'incidence sur les délais</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Justification de l'incidence sur les délais</label>
                           <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.incidences_delais_details} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_details: e.target.value})}
                             placeholder="ex: Complexification du programme nécessitant une phase PRO étendue" />
@@ -1834,7 +2106,7 @@ export default function ProjectDetail() {
                       )}
                       <div className="flex justify-end gap-3">
                         <button onClick={() => setIsAddingOsMoe(false)} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">Créer l'avenant</button>
+                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">Créer l'avenant</button>
                       </div>
                     </div>
                   )}
@@ -1846,18 +2118,18 @@ export default function ProjectDetail() {
                     if (moeAvenants.length === 0) return null;
                     return (
                       <div className="mx-6 mb-4 mt-2 flex items-center gap-6 text-xs px-4 py-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40">
-                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Honoraires initiaux</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit)}</span></div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">Honoraires initiaux</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit)}</span></div>
                         <div className="text-blue-300">+</div>
-                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Cumul avenants approuvés</span><br/><span className={cn("font-black text-sm", cumul >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{cumul >= 0 ? '+' : ''}{formatCurrency(cumul)}</span></div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">Cumul avenants approuvés</span><br/><span className={cn("font-black text-sm", cumul >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{cumul >= 0 ? '+' : ''}{formatCurrency(cumul)}</span></div>
                         <div className="text-blue-300">=</div>
-                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[9px]">Honoraires révisés</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit + cumul)}</span></div>
-                        <div className="ml-auto text-blue-400 text-[10px]">{approuves.length}/{moeAvenants.length} approuvé{approuves.length > 1 ? 's' : ''}</div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">Honoraires révisés</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit + cumul)}</span></div>
+                        <div className="ml-auto text-blue-400 text-[0.6875rem]">{approuves.length}/{moeAvenants.length} approuvé{approuves.length > 1 ? 's' : ''}</div>
                       </div>
                     );
                   })()}
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-4 py-3 text-left">N°</th>
                           <th className="px-4 py-3 text-left">Type</th>
@@ -1882,14 +2154,14 @@ export default function ProjectDetail() {
                           return moeAvenants.map((os) => (
                             <tr key={os.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
                               <td className="px-4 py-3 font-mono font-black text-[var(--tblr-text)] whitespace-nowrap text-xs">Av.{os.os_number}</td>
-                              <td className="px-4 py-3"><span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{TYPE_SHORT[os.objet || ''] || os.objet || '—'}</span></td>
+                              <td className="px-4 py-3"><span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{TYPE_SHORT[os.objet || ''] || os.objet || '—'}</span></td>
                               <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200 max-w-[180px]">
                                 <p className="truncate font-medium">{os.title}</p>
-                                {os.description && <p className="text-[10px] text-[var(--tblr-muted)] truncate mt-0.5">{os.description}</p>}
+                                {os.description && <p className="text-[0.6875rem] text-[var(--tblr-muted)] truncate mt-0.5">{os.description}</p>}
                               </td>
                               <td className="px-4 py-3 text-[var(--tblr-muted)] text-xs whitespace-nowrap">
                                 {os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}
-                                {os.date_signature && <div className="text-[10px] text-green-600">Signé le {new Date(os.date_signature).toLocaleDateString('fr-FR')}</div>}
+                                {os.date_signature && <div className="text-[0.6875rem] text-green-600">Signé le {new Date(os.date_signature).toLocaleDateString('fr-FR')}</div>}
                               </td>
                               <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300 whitespace-nowrap">{os.montant_devis_presente != null ? formatCurrency(Number(os.montant_devis_presente)) : '—'}</td>
                               <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
@@ -1899,24 +2171,24 @@ export default function ProjectDetail() {
                               </td>
                               <td className="px-4 py-3 text-center">
                                 {os.incidences_delais_type === 'oui'
-                                  ? <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? `+${os.delai_execution}j` : 'Oui'}</span>
-                                  : <span className="text-zinc-300 text-[10px]">—</span>}
+                                  ? <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? `+${os.delai_execution}j` : 'Oui'}</span>
+                                  : <span className="text-zinc-300 text-[0.6875rem]">—</span>}
                               </td>
                               <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  {os.status === 'draft' && <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[10px] font-bold transition-all"><IconSend size={11} /> Soumettre</button>}
+                                  {os.status === 'draft' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[0.6875rem] font-bold transition"><IconSend size={11} /> Soumettre</button>}
                                   {os.status === 'submitted' && (<>
-                                    <button onClick={() => handleUpdateOsStatus(os.id, 'approved', os.montant_devis_presente ?? undefined)} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all"><IconCheck size={11} /> Approuver</button>
-                                    <button onClick={() => handleUpdateOsStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[10px] font-bold transition-all"><IconX size={11} /> Rejeter</button>
+                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'approved')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition"><IconCheck size={11} /> Approuver</button>
+                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[0.6875rem] font-bold transition"><IconX size={11} /> Rejeter</button>
                                   </>)}
-                                  {os.status === 'rejected' && <button onClick={() => handleUpdateOsStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[10px] font-bold transition-all"><IconRefresh size={11} /> Rouvrir</button>}
+                                  {os.status === 'rejected' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[0.6875rem] font-bold transition"><IconRefresh size={11} /> Rouvrir</button>}
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                   <button title="Exporter PDF avenant" onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                  <button onClick={() => handleDeleteOs(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                  <button onClick={() => handleDeleteAvenant(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
                                 </div>
                               </td>
                             </tr>
@@ -1942,12 +2214,20 @@ export default function ProjectDetail() {
                     { id: 'det', name: 'DET — Direction de l\'Exécution des Travaux' },
                     { id: 'aor', name: 'AOR — Assistance à la Réception' },
                   ];
-                  const honRevises = (Number(project.remuneration) || 0) +
-                    ordresDeService.filter(o => o.type === 'contrat_moe' && o.status === 'approved').reduce((s: number, o: any) => s + (Number(o.montant_devis_accepte ?? o.montant_devis_presente) || 0), 0);
+                  const honRevises = (Number(project.remuneration) || 0) + cumulAvenantsApprouves;
                   const contrat = linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0];
                   const cotraitants: any[] = contrat?.cotraitants || [];
                   const sousTraitants: any[] = contrat?.sous_traitants || [];
                   const phases = contrat?.missions_list?.filter((m: any) => m.incluse).map((m: any) => ({ id: m.id, name: m.name })) ?? DEFAULT_PHASES;
+
+                  // Parts de répartition par défaut, reprises du contrat : chaque
+                  // cotraitant a la part qui lui est contractuellement due
+                  // (`fee_pct`), l'agence le solde. C'est la répartition la plus
+                  // probable d'une mission, à ajuster mission par mission dans la
+                  // note (une esquisse peut pencher davantage vers l'agence que le
+                  // contrat dans son ensemble).
+                  const partCotraitantDefaut = (ct: any) => Number(ct?.fee_pct) || 0;
+                  const partAgenceDefaut = Math.max(0, 100 - cotraitants.reduce((s: number, ct: any) => s + partCotraitantDefaut(ct), 0));
 
                   const initNoteForm = () => ({
                     numero: `NH-${String(notesHonoraires.length + 1).padStart(2, '0')}`,
@@ -1955,21 +2235,344 @@ export default function ProjectDetail() {
                     objet: '',
                     status: 'Brouillon',
                     tva_rate: 20,
-                    phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
-                    cotraitants_facturation: cotraitants.map((ct: any) => ({ contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0 })),
-                    sous_traitants_facturation: sousTraitants.map((st: any) => ({ contact_id: st.contact_id, nom: st.contact_name || st.specialty || '', montant_ht: 0, tva_rate: 20, montant_ttc: 0, paiement_direct_moa: !!st.paiement_direct_moa })),
+                    phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0, part_pct: partAgenceDefaut })),
+                    cotraitants_facturation: cotraitants.map((ct: any) => ({
+                      contact_id: ct.contact_id, nom: ct.contact_name || ct.specialty || '',
+                      phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0, part_pct: partCotraitantDefaut(ct) })),
+                      montant_ht: 0, tva_rate: 20, montant_ttc: 0,
+                    })),
+                    sous_traitants_facturation: sousTraitants.map((st: any) => ({
+                      contact_id: st.contact_id, nom: st.contact_name || st.specialty || '',
+                      phases: phases.map((p: any) => ({ phase_id: p.id, phase_name: p.name, avancement_pct: 0, montant_phase: 0 })),
+                      montant_ht: 0, tva_rate: 20, montant_ttc: 0,
+                      payeur: st.payeur ?? (st.paiement_direct_moa ? 'moa' : 'agence'),
+                    })),
                     notes: '',
                   });
 
+                  // Le nom de l'agence — jamais le mot générique "Agence" —
+                  // pour rappeler qu'une note d'honoraires concerne toute
+                  // l'équipe de maîtrise d'œuvre (le groupement), alors que
+                  // seule cette colonne, une fois isolée, donne la facture de
+                  // l'agence elle-même.
+                  const agencyName = (settings as any)?.agencyName || 'Agence';
+
+                  // Nom affiché d'un cotraitant/sous-traitant : toujours relu
+                  // depuis le contrat courant (par contact_id), jamais depuis
+                  // le `nom` figé dans la note à sa création — sinon renommer
+                  // un intervenant dans le contrat (ContactAutocomplete) ne se
+                  // répercutait jamais sur les notes déjà en cours d'édition
+                  // ni sur les nouvelles tant que la page n'était pas rechargée.
+                  // Un intervenant retiré du contrat depuis garde son dernier
+                  // nom connu plutôt que d'afficher un intitulé vide.
+                  const ctDisplayName = (ct: any) => {
+                    const rec = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom));
+                    return rec?.contact_name || rec?.specialty || ct.nom || 'Cotraitant';
+                  };
+                  const stDisplayName = (st: any) => {
+                    const rec = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
+                    return rec?.contact_name || rec?.specialty || st.nom || 'Sous-traitant';
+                  };
+
+                  /**
+                   * Qui règle ce sous-traitant, pour la note en cours — relu sur le
+                   * CONTRAT (par `contact_id`), comme les noms juste au-dessus, et
+                   * non depuis la valeur figée dans la note à sa création : désigner
+                   * ou changer le payeur dans le contrat doit se répercuter
+                   * immédiatement sur la ventilation, y compris d'une note déjà
+                   * ouverte. La valeur figée ne sert de repli que si le
+                   * sous-traitant a depuis été retiré du contrat.
+                   *
+                   * Rend une clé canonique : `'agence'`, `'moa'`, ou l'`id` du
+                   * cotraitant payeur. Un payeur désigné mais introuvable dans le
+                   * contrat (cotraitant supprimé depuis) revient à l'agence, qui est
+                   * le mandataire : sans ça, le montant du sous-traitant sortait de
+                   * l'enveloppe de la mission sans revenir à personne, et les
+                   * montants de TOUS les membres baissaient.
+                   */
+                  const payeurEffectif = (st: any): string => {
+                    const rec = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
+                    const source = rec || st;
+                    const brut = source.payeur ?? (source.paiement_direct_moa ? 'moa' : 'agence');
+                    if (brut === 'moa' || brut === 'agence') return brut;
+                    // Un payeur cotraitant est enregistré par son `id` de contrat, mais
+                    // une note ancienne ou un import peuvent porter son `contact_id` :
+                    // les deux sont acceptés pour ne pas perdre l'imputation.
+                    const ct = cotraitants.find((c: any) => c.id === brut || c.contact_id === brut);
+                    return ct ? ct.id : 'agence';
+                  };
+
+                  // Libellé du payeur sous le nom de colonne d'un sous-traitant —
+                  // rien à afficher quand c'est l'agence, le cas par défaut.
+                  const payeurLabel = (st: any) => {
+                    const payeur = payeurEffectif(st);
+                    if (payeur === 'agence') return null;
+                    if (payeur === 'moa') return "réglé par le MOA";
+                    const ct = cotraitants.find((c: any) => c.id === payeur);
+                    return ct ? `réglé par ${ct.contact_name || ct.specialty || 'cotraitant'}` : null;
+                  };
+
+                  // Plafonds de ventilation : le cumul déjà facturé sur les notes
+                  // précédentes du même contrat — ne jamais laisser le total, toutes
+                  // notes confondues, dépasser ce qui est dû.
+                  const contratIdForCaps = contrat?.id || null;
+                  const priorNotesForCaps = notesHonoraires.filter((n: any) => n.contrat_id === contratIdForCaps && n.id !== editingNote?.id);
+                  // L'avancement se cumule en POURCENTAGE et non en montant : c'est
+                  // le groupement qui porte l'avancement d'une mission, et une
+                  // mission ne peut pas être facturée au-delà de 100 %.
+                  const cumulGroupementPct = (phaseId: string) => priorNotesForCaps.reduce((s: number, n: any) =>
+                    s + (Number((n.phases || []).find((p: any) => p.phase_id === phaseId)?.avancement_pct) || 0), 0);
+                  const cumulStTotal = (key: string) => priorNotesForCaps.reduce((s: number, n: any) => {
+                    const st = (n.sous_traitants_facturation || []).find((x: any) => (x.contact_id || x.nom) === key);
+                    return s + (st?.montant_ht || 0);
+                  }, 0);
+
+                  // Montant total d'une mission pour TOUT le groupement : le
+                  // pourcentage de mission du contrat appliqué aux honoraires
+                  // révisés, qui sont eux-mêmes le montant du contrat pour
+                  // l'ensemble de l'équipe. C'est ce montant que la répartition
+                  // par membre découpe ensuite — il n'additionne donc PAS les
+                  // parts des cotraitants, qui en sont des fractions et non des
+                  // suppléments.
+                  const groupementPhaseBase = (phaseId: string) => {
+                    const pct = (contrat?.missions_list || []).find((m: any) => m.id === phaseId)?.pct || 0;
+                    return honRevises * pct / 100;
+                  };
+
+                  // Identifiant contractuel d'un cotraitant de la note — c'est cet
+                  // `id` que `ContratSousTraitant.payeur` désigne, et donc lui qui
+                  // relie un sous-traitant au membre dont le montant se réduit.
+                  const ctContratId = (ct: any) => cotraitants.find((c: any) =>
+                    (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom))?.id;
+
+                  /**
+                   * Recalcule tous les montants dérivés de la note, mission par
+                   * mission : seuls trois champs sont réellement saisis — le
+                   * pourcentage d'avancement du groupement, la quote-part de chaque
+                   * membre, et le montant de chaque sous-traitant. Tout le reste en
+                   * découle, d'où un recalcul global plutôt qu'une retouche cellule
+                   * par cellule : changer l'avancement du groupement déplace les
+                   * montants de tous les membres de la ligne.
+                   */
+                  const recalcNote = (form: any) => {
+                    // Les objets `phases` sont recopiés et non seulement leurs
+                    // tableaux : `montant_phase` y est réécrit, et ces objets sont
+                    // partagés avec l'état précédent du formulaire.
+                    const cts = (form.cotraitants_facturation || []).map((ct: any) => ({ ...ct, phases: (ct.phases || []).map((p: any) => ({ ...p })) }));
+                    // `payeur` est réécrit avec la valeur résolue sur le contrat :
+                    // la note enregistrée porte ainsi le payeur qui a réellement
+                    // servi au calcul, et l'export PDF comme la facture brouillon
+                    // lisent la même imputation que l'écran.
+                    const sts = (form.sous_traitants_facturation || []).map((st: any) => ({
+                      ...st,
+                      payeur: payeurEffectif(st),
+                      paiement_direct_moa: undefined,
+                      phases: (st.phases || []).map((p: any) => ({ ...p })),
+                    }));
+                    const phaseOf = (list: any[], phaseId: string) => list.find((p: any) => p.phase_id === phaseId);
+
+                    const nextPhases = (form.phases || []).map((phase: any) => {
+                      const montantGroupement = groupementPhaseBase(phase.phase_id) * (Number(phase.avancement_pct) || 0) / 100;
+                      const stMission = (st: any) => Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0;
+                      const stPayePar = (payeurKey: string) => sts.reduce((s: number, st: any) =>
+                        payeurEffectif(st) === payeurKey ? s + stMission(st) : s, 0);
+
+                      // Le montant facturé par le groupement sur une mission ne bouge
+                      // PAS quand des sous-traitants sont saisis : ce qui leur est
+                      // reversé sort de l'enveloppe de la mission, pas en supplément.
+                      // Les quote-parts se calculent donc sur ce qui reste après
+                      // sous-traitance (`resteAPartager`), de sorte que chacun
+                      // touche RÉELLEMENT sa part une fois les sous-traitants payés.
+                      const stTotalMission = sts.reduce((s: number, st: any) => s + stMission(st), 0);
+                      const resteAPartager = Math.max(0, montantGroupement - stTotalMission);
+
+                      // Le membre qui règle un sous-traitant le facture au maître
+                      // d'ouvrage puis le reverse : son montant facturé est donc sa
+                      // part NETTE augmentée de ce qu'il reverse, tandis que celui
+                      // qui ne règle personne voit sa part baisser d'autant — les
+                      // deux touchent bien leur pourcentage une fois la
+                      // sous-traitance payée, et la somme des membres reste égale au
+                      // montant du groupement (diminuée de ce que le maître
+                      // d'ouvrage règle lui-même en direct).
+                      cts.forEach((ct: any) => {
+                        const p = phaseOf(ct.phases, phase.phase_id);
+                        if (!p) return;
+                        const net = resteAPartager * (Number(p.part_pct) || 0) / 100;
+                        p.montant_phase = parseFloat((net + stPayePar(ctContratId(ct) || '')).toFixed(2));
+                      });
+
+                      const netAgence = resteAPartager * (Number(phase.part_pct) || 0) / 100;
+                      return { ...phase, montant_phase: parseFloat((netAgence + stPayePar('agence')).toFixed(2)) };
+                    });
+
+                    const totaux = (intervenant: any) => {
+                      const montant_ht = parseFloat((intervenant.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0).toFixed(2));
+                      return {
+                        ...intervenant,
+                        montant_ht,
+                        montant_ttc: parseFloat((montant_ht * (1 + (intervenant.tva_rate || 20) / 100)).toFixed(2)),
+                      };
+                    };
+
+                    return {
+                      ...form,
+                      phases: nextPhases,
+                      cotraitants_facturation: cts.map(totaux),
+                      sous_traitants_facturation: sts.map(totaux),
+                    };
+                  };
+
                   const totalNotesHT = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ht || 0), 0);
                   const totalNotesTTC = notesHonoraires.reduce((s: number, n: any) => s + (n.montant_ttc || 0), 0);
+
+                  // Saisie d'une cellule d'intervenant : pose la valeur saisie
+                  // (`part_pct` pour un cotraitant, `montant_phase` pour un
+                  // sous-traitant) puis laisse `recalcNote` refaire tous les
+                  // montants dérivés — un montant de sous-traitant change la part
+                  // nette de celui qui le règle, donc un recalcul local ne suffit
+                  // pas.
+                  const updateIntervenantPhase = (
+                    group: 'cotraitants_facturation' | 'sous_traitants_facturation',
+                    intervenantIdx: number,
+                    phaseId: string,
+                    phaseName: string,
+                    patch: Partial<{ part_pct: number; montant_phase: number }>,
+                  ) => {
+                    const list = [...(noteForm[group] || [])];
+                    const intervenant = { ...list[intervenantIdx] };
+                    const phasesArr = [...(intervenant.phases || [])];
+                    let pIdx = phasesArr.findIndex((p: any) => p.phase_id === phaseId);
+                    if (pIdx === -1) {
+                      phasesArr.push({ phase_id: phaseId, phase_name: phaseName, avancement_pct: 0, montant_phase: 0, part_pct: 0 });
+                      pIdx = phasesArr.length - 1;
+                    }
+                    phasesArr[pIdx] = { ...phasesArr[pIdx], ...patch };
+                    intervenant.phases = phasesArr;
+                    list[intervenantIdx] = intervenant;
+                    setNoteForm(recalcNote({ ...noteForm, [group]: list }));
+                  };
+
+                  /**
+                   * Ouverture d'une note enregistrée AVANT cette refonte : chaque
+                   * intervenant y portait son propre avancement et aucun
+                   * `part_pct`, donc un recalcul direct ramènerait tous ses
+                   * montants à zéro. On reconstruit ici les valeurs saisissables
+                   * du nouveau modèle à partir des montants déjà enregistrés —
+                   * l'avancement du groupement depuis le montant total de la
+                   * mission, et la quote-part de chaque membre depuis son montant
+                   * brut (son montant net plus ce qu'il règle à ses
+                   * sous-traitants) — de sorte que la note rouvre sur exactement
+                   * les mêmes montants qu'à son enregistrement.
+                   */
+                  const noteFormFromSaved = (note: any) => {
+                    // Copie en profondeur des `phases` : on y écrit les `part_pct`
+                    // reconstruits, et les objets de la note enregistrée sont
+                    // partagés avec la liste affichée (`notesHonoraires`).
+                    const copiePhases = (list: any[]) => (list || []).map((p: any) => ({ ...p }));
+                    const form = {
+                      ...note,
+                      phases: copiePhases(note.phases),
+                      cotraitants_facturation: (note.cotraitants_facturation || []).map((ct: any) => ({ ...ct, phases: copiePhases(ct.phases) })),
+                      sous_traitants_facturation: (note.sous_traitants_facturation || []).map((st: any) => ({ ...st, phases: copiePhases(st.phases) })),
+                    };
+                    const dejaMigree = (form.phases || []).every((p: any) => p.part_pct != null);
+                    if (dejaMigree) return recalcNote(form);
+
+                    const phaseOf = (list: any[], phaseId: string) => (list || []).find((p: any) => p.phase_id === phaseId);
+                    form.phases = (form.phases || []).map((phase: any) => {
+                      const stMission = (st: any) => Number(phaseOf(st.phases, phase.phase_id)?.montant_phase) || 0;
+                      const stPayePar = (payeurKey: string) => form.sous_traitants_facturation.reduce((s: number, st: any) =>
+                        payeurEffectif(st) === payeurKey ? s + stMission(st) : s, 0);
+
+                      // Dans l'ancien modèle, les montants des sous-traitants
+                      // s'ajoutaient à ceux des membres ; dans le nouveau, ceux
+                      // qu'un membre règle sont compris dans son montant. Les
+                      // montants des membres sont donc repris tels quels et les
+                      // valeurs saisissables déduites à l'envers : l'enveloppe à
+                      // partager est la somme des membres moins ce qu'ils
+                      // reversent, et le montant du groupement cette enveloppe plus
+                      // TOUS les sous-traitants (ceux réglés en direct par le
+                      // maître d'ouvrage compris, qui ne reviennent à aucun membre).
+                      const totalMembres = (Number(phase.montant_phase) || 0)
+                        + form.cotraitants_facturation.reduce((s: number, ct: any) => s + (Number(phaseOf(ct.phases, phase.phase_id)?.montant_phase) || 0), 0);
+                      const stMoa = form.sous_traitants_facturation.reduce((s: number, st: any) =>
+                        payeurEffectif(st) === 'moa' ? s + stMission(st) : s, 0);
+                      const stMembres = form.sous_traitants_facturation.reduce((s: number, st: any) =>
+                        payeurEffectif(st) !== 'moa' ? s + stMission(st) : s, 0);
+                      const resteAPartager = totalMembres - stMembres;
+                      const part = (montantFacture: number, reverse: number) =>
+                        resteAPartager > 0 ? parseFloat((Math.max(0, montantFacture - reverse) / resteAPartager * 100).toFixed(4)) : 0;
+
+                      form.cotraitants_facturation.forEach((ct: any) => {
+                        const p = phaseOf(ct.phases, phase.phase_id);
+                        if (!p) return;
+                        p.part_pct = part(Number(p.montant_phase) || 0, stPayePar(ctContratId(ct) || ''));
+                      });
+
+                      const base = groupementPhaseBase(phase.phase_id);
+                      const montantGroupement = resteAPartager + stMembres + stMoa;
+                      return {
+                        ...phase,
+                        avancement_pct: base > 0 ? parseFloat((montantGroupement / base * 100).toFixed(4)) : 0,
+                        part_pct: part(Number(phase.montant_phase) || 0, stPayePar('agence')),
+                      };
+                    });
+                    return recalcNote(form);
+                  };
+
+                  // Avancement du groupement sur une mission — la seule valeur
+                  // d'avancement saisie de toute la note.
+                  const updateGroupementPct = (phaseIdx: number, pct: number) => {
+                    const nextPhases = [...(noteForm.phases || [])];
+                    nextPhases[phaseIdx] = { ...nextPhases[phaseIdx], avancement_pct: pct };
+                    setNoteForm(recalcNote({ ...noteForm, phases: nextPhases }));
+                  };
+
+                  // Quote-part de l'agence sur une mission (les parts des
+                  // cotraitants passent, elles, par `updateIntervenantPhase`).
+                  const updatePartAgence = (phaseIdx: number, part: number) => {
+                    const nextPhases = [...(noteForm.phases || [])];
+                    nextPhases[phaseIdx] = { ...nextPhases[phaseIdx], part_pct: part };
+                    setNoteForm(recalcNote({ ...noteForm, phases: nextPhases }));
+                  };
+
+                  // Remet la répartition d'une mission sur celle du contrat :
+                  // chaque cotraitant à sa part contractuelle, l'agence au solde.
+                  const resetRepartition = (phaseIdx: number) => {
+                    const phaseId = (noteForm.phases || [])[phaseIdx]?.phase_id;
+                    if (!phaseId) return;
+                    const nextPhases = [...(noteForm.phases || [])];
+                    nextPhases[phaseIdx] = { ...nextPhases[phaseIdx], part_pct: partAgenceDefaut };
+                    const cts = (noteForm.cotraitants_facturation || []).map((ct: any) => {
+                      const rec = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom));
+                      return {
+                        ...ct,
+                        phases: (ct.phases || []).map((p: any) => p.phase_id === phaseId ? { ...p, part_pct: partCotraitantDefaut(rec) } : p),
+                      };
+                    });
+                    setNoteForm(recalcNote({ ...noteForm, phases: nextPhases, cotraitants_facturation: cts }));
+                  };
 
                   const saveNote = async () => {
                     if (!noteForm || !id) return;
                     const montant_ht = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
                     const montant_tva = montant_ht * (noteForm.tva_rate || 20) / 100;
                     const montant_ttc = montant_ht + montant_tva;
-                    const payload = { ...noteForm, project_id: id, contrat_id: contrat?.id || null, montant_ht, montant_tva, montant_ttc };
+                    // Instantané du cumul agence, exactement comme "Montant des
+                    // Honoraires Cumulés HT" / "Montant à l'Acompte Précédent HT" sur
+                    // le modèle papier — pris au moment de l'enregistrement pour ne
+                    // pas bouger rétroactivement si une note antérieure est éditée.
+                    const contratId = contrat?.id || null;
+                    const priorNotes = notesHonoraires.filter((n: any) =>
+                      n.contrat_id === contratId && n.id !== editingNote?.id
+                      && (!n.date || !noteForm.date || n.date <= noteForm.date));
+                    const montant_cumule_precedent_ht = priorNotes.reduce((s: number, n: any) => s + (Number(n.montant_ht) || 0), 0);
+                    const montant_cumule_ht = montant_cumule_precedent_ht + montant_ht;
+                    const pct_facturation_cumule = honRevises > 0 ? Math.min(100, parseFloat((montant_cumule_ht / honRevises * 100).toFixed(2))) : 0;
+                    const payload = {
+                      ...noteForm, project_id: id, contrat_id: contratId, montant_ht, montant_tva, montant_ttc,
+                      montant_cumule_precedent_ht, montant_cumule_ht, pct_facturation_cumule,
+                    };
                     if (editingNote?.id) {
                       await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
                     } else {
@@ -1983,9 +2586,26 @@ export default function ProjectDetail() {
                   };
 
                   const deleteNote = async (noteId: string) => {
-                    if (!confirm('Supprimer cette note d\'honoraires ?')) return;
+                    if (!confirm(t('projectdetail_confirm_delete_note_honoraires'))) return;
                     await fetch(`/api/notes_honoraires/${noteId}`, { method: 'DELETE' });
                     setNotesHonoraires(notesHonoraires.filter((n: any) => n.id !== noteId));
+                  };
+
+                  const exportNotePdf = async (note: any) => {
+                    const { exportNoteHonorairesToPDF } = await import('../lib/noteHonorairesExport');
+                    await exportNoteHonorairesToPDF(
+                      note, contrat,
+                      { name: project.name, client: project.client, construction_cost: project.construction_cost },
+                      settings ?? {},
+                    );
+                  };
+
+                  const createFactureFromNote = async (note: any) => {
+                    if (note.invoice_id) return;
+                    const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
+                    if (!res.ok) { alert(t('projectdetail_draft_invoice_create_failed')); return; }
+                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
+                    setNotesHonoraires(data || []);
                   };
 
                   const STATUS_NOTE_COLORS: Record<string, string> = {
@@ -2007,7 +2627,7 @@ export default function ProjectDetail() {
                               setEditingNote(null);
                               setIsAddingNote(true);
                             }}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                           >
                             <IconPlus size={14} />
                             Nouvelle note
@@ -2038,22 +2658,22 @@ export default function ProjectDetail() {
                         <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-5">
                           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div className="space-y-1">
-                              <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">N° Note</label>
+                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° Note</label>
                               <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.numero} onChange={e => setNoteForm({ ...noteForm, numero: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
+                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
                               <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.date} onChange={e => setNoteForm({ ...noteForm, date: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">TVA (%)</label>
+                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">TVA (%)</label>
                               <input type="number" min={0} max={30} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.tva_rate} onChange={e => setNoteForm({ ...noteForm, tva_rate: parseFloat(e.target.value) || 20 })} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
+                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
                               <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.status} onChange={e => setNoteForm({ ...noteForm, status: e.target.value })}>
                                 {['Brouillon', 'Envoyée', 'Payée'].map(s => <option key={s} value={s}>{s}</option>)}
@@ -2061,120 +2681,291 @@ export default function ProjectDetail() {
                             </div>
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Objet</label>
+                            <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Objet</label>
                             <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={noteForm.objet} onChange={e => setNoteForm({ ...noteForm, objet: e.target.value })}
                               placeholder="ex : Acompte sur honoraires ESQ + APS" />
                           </div>
 
-                          {/* Avancement par phase */}
+                          {/* Ventilation par mission — agence, cotraitants et sous-traitants */}
                           <div>
-                            <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Avancement par phase — Agence</p>
-                            <div className="space-y-2">
-                              {(noteForm.phases || []).map((phase: any, idx: number) => {
-                                const basePhase = phases.find((p: any) => p.id === phase.phase_id) || DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
-                                const phasePct = (contrat?.missions_list || []).find((m: any) => m.id === phase.phase_id)?.pct || 0;
-                                const montantPhaseBase = honRevises * phasePct / 100;
-                                const montantAvancement = montantPhaseBase * (phase.avancement_pct || 0) / 100;
-                                return (
-                                  <div key={phase.phase_id} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)]">
-                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 w-48 flex-shrink-0">{basePhase?.name || phase.phase_name}</span>
-                                    <div className="flex items-center gap-2 flex-shrink-0">
-                                      <input type="number" min={0} max={100} step={5}
-                                        className="w-16 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-center outline-none focus:ring-2 focus:ring-blue-500"
-                                        value={phase.avancement_pct}
-                                        onChange={e => {
-                                          const pct = Math.min(100, Math.max(0, parseFloat(e.target.value) || 0));
-                                          const newPhases = [...noteForm.phases];
-                                          const mp = montantPhaseBase * pct / 100;
-                                          newPhases[idx] = { ...phase, avancement_pct: pct, montant_phase: parseFloat(mp.toFixed(2)) };
-                                          setNoteForm({ ...noteForm, phases: newPhases });
-                                        }} />
-                                      <span className="text-xs text-[var(--tblr-muted)]">%</span>
-                                    </div>
-                                    <div className="flex items-center gap-1 text-xs text-[var(--tblr-muted)] flex-shrink-0">
-                                      <span>→</span>
-                                      <input type="number" min={0}
-                                        className="w-28 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                        value={phase.montant_phase}
-                                        onChange={e => {
-                                          const newPhases = [...noteForm.phases];
-                                          newPhases[idx] = { ...phase, montant_phase: parseFloat(e.target.value) || 0 };
-                                          setNoteForm({ ...noteForm, phases: newPhases });
-                                        }} />
-                                      <span>€ HT</span>
-                                    </div>
-                                    {montantAvancement > 0 && phase.montant_phase === 0 && (
-                                      <button type="button" className="text-[10px] text-blue-500 hover:text-blue-700 flex-shrink-0" onClick={() => {
-                                        const newPhases = [...noteForm.phases];
-                                        newPhases[idx] = { ...phase, montant_phase: parseFloat(montantAvancement.toFixed(2)) };
-                                        setNoteForm({ ...noteForm, phases: newPhases });
-                                      }}>Auto</button>
+                            <p className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase mb-3">Ventilation par mission</p>
+                            {/* min-w-full (et non w-full) : avec un cotraitant et plusieurs
+                                sous-traitants, cette ligne dépasse vite la largeur de l'écran
+                                (deux colonnes % + € par membre). min-w-full garde le tableau à
+                                sa largeur naturelle sans jamais la plafonner à celle du
+                                conteneur, pour que le débordement se traduise par le défilement
+                                horizontal de ce conteneur plutôt que par des colonnes tassées. */}
+                            <div className="overflow-x-auto rounded-lg border border-[var(--tblr-border)]">
+                              <table className="min-w-full text-xs border-collapse">
+                                <thead>
+                                  <tr className="bg-[var(--tblr-surface-2)]">
+                                    <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom whitespace-nowrap">Mission</th>
+                                    {/* Groupement : le pourcentage de la mission facturé par
+                                        l'ensemble de l'équipe dans cette note, et son montant. */}
+                                    <th colSpan={2} title="Total pour toute l'équipe de maîtrise d'œuvre (agence + cotraitants + sous-traitants) — ce que facture la note d'honoraires dans son ensemble" className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Groupement</th>
+                                    {/* L'agence (mandataire) et les cotraitants sous une même
+                                        entête : ce sont les membres du groupement titulaires du
+                                        marché de maîtrise d'œuvre, par opposition aux
+                                        sous-traitants regroupés à leur droite. */}
+                                    <th colSpan={2 + (noteForm.cotraitants_facturation || []).length * 2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">
+                                      {(noteForm.cotraitants_facturation || []).length > 0 ? 'Mandataire et cotraitants' : 'Mandataire'}
+                                    </th>
+                                    {(noteForm.sous_traitants_facturation || []).length > 0 && (
+                                      <th colSpan={(noteForm.sous_traitants_facturation || []).length} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Sous-traitants</th>
                                     )}
-                                  </div>
-                                );
-                              })}
+                                  </tr>
+                                  <tr className="bg-[var(--tblr-surface-2)]">
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">%</th>
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2">€</th>
+                                    <th className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{agencyName}</th>
+                                    {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
+                                      <th key={`ct-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]" colSpan={2}>{ctDisplayName(ct)}</th>
+                                    ))}
+                                    {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
+                                      <th key={`st-h-${i}`} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-2 border-l border-[var(--tblr-border)]">
+                                        {stDisplayName(st)}
+                                        {payeurLabel(st) && <span className="block text-[0.6875rem] font-normal normal-case text-amber-600">{payeurLabel(st)}</span>}
+                                      </th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {(noteForm.phases || []).map((phase: any, idx: number) => {
+                                    const basePhase = phases.find((p: any) => p.id === phase.phase_id) || DEFAULT_PHASES.find((p: any) => p.id === phase.phase_id);
+                                    // Montant total de la mission pour le groupement, et ce qui en
+                                    // est facturé dans cette note : c'est LA valeur saisie de la
+                                    // ligne, tous les montants des membres s'en déduisant.
+                                    const baseGroupement = groupementPhaseBase(phase.phase_id);
+                                    const pctGroupement = Number(phase.avancement_pct) || 0;
+                                    const montantGroupement = baseGroupement * pctGroupement / 100;
+                                    // Une mission ne se facture pas au-delà de 100 %, cumul des
+                                    // notes précédentes du même contrat compris.
+                                    const pctRestant = Math.max(0, 100 - cumulGroupementPct(phase.phase_id));
+                                    const ctPhasesRow = (noteForm.cotraitants_facturation || []).map((ct: any) =>
+                                      (ct.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { part_pct: 0, montant_phase: 0 });
+                                    const stPhasesRow = (noteForm.sous_traitants_facturation || []).map((st: any) =>
+                                      (st.phases || []).find((p: any) => p.phase_id === phase.phase_id) || { montant_phase: 0 });
+                                    // La répartition d'une mission doit totaliser 100 % : en deçà,
+                                    // une part du montant groupement n'est attribuée à personne ;
+                                    // au-delà, la somme des membres dépasse ce qui est facturé.
+                                    const totalParts = (Number(phase.part_pct) || 0)
+                                      + ctPhasesRow.reduce((s: number, p: any) => s + (Number(p.part_pct) || 0), 0);
+                                    const repartitionIncomplete = pctGroupement > 0 && Math.abs(totalParts - 100) > 0.01;
+                                    // Ce que chaque membre reverse à ses sous-traitants sur cette
+                                    // mission : compris dans son montant facturé, donc affiché
+                                    // sous celui-ci en « dont … » et jamais additionné en plus.
+                                    const stReverse = (payeurKey: string) => (noteForm.sous_traitants_facturation || []).reduce((s: number, st: any, i: number) =>
+                                      payeurEffectif(st) === payeurKey ? s + (Number(stPhasesRow[i]?.montant_phase) || 0) : s, 0);
+                                    // Tous sous-traitants de la mission confondus : ce qui sort de
+                                    // l'enveloppe avant répartition entre les membres.
+                                    const stTotalMission = stPhasesRow.reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                                    const eur = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
+                                    // Pourcentage RÉELLEMENT facturé par un membre sur cette
+                                    // mission : sa quote-part saisie porte sur ce qui reste après
+                                    // sous-traitance, celui qui règle un sous-traitant facture donc
+                                    // un pourcentage plus élevé (et les autres plus faible). On
+                                    // l'affiche sous le montant dès qu'il diffère de la part
+                                    // saisie, sinon la ligne semblerait contredire les 50/50 du
+                                    // contrat sans dire pourquoi.
+                                    const pctEffectif = (montant: number) =>
+                                      montantGroupement > 0 ? montant / montantGroupement * 100 : 0;
+                                    const pct1 = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 }).format(n);
+                                    return (
+                                      <tr key={phase.phase_id} className="border-t border-[var(--tblr-border)] bg-white dark:bg-zinc-900">
+                                        {/* Icône plutôt que le libellé « Répartir » : sur cette
+                                            colonne sticky, chaque caractère de plus s'ajoute à la
+                                            largeur qui reste fixe pendant le défilement horizontal
+                                            des colonnes financières — la garder compacte laisse plus
+                                            de place à ces dernières sur un écran étroit. */}
+                                        <td className="p-2 font-semibold text-zinc-600 dark:text-zinc-300 whitespace-nowrap sticky left-0 bg-white dark:bg-zinc-900">
+                                          <span className="inline-flex items-center gap-1.5">
+                                            {basePhase?.name || phase.phase_name}
+                                            {(noteForm.cotraitants_facturation || []).length > 0 && (
+                                              <button type="button" title="Reprendre la répartition du contrat pour cette mission"
+                                                className="p-0.5 rounded text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex-shrink-0"
+                                                onClick={() => resetRepartition(idx)}><IconRefresh size={12} /></button>
+                                            )}
+                                          </span>
+                                        </td>
+                                        <td className="p-1 border-l border-[var(--tblr-border)]">
+                                          <div className="flex items-center gap-1 justify-center">
+                                            <input type="number" min={0} max={pctRestant} step={5}
+                                              title={`Part de la mission facturée dans cette note pour tout le groupement (reste ${pctRestant.toFixed(1)} % à facturer)`}
+                                              className="w-14 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                                              value={phase.avancement_pct}
+                                              onChange={e => updateGroupementPct(idx, Math.min(pctRestant, Math.max(0, parseFloat(e.target.value) || 0)))} />
+                                            <span className="text-[var(--tblr-muted)]">%</span>
+                                          </div>
+                                        </td>
+                                        <td className="p-2 text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
+                                          title={`Montant total de la mission pour le groupement : ${eur(baseGroupement)}`}>
+                                          {eur(montantGroupement)}
+                                          {repartitionIncomplete && (
+                                            <span className="block text-[0.6875rem] font-normal text-amber-600" title="La somme des parts des membres n'atteint pas 100 % du montant groupement">
+                                              répartition : {totalParts.toFixed(1)} %
+                                            </span>
+                                          )}
+                                        </td>
+                                        {/* Quote-part de l'agence dans ce qui reste après
+                                            sous-traitance, et son montant facturé — sa part nette
+                                            plus ce qu'elle reverse à ses propres sous-traitants. */}
+                                        <td className="p-1 border-l border-[var(--tblr-border)]">
+                                          <div className="flex items-center gap-1">
+                                            <input type="number" min={0} max={100} step="any"
+                                              title="Quote-part de l'agence sur cette mission, une fois les sous-traitants payés"
+                                              className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                              value={phase.part_pct ?? 0}
+                                              onChange={e => updatePartAgence(idx, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))} />
+                                            <span className="text-[var(--tblr-muted)]">%</span>
+                                          </div>
+                                        </td>
+                                        <td className="p-2 text-right whitespace-nowrap">
+                                          {eur(Number(phase.montant_phase) || 0)}
+                                          {stTotalMission > 0 && (
+                                            <span className="block text-[0.6875rem] font-normal text-amber-600"
+                                              title={stReverse('agence') > 0
+                                                ? "Pourcentage réellement facturé, sous-traitants réglés par l'agence compris — elle les reverse ensuite"
+                                                : 'Pourcentage réellement facturé, la sous-traitance étant portée par un autre membre'}>
+                                              {pct1(pctEffectif(Number(phase.montant_phase) || 0))} %
+                                              {stReverse('agence') > 0 && ` · dont ${eur(stReverse('agence'))} ST`}
+                                            </span>
+                                          )}
+                                        </td>
+                                        {(noteForm.cotraitants_facturation || []).map((ct: any, ctIdx: number) => {
+                                          const ctPhase = ctPhasesRow[ctIdx];
+                                          const reverse = stReverse(ctContratId(ct) || '');
+                                          return (
+                                            <React.Fragment key={`ct-${ctIdx}`}>
+                                              <td className="p-1 border-l border-[var(--tblr-border)]">
+                                                <div className="flex items-center gap-1">
+                                                  <input type="number" min={0} max={100} step="any"
+                                                    title={`Quote-part de ${ctDisplayName(ct)} sur cette mission, une fois les sous-traitants payés`}
+                                                    className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
+                                                    value={ctPhase.part_pct ?? 0}
+                                                    onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { part_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
+                                                  <span className="text-[var(--tblr-muted)]">%</span>
+                                                </div>
+                                              </td>
+                                              <td className="p-2 text-right whitespace-nowrap">
+                                                {eur(Number(ctPhase.montant_phase) || 0)}
+                                                {stTotalMission > 0 && (
+                                                  <span className="block text-[0.6875rem] font-normal text-amber-600"
+                                                    title={reverse > 0
+                                                      ? `Pourcentage réellement facturé, sous-traitants réglés par ${ctDisplayName(ct)} compris — il les reverse ensuite`
+                                                      : 'Pourcentage réellement facturé, la sous-traitance étant portée par un autre membre'}>
+                                                    {pct1(pctEffectif(Number(ctPhase.montant_phase) || 0))} %
+                                                    {reverse > 0 && ` · dont ${eur(reverse)} ST`}
+                                                  </span>
+                                                )}
+                                              </td>
+                                            </React.Fragment>
+                                          );
+                                        })}
+                                        {(noteForm.sous_traitants_facturation || []).map((st: any, stIdx: number) => {
+                                          const stPhase = stPhasesRow[stIdx];
+                                          const stKey = st.contact_id || st.nom;
+                                          // Les sous-traitants n'ont pas de répartition par mission dans
+                                          // le contrat (un seul montant global) : le plafond porte donc
+                                          // sur le montant total du sous-traitant, réparti sur les autres
+                                          // missions déjà saisies dans cette note et le cumul des notes
+                                          // précédentes.
+                                          const stRecord = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === stKey);
+                                          const stTotal = stRecord?.montant || 0;
+                                          const stOtherPhasesSum = (st.phases || []).filter((p: any) => p.phase_id !== phase.phase_id).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                                          // Second plafond : la sous-traitance d'une mission sort de
+                                          // l'enveloppe de cette mission, elle ne peut donc pas la
+                                          // dépasser (les autres sous-traitants de la ligne déjà
+                                          // saisis comptent dans ce qui reste).
+                                          const resteMission = Math.max(0, montantGroupement - (stTotalMission - (Number(stPhase.montant_phase) || 0)));
+                                          const stCap = Math.min(
+                                            Math.max(0, stTotal - cumulStTotal(stKey) - stOtherPhasesSum),
+                                            resteMission,
+                                          );
+                                          return (
+                                            <td key={`st-${stIdx}`} className="p-1 border-l border-[var(--tblr-border)]">
+                                              <input type="number" min={0} max={stCap}
+                                                title={`Montant réglé à ${stDisplayName(st)} sur cette mission — prélevé sur l'enveloppe de la mission, et compris dans le montant facturé par celui qui le règle`}
+                                                className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
+                                                value={stPhase.montant_phase}
+                                                onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), stCap) })} />
+                                            </td>
+                                          );
+                                        })}
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="border-t-2 border-[var(--tblr-border)] font-bold text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)]">
+                                    <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Total HT</td>
+                                    {(() => {
+                                      // Le total du groupement est la somme des montants de
+                                      // mission facturés (base × avancement), et NON la somme des
+                                      // colonnes : saisir des sous-traitants ne change pas ce que
+                                      // le groupement facture, seulement qui l'encaisse — les
+                                      // additionner aux membres compterait deux fois ce que le
+                                      // payeur leur reverse.
+                                      const totalGroupement = (noteForm.phases || []).reduce((s: number, p: any) =>
+                                        s + groupementPhaseBase(p.phase_id) * (Number(p.avancement_pct) || 0) / 100, 0);
+                                      // Base de l'ensemble des missions présentes dans la note,
+                                      // pour que le % du pied se lise comme la somme des lignes.
+                                      const baseGroupement = (noteForm.phases || []).reduce((s: number, p: any) => s + groupementPhaseBase(p.phase_id), 0);
+                                      return (
+                                        <>
+                                          <td className="p-2 border-l border-[var(--tblr-border)] text-center whitespace-nowrap">
+                                            {baseGroupement > 0 ? `${(totalGroupement / baseGroupement * 100).toFixed(1)} %` : '—'}
+                                          </td>
+                                          <td className="p-2 text-right whitespace-nowrap">
+                                            {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalGroupement)}
+                                          </td>
+                                        </>
+                                      );
+                                    })()}
+                                    <td className="p-2 border-l border-[var(--tblr-border)]"></td>
+                                    <td className="p-2 text-right text-blue-600 whitespace-nowrap">
+                                      {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}
+                                    </td>
+                                    {(noteForm.cotraitants_facturation || []).map((ct: any, i: number) => (
+                                      <td key={`ct-tot-${i}`} className="p-2 text-right whitespace-nowrap border-l border-[var(--tblr-border)]" colSpan={2}>
+                                        {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(ct.montant_ht || 0)}
+                                      </td>
+                                    ))}
+                                    {(noteForm.sous_traitants_facturation || []).map((st: any, i: number) => (
+                                      <td key={`st-tot-${i}`} className="p-2 text-right whitespace-nowrap border-l border-[var(--tblr-border)]">
+                                        {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(st.montant_ht || 0)}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                </tfoot>
+                              </table>
                             </div>
-                            <div className="mt-2 flex items-center justify-between text-xs font-bold text-zinc-700 dark:text-zinc-300 px-2">
-                              <span>Total agence HT</span>
-                              <span className="text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format((noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0))}</span>
-                            </div>
+                            <p className="mt-2 text-[0.6875rem] text-[var(--tblr-muted)]">Le pourcentage se saisit une seule fois par mission, dans la colonne « Groupement » : c'est la part de la mission facturée au maître d'ouvrage pour toute l'équipe (par exemple 100 % de l'esquisse et 50 % de l'APS). Ce montant ne bouge pas selon les sous-traitants saisis : ce qui leur est reversé sort de l'enveloppe de la mission, jamais en supplément. Les quote-parts des membres portent donc sur ce qui reste une fois les sous-traitants payés, et le membre qui en règle un le facture au maître d'ouvrage avant de le lui reverser — son montant est augmenté d'autant (« dont … ST »), celui des autres baissé, chacun touchant bien son pourcentage. La somme des colonnes des membres est ainsi égale, sur chaque ligne, à 100 % du montant de la mission, les colonnes sous-traitants n'en étant que le détail. Le cumul d'une mission, toutes notes confondues, ne peut pas dépasser 100 %. La facture, elle, ne porte que sur {agencyName} : seule cette colonne alimente la facture brouillon, les montants cotraitants restant hors comptabilité agence.</p>
                           </div>
 
-                          {/* Cotraitants */}
-                          {(noteForm.cotraitants_facturation || []).length > 0 && (
-                            <div>
-                              <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Cotraitants (hors comptabilité agence)</p>
-                              <div className="space-y-2">
-                                {(noteForm.cotraitants_facturation || []).map((ct: any, idx: number) => (
-                                  <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)]">
-                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex-1">{ct.nom || 'Cotraitant'}</span>
-                                    <input type="number" min={0}
-                                      className="w-28 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                      value={ct.montant_ht}
-                                      onChange={e => {
-                                        const ht = parseFloat(e.target.value) || 0;
-                                        const newCts = [...noteForm.cotraitants_facturation];
-                                        newCts[idx] = { ...ct, montant_ht: ht, montant_ttc: ht * (1 + ct.tva_rate / 100) };
-                                        setNoteForm({ ...noteForm, cotraitants_facturation: newCts });
-                                      }} />
-                                    <span className="text-xs text-[var(--tblr-muted)]">€ HT</span>
-                                  </div>
-                                ))}
+                          {/* Suivi du pourcentage de facturation */}
+                          {honRevises > 0 && (() => {
+                            const montant_ht_preview = (noteForm.phases || []).reduce((s: number, p: any) => s + (Number(p.montant_phase) || 0), 0);
+                            const contratId = contrat?.id || null;
+                            const priorNotes = notesHonoraires.filter((n: any) => n.contrat_id === contratId && n.id !== editingNote?.id);
+                            const cumulPrecedent = priorNotes.reduce((s: number, n: any) => s + (Number(n.montant_ht) || 0), 0);
+                            const pct = Math.min(100, (cumulPrecedent + montant_ht_preview) / honRevises * 100);
+                            return (
+                              <div className="space-y-1">
+                                <div className="flex items-center justify-between text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">
+                                  <span>Avancement cumulé de la facturation (agence)</span>
+                                  <span className="text-zinc-700 dark:text-zinc-300">{pct.toFixed(1)} %</span>
+                                </div>
+                                <div className="h-1.5 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden">
+                                  <div className="h-full bg-blue-600" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+                                </div>
                               </div>
-                            </div>
-                          )}
-
-                          {/* Sous-traitants */}
-                          {(noteForm.sous_traitants_facturation || []).length > 0 && (
-                            <div>
-                              <p className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase mb-3">Sous-traitants</p>
-                              <div className="space-y-2">
-                                {(noteForm.sous_traitants_facturation || []).map((st: any, idx: number) => (
-                                  <div key={idx} className="flex items-center gap-3 p-2 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)]">
-                                    <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 flex-1">{st.nom || 'Sous-traitant'}</span>
-                                    <input type="number" min={0}
-                                      className="w-28 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-sm text-right outline-none focus:ring-2 focus:ring-blue-500"
-                                      value={st.montant_ht}
-                                      onChange={e => {
-                                        const ht = parseFloat(e.target.value) || 0;
-                                        const newSts = [...noteForm.sous_traitants_facturation];
-                                        newSts[idx] = { ...st, montant_ht: ht, montant_ttc: ht * (1 + st.tva_rate / 100) };
-                                        setNoteForm({ ...noteForm, sous_traitants_facturation: newSts });
-                                      }} />
-                                    <span className="text-xs text-[var(--tblr-muted)]">€ HT</span>
-                                    {st.paiement_direct_moa && (
-                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-bold flex-shrink-0">Paiement direct MOA</span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                            );
+                          })()}
 
                           <div className="flex gap-2 justify-end pt-2 border-t border-[var(--tblr-border)]">
                             <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">
+                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">
                               {editingNote ? 'Mettre à jour' : 'Créer la note'}
                             </button>
                           </div>
@@ -2195,15 +2986,15 @@ export default function ProjectDetail() {
                                 <div className="flex items-start justify-between gap-4">
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                                      {note.numero && <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]">{note.numero}</span>}
-                                      <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', STATUS_NOTE_COLORS[note.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{note.status}</span>
-                                      {note.date && <span className="text-[10px] text-[var(--tblr-muted)]">{new Date(note.date).toLocaleDateString('fr-FR')}</span>}
+                                      {note.numero && <span className="text-[0.6875rem] font-mono px-2 py-0.5 rounded bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]">{note.numero}</span>}
+                                      <span className={cn('text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', STATUS_NOTE_COLORS[note.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{note.status}</span>
+                                      {note.date && <span className="text-[0.6875rem] text-[var(--tblr-muted)]">{new Date(note.date).toLocaleDateString('fr-FR')}</span>}
                                     </div>
                                     {note.objet && <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">{note.objet}</p>}
                                     {phases.length > 0 && (
                                       <div className="flex flex-wrap gap-1 mt-1">
                                         {phases.map((p: any) => (
-                                          <span key={p.phase_id} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-medium">
+                                          <span key={p.phase_id} className="text-[0.6875rem] px-1.5 py-0.5 rounded bg-blue-50 dark:bg-blue-900/20 text-blue-600 font-medium">
                                             {p.phase_name.split('—')[0].trim()} {p.avancement_pct}%
                                           </span>
                                         ))}
@@ -2212,12 +3003,27 @@ export default function ProjectDetail() {
                                     <div className="flex gap-4 mt-1 text-xs text-[var(--tblr-muted)]">
                                       <span className="font-bold text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ht)} HT</span>
                                       <span>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ttc)} TTC</span>
+                                      {note.pct_facturation_cumule != null && (
+                                        <span className="flex items-center gap-1">
+                                          <span className="inline-block w-16 h-1.5 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden align-middle">
+                                            <span className="block h-full bg-blue-600" style={{ width: `${Math.max(0, Math.min(100, note.pct_facturation_cumule))}%` }} />
+                                          </span>
+                                          {note.pct_facturation_cumule.toFixed(1)} % cumulé
+                                        </span>
+                                      )}
+                                      {note.invoice_id && <span className="text-green-600 font-bold">Facture créée</span>}
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-1 flex-shrink-0">
+                                    <button title="Exporter en PDF" onClick={() => exportNotePdf(note)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
+                                    <button title={note.invoice_id ? 'Facture brouillon déjà créée' : 'Créer une facture brouillon (agence uniquement)'} disabled={!!note.invoice_id}
+                                      onClick={() => createFactureFromNote(note)}
+                                      className={cn('p-1 transition-colors', note.invoice_id ? 'text-green-500 cursor-default' : 'text-zinc-300 hover:text-blue-500')}>
+                                      <IconFileInvoice size={14} />
+                                    </button>
                                     <button onClick={() => {
                                       setEditingNote(note);
-                                      setNoteForm({ ...note });
+                                      setNoteForm(noteFormFromSaved(note));
                                       setIsAddingNote(true);
                                     }} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconEdit size={14} /></button>
                                     <button onClick={() => deleteNote(note.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
@@ -2234,7 +3040,7 @@ export default function ProjectDetail() {
 
               </div>
             )}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} /></div>}
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
             {activeTab === 'TACHES' && <ProjectTasksTab projectId={id!} projects={project ? [project] : []} />}
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">
@@ -2251,7 +3057,7 @@ export default function ProjectDetail() {
                           </div>
                         )}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-lg font-bold border border-white/30 transition-all">
+                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-lg font-bold border border-white/30 transition">
                             <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
                             Change Cover Image
                           </label>
@@ -2266,13 +3072,13 @@ export default function ProjectDetail() {
                             placeholder="Project Name"
                           />
                           <div className="flex flex-wrap items-center gap-4">
-                            <ContactAutocomplete 
+                            <ContactAutocomplete
                               contacts={contacts.filter(isClientContact)}
-                              value={contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === project.client)?.id || ''}
+                              value={project.client_id || contacts.find(c => (c.company_name || `${c.first_name} ${c.last_name}`) === project.client)?.id || ''}
                               onChange={id => {
                                 const contact = contacts.find(c => c.id === id);
                                 if (contact) {
-                                  setProject({...project, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
+                                  setProject({...project, client_id: contact.id, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
                                 }
                               }}
                               onAddNew={() => setIsContactModalOpen(true)}
@@ -2400,14 +3206,26 @@ export default function ProjectDetail() {
                             <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={project.address} /></InfoPanelBoundary>
                           </div>
                           <div className="bg-zinc-100 dark:bg-zinc-800 rounded-lg overflow-hidden border border-[var(--tblr-border)]">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-200 dark:bg-zinc-800 h-[400px]">
-                              <div className="bg-white dark:bg-zinc-900 relative">
-                                <InfoPanelBoundary label="Cadastre"><GeoportailMap address={project.address} /></InfoPanelBoundary>
-                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">Cadastre</div>
-                              </div>
-                              <div className="bg-white dark:bg-zinc-900 relative">
-                                <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={project.address} /></InfoPanelBoundary>
-                                <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[10px] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">OpenStreetMap</div>
+                            <div className="bg-white dark:bg-zinc-900 relative h-[500px]">
+                              <InfoPanelBoundary label="Cadastre">
+                                <GeoportailMap
+                                  address={project.address}
+                                  onParcelSelect={(parcel: CadastreParcel) => {
+                                    const reference = [
+                                      parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
+                                      parcel.section,
+                                      parcel.numero,
+                                    ].filter(Boolean).join(' ');
+                                    setProject(prev => prev ? ({
+                                      ...prev,
+                                      ref_cadastrale: reference || prev.ref_cadastrale,
+                                      surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                                    }) : null);
+                                  }}
+                                />
+                              </InfoPanelBoundary>
+                              <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[0.6875rem] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">
+                                Vue aérienne · Cadastre — cliquez une parcelle pour la renseigner
                               </div>
                             </div>
                           </div>
@@ -2420,7 +3238,7 @@ export default function ProjectDetail() {
                           <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>Milestones</h3>
                           <button 
                             onClick={() => setIsAddingMilestone(!isAddingMilestone)}
-                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                            className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                           >
                             <IconPlus size={14} />
                             Ajouter un milestone
@@ -2431,7 +3249,7 @@ export default function ProjectDetail() {
                           <div className="p-6 bg-[var(--tblr-surface-2)] rounded-lg border border-[var(--tblr-border)] space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Titre</label>
+                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Titre</label>
                                 <input 
                                   type="text"
                                   className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
@@ -2441,7 +3259,7 @@ export default function ProjectDetail() {
                                 />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
+                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
                                 <input 
                                   type="date"
                                   className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
@@ -2459,7 +3277,7 @@ export default function ProjectDetail() {
                               </button>
                               <button 
                                 onClick={handleAddMilestone}
-                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                               >
                                 Ajouter
                               </button>
@@ -2508,7 +3326,7 @@ export default function ProjectDetail() {
                                   <p className={cn("text-sm font-medium", m.completed ? "text-[var(--tblr-muted)] line-through" : "text-[var(--tblr-text)]")}>
                                     {m.title}
                                   </p>
-                                  <div className="flex items-center gap-1 text-[10px] text-[var(--tblr-muted)]">
+                                  <div className="flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)]">
                                     <IconCalendar size={10} />
                                     {new Date(m.due_date).toLocaleDateString()}
                                   </div>
@@ -2516,12 +3334,12 @@ export default function ProjectDetail() {
                               </div>
                               <button 
                                 onClick={() => {
-                                  if(confirm('Supprimer ce jalon ?')) {
+                                  if(confirm(t('projectdetail_confirm_delete_milestone'))) {
                                     fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
                                       .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
                                   }
                                 }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
                               >
                                 <IconTrash size={14} />
                               </button>
@@ -2536,7 +3354,7 @@ export default function ProjectDetail() {
                       <div className="p-6 rounded-lg space-y-8" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                         <div className="space-y-4">
                           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">01</span>
+                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">01</span>
                             Détails Client
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2570,7 +3388,7 @@ export default function ProjectDetail() {
                             <FormField label="N° TVA client" value={project.client_vat_number} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_vat_number: v}) : null)} />
                             <FormField label="Maîtrise d'ouvrage publique" type="checkbox" value={project.is_public_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_public_client: v}) : null)} />
                           </div>
-                          <p className="text-[11px] text-[var(--tblr-muted)] -mt-4">
+                          <p className="text-[0.6875rem] text-[var(--tblr-muted)] -mt-4">
                             La maîtrise d'ouvrage publique détermine si les factures et situations de ce projet passent par Chorus Pro (marchés publics) ou par Super PDP (marchés privés).
                           </p>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2599,7 +3417,7 @@ export default function ProjectDetail() {
 
                         <div className="space-y-4 pt-8 border-t border-[var(--tblr-border)]">
                           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">02</span>
+                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">02</span>
                             Spécificités du Projet & Terrain
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2653,7 +3471,7 @@ export default function ProjectDetail() {
                             <FormField label="Type" value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
                             <FormField label="Catégorie" value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />
                             <div className="space-y-1">
-                              <label className="block text-[10px] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Type de mission (circulaire MAF)</label>
+                              <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Type de mission (circulaire MAF)</label>
                               <select
                                 className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
                                 value={project.maf_intercalaire ?? ''}
@@ -2669,7 +3487,7 @@ export default function ProjectDetail() {
                             </div>
                             {project.maf_intercalaire === 'jaune' && (
                               <div className="space-y-1">
-                                <label className="block text-[10px] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux de la mission (T)</label>
+                                <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux de la mission (T)</label>
                                 <select
                                   className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
                                   value={project.taux_mission ?? ''}
@@ -2691,7 +3509,7 @@ export default function ProjectDetail() {
 
                         <div className="space-y-4 pt-8 border-t border-[var(--tblr-border)]">
                           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">03</span>
+                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">03</span>
                             Surfaces & Capacités
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2780,6 +3598,25 @@ export default function ProjectDetail() {
                             Chantier
                           </label>
                         </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="offline_enabled"
+                            className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+                            checked={!!project.offline_enabled}
+                            onChange={e => {
+                              const checked = e.target.checked;
+                              setProject({ ...project, offline_enabled: checked });
+                              // Précharge tout de suite plutôt que d'attendre le
+                              // prochain passage par /projects (src/lib/offlinePrefetch.ts)
+                              // — sans réseau, ce préchargement ne fait simplement rien.
+                              if (checked) prefetchProjectForOffline(project.id).catch(() => {});
+                            }}
+                          />
+                          <label htmlFor="offline_enabled" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+                            Disponible hors connexion
+                          </label>
+                        </div>
                       </div>
                     </div>
 
@@ -2793,7 +3630,7 @@ export default function ProjectDetail() {
                         const filteredPhases = MISSION_PHASES.filter(phase =>
                           !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
                         );
-                        const currentPhase = phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined;
+                        const currentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || filteredPhases[0];
                         return (
                           <PhaseStepper
                             steps={filteredPhases.map(phase => ({ id: phase, label: phase, description: PHASE_LABELS[phase] }))}
@@ -2864,7 +3701,7 @@ export default function ProjectDetail() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{m.name || m.email}</p>
-                              <p className="text-[10px] text-[var(--tblr-muted)]">{m.role || 'member'}</p>
+                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{m.role || 'member'}</p>
                             </div>
                             <button
                               onClick={async () => {
@@ -2874,7 +3711,7 @@ export default function ProjectDetail() {
                                   if (res.ok) setProjectMembers(prev => prev.filter(pm => (pm.user_id || pm.id) !== userId));
                                 } catch (err) { console.error(err); }
                               }}
-                              className="ml-1 p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                              className="ml-1 p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
                               title="Retirer du projet"
                             >✕</button>
                           </div>
@@ -2897,7 +3734,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingPermit(!isAddingPermit)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         {isAddingPermit ? 'Annuler' : 'Ajouter'}
@@ -2935,7 +3772,7 @@ export default function ProjectDetail() {
                               }
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                         >
                           Ajouter
                         </button>
@@ -2948,39 +3785,51 @@ export default function ProjectDetail() {
                     ) : (
                       <div className="space-y-2">
                         {permits.map(p => (
-                          <div key={p.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
-                            <div className="flex items-center gap-3 min-w-0">
-                              <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{p.type}</span>
-                              <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || 'Sans référence'}</span>
-                              <span className="text-[10px] text-[var(--tblr-muted)] shrink-0">{p.submission_date ? new Date(p.submission_date).toLocaleDateString('fr-FR') : '—'}</span>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <select
-                                className="text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]"
-                                value={p.status}
-                                onChange={async (e) => {
-                                  const status = e.target.value;
-                                  const res = await fetch(`/api/permits/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, status }) });
-                                  if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
-                                }}
-                              >
-                                <option value="en_instruction">En instruction</option>
-                                <option value="accorde">Accordé</option>
-                                <option value="refuse">Refusé</option>
-                                <option value="recours">Recours</option>
-                              </select>
+                          <div key={p.id} className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg overflow-hidden">
+                            <div className="flex items-center justify-between gap-2 px-3 py-2 group">
                               <button
-                                onClick={async () => {
-                                  if (!confirm('Supprimer ce permis ?')) return;
-                                  const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
-                                  if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
-                                }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
-                                title="Supprimer"
+                                type="button"
+                                onClick={() => setExpandedPermitId(expandedPermitId === p.id ? null : p.id)}
+                                className="flex items-center gap-3 min-w-0 text-left"
                               >
-                                <IconTrash size={14} />
+                                {expandedPermitId === p.id ? <IconChevronDown size={14} className="text-[var(--tblr-muted)] shrink-0" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)] shrink-0" />}
+                                <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{p.type}</span>
+                                <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || 'Sans référence'}</span>
+                                <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{p.submission_date ? new Date(p.submission_date).toLocaleDateString('fr-FR') : '—'}</span>
                               </button>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <select
+                                  className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]"
+                                  value={p.status}
+                                  onChange={async (e) => {
+                                    const status = e.target.value;
+                                    const res = await fetch(`/api/permits/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, status }) });
+                                    if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
+                                  }}
+                                >
+                                  <option value="en_instruction">En instruction</option>
+                                  <option value="accorde">Accordé</option>
+                                  <option value="refuse">Refusé</option>
+                                  <option value="recours">Recours</option>
+                                </select>
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm(t('projectdetail_confirm_delete_permit'))) return;
+                                    const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
+                                    if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
+                                  }}
+                                  className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
+                                  title="Supprimer"
+                                >
+                                  <IconTrash size={14} />
+                                </button>
+                              </div>
                             </div>
+                            {expandedPermitId === p.id && (
+                              <div className="px-3 pb-3 pt-1 border-t border-[var(--tblr-border)]">
+                                <ResourceAttachments resourceType="permits" resourceId={p.id} category="CERFA" />
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -2997,6 +3846,8 @@ export default function ProjectDetail() {
                 project={project}
                 lots_list={project.lots_list || []}
                 ordresDeService={ordresDeService}
+                contacts={contacts}
+                settings={settings}
                 osSituationsContent={
               <div className="space-y-8">
                 {/* Ordres de Service Travaux */}
@@ -3018,7 +3869,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingOs(!isAddingOs)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Nouvel OS
@@ -3029,38 +3880,67 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">N° OS</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° OS</label>
                           <input type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.os_number} onChange={e => setNewOs({...newOs, os_number: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date d'émission</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date d'émission</label>
                           <input type="date"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.date_emission} onChange={e => setNewOs({...newOs, date_emission: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Lot</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Marché travaux *</label>
                           <select
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.lot} onChange={e => handleLotChange(e.target.value)}>
-                            <option value="">Sélectionner un lot</option>
-                            {project.lots_list?.map(l => (
-                              <option key={l.id} value={l.lot_number}>{l.lot_number} - {l.lot_title}</option>
+                            value={newOs.marche_id} onChange={e => handleMarcheChange(e.target.value)}>
+                            <option value="">Sélectionner un marché</option>
+                            {marchesTravaux.map((m: any) => (
+                              <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>
                             ))}
                           </select>
                         </div>
                       </div>
+                      {marchesTravaux.length === 0 && !isAddingMarche && (
+                        <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-700 dark:text-amber-400">
+                          <span>Aucun marché de travaux sur ce projet — un OS doit être rattaché à un marché.</span>
+                          <button type="button" onClick={() => setIsAddingMarche(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[0.6875rem] whitespace-nowrap transition">+ Créer un marché</button>
+                        </div>
+                      )}
+                      {isAddingMarche && (
+                        <div className="p-4 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] space-y-3">
+                          <p className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Nouveau marché de travaux</p>
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                            <input type="text" placeholder="Entreprise *"
+                              className="md:col-span-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newMarche.entreprise_nom} onChange={e => setNewMarche({ ...newMarche, entreprise_nom: e.target.value })} />
+                            <input type="text" placeholder="N° lot"
+                              className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newMarche.lot_numero} onChange={e => setNewMarche({ ...newMarche, lot_numero: e.target.value })} />
+                            <input type="number" placeholder="Montant HT"
+                              className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newMarche.montant_ht} onChange={e => setNewMarche({ ...newMarche, montant_ht: e.target.value })} />
+                          </div>
+                          <input type="text" placeholder="Intitulé du lot (ex: Gros œuvre)"
+                            className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            value={newMarche.lot_titre} onChange={e => setNewMarche({ ...newMarche, lot_titre: e.target.value })} />
+                          <div className="flex gap-2 justify-end">
+                            <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1.5 text-xs font-bold text-[var(--tblr-muted)]">Annuler</button>
+                            <button type="button" onClick={handleCreateMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs transition">Créer le marché</button>
+                          </div>
+                        </div>
+                      )}
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Titre *</label>
+                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Titre *</label>
                         <input type="text"
                           className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                           value={newOs.title} onChange={e => setNewOs({...newOs, title: e.target.value})}
                           placeholder="ex: Travaux supplémentaires fondations" />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Objet</label>
+                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Objet</label>
                         <input type="text"
                           className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                           value={newOs.objet} onChange={e => setNewOs({...newOs, objet: e.target.value})}
@@ -3068,20 +3948,20 @@ export default function ProjectDetail() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Émetteur (MOE)</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Émetteur (MOE)</label>
                           <input type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.emetteur_os} onChange={e => setNewOs({...newOs, emetteur_os: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Entreprise destinataire</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Entreprise destinataire</label>
                           <input type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.destinataire_os || newOs.entreprise}
-                            onChange={e => { handleEntrepriseChange(e.target.value); setNewOs(prev => ({...prev, destinataire_os: e.target.value})); }} />
+                            onChange={e => setNewOs(prev => ({...prev, destinataire_os: e.target.value, entreprise: e.target.value}))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Montant présenté HT</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Montant présenté HT</label>
                           <input type="number"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.montant_devis_presente} onChange={e => setNewOs({...newOs, montant_devis_presente: e.target.value})} />
@@ -3089,7 +3969,7 @@ export default function ProjectDetail() {
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Délai d'exécution</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Délai d'exécution</label>
                           <div className="flex gap-2">
                             <input type="number" placeholder="ex: 30"
                               className="w-20 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
@@ -3104,8 +3984,8 @@ export default function ProjectDetail() {
                           </div>
                         </div>
                         <div className="md:col-span-2 flex items-end">
-                          <button onClick={handleCreateOs}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all">
+                          <button onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title}
+                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
                             Créer l'OS
                           </button>
                         </div>
@@ -3113,8 +3993,8 @@ export default function ProjectDetail() {
                     </div>
                   )}
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-4 py-3 text-left">N°</th>
                           <th className="px-4 py-3 text-left">Titre</th>
@@ -3157,14 +4037,14 @@ export default function ProjectDetail() {
                                 {os.status === 'draft' && (
                                   <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
                                     title="Émettre l'OS"
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[10px] font-bold transition-all">
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[0.6875rem] font-bold transition">
                                     <IconSend size={11} /> Émettre
                                   </button>
                                 )}
                                 {os.status === 'submitted' && (
                                   <button onClick={() => handleUpdateOsStatus(os.id, 'approved')}
                                     title="Enregistrer AR"
-                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[10px] font-bold transition-all">
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition">
                                     <IconCheck size={11} /> AR reçu
                                   </button>
                                 )}
@@ -3185,7 +4065,7 @@ export default function ProjectDetail() {
                                 </button>
                               </div>
                               {os.status === 'approved' && os.date_ar && (
-                                <p className="text-[10px] text-green-600 mt-0.5">AR : {os.date_ar}</p>
+                                <p className="text-[0.6875rem] text-green-600 mt-0.5">AR : {os.date_ar}</p>
                               )}
                             </td>
                           </tr>
@@ -3213,7 +4093,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingRfi(!isAddingRfi)}
-                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         {isAddingRfi ? 'Annuler' : 'Ajouter'}
@@ -3241,7 +4121,7 @@ export default function ProjectDetail() {
                               }
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                         >
                           Ajouter
                         </button>
@@ -3257,12 +4137,12 @@ export default function ProjectDetail() {
                           <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
                             <div className="min-w-0">
                               <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">{r.question}</p>
-                              <p className="text-[10px] text-[var(--tblr-muted)]">{r.due_date ? `Échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}` : 'Sans échéance'}</p>
+                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{r.due_date ? `Échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}` : 'Sans échéance'}</p>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <select
                                 className={cn(
-                                  "text-[10px] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer",
+                                  "text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer",
                                   r.status === 'repondu' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                 )}
                                 value={r.status}
@@ -3277,11 +4157,11 @@ export default function ProjectDetail() {
                               </select>
                               <button
                                 onClick={async () => {
-                                  if (!confirm('Supprimer cette RFI ?')) return;
+                                  if (!confirm(t('projectdetail_confirm_delete_rfi'))) return;
                                   const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
                                   if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
                                 }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded"
+                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
                                 title="Supprimer"
                               >
                                 <IconTrash size={14} />
@@ -3307,16 +4187,14 @@ export default function ProjectDetail() {
                     .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
                   const marchesRevises = marchesInitiaux + avenantsTravauxApprouves;
                   const honorairesInitiaux = Number(project.remuneration) || 0;
-                  const avenantsHonorairesApprouves = ordresDeService
-                    .filter(o => o.type === 'contrat_moe' && o.status === 'approved')
-                    .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
+                  const avenantsHonorairesApprouves = cumulAvenantsApprouves;
                   const honorairesRevises = honorairesInitiaux + avenantsHonorairesApprouves;
                   return (
                     <>
                       {(avenantsTravauxApprouves !== 0 || avenantsHonorairesApprouves !== 0) && (
                         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40 rounded-lg p-4 flex flex-wrap gap-6 items-center">
                           <div>
-                            <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Marchés révisés</p>
+                            <p className="text-[0.6875rem] font-bold text-blue-400 uppercase tracking-wider">Marchés révisés</p>
                             <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatCurrency(marchesRevises)}</p>
                             {avenantsTravauxApprouves !== 0 && (
                               <p className="text-xs text-blue-500">{formatCurrency(marchesInitiaux)} initial {avenantsTravauxApprouves >= 0 ? '+' : ''}{formatCurrency(avenantsTravauxApprouves)} avenants</p>
@@ -3324,7 +4202,7 @@ export default function ProjectDetail() {
                           </div>
                           {honorairesRevises !== 0 && (
                             <div>
-                              <p className="text-[10px] font-bold text-blue-400 uppercase tracking-wider">Honoraires MOE révisés</p>
+                              <p className="text-[0.6875rem] font-bold text-blue-400 uppercase tracking-wider">Honoraires MOE révisés</p>
                               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatCurrency(honorairesRevises)}</p>
                               {avenantsHonorairesApprouves !== 0 && (
                                 <p className="text-xs text-blue-500">{formatCurrency(honorairesInitiaux)} initial {avenantsHonorairesApprouves >= 0 ? '+' : ''}{formatCurrency(avenantsHonorairesApprouves)} avenants</p>
@@ -3359,7 +4237,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => setIsAddingInvoice(!isAddingInvoice)}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Ajouter une facture
@@ -3371,7 +4249,7 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">N° Facture</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° Facture</label>
                           <input 
                             type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
@@ -3381,7 +4259,7 @@ export default function ProjectDetail() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Montant HT</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Montant HT</label>
                           <input 
                             type="number"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
@@ -3390,7 +4268,7 @@ export default function ProjectDetail() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Description</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Description</label>
                           <input 
                             type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
@@ -3431,7 +4309,7 @@ export default function ProjectDetail() {
                               console.error(err);
                             }
                           }}
-                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                         >
                           Ajouter
                         </button>
@@ -3440,8 +4318,8 @@ export default function ProjectDetail() {
                   )}
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-6 py-3 text-left">N° Facture</th>
                           <th className="px-6 py-3 text-left">Date</th>
@@ -3457,7 +4335,7 @@ export default function ProjectDetail() {
                             <td className="px-6 py-4">
                               <select 
                                 className={cn(
-                                  "bg-transparent font-bold text-[10px] uppercase tracking-wider outline-none cursor-pointer",
+                                  "bg-transparent font-bold text-[0.6875rem] uppercase tracking-wider outline-none cursor-pointer",
                                   inv.status === 'Paid' ? "text-green-600" :
                                   inv.status === 'Overdue' ? "text-red-600" :
                                   "text-[var(--tblr-muted)]"
@@ -3511,13 +4389,6 @@ export default function ProjectDetail() {
                   projectName={project.name}
                   lots={project.lots_list || []}
                   contacts={contacts}
-                  onLotsChange={updatedLots => {
-                    setProject({ ...project, lots_list: updatedLots });
-                    apiFetch(`/api/projects/${id}`, {
-                      method: 'PUT',
-                      body: JSON.stringify({ ...project, lots_list: updatedLots }),
-                    }).catch(console.error);
-                  }}
                 />
               </div>
             )}
@@ -3579,7 +4450,7 @@ export default function ProjectDetail() {
                                 key={s}
                                 onClick={() => setVisaForm(f => ({ ...f, status: s }))}
                                 className={cn(
-                                  "flex-1 py-1.5 px-2 rounded-lg text-xs font-bold uppercase transition-all border",
+                                  "flex-1 py-1.5 px-2 rounded-lg text-xs font-bold uppercase transition border",
                                   visaForm.status === s
                                     ? s === 'approved' ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/40 dark:border-green-700 dark:text-green-400'
                                       : s === 'rejected' ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900/40 dark:border-red-700 dark:text-red-400'
@@ -3630,7 +4501,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => prev.map(v => v.id === editingVisa.id ? updated : v));
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(`Erreur lors de l'enregistrement du visa : ${err?.error || res.statusText}`);
+                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
                                 }
                               } else {
                                 const res = await fetch('/api/visas', { method: 'POST', body: form });
@@ -3639,7 +4510,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => [...prev, data]);
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(`Erreur lors de l'enregistrement du visa : ${err?.error || res.statusText}`);
+                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
                                 }
                               }
                               setIsVisaModalOpen(false);
@@ -3648,7 +4519,7 @@ export default function ProjectDetail() {
                               setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                             } catch (err) {
                               console.error(err);
-                              alert("Erreur lors de l'enregistrement du visa.");
+                              alert(t('projectdetail_visa_save_failed'));
                             } finally {
                               setVisaSaving(false);
                             }
@@ -3679,7 +4550,7 @@ export default function ProjectDetail() {
                           setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                           setIsVisaModalOpen(true);
                         }}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Ajouter un visa
@@ -3687,8 +4558,8 @@ export default function ProjectDetail() {
                     }
                   />
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-6 py-3 text-left">Titre</th>
                           <th className="px-6 py-3 text-left">Date</th>
@@ -3713,8 +4584,8 @@ export default function ProjectDetail() {
                             <td colSpan={5} className="px-6 py-3">
                               <div className="flex items-center gap-2">
                                 {visaExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                                <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
-                                <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupVisas.length} visa{groupVisas.length > 1 ? 's' : ''})</span>
+                                <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
+                                <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupVisas.length} visa{groupVisas.length > 1 ? 's' : ''})</span>
                               </div>
                             </td>
                           </tr>
@@ -3733,7 +4604,7 @@ export default function ProjectDetail() {
                             <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(visa.date).toLocaleDateString('fr-FR')}</td>
                             <td className="px-6 py-4">
                               <span className={cn(
-                                "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                "px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider",
                                 visa.status === 'approved' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                                 visa.status === 'rejected' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                                 visa.status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
@@ -3794,7 +4665,7 @@ export default function ProjectDetail() {
                                 <button
                                   title="Supprimer"
                                   onClick={async () => {
-                                    if (!confirm('Supprimer ce visa ?')) return;
+                                    if (!confirm(t('projectdetail_confirm_delete_visa'))) return;
                                     try {
                                       const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
                                       if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
@@ -3824,7 +4695,7 @@ export default function ProjectDetail() {
 
             {activeTab === 'CORRESPONDANCE' && (
               <div className="space-y-8">
-                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} />
+                <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} relatedKeywords={[project?.name, project?.project_code, project?.reference].filter(Boolean) as string[]} />
               </div>
             )}
             {activeTab === 'AOR' && (
@@ -3837,6 +4708,9 @@ export default function ProjectDetail() {
                   setReserves={setReserves}
                   plans={plans}
                   lotsList={project?.lots_list}
+                  project={project}
+                  settings={settings}
+                  initialOpenReserveId={openResourceKey === 'reserves' ? openRecordId : undefined}
                 />
 
                 <ReserveTracker
@@ -3847,6 +4721,8 @@ export default function ProjectDetail() {
                   setReserves={setGpaReserves}
                   plans={plans}
                   lotsList={project?.lots_list}
+                  project={project}
+                  settings={settings}
                 />
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -3859,7 +4735,7 @@ export default function ProjectDetail() {
                     action={
                       <button
                         onClick={() => { setShowPvForm(true); setEditingReceptionId(null); setPvForm(defaultPvForm()); }}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all"
+                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
                         Créer PV de réception
@@ -3872,28 +4748,28 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Référence PV</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Référence PV</label>
                           <input type="text" placeholder="ex: PV-2024-001" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reference_pv} onChange={e => setPvForm(prev => ({ ...prev, reference_pv: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Type</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Type</label>
                           <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.type} onChange={e => setPvForm(prev => ({ ...prev, type: e.target.value as 'provisoire' | 'definitive' }))}>
                             <option value="provisoire">Réception provisoire</option>
                             <option value="definitive">Réception définitive</option>
                           </select>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
                           <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date} onChange={e => setPvForm(prev => ({ ...prev, date: e.target.value }))} />
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Lieu</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Lieu</label>
                           <input type="text" placeholder="ex: Site du projet" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.lieu} onChange={e => setPvForm(prev => ({ ...prev, lieu: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Date limite levée des réserves</label>
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date limite levée des réserves</label>
                           <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date_limite_levee} onChange={e => setPvForm(prev => ({ ...prev, date_limite_levee: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
@@ -3903,10 +4779,10 @@ export default function ProjectDetail() {
                       {/* Liste des réserves */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">
                             Réserves
                             {pvForm.reserves_list.length > 0 && (
-                              <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px]">{pvForm.reserves_list.length}</span>
+                              <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[0.6875rem]">{pvForm.reserves_list.length}</span>
                             )}
                           </label>
                           <button
@@ -3916,7 +4792,7 @@ export default function ProjectDetail() {
                               has_reserves: true,
                               reserves_list: [...prev.reserves_list, { id: crypto.randomUUID(), title: '', batiment: '', local: '', lots: '', entreprises: '', due_date: prev.date_limite_levee || '', status: 'A faire' }]
                             }))}
-                            className="flex items-center gap-1 text-[10px] font-bold text-amber-600 hover:text-amber-700 transition-colors"
+                            className="flex items-center gap-1 text-[0.6875rem] font-bold text-amber-600 hover:text-amber-700 transition-colors"
                           >
                             <IconPlus size={12} /> Ajouter une réserve
                           </button>
@@ -3927,7 +4803,7 @@ export default function ProjectDetail() {
                         {pvForm.reserves_list.map((r, idx) => (
                           <div key={r.id} className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-900/10 p-3 space-y-2">
                             <div className="flex items-center gap-2">
-                              <span className="text-[10px] font-black text-amber-600 w-5 shrink-0">#{idx + 1}</span>
+                              <span className="text-[0.625rem] font-black text-amber-600 w-5 shrink-0">#{idx + 1}</span>
                               <input
                                 type="text"
                                 placeholder="Intitulé de la réserve *"
@@ -3953,11 +4829,11 @@ export default function ProjectDetail() {
                               <input type="text" placeholder="Lot(s) concerné(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
                               <input type="text" placeholder="Entreprise(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
                               <div className="space-y-0.5">
-                                <label className="text-[9px] font-bold text-[var(--tblr-muted)] uppercase">Date limite</label>
+                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date limite</label>
                                 <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
                               </div>
                               <div className="space-y-0.5">
-                                <label className="text-[9px] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
+                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
                                 <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
                                   <option value="A faire">À faire</option>
                                   <option value="En cours">En cours</option>
@@ -3975,8 +4851,8 @@ export default function ProjectDetail() {
                       {/* Signataires */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Signataires</label>
-                          <button type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: [...prev.signataires, { nom: '', role: '' }] }))} className="flex items-center gap-1 text-[10px] font-bold text-blue-600 hover:text-blue-700 transition-colors">
+                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Signataires</label>
+                          <button type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: [...prev.signataires, { nom: '', role: '' }] }))} className="flex items-center gap-1 text-[0.6875rem] font-bold text-blue-600 hover:text-blue-700 transition-colors">
                             <IconPlus size={12} /> Ajouter signataire
                           </button>
                         </div>
@@ -3990,7 +4866,7 @@ export default function ProjectDetail() {
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase">Observations</label>
+                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Observations</label>
                         <textarea rows={3} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={pvForm.observations} onChange={e => setPvForm(prev => ({ ...prev, observations: e.target.value }))} />
                       </div>
 
@@ -4045,7 +4921,7 @@ export default function ProjectDetail() {
                               setPvForm(defaultPvForm());
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all"
+                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                         >
                           {editingReceptionId ? 'Enregistrer' : 'Créer le PV'}
                         </button>
@@ -4054,8 +4930,8 @@ export default function ProjectDetail() {
                   )}
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                    <table className="min-w-full text-sm">
+                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-6 py-3 text-left">Référence</th>
                           <th className="px-6 py-3 text-left">Type</th>
@@ -4079,7 +4955,7 @@ export default function ProjectDetail() {
                             <tr className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
                               <td className="px-6 py-4 font-mono text-xs font-bold text-[var(--tblr-text)]">{rec.reference_pv || '—'}</td>
                               <td className="px-6 py-4">
-                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
+                                <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
                                   {rec.type === 'provisoire' ? 'Provisoire' : 'Définitive'}
                                 </span>
                               </td>
@@ -4089,13 +4965,13 @@ export default function ProjectDetail() {
                                 {pvReserves.length > 0 ? (
                                   <button
                                     onClick={() => setExpandedPvId(isExpanded ? null : rec.id)}
-                                    className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider transition-colors", "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200")}
+                                    className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider transition-colors", "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200")}
                                   >
                                     {isExpanded ? <IconChevronUp size={10} /> : <IconChevronDown size={10} />}
                                     {pvReserves.length} réserve{pvReserves.length > 1 ? 's' : ''} · {reservesLevees} levée{reservesLevees > 1 ? 's' : ''}
                                   </button>
                                 ) : (
-                                  <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                  <span className="px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                                     Sans réserves
                                   </span>
                                 )}
@@ -4109,7 +4985,7 @@ export default function ProjectDetail() {
                                 ) : '—'}
                               </td>
                               <td className="px-6 py-4">
-                                <span className={cn("px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider", rec.pv_valide ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-zinc-100 text-[var(--tblr-muted)] dark:bg-zinc-800 dark:text-[var(--tblr-muted)]")}>
+                                <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", rec.pv_valide ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-zinc-100 text-[var(--tblr-muted)] dark:bg-zinc-800 dark:text-[var(--tblr-muted)]")}>
                                   {rec.pv_valide ? 'Validé' : 'Brouillon'}
                                 </span>
                               </td>
@@ -4129,33 +5005,7 @@ export default function ProjectDetail() {
                                   {/* Edit */}
                                   <button
                                     title="Modifier"
-                                    onClick={() => {
-                                      setEditingReceptionId(rec.id);
-                                      const existingReserves = reserves.filter(r => r.reception_id === rec.id);
-                                      setPvForm({
-                                        reference_pv: rec.reference_pv || '',
-                                        type: rec.type,
-                                        date: rec.date,
-                                        lieu: rec.lieu || '',
-                                        date_limite_levee: rec.date_limite_levee || '',
-                                        has_reserves: rec.has_reserves,
-                                        reserves_count: rec.reserves_count || 0,
-                                        signataires: rec.signataires ? JSON.parse(rec.signataires) : [],
-                                        observations: rec.observations || '',
-                                        pv_valide: rec.pv_valide || false,
-                                        reserves_list: existingReserves.map(r => ({
-                                          id: r.id,
-                                          title: r.title,
-                                          batiment: r.batiment || '',
-                                          local: r.local || '',
-                                          lots: (() => { try { const p = JSON.parse(r.lots); return Array.isArray(p) ? p.join(', ') : r.lots; } catch { return r.lots || ''; } })(),
-                                          entreprises: (() => { try { const p = JSON.parse(r.entreprises); return Array.isArray(p) ? p.join(', ') : r.entreprises; } catch { return r.entreprises || ''; } })(),
-                                          due_date: r.due_date || '',
-                                          status: r.status,
-                                        })),
-                                      });
-                                      setShowPvForm(true);
-                                    }}
+                                    onClick={() => openReceptionForm(rec)}
                                     className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
                                   >
                                     <IconFileText size={15} />
@@ -4164,7 +5014,7 @@ export default function ProjectDetail() {
                                   <button
                                     title="Supprimer"
                                     onClick={async () => {
-                                      if (!confirm('Supprimer ce PV de réception ?')) return;
+                                      if (!confirm(t('projectdetail_confirm_delete_pv_reception'))) return;
                                       try {
                                         const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
                                         if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
@@ -4183,15 +5033,15 @@ export default function ProjectDetail() {
                                 <td colSpan={8} className="px-0 pb-0 pt-0">
                                   <div className="mx-6 mb-4 rounded-lg border border-amber-200 dark:border-amber-800/40 overflow-hidden">
                                     <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/40 flex items-center justify-between">
-                                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                                      <span className="text-[0.6875rem] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
                                         Liste des réserves — {rec.reference_pv}
                                       </span>
-                                      <span className="text-[10px] text-amber-600 dark:text-amber-500">
+                                      <span className="text-[0.6875rem] text-amber-600 dark:text-amber-500">
                                         {reservesLevees}/{pvReserves.length} levées
                                       </span>
                                     </div>
                                     <table className="w-full text-xs">
-                                      <thead className="bg-amber-50/50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-500 font-bold uppercase text-[9px] tracking-wider">
+                                      <thead className="bg-amber-50/50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-500 font-bold uppercase text-[0.6875rem] tracking-wider">
                                         <tr>
                                           <th className="px-4 py-2 text-left w-8">#</th>
                                           <th className="px-4 py-2 text-left">Intitulé</th>
@@ -4240,7 +5090,7 @@ export default function ProjectDetail() {
                                                     await fetch(`/api/reserves/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status: newStatus }) });
                                                     setReserves(prev => prev.map(rv => rv.id === r.id ? { ...rv, status: newStatus as Reserve['status'] } : rv));
                                                   }}
-                                                  className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
+                                                  className={cn("text-[0.6875rem] font-bold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
                                                 >
                                                   <option value="A faire">À faire</option>
                                                   <option value="En cours">En cours</option>
@@ -4253,7 +5103,7 @@ export default function ProjectDetail() {
                                               <td className="px-4 py-2 text-right">
                                                 <button
                                                   onClick={async () => {
-                                                    if (!confirm('Supprimer cette réserve ?')) return;
+                                                    if (!confirm(t('projectdetail_confirm_delete_reserve'))) return;
                                                     await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
                                                     setReserves(prev => prev.filter(rv => rv.id !== r.id));
                                                   }}
@@ -4356,11 +5206,11 @@ export default function ProjectDetail() {
                               await fetchDoeDocuments();
                             } else {
                               const err = await res.json().catch(() => null);
-                              alert(`Erreur lors de l'upload du document DOE : ${err?.error || res.statusText}`);
+                              alert(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }));
                             }
                           } catch (err) {
                             console.error(err);
-                            alert("Erreur lors de l'upload du document DOE.");
+                            alert(t('projectdetail_doe_upload_failed'));
                           } finally {
                             setDoeUploading(false);
                             if (doeInputRef.current) doeInputRef.current.value = '';
@@ -4369,7 +5219,7 @@ export default function ProjectDetail() {
                         <button
                           onClick={() => doeInputRef.current?.click()}
                           disabled={doeUploading}
-                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
                         >
                           <IconFilePlus size={14} />
                           {doeUploading ? 'Upload...' : 'Ajouter document DOE'}
@@ -4378,8 +5228,8 @@ export default function ProjectDetail() {
                       }
                     />
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                      <table className="min-w-full text-sm">
+                        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                           <tr>
                             <th className="px-6 py-3 text-left">Nom</th>
                             <th className="px-6 py-3 text-left">Statut</th>
@@ -4398,8 +5248,8 @@ export default function ProjectDetail() {
                                 <td colSpan={5} className="px-6 py-3">
                                   <div className="flex items-center gap-2">
                                     {doeExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                                    <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
-                                    <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupDocs.length} document{groupDocs.length > 1 ? 's' : ''})</span>
+                                    <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
+                                    <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupDocs.length} document{groupDocs.length > 1 ? 's' : ''})</span>
                                   </div>
                                 </td>
                               </tr>
@@ -4408,7 +5258,7 @@ export default function ProjectDetail() {
                                   <td className="px-6 py-4 font-medium text-[var(--tblr-text)]">{doc.name}</td>
                                   <td className="px-6 py-4">
                                     <span className={cn(
-                                      "px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                                      "px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider",
                                       doc.validation_status === 'approved' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
                                       doc.validation_status === 'rejected' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
                                       doc.validation_status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
@@ -4496,7 +5346,7 @@ export default function ProjectDetail() {
                                           </button>
                                           <button
                                             onClick={async () => {
-                                              if (!confirm('Supprimer ce document DOE ?')) return;
+                                              if (!confirm(t('projectdetail_confirm_delete_doe_document'))) return;
                                               try {
                                                 const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
                                                 if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
@@ -4550,7 +5400,7 @@ export default function ProjectDetail() {
                               planInputRef.current?.click();
                             }}
                             disabled={planUploading}
-                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all whitespace-nowrap disabled:opacity-50"
+                            className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition whitespace-nowrap disabled:opacity-50"
                           >
                             <IconUpload size={14} />
                             <span className="hidden sm:inline">{planUploading ? 'Upload...' : 'Importer un plan'}</span>
@@ -4560,8 +5410,8 @@ export default function ProjectDetail() {
                         }
                       />
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+                        <table className="min-w-full text-sm">
+                          <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                             <tr>
                               <th className="px-6 py-3 text-left">Nom</th>
                               <th className="px-6 py-3 text-left w-20">Indice</th>
@@ -4576,7 +5426,7 @@ export default function ProjectDetail() {
                               <tr key={plan.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
                                 <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">{plan.name}</td>
                                 <td className="px-6 py-4">
-                                  <span className="px-2 py-0.5 bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] rounded text-[10px] font-bold">
+                                  <span className="px-2 py-0.5 bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] rounded text-[0.6875rem] font-bold">
                                     {plan.index || 'A'}
                                   </span>
                                 </td>
@@ -4599,7 +5449,7 @@ export default function ProjectDetail() {
                                     </button>
                                     <button 
                                       onClick={async () => {
-                                        if (!confirm('Supprimer ce plan ?')) return;
+                                        if (!confirm(t('projectdetail_confirm_delete_plan'))) return;
                                         try {
                                           const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
                                           if (res.ok) setPlans(prev => prev.filter(p => p.id !== plan.id));
@@ -4640,7 +5490,8 @@ export default function ProjectDetail() {
         {arOsTarget && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md rounded-lg shadow-2xl p-6"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -4649,17 +5500,17 @@ export default function ProjectDetail() {
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Date d'AR *</label>
+                  <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Date d'AR *</label>
                   <input type="date" value={arForm.date_ar} onChange={e => setArForm(f => ({...f, date_ar: e.target.value}))}
                     className="w-full bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Date d'exécution prévue</label>
+                  <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Date d'exécution prévue</label>
                   <input type="date" value={arForm.date_execution} onChange={e => setArForm(f => ({...f, date_execution: e.target.value}))}
                     className="w-full bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Notes</label>
+                  <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Notes</label>
                   <textarea rows={3} value={arForm.notes_ar} onChange={e => setArForm(f => ({...f, notes_ar: e.target.value}))}
                     className="w-full bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg p-2 text-sm resize-none outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
@@ -4670,8 +5521,55 @@ export default function ProjectDetail() {
                   Annuler
                 </button>
                 <button onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar}
-                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition-all">
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition">
                   {arSaving ? 'Enregistrement…' : 'Confirmer AR'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
+      <AnimatePresence>
+        {showDeleteProjectConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+            <motion.div
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
+              className="w-full max-w-md rounded-lg shadow-2xl p-6"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+            >
+              <h3 className="text-sm font-bold text-[var(--tblr-text)] mb-2">{t('projects_delete_confirm_title')}</h3>
+              <p className="text-sm text-[var(--tblr-muted)] mb-2">
+                {t('projects_delete_confirm_body', { name: project?.name })}
+              </p>
+              <p className="text-sm text-[var(--tblr-muted)] mb-3">
+                {t('projects_delete_confirm_instruction', { word: t('projects_delete_confirm_word') })}
+              </p>
+              <input
+                autoFocus
+                className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-[var(--tblr-text)]"
+                value={deleteProjectConfirmInput}
+                onChange={e => setDeleteProjectConfirmInput(e.target.value)}
+                placeholder={t('projects_delete_confirm_word')}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && deleteProjectConfirmInput.trim().toLowerCase() === t('projects_delete_confirm_word').toLowerCase() && !isDeletingProject) {
+                    handleDelete();
+                  }
+                }}
+              />
+              <div className="flex gap-2 mt-5 justify-end">
+                <button onClick={() => setShowDeleteProjectConfirm(false)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                  {t('btn_cancel')}
+                </button>
+                <button
+                  disabled={deleteProjectConfirmInput.trim().toLowerCase() !== t('projects_delete_confirm_word').toLowerCase() || isDeletingProject}
+                  onClick={handleDelete}
+                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
                 </button>
               </div>
             </motion.div>
@@ -4687,6 +5585,7 @@ export default function ProjectDetail() {
           setContacts(prev => [...prev, newContact]);
           setProject(prev => prev ? ({
             ...prev,
+            client_id: newContact.id,
             client: newContact.company_name || `${newContact.first_name} ${newContact.last_name}`
           }) : prev);
           fetchContacts();

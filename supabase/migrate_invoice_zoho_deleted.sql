@@ -1,0 +1,18 @@
+-- La synchro Zoho (server/routes/zohoInvoice.ts, zohoBooks.ts) ne fait, côté
+-- pull, que parcourir la liste que Zoho renvoie : une facture supprimée côté
+-- Zoho disparaît simplement de cette liste et n'est donc jamais revue par la
+-- boucle — la ligne locale restait figée à son dernier statut connu, pour
+-- toujours, sans que rien ne le signale.
+--
+-- Pas de suppression locale en miroir : une facture déjà envoyée porte un
+-- numéro légal (Factur-X / EN 16931), et la faire disparaître romprait la
+-- continuité de numérotation que la loi française impose — c'est le même
+-- principe que le verrou déjà en place sur PUT/DELETE /api/invoices/:id.
+-- `zoho_deleted_at` se contente donc de signaler l'écart pour une revue
+-- humaine (bandeau dans l'UI), jamais de trancher à la place du cabinet.
+--
+-- Nom volontairement générique (pas "sync_deleted_at" pour autant : seul le
+-- pull Zoho la pose aujourd'hui) plutôt que préfixé zoho_, pour pouvoir
+-- servir un futur connecteur (Odoo, Zoho Books) sans ajouter une colonne par
+-- fournisseur — voir le même choix documenté sur invoice_accounting_sync.
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS accounting_deleted_at TIMESTAMPTZ;

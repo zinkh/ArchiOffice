@@ -6,10 +6,20 @@
 // just never extracted alongside them. GET/POST /api/projects/:projectId/dpgf
 // joins in a later lot: a different route shape (one JSON blob per project,
 // upserted wholesale) than the per-field CRUD below, but the same `dpgfs`
-// table — same relationship as GET/POST /api/projects/:projectId/cctp to
-// server/routes/cctps.ts's per-field CCTP CRUD.
+// table.
+//
+// This is also, since the CCTP consolidation (see CLAUDE.md's "Le CCTP n'est
+// pas un document séparé" section), the ONLY document endpoint the CCTP
+// editor talks to: CCTPEditor.tsx writes `cctpDescription`/`cctpOnly` fields
+// straight onto this same lots/chapitres/lignes tree (« le CCTP partage le
+// même dpgf.lots ») rather than a separate document. There used to be a
+// parallel `cctps` table with its own GET/POST /api/projects/:projectId/cctp
+// route (server/routes/cctps.ts, now removed) that no production UI ever
+// wrote to through the live CCTPEditor — see that CLAUDE.md section for why
+// the table itself is left in place, unused, rather than dropped.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 import { remonterPrixOffre } from '../articlePrices';
 
 export interface RouteDeps {
@@ -30,6 +40,14 @@ async function loadRow(supabaseAdmin: any, tenantId: string, projectId: string) 
     .eq('project_id', projectId).eq('tenant_id', tenantId).single();
   if (error && error.code !== 'PGRST116') throw error;
   return data ?? null;
+}
+
+/** Signale les anciennes routes ligne-à-ligne sans casser leurs consommateurs. */
+function legacyDpgfItemsHeaders(res: any) {
+  res.set('Deprecation', 'true');
+  res.set('Sunset', 'Wed, 31 Mar 2027 23:59:59 GMT');
+  res.set('Link', '</api/projects/{projectId}/dpgf>; rel="successor-version"');
+  res.set('Warning', '299 ArchiOffice "dpgf_items est déprécié ; utiliser le document structuré /api/projects/:projectId/dpgf"');
 }
 
 export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
@@ -71,6 +89,61 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     } catch (error) {
       console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
+    }
+  });
+
+  // ── Instantanés de phase / indice ─────────────────────────────────────────
+  app.get('/api/projects/:projectId/dpgf/versions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions')
+        .select('id,label,phase,version,created_by,created_at').eq('project_id', req.params.projectId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data ?? []);
+    } catch (e: any) {
+      console.error('[GET dpgf/versions]', e);
+      res.status(500).json({ error: 'Failed to fetch DPGF versions' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/dpgf/versions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+      const document = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      const label = String(req.body?.label || '').trim();
+      if (!label) return res.status(400).json({ error: 'Le libellé est obligatoire' });
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions').insert({
+        id: crypto.randomUUID(),
+        project_id: req.params.projectId, dpgf_id: row.id, label,
+        phase: req.body?.phase || null, version: req.body?.version || document?.version || null,
+        document, created_by: req.user.id, created_at: new Date().toISOString(),
+      }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) {
+      console.error('[POST dpgf/versions]', e);
+      res.status(500).json({ error: 'Failed to snapshot DPGF' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/dpgf/versions/:versionId/restore', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+      const { data: snapshot, error: readError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions')
+        .select('*').eq('id', req.params.versionId).eq('project_id', req.params.projectId).single();
+      if (readError || !snapshot) return res.status(404).json({ error: 'Version introuvable' });
+      const document = typeof snapshot.document === 'string' ? JSON.parse(snapshot.document) : snapshot.document;
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgfs').update({ data: JSON.stringify(document) }).eq('id', row.id);
+      if (error) throw error;
+      res.json(document);
+    } catch (e: any) {
+      console.error('[POST dpgf/versions/:versionId/restore]', e);
+      res.status(500).json({ error: 'Failed to restore DPGF version' });
     }
   });
 
@@ -193,6 +266,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.get('/api/dpgf/:projectId', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items').select('*').eq('project_id', req.params.projectId);
       if (error) throw error;
@@ -202,8 +276,15 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.post('/api/dpgf', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      if (dpgf_id && !(await assertTenantEntity(supabaseAdmin, 'dpgfs', dpgf_id, tenantId))) {
+        return res.status(400).json({ error: "DPGF introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items')
         .insert({ id, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price })
@@ -218,6 +299,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.put('/api/dpgf/:id', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items')
@@ -233,6 +315,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.delete('/api/dpgf/:id', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items').delete().eq('id', req.params.id);
       if (error) throw error;
@@ -247,6 +330,9 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, title, version } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgfs').insert({ id, project_id, title, version }).select().single();
       if (error) throw error;

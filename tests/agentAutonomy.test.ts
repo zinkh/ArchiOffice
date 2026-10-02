@@ -50,19 +50,28 @@ describe('périmètre des outils selon les capacités', () => {
 
   it('refuse un appel dont la capacité est éteinte, même si le modèle le tente', async () => {
     const caps = capabilitiesFromAgent(NO_CAPS);
-    const mail = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'send_email', args: { to: 'a@b.fr' } });
+    const mail = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'send_email', args: { to: 'a@b.fr' } });
     expect(String(mail.response.error)).toMatch(/messagerie/i);
-    const geo = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'get_zone_plu', args: {} });
+    const geo = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'get_zone_plu', args: {} });
     expect(String(geo.response.error)).toMatch(/cartographique/i);
-    const docs = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, { name: 'read_cctp', args: {} });
+    const docs = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, { name: 'read_cctp', args: {} });
     expect(String(docs.response.error)).toMatch(/CCTP/i);
   });
 
-  it('donne un périmètre d\'écriture par défaut à chaque métier du catalogue', () => {
+  it('donne un périmètre d\'écriture par défaut à la plupart des métiers du catalogue', () => {
     expect(AGENT_DEFAULT_ACTION_SCOPES['secretaire']).toContain('meetings');
     expect(AGENT_DEFAULT_ACTION_SCOPES['comptable']).toContain('invoices');
-    for (const scopes of Object.values(AGENT_DEFAULT_ACTION_SCOPES)) {
-      expect(scopes.length).toBeGreaterThan(0);
+    // Quatre métiers d'ingénierie n'avaient que la ressource 'specifications'
+    // (l'ancienne ressource CCTP, retirée du système — voir CLAUDE.md) comme
+    // défaut : leur périmètre est désormais vide plutôt qu'un remplacement
+    // improvisé, à régler au cas par cas depuis /agents/:id/edit.
+    const emptyByDesign = ['ingenieur-thermique', 'ingenieur-structure', 'ingenieur-fluides', 'acousticien'];
+    for (const [metier, scopes] of Object.entries(AGENT_DEFAULT_ACTION_SCOPES)) {
+      if (emptyByDesign.includes(metier)) {
+        expect(scopes.length).toBe(0);
+      } else {
+        expect(scopes.length).toBeGreaterThan(0);
+      }
     }
   });
 });
@@ -292,11 +301,19 @@ describe('documents produits par un agent', () => {
 
 // ── Lecture CCTP / DPGF ────────────────────────────────────────────────────
 describe('lecture du CCTP et du DPGF', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  // Le CCTP n'est plus un document séparé : summarizeCctp lit le même arbre
+  // que le DPGF (lots > chapitres > lignes), et en tire le texte porté par
+  // `cctpDescription` — voir CCTPEditor.tsx et CLAUDE.md.
   const cctp = {
     titre: 'CCTP', version: '1', statut: 'draft',
     lots: [{
-      numero: '01', titre: 'Gros œuvre', description: '',
-      chapitres: [{ numero: '1.1', titre: 'Fondations', articles: [{ numero: '1.1.1', designation: 'Semelles', description: 'Béton', unite: 'm3', normes: 'NF' }] }],
+      numero: '01', titre: 'Gros œuvre', cctpDescription: '',
+      chapitres: [{
+        numero: '1.1', titre: 'Fondations', cctpDescription: '',
+        lignes: [{ numero: '1.1.1', designation: 'Semelles', unite: 'm3', cctpDescription: 'Béton NF', type: 'ouvrage' }],
+      }],
     }],
   };
 
@@ -307,8 +324,31 @@ describe('lecture du CCTP et du DPGF', () => {
   });
 
   it('détaille le lot demandé, par numéro comme par titre', () => {
-    expect((summarizeCctp(cctp, '01') as any).lot.chapitres[0].articles[0].designation).toBe('Semelles');
+    expect((summarizeCctp(cctp, '01') as any).lot.chapitres[0].articles[0].contenu).toBe('Béton NF');
     expect((summarizeCctp(cctp, 'gros œuvre') as any).lot.numero).toBe('01');
+  });
+
+  it('read_cctp lit la route /dpgf, pas un endpoint /cctp séparé qui n\'existe plus', async () => {
+    // Régression : read_cctp appelait auparavant GET /api/projects/:id/cctp,
+    // une route morte adossée à une table (`cctps`) qu'aucun éditeur en
+    // production n'écrivait plus — l'outil rapportait donc systématiquement
+    // qu'aucun CCTP n'existait, quel que soit le projet. Le CCTP vit
+    // désormais sur le même document que le DPGF (voir CCTPEditor.tsx).
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true, status: 200,
+      json: async () => (String(url).includes('/dpgf') ? cctp : null),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ docs_read_enabled: true });
+
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
+      name: 'read_cctp', args: { project_id: 'proj-1' },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/projects/proj-1/dpgf');
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain('/cctp');
+    expect((result.response as any).lots[0].numero).toBe('01');
   });
 
   it('signale un lot inexistant au lieu d\'en inventer un', () => {
@@ -411,6 +451,37 @@ describe('préparation des écritures', () => {
     expect(prepared.normalizedValues).toEqual({});
   });
 
+  // Incident réel (16/09/2026) : un agent a deviné 'nom' puis 'title' pour le
+  // nom d'un projet (le vrai champ est 'name'), a échoué deux fois de suite,
+  // et a abandonné en s'excusant plutôt que de retenter avec le bon champ.
+  // Un synonyme plausible du "nom" de la ressource ou du "client" ne doit
+  // plus se perdre : il se redirige vers le champ réel au lieu d'être écarté.
+  it('redirige un synonyme plausible du champ identité vers le vrai champ au lieu de le perdre', () => {
+    const projects = AGENT_RESOURCES.find(r => r.key === 'projects')!;
+    const prepared = prepareRecord(projects, { nom: 'Villa Martin', client: 'M. Martin' });
+    expect(prepared.data.name).toBe('Villa Martin');
+    expect(prepared.aliasedFields).toEqual({ nom: 'name' });
+    expect(prepared.ignoredFields).toEqual([]);
+    expect(prepared.missingRequired).toEqual([]);
+  });
+
+  it("redirige un synonyme du champ client, sans écraser un champ 'name' déjà correct", () => {
+    const projects = AGENT_RESOURCES.find(r => r.key === 'projects')!;
+    const prepared = prepareRecord(projects, { name: 'Villa Martin', maitre_ouvrage: 'M. Martin' });
+    expect(prepared.data).toMatchObject({ name: 'Villa Martin', client: 'M. Martin' });
+    expect(prepared.aliasedFields).toEqual({ maitre_ouvrage: 'client' });
+  });
+
+  it("ne redirige jamais vers un champ déjà fourni sous son vrai nom", () => {
+    const projects = AGENT_RESOURCES.find(r => r.key === 'projects')!;
+    // 'name' est déjà donné correctement : un 'titre' redondant ne doit pas
+    // l'écraser, il est simplement écarté comme un champ inconnu ordinaire.
+    const prepared = prepareRecord(projects, { name: 'Villa Martin', titre: 'Autre intitulé', client: 'M. Martin' });
+    expect(prepared.data.name).toBe('Villa Martin');
+    expect(prepared.ignoredFields).toEqual(['titre']);
+    expect(prepared.aliasedFields).toEqual({});
+  });
+
   it('déclare un vocabulaire cohérent avec les champs connus de chaque ressource', () => {
     for (const resource of AGENT_RESOURCES) {
       expect(resource.knownFields.length).toBeGreaterThan(0);
@@ -427,21 +498,17 @@ describe('préparation des écritures', () => {
   });
 });
 
-// ── Bibliothèque d'ouvrages (articles_type) vs CCTP (specifications) ────────
+// ── Bibliothèque d'ouvrages (articles_type) ─────────────────────────────────
 // Le 7 septembre 2026, un agent a créé 19 CCTP sans projet en réponse à des
 // demandes qui visaient en réalité la Bibliothèque d'ouvrages : les agents
-// n'avaient aucun outil d'écriture sur articles_type, seul le CCTP
-// ressemblait de loin à une « bibliothèque ». Ces tests protègent les deux
-// correctifs : un CCTP exige désormais un projet, et articles_type est une
-// ressource à part entière, jamais confondue avec le CCTP.
+// n'avaient aucun outil d'écriture sur articles_type, seule la ressource
+// 'specifications' (l'ancien CCTP) ressemblait de loin à une « bibliothèque ».
+// Cette ressource a depuis été retirée du système entier (route, table et
+// entrée AGENT_RESOURCES — voir CLAUDE.md) ; ces tests protègent ce qui
+// reste : articles_type comme ressource à part entière, jamais confondue
+// avec le CCTP réel (qui vit désormais dans l'arbre du DPGF).
 describe("Bibliothèque d'ouvrages (articles_type)", () => {
-  const specifications = AGENT_RESOURCES.find(r => r.key === 'specifications')!;
   const articlesType = AGENT_RESOURCES.find(r => r.key === 'articles_type')!;
-
-  it('exige désormais un projet pour créer un CCTP', () => {
-    const prepared = prepareRecord(specifications, { title: 'Lot 00 - Généralités' });
-    expect(prepared.missingRequired).toEqual(['project_id']);
-  });
 
   it("pose 'saisie' comme provenance par défaut d'un article de bibliothèque", () => {
     const prepared = prepareRecord(articlesType, { designation: 'Chape fluide anhydrite' });
@@ -461,7 +528,10 @@ describe("Bibliothèque d'ouvrages (articles_type)", () => {
     // recréer la même ambiguïté avec la bibliothèque.
     expect(articlesType.label).toBe("Bibliothèque d'ouvrages");
     expect(articlesType.label).not.toContain('CCTP');
-    expect(specifications.label).not.toBe("Bibliothèque d'ouvrages");
+  });
+
+  it("n'expose plus aucune ressource 'specifications' — retirée du système", () => {
+    expect(AGENT_RESOURCES.find(r => r.key === 'specifications')).toBeUndefined();
   });
 
   it("expose create/update/delete/search sur articles_type à un agent qui y est autorisé", () => {
@@ -498,7 +568,7 @@ describe('remontée des erreurs d\'écriture au modèle', () => {
       } as any;
     }));
 
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'create_record',
       args: { resource: 'proposals', data: { title: 'Surélévation', status: 'En cours' }, confirm: true },
     });
@@ -520,7 +590,7 @@ describe('remontée des erreurs d\'écriture au modèle', () => {
       json: async () => (init?.method === 'POST' ? { id: 'prop-1' } : []),
     } as any)));
 
-    const result = await executeAgentAction('http://127.0.0.1:1', 'Bearer x', caps, {
+    const result = await executeAgentAction('http://127.0.0.1:1', { authorization: 'Bearer x' }, caps, {
       name: 'create_record',
       args: {
         resource: 'proposals',
@@ -531,5 +601,80 @@ describe('remontée des erreurs d\'écriture au modèle', () => {
     expect(result.response.success).toBe(true);
     expect(result.response.champs_ignores).toEqual(['fees', 'payment_terms']);
     expect(result.response.valeurs_par_defaut).toMatchObject({ status: 'Draft' });
+  });
+});
+
+describe('comptes-rendus de chantier DET', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('propose une action dédiée uniquement aux agents autorisés à accéder aux opérations', () => {
+    const projectCaps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const meetingCaps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['meetings'] });
+    expect(buildAgentTools(projectCaps).map(t => t.name)).toContain('create_site_report');
+    expect(buildAgentTools(meetingCaps).map(t => t.name)).not.toContain('create_site_report');
+    expect(AGENT_RESOURCES.find(r => r.key === 'meetings')?.fields).not.toContain('est LA réunion de chantier');
+  });
+
+  it('crée le brouillon par la route DET du projet et renvoie son lien', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: any) => ({
+      ok: true,
+      status: init?.method === 'POST' ? 201 : 200,
+      json: async () => init?.method === 'POST' ? { id: 'cr-1', report_number: 2 } : [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'create_site_report', args: { project_id: 'proj-1', date: '2026-09-23' },
+    });
+    expect(fetchMock.mock.calls[1][0]).toBe('http://localhost/api/projects/proj-1/reports');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ date: '2026-09-23' });
+    expect(result.response).toMatchObject({ success: true, id: 'cr-1', report_number: 2, statut: 'brouillon' });
+    expect(result.response.record_url).toContain('/projects/proj-1?tab=DET');
+  });
+
+  it('ne crée pas de deuxième CR à la même date', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => [{ id: 'cr-1', date: '2026-09-23', report_number: 1 }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'create_site_report', args: { project_id: 'proj-1', date: '2026-09-23' },
+    });
+    expect(result.response.needs_confirmation).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ajoute un point au brouillon DET sans créer de tâche', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => ({
+      ok: true,
+      status: init?.method === 'POST' ? 200 : 200,
+      json: async () => init?.method === 'POST' ? { id: 'obs-1', number: 3 }
+        : url.endsWith('/reports') ? [{ id: 'cr-1', report_number: 1, statut: 'brouillon' }] : [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    expect(buildAgentTools(caps).map(t => t.name)).toContain('add_site_report_observation');
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'add_site_report_observation', args: { project_id: 'vip-tc', texte: 'HCT : brancher la base vie' },
+    });
+    expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
+      'http://localhost/api/projects/vip-tc/reports',
+      'http://localhost/api/reports/cr-1/observations',
+      'http://localhost/api/projects/vip-tc/observations',
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ texte: 'HCT : brancher la base vie', created_report_id: 'cr-1' });
+    expect(result.response).toMatchObject({ success: true, id: 'obs-1', report_id: 'cr-1' });
+  });
+
+  it('demande quel brouillon modifier quand plusieurs existent', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [
+      { id: 'cr-1', statut: 'brouillon' }, { id: 'cr-2', statut: 'brouillon' },
+    ] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'add_site_report_observation', args: { project_id: 'vip-tc', texte: 'HCT : brancher la base vie' },
+    });
+    expect(result.response.error).toContain('Plusieurs brouillons');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -25,6 +25,7 @@
 import webpush from 'web-push';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { tenantScopedFrom } from './tenantScopedFrom';
+import { listTenantAdminIds } from './tenantMemberships';
 
 export interface NotificationPayload {
   title: string;
@@ -143,7 +144,13 @@ export async function notifyUsers(
     const recipients = [...new Set(userIds.filter(Boolean))];
     if (!recipients.length) return;
 
-    const { data: profiles } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles')
+    // Sans filtre de cabinet : les destinataires ont déjà été choisis dans ce
+    // cabinet, et leur profil est unique quel que soit le nombre de cabinets
+    // où ils exercent (`profiles.tenant_id` ne dit que leur cabinet par
+    // défaut). Le filtrer ici privait de notification quiconque exerce dans
+    // deux structures.
+    const { data: profiles } = await supabaseAdmin
+      .from('profiles')
       .select('id, notification_prefs')
       .in('id', recipients);
 
@@ -205,10 +212,8 @@ export async function notifyTenantAdminsPush(
   payload: NotificationPayload,
 ): Promise<void> {
   try {
-    const { data: admins } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles')
-      .select('id')
-      .eq('system_role', 'admin');
-    await notifyUsers(supabaseAdmin, tenantId, ((admins || []) as any[]).map(a => String(a.id)), payload);
+    const adminIds = await listTenantAdminIds(supabaseAdmin, tenantId);
+    await notifyUsers(supabaseAdmin, tenantId, adminIds, payload);
   } catch (err: any) {
     console.error('[push] notifyTenantAdminsPush en échec :', err?.message);
   }

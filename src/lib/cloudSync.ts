@@ -24,9 +24,18 @@ async function parseJsonOrThrow(res: Response): Promise<any> {
   return data;
 }
 
-export async function checkCloudLinkStatus(): Promise<{ linked: boolean }> {
+export async function checkCloudLinkStatus(): Promise<{ linked: boolean; importCompleted: boolean | null; email: string | null }> {
   const res = await fetch('/api/auth/cloud-link-status');
   return parseJsonOrThrow(res);
+}
+
+/**
+ * Rétablit la session cloud (jeton de rafraîchissement expiré ou révoqué)
+ * d'un poste déjà lié — voir server/cloudLinkRoutes.ts. Ne demande que le
+ * mot de passe : l'email est déjà fixé par le lien existant.
+ */
+export async function reconnectCloud(password: string): Promise<{ ok: true }> {
+  return apiFetch('/api/auth/cloud-link-reconnect', { method: 'POST', body: JSON.stringify({ password }) });
 }
 
 export async function cloudLink(email: string, password: string, localPassword: string): Promise<LocalSession & { importJobId: string }> {
@@ -40,6 +49,23 @@ export async function cloudLink(email: string, password: string, localPassword: 
   return result;
 }
 
+/**
+ * Relance l'import initial après un échec. Le compte local et le lien cloud
+ * existent déjà (posés par cloudLink() avant même que l'import ne démarre),
+ * donc une session locale valide est disponible — apiFetch() l'ajoute comme
+ * partout ailleurs dans l'application, contrairement à cloudLink() ci-dessus
+ * qui s'exécute avant qu'aucune session n'existe.
+ */
+export async function retryImport(): Promise<{ importJobId: string }> {
+  return apiFetch('/api/auth/cloud-link-retry-import', { method: 'POST' });
+}
+
+export interface ImportJobWarning {
+  table: string;
+  rowCount: number;
+  message: string;
+}
+
 export interface ImportJobStatus {
   status: 'running' | 'done' | 'error';
   tablesDone: number;
@@ -48,6 +74,7 @@ export interface ImportJobStatus {
   rowsDone: number;
   filesDone: number;
   error: string | null;
+  warnings: ImportJobWarning[];
 }
 
 export async function getImportProgress(jobId: string): Promise<ImportJobStatus> {

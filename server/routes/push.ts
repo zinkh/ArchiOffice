@@ -92,7 +92,9 @@ export function registerPushRoutes(app: Express, { supabaseAdmin, getTenantId }:
     try {
       const tenantId = await getTenantId(req.user.id);
       const [{ data: profile }, { count }] = await Promise.all([
-        tenantScopedFrom(supabaseAdmin, tenantId, 'profiles')
+        // Préférence personnelle, pas une donnée du cabinet : filtrée sur le
+        // seul identifiant (voir server/tenantMemberships.ts).
+        supabaseAdmin.from('profiles')
           .select('notification_prefs').eq('id', req.user.id).maybeSingle(),
         tenantScopedFrom(supabaseAdmin, tenantId, 'push_subscriptions')
           .select('id', { count: 'exact', head: true }).eq('user_id', req.user.id),
@@ -115,7 +117,7 @@ export function registerPushRoutes(app: Express, { supabaseAdmin, getTenantId }:
       const muted = Array.isArray(req.body?.muted)
         ? [...new Set(req.body.muted.map((c: unknown) => String(c)).filter(Boolean))].slice(0, 50)
         : [];
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles')
+      const { error } = await supabaseAdmin.from('profiles')
         .update({ notification_prefs: { muted } })
         .eq('id', req.user.id);
       if (error) throw error;

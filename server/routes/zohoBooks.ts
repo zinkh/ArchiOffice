@@ -19,18 +19,208 @@ import { fetchWithTimeout } from '../fetchWithTimeout';
 import { encryptSecret, decryptSecretMaybe } from '../secretsCrypto';
 import {
   ZOHO_TIMEOUT_MS, ZOHO_MAX_PUSH_PER_RUN, ZOHO_PAGE_SIZE, ZOHO_MAX_PULL_PAGES,
-  mapZohoStatus, zohoDate, zohoLineItems, localInvoicesByZohoId, isRateLimited,
-  zohoInvoiceToLocalRow,
+  mapZohoStatus, zohoDate, zohoLineItems, zohoItemIdentity, localInvoicesByZohoId, isRateLimited,
+  zohoInvoiceToLocalRow, flagInvoicesDeletedUpstream, type ZohoAffaireInfo,
 } from '../zohoSync';
+import { loadInvoiceClientContact, resolveOrCreateContactFromExternal, type ClientContactInfo } from '../invoiceClientContact';
+
+/**
+ * Books equivalent of zohoInvoice.ts's buildZohoContactPayload — same
+ * `/contacts` shape on both Zoho products, same "no native SIRET field, so
+ * it rides in `notes`" workaround. Kept duplicated rather than shared: the
+ * two files already each keep their own token cache and callback URL logic
+ * (different OAuth scopes/redirect URIs per product), so a third shared
+ * concern here wouldn't remove much and would cost an import both files
+ * would need to keep synchronised anyway.
+ */
+function buildZohoContactPayload(info: ClientContactInfo) {
+  const hasAddress = !!(info.address || info.city || info.zip || info.country);
+  return {
+    contact_name: info.name,
+    company_name: info.name,
+    contact_type: 'customer',
+    email: info.email || undefined,
+    phone: info.phone || undefined,
+    billing_address: hasAddress ? {
+      address: info.address || undefined, city: info.city || undefined,
+      zip: info.zip || undefined, country: info.country || undefined,
+    } : undefined,
+    notes: info.siret ? `SIRET : ${info.siret}` : undefined,
+  };
+}
+
+/** Match-or-create a Zoho Books contact for the invoice's Maître d'Ouvrage, mirroring getOrCreateZohoCustomer in zohoInvoice.ts. */
+async function getOrCreateZohoBooksCustomer(apiBase: string, orgId: string, headers: any, info: ClientContactInfo): Promise<string> {
+  const searchRes = await fetchWithTimeout(
+    `${apiBase}/contacts?organization_id=${orgId}&contact_name=${encodeURIComponent(info.name)}&per_page=${ZOHO_PAGE_SIZE}`,
+    { headers }, ZOHO_TIMEOUT_MS,
+  );
+  const searchBody = await searchRes.json() as any;
+  const match = (searchBody?.contacts || []).find(
+    (c: any) => typeof c?.contact_name === 'string' && c.contact_name.trim() === info.name.trim(),
+  );
+  if (match) return match.contact_id;
+
+  const createRes = await fetchWithTimeout(`${apiBase}/contacts?organization_id=${orgId}`, {
+    method: 'POST', headers, body: JSON.stringify(buildZohoContactPayload(info)),
+  }, ZOHO_TIMEOUT_MS);
+  const createBody = await createRes.json() as any;
+  if (!createBody?.contact?.contact_id) throw new Error(createBody?.message || 'Création du contact Zoho Books échouée');
+  return createBody.contact.contact_id;
+}
+
+/**
+ * Books equivalent of zohoInvoice.ts's getOrCreateZohoItem — same Items API
+ * shape on both Zoho products (search by exact name before create, so a
+ * line reused on the same affaire finds and reuses its article rather than
+ * duplicating it), same best-effort contract: a failure here never fails
+ * the invoice, the line just goes out free-form as before articles existed.
+ */
+async function getOrCreateZohoBooksItem(apiBase: string, orgId: string, headers: any, name: string, description: string | undefined, rate: number): Promise<string | undefined> {
+  try {
+    const searchRes = await fetchWithTimeout(
+      `${apiBase}/items?organization_id=${orgId}&name=${encodeURIComponent(name)}&per_page=${ZOHO_PAGE_SIZE}`,
+      { headers }, ZOHO_TIMEOUT_MS,
+    );
+    const searchBody = await searchRes.json() as any;
+    const match = (searchBody?.items || []).find(
+      (it: any) => typeof it?.name === 'string' && it.name.trim() === name.trim(),
+    );
+    if (match) return match.item_id;
+    const createRes = await fetchWithTimeout(`${apiBase}/items?organization_id=${orgId}`, {
+      method: 'POST', headers, body: JSON.stringify({ name, description, rate }),
+    }, ZOHO_TIMEOUT_MS);
+    const createBody = await createRes.json() as any;
+    return createBody?.item?.item_id;
+  } catch (err: any) {
+    console.error('[getOrCreateZohoBooksItem]', err?.message || err);
+    return undefined;
+  }
+}
+
+/** Books equivalent of zohoInvoice.ts's buildZohoLineItemsWithArticles. */
+async function buildZohoBooksLineItemsWithArticles(apiBase: string, orgId: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
+  const lines = zohoLineItems(inv);
+  return Promise.all(lines.map(async (line) => {
+    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const item_id = await getOrCreateZohoBooksItem(apiBase, orgId, headers, name, description, line.rate);
+    return item_id ? { ...line, item_id } : line;
+  }));
+}
+
+/** Best-effort: a contact that vanished or errors out just falls back to the bare name on the invoice. */
+async function fetchZohoBooksContactDetail(apiBase: string, orgId: string, headers: any, contactId: string | undefined): Promise<any | null> {
+  if (!contactId) return null;
+  try {
+    const resp = await fetchWithTimeout(`${apiBase}/contacts/${contactId}?organization_id=${orgId}`, { headers }, ZOHO_TIMEOUT_MS);
+    const body = await resp.json() as any;
+    return body?.contact || null;
+  } catch {
+    return null;
+  }
+}
+
+function zohoBooksContactToClientInfo(contact: any, fallbackName: string): ClientContactInfo {
+  const addr = contact?.billing_address || {};
+  const notesSiret = typeof contact?.notes === 'string' ? contact.notes.match(/SIRET\s*:\s*(\S+)/i)?.[1] : undefined;
+  return {
+    name: contact?.contact_name || contact?.company_name || fallbackName,
+    email: contact?.email || undefined,
+    phone: contact?.phone || contact?.mobile || undefined,
+    address: addr.address || undefined,
+    city: addr.city || undefined,
+    zip: addr.zip || undefined,
+    country: addr.country || undefined,
+    siret: notesSiret,
+  };
+}
+
+/** The local contact a pulled Zoho Books invoice's customer resolves to — see the matching helper in zohoInvoice.ts. */
+async function resolveZohoBooksCustomerAsLocalContact(
+  apiBase: string, orgId: string, headers: any, supabaseAdmin: any, tenantId: string,
+  customerId: string | undefined, customerName: string | undefined,
+): Promise<string | null> {
+  if (!customerId && !customerName) return null;
+  const detail = await fetchZohoBooksContactDetail(apiBase, orgId, headers, customerId);
+  const info = zohoBooksContactToClientInfo(detail, customerName || '');
+  return resolveOrCreateContactFromExternal(supabaseAdmin, tenantId, info);
+}
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
-export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+/**
+ * Books equivalent of pushInvoiceToZohoInvoice (server/routes/zohoInvoice.ts)
+ * — same idempotency mechanics (search by `reference_number` before create),
+ * same no-cache rationale (one call per invoice creation, not per sync run).
+ */
+export async function pushInvoiceToZohoBooks(
+  supabaseAdmin: any,
+  tenantId: string,
+  inv: any,
+  idempotencyKey: string,
+): Promise<{ external_id: string; invoice_number: string; status: string }> {
+  const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
+  const s = settings as any;
+  if (!s?.zoho_books_refresh_token) throw new Error('Zoho Books non connecté');
+
+  const dc = s.zoho_data_center || 'com';
+  const orgId = s.zoho_books_org_id || s.zoho_org_id;
+  const params = new URLSearchParams({
+    refresh_token: decryptSecretMaybe(s.zoho_books_refresh_token),
+    client_id: s.zoho_client_id,
+    client_secret: s.zoho_client_secret,
+    grant_type: 'refresh_token',
+  });
+  const tokenRes = await fetchWithTimeout(`https://accounts.zoho.${dc}/oauth/v2/token`, { method: 'POST', body: params }, ZOHO_TIMEOUT_MS);
+  const tokenBody = await tokenRes.json() as any;
+  if (!tokenBody?.access_token) throw new Error(`Échec du rafraîchissement du jeton Zoho Books${tokenBody?.error ? ` (${tokenBody.error})` : ''}`);
+
+  const apiBase = `https://books.zoho.${dc}/api/v3`;
+  const headers = { Authorization: `Zoho-oauthtoken ${tokenBody.access_token}`, 'Content-Type': 'application/json' };
+
+  const existingRes = await fetchWithTimeout(
+    `${apiBase}/invoices?organization_id=${orgId}&reference_number=${encodeURIComponent(idempotencyKey)}&per_page=1`,
+    { headers }, ZOHO_TIMEOUT_MS,
+  );
+  const existingBody = await existingRes.json() as any;
+  const already = (existingBody?.invoices || [])[0];
+  if (already) {
+    return { external_id: already.invoice_id, invoice_number: already.invoice_number, status: mapZohoStatus(already.status) || 'Draft' };
+  }
+
+  // The invoice's Maître d'Ouvrage — same resolution as pushInvoiceToZohoInvoice:
+  // invoices.client_id, falling back to its project's client, then to a bare
+  // name only when neither exists (an invoice predating client_id, or a
+  // general one with no contact chosen).
+  const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+  const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+  const customerId = await getOrCreateZohoBooksCustomer(apiBase, orgId, headers, clientInfo || { name: customerName });
+
+  const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
+  const payload = {
+    customer_id: customerId,
+    reference_number: idempotencyKey,
+    date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
+    due_date: zohoDate(inv.due_date),
+    line_items: await buildZohoBooksLineItemsWithArticles(apiBase, orgId, headers, inv, affaire),
+    notes: inv.description || undefined,
+  };
+  const resp = await fetchWithTimeout(`${apiBase}/invoices?organization_id=${orgId}`, {
+    method: 'POST', headers, body: JSON.stringify(payload),
+  }, ZOHO_TIMEOUT_MS);
+  const respData = await resp.json() as any;
+  const created = respData?.invoice;
+  if (!created?.invoice_id) throw new Error(respData?.message || 'Création Zoho Books échouée');
+  return { external_id: created.invoice_id, invoice_number: created.invoice_number, status: mapZohoStatus(created.status) || 'Draft' };
+}
+
+export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // Keyed by tenantId — see the matching comment in zohoInvoice.ts. An
   // unkeyed single value here let one tenant's cached Zoho token leak to
   // whichever other tenant synced next within the ~1h expiry window.
@@ -111,7 +301,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   // authenticated fetch; the frontend navigates to the returned URL itself.
   app.get('/api/zoho-books/auth', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_data_center').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_client_id) {
         return res.status(400).json({ error: 'Zoho credentials not configured' });
@@ -130,7 +320,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       res.json({ url: authUrl.toString() });
     } catch (error: any) {
       console.error("[GET /api/zoho-books/auth]", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 
@@ -183,7 +373,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   // DELETE /api/zoho-books/disconnect
   app.delete('/api/zoho-books/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       zohoBooksAccessTokenCache.delete(tenantId);
       // Only Books' token — this used to null zoho_refresh_token, so
       // disconnecting Books also disconnected Zoho Invoice.
@@ -193,14 +383,14 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       res.json({ success: true });
     } catch (error: any) {
       console.error("[DELETE /api/zoho-books/disconnect]", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 
   // POST /api/zoho-books/sync  — sync invoices/estimates with Zoho Books
   app.post('/api/zoho-books/sync', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_books_refresh_token) {
         return res.status(400).json({ error: 'Zoho Books non connecté' });
@@ -214,21 +404,24 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         'Content-Type': 'application/json',
       };
 
-      let pushed = 0, pulled = 0, remaining = 0;
+      let pushed = 0, pulled = 0, remaining = 0, deletedUpstream = 0;
       const errors: string[] = [];
 
       // Push local invoices not yet in Zoho Books
       try {
         const { data: localInvoices, error: localInvoicesErr } = await supabaseAdmin
           .from('invoices')
-          .select('*, projects(name)')
+          .select('*, projects(name, project_code, address)')
           .eq('tenant_id', tenantId)
           .or('zoho_invoice_id.is.null,zoho_invoice_id.eq.');
         // See the matching note in zohoInvoice.ts: a failed query used to be
         // silently treated as "no invoices to push".
         if (localInvoicesErr) throw new Error(`Lecture des factures locales échouée: ${localInvoicesErr.message}`);
 
-        const invoicesArr = (localInvoices || []).map((inv: any) => ({ ...inv, project_name: inv.projects?.name || null }));
+        const invoicesArr = (localInvoices || []).map((inv: any) => ({
+          ...inv, project_name: inv.projects?.name || null,
+          project_code: inv.projects?.project_code || null, project_address: inv.projects?.address || null,
+        }));
         // Bounded per run — see the matching note in zohoInvoice.ts.
         const toPush = invoicesArr.slice(0, ZOHO_MAX_PUSH_PER_RUN);
         remaining = invoicesArr.length - toPush.length;
@@ -241,12 +434,16 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             // its UUID as the invoice number and today's date, carrying a single
             // untaxed line. These are the real columns, mapped the same way the
             // Zoho Invoice push maps them.
+            const clientInfo = await loadInvoiceClientContact(supabaseAdmin, tenantId, inv);
+            const customerName = clientInfo?.name || inv.project_name || inv.description || 'Client';
+            const customerId = await getOrCreateZohoBooksCustomer(apiBase, orgId, headers, clientInfo || { name: customerName });
+            const affaire: ZohoAffaireInfo = { projectCode: inv.project_code, projectName: inv.project_name, projectAddress: inv.project_address };
             const payload = {
-              customer_name: inv.project_name || inv.description || 'Client',
+              customer_id: customerId,
               invoice_number: inv.invoice_number || undefined,
               date: zohoDate(inv.issue_date) || new Date().toISOString().split('T')[0],
               due_date: zohoDate(inv.due_date),
-              line_items: zohoLineItems(inv),
+              line_items: await buildZohoBooksLineItemsWithArticles(apiBase, orgId, headers, inv, affaire),
               notes: inv.description || undefined,
             };
             const resp = await fetchWithTimeout(`${apiBase}/invoices?organization_id=${orgId}`, {
@@ -281,6 +478,9 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
         // Paginated: this used to fetch one default-sized page and stop, so a
         // tenant past that first page silently stopped receiving status updates.
         const zohoInvoices: any[] = [];
+        // Ne vaut « liste complète » que si la dernière page dit elle-même
+        // qu'il n'y en a plus — voir la même note dans zohoInvoice.ts.
+        let fullyFetched = false;
         for (let page = 1; page <= ZOHO_MAX_PULL_PAGES; page++) {
           const resp = await fetchWithTimeout(
             `${apiBase}/invoices?organization_id=${orgId}&status=all&page=${page}&per_page=${ZOHO_PAGE_SIZE}`,
@@ -289,7 +489,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
           );
           const respData = await resp.json() as any;
           zohoInvoices.push(...(respData?.invoices || []));
-          if (!respData?.page_context?.has_more_page) break;
+          if (!respData?.page_context?.has_more_page) { fullyFetched = true; break; }
         }
 
         // One query for the whole batch instead of one per Zoho invoice.
@@ -302,9 +502,10 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             // A Zoho Books invoice ArchiOffice has never recorded — see the
             // matching note in zohoInvoice.ts. This used to `continue` here too,
             // so nothing already in Zoho Books at connection time ever appeared
-            // in ArchiOffice.
+            // in ArchiOffice. Same customer resolution as Zoho Invoice's pull.
+            const clientId = await resolveZohoBooksCustomerAsLocalContact(apiBase, orgId, headers, supabaseAdmin, tenantId, zohoInv.customer_id, zohoInv.customer_name);
             const { error: importErr } = await supabaseAdmin
-              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId));
+              .from('invoices').insert(zohoInvoiceToLocalRow(zohoInv, tenantId, clientId));
             if (importErr) {
               console.error("[POST /api/zoho-books/sync] import", importErr);
               errors.push(`Import échoué (${zohoInv.invoice_number || zohoInv.invoice_id}): ${importErr.message}`);
@@ -323,17 +524,27 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
             pulled++;
           }
         }
+
+        // Voir la même note dans zohoInvoice.ts : une facture supprimée côté
+        // Zoho Books disparaît simplement de cette liste, sans que rien ne
+        // le signale localement — seulement quand la pagination a couvert
+        // la liste entière.
+        if (fullyFetched) {
+          deletedUpstream = await flagInvoicesDeletedUpstream(
+            supabaseAdmin, tenantId, zohoInvoices.map((z: any) => z.invoice_id),
+          );
+        }
       } catch (err: any) {
         console.error("[POST /api/zoho-books/sync]", err);
         errors.push(`Récupération échouée: ${err.message}`);
       }
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho Books (${pushed} envoyée(s), ${pulled} reçue(s))`, '', tenantId, 'integration', 'Intégrations');
-      res.json({ pushed, pulled, remaining, errors });
+      logActivity(tenantId, req.user.id, userName, `Synchronisation Zoho Books (${pushed} envoyée(s), ${pulled} reçue(s)${deletedUpstream ? `, ${deletedUpstream} signalée(s) supprimée(s) côté Zoho` : ''})`, '', tenantId, 'integration', 'Intégrations');
+      res.json({ pushed, pulled, deletedUpstream, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho Books sync error]', error.message);
-      res.status(500).json({ error: error.message || 'Sync échouée' });
+      res.status(error.status || 500).json({ error: error.message || 'Sync échouée' });
     }
   });
 }

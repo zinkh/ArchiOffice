@@ -153,7 +153,11 @@ export async function runSchedule(
       schedule.created_by || '', (agent as any).id,
       (agent as any).context_scopes || [], []
     );
-    const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx) +
+    // false explicite : une exécution planifiée n'a AUCUN outil, la recherche
+    // web comme le reste (voir le texte ajouté juste après, qui le dit déjà
+    // au modèle — ne pas laisser ce troisième paramètre au défaut par
+    // accident si son défaut venait à changer).
+    const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx, false) +
       "\n\n═══ EXÉCUTION PLANIFIÉE ═══\n" +
       "Ce message n'est pas envoyé par une personne : il provient d'une tâche planifiée qui s'exécute sans surveillance. " +
       "Tu n'as ici AUCUN outil : tu ne peux ni écrire en base, ni envoyer de mail, ni consulter le web. " +

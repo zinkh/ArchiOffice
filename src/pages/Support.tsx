@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -45,7 +46,7 @@ function Bubble({ msg }: { msg: Message }) {
         'max-w-[80%] rounded-xl px-3 py-2 text-sm',
         isTeam ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100' : 'bg-blue-600 text-white'
       )}>
-        <p className="text-[11px] opacity-70 mb-0.5">{isTeam ? (msg.author_name || 'Support ArchiOffice') : (msg.author_name || 'Vous')}</p>
+        <p className="text-[0.6875rem] opacity-70 mb-0.5">{isTeam ? (msg.author_name || 'Support ArchiOffice') : (msg.author_name || 'Vous')}</p>
         {msg.body && <p className="whitespace-pre-wrap">{msg.body}</p>}
         {msg.attachment_url && (
           msg.attachment_type?.startsWith('image/') ? (
@@ -58,7 +59,7 @@ function Bubble({ msg }: { msg: Message }) {
             </button>
           )
         )}
-        <p className="text-[10px] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
+        <p className="text-[0.6875rem] opacity-60 mt-1">{new Date(msg.created_at).toLocaleString('fr-FR')}</p>
       </div>
     </div>
   );
@@ -168,6 +169,7 @@ function HelpHome({ onNavigate, onNewTicket, onViewTickets }: { onNavigate: (key
 }
 
 export default function Support() {
+  const { t } = useTranslation();
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loadingTickets, setLoadingTickets] = useState(false);
   const [view, setView] = useState<'help' | 'faq' | 'article' | 'list' | 'new'>('help');
@@ -222,7 +224,7 @@ export default function Support() {
         fd.append('file', newAttachment);
         const token = await getAccessToken();
         const res = await fetch('/api/support/tickets', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || 'Erreur lors de la création du ticket');
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || t('support_ticket_create_failed'));
         ticket = await res.json();
       } else {
         ticket = await apiFetch<Ticket>('/api/support/tickets', { method: 'POST', body: JSON.stringify({ subject: newSubject, message: newMessage }) });
@@ -230,7 +232,7 @@ export default function Support() {
       setNewSubject(''); setNewMessage(''); setNewAttachment(null);
       setActiveId(ticket.id);
     } catch (e: any) {
-      alert(e.message || 'Erreur lors de la création du ticket');
+      alert(e.message || t('support_ticket_create_failed'));
     } finally {
       setCreating(false);
     }
@@ -246,21 +248,21 @@ export default function Support() {
         fd.append('file', replyAttachment);
         const token = await getAccessToken();
         const res = await fetch(`/api/support/tickets/${activeId}/messages`, { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd });
-        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || "Erreur lors de l'envoi");
+        if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.error || t('support_message_send_failed'));
       } else {
         await apiFetch(`/api/support/tickets/${activeId}/messages`, { method: 'POST', body: JSON.stringify({ body: reply }) });
       }
       setReply(''); setReplyAttachment(null);
       await loadDetail(activeId);
     } catch (e: any) {
-      alert(e.message || "Erreur lors de l'envoi");
+      alert(e.message || t('support_message_send_failed'));
     } finally {
       setSending(false);
     }
   }
 
   async function handleClose() {
-    if (!activeId || !window.confirm('Fermer ce ticket ?')) return;
+    if (!activeId || !window.confirm(t('support_confirm_close_ticket'))) return;
     await apiFetch(`/api/support/tickets/${activeId}/status`, { method: 'PATCH', body: JSON.stringify({ status: 'closed' }) });
     await loadDetail(activeId);
   }
@@ -283,7 +285,7 @@ export default function Support() {
               </button>
             )}
           </div>
-          <div className="space-y-3 max-h-[50vh] overflow-y-auto py-2">
+          <div className="space-y-3 max-h-[50dvh] overflow-y-auto py-2">
             {detail.messages.map(m => <Bubble key={m.id} msg={m} />)}
           </div>
           {detail.status !== 'closed' && (
@@ -410,7 +412,7 @@ export default function Support() {
                 >
                   <div>
                     <p className="font-medium text-zinc-900 dark:text-white">{t.subject}</p>
-                    <p className="text-[11px] text-zinc-400">Dernier échange le {new Date(t.last_message_at).toLocaleDateString('fr-FR')}</p>
+                    <p className="text-[0.6875rem] text-zinc-400">Dernier échange le {new Date(t.last_message_at).toLocaleDateString('fr-FR')}</p>
                   </div>
                   <span className={cn('text-xs px-2 py-0.5 rounded-full flex-shrink-0', STATUS_COLORS[t.status])}>{STATUS_LABELS[t.status] || t.status}</span>
                 </button>

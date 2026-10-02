@@ -9,21 +9,68 @@ import express, { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { readLocalAccount, writeLocalAccount, signLocalJwt, goTrueUserFromAccount, LocalAccount } from './offlineAccount';
-import { readCloudLinkState, writeCloudLinkState, writeEncryptedCloudSession } from './cloudLinkState';
-import { createCloudSupabaseClient } from './cloudSyncClient';
-import { encryptForStorage } from './ipcCrypto';
+import {
+  readLocalAccount, writeLocalAccount, signLocalJwt, verifyLocalJwt, goTrueUserFromAccount, LocalAccount,
+} from './offlineAccount';
+import {
+  readCloudLinkState, writeCloudLinkState, writeEncryptedCloudSession, readEncryptedCloudSession, CloudLinkState,
+} from './cloudLinkState';
+import { createCloudSupabaseClient, restoreCloudSession } from './cloudSyncClient';
+import { encryptForStorage, decryptFromStorage } from './ipcCrypto';
 import { runInitialImport, getImportJob } from './initialImport';
 
 function accountResponse(account: LocalAccount) {
   return { access_token: signLocalJwt(account.userId), user: goTrueUserFromAccount(account) };
 }
 
-export function createCloudLinkRouter(supabaseAdmin: SupabaseClient): Router {
+function bearerToken(req: Request): string | null {
+  const header = req.headers.authorization;
+  if (!header) return null;
+  const [, token] = header.split(' ');
+  return token || null;
+}
+
+/**
+ * Un import réussi termine sur cet appel commun aux deux chemins (premier
+ * lien et relance) : marque le lien comme complet et bascule la synchro
+ * cloud en direct, sans attendre un redémarrage de l'application — même
+ * logique que server/localCloudUpgrade.ts, qui documente pourquoi
+ * (« so the user doesn't have to restart the app »). Manquait sur ce
+ * chemin-ci jusqu'ici : un premier lien réussi laissait la synchro éteinte
+ * jusqu'au prochain lancement de l'appli.
+ */
+async function finalizeImport(
+  jobId: string,
+  activateCloudSync: (linkState: CloudLinkState) => Promise<void>,
+): Promise<void> {
+  const job = getImportJob(jobId);
+  const state = readCloudLinkState();
+  if (job?.status !== 'done' || !state) return;
+  const updated: CloudLinkState = { ...state, importCompleted: true, initialWatermarkId: job.initialWatermarkId };
+  writeCloudLinkState(updated);
+  try {
+    await activateCloudSync(updated);
+  } catch (err: any) {
+    console.error('[cloud-link] failed to activate background sync live:', err.message);
+  }
+}
+
+export function createCloudLinkRouter(
+  supabaseAdmin: SupabaseClient,
+  activateCloudSync: (linkState: CloudLinkState) => Promise<void>,
+): Router {
   const router = Router();
 
+  // `linked` seul ne dit pas si l'import initial a abouti : un import qui a
+  // échoué au premier lien (server/initialImport.ts) laisse un état
+  // `importCompleted: false` permanent — /api/sync/* ne démarre alors
+  // jamais (voir server.ts, `if (linkState?.importCompleted)`), et sans ce
+  // champ ici, Settings.tsx n'avait aucun moyen de distinguer ce poste
+  // (lié mais jamais synchronisé, projets restés vides indéfiniment) d'un
+  // poste réellement synchronisé — ni donc de proposer de relancer l'import.
   router.get('/cloud-link-status', (req: Request, res: Response) => {
-    res.json({ linked: !!readCloudLinkState() });
+    const state = readCloudLinkState();
+    res.json({ linked: !!state, importCompleted: state?.importCompleted ?? null, email: state?.email ?? null });
   });
 
   router.post('/cloud-link', express.json(), async (req: Request, res: Response) => {
@@ -133,13 +180,7 @@ export function createCloudLinkRouter(supabaseAdmin: SupabaseClient): Router {
     // HTTP response returns immediately with a jobId the UI polls instead
     // of blocking this request.
     runInitialImport(jobId, cloudClient, supabaseAdmin, profile.tenant_id)
-      .then(() => {
-        const job = getImportJob(jobId);
-        const state = readCloudLinkState();
-        if (job?.status === 'done' && state) {
-          writeCloudLinkState({ ...state, importCompleted: true, initialWatermarkId: job.initialWatermarkId });
-        }
-      })
+      .then(() => finalizeImport(jobId, activateCloudSync))
       .catch(() => {
         // getImportJob already captured the error for the polling endpoint below.
       });
@@ -151,6 +192,112 @@ export function createCloudLinkRouter(supabaseAdmin: SupabaseClient): Router {
     const job = getImportJob(req.params.jobId);
     if (!job) return res.status(404).json({ error: 'Import introuvable' });
     res.json(job);
+  });
+
+  // Rétablit la session cloud d'un poste déjà lié quand le jeton stocké n'est
+  // plus valide (expiré côté Supabase Auth, révoqué manuellement...) — c'est
+  // le recours que /cloud-link-retry-import promettait déjà dans son message
+  // d'erreur ("Reconnectez-vous depuis Réglages") sans qu'aucune route ne
+  // l'implémente. Seul le mot de passe est demandé, jamais l'email : ce
+  // poste est déjà lié à un cloudUserId précis (state.email, ci-dessous), et
+  // le proposer en clair inviterait à croire qu'on peut re-lier ce poste à
+  // un AUTRE compte cloud depuis cet écran — impossible sans perdre
+  // l'alignement des tenant_id/profiles déjà posés localement au premier
+  // lien (voir /cloud-link plus haut).
+  router.post('/cloud-link-reconnect', express.json(), async (req: Request, res: Response) => {
+    const account = readLocalAccount();
+    const state = readCloudLinkState();
+    if (!account || !state) {
+      return res.status(400).json({ error: "Ce poste n'est pas relié à un compte cloud" });
+    }
+
+    const token = bearerToken(req);
+    const claims = token ? verifyLocalJwt(token) : null;
+    if (!claims || claims.sub !== account.userId) {
+      return res.status(401).json({ error: 'Authentification locale requise' });
+    }
+
+    const password = req.body?.password || '';
+    if (!password) {
+      return res.status(400).json({ error: 'Mot de passe requis' });
+    }
+
+    let cloudClient: SupabaseClient;
+    try {
+      cloudClient = createCloudSupabaseClient();
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+
+    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({ email: state.email, password });
+    if (authErr || !authData.session) {
+      return res.status(401).json({ error: authErr?.message || 'Mot de passe incorrect' });
+    }
+    // Un même email peut en théorie changer de compte cloud (suppression et
+    // recréation) — s'assurer que c'est TOUJOURS le même cloudUserId avant
+    // d'écraser le jeton stocké, sinon ce poste continuerait de pousser/tirer
+    // sous state.tenantId des données appartenant en réalité à un autre id.
+    if (authData.session.user.id !== state.cloudUserId) {
+      return res.status(409).json({ error: "Ce compte cloud ne correspond plus à celui lié à ce poste. Contactez le support." });
+    }
+
+    try {
+      const encrypted = await encryptForStorage(authData.session.refresh_token);
+      writeEncryptedCloudSession(encrypted);
+    } catch (err: any) {
+      return res.status(500).json({ error: `Échec du chiffrement de la session cloud : ${err.message}` });
+    }
+
+    res.json({ ok: true });
+  });
+
+  // Relance l'import initial après un échec (voir server/initialImport.ts :
+  // une ligne dont la référence n'a pas encore été importée au premier
+  // passage, un décalage de schéma local pas encore rejoué...). L'import
+  // est un upsert par identifiant : le rejouer entièrement ne duplique
+  // rien, il se contente de rattraper ce qui manquait. Le compte local et
+  // le lien cloud existent déjà à ce stade (posés par /cloud-link avant que
+  // l'import ne démarre) — seule une nouvelle exécution de l'import est
+  // nécessaire, pas de reprendre tout le flux de connexion.
+  router.post('/cloud-link-retry-import', express.json(), async (req: Request, res: Response) => {
+    const account = readLocalAccount();
+    const state = readCloudLinkState();
+    if (!account || !state) {
+      return res.status(400).json({ error: "Ce poste n'est pas relié à un compte cloud" });
+    }
+
+    const token = bearerToken(req);
+    const claims = token ? verifyLocalJwt(token) : null;
+    if (!claims || claims.sub !== account.userId) {
+      return res.status(401).json({ error: 'Authentification locale requise' });
+    }
+
+    const encrypted = readEncryptedCloudSession();
+    if (!encrypted) {
+      return res.status(409).json({ error: 'Session cloud introuvable — reconnectez-vous depuis Réglages.' });
+    }
+
+    let cloudClient: SupabaseClient;
+    try {
+      cloudClient = createCloudSupabaseClient();
+      const refreshToken = await decryptFromStorage(encrypted);
+      await restoreCloudSession(cloudClient, refreshToken);
+    } catch (err: any) {
+      // Le jeton stocké n'est plus valide (expiré, révoqué) — pas de
+      // rattrapage possible sans une nouvelle authentification complète.
+      return res.status(401).json({
+        error: `Impossible de rétablir la session cloud (${err.message}). Reconnectez-vous depuis Réglages.`,
+      });
+    }
+
+    const jobId = crypto.randomUUID();
+    runInitialImport(jobId, cloudClient, supabaseAdmin, state.tenantId)
+      .then(() => finalizeImport(jobId, activateCloudSync))
+      .catch(() => {
+        // getImportJob already captured the error for the polling endpoint above.
+      });
+
+    res.json({ importJobId: jobId });
   });
 
   return router;

@@ -1,15 +1,33 @@
 import * as React from 'react';
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2, IconBuildingBank } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
-import type { Invoice, InvoicePhase, Project } from '../types';
+import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
+import { type EmailAttachment } from '../lib/emailAttachments';
+import EmailAttachmentsField from '../components/EmailAttachmentsField';
+import type { Invoice, InvoicePhase, Project, Contact } from '../types';
 import { useTranslation } from 'react-i18next';
 import { InvoiceGenerator } from '../components/InvoiceGenerator';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { isClientContact } from '../lib/contactCategories';
+
+// Une facture sans échéance (avant que le délai de paiement par défaut du
+// cabinet ne s'applique systématiquement côté serveur, voir server/
+// invoiceDueDate.ts) affichait "01/01/1970" : new Date(null) vaut l'epoch,
+// que toLocaleDateString formate sans se plaindre.
+const formatDueDate = (dueDate: string | null | undefined): string => {
+  if (!dueDate) return '---';
+  const d = new Date(dueDate);
+  return Number.isNaN(d.getTime()) ? '---' : d.toLocaleDateString('fr-FR');
+};
 
 const MISSIONS = [
   { id: 'esquisse', name: 'Esquisse (ESQ)', default_pct: 10 },
@@ -54,6 +72,33 @@ function chorusProStatusLabel(status: string): { label: string; style: React.CSS
 // Invoices created before the multi-phase model only have a single
 // mission_id/mission_name/advancement_pct — synthesize a one-entry phases
 // list from them so read-only displays don't need two code paths.
+// Ligne d'adresse + mentions légales d'un contact, pour l'affichage sous le
+// sélecteur de Maître d'Ouvrage — mêmes champs que le serveur agrège dans
+// `invoice.client` (server/invoiceClientContact.ts), lus directement ici sur
+// le contact déjà chargé plutôt que sur la facture, pour refléter tout de
+// suite un changement de sélection avant même l'enregistrement.
+function contactLegalLines(c: Contact): string[] {
+  const name = c.company_name || `${c.first_name} ${c.last_name}`.trim();
+  const address = c.address || c.address_work_street;
+  const city = [c.zip || c.address_work_zip, c.city || c.address_work_city].filter(Boolean).join(' ');
+  const lines = [name];
+  if (address || city) lines.push([address, city].filter(Boolean).join(', '));
+  if (c.siret) lines.push(`SIRET : ${c.siret}`);
+  if (c.phone) lines.push(`Tél : ${c.phone}`);
+  if (c.email) lines.push(c.email);
+  return lines;
+}
+
+// Le Maître d'Ouvrage d'une facture est invoice.client_id, sinon celui de
+// son projet (voir resolveInvoiceClientId côté serveur) — la liste ne joint
+// jamais le contact (voir invoice.client plus haut), donc résolu ici sur les
+// contacts déjà chargés pour l'autocomplete plutôt que d'ajouter un fan-out.
+function invoiceClientName(invoice: Invoice, projects: Project[], contacts: Contact[]): string {
+  const contact = invoice.client_id ? contacts.find(c => c.id === invoice.client_id) : undefined;
+  if (contact) return contact.company_name || `${contact.first_name} ${contact.last_name}`.trim();
+  return projects.find(p => p.id === invoice.project_id)?.client || '---';
+}
+
 function getEffectivePhases(invoice: Invoice): InvoicePhase[] {
   if (invoice.phases && invoice.phases.length > 0) return invoice.phases;
   if (invoice.mission_id) {
@@ -141,7 +186,7 @@ function AcomptePhasesEditor({ phases, onChange, project, currency, t }: {
               <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                 <span>→</span>
                 <input
-                  type="number" min={0}
+                  type="number" min={0} step="0.01"
                   className="w-24 text-sm text-right rounded p-1 outline-none"
                   style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   value={phase.montant_phase}
@@ -150,7 +195,7 @@ function AcomptePhasesEditor({ phases, onChange, project, currency, t }: {
                 <span>€</span>
               </div>
               {montantAvancement > 0 && phase.montant_phase !== montantAvancement && (
-                <button type="button" className="text-[10px] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
+                <button type="button" className="text-[0.6875rem] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
                   Auto
                 </button>
               )}
@@ -178,6 +223,7 @@ export default function Invoices() {
   const { t } = useTranslation();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [currency, setCurrency] = useState('EUR');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
@@ -203,23 +249,31 @@ export default function Invoices() {
   const [editError, setEditError] = useState<string | null>(null);
   const [sendingInvoice, setSendingInvoice] = useState<Invoice | null>(null);
   const [sendForm, setSendForm] = useState({ to: '', subject: '', message: '' });
+  const [sendAttachments, setSendAttachments] = useState<EmailAttachment[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Délai de paiement par défaut du cabinet (settings.invoicePaymentTermsDays,
+  // réglable depuis /settings → Cabinet) : sert à préremplir l'échéance d'une
+  // nouvelle facture tant qu'elle n'a pas été chargée, 30 jours étant la même
+  // valeur par défaut que côté serveur (server/invoiceDueDate.ts).
+  const [paymentTermsDays, setPaymentTermsDays] = useState(30);
+  const defaultDueDate = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [newInvoice, setNewInvoice] = useState<Partial<Invoice>>({
     project_id: '',
     amount: 0,
     description: '',
     status: 'Draft',
     invoice_type: 'standard',
-    due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    due_date: defaultDueDate(30)
   });
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [invoicesData, projectsData, settingsData] = await Promise.all([
+        const [invoicesData, projectsData, contactsData, settingsData] = await Promise.all([
           fetchJson<Invoice[]>('/api/invoices'),
           fetchJson<Project[]>('/api/projects'),
+          fetchJson<Contact[]>('/api/contacts'),
           fetchJson<any>('/api/settings')
         ]);
         const enrichedInvoices = invoicesData.map(inv => ({
@@ -228,7 +282,11 @@ export default function Invoices() {
         }));
         setInvoices(enrichedInvoices);
         setProjects(projectsData);
+        setContacts(contactsData);
         if (settingsData?.currency) setCurrency(settingsData.currency);
+        if (Number.isFinite(settingsData?.invoicePaymentTermsDays) && settingsData.invoicePaymentTermsDays >= 0) {
+          setPaymentTermsDays(settingsData.invoicePaymentTermsDays);
+        }
       } catch (err) {
         console.error('Invoices data fetch failed:', err);
       }
@@ -238,6 +296,18 @@ export default function Invoices() {
     fetch('/api/superpdp/status').then(r => r.json()).then(s => setSuperpdpConnected(!!s.connected)).catch(() => {});
     fetch('/api/chorus-pro/status').then(r => r.json()).then(s => setChorusProConnected(!!s.connected)).catch(() => {});
   }, []);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || invoices.length === 0) return;
+    const invoice = invoices.find(i => i.id === openId);
+    if (invoice) handleOpenGenerator(invoice);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoices, searchParams]);
 
   const handleZohoSync = async () => {
     setIsSyncingZoho(true);
@@ -373,16 +443,38 @@ export default function Invoices() {
     const project = projects.find(p => p.id === invoice.project_id);
     const clientEmail = project?.client_email || project?.email_client || '';
     const affaireRef = invoice.affaire_invoice_number ? ` (réf. affaire ${invoice.affaire_invoice_number})` : '';
-    const subject = `${invoice.invoice_type === 'acompte' ? "Facture d'acompte" : 'Facture'} N° ${invoice.invoice_number}${affaireRef} – ${invoice.project_name || project?.name || ''}`;
     const isAcompte = invoice.invoice_type === 'acompte';
     const phases = isAcompte ? getEffectivePhases(invoice) : [];
     const missionLine = phases.length > 0
       ? `${phases.map(p => `Phase : ${p.phase_name} (${p.avancement_pct}% d'avancement)`).join('\n')}\n`
       : '';
-    const message = `Bonjour,\n\nVeuillez trouver ci-joint ${isAcompte ? "la facture d'acompte" : 'la facture'} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
+    const typeFacture = isAcompte ? "Facture d'acompte" : 'Facture';
+    const typeFactureMinuscule = isAcompte ? "la facture d'acompte" : 'la facture';
+    const projetNom = invoice.project_name || project?.name || '';
+    const placeholderValues: Record<string, string> = {
+      type_facture: typeFacture,
+      type_facture_minuscule: typeFactureMinuscule,
+      numero: String(invoice.invoice_number ?? ''),
+      reference_affaire: affaireRef,
+      projet: projetNom,
+      missions: missionLine,
+      montant_ht: formatCurrency(invoice.amount, currency),
+      montant_ttc: formatCurrency(invoice.total_amount ?? invoice.amount, currency),
+      echeance: formatDueDate(invoice.due_date),
+    };
+    // Fallback text if the tenant's "invoice" email template can't be fetched —
+    // exactly what this modal always sent before templates existed.
+    const fallbackSubject = `${typeFacture} N° ${invoice.invoice_number}${affaireRef} – ${projetNom}`;
+    const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${formatDueDate(invoice.due_date)}\n\nCordialement`;
     setSendingInvoice(invoice);
-    setSendForm({ to: clientEmail, subject, message });
+    setSendForm({ to: clientEmail, subject: fallbackSubject, message: fallbackMessage });
+    setSendAttachments([]);
     setSendResult(null);
+
+    fetchEmailTemplate('invoice').then(tpl => {
+      if (!tpl) return;
+      setSendForm({ to: clientEmail, subject: fillTemplate(tpl.subject, placeholderValues), message: fillTemplate(tpl.body, placeholderValues) });
+    }).catch(err => console.error('fetchEmailTemplate(invoice) failed:', err));
   };
 
   const handleSendInvoice = async (e: React.FormEvent) => {
@@ -394,7 +486,7 @@ export default function Invoices() {
       const html = `<p>${sendForm.message.replace(/\n/g, '<br/>')}</p>`;
       await fetchJson('/api/send-email', {
         method: 'POST',
-        body: JSON.stringify({ to: sendForm.to, subject: sendForm.subject, text: sendForm.message, html })
+        body: JSON.stringify({ to: sendForm.to, subject: sendForm.subject, text: sendForm.message, html, attachments: sendAttachments })
       });
       if (sendingInvoice.status === 'Draft') {
         const updated = await fetchJson<Invoice>(`/api/invoices/${sendingInvoice.id}`, {
@@ -461,7 +553,7 @@ export default function Invoices() {
         description: '',
         status: 'Draft',
         invoice_type: 'standard',
-        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        due_date: defaultDueDate(paymentTermsDays)
       });
     } catch (err) {
       console.error('Create invoice failed:', err);
@@ -484,9 +576,32 @@ export default function Invoices() {
     }
   };
 
-  const handleOpenGenerator = (invoice: Invoice) => {
+  // Réservé aux brouillons (voir DELETE /api/invoices/:id) : une facture déjà
+  // envoyée porte un numéro légal qui doit rester dans la séquence, elle ne
+  // se supprime pas — elle s'annule par un avoir.
+  const handleDeleteInvoice = async (invoice: Invoice) => {
+    if (!window.confirm(t('invoices_confirm_delete', { number: invoice.invoice_number || '' }))) return;
+    try {
+      await fetchJson(`/api/invoices/${invoice.id}`, { method: 'DELETE' });
+      setInvoices(invoices.filter(i => i.id !== invoice.id));
+    } catch (err: any) {
+      console.error('Delete invoice failed:', err);
+      alert(err.message || t('invoices_delete_failed'));
+    }
+  };
+
+  // La liste (GET /api/invoices) ne porte plus les lignes chiffrées — voir
+  // CLAUDE.md — donc ouvrir le générateur sur une facture existante va les
+  // chercher à part plutôt que de compter sur ce que la liste avait déjà.
+  const handleOpenGenerator = async (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setIsGeneratorOpen(true);
+    try {
+      const full = await fetchJson<Invoice>(`/api/invoices/${invoice.id}`);
+      setSelectedInvoice(full);
+    } catch (err) {
+      console.error('Failed to fetch invoice detail:', err);
+    }
   };
 
   const toggleProjectExpansion = (projectId: string) => {
@@ -569,7 +684,7 @@ export default function Invoices() {
             <button
               onClick={handleZohoSync}
               disabled={isSyncingZoho}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95 disabled:opacity-60"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold press disabled:opacity-60"
               style={{ background: '#f76707', color: '#fff' }}
             >
               <IconRefresh size={18} className={isSyncingZoho ? 'animate-spin' : ''} />
@@ -577,8 +692,8 @@ export default function Invoices() {
             </button>
           )}
           <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+            onClick={() => { setNewInvoice(inv => ({ ...inv, due_date: defaultDueDate(paymentTermsDays) })); setIsModalOpen(true); }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
@@ -619,14 +734,14 @@ export default function Invoices() {
             placeholder={t('invoices_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition"
             style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
         <div className="flex items-center gap-2 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
           <button
             onClick={() => setIsGroupedByProject(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition"
             style={isGroupedByProject
               ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
               : { color: 'var(--tblr-muted)' }}
@@ -636,7 +751,7 @@ export default function Invoices() {
           </button>
           <button
             onClick={() => setIsGroupedByProject(false)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition"
             style={!isGroupedByProject
               ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
               : { color: 'var(--tblr-muted)' }}
@@ -658,21 +773,27 @@ export default function Invoices() {
               { label: t('invoices_col_invoice_project'), primary: true, render: inv => (
                 <div>
                   <p className="font-semibold text-sm">{inv.invoice_number}</p>
-                  {inv.affaire_invoice_number && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
-                  <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
+                  {inv.affaire_invoice_number && <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
+                  <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
                 </div>
               )},
-              { label: t('invoices_col_client'), render: inv => projects.find(p => p.id === inv.project_id)?.client || '---' },
+              { label: t('invoices_col_client'), render: inv => invoiceClientName(inv, projects, contacts) },
               { label: t('invoices_col_amount'), render: inv => <span className="font-mono font-bold">{formatCurrency(inv.amount)}</span> },
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+                <div>
+                  <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={statusStyle(inv.status)}>{statusLabel(inv.status)}</span>
+                  {inv.accounting_deleted_at && (
+                    <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
+                  )}
+                </div>
               )},
             ]}
             actions={inv => (
               <div className="flex gap-2">
-                <button onClick={() => { setSelectedInvoice(inv); setIsGeneratorOpen(true); }} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
+                <button onClick={() => handleOpenGenerator(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
                 {inv.status !== 'Paid' && <button onClick={() => handleUpdateStatus(inv, 'Paid')} className="p-1.5 rounded-lg" style={{ color: '#2f9e44', background: '#d3f9d8' }}><IconCircleCheck size={15} /></button>}
+                {inv.status === 'Draft' && <button onClick={() => handleDeleteInvoice(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-danger)', background: '#ffe0e0' }} title="Supprimer"><IconTrash size={15} /></button>}
               </div>
             )}
           />
@@ -689,7 +810,7 @@ export default function Invoices() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="min-w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th
@@ -752,7 +873,7 @@ export default function Invoices() {
                               : <IconChevronRight size={16} style={{ color: 'var(--tblr-muted)' }} />}
                           </div>
                           <span className="font-bold text-sm transition-colors" style={{ color: 'var(--tblr-text)' }}>{group.name}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                          <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                             {group.invoices.length > 1 ? t('invoices_count_invoices_plural', { count: group.invoices.length }) : t('invoices_count_invoices', { count: group.invoices.length })}
                           </span>
                         </div>
@@ -774,11 +895,11 @@ export default function Invoices() {
                               <div className="flex items-center gap-2">
                                 <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                                 {invoice.invoice_type === 'acompte' && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                                  <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                                 )}
                               </div>
                               {invoice.affaire_invoice_number && (
-                                <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                                <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
                               )}
                               <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                             </div>
@@ -790,13 +911,18 @@ export default function Invoices() {
                         <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                           <div className="flex items-center gap-1.5">
                             <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
-                            {new Date(invoice.due_date).toLocaleDateString()}
+                            {formatDueDate(invoice.due_date)}
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
-                            {invoice.status}
+                          <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                            {statusLabel(invoice.status)}
                           </span>
+                          {invoice.accounting_deleted_at && (
+                            <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                              Supprimée sur Zoho
+                            </span>
+                          )}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -810,6 +936,18 @@ export default function Invoices() {
                             >
                               <IconEdit size={18} />
                             </button>
+                            {invoice.status === 'Draft' && (
+                              <button
+                                onClick={() => handleDeleteInvoice(invoice)}
+                                className="p-1.5 rounded-lg transition-colors"
+                                style={{ color: 'var(--tblr-danger)' }}
+                                onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#ffe0e0'}
+                                onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                                title="Supprimer"
+                              >
+                                <IconTrash size={18} />
+                              </button>
+                            )}
                             <button
                               onClick={() => handleOpenGenerator(invoice)}
                               className="p-1.5 rounded-lg transition-colors"
@@ -870,13 +1008,13 @@ export default function Invoices() {
                               </button>
                             )}
                           </div>
-                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
-                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                           {pdpNotice?.invoiceId === invoice.id && (
-                            <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                            <div className="mt-1 text-[0.6875rem]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
                           )}
                           {chorusProNotice?.invoiceId === invoice.id && (
-                            <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
+                            <div className="mt-1 text-[0.6875rem]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                           )}
                         </td>
                       </tr>
@@ -900,13 +1038,13 @@ export default function Invoices() {
                           <div className="flex items-center gap-2">
                             <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                             {invoice.invoice_type === 'acompte' && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                             )}
-                            <span className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
+                            <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
                             <p className="text-xs font-medium" style={{ color: 'var(--tblr-primary)' }}>{invoice.project_name || 'General'}</p>
                           </div>
                           {invoice.affaire_invoice_number && (
-                            <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                            <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
                           )}
                           <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                         </div>
@@ -918,13 +1056,18 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                       <div className="flex items-center gap-1.5">
                         <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
-                        {new Date(invoice.due_date).toLocaleDateString()}
+                        {formatDueDate(invoice.due_date)}
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
-                        {invoice.status}
+                      <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                        {statusLabel(invoice.status)}
                       </span>
+                      {invoice.accounting_deleted_at && (
+                        <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                          Supprimée sur Zoho
+                        </span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -938,6 +1081,18 @@ export default function Invoices() {
                         >
                           <IconEdit size={18} />
                         </button>
+                        {invoice.status === 'Draft' && (
+                          <button
+                            onClick={() => handleDeleteInvoice(invoice)}
+                            className="p-1.5 rounded-lg transition-colors"
+                            style={{ color: 'var(--tblr-danger)' }}
+                            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.background = '#ffe0e0'}
+                            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.background = 'transparent'}
+                            title="Supprimer"
+                          >
+                            <IconTrash size={18} />
+                          </button>
+                        )}
                         <button
                           onClick={() => handleOpenGenerator(invoice)}
                           className="p-1.5 rounded-lg transition-colors"
@@ -998,13 +1153,13 @@ export default function Invoices() {
                           </button>
                         )}
                       </div>
-                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
-                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                       {pdpNotice?.invoiceId === invoice.id && (
-                        <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                        <div className="mt-1 text-[0.6875rem]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
                       )}
                       {chorusProNotice?.invoiceId === invoice.id && (
-                        <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
+                        <div className="mt-1 text-[0.6875rem]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                       )}
                     </td>
                   </tr>
@@ -1033,7 +1188,7 @@ export default function Invoices() {
 
       <AnimatePresence>
         {isGeneratorOpen && selectedInvoice && (
-          <InvoiceGenerator
+          <InvoiceGenerator key="invoice-generator"
             onClose={() => setIsGeneratorOpen(false)}
             onSave={(updated) => {
               setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
@@ -1047,9 +1202,10 @@ export default function Invoices() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -1081,7 +1237,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'standard'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition"
                       style={newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
                         ? { borderColor: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -1092,7 +1248,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'acompte'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition"
                       style={newInvoice.invoice_type === 'acompte'
                         ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -1114,7 +1270,7 @@ export default function Invoices() {
                 <div>
                   <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                   <input
-                    type="number"
+                    type="number" step="0.01"
                     required={newInvoice.invoice_type !== 'acompte' || newAcompteCalculated === null}
                     className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
@@ -1169,10 +1325,11 @@ export default function Invoices() {
         {editingInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90dvh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
@@ -1196,13 +1353,63 @@ export default function Invoices() {
                     className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20"
                     style={inputStyle}
                     value={editForm.project_id || ''}
-                    onChange={e => setEditForm({ ...editForm, project_id: e.target.value || null })}
+                    onChange={e => {
+                      const newProjectId = e.target.value || null;
+                      const newProject = projects.find(p => p.id === newProjectId);
+                      // Le Maître d'Ouvrage d'une affaire est réputé être son
+                      // client — voir resolveInvoiceClientId côté serveur —
+                      // donc rattacher la facture à une affaire en reprend le
+                      // client directement plutôt que de forcer une nouvelle
+                      // recherche manuelle dans ContactAutocomplete juste en
+                      // dessous. Toujours corrigeable ensuite : une affaire
+                      // sans client_id (ou aucune affaire choisie) laisse le
+                      // Maître d'Ouvrage déjà saisi inchangé.
+                      setEditForm({
+                        ...editForm,
+                        project_id: newProjectId,
+                        client_id: newProject?.client_id || editForm.client_id,
+                      });
+                    }}
                   >
                     <option value="">{t('invoices_no_project_option')}</option>
                     {projects.map(p => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
+                </div>
+
+                {/* Maître d'Ouvrage — always editable, same rationale as the
+                    project select just above: correcting who a document is
+                    attached to isn't part of the legal content already sent,
+                    and it's exactly what lets a Zoho/Odoo-created placeholder
+                    contact (name only, no SIRET/address/phone) be fixed
+                    after the fact. Independent of project_id: a general
+                    invoice or one imported from a connector has no project
+                    at all, but still needs a Maître d'Ouvrage to be a valid
+                    French invoice. */}
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_client_label')}</label>
+                  <ContactAutocomplete
+                    contacts={contacts.filter(isClientContact)}
+                    value={editForm.client_id || ''}
+                    onChange={id => setEditForm({ ...editForm, client_id: id || null })}
+                    placeholder={t('invoices_select_client')}
+                  />
+                  {(() => {
+                    const client = contacts.find(c => c.id === editForm.client_id);
+                    if (client) {
+                      return (
+                        <div className="mt-2 text-xs space-y-0.5 p-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          {contactLegalLines(client).map((line, i) => <p key={i}>{line}</p>)}
+                        </div>
+                      );
+                    }
+                    return (
+                      <p className="mt-1 text-xs flex items-center gap-1" style={{ color: '#e67700' }}>
+                        <IconInfoCircle size={12} className="shrink-0" />{t('invoices_no_client_warning')}
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 {/* Invoice type toggle — always editable: recategorizing an
@@ -1217,7 +1424,7 @@ export default function Invoices() {
                         key={type}
                         type="button"
                         onClick={() => setEditForm({ ...editForm, invoice_type: type })}
-                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all"
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition"
                         style={editForm.invoice_type === type
                           ? type === 'acompte'
                             ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
@@ -1254,7 +1461,7 @@ export default function Invoices() {
                   <div>
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_amount_label')}</label>
                     <input
-                      type="number"
+                      type="number" step="0.01"
                       className="w-full px-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60"
                       style={inputStyle}
                       value={acompteCalculated !== null ? acompteCalculated.toFixed(2) : (editForm.amount ?? '')}
@@ -1297,7 +1504,7 @@ export default function Invoices() {
                     onChange={e => setEditForm({ ...editForm, status: e.target.value as Invoice['status'] })}
                   >
                     {(['Draft', 'Sent', 'Paid', 'Overdue'] as const).map(s => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>{statusLabel(s)}</option>
                     ))}
                   </select>
                 </div>
@@ -1336,9 +1543,10 @@ export default function Invoices() {
         {sendingInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -1386,6 +1594,14 @@ export default function Invoices() {
                     onChange={e => setSendForm({ ...sendForm, message: e.target.value })}
                   />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('email_attachments_label')}</label>
+                  <EmailAttachmentsField
+                    attachments={sendAttachments}
+                    onChange={setSendAttachments}
+                    documentsQuery={sendingInvoice?.project_id ? { project_id: sendingInvoice.project_id } : undefined}
+                  />
+                </div>
                 {sendResult && (
                   <div
                     className="text-sm p-3 rounded-lg"
@@ -1424,9 +1640,10 @@ export default function Invoices() {
         {chorusProModalInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >

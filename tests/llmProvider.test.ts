@@ -163,6 +163,28 @@ describe('Gemini adapter — request mapping', () => {
     expect(generateContent.mock.calls[1][0].config.tools).toEqual([{ functionDeclarations: tools }]);
   });
 
+  // Régression (16/09/2026) : un agent avec à la fois web_search_enabled et
+  // une ressource en écriture faisait échouer TOUT l'échange en 400 « Please
+  // enable tool_config.include_server_side_tool_invocations... » — Gemini
+  // refuse de mélanger un tool natif (googleSearch) et des
+  // functionDeclarations sans ce réglage explicite.
+  it('active includeServerSideToolInvocations seulement quand tools et webSearch coexistent', async () => {
+    const tools: LlmToolDef[] = [
+      { name: 'create_record', description: 'Crée', parametersJsonSchema: { type: 'object', properties: {} } },
+    ];
+
+    await provider().chat({ messages: [{ role: 'user', content: 'x' }], webSearch: true });
+    expect(generateContent.mock.calls[0][0].config.tools).toEqual([{ googleSearch: {} }]);
+    expect(generateContent.mock.calls[0][0].config.toolConfig).toBeUndefined();
+
+    await provider().chat({ messages: [{ role: 'user', content: 'x' }], tools });
+    expect(generateContent.mock.calls[1][0].config.toolConfig).toBeUndefined();
+
+    await provider().chat({ messages: [{ role: 'user', content: 'x' }], tools, webSearch: true });
+    expect(generateContent.mock.calls[2][0].config.tools).toEqual([{ functionDeclarations: tools }, { googleSearch: {} }]);
+    expect(generateContent.mock.calls[2][0].config.toolConfig).toEqual({ includeServerSideToolInvocations: true });
+  });
+
   it('honours an explicit model override', async () => {
     await createGeminiProvider({ apiKey: 'k', model: 'gemini-2.5-flash' }).chat({ messages: [{ role: 'user', content: 'x' }] });
     expect(generateContent.mock.calls[0][0].model).toBe('gemini-2.5-flash');

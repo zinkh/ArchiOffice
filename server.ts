@@ -5,6 +5,11 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
+import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
+import { registerTelegramRoutes } from "./server/routes/telegram";
+import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
+import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
+import { resolveAutomationApiKey } from "./server/automationApiKeys";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -12,7 +17,6 @@ import { registerBpuRoutes } from "./server/routes/bpu";
 import { registerPriceLibraryRoutes } from "./server/routes/priceLibrary";
 import { registerReferentielRoutes } from "./server/routes/referentiels";
 import { registerSituationRoutes } from "./server/routes/situations";
-import { registerCctpRoutes } from "./server/routes/cctps";
 import { registerCustomReferenceRoutes } from "./server/routes/customReferences";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
@@ -21,6 +25,7 @@ import { registerObservationRoutes } from "./server/routes/observations";
 import { registerMeetingRoutes } from "./server/routes/meetings";
 import { registerMeetingAttendeeRoutes } from "./server/routes/meetingAttendees";
 import { registerDocumentTemplateRoutes } from "./server/routes/documentTemplates";
+import { registerEmailTemplateRoutes } from "./server/routes/emailTemplates";
 import { registerContratsMoeRoutes } from "./server/routes/contratsMoe";
 import { registerNotesHonorairesRoutes } from "./server/routes/notesHonoraires";
 import { registerProfileRoutes } from "./server/routes/profile";
@@ -34,8 +39,15 @@ import { registerTimeTrackingRoutes } from "./server/routes/timeTracking";
 import { registerLeaveRoutes } from "./server/routes/leave";
 import { registerTenderRoutes } from "./server/routes/tenders";
 import { registerTenderRssRoutes } from "./server/routes/tenderRss";
+import { registerTenderCompetitorRoutes } from "./server/routes/tenderCompetitors";
+import { registerTenderPieceRoutes } from "./server/routes/tenderPieces";
+import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences";
+import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
+import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
+import { registerTenderAiRoutes } from "./server/routes/tenderAi";
+import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
+import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
-import { registerSpecificationRoutes } from "./server/routes/specifications";
 import { registerContactRoutes } from "./server/routes/contacts";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
 import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
@@ -60,13 +72,18 @@ import { registerChorusProRoutes } from "./server/routes/chorusPro";
 import { registerRegistrationRoutes } from "./server/routes/registration";
 import { registerAgencySetupRoutes } from "./server/routes/agencySetup";
 import { registerTeamRoutes } from "./server/routes/team";
+import { registerTenantMembershipRoutes } from "./server/routes/tenantMemberships";
+import { runWithTenantContext, activeTenantFor, TENANT_HEADER } from "./server/tenantContext";
+import { getMemberRole, listMemberships, listTenantMemberIds, resolveActiveTenantId, tenantMembershipsByUser } from "./server/tenantMemberships";
 import { registerProposalRoutes } from "./server/routes/proposals";
 import { registerInvoiceRoutes } from "./server/routes/invoices";
 import { registerOrdresDeServiceRoutes } from "./server/routes/ordresDeService";
+import { registerAvenantsMoeRoutes } from "./server/routes/avenantsMoe";
 import { registerVisaRoutes } from "./server/routes/visas";
 import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
+import { registerReservePhotoRoutes } from "./server/reservePhotos";
 import { registerPermitRoutes } from "./server/routes/permits";
 import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
@@ -74,10 +91,20 @@ import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
 import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
+import { registerMailDraftRoutes } from "./server/routes/mailDrafts";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
+import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
+import { registerAutomationApiKeyRoutes } from "./server/routes/automationApiKeys";
+import { registerWebhookRoutes } from "./server/routes/webhooks";
+import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
+import { registerStorageProviders } from "./server/externalStorage/providers";
+import { parseExternalRef } from "./server/externalStorage/externalRef";
+import { getConnectionById } from "./server/externalStorage/externalConnection";
+import { createProvider } from "./server/externalStorage/providerFactory";
+import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
@@ -91,6 +118,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startAgentAlerts } from "./server/agentAlerts";
+import { startAgentMailInbox } from "./server/agentMailInbox";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
 import { startTenantPurge } from "./server/tenantPurge";
@@ -156,6 +184,16 @@ export async function createApp() {
   //    resource (map tiles, Supabase Storage images) that doesn't send back
   //    a matching CORP/CORS header — this app relies on exactly that kind of
   //    loading, so COEP stays off.
+  //  - crossOriginOpenerPolicy: helmet's default ('same-origin') severs
+  //    `window.opener` the moment a popup THIS app opened navigates to a
+  //    different origin — exactly what the Google Contacts OAuth popup does
+  //    (src/lib/googleAuth.ts opens a popup that goes to accounts.google.com
+  //    and back). The popup's callback page then finds `window.opener` null
+  //    and its postMessage back to the opener silently no-ops, so the sync
+  //    never completes even though the popup itself reports success.
+  //    'same-origin-allow-popups' keeps the isolation this header is for
+  //    (protection from windows that open *this* page) while letting popups
+  //    *we* open keep their opener reference.
   app.use(helmet({
     contentSecurityPolicy: {
       useDefaults: false,
@@ -163,6 +201,7 @@ export async function createApp() {
     },
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: false,
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
   }));
 
   // CORS headers — must run before any redirect so that redirect responses also
@@ -237,9 +276,17 @@ export async function createApp() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
-  // Debug middleware for API routes
+  // Debug middleware for API routes — logs the path only, never the query
+  // string: OAuth callbacks (Zoho, Gmail, Outlook, Google Calendar) arrive as
+  // /api/.../callback?code=...&state=..., and logging req.originalUrl as-is
+  // put that authorization code and state nonce in plaintext server logs.
+  // req.path can't replace it here: this middleware mounts on "/api/*", and
+  // Express strips the matched prefix from req.path for a path-mounted
+  // app.use (see the AUTH_EXEMPT matching below for the same caveat) — it
+  // would log "/zoho/callback", not "/api/zoho/callback". Splitting
+  // req.originalUrl on "?" keeps the full path without the query string.
   app.use("/api/*", (req, res, next) => {
-    console.log(`[API DEBUG] ${req.method} ${req.originalUrl}`);
+    console.log(`[API DEBUG] ${req.method} ${req.originalUrl.split("?")[0]}`);
     next();
   });
 
@@ -267,20 +314,15 @@ export async function createApp() {
     const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
     app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
 
-    // First-run "log into your existing cloud account" flow — see
-    // server/cloudLinkRoutes.ts. Mounted alongside local-auth (a first-run
-    // install picks one or the other, both routers coexist harmlessly).
-    const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
-    app.use('/api/auth', createCloudLinkRouter(supabaseAdmin));
-
     // Mounts the background sync engine (server/cloudSync.ts) and its
     // /api/sync status/trigger routes for the rest of this process's life.
-    // Called once at boot below when already linked, and once more, live,
-    // by server/localCloudUpgrade.ts right after a same-session upgrade from
-    // a local-only account — so a freshly-linked install doesn't need an app
-    // restart to start syncing. Guarded so a second call (there shouldn't be
-    // one — the two callers are mutually exclusive within one process's
-    // life) never tries to mount /api/sync twice.
+    // Called once at boot below when already linked, and live from three
+    // places right after they finish an import — server/cloudLinkRoutes.ts
+    // (first-run link, and its retry-after-failure route), and
+    // server/localCloudUpgrade.ts (a same-session upgrade from a local-only
+    // account) — so none of the three needs an app restart before syncing
+    // starts. Guarded so a second call (callers are mutually exclusive
+    // within one process's life) never tries to mount /api/sync twice.
     let cloudSyncActivated = false;
     const activateCloudSync = async (linkState: import('./server/cloudLinkState').CloudLinkState) => {
       if (cloudSyncActivated) return;
@@ -290,6 +332,12 @@ export async function createApp() {
       app.use('/api/sync', createCloudSyncRouter(cloudSync));
       cloudSyncActivated = true;
     };
+
+    // First-run "log into your existing cloud account" flow — see
+    // server/cloudLinkRoutes.ts. Mounted alongside local-auth (a first-run
+    // install picks one or the other, both routers coexist harmlessly).
+    const { createCloudLinkRouter } = await import('./server/cloudLinkRoutes');
+    app.use('/api/auth', createCloudLinkRouter(supabaseAdmin, activateCloudSync));
 
     // Lets an already-configured local-only install switch to cloud-linked
     // without losing its data — see server/localCloudUpgrade.ts.
@@ -317,6 +365,14 @@ export async function createApp() {
   // passer par /api/agency-setup (créer ou rejoindre une agence) — voir
   // src/pages/AgencySetup.tsx et la garde dans ProtectedLayout (src/App.tsx).
   async function getTenantId(userId: string): Promise<string> {
+    // Le cabinet actif de la requête, quand elle en désigne un (en-tête
+    // X-Tenant-Id, validé contre les adhésions par le middleware
+    // d'authentification plus bas). Une personne pouvant exercer dans
+    // plusieurs cabinets, `profiles.tenant_id` ne dit plus que son cabinet
+    // par défaut — voir server/tenantContext.ts.
+    const active = activeTenantFor(userId);
+    if (active) return active;
+
     const { data } = await supabaseAdmin
       .from('profiles')
       .select('tenant_id')
@@ -325,15 +381,24 @@ export async function createApp() {
 
     if (data?.tenant_id) return data.tenant_id;
 
+    // Pas de cabinet par défaut sur le profil : il reste l'adhésion la plus
+    // ancienne, cas d'un compte rattaché uniquement côté adhésions.
+    const memberships = await listMemberships(supabaseAdmin, userId);
+    if (memberships.length) return memberships[0].tenantId;
+
     const err: any = new Error("Ce compte n'est rattaché à aucune agence. Veuillez d'abord créer ou rejoindre une agence.");
     err.status = 409;
     err.code = 'NO_TENANT';
     throw err;
   }
 
+  // Le rôle système est celui tenu DANS ce cabinet : gérant du sien, simple
+  // collaborateur de l'autre. C'est l'adhésion qui fait foi (`profiles` ne
+  // sert plus que de repli, pour son propre cabinet) — voir
+  // server/tenantMemberships.ts.
   async function getSystemRole(tenantId: string, userId: string): Promise<string | null> {
-    const { data } = await supabaseAdmin.from('profiles').select('system_role').eq('id', userId).eq('tenant_id', tenantId).single();
-    return (data as any)?.system_role ?? null;
+    const membership = await getMemberRole(supabaseAdmin, tenantId, userId);
+    return membership?.systemRole ?? null;
   }
 
   // Centralized route guard for admin-only endpoints — checks the caller's
@@ -387,27 +452,98 @@ export async function createApp() {
     pack_50: { amount_cents: 5000, label: '50 €' },
   };
 
-  // Top up plan monthly allowance on first AI call of each month
+  // Top up plan monthly allowance on first AI call of each month. Atomic:
+  // refresh_monthly_ai_credits() checks ai_credit_last_refresh and writes the
+  // new balance/timestamp in the SAME statement, so two concurrent
+  // first-calls-of-the-month can't both read "not yet refreshed" and both
+  // credit the tenant — a plain read-then-write here let exactly that
+  // happen (security audit finding).
   async function maybeRefreshMonthlyCredits(tenantId: string, plan: string): Promise<void> {
     const included = PLAN_AI_MONTHLY_CREDIT_CENTS[plan] ?? 0;
-    const { data: tenant } = await supabaseAdmin.from('tenants')
-      .select('ai_credit_last_refresh').eq('id', tenantId).single();
-    const lastRefresh = (tenant as any)?.ai_credit_last_refresh;
-    const firstOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-    if (!lastRefresh || lastRefresh < firstOfMonth) {
-      if (included > 0) {
-        await supabaseAdmin.rpc('increment_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
-      }
-      await supabaseAdmin.from('tenants')
-        .update({ ai_credit_last_refresh: new Date().toISOString() }).eq('id', tenantId);
-    }
+    await supabaseAdmin.rpc('refresh_monthly_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
+  }
+
+  // Conservative upper bound on a single model call's output, used only to
+  // size a pre-call reservation (see reserveAiCredit/settleAiCredit below) —
+  // never passed to the provider itself. Matches the hard max_tokens the
+  // Anthropic/Mistral adapters already enforce (llm/anthropic.ts,
+  // llm/mistral.ts); Gemini has no equivalent cap in code, so this is the
+  // assumption used for the reservation math on that provider, not a real
+  // limit — if a Gemini response ever exceeds it, settleAiCredit's delta
+  // charges the (small) difference after the fact rather than blocking it.
+  const RESERVE_MAX_OUTPUT_TOKENS = 16000;
+
+  async function estimateReserveCents(provider: string, model: string, inputTokens: number, audioInputTokens = 0): Promise<number> {
+    const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
+    return priceEurCents(provider, model, inputTokens, RESERVE_MAX_OUTPUT_TOKENS, audioInputTokens);
+  }
+
+  // Reserves a conservative worst-case cost BEFORE calling the model — the
+  // atomic half of the fix (see reserve_ai_credit() in
+  // supabase/migrate_ai_billing_atomicity.sql): the balance check and the
+  // deduction happen in one SQL statement, so a burst of concurrent
+  // requests against a low balance can no longer all pass a stale
+  // pre-check and each run (and cost real money against our own provider
+  // bill) before any of them deducts. Returns false when the balance can't
+  // cover the reservation — the caller must 402 without ever invoking the
+  // model.
+  async function reserveAiCredit(tenantId: string, estimateCents: number): Promise<boolean> {
+    const { data } = await supabaseAdmin.rpc('reserve_ai_credit', { p_tenant_id: tenantId, p_amount_cents: estimateCents });
+    return !!data;
+  }
+
+  // Refunds a reservation IN FULL when the call never completed (network
+  // error, timeout) — a plain settle_ai_credit credit with no usage row,
+  // since no tokens were actually consumed. Deliberately separate from
+  // settleAiCredit: that function prices the call via priceEurCents, which
+  // floors even a zero-token call at 1 cent (same rule a real, tiny call
+  // gets) — using it here would leave a 1-cent phantom charge on a call
+  // that never ran at all.
+  async function refundAiCredit(tenantId: string, cents: number): Promise<void> {
+    await supabaseAdmin.rpc('settle_ai_credit', { p_tenant_id: tenantId, p_delta_cents: cents });
+  }
+
+  // Reconciles a prior reserveAiCredit() against the real cost once usage is
+  // known: refunds the unused portion of the reservation, or — when the
+  // reservation under-estimated — charges the difference, floored at zero
+  // either way (settle_ai_credit() in the same migration). Also records the
+  // usage row, same shape as the old deductAiCredit.
+  async function settleAiCredit(params: {
+    tenantId: string; userId: string;
+    agentId: string | null; conversationId: string | null;
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
+    provider: string; model: string;
+    reservedCents: number;
+    inputTokens: number; outputTokens: number;
+    audioInputTokens?: number;
+  }): Promise<{ newBalance: number; costCents: number }> {
+    const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
+    const audioInputTokens = params.audioInputTokens ?? 0;
+    const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
+    // Positive delta = refund (reservation was more than the real cost, the
+    // common case since it assumes RESERVE_MAX_OUTPUT_TOKENS); negative =
+    // extra charge for the rare call that ran past that assumption.
+    const delta = params.reservedCents - costCents;
+    await supabaseAdmin.rpc('settle_ai_credit', { p_tenant_id: params.tenantId, p_delta_cents: delta });
+    const { data: t } = await supabaseAdmin.from('tenants')
+      .select('ai_credit_balance_eur_cents').eq('id', params.tenantId).single();
+    const newBalance = (t as any)?.ai_credit_balance_eur_cents ?? 0;
+    await supabaseAdmin.from('agent_token_usage').insert({
+      tenant_id: params.tenantId, agent_id: params.agentId,
+      user_id: params.userId, conversation_id: params.conversationId,
+      tokens_used: params.inputTokens + audioInputTokens + params.outputTokens,
+      input_tokens: params.inputTokens + audioInputTokens, output_tokens: params.outputTokens,
+      cost_eur_cents: costCents, endpoint_type: params.endpointType,
+      provider: params.provider, model: params.model,
+    });
+    return { newBalance, costCents };
   }
 
   // Deduct cost from tenant balance and log usage
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;
@@ -468,8 +604,9 @@ export async function createApp() {
       const { count: c } = await supabaseAdmin.from('projects').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
       count = c ?? 0;
     } else if (resource === 'users') {
-      const { count: c } = await supabaseAdmin.from('profiles').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
-      count = c ?? 0;
+      // Compté sur les adhésions : une personne rattachée à ce cabinet sans
+      // l'avoir en cabinet par défaut compte tout autant.
+      count = (await listTenantMemberIds(supabaseAdmin, tenantId)).length;
     } else if (resource === 'documents') {
       const { count: c } = await supabaseAdmin.from('documents').select('*', { count: 'exact', head: true }).eq('tenant_id', tenantId);
       count = c ?? 0;
@@ -492,8 +629,7 @@ export async function createApp() {
       throw err;
     }
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
-    const { data } = await supabaseAdmin.from('document_versions').select('size_bytes').eq('tenant_id', tenantId);
-    const usedBytes = (data || []).reduce((sum: number, r: any) => sum + (r.size_bytes || 0), 0);
+    const usedBytes = await tenantSupabaseStorageBytes(supabaseAdmin, tenantId);
     const limitBytes = limits.storage_mb * 1024 * 1024;
     if (usedBytes + incomingBytes > limitBytes) {
       const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
@@ -514,7 +650,7 @@ export async function createApp() {
   // that reference for a short-lived signed URL after checking the caller's
   // tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'support-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'support-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
@@ -553,6 +689,30 @@ export async function createApp() {
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
+  // Les documents, plans et visas d'un cabinet qui a branché son propre espace
+  // (Google Drive, Dropbox, Nextcloud, kDrive) n'y vont plus. Cette couche est
+  // la seule à le savoir : les dix autres modules de routes continuent d'appeler
+  // uploadToStorage/deleteFromStorage directement, sans rien changer. Voir
+  // server/externalStorage/storeBusinessFile.ts.
+  const { storeBusinessFile, removeBusinessFile } = createBusinessFileStore({
+    supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota,
+  });
+  registerStorageProviders(supabaseAdmin);
+
+  /** Les octets d'un fichier hébergé sur l'espace de stockage du cabinet, ou
+   *  null si la référence n'en est pas une (l'appelant reprend alors ses
+   *  chemins habituels). */
+  async function readExternalBusinessFile(tenantId: string, fileUrl: string) {
+    const ref = parseExternalRef(fileUrl);
+    if (!ref) return null;
+    const connection = await getConnectionById(supabaseAdmin, tenantId, ref.connectionId);
+    if (!connection) return null;
+    const stream = await createProvider(connection).openReadStream(ref.externalId);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream.body) chunks.push(Buffer.from(chunk as any));
+    return { buffer: Buffer.concat(chunks), contentType: stream.contentType };
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
 
   // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
@@ -575,6 +735,21 @@ export async function createApp() {
     // inside the handler, not via our session auth. Was missing here, so
     // the auth middleware 401'd it before that check ever ran.
     "/api/ragic/webhook",
+    // Sert un fichier hébergé sur l'espace de stockage du cabinet. Atteinte
+    // par window.open() ou par le `src` d'une balise <img>, donc sans en-tête
+    // Authorization possible — exactement comme une URL signée Supabase. C'est
+    // le jeton signé du chemin qui authentifie, vérifié dans le handler
+    // (server/externalStorage/externalTicket.ts).
+    "/api/storage/external",
+    // La redirection de Google après consentement est une navigation nue, sans
+    // JWT : le cabinet est récupéré depuis le nonce à usage unique
+    // (server/oauthState.ts). Le préfixe est exact, donc
+    // /api/external-storage/callback-url, lui, reste authentifié.
+    "/api/external-storage/callback",
+    // Appelée par Telegram lui-même (pas de JWT possible) — authentifiée par
+    // le secret de webhook vérifié dans le handler (server/routes/telegram.ts),
+    // sur le même principe que /api/ragic/webhook ci-dessus.
+    "/api/telegram/webhook",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
@@ -591,9 +766,83 @@ export async function createApp() {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Authentification requise" });
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: "Token invalide" });
+    if (error || !user) {
+      // Pas un JWT Supabase — peut être un jeton MCP (voir
+      // packages/archioffice-agents/src/server/mcp/*.ts) : les outils MCP
+      // rappellent cette même API en boucle locale avec leur propre jeton,
+      // exactement comme les outils d'agent le font avec le JWT de
+      // l'utilisateur (internalApi.ts). Préfixe reconnaissable (mcp_at_),
+      // donc pas de lookup en base pour un JWT Supabase mal formé.
+      if (token.startsWith('mcp_at_')) {
+        const { resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
+        const resolved = await resolveMcpAccessToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Même principe pour le bot Telegram (server/telegramBot.ts) : le
+      // webhook rappelle /api/agents/:id/chat avec le jeton de la liaison
+      // plutôt qu'un JWT, puisque Telegram n'en fournit aucun.
+      if (token.startsWith('tg_at_')) {
+        const resolved = await resolveTelegramAccessToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Même principe pour le relevé de la messagerie entrante partagée
+      // (server/agentMailInbox.ts) : un email transféré reconnu rappelle
+      // /api/agents/:id/chat avec ce jeton plutôt qu'un JWT, puisqu'il n'y a
+      // personne de vivant derrière ce déclenchement. Jeton à usage unique
+      // et de quelques minutes (server/agentMailRelayTokens.ts), à la
+      // différence des liaisons persistantes mcp_at_/tg_at_ ci-dessus.
+      if (token.startsWith('mail_at_')) {
+        const resolved = await resolveMailRelayToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Clé d'automatisation (n8n, ou tout appelant HTTP externe) — voir
+      // server/automationApiKeys.ts. Liaison persistante et révocable comme
+      // tg_at_, pas à usage unique comme mail_at_ : un scénario n8n rappelle
+      // la même clé à chaque exécution.
+      if (token.startsWith('auto_at_')) {
+        const resolved = await resolveAutomationApiKey(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      return res.status(401).json({ error: "Token invalide" });
+    }
     req.user = user;
-    next();
+
+    // Cabinet actif de la requête. L'en-tête n'est jamais cru sur parole :
+    // il n'est retenu que s'il correspond à une adhésion réelle, sinon la
+    // requête est refusée en 403 TENANT_NOT_MEMBER — ce qui permet au client
+    // d'effacer un cabinet resté sélectionné après un départ (voir
+    // src/lib/activeTenant.ts) plutôt que de basculer silencieusement sur un
+    // autre cabinet que celui affiché à l'écran.
+    const requestedTenantId = (req.headers[TENANT_HEADER] as string | undefined)?.trim() || null;
+    let activeTenantId: string | null = null;
+    if (requestedTenantId) {
+      try {
+        activeTenantId = await resolveActiveTenantId(supabaseAdmin, user.id, requestedTenantId);
+      } catch (e: any) {
+        return res.status(e.status || 403).json({ error: e.message, code: e.code });
+      }
+    }
+    req.activeTenantId = activeTenantId;
+    // `next()` (et toute la suite asynchrone de la requête) s'exécute dans ce
+    // contexte : c'est ainsi que getTenantId() le retrouve sans que chaque
+    // route ait à le transporter.
+    runWithTenantContext({ userId: user.id, tenantId: activeTenantId }, next);
   });
 
   app.get("/api/health", (req, res) => {
@@ -617,10 +866,11 @@ export async function createApp() {
   // Allows: the person themselves, a tenant admin, or the target's direct manager (profiles.manager_id).
   async function requireManagerOf(tenantId: string, targetUserId: string, actingUserId: string): Promise<void> {
     if (targetUserId === actingUserId) return;
-    const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', actingUserId).eq('tenant_id', tenantId).single();
-    if (acting?.system_role === 'admin') return;
-    const { data: target } = await supabaseAdmin.from('profiles').select('manager_id').eq('id', targetUserId).eq('tenant_id', tenantId).single();
-    if (target?.manager_id === actingUserId) return;
+    if (await isAdmin(tenantId, actingUserId)) return;
+    // Le supérieur hiérarchique se lit sur l'adhésion : il n'est pas le même
+    // d'un cabinet à l'autre.
+    const target = await getMemberRole(supabaseAdmin, tenantId, targetUserId);
+    if (target?.managerId === actingUserId) return;
     const err: any = new Error("Réservé au manager de cette personne ou à un administrateur");
     err.status = 403;
     throw err;
@@ -629,15 +879,20 @@ export async function createApp() {
   // Resolves the set of profile ids that report to `managerId` (direct reports only).
   // If `includeAllForAdmin` is true and the manager is a tenant admin, returns every profile in the tenant instead.
   async function resolveReportIds(tenantId: string, managerId: string, includeAllForAdmin: boolean): Promise<string[]> {
-    if (includeAllForAdmin) {
-      const { data: acting } = await supabaseAdmin.from('profiles').select('system_role').eq('id', managerId).eq('tenant_id', tenantId).single();
-      if (acting?.system_role === 'admin') {
-        const { data: all } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId);
-        return (all || []).map((p: any) => p.id);
-      }
+    if (includeAllForAdmin && await isAdmin(tenantId, managerId)) {
+      return listTenantMemberIds(supabaseAdmin, tenantId);
     }
-    const { data: reports } = await supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', managerId);
-    return (reports || []).map((p: any) => p.id);
+    // Le rattachement hiérarchique se lit d'abord sur l'adhésion (il diffère
+    // d'un cabinet à l'autre), et sur `profiles` pour les comptes qu'aucune
+    // adhésion ne couvre encore. Deux requêtes, pas une par personne.
+    const [memberships, { data: profileReports }] = await Promise.all([
+      tenantMembershipsByUser(supabaseAdmin, tenantId),
+      supabaseAdmin.from('profiles').select('id').eq('tenant_id', tenantId).eq('manager_id', managerId),
+    ]);
+    const reports = new Set<string>();
+    memberships.forEach((m, userId) => { if (m.managerId === managerId) reports.add(userId); });
+    (profileReports || []).forEach((p: any) => { if (!memberships.has(p.id)) reports.add(p.id); });
+    return [...reports];
   }
 
   // Callers are expected to reject implausible ranges before this point (see
@@ -688,7 +943,10 @@ export async function createApp() {
   const getUserName = async (tenantId: string, userId: string, email?: string): Promise<string> => {
     // profiles is the live source of truth for a user's display name — team_members
     // is no longer written to anywhere (POST/PUT /api/team both write to profiles).
-    const { data: me } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).eq('tenant_id', tenantId).maybeSingle();
+    // Sans filtre sur le cabinet : le nom est une donnée d'identité, la même
+    // dans les deux cabinets d'une personne qui en a deux, alors que
+    // `profiles.tenant_id` ne pointe que sur son cabinet par défaut.
+    const { data: me } = await supabaseAdmin.from('profiles').select('name').eq('id', userId).maybeSingle();
     return (me as any)?.name || email?.split('@')[0] || 'Utilisateur';
   };
 
@@ -718,7 +976,6 @@ export async function createApp() {
   registerPriceLibraryRoutes(app, { supabaseAdmin, getTenantId });
   registerReferentielRoutes(app, { supabaseAdmin });
   registerSituationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerCctpRoutes(app, { supabaseAdmin, getTenantId });
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -727,8 +984,9 @@ export async function createApp() {
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerEmailTemplateRoutes(app, { supabaseAdmin, getTenantId });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
-  registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber });
+  registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber, getUserName, logActivity });
   registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerActivityFeedRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage, captureWithContext });
   registerPushRoutes(app, { supabaseAdmin, getTenantId });
@@ -740,15 +998,22 @@ export async function createApp() {
   registerLeaveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin, businessDaysBetween });
   registerTenderRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerTenderRssRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerTenderCompetitorRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderPieceRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderReferenceRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
+  registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
-  registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
   registerAdminSupportRoutes(app, { supabaseAdmin, uploadToStorage });
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
-  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCalendarAccountRoutes(app, { supabaseAdmin, getTenantId });
   registerGmailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -757,32 +1022,40 @@ export async function createApp() {
   registerMailAccountRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMailLinkRoutes(app, { supabaseAdmin, getTenantId });
   registerMailFolderLinkRoutes(app, { supabaseAdmin, getTenantId });
-  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerRagicRoutes(app, { supabaseAdmin, getTenantId });
-  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId });
-  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerRagicRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerRegistrationRoutes(app, { supabaseAdmin });
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
+  registerTenantMembershipRoutes(app, { supabaseAdmin, getTenantId });
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
+  registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
-  registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
+  registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
+  registerReservePhotoRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
+  registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
+  registerExternalStorageRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerAutomationApiKeyRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerWebhookRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
@@ -790,8 +1063,6 @@ export async function createApp() {
   // Phase 7: DPGF (items + parents) and Situations (+ detail lines) now live
   // in server/routes/dpgf.ts and server/routes/situations.ts — registered
   // above alongside the other extracted domains.
-
-  // Phase 7: CCTPs update/delete now live in server/routes/cctps.ts.
 
   // Phase 7: Custom References now live in server/routes/customReferences.ts.
 
@@ -801,9 +1072,24 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
+  // Le package agents n'importe rien depuis server/ (module propriétaire
+  // autonome) et ne peut donc pas construire lui-même un adaptateur de
+  // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
+  // nonces OAuth : sans ça, un agent cesserait de lire les pièces jointes
+  // déposées depuis qu'un cabinet a branché son espace, en rapportant
+  // simplement que le document est vide.
+  setExternalFileReader(readExternalBusinessFile);
+  // Même principe pour le moteur de lecture des documents (local ou Nomic,
+  // choisi dans /admin) : les extracteurs du package n'ont pas de client
+  // Supabase à eux pour relire ce réglage.
+  setDocumentParserSettingsClient(supabaseAdmin);
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
+    reserveAiCredit,
+    settleAiCredit,
+    refundAiCredit,
+    estimateReserveCents,
     maybeRefreshMonthlyCredits,
     PLAN_AI_MONTHLY_CREDIT_CENTS,
     baseUrl: `http://127.0.0.1:${PORT}`,
@@ -816,6 +1102,31 @@ export async function createApp() {
     notifyTenantAdmins,
   });
   registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
+
+  // ── Serveur MCP (Gemini Spark, "Connected Apps → Custom apps for Spark") ──
+  // Voir packages/archioffice-agents/src/server/mcp/*.ts. Fournisseur OAuth
+  // (pas consommateur comme Gmail/Calendar/Zoho) + endpoint StreamableHTTP,
+  // un sous-ensemble volontairement restreint des outils d'agent.
+  // Postés ici plutôt que dans mcp/*.ts (qui n'importe rien depuis server/,
+  // voir plus haut) : l'ordre d'enregistrement Express suffit à les appliquer
+  // aux routes que registerMcpOAuthRoutes/registerMcpEndpoint définissent
+  // juste après, quel que soit le module qui porte le handler final.
+  app.use('/oauth/mcp', mcpOAuthLimiter);
+  app.use('/mcp', mcpToolLimiter);
+  if (!process.env.APP_URL) {
+    // Contrairement aux autres usages d'APP_URL (liens dans un email, callback
+    // OAuth qu'on redéclenche soi-même), celui-ci est publié tel quel dans le
+    // document de découverte OAuth que Gemini lit — une valeur de repli
+    // inatteignable (127.0.0.1) casse la connexion sans qu'aucune requête ne
+    // remonte d'erreur explicite côté ArchiOffice : Gemini échoue en silence
+    // à joindre son propre `issuer`. Vaut la peine d'un avertissement au
+    // démarrage plutôt que de laisser deviner pourquoi la liaison ne marche
+    // jamais sur une instance où la variable a été oubliée.
+    console.warn('[mcp] APP_URL non défini — le lien Gemini/MCP ne fonctionnera pas tant que cette variable ne pointe pas sur le domaine public HTTPS de cette instance.');
+  }
+  const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
+  registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
+  registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
 
 
   // Must be registered after all routes but before the SPA fallback below —
@@ -879,6 +1190,7 @@ export async function createApp() {
   // de fond, qui ne doivent pas tourner avant que la boucle locale réponde).
   const startAgentBackgroundJobs = () => {
     startAgentAlerts(supabaseAdmin);
+    startAgentMailInbox(supabaseAdmin, `http://127.0.0.1:${PORT}`);
     import('@zinkh/archioffice-agents/server')
       .then(({ startAgentScheduler }) => startAgentScheduler(supabaseAdmin, { deductAiCredit, notifyTenantAdmins }))
       .catch(e => console.error('[agentScheduler] démarrage impossible:', e.message));

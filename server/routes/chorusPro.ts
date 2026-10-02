@@ -7,10 +7,12 @@
 // rather than tenantScopedFrom, matching the other integration modules.
 import type { Express } from 'express';
 import { computeEtatAcompte, buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
@@ -94,7 +96,7 @@ function chorusProCfgComplete(cfg: any): boolean {
   return !!(cfg?.chorus_pro_piste_client_id && cfg?.chorus_pro_piste_client_secret && cfg?.chorus_pro_technical_login && cfg?.chorus_pro_technical_password);
 }
 
-export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // GET /api/chorus-pro/status
   app.get('/api/chorus-pro/status', async (req: any, res: any) => {
     try {
@@ -111,7 +113,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
   // DELETE /api/chorus-pro/disconnect
   app.delete('/api/chorus-pro/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({
         chorus_pro_piste_client_id: null, chorus_pro_piste_client_secret: null,
         chorus_pro_technical_login: null, chorus_pro_technical_password: null,
@@ -120,7 +122,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Chorus Pro', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (e: any) {
-      console.error("[DELETE /api/chorus-pro/disconnect]", e); res.status(500).json({ error: e.message }); }
+      console.error("[DELETE /api/chorus-pro/disconnect]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // POST /api/chorus-pro/test — verify both credential layers: the PISTE OAuth2
@@ -128,7 +130,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
   // header), by looking up the tenant's own SIRET in the structures directory.
   app.post('/api/chorus-pro/test', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: s } = await supabaseAdmin.from('settings')
         .select('siret,chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
         .eq('tenant_id', tenantId).single();
@@ -145,7 +147,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       }
       res.json({ connected: true, sandbox });
     } catch (e: any) {
-      console.error("[POST /api/chorus-pro/test]", e); res.status(400).json({ connected: false, error: e.message }); }
+      console.error("[POST /api/chorus-pro/test]", e); res.status(e.status || 400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/chorus-pro/send/:invoiceId — submit one invoice to Chorus Pro
@@ -167,12 +169,20 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
       if (!invoice) return res.status(404).json({ error: 'Facture introuvable' });
 
-      // Fall back to the SIRET already captured on the linked project (Factur-X fields)
-      // so it doesn't need to be re-entered when it's already known there.
+      // Fall back to the SIRET already captured on the linked project (Factur-X fields),
+      // or on the invoice's own Maître d'Ouvrage contact, so it doesn't need to be
+      // re-entered when it's already known there — the contact fallback notably
+      // covers a general/imported invoice, which has no project at all.
       let projectSiret: string | null = null;
-      if (!buyer_siret && !invoice.buyer_siret && invoice.project_id) {
-        const { data: project } = await supabaseAdmin.from('projects').select('client_siret').eq('id', invoice.project_id).eq('tenant_id', tenantId).single();
-        projectSiret = (project as any)?.client_siret || null;
+      if (!buyer_siret && !invoice.buyer_siret) {
+        if (invoice.project_id) {
+          const { data: project } = await supabaseAdmin.from('projects').select('client_siret').eq('id', invoice.project_id).eq('tenant_id', tenantId).single();
+          projectSiret = (project as any)?.client_siret || null;
+        }
+        if (!projectSiret) {
+          const client = await loadInvoiceClientContact(supabaseAdmin, tenantId, invoice);
+          projectSiret = client?.siret || null;
+        }
       }
 
       const finalBuyerSiret = buyer_siret || invoice.buyer_siret || projectSiret;

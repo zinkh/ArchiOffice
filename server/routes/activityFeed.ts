@@ -13,6 +13,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleDocumentUpload } from '../documentUpload';
 import { notifyUsers } from '../push';
+import { listTenantProfiles } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -41,7 +42,7 @@ export function registerActivityFeedRoutes(app: Express, { supabaseAdmin, getTen
     itemType: 'post' | 'comment', itemId: string, postId: string
   ) => {
     try {
-      const { data: members } = await tenantScopedFrom(supabaseAdmin, tenantId, 'profiles').select('id, name');
+      const members = await listTenantProfiles(supabaseAdmin, tenantId, 'id, name');
       const mentionedIds = extractMentionedUserIds(content, (members || []).filter((m: any) => m.id !== authorId));
       if (!mentionedIds.length) return;
       const rows = mentionedIds.map(uid => ({

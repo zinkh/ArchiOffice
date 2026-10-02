@@ -12,6 +12,12 @@ import { storageDir } from './offlineAccount';
 const PAGE_SIZE = 500;
 const STORAGE_BUCKETS = ['documents', 'logos', 'meeting-photos'];
 
+export interface ImportJobWarning {
+  table: string;
+  rowCount: number;
+  message: string;
+}
+
 export interface ImportJobStatus {
   status: 'running' | 'done' | 'error';
   tablesDone: number;
@@ -22,6 +28,11 @@ export interface ImportJobStatus {
   error: string | null;
   /** sync_log.id captured before any table was read — seeds the inbound watermark. */
   initialWatermarkId: number | null;
+  /** Lignes qu'aucune des deux passes n'a pu importer (voir la boucle de
+   *  retry ci-dessous) — l'import se termine quand même en `done` plutôt
+   *  que de bloquer indéfiniment tout le reste du cabinet derrière une
+   *  poignée de lignes qu'un ré-essai ne résoudra jamais. */
+  warnings: ImportJobWarning[];
 }
 
 const jobs = new Map<string, ImportJobStatus>();
@@ -48,16 +59,30 @@ async function fetchAllRows(cloudClient: SupabaseClient, table: string, tenantId
   return rows;
 }
 
-async function upsertRows(supabaseAdmin: SupabaseClient, table: string, rows: any[]): Promise<any[]> {
-  if (rows.length === 0) return [];
+interface UpsertResult {
+  failed: any[];
+  /** Le message Postgres/PostgREST de chaque lot en échec — sans lui, un
+   *  import raté ne renvoyait que « N ligne(s) en échec », sans dire
+   *  pourquoi (contrainte de clé étrangère, colonne manquante localement
+   *  après une migration pas encore rejouée, etc.), rendant le diagnostic
+   *  impossible pour l'utilisateur comme pour nous. */
+  errorMessages: string[];
+}
+
+async function upsertRows(supabaseAdmin: SupabaseClient, table: string, rows: any[]): Promise<UpsertResult> {
+  if (rows.length === 0) return { failed: [], errorMessages: [] };
   const failed: any[] = [];
+  const errorMessages: string[] = [];
   // Batch upserts to keep individual PostgREST payloads reasonable.
   for (let i = 0; i < rows.length; i += 200) {
     const batch = rows.slice(i, i + 200);
     const { error } = await supabaseAdmin.from(table).upsert(batch, { onConflict: 'id' });
-    if (error) failed.push(...batch);
+    if (error) {
+      failed.push(...batch);
+      errorMessages.push(error.message);
+    }
   }
-  return failed;
+  return { failed, errorMessages };
 }
 
 async function importJunctionRows(
@@ -124,6 +149,7 @@ export async function runInitialImport(
     filesDone: 0,
     error: null,
     initialWatermarkId: null,
+    warnings: [],
   };
   jobs.set(jobId, job);
 
@@ -142,13 +168,13 @@ export async function runInitialImport(
 
     const projectIds: string[] = [];
     const observationIds: string[] = [];
-    const pendingRetry: { table: string; rows: any[] }[] = [];
+    const pendingRetry: { table: string; rows: any[]; errorMessages: string[] }[] = [];
 
     for (const table of SYNC_TABLES) {
       job.currentTable = table;
       const rows = await fetchAllRows(cloudClient, table, tenantId);
-      const failed = await upsertRows(supabaseAdmin, table, rows);
-      if (failed.length > 0) pendingRetry.push({ table, rows: failed });
+      const { failed, errorMessages } = await upsertRows(supabaseAdmin, table, rows);
+      if (failed.length > 0) pendingRetry.push({ table, rows: failed, errorMessages });
 
       if (table === 'projects') projectIds.push(...rows.map((r) => r.id));
       if (table === 'observations') observationIds.push(...rows.map((r) => r.id));
@@ -160,11 +186,28 @@ export async function runInitialImport(
     // Same 2-pass retry pattern already used by electron/applySchema.cjs for
     // ordinary forward-reference issues (a table referencing another one
     // that happened to be imported later) — avoids hand-maintaining a full
-    // FK dependency graph across 44 tables.
-    for (const { table, rows } of pendingRetry) {
-      const stillFailed = await upsertRows(supabaseAdmin, table, rows);
+    // FK dependency graph across 44 tables. A row still failing after this
+    // second pass isn't a forward-reference problem any more (everything
+    // SYNC_TABLES could supply has already been written) — it's a row this
+    // import genuinely cannot place (e.g. a foreign key pointing at a row
+    // that doesn't exist for this tenant on the cloud either). Collecting it
+    // as a warning rather than throwing matters because SYNC_TABLES is a
+    // flat alphabetical list, not a dependency order: a handful of
+    // unrelated bad rows early in that order (e.g. `contrats_moe` before
+    // `projects`) used to abort the ENTIRE import before it ever reached
+    // `projects` itself, the junction tables, or storage — locking the
+    // whole tenant out of sync over a problem confined to a few rows that a
+    // retry was never going to fix anyway.
+    for (const { table, rows, errorMessages } of pendingRetry) {
+      const { failed: stillFailed, errorMessages: retryErrorMessages } = await upsertRows(supabaseAdmin, table, rows);
       if (stillFailed.length > 0) {
-        throw new Error(`${table}: ${stillFailed.length} row(s) failed to import after retry`);
+        // Le message Postgres/PostgREST réel (ex. contrainte de clé
+        // étrangère, colonne inconnue) plutôt qu'un simple décompte — sans
+        // lui, l'écran d'import affichait « N ligne(s) en échec » sans
+        // jamais dire pourquoi, rendant impossible tout diagnostic depuis
+        // l'application.
+        const detail = retryErrorMessages[0] || errorMessages[0] || 'raison inconnue';
+        job.warnings.push({ table, rowCount: stillFailed.length, message: detail });
       }
     }
 

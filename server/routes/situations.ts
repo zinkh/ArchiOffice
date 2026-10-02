@@ -7,6 +7,7 @@
 // mutations already here, just never extracted alongside them.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -38,6 +39,9 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, numero, date_situation, statut } = req.body;
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
         .insert({ id, project_id, numero, date_situation, statut })
@@ -87,6 +91,12 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, situation_id, dpgf_item_id, quantite_realisee, montant_situation } = req.body;
+      if (situation_id && !(await assertTenantEntity(supabaseAdmin, 'situations', situation_id, tenantId))) {
+        return res.status(400).json({ error: "Situation introuvable pour ce cabinet." });
+      }
+      if (dpgf_item_id && !(await assertTenantEntity(supabaseAdmin, 'dpgf_items', dpgf_item_id, tenantId))) {
+        return res.status(400).json({ error: "Ligne DPGF introuvable pour ce cabinet." });
+      }
       const id = bodyId || crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'detail_situations')
         .insert({ id, situation_id, dpgf_item_id, quantite_realisee, montant_situation })

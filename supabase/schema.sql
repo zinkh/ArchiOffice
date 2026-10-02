@@ -57,16 +57,55 @@ CREATE TABLE IF NOT EXISTS profiles (
   -- Horodatage du consentement à la politique de confidentialité / CGU,
   -- capturé à l'inscription (case à cocher obligatoire, voir Register.tsx).
   terms_accepted_at TIMESTAMPTZ,
+  -- Préférence personnelle : afficher ou non ses propres contacts personnels
+  -- dans la liste — voir migrate_contacts_personal_visibility.sql.
+  show_personal_contacts BOOLEAN NOT NULL DEFAULT true,
+  -- Signature de courrier personnelle — voir migrate_profile_mail_signature.sql.
+  mail_signature TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Créer automatiquement un profil à l'inscription
+-- Appartenance aux cabinets — un architecte peut exercer dans plusieurs
+-- structures (la sienne et une SCPA, un groupement...). `profiles` porte
+-- l'identité (une ligne par personne, clé = compte auth) ; l'appartenance et
+-- le rôle tenu, eux, sont par cabinet. Voir migrate_tenant_memberships.sql.
+-- `profiles.tenant_id` reste le cabinet PAR DÉFAUT (celui sur lequel une
+-- session s'ouvre), tenu synchrone avec `is_default` par
+-- server/tenantMemberships.ts.
+CREATE TABLE IF NOT EXISTS tenant_memberships (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  role        TEXT DEFAULT 'Member',
+  system_role TEXT DEFAULT 'user',
+  manager_id  UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (user_id, tenant_id)
+);
+
+-- Au plus un cabinet par défaut par personne, sans en imposer un.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_memberships_default
+  ON tenant_memberships(user_id) WHERE is_default = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_tenant ON tenant_memberships(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_tenant_memberships_user   ON tenant_memberships(user_id);
+
+-- Créer automatiquement un profil à l'inscription. `email` est copié depuis
+-- auth.users : sans lui, un compte né d'une connexion Google (qui ne passe
+-- par aucune route applicative avant ce trigger) se retrouvait avec
+-- `profiles.email` vide alors que l'adresse existe bien côté Auth — voir
+-- server/routes/agencySetup.ts::adminRecipients(), qui contournait déjà ce
+-- trou pour un seul appelant plutôt que de le fermer à la source.
+-- `DO UPDATE ... COALESCE` (pas DO NOTHING) : une route applicative qui a
+-- déjà upserté un profil plus riche avant que ce trigger s'exécute (course
+-- possible entre l'INSERT dans auth.users et le retour de l'appel) garde ses
+-- valeurs ; seul un email resté NULL est complété.
 CREATE OR REPLACE FUNCTION handle_new_user()
 RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
 BEGIN
-  INSERT INTO profiles (id, name)
-  VALUES (NEW.id, NEW.raw_user_meta_data->>'name')
-  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO profiles (id, name, email)
+  VALUES (NEW.id, NEW.raw_user_meta_data->>'name', NEW.email)
+  ON CONFLICT (id) DO UPDATE SET email = COALESCE(profiles.email, EXCLUDED.email);
   RETURN NEW;
 END;
 $$;
@@ -139,8 +178,8 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL, budget NUMERIC, category TEXT,
   start_date TEXT, end_date TEXT, description TEXT, image_url TEXT,
   project_code TEXT, address TEXT, client_siret TEXT, client_vat_number TEXT,
-  client_email TEXT, is_public_client INTEGER DEFAULT 0,
-  reference TEXT, projet_detail TEXT, is_entreprise INTEGER DEFAULT 0,
+  client_email TEXT, is_public_client BOOLEAN DEFAULT false,
+  reference TEXT, projet_detail TEXT, is_entreprise BOOLEAN DEFAULT false,
   nom_societe TEXT, rcs TEXT, representant TEXT, qualite TEXT,
   adresse_client TEXT, cp_client TEXT, ville_client TEXT,
   telephone TEXT, portable TEXT, email_client TEXT,
@@ -150,9 +189,14 @@ CREATE TABLE IF NOT EXISTS projects (
   type_projet TEXT, categorie_projet TEXT, surface_plancher TEXT,
   surface_plancher_ext TEXT, surface_erp TEXT, surface_ert TEXT,
   effectif_public TEXT, effectif_personnel TEXT, ind TEXT, date_modification TEXT,
-  is_complete_mission TEXT, is_chantier TEXT, etudes_notes TEXT, chantier_notes TEXT,
+  is_complete_mission BOOLEAN DEFAULT false, is_chantier BOOLEAN DEFAULT false, etudes_notes TEXT, chantier_notes TEXT,
   surface TEXT, construction_cost TEXT, remuneration TEXT, progression TEXT,
-  project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT
+  project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT,
+  -- Disponible hors connexion (voir supabase/migrate_project_offline_enabled.sql) :
+  -- cochée depuis la fiche projet, déclenche le préchargement en lecture seule
+  -- des données du projet dans le cache Dexie du navigateur — jamais activée
+  -- pour tous les projets à la fois, pour ne pas alourdir l'app sur les autres.
+  offline_enabled BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS project_categories_junction (
@@ -183,9 +227,9 @@ CREATE TABLE IF NOT EXISTS tenders (
   value NUMERIC, notes TEXT, mandataire_id TEXT, type TEXT,
   surface NUMERIC, construction_cost NUMERIC, honoraires_percent NUMERIC,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
-  mandatory_visit INTEGER DEFAULT 0, visit_date TEXT,
-  withdrawal_deadline TEXT, archived INTEGER DEFAULT 0,
-  ville_execution TEXT
+  mandatory_visit BOOLEAN DEFAULT false, visit_date TEXT,
+  withdrawal_deadline TEXT, archived BOOLEAN DEFAULT false,
+  ville_execution TEXT, description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tender_specialties (
@@ -195,12 +239,75 @@ CREATE TABLE IF NOT EXISTS tender_specialties (
   specialty_name TEXT NOT NULL, contact_id TEXT
 );
 
+-- Dossier de candidature d'un appel d'offres — voir migrate_tender_dossier.sql
+CREATE TABLE IF NOT EXISTS tender_competitors (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  name TEXT NOT NULL, info TEXT,
+  risk_level TEXT NOT NULL DEFAULT 'moyen' CHECK (risk_level IN ('faible', 'moyen', 'eleve')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_competitors_tender ON tender_competitors(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_evaluation_criteria (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  label TEXT NOT NULL, weight_pct NUMERIC NOT NULL DEFAULT 0, sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_tender_eval_criteria_tender ON tender_evaluation_criteria(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_pieces (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  section TEXT NOT NULL DEFAULT 'candidature' CHECK (section IN ('candidature', 'offre_technique', 'offre_financiere')),
+  label TEXT NOT NULL, obligatoire BOOLEAN NOT NULL DEFAULT TRUE, quantity_required INTEGER,
+  status TEXT NOT NULL DEFAULT 'a_fournir' CHECK (status IN ('a_fournir', 'fournie', 'detectee_ia')),
+  source_hint TEXT, document_id TEXT REFERENCES documents(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_pieces_tender ON tender_pieces(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_references (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  custom_reference_id UUID REFERENCES custom_references(id) ON DELETE CASCADE,
+  required BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CHECK (project_id IS NOT NULL OR custom_reference_id IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_tender_references_tender ON tender_references(tenant_id, tender_id);
+
+CREATE TABLE IF NOT EXISTS tender_methodology_notes (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'a_rediger' CHECK (status IN ('a_rediger', 'redige')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_methodology_tender ON tender_methodology_notes(tenant_id, tender_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS tender_activity_notes (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  tender_id TEXT REFERENCES tenders(id) ON DELETE CASCADE NOT NULL,
+  author_name TEXT NOT NULL, content TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_tender_activity_notes_tender ON tender_activity_notes(tenant_id, tender_id, created_at);
+
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   title TEXT NOT NULL, client_id TEXT REFERENCES contacts(id), amount NUMERIC, status TEXT NOT NULL,
   description TEXT, created_at TEXT, reference TEXT, projet_detail TEXT,
-  is_entreprise INTEGER DEFAULT 0, nom_societe TEXT, rcs TEXT,
+  is_entreprise BOOLEAN DEFAULT false, nom_societe TEXT, rcs TEXT,
   representant TEXT, qualite TEXT, adresse_client TEXT, cp_client TEXT,
   ville_client TEXT, telephone TEXT, portable TEXT, email_client TEXT,
   adresse_terrain TEXT, cp_ville_terrain TEXT, ref_cadastrale TEXT,
@@ -252,7 +359,7 @@ CREATE TABLE IF NOT EXISTS milestones (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, proposal_id TEXT, tender_id TEXT,
-  title TEXT NOT NULL, due_date TEXT NOT NULL, completed INTEGER DEFAULT 0,
+  title TEXT NOT NULL, due_date TEXT NOT NULL, completed BOOLEAN DEFAULT false,
   duration_days INTEGER, dependencies TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id, project_id);
@@ -260,7 +367,7 @@ CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id
 CREATE TABLE IF NOT EXISTS invoices (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  invoice_number TEXT, project_id TEXT, amount NUMERIC,
+  invoice_number TEXT, project_id TEXT REFERENCES projects(id) ON DELETE SET NULL, amount NUMERIC,
   tax_amount NUMERIC, total_amount NUMERIC, status TEXT NOT NULL,
   due_date TEXT, issue_date TEXT, description TEXT, created_at TEXT,
   seller_name TEXT, seller_address TEXT, seller_siret TEXT,
@@ -272,9 +379,12 @@ CREATE TABLE IF NOT EXISTS invoices (
   -- de invoice_number (le numéro légal séquentiel ci-dessus). phases porte
   -- la ventilation par phase de mission d'un acompte, même forme que
   -- notes_honoraires.phases : [{phase_id, phase_name, avancement_pct, montant_phase}]
-  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]'
+  affaire_invoice_number TEXT, phases jsonb DEFAULT '[]',
+  -- Maître d'Ouvrage de la facture — voir migrate_invoice_client_link.sql.
+  client_id TEXT REFERENCES contacts(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_tenant_project ON invoices(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_client_id ON invoices(client_id);
 
 CREATE TABLE IF NOT EXISTS invoice_items (
   id TEXT PRIMARY KEY,
@@ -327,14 +437,6 @@ CREATE INDEX IF NOT EXISTS idx_tasks_tenant_project  ON tasks(tenant_id, project
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_assignee ON tasks(tenant_id, assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_status   ON tasks(tenant_id, status);
 
-CREATE TABLE IF NOT EXISTS specifications (
-  id TEXT PRIMARY KEY,
-  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id TEXT, title TEXT NOT NULL, content TEXT,
-  last_updated TEXT, is_template INTEGER DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_specifications_tenant_project ON specifications(tenant_id, project_id);
-
 CREATE TABLE IF NOT EXISTS ordres_de_service (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -364,7 +466,10 @@ CREATE TABLE IF NOT EXISTS site_reports (
   meetingnotes TEXT, nextmeeting TEXT, meteo TEXT,
   temperature TEXT, effectif_total TEXT,
   attendance JSONB DEFAULT '[]', statut TEXT NOT NULL DEFAULT 'brouillon',
-  decisions JSONB DEFAULT '[]'
+  decisions JSONB DEFAULT '[]',
+  -- Suivi par lot (page 2 du CR : présence P/R/AE/ANE, effectif, retards,
+  -- intempéries, lieu) — supabase/migrate_site_report_lot_tracking.sql
+  lot_tracking JSONB DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 
@@ -414,7 +519,7 @@ CREATE TABLE IF NOT EXISTS receptions (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, date TEXT NOT NULL, type TEXT NOT NULL,
-  has_reserves INTEGER DEFAULT 0, reserves_count INTEGER DEFAULT 0,
+  has_reserves BOOLEAN DEFAULT false, reserves_count INTEGER DEFAULT 0,
   document_url TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_receptions_tenant_project ON receptions(tenant_id, project_id);
@@ -483,6 +588,18 @@ CREATE TABLE IF NOT EXISTS dpgfs (
   project_id TEXT, cctp_id TEXT, data TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dpgf_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT NOT NULL,
+  dpgf_id TEXT REFERENCES dpgfs(id) ON DELETE CASCADE NOT NULL,
+  label TEXT NOT NULL, phase TEXT, version TEXT,
+  document JSONB NOT NULL, created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dpgf_versions_project ON dpgf_versions(tenant_id, project_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL UNIQUE,
@@ -516,8 +633,19 @@ CREATE TABLE IF NOT EXISTS project_templates (
   default_status TEXT DEFAULT 'Planning',
   default_budget NUMERIC DEFAULT 0,
   default_description TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  -- migrate_project_templates_structure.sql : trame complète de l'affaire
+  operation_type TEXT CHECK (operation_type IS NULL OR operation_type IN ('neuf', 'rehabilitation', 'extension', 'maison_individuelle', 'permis_seul', 'autre')),
+  marche_type TEXT CHECK (marche_type IS NULL OR marche_type IN ('prive', 'public')),
+  default_lots JSONB NOT NULL DEFAULT '[]'::jsonb,
+  default_milestones JSONB NOT NULL DEFAULT '[]'::jsonb,
+  default_tasks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- migrate_project_templates_missions.sql : répartition des missions MOE
+  default_missions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  catalog_key TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS project_templates_tenant_catalog_key_idx
+  ON project_templates (tenant_id, catalog_key) WHERE catalog_key IS NOT NULL;
 
 -- ACT Data (Analyse Comparative des Offres)
 CREATE TABLE IF NOT EXISTS act_data (
@@ -591,6 +719,7 @@ CREATE INDEX IF NOT EXISTS idx_custom_references_tenant_id ON custom_references(
 -- Activer RLS sur toutes les tables métier
 ALTER TABLE tenants              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_memberships   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contacts             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contact_categories   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_categories   ENABLE ROW LEVEL SECURITY;
@@ -600,6 +729,12 @@ ALTER TABLE team_members         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_team         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenders              ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tender_specialties   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_competitors        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_evaluation_criteria ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_pieces             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_references         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_methodology_notes  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tender_activity_notes     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposals            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposal_specialties ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones           ENABLE ROW LEVEL SECURITY;
@@ -609,7 +744,6 @@ ALTER TABLE project_cotraitants  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_stakeholders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_lots         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks                ENABLE ROW LEVEL SECURITY;
-ALTER TABLE specifications       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordres_de_service    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_reports         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_report_notes    ENABLE ROW LEVEL SECURITY;
@@ -620,6 +754,7 @@ ALTER TABLE receptions           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reserves             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dpgf_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dpgf_versions        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_phase_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE situations           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detail_situations    ENABLE ROW LEVEL SECURITY;
@@ -645,7 +780,24 @@ ALTER TABLE project_members      ENABLE ROW LEVEL SECURITY;
 -- JWT de l'appelant, donc aucune isolation multi-tenant n'est affaiblie.
 CREATE OR REPLACE FUNCTION my_tenant_id()
 RETURNS UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT tenant_id FROM profiles WHERE id = auth.uid()
+  SELECT COALESCE(
+    (SELECT tenant_id FROM profiles WHERE id = auth.uid()),
+    (SELECT tenant_id FROM tenant_memberships WHERE user_id = auth.uid() AND is_default LIMIT 1),
+    (SELECT tenant_id FROM tenant_memberships WHERE user_id = auth.uid() ORDER BY created_at LIMIT 1)
+  )
+$$;
+
+-- L'ENSEMBLE des cabinets de la personne connectée. Les policies
+-- "tenant_isolation" ci-dessous gardent volontairement `my_tenant_id()` : le
+-- client ne requête aucune table directement (tout passe par l'API, qui
+-- tranche le cabinet actif par requête — server/tenantContext.ts), et une
+-- policy en `IN (...)` mélangerait au contraire les lignes des deux cabinets
+-- dans une même vue. Cette fonction sert aux vérifications d'appartenance.
+CREATE OR REPLACE FUNCTION my_tenant_ids()
+RETURNS SETOF UUID LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT tenant_id FROM tenant_memberships WHERE user_id = auth.uid()
+  UNION
+  SELECT tenant_id FROM profiles WHERE id = auth.uid() AND tenant_id IS NOT NULL
 $$;
 
 -- Politique générique : chaque user ne voit que les données de son tenant
@@ -665,6 +817,18 @@ CREATE POLICY "tenant_isolation" ON tenders
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON tender_specialties
   USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_competitors
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_evaluation_criteria
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_pieces
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_references
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_methodology_notes
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON tender_activity_notes
+  USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON proposals
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON proposal_specialties
@@ -682,8 +846,6 @@ CREATE POLICY "tenant_isolation" ON project_stakeholders
 CREATE POLICY "tenant_isolation" ON project_lots
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON tasks
-  USING (tenant_id = my_tenant_id());
-CREATE POLICY "tenant_isolation" ON specifications
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON ordres_de_service
   USING (tenant_id = my_tenant_id());
@@ -704,6 +866,8 @@ CREATE POLICY "tenant_isolation" ON plans
 CREATE POLICY "tenant_isolation" ON reserves
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON dpgf_items
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON dpgf_versions
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON project_phase_history
   USING (tenant_id = my_tenant_id());
@@ -735,6 +899,11 @@ CREATE POLICY "tenant_isolation" ON project_team
 -- Profiles : chaque user voit son propre profil + ceux de son tenant
 CREATE POLICY "own_profile" ON profiles
   USING (id = auth.uid() OR tenant_id = my_tenant_id());
+
+-- Adhésions : les siennes, plus celles des personnes du cabinet courant
+-- (c'est ce que la page Équipe affiche).
+CREATE POLICY "own_memberships" ON tenant_memberships
+  USING (user_id = auth.uid() OR tenant_id = my_tenant_id());
 
 -- Tenants : visible par ses membres uniquement
 CREATE POLICY "own_tenant" ON tenants
@@ -830,6 +999,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_document_templates_one_default_per_categor
 ALTER TABLE document_templates ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON document_templates USING (tenant_id = my_tenant_id());
 
+-- Modèles de mails transmis par l'application, personnalisables avec des
+-- placeholders (see migrate_email_templates.sql). Un modèle par genre de mail
+-- (`kind` : 'invoice', 'tender_solicitation', 'tender_relance'), pas de notion
+-- de catégories multiples ni de modèle par défaut comme document_templates —
+-- ici chaque genre EST le modèle. Éditable directement, sans dupliquer.
+CREATE TABLE IF NOT EXISTS email_templates (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  kind TEXT NOT NULL,
+  subject TEXT NOT NULL,
+  body TEXT NOT NULL,
+  created_by TEXT,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_email_templates_tenant_kind ON email_templates(tenant_id, kind);
+ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON email_templates USING (tenant_id = my_tenant_id());
+
 -- Time tracking + leave management (see migrate_add_time_and_leave.sql)
 CREATE TABLE IF NOT EXISTS time_entries (
   id TEXT PRIMARY KEY,
@@ -891,3 +1079,97 @@ CREATE POLICY "tenant_isolation" ON leave_balances USING (tenant_id = my_tenant_
 
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS default_leave_days_conges_payes NUMERIC DEFAULT 25;
 ALTER TABLE settings ADD COLUMN IF NOT EXISTS default_leave_days_rtt NUMERIC DEFAULT 0;
+
+-- ============================================================
+-- STOCKAGE EXTERNE — l'espace de stockage du cabinet
+-- (voir supabase/migrate_stockage_externe.sql)
+-- ============================================================
+-- Les documents et les plans peuvent être déposés sur le Google Drive, le
+-- Dropbox, le Nextcloud ou le kDrive du cabinet plutôt que dans Supabase
+-- Storage. Réglage du CABINET et non d'une personne : pas de user_id, et la
+-- policy ne porte que sur tenant_id.
+
+CREATE TABLE IF NOT EXISTS external_storage_connections (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  provider      TEXT NOT NULL,          -- 'google_drive' | 'dropbox' | 'webdav'
+  webdav_flavor TEXT,                   -- 'nextcloud' | 'kdrive' (affichage seulement)
+  display_name  TEXT,
+  external_account_email TEXT,
+  refresh_token TEXT, access_token TEXT, expires_at TIMESTAMPTZ, scopes TEXT,
+  drive_id      TEXT,
+  base_url      TEXT, username TEXT, password_encrypted TEXT,
+  root_folder_path        TEXT NOT NULL DEFAULT 'ArchiOffice',
+  root_folder_external_id TEXT,
+  is_active     BOOLEAN NOT NULL DEFAULT true,
+  status        TEXT NOT NULL DEFAULT 'ok',   -- 'ok' | 'needs_reauth' | 'error'
+  last_error    TEXT, last_error_at TIMESTAMPTZ, last_used_at TIMESTAMPTZ,
+  created_by    UUID,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+-- Un seul espace actif par cabinet, sans supprimer les connexions passées :
+-- les références déjà écrites citent leur connexion par identifiant.
+CREATE UNIQUE INDEX IF NOT EXISTS external_storage_connections_one_active_per_tenant_idx
+  ON external_storage_connections(tenant_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_external_storage_connections_tenant
+  ON external_storage_connections(tenant_id);
+
+CREATE TABLE IF NOT EXISTS external_storage_folders (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  connection_id UUID REFERENCES external_storage_connections(id) ON DELETE CASCADE NOT NULL,
+  folder_key    TEXT NOT NULL,
+  external_id   TEXT NOT NULL,
+  created_at       TIMESTAMPTZ DEFAULT NOW(),
+  last_verified_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS external_storage_folders_connection_key_idx
+  ON external_storage_folders(connection_id, folder_key);
+CREATE INDEX IF NOT EXISTS idx_external_storage_folders_tenant
+  ON external_storage_folders(tenant_id);
+
+ALTER TABLE external_storage_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE external_storage_folders     ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON external_storage_connections USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON external_storage_folders     USING (tenant_id = my_tenant_id());
+
+-- Colonne DÉRIVÉE de file_url, jamais la source de vérité de la résolution :
+-- elle n'existe que pour les filtres SQL du quota (server.ts) et de la jauge
+-- d'abonnement (server/routes/billing.ts), qui ne peuvent pas analyser une URI.
+ALTER TABLE documents         ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
+ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
+ALTER TABLE plans             ADD COLUMN IF NOT EXISTS storage_backend TEXT NOT NULL DEFAULT 'supabase';
+CREATE INDEX IF NOT EXISTS idx_document_versions_tenant_backend
+  ON document_versions(tenant_id, storage_backend);
+
+-- ── Réserves : commentaire, photos et projets ouverts récemment ──────────────
+-- Voir supabase/migrate_reserves_photos_recent_views.sql.
+-- (`gpa_reserves`, créée par migrate_add_manager_dashboard.sql, reçoit la même
+-- colonne dans la migration elle-même.)
+ALTER TABLE reserves ADD COLUMN IF NOT EXISTS description TEXT;
+
+CREATE TABLE IF NOT EXISTS reserve_photos (
+  id           TEXT PRIMARY KEY,
+  tenant_id    UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  reserve_id   TEXT NOT NULL,
+  reserve_kind TEXT NOT NULL DEFAULT 'opr' CHECK (reserve_kind IN ('opr', 'gpa')),
+  file_url     TEXT NOT NULL,
+  caption      TEXT,
+  uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_reserve_photos_reserve ON reserve_photos(tenant_id, reserve_kind, reserve_id);
+
+CREATE TABLE IF NOT EXISTS project_recent_views (
+  id         TEXT PRIMARY KEY,
+  tenant_id  UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  user_id    UUID NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  opened_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (user_id, project_id)
+);
+CREATE INDEX IF NOT EXISTS idx_project_recent_views_user ON project_recent_views(tenant_id, user_id);
+
+ALTER TABLE reserve_photos       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_recent_views ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON reserve_photos       USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON project_recent_views USING (tenant_id = my_tenant_id());

@@ -76,8 +76,25 @@ export function writeAdminUsers(users: AdminUser[]): void {
   fs.writeFileSync(adminUsersPath(), JSON.stringify(users, null, 2), { mode: 0o600 });
 }
 
+/**
+ * Racine des fichiers uploadés (devis, plans, photos de chantier...) —
+ * distincte de getDataDir() (base de données + petits fichiers de compte)
+ * depuis qu'electron/dataLocation.cjs laisse choisir les deux séparément :
+ * les documents peuvent vivre sur un disque réseau ou un dossier
+ * synchronisé, contrairement à la base, qui doit impérativement rester en
+ * local (voir le commentaire de tête de ce module). `OFFLINE_STORAGE_DIR`
+ * absent (poste installé avant que ce choix n'existe, ou hors Electron) ->
+ * repli sur l'ancien emplacement, sous OFFLINE_DATA_DIR, pour rester
+ * rétrocompatible.
+ */
+function getStorageRootDir(): string {
+  const dir = process.env.OFFLINE_STORAGE_DIR || path.join(getDataDir(), 'storage');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
 export function storageDir(bucket: string): string {
-  const dir = path.join(getDataDir(), 'storage', bucket);
+  const dir = path.join(getStorageRootDir(), bucket);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }

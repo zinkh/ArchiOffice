@@ -5,6 +5,8 @@
 // left off every prior bilan's "remaining" list by oversight rather than
 // deliberate deferral.
 import type { Express } from 'express';
+import { assertTenantEntity } from '../assertTenantEntity';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -33,14 +35,27 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
     try {
       const tenantId = await getTenantId(req.user.id);
       const {
-        project_id, os_number, march_number, title, date, description, lot, status, type,
+        project_id, os_number, march_number, marche_id, title, date, description, lot, status, type,
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature
       } = req.body || {};
+      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      // Un ordre de service s'adresse toujours à une entreprise sur un
+      // marché de travaux (marches_entreprises) — jamais un champ libre.
+      if (!marche_id) {
+        return res.status(400).json({ error: "Un ordre de service doit être rattaché à un marché de travaux." });
+      }
+      const { data: marche } = await supabaseAdmin.from('marches_entreprises').select('id, project_id').eq('id', marche_id).eq('tenant_id', tenantId).maybeSingle();
+      if (!marche) return res.status(400).json({ error: "Marché de travaux introuvable pour ce cabinet." });
+      if (project_id && (marche as any).project_id !== project_id) {
+        return res.status(400).json({ error: "Ce marché n'appartient pas au projet de l'ordre de service." });
+      }
       const id = crypto.randomUUID();
       const { data, error } = await supabaseAdmin.from('ordres_de_service').insert({
-        id, tenant_id: tenantId, project_id, os_number, march_number, title, date, description, lot,
+        id, tenant_id: tenantId, project_id, os_number, march_number, marche_id, title, date, description, lot,
         status: status || 'draft', type: type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
@@ -49,6 +64,7 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de l'ordre de service "${title || os_number}"`, title || os_number || '', id, 'ordre_de_service', 'Ordres de service');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'ordre_service.created', { id, project_id, title, os_number, entreprise });
       res.status(201).json(data);
     } catch (e: any) {
       console.error("Error creating OS:", e);
@@ -61,15 +77,19 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
-        os_number, march_number, title, date, description, lot, status, type,
+        os_number, march_number, marche_id, title, date, description, lot, status, type,
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature,
         date_emission, date_ar, date_execution, emetteur_os, destinataire_os, notes_ar,
         delai_execution, delai_unit
       } = req.body;
+      if (marche_id) {
+        const { data: marche } = await supabaseAdmin.from('marches_entreprises').select('id').eq('id', marche_id).eq('tenant_id', tenantId).maybeSingle();
+        if (!marche) return res.status(400).json({ error: "Marché de travaux introuvable pour ce cabinet." });
+      }
       const { error } = await supabaseAdmin.from('ordres_de_service').update({
-        os_number, march_number, title, date, description, lot, status, type: type || 'travaux',
+        os_number, march_number, marche_id, title, date, description, lot, status, type: type || 'travaux',
         maitrise_oeuvre_adresse, entreprise, origine_demande, montant_marche_ht, objet,
         date_fourniture, article_ccap, incidences_delais_type, incidences_delais_details,
         incidences_couts_type, montant_devis_presente, montant_devis_accepte, date_signature,

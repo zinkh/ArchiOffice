@@ -9,7 +9,9 @@ import { AGENT_RESOURCES } from '../types.js';
 // 1.x is a pure-JS text-only extractor with zero native dependencies.
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
-import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS } from './ocr.js';
+import { parseWithActiveEngine } from './documentParser.js';
+import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS, rasterizePdf, visionMimeType, ocrMaxPages, OCR_MIN_TEXT_CHARS } from './ocr.js';
+import { readExternalFile } from './externalFiles.js';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
@@ -68,7 +70,15 @@ function parseStorageRef(fileUrl: string): { bucket: string; path: string } | nu
 // plain fetch() against the stored reference URL, which would 401/403.
 // Falls back to a direct fetch for anything that isn't one of our own
 // storage refs (e.g. a document imported from an external link).
-async function readStorageObject(supabaseAdmin: any, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+export async function readStorageObject(supabaseAdmin: any, tenantId: string, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+  // Un fichier hébergé sur l'espace de stockage du cabinet (Google Drive,
+  // Dropbox, Nextcloud, kDrive) n'est joignable ni par Storage ni par un fetch
+  // direct : seul l'hôte sait construire l'adaptateur. Sans ce passage, les
+  // agents cesseraient de lire les pièces jointes récentes en rapportant
+  // simplement que le document est vide.
+  const external = await readExternalFile(tenantId, fileUrl || '');
+  if (external) return external;
+
   const ref = parseStorageRef(fileUrl || '');
   if (ref) {
     const { data, error } = await supabaseAdmin.storage.from(ref.bucket).download(ref.path);
@@ -94,6 +104,23 @@ const MAX_PRICE_CATALOG_ROWS = 40;
 const MAX_COST_HISTORY_ROWS = 30;
 const MAX_CCTP_EXCERPTS = 5;
 const MAX_CCTP_EXCERPT_CHARS = 2000;
+
+// La bibliothèque de connaissances d'un agent (réglementation, DTU, notices)
+// est, comme firm_knowledge, auto-injectée à chaque tour et facturée au
+// jeton — mêmes plafonds d'ordre de grandeur que les extraits de CCTP
+// ci-dessus, volontairement serrés : ce n'est pas un canal de recherche dans
+// un gros document, mais l'injection directe de quelques pièces courtes
+// choisies par l'architecte (voir CLAUDE.md, "Bibliothèque de connaissances
+// des agents").
+const MAX_KNOWLEDGE_DOCS = 10;
+const MAX_KNOWLEDGE_DOC_CHARS = 6000;
+const KNOWLEDGE_EXTRACTION_TIMEOUT_MS = 10_000;
+
+// Mémoire d'apprentissage (agent_learning_suggestions approuvées) : du texte
+// court déjà en base, pas un document à extraire — plafonds bien plus serrés
+// que la bibliothèque de connaissances, qui porte des pièces entières.
+const MAX_LEARNING_NOTES = 15;
+const MAX_LEARNING_NOTE_CHARS = 1000;
 
 function daysBetween(start: string, end: string): number | null {
   const s = new Date(start).getTime();
@@ -140,13 +167,110 @@ function summarizeCostHistory(rows: { designation: string; unite: string; prix_u
     .slice(0, MAX_COST_HISTORY_ROWS);
 }
 
+// Le CCTP n'est plus un document séparé (voir server/routes/dpgf.ts) : son
+// texte technique vit dans les champs `cctpDescription` portés par les lots,
+// chapitres et lignes du même arbre que le DPGF (src/components/pro/CCTPEditor.tsx).
+// Cette fonction rejoue donc, en miniature, la même marche que
+// projectDocTools.ts's summarizeCctp() pour en tirer un extrait par projet,
+// au lieu de lire l'ancienne table `specifications` — vidée de tout contenu
+// CCTP depuis que /specifications est devenue la bibliothèque d'ouvrages.
+function collectCctpText(lignes: any[]): string[] {
+  const out: string[] = [];
+  for (const l of lignes ?? []) {
+    if (l?.cctpDescription) out.push(String(l.cctpDescription));
+    if (Array.isArray(l?.children)) out.push(...collectCctpText(l.children));
+  }
+  return out;
+}
+
+function extractCctpExcerpt(dpgf: any): string | null {
+  const parts: string[] = [];
+  for (const lot of dpgf?.lots ?? []) {
+    if (lot?.cctpDescription) parts.push(String(lot.cctpDescription));
+    for (const chap of lot?.chapitres ?? []) {
+      if (chap?.cctpDescription) parts.push(String(chap.cctpDescription));
+      parts.push(...collectCctpText(chap?.lignes ?? []));
+    }
+  }
+  const text = parts.filter(Boolean).join('\n');
+  return text.trim().length > 0 ? text : null;
+}
+
+function summarizeCctpExcerpts(rows: { data: string | any }[]): { title: string; excerpt: string }[] {
+  const excerpts: { title: string; excerpt: string }[] = [];
+  for (const row of rows) {
+    if (excerpts.length >= MAX_CCTP_EXCERPTS) break;
+    const dpgf = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+    const text = extractCctpExcerpt(dpgf);
+    if (!text) continue;
+    excerpts.push({ title: dpgf?.titre || 'CCTP sans titre', excerpt: text.slice(0, MAX_CCTP_EXCERPT_CHARS) });
+  }
+  return excerpts;
+}
+
+// Extraction texte-seul (pas de vision) pour un document de la bibliothèque
+// de connaissances d'un agent : une réglementation ou un DTU est un texte,
+// jamais une photo à lire pixel par pixel comme une pièce jointe de message
+// (voir la note sur ctx.documentImages plus bas) — pas de branche vision ici,
+// volontairement, pour rester le sous-ensemble strictement nécessaire plutôt
+// que de dupliquer toute la marche à suivre de la boucle contentFetches
+// ci-dessous (redirection PDF scanné vers rasterizePdf comprise).
+export async function extractKnowledgeDocText(
+  supabaseAdmin: any,
+  tenantId: string,
+  doc: { name: string; file_url: string },
+  // Faux pour la bibliothèque d'un agent, relue à CHAQUE tour de chaque
+  // conversation : Nomic se paie à la page, et le même DTU refacturé à chaque
+  // message n'apporterait rien qu'une lecture locale n'ait déjà donné.
+  // Vrai pour une lecture ponctuelle (analyse du DCE, génération du CCTP).
+  allowNomic: boolean = true,
+): Promise<string | null> {
+  const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
+  if (!fetched) return null;
+  const { buffer, contentType } = fetched;
+  const lowerName = String(doc.name || '').toLowerCase();
+
+  // Nomic Parse quand il est le moteur choisi dans /admin (plans et pièces du
+  // DCE surtout, voir documentParser.ts) ; null = moteur local ci-dessous.
+  const nomicText = allowNomic ? await parseWithActiveEngine(lowerName, buffer) : null;
+  if (nomicText) return nomicText;
+
+  let text: string | null = null;
+  if (lowerName.endsWith('.pdf')) {
+    text = (await pdfParse(buffer)).text;
+  } else if (lowerName.endsWith('.docx')) {
+    text = (await mammoth.extractRawText({ buffer })).value;
+  } else if (contentType.includes('text') || contentType.includes('json') || contentType.includes('csv') || contentType.includes('xml')) {
+    text = buffer.toString('utf8');
+  }
+
+  if (isOcrCandidate(lowerName, text)) {
+    const ocr = await ocrDocument(lowerName, buffer).catch(() => null);
+    if (ocr?.text?.trim()) text = ocr.text;
+  }
+
+  return text && text.trim() ? text : null;
+}
+
 export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
   userId: string,
   currentAgentId: string,
   scopes: string[],
-  attachedDocumentIds: string[] = []
+  attachedDocumentIds: string[] = [],
+  // Décide, pour les pièces attachées à CE message, si une photo ou un PDF
+  // scanné part comme image (vision native) ou comme texte OCR — voir
+  // LlmProvider.supportsVision et LlmImage dans llm/types.ts. Faux par
+  // défaut : un appelant qui ne le passe pas (les tests existants, avant
+  // cette capacité) garde le comportement OCR d'origine plutôt que de
+  // planter sur un paramètre manquant.
+  supportsVision: boolean = false,
+  // capabilitiesFromAgent(agent).knowledge — indépendant de context_scopes,
+  // comme docsRead/docsWrite (voir AgentCapabilities.knowledge dans types.ts).
+  knowledgeEnabled: boolean = false,
+  // capabilitiesFromAgent(agent).learning — même indépendance de context_scopes.
+  learningEnabled: boolean = false
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -163,9 +287,12 @@ export async function buildAgentContext(
     recentDocuments: [],
     tasks: [],
     documentContents: [],
+    documentImages: [],
     colleagues: [],
     teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
+    knowledgeDocuments: [],
+    learningNotes: [],
   };
 
   const fetches: Promise<void>[] = [];
@@ -287,15 +414,38 @@ export async function buildAgentContext(
         })
     );
     fetches.push(
-      supabaseAdmin.from('specifications').select('title, content, is_template')
-        .eq('tenant_id', tenantId).not('content', 'is', null)
-        .order('is_template', { ascending: false }).order('last_updated', { ascending: false })
-        .limit(MAX_CCTP_EXCERPTS)
+      // Un peu plus de lignes que MAX_CCTP_EXCERPTS : `dpgfs` n'a pas de
+      // colonne de dernière mise à jour à trier dessus (voir schema.sql), et
+      // toutes les lignes n'ont pas forcément de texte CCTP renseigné — la
+      // marge donne à summarizeCctpExcerpts de quoi en trouver malgré tout.
+      supabaseAdmin.from('dpgfs').select('data')
+        .eq('tenant_id', tenantId)
+        .limit(MAX_CCTP_EXCERPTS * 10)
         .then((r: any) => {
-          if (r.error) { console.warn('[agent context] firm_knowledge specifications fetch failed:', r.error.message); return; }
-          ctx.firmKnowledge.cctpExcerpts = ((r.data || []) as any[])
-            .filter((s: any) => s.content && String(s.content).trim().length > 0)
-            .map((s: any) => ({ title: s.title, excerpt: String(s.content).slice(0, MAX_CCTP_EXCERPT_CHARS) }));
+          if (r.error) { console.warn('[agent context] firm_knowledge dpgfs (cctp) fetch failed:', r.error.message); return; }
+          ctx.firmKnowledge.cctpExcerpts = summarizeCctpExcerpts((r.data || []) as any[]);
+        })
+    );
+  }
+
+  // Mémoire d'apprentissage — corrections et notes déjà APPROUVÉES par
+  // l'architecte (agent_learning_suggestions), jamais une proposition encore
+  // 'pending'. Toujours peuplée quand learningEnabled, comme
+  // knowledgeDocuments : c'est ce qui referme la boucle de
+  // suggerer_amelioration une fois la proposition validée.
+  if (learningEnabled) {
+    fetches.push(
+      supabaseAdmin.from('agent_learning_suggestions')
+        .select('kind, title, content')
+        .eq('tenant_id', tenantId).eq('agent_id', currentAgentId).eq('status', 'approved')
+        .in('kind', ['correction', 'knowledge_note'])
+        .order('created_at', { ascending: false })
+        .limit(MAX_LEARNING_NOTES)
+        .then((r: any) => {
+          if (r.error) { console.warn('[agent context] learning notes fetch failed:', r.error.message); return; }
+          ctx.learningNotes = ((r.data || []) as any[]).map(row => ({
+            kind: row.kind, title: row.title, content: String(row.content || '').slice(0, MAX_LEARNING_NOTE_CHARS),
+          }));
         })
     );
   }
@@ -336,9 +486,43 @@ export async function buildAgentContext(
         // the object directly via Storage's download() API instead, which
         // bypasses the bucket's privacy the same way a table query bypasses
         // RLS — no signed URL needed.
-        const fetched = await readStorageObject(supabaseAdmin, doc.file_url);
+        const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
         if (!fetched) return;
         const { buffer, contentType } = fetched;
+
+        // Une photo (carte de visite, panneau, véhicule d'entreprise...) part
+        // en vision native quand le fournisseur actif sait la lire — jamais
+        // par l'OCR texte (ocrDocument/Tesseract), conçu pour un texte scanné
+        // à plat. Sur une photo prise en perspective, Tesseract ne produit
+        // pas "un peu moins bon" que la vision : il produit du bruit
+        // incohérent, que le modèle "corrige" ensuite en une donnée plausible
+        // mais fausse, sans jamais avoir vu les pixels réels. Voir LlmImage
+        // dans llm/types.ts.
+        const imageMime = visionMimeType(lowerName);
+        if (imageMime) {
+          if (supportsVision) {
+            ctx.documentImages.push({ id: doc.id, name: doc.name, mimeType: imageMime, data: buffer });
+            return;
+          }
+          // Fournisseur sans vision (ex. Mistral) : reste sur l'OCR texte
+          // classique ci-dessous, dégradé mais honnête — c'est le chemin
+          // isOcrCandidate/ocrDocument existant, inchangé.
+        }
+
+        // Moteur Nomic choisi dans /admin : lecture complète (couche texte,
+        // OCR, tableaux) d'un PDF ou d'un document Office — après la branche
+        // vision ci-dessus, qui reste préférée pour une photo. Null = moteur
+        // local, y compris après un échec de Nomic.
+        const nomicText = await parseWithActiveEngine(lowerName, buffer);
+        if (nomicText) {
+          ctx.documentContents.push({
+            id: doc.id,
+            name: doc.name,
+            content: '[Document lu par Nomic Parse.]\n\n' + nomicText.slice(0, MAX_DOC_BYTES),
+          });
+          console.log(`[agent context] document "${doc.name}" extracted by Nomic in ${Date.now() - docStart}ms (${nomicText.length} chars)`);
+          return;
+        }
 
         let text: string | null = null;
         let ocrNote = '';
@@ -361,10 +545,28 @@ export async function buildAgentContext(
           return;
         }
 
-        // PDF scanné (aucune couche texte exploitable) ou image : dernier
-        // recours par reconnaissance de caractères. Le résultat remplace le
-        // texte vide, et si l'OCR n'est pas disponible sur ce serveur on
-        // injecte la raison plutôt que rien, pour que l'agent puisse le dire.
+        // PDF scanné (aucune couche texte exploitable) : avec un fournisseur
+        // vision, ses pages rendues en image partent en vision native pour la
+        // même raison que ci-dessus — un PV ou un plan scanné à la va-vite
+        // n'est pas plus "plat" qu'une photo, et mérite la même lecture
+        // directe plutôt qu'un détour par Tesseract.
+        if (lowerName.endsWith('.pdf') && supportsVision && (!text || text.trim().length < OCR_MIN_TEXT_CHARS)) {
+          const pages = await rasterizePdf(buffer, ocrMaxPages()).catch(() => null);
+          if (pages && pages.length > 0) {
+            pages.forEach((page, i) => {
+              ctx.documentImages.push({ id: doc.id, name: `${doc.name} (page ${i + 1})`, mimeType: 'image/png', data: page });
+            });
+            return;
+          }
+          // pdftoppm absent de ce serveur : retombe sur l'OCR texte ci-dessous
+          // plutôt que de laisser le document sans aucun contenu.
+        }
+
+        // PDF scanné sans fournisseur vision, ou image sur un fournisseur
+        // sans vision : dernier recours par reconnaissance de caractères. Le
+        // résultat remplace le texte vide, et si l'OCR n'est pas disponible
+        // sur ce serveur on injecte la raison plutôt que rien, pour que
+        // l'agent puisse le dire.
         if (isOcrCandidate(lowerName, text)) {
           const ocrStart = Date.now();
           const ocr = await ocrDocument(lowerName, buffer).catch((e: any) => {
@@ -407,6 +609,36 @@ export async function buildAgentContext(
     });
 
     await Promise.all(contentFetches);
+  }
+
+  // Bibliothèque de connaissances de l'agent — auto-injectée à chaque tour,
+  // comme firm_knowledge, jamais conditionnée par attachedDocumentIds : ces
+  // documents (documents.resource_type = 'agents', resource_id = l'agent)
+  // ont été déposés une fois pour toutes par l'architecte via
+  // ResourceAttachments sur la fiche agent, pas joints à CE message.
+  if (knowledgeEnabled) {
+    const { data: knowledgeDocs } = await supabaseAdmin
+      .from('documents')
+      .select('id, name, file_url')
+      .eq('tenant_id', tenantId)
+      .eq('resource_type', 'agents')
+      .eq('resource_id', currentAgentId)
+      .order('uploaded_at', { ascending: false })
+      .limit(MAX_KNOWLEDGE_DOCS);
+
+    const knowledgeFetches = ((knowledgeDocs as any[]) || []).map((doc: any) =>
+      withTimeout(
+        extractKnowledgeDocText(supabaseAdmin, tenantId, doc, false).then(text => {
+          if (text) ctx.knowledgeDocuments.push({ title: doc.name, excerpt: text.slice(0, MAX_KNOWLEDGE_DOC_CHARS) });
+        }),
+        KNOWLEDGE_EXTRACTION_TIMEOUT_MS
+      ).catch((e: any) => {
+        // Même logique que l'extraction des pièces jointes : un document
+        // illisible ou trop lent est ignoré, jamais bloquant pour le tour.
+        console.log(`[agent context] knowledge document "${doc.name}" extraction failed: ${e?.message}`);
+      })
+    );
+    await Promise.all(knowledgeFetches);
   }
 
   return ctx;

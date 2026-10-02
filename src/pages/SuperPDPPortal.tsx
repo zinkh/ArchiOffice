@@ -57,7 +57,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; 
 function StatusBadge({ code }: { code: string }) {
   const s = STATUS_LABELS[code] || { label: code, color: 'var(--tblr-muted)', bg: 'var(--tblr-surface-2)', border: 'var(--tblr-border)', icon: null };
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider"
       style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>
       {s.icon}{s.label}
     </span>
@@ -182,7 +182,8 @@ export default function SuperPDPPortal() {
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Facture</th>
@@ -208,7 +209,7 @@ export default function SuperPDPPortal() {
                           <p className="font-bold text-xs" style={{ color: 'var(--tblr-text)' }}>
                             {inv.en_invoice?.number || local?.invoice_number || `PDP #${inv.id}`}
                           </p>
-                          <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                          <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                             {inv.en_invoice?.issue_date || local?.issue_date || new Date(inv.created_at).toLocaleDateString('fr-FR')}
                           </p>
                         </div>
@@ -218,7 +219,7 @@ export default function SuperPDPPortal() {
                       <p className="text-xs font-medium" style={{ color: 'var(--tblr-text)' }}>
                         {inv.direction === 'out' ? (inv.en_invoice?.buyer?.name || local?.project_name || '—') : (inv.en_invoice?.seller?.name || '—')}
                       </p>
-                      <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+                      <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
                         {inv.direction === 'out' ? 'Émise' : 'Reçue'}
                       </p>
                     </td>
@@ -236,13 +237,13 @@ export default function SuperPDPPortal() {
                       <div className="flex flex-col gap-0.5 max-h-20 overflow-y-auto">
                         {inv.events.slice().reverse().map(ev => (
                           <div key={ev.id} className="flex items-center gap-1.5">
-                            <span className="text-[9px] font-mono" style={{ color: 'var(--tblr-muted)' }}>
+                            <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>
                               {new Date(ev.created_at).toLocaleDateString('fr-FR')}
                             </span>
                             <StatusBadge code={ev.status_code} />
                           </div>
                         ))}
-                        {inv.events.length === 0 && <span className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>Aucun événement</span>}
+                        {inv.events.length === 0 && <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Aucun événement</span>}
                       </div>
                     </td>
                     <td className="px-5 py-4 text-right">
@@ -265,6 +266,7 @@ export default function SuperPDPPortal() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -277,7 +279,8 @@ export default function SuperPDPPortal() {
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Situation</th>
@@ -299,7 +302,7 @@ export default function SuperPDPPortal() {
                       </div>
                       <div>
                         <p className="font-bold text-xs" style={{ color: 'var(--tblr-text)' }}>Sit. n°{sit.numero_situation}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(sit.date_situation).toLocaleDateString('fr-FR')}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{new Date(sit.date_situation).toLocaleDateString('fr-FR')}</p>
                       </div>
                     </div>
                   </td>
@@ -315,7 +318,7 @@ export default function SuperPDPPortal() {
                   </td>
                   <td className="px-5 py-4">
                     {sit.etat_acompte_joint_at
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}><IconCircleCheck size={12} /> Joint</span>
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}><IconCircleCheck size={12} /> Joint</span>
                       : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Non joint</span>}
                   </td>
                   <td className="px-5 py-4 text-right">
@@ -335,6 +338,7 @@ export default function SuperPDPPortal() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

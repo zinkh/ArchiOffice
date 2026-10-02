@@ -9,6 +9,7 @@
 // pour le modèle. Tout ce qui est géométrie est donc retiré avant de rendre
 // la réponse, et le nombre d'entités est plafonné.
 import type { FunctionDeclarationLike, ToolOutcome } from './toolTypes.js';
+import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 const MAX_FEATURES = 10;
 const GEOMETRY_KEYS = new Set(['geometry', 'coordinates', 'geo_shape', 'geo_point_2d', 'contour', 'bbox']);
@@ -28,9 +29,9 @@ export function stripGeometry(value: unknown, depth = 0): unknown {
   return value;
 }
 
-async function getJson(baseUrl: string, path: string, authHeader: string): Promise<{ ok: boolean; data: any }> {
+async function getJson(baseUrl: string, path: string, auth: InternalAuth): Promise<{ ok: boolean; data: any }> {
   try {
-    const res = await fetch(baseUrl + path, { headers: { Authorization: authHeader } });
+    const res = await fetch(baseUrl + path, { headers: internalHeaders(auth) });
     const data = await res.json().catch(() => null);
     return { ok: res.ok, data };
   } catch (e: any) {
@@ -95,7 +96,7 @@ export function buildGeoTools(): FunctionDeclarationLike[] {
 
 export async function executeGeoTool(
   baseUrl: string,
-  authHeader: string,
+  auth: InternalAuth,
   name: string,
   args: Record<string, unknown>
 ): Promise<ToolOutcome> {
@@ -109,7 +110,7 @@ export async function executeGeoTool(
   if (name === 'search_address') {
     const query = String(args.query || '').trim();
     if (!query) return { response: { error: 'query est requis.' } };
-    const { ok, data } = await getJson(baseUrl, `/api/address-search?q=${encodeURIComponent(query)}`, authHeader);
+    const { ok, data } = await getJson(baseUrl, `/api/address-search?q=${encodeURIComponent(query)}`, auth);
     if (!ok) return { response: { error: data?.error || "Recherche d'adresse impossible." } };
     const features = (data?.features || []).slice(0, MAX_FEATURES).map((f: any) => ({
       label: f.properties?.label,
@@ -124,14 +125,14 @@ export async function executeGeoTool(
   }
 
   if (name === 'get_parcelle_cadastrale') {
-    const { ok, data } = await getJson(baseUrl, `/api/cadastre/parcel?lat=${lat}&lon=${lon}`, authHeader);
+    const { ok, data } = await getJson(baseUrl, `/api/cadastre/parcel?lat=${lat}&lon=${lon}`, auth);
     if (!ok) return { response: { error: data?.error || 'Recherche cadastrale impossible.' } };
     return { response: { parcelles: stripGeometry(data) }, summary: 'Parcelle cadastrale consultée' };
   }
 
   if (name === 'get_zone_plu') {
     const geom = encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: [lon, lat] }));
-    const { ok, data } = await getJson(baseUrl, `/api/urbanisme?geom=${geom}`, authHeader);
+    const { ok, data } = await getJson(baseUrl, `/api/urbanisme?geom=${geom}`, auth);
     if (!ok) return { response: { error: data?.error || 'Consultation du PLU impossible.' } };
     return { response: { urbanisme: stripGeometry(data) }, summary: 'Zonage PLU consulté' };
   }
@@ -139,7 +140,7 @@ export async function executeGeoTool(
   if (name === 'get_risques') {
     const insee = String(args.code_insee || '').trim();
     if (!insee) return { response: { error: 'code_insee est requis (renvoyé par search_address).' } };
-    const { ok, data } = await getJson(baseUrl, `/api/georisques?latitude=${lat}&longitude=${lon}&code_insee=${encodeURIComponent(insee)}`, authHeader);
+    const { ok, data } = await getJson(baseUrl, `/api/georisques?latitude=${lat}&longitude=${lon}&code_insee=${encodeURIComponent(insee)}`, auth);
     if (!ok) return { response: { error: data?.error || 'Consultation Géorisques impossible.' } };
     return { response: { risques: stripGeometry(data) }, summary: 'Risques Géorisques consultés' };
   }
@@ -147,7 +148,7 @@ export async function executeGeoTool(
   if (name === 'get_monuments_historiques') {
     const distanceArg = Number(args.distance);
     const distance = Number.isFinite(distanceArg) && distanceArg > 0 ? Math.min(distanceArg, 50000) : 1000;
-    const { ok, data } = await getJson(baseUrl, `/api/historical-monuments?lat=${lat}&lon=${lon}&distance=${distance}`, authHeader);
+    const { ok, data } = await getJson(baseUrl, `/api/historical-monuments?lat=${lat}&lon=${lon}&distance=${distance}`, auth);
     if (!ok) return { response: { error: data?.error || 'Consultation des monuments historiques impossible.' } };
     return { response: { rayon_m: distance, monuments: stripGeometry(data) }, summary: 'Monuments historiques consultés' };
   }

@@ -66,13 +66,13 @@ export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'def
               </span>
               <span className={cn('text-center leading-tight', compact ? 'max-w-[64px]' : 'max-w-[92px]')}>
                 <span
-                  className={cn('block font-bold whitespace-nowrap', compact ? 'text-[10px]' : 'text-[11px]')}
+                  className={cn('block font-bold whitespace-nowrap', compact ? 'text-[0.6875rem]' : 'text-[0.6875rem]')}
                   style={{ color: status === 'upcoming' ? 'var(--tblr-muted)' : 'var(--tblr-text)' }}
                 >
                   {step.label}
                 </span>
                 {step.description && !compact && (
-                  <span className="block text-[10px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                  <span className="block text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                     {step.description}
                   </span>
                 )}

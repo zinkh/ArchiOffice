@@ -7,15 +7,39 @@ directories:
 # no token embedded in the shipped app. .github/workflows/build-windows.yml
 # publishes here (GH_TOKEN, the workflow's own default token, is enough for
 # a same-repo release since the repo is public).
+#
+# releaseType: release, not electron-builder's own default of draft — every
+# `vX.Y.Z` tag pushed so far (v1.0.1, v1.0.2) had already been created as a
+# real, non-draft GitHub Release (via the web UI) before CI ever ran. With
+# the default, electron-builder's own publishingType (draft) didn't match
+# that existingType (release) and it silently skipped uploading the
+# installer/blockmap/latest.yml to it — confirmed in the v1.0.1 build log:
+# "GitHub release not created  reason=existing type not compatible with
+# publishing type tag=v1.0.1 version=1.0.1 existingType=release
+# publishingType=draft". The job still exited 0, so nothing looked wrong —
+# but electron-updater had no latest.yml to find on either release, hence
+# every install stayed on 1.0.1 no matter how many tags were pushed after.
 publish:
   provider: github
   owner: zinkh
   repo: ArchiOffice
+  releaseType: release
 # The Express server is bundled into a single self-contained file by esbuild
 # (dist-server/server.cjs) and the frontend is the static dist/ SPA, so
-# neither needs any node_modules shipped. Neither embedded-postgres nor pg has
-# a native .node addon needing an Electron ABI rebuild (embedded-postgres
-# ships a plain OS executable), so npmRebuild stays off.
+# neither needs any node_modules shipped. This must stay true for EVERY
+# runtime dependency `server.ts` pulls in (transitively or not) — a package
+# left `--external` in build:server (package.json) without an entry in
+# extraResources below produces exactly the same failure @modelcontextprotocol/sdk
+# did in 1.0.8: `dist-server/server.cjs` requires it, resources/node_modules
+# doesn't have it, the packaged app crashes at every launch with
+# MODULE_NOT_FOUND — Postgres/PostgREST both come up fine first, so the splash
+# screen only reports the failure on its last step ("Démarrage du serveur
+# applicatif"), 90s later. Fixed by dropping that flag and letting esbuild
+# bundle the SDK like everything else (its own dependency closure — Express 5,
+# Hono, ajv, zod, jose... — is too deep to hand-list here the way pg's is
+# below). Neither embedded-postgres nor pg has a native .node addon needing an
+# Electron ABI rebuild (embedded-postgres ships a plain OS executable), so
+# npmRebuild stays off.
 npmRebuild: false
 # asar stays enabled (default) for speed and a compact install — but
 # embedded-postgres isn't asar-aware: it resolves its own binary path via

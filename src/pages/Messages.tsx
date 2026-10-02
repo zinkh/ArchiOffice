@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconSend, IconPaperclip, IconPlus, IconX, IconSearch, IconUsersGroup,
   IconArrowLeft, IconFile, IconDownload, IconMessageCircle, IconLogout, IconCheck,
@@ -118,7 +119,7 @@ function NewConversationModal({ teamMembers, onClose, onCreated }: {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[80vh]">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col max-h-[80dvh]">
         <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between shrink-0">
           <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Nouvelle conversation</h3>
           <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
@@ -174,6 +175,7 @@ function NewConversationModal({ teamMembers, onClose, onCreated }: {
 }
 
 export default function Messages() {
+  const { t } = useTranslation();
   const { currentUser } = useUser();
   const [searchParams, setSearchParams] = useSearchParams();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -317,7 +319,7 @@ export default function Messages() {
 
   const leaveConversation = async () => {
     if (!selectedId || !currentUser) return;
-    if (!window.confirm('Quitter ce groupe ?')) return;
+    if (!window.confirm(t('messages_confirm_leave_group'))) return;
     try {
       await apiFetch(`/api/conversations/${selectedId}/participants/${currentUser.id}`, { method: 'DELETE' });
       setConversations(prev => prev.filter(c => c.id !== selectedId));
@@ -330,7 +332,7 @@ export default function Messages() {
   const totalUnread = conversations.reduce((sum, c) => sum + c.unread_count, 0);
 
   return (
-    <div className="h-[calc(100vh-8rem)] flex bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
+    <div className="h-[calc(100dvh-8rem)] flex bg-white dark:bg-zinc-800 rounded-2xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-hidden">
       {/* Conversation list */}
       <div className={cn(
         "w-full sm:w-80 border-r border-zinc-100 dark:border-zinc-700/50 flex flex-col shrink-0",
@@ -340,7 +342,7 @@ export default function Messages() {
           <h2 className="font-bold text-zinc-900 dark:text-white flex items-center gap-2">
             <IconMessageCircle size={18} className="text-blue-600 dark:text-blue-400" />
             Messages
-            {totalUnread > 0 && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white">{totalUnread}</span>}
+            {totalUnread > 0 && <span className="text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white">{totalUnread}</span>}
           </h2>
           <button
             onClick={() => setShowNewConversation(true)}
@@ -372,12 +374,12 @@ export default function Messages() {
                   <span className={cn("text-sm truncate", conv.unread_count > 0 ? "font-bold text-zinc-900 dark:text-white" : "font-medium text-zinc-700 dark:text-zinc-300")}>
                     {conv.name}
                   </span>
-                  <span className="text-[10px] text-zinc-400 shrink-0">{timeAgo(conv.last_message_at)}</span>
+                  <span className="text-[0.6875rem] text-zinc-400 shrink-0">{timeAgo(conv.last_message_at)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{conv.last_message || 'Aucun message'}</span>
                   {conv.unread_count > 0 && (
-                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white shrink-0">{conv.unread_count}</span>
+                    <span className="text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full bg-rose-500 text-white shrink-0">{conv.unread_count}</span>
                   )}
                 </div>
               </div>
@@ -405,7 +407,7 @@ export default function Messages() {
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm text-zinc-900 dark:text-white truncate">{selectedConversation.name}</p>
                 {selectedConversation.is_group && (
-                  <p className="text-[11px] text-zinc-400 truncate">{selectedConversation.participants.map(p => p.name).join(', ')}</p>
+                  <p className="text-[0.6875rem] text-zinc-400 truncate">{selectedConversation.participants.map(p => p.name).join(', ')}</p>
                 )}
               </div>
               {selectedConversation.is_group && (
@@ -426,7 +428,7 @@ export default function Messages() {
                       style={isMine ? ({ '--tblr-primary': '#ffffff', '--tblr-border': 'rgba(255,255,255,0.5)' } as React.CSSProperties) : undefined}
                     >
                       {!isMine && selectedConversation.is_group && (
-                        <p className="text-[10px] font-bold opacity-70 mb-0.5">{msg.sender_name}</p>
+                        <p className="text-[0.6875rem] font-bold opacity-70 mb-0.5">{msg.sender_name}</p>
                       )}
                       {msg.content && <div className="text-sm">{renderTextWithMentions(msg.content, [])}</div>}
                       {msg.attachment_url && (
@@ -440,7 +442,7 @@ export default function Messages() {
                           </button>
                         )
                       )}
-                      <p className={cn("text-[9px] mt-1", isMine ? "text-blue-100" : "text-zinc-400")}>{timeAgo(msg.created_at)}</p>
+                      <p className={cn("text-[0.6875rem] mt-1", isMine ? "text-blue-100" : "text-zinc-400")}>{timeAgo(msg.created_at)}</p>
                     </div>
                   </div>
                 );
