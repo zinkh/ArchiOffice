@@ -1,0 +1,28 @@
+-- ============================================================
+-- ArchiOffice — Migration : écriture du CCTP/DPGF par les agents
+-- ============================================================
+-- Même principe qu'une colonne de plus par capacité (web_fetch_enabled,
+-- mail_enabled, geo_enabled, docs_read_enabled, delegate_enabled,
+-- notify_users_enabled, web_search_enabled) plutôt qu'une entrée dans
+-- action_scopes : le risque et la surface exposée ne sont pas ceux d'une
+-- écriture CRUD classique, réglable agent par agent depuis /agents/:id/edit.
+--
+-- docs_write_enabled active write_dpgf_article
+-- (packages/archioffice-agents/src/server/projectDocTools.ts) : créer ou
+-- modifier un article du CCTP/DPGF d'un projet (texte technique et/ou ligne
+-- chiffrée). Sans elle, un agent n'a AUCUN moyen d'écrire un CCTP ou un DPGF
+-- — avant cette migration, un agent qui devait tout de même produire
+-- quelque chose écrivait dans la ressource 'specifications' (AGENT_RESOURCES),
+-- une table que l'application n'affiche plus comme un CCTP depuis que
+-- /specifications est devenue la bibliothèque d'ouvrages (voir CLAUDE.md,
+-- « Le CCTP n'est pas un document séparé ») : la fiche créée restait
+-- invisible pour l'utilisateur qui l'avait demandée, comme l'incident du
+-- 7 septembre 2026 déjà documenté sur cette même ressource.
+--
+-- Palier distinct de la lecture, jamais implicite, même invariant que
+-- mail_send_enabled : docs_write_enabled ne peut être vrai que si
+-- docs_read_enabled l'est aussi (capabilitiesFromAgent et PUT
+-- /api/agents/:id appliquent le même ET) — écrire un article cohérent
+-- suppose de pouvoir relire le document. Off par défaut, et jamais hérité
+-- d'un template (voir routes.ts, POST /api/agents), comme mail_send_enabled.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS docs_write_enabled BOOLEAN NOT NULL DEFAULT FALSE;

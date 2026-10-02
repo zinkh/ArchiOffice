@@ -8,8 +8,16 @@ import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLette
 import { montantEnLettres } from './numberToFrenchWords';
 import type { NoteHonoraires, ContratMOE, NoteHonorairePhase } from '../types';
 
+// Intl.NumberFormat('fr-FR', …) sépare les milliers par une espace fine
+// insécable (U+202F) — jsPDF ne sait pas la placer dans les polices standard
+// (Helvetica/WinAnsi) et la remplace silencieusement par un « / » dans le flux
+// PDF généré (vérifié sur le contenu du PDF produit : `Tj` porte littéralement
+// "18/898,25" au lieu de "18 898,25"). Une espace normale est un caractère
+// WinAnsi ordinaire, correctement mesurée et rendue.
 const fmt = (n?: number) =>
-  new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n || 0);
+  new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    .format(n || 0)
+    .replace(/[  ]/g, ' ');
 
 const sanitize = (s: string) => (s || 'note').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w-]+/g, '_');
 
@@ -40,28 +48,46 @@ export async function exportNoteHonorairesToPDF(
   };
   let y = drawAgencyHeader(doc, settings, letterhead);
 
-  // ── Parties ────────────────────────────────────────────────────────────
-  const champ = (label: string, value?: string) => {
-    if (!value) return;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(17, 24, 39);
-    doc.text(label, 14, y);
-    doc.setFont('helvetica', 'normal');
-    const wrapped = doc.splitTextToSize(value, 128) as string[];
-    doc.text(wrapped, 60, y);
-    y += 5 * Math.max(1, wrapped.length);
-  };
-
   const moeNames = [
     settings.agencyName,
     ...(contrat?.cotraitants || []).map(c => c.contact_name || c.specialty).filter(Boolean),
   ].filter(Boolean).join('\n');
 
+  // ── Parties ────────────────────────────────────────────────────────────
+  // La colonne des valeurs démarrait à un x fixe (60) sans rapport avec la
+  // largeur réelle des libellés : « Coût prévisionnel des travaux HT : » à
+  // 9 pt gras mesure ~52 mm, largement au-delà des 46 mm laissés entre le
+  // début du libellé (x=14) et cette colonne — la valeur s'imprimait donc
+  // par-dessus la fin du libellé. La position de la colonne est maintenant
+  // dérivée du libellé le plus large RÉELLEMENT affiché (les champs sont
+  // conditionnels — un projet sans coût prévisionnel n'affiche pas cette
+  // ligne, et ne doit pas pour autant réserver sa place), avec une marge de
+  // 3 mm avant la valeur.
+  const champs: [string, string | undefined][] = [
+    ['Concerne :', project.name],
+    ["Maître d'Ouvrage :", project.client],
+    ["Maître d'Œuvre :", moeNames],
+    ['Objet :', note.objet],
+    ...(project.construction_cost
+      ? ([['Coût prévisionnel des travaux HT :', `${fmt(project.construction_cost)} €`]] as [string, string][])
+      : []),
+  ];
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+  const labelWidths = champs.filter(([, v]) => v).map(([label]) => doc.getTextWidth(label));
+  const valueX = 14 + Math.max(16, ...labelWidths) + 3;
+
+  const champ = (label: string, value?: string) => {
+    if (!value) return;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(17, 24, 39);
+    doc.text(label, 14, y);
+    doc.setFont('helvetica', 'normal');
+    const wrapped = doc.splitTextToSize(value, 196 - valueX) as string[];
+    doc.text(wrapped, valueX, y);
+    y += 5 * Math.max(1, wrapped.length);
+  };
+
   y += 2;
-  champ('Concerne :', project.name);
-  champ("Maître d'Ouvrage :", project.client);
-  champ("Maître d'Œuvre :", moeNames);
-  champ('Objet :', note.objet);
-  if (project.construction_cost) champ('Coût prévisionnel des travaux HT :', `${fmt(project.construction_cost)} €`);
+  champs.forEach(([label, value]) => champ(label, value));
   y += 4;
 
   // ── Récapitulatif financier ────────────────────────────────────────────
@@ -101,49 +127,103 @@ export async function exportNoteHonorairesToPDF(
   // ── Annexe : ventilation par mission et par intervenant ───────────────
   const cotraitants = note.cotraitants_facturation || [];
   const sousTraitants = note.sous_traitants_facturation || [];
+  // Le nom affiché est relu depuis le contrat courant (par contact_id), pas
+  // depuis le `nom` figé dans la note à sa création — sinon renommer un
+  // intervenant dans le contrat après coup ne se répercute jamais sur les
+  // notes déjà enregistrées. Un intervenant retiré du contrat depuis garde
+  // son dernier nom connu plutôt qu'un intitulé vide.
+  const liveName = (entry: { contact_id?: string; nom: string }, contratList: any[] | undefined) => {
+    const rec = (contratList || []).find((c: any) => (c.contact_id || c.contact_name) === (entry.contact_id || entry.nom));
+    return rec?.contact_name || rec?.specialty || entry.nom;
+  };
   const intervenants: { key: string; nom: string; isAgence: boolean }[] = [
     { key: '__agence__', nom: settings.agencyName || 'Agence', isAgence: true },
-    ...cotraitants.map(c => ({ key: c.contact_id || c.nom, nom: c.nom, isAgence: false })),
-    ...sousTraitants.map(s => ({ key: s.contact_id || s.nom, nom: s.nom, isAgence: false })),
+    ...cotraitants.map(c => ({ key: c.contact_id || c.nom, nom: liveName(c, contrat?.cotraitants), isAgence: false })),
+    ...sousTraitants.map(s => ({ key: s.contact_id || s.nom, nom: liveName(s, contrat?.sous_traitants), isAgence: false })),
   ];
 
   if ((note.phases || []).length > 0) {
-    const landscape = intervenants.length > 3;
+    // -1 : la colonne Groupement occupe désormais une place de plus, en
+    // plus de "Mission" et de chaque intervenant.
+    const landscape = intervenants.length > 2;
     (doc as any).addPage('a4', landscape ? 'landscape' : 'portrait');
     const annexeLetterhead = { ...letterhead, title: `Annexe — Note N° ${note.numero || ''}`, subtitle: 'Ventilation par mission' };
     const ay = drawAgencyHeader(doc, settings, annexeLetterhead);
 
     const findPhase = (list: NoteHonorairePhase[] | undefined, phaseId: string) => (list || []).find(p => p.phase_id === phaseId);
+    // Le pourcentage d'un membre du groupement est sa QUOTE-PART du montant de
+    // la mission (`part_pct`), l'avancement étant porté une seule fois par le
+    // groupement. Repli sur `avancement_pct` pour les notes enregistrées avant
+    // cette refonte, où chaque intervenant portait son propre avancement.
+    const pctFor = (p: NoteHonorairePhase) => p.part_pct ?? p.avancement_pct ?? 0;
     const cellFor = (intervenantKey: string, phaseId: string) => {
       if (intervenantKey === '__agence__') {
         const p = findPhase(note.phases, phaseId);
-        return p ? `${p.avancement_pct || 0}% · ${fmt(p.montant_phase)} €` : '—';
+        return p ? `${pctFor(p)}% · ${fmt(p.montant_phase)} €` : '—';
       }
       const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === intervenantKey);
       const p = findPhase(owner?.phases, phaseId);
-      return p ? `${p.avancement_pct || 0}% · ${fmt(p.montant_phase)} €` : '—';
+      if (!p) return '—';
+      // Un sous-traitant n'a pas de quote-part : il est réglé d'un montant.
+      const estSousTraitant = sousTraitants.some(s => (s.contact_id || s.nom) === intervenantKey);
+      return estSousTraitant ? `${fmt(p.montant_phase)} €` : `${pctFor(p)}% · ${fmt(p.montant_phase)} €`;
     };
     const totalFor = (intervenantKey: string) => {
       if (intervenantKey === '__agence__') return note.montant_ht || 0;
       const owner = [...cotraitants, ...sousTraitants].find(c => (c.contact_id || c.nom) === intervenantKey);
       return owner?.montant_ht || 0;
     };
+    // Total pour tout le groupement — la note d'honoraires facture l'équipe
+    // entière, la colonne agence seule ne reflète que ce qui part en facture
+    // brouillon. Ce sont les MEMBRES (agence + cotraitants) qui facturent le
+    // maître d'ouvrage : ce qu'un membre reverse à ses sous-traitants est déjà
+    // compris dans son montant, donc seuls les sous-traitants réglés en direct
+    // par le maître d'ouvrage s'y ajoutent. Additionner toutes les colonnes
+    // compterait deux fois la sous-traitance portée par un membre.
+    // Le payeur est relu sur le CONTRAT (par `contact_id`), comme les noms
+    // ci-dessus : c'est lui qui fait foi, la valeur figée dans la note ne
+    // servant de repli que si le sous-traitant a depuis été retiré du contrat.
+    const paye = (st: { contact_id?: string; nom: string; payeur?: string; paiement_direct_moa?: boolean }) => {
+      const rec = (contrat?.sous_traitants || []).find(s => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
+      const source = rec || st;
+      return source.payeur ?? (source.paiement_direct_moa ? 'moa' : 'agence');
+    };
+    const stMoa = sousTraitants.filter(st => paye(st) === 'moa');
+    const groupementFor = (phaseId: string) =>
+      (findPhase(note.phases, phaseId)?.montant_phase || 0)
+      + cotraitants.reduce((s, ct) => s + (findPhase(ct.phases, phaseId)?.montant_phase || 0), 0)
+      + stMoa.reduce((s, st) => s + (findPhase(st.phases, phaseId)?.montant_phase || 0), 0);
+    const groupementTotal = (note.montant_ht || 0)
+      + cotraitants.reduce((s, c) => s + (c.montant_ht || 0), 0)
+      + stMoa.reduce((s, st) => s + (st.montant_ht || 0), 0);
+
+    // Le pourcentage du groupement est saisi une fois par mission dans la note
+    // (`phases[].avancement_pct`, cf. `NoteHonorairePhase`) : c'est la part de
+    // la mission facturée pour toute l'équipe, que les colonnes de membres se
+    // répartissent ensuite. Rien à recalculer ici.
+    const groupementCell = (phaseId: string) => {
+      const montant = groupementFor(phaseId);
+      const pct = findPhase(note.phases, phaseId)?.avancement_pct;
+      return pct ? `${pct}% · ${fmt(montant)} €` : `${fmt(montant)} €`;
+    };
 
     const body = (note.phases || []).map(phase => [
       phase.phase_name?.split('—')[0].trim() || phase.phase_id,
+      groupementCell(phase.phase_id),
       ...intervenants.map(iv => cellFor(iv.key, phase.phase_id)),
     ]);
-    const totalsRow = ['Total HT', ...intervenants.map(iv => `${fmt(totalFor(iv.key))} €`)];
+    const totalsRow = ['Total HT', `${fmt(groupementTotal)} €`, ...intervenants.map(iv => `${fmt(totalFor(iv.key))} €`)];
 
     autoTable(doc, {
       startY: ay,
-      head: [['Mission', ...intervenants.map(iv => iv.nom)]],
+      head: [['Mission', 'Groupement', ...intervenants.map(iv => iv.nom)]],
       body,
       foot: [totalsRow],
       styles: { fontSize: 7.5, textColor: [17, 24, 39] },
       headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
       footStyles: { fillColor: [225, 225, 225], textColor: [17, 24, 39], fontStyle: 'bold' },
-      columnStyles: Object.fromEntries(intervenants.map((_, i) => [i + 1, { halign: 'right' }])),
+      // Colonnes 1..N (Groupement + chaque intervenant) alignées à droite — seule la 0 (Mission) reste à gauche.
+      columnStyles: Object.fromEntries(Array.from({ length: intervenants.length + 1 }, (_, i) => [i + 1, { halign: 'right' }])),
       margin: { left: 14, right: 14, bottom: 25 },
     });
   }

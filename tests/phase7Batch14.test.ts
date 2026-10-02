@@ -25,7 +25,7 @@ describe('Zoho Invoice', () => {
 
   it('reports connected/has_credentials from settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org', zoho_refresh_token: 'rt' }]);
 
     const res = await request(app).get('/api/zoho/status').set(authHeader(token));
@@ -35,7 +35,7 @@ describe('Zoho Invoice', () => {
 
   it('requires credentials before starting the OAuth flow', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId }]);
 
     const res = await request(app).get('/api/zoho/auth').set(authHeader(token));
@@ -44,7 +44,7 @@ describe('Zoho Invoice', () => {
 
   it('returns the Zoho consent URL as JSON, with a one-time state nonce (not the bare tenantId)', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
 
     // Called via an authenticated fetch (not a bare `window.location.href` navigation,
@@ -60,7 +60,7 @@ describe('Zoho Invoice', () => {
 
   it('completes the callback (no auth header, matching Zoho\'s bare redirect) using a state minted by /api/zoho/auth', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { refresh_token: 'new-refresh-token' } } as any);
 
@@ -82,7 +82,7 @@ describe('Zoho Invoice', () => {
   // from the per-process fallback, which would pass the round trip either way.
   it('persists the state nonce to oauth_states and spends it on use', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { refresh_token: 'rt' } } as any);
 
@@ -107,7 +107,7 @@ describe('Zoho Invoice', () => {
 
     // Same nonce used twice — the second attempt must fail even with a valid code.
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { refresh_token: 'rt' } } as any);
     const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
@@ -124,7 +124,7 @@ describe('Zoho Invoice', () => {
 
   it('disconnects, clearing the refresh token', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt' }]);
 
     const res = await request(app).delete('/api/zoho/disconnect').set(authHeader(token));
@@ -137,7 +137,7 @@ describe('Zoho Invoice', () => {
   // which told the admin nothing about which console setting was wrong.
   it('forwards Zoho\'s error code when the token exchange is refused (200 body)', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
     const state = new URL(authRes.body.url).searchParams.get('state')!;
@@ -150,7 +150,7 @@ describe('Zoho Invoice', () => {
 
   it('forwards Zoho\'s error code when the token endpoint returns a non-2xx', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
     const state = new URL(authRes.body.url).searchParams.get('state')!;
@@ -166,7 +166,7 @@ describe('Zoho Invoice', () => {
   // the browser is redirected to.
   it('degrades an unrecognised error shape to a generic code', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     const authRes = await request(app).get('/api/zoho/auth').set(authHeader(token));
     const state = new URL(authRes.body.url).searchParams.get('state')!;
@@ -181,7 +181,7 @@ describe('Zoho Invoice', () => {
   // client_id and the rest of the request back with it.
   it('reports a failed token refresh without echoing the raw Zoho response', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'secret-client-id', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { error: 'invalid_code' } } as any);
 
@@ -193,7 +193,7 @@ describe('Zoho Invoice', () => {
 
   it('requires being connected before syncing', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId }]);
 
     const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
@@ -202,7 +202,7 @@ describe('Zoho Invoice', () => {
 
   it('pushes an unsynced invoice and pulls a status update, tenant-scoped', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
       { id: 'inv-new', tenant_id: tenantId, description: 'Honoraires phase 1', amount: 5000, zoho_invoice_id: null },
@@ -229,9 +229,100 @@ describe('Zoho Invoice', () => {
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-synced')?.status).toBe('Paid');
   });
 
+  // Chaque ligne facturée doit être inscrite au catalogue d'articles (Items)
+  // de Zoho, pas seulement portée comme une ligne libre sur cette facture —
+  // voir getOrCreateZohoItem/buildZohoLineItemsWithArticles.
+  it('inscrit la ligne facturée dans les articles Zoho (Items), recherchés par nom exact avant création', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item', tenant_id: tenantId, description: 'Honoraires ESQ', amount: 1000, zoho_invoice_id: null }]);
+
+    const itemSearchNames: string[] = [];
+    let itemCreatePayload: any = null;
+    let pushedLineItems: any = null;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) { itemCreatePayload = body; return { data: { item: { item_id: 'item-new' } } } as any; }
+      if (url.endsWith('/invoices')) { pushedLineItems = body.line_items; return { data: { invoice: { invoice_id: 'zoho-new' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string, config: any) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) { itemSearchNames.push(config.params.name); return { data: { items: [] } } as any; }
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    // Aucune affaire rattachée ici (le projet n'est pas résolu par la relation
+    // imbriquée dans ce banc de test — voir tests/fakeSupabaseAdmin.ts), donc
+    // l'article garde le seul intitulé de la ligne — c'est zohoItemIdentity()
+    // qui porte, elle, la logique d'affaire (tests/zohoSync.test.ts).
+    expect(itemSearchNames).toContain('Honoraires ESQ');
+    expect(itemCreatePayload).toMatchObject({ name: 'Honoraires ESQ', rate: 1000 });
+    expect(pushedLineItems[0].item_id).toBe('item-new');
+  });
+
+  it('réutilise un article Zoho déjà existant au lieu d\'en créer un doublon quand le nom correspond exactement', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-2', tenant_id: tenantId, description: 'Honoraires APS', amount: 500, zoho_invoice_id: null }]);
+
+    let itemCreateCalled = false;
+    let pushedLineItems: any = null;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) { itemCreateCalled = true; return { data: { item: { item_id: 'should-not-be-used' } } } as any; }
+      if (url.endsWith('/invoices')) { pushedLineItems = body.line_items; return { data: { invoice: { invoice_id: 'zoho-new-2' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) return { data: { items: [{ item_id: 'item-existing', name: 'Honoraires APS' }] } } as any;
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(itemCreateCalled).toBe(false);
+    expect(pushedLineItems[0].item_id).toBe('item-existing');
+  });
+
+  it('pousse la facture même si l\'API Items échoue — l\'article est un ajout, pas une condition à la facturation', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-3', tenant_id: tenantId, description: 'Honoraires', amount: 200, zoho_invoice_id: null }]);
+
+    let pushedLineItems: any = null;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string, body: any) => {
+      if (url.includes('/oauth/v2/token')) return { data: { access_token: 'tok', expires_in: 3600 } } as any;
+      if (url.endsWith('/contacts')) return { data: { contact: { contact_id: 'cust-1' } } } as any;
+      if (url.endsWith('/items')) throw new Error('Zoho Items indisponible');
+      if (url.endsWith('/invoices')) { pushedLineItems = body.line_items; return { data: { invoice: { invoice_id: 'zoho-new-3' } } } as any; }
+      return { data: {} } as any;
+    });
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (url.endsWith('/contacts')) return { data: { contacts: [] } } as any;
+      if (url.endsWith('/items')) throw new Error('Zoho Items indisponible');
+      if (url.endsWith('/invoices')) return { data: { invoices: [] } } as any;
+      return { data: {} } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(pushedLineItems[0].item_id).toBeUndefined();
+  });
+
   it('pages through every Zoho invoice instead of stopping at the first page', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
       { id: 'inv-p1', tenant_id: tenantId, zoho_invoice_id: 'z-page1', status: 'Draft' },
@@ -252,11 +343,40 @@ describe('Zoho Invoice', () => {
     expect(fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-p2')?.status).toBe('Overdue');
   });
 
+  // supabase/migrate_invoice_zoho_deleted.sql — a local invoice never
+  // hard-deletes in mirror of Zoho (the legal numbering sequence must not
+  // gap), it's only flagged for a human to review.
+  it('flags a local invoice whose Zoho counterpart has disappeared, without deleting it', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'inv-gone', tenant_id: tenantId, zoho_invoice_id: 'z-gone', status: 'Sent', invoice_number: 'ZOHO-1' },
+      { id: 'inv-still-there', tenant_id: tenantId, zoho_invoice_id: 'z-here', status: 'Sent', invoice_number: 'ZOHO-2' },
+    ]);
+
+    vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'tok', expires_in: 3600 } } as any);
+    vi.spyOn(axios, 'get').mockImplementation(async (url: string) => {
+      if (!url.endsWith('/invoices')) return { data: {} } as any;
+      // Only z-here comes back — z-gone was deleted in Zoho — and this is the
+      // full, un-truncated list (has_more_page: false).
+      return { data: { invoices: [{ invoice_id: 'z-here', status: 'sent' }], page_context: { has_more_page: false } } } as any;
+    });
+
+    const res = await request(app).post('/api/zoho/sync').set(authHeader(token));
+    expect(res.body.deletedUpstream).toBe(1);
+    const gone = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-gone');
+    expect(gone).toBeDefined();
+    expect(gone?.accounting_deleted_at).toBeTruthy();
+    const stillThere = fakeSupabaseAdmin.getTable('invoices').find(i => i.id === 'inv-still-there');
+    expect(stillThere?.accounting_deleted_at).toBeFalsy();
+  });
+
   // contact_name_contains matched substrings, so an invoice for "Dupont" bound
   // itself to the existing, unrelated "Dupont-Martin".
   it('binds an invoice only to an exactly-matching Zoho contact', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-x', tenant_id: tenantId, description: 'Dupont', amount: 100, zoho_invoice_id: null }]);
 
@@ -289,7 +409,7 @@ describe('Zoho Invoice', () => {
   // time Zoho hiccuped; the invoice should fail instead.
   it('does not create a duplicate contact when the contact lookup fails', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-y', tenant_id: tenantId, description: 'Client Y', amount: 100, zoho_invoice_id: null }]);
 
@@ -316,7 +436,7 @@ describe('Zoho Invoice', () => {
   // of the request on calls that are all going to be refused.
   it('stops on a Zoho rate limit and reports what is left', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
       { id: 'inv-a', tenant_id: tenantId, description: 'A', amount: 1, zoho_invoice_id: null },
@@ -356,7 +476,7 @@ describe('Zoho Invoice', () => {
   // déjà présentes sur zoho".
   it('imports a Zoho invoice that has no local counterpart', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
 
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { access_token: 'tok', expires_in: 3600 } } as any);
@@ -406,7 +526,7 @@ describe('Zoho Invoice', () => {
   // surfaces instead of being swallowed.
   it('surfaces a broken invoices query instead of reporting success', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org' }]);
     fakeSupabaseAdmin.breakTable('invoices');
 
@@ -426,7 +546,7 @@ describe('Zoho Books', () => {
 
   it('reports connected/has_credentials from settings (books org id or shared org id)', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'books-org', zoho_books_refresh_token: 'rt' }]);
 
     const res = await request(app).get('/api/zoho-books/status').set(authHeader(token));
@@ -436,7 +556,7 @@ describe('Zoho Books', () => {
 
   it('requires being connected before syncing', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId }]);
 
     const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
@@ -445,7 +565,7 @@ describe('Zoho Books', () => {
 
   it('returns the consent URL with a one-time state nonce, then completes the callback with no auth header', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_data_center: 'com' }]);
 
     const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
@@ -473,7 +593,7 @@ describe('Zoho Books', () => {
   // "Authorized Redirect URI", and Zoho then refuses the consent request.
   it('advertises a callback URL distinct from Zoho Invoice\'s', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
 
     const books = await request(app).get('/api/zoho-books/callback-url').set(authHeader(token));
     const invoice = await request(app).get('/api/zoho/callback-url').set(authHeader(token));
@@ -488,7 +608,7 @@ describe('Zoho Books', () => {
   // either one silently broke the other.
   it('keeps its refresh token separate from Zoho Invoice\'s', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_org_id: 'org', zoho_refresh_token: 'invoice-rt' }]);
 
     // Zoho Invoice connected, Zoho Books not — Books must not claim otherwise.
@@ -518,7 +638,7 @@ describe('Zoho Books', () => {
   // unactionable "zoho_books_error=1".
   it('forwards Zoho\'s error code when the token exchange is refused', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec' }]);
 
     const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
@@ -534,7 +654,7 @@ describe('Zoho Books', () => {
   // the browser is redirected to.
   it('degrades an unrecognised error shape to a generic code', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_client_id: 'cid', zoho_client_secret: 'sec' }]);
 
     const authRes = await request(app).get('/api/zoho-books/auth').set(authHeader(token));
@@ -547,7 +667,7 @@ describe('Zoho Books', () => {
 
   it('disconnects, clearing the refresh token', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt' }]);
 
     const res = await request(app).delete('/api/zoho-books/disconnect').set(authHeader(token));
@@ -557,7 +677,7 @@ describe('Zoho Books', () => {
 
   it('pushes an unsynced invoice and pulls a status update, tenant-scoped', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
       { id: 'inv-new-b', tenant_id: tenantId, invoice_number: 'FAC-001', issue_date: '2026-03-04T00:00:00Z', amount: 3000, zoho_invoice_id: null },
@@ -568,6 +688,10 @@ describe('Zoho Books', () => {
     global.fetch = vi.fn(async (url: any, init: any) => {
       const u = String(url);
       if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      // The push now resolves a real Zoho Books contact (customer_id) before
+      // creating the invoice, instead of a bare customer_name — see
+      // getOrCreateZohoBooksCustomer in server/routes/zohoBooks.ts.
+      if (u.includes('/contacts')) return { ok: true, json: async () => ({ contact: { contact_id: 'cust-b-1' } }) } as any;
       if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [{ invoice_id: 'zoho-b-existing', status: 'paid' }] }) } as any;
       if (u.includes('/invoices')) {
         pushBody = JSON.parse(init.body);
@@ -592,9 +716,61 @@ describe('Zoho Books', () => {
     expect(pushBody.line_items[0].rate).toBe(3000);
   });
 
+  // Même mécanique côté Books — voir getOrCreateZohoBooksItem/
+  // buildZohoBooksLineItemsWithArticles dans server/routes/zohoBooks.ts.
+  it('inscrit la ligne facturée dans les articles Zoho Books, recherchés par nom exact avant création', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-b', tenant_id: tenantId, description: 'Honoraires ESQ', amount: 1000, zoho_invoice_id: null }]);
+
+    let itemCreated = false;
+    let pushedLineItems: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('/contacts')) return { ok: true, json: async () => ({ contact: { contact_id: 'cust-b-1' } }) } as any;
+      if (init?.method === 'POST' && u.includes('/items')) { itemCreated = true; return { ok: true, json: async () => ({ item: { item_id: 'item-b-new' } }) } as any; }
+      if (u.includes('/items')) return { ok: true, json: async () => ({ items: [] }) } as any;
+      if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [] }) } as any;
+      if (u.includes('/invoices')) { pushedLineItems = JSON.parse(init.body).line_items; return { ok: true, json: async () => ({ invoice: { invoice_id: 'zoho-b-new' } }) } as any; }
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(itemCreated).toBe(true);
+    expect(pushedLineItems[0].item_id).toBe('item-b-new');
+  });
+
+  it('réutilise un article Zoho Books déjà existant au lieu d\'en créer un doublon', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-item-b2', tenant_id: tenantId, description: 'Honoraires APS', amount: 500, zoho_invoice_id: null }]);
+
+    let itemCreated = false;
+    let pushedLineItems: any = null;
+    global.fetch = vi.fn(async (url: any, init: any) => {
+      const u = String(url);
+      if (u.includes('/oauth/v2/token')) return { ok: true, json: async () => ({ access_token: 'tok', expires_in: 3600 }) } as any;
+      if (u.includes('/contacts')) return { ok: true, json: async () => ({ contact: { contact_id: 'cust-b-1' } }) } as any;
+      if (init?.method === 'POST' && u.includes('/items')) { itemCreated = true; return { ok: true, json: async () => ({ item: { item_id: 'should-not-be-used' } }) } as any; }
+      if (u.includes('/items')) return { ok: true, json: async () => ({ items: [{ item_id: 'item-b-existing', name: 'Honoraires APS' }] }) } as any;
+      if (u.includes('status=all')) return { ok: true, json: async () => ({ invoices: [] }) } as any;
+      if (u.includes('/invoices')) { pushedLineItems = JSON.parse(init.body).line_items; return { ok: true, json: async () => ({ invoice: { invoice_id: 'zoho-b-new-2' } }) } as any; }
+      return { ok: true, json: async () => ({}) } as any;
+    }) as any;
+
+    const res = await request(app).post('/api/zoho-books/sync').set(authHeader(token));
+    expect(res.body.pushed).toBe(1);
+    expect(itemCreated).toBe(false);
+    expect(pushedLineItems[0].item_id).toBe('item-b-existing');
+  });
+
   it('pages through every Zoho Books invoice instead of stopping at the first page', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
     fakeSupabaseAdmin.seed('invoices', [
       { id: 'inv-bp1', tenant_id: tenantId, zoho_invoice_id: 'zb-page1', status: 'Draft' },
@@ -619,7 +795,7 @@ describe('Zoho Books', () => {
     fakeSupabaseAdmin.seed('invoices', [{ id: 'inv-victim', tenant_id: tenantB, client_name: 'Victim', amount: 1, zoho_invoice_id: null }]);
 
     const tenantA = makeTenant();
-    const { token } = makeUser(tenantA);
+    const { token } = makeUser(tenantA, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantA, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
 
     global.fetch = vi.fn(async (url: any) => {
@@ -640,7 +816,7 @@ describe('Zoho Books', () => {
   // connection time ever appeared in ArchiOffice.
   it('imports a Zoho Books invoice that has no local counterpart', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
 
     global.fetch = vi.fn(async (url: any) => {
@@ -683,7 +859,7 @@ describe('Zoho Books', () => {
   // hook.
   it('surfaces a broken invoices query instead of reporting success', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, zoho_books_refresh_token: 'rt', zoho_client_id: 'cid', zoho_client_secret: 'sec', zoho_books_org_id: 'org' }]);
     fakeSupabaseAdmin.breakTable('invoices');
 

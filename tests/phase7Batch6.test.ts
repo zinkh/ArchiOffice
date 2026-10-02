@@ -58,7 +58,7 @@ describe('Contact Sync', () => {
 
     const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ imported: 1, updated: 1 });
+    expect(res.body).toEqual({ imported: 1, updated: 1, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.email === 'new@example.com')?.tenant_id).toBe(tenantId);
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-existing')?.first_name).toBe('Updated');
   });
@@ -76,9 +76,132 @@ describe('Contact Sync', () => {
 
     const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ imported: 1, updated: 0 });
+    expect(res.body).toEqual({ imported: 1, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
     expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-b')?.first_name).toBe('Foreign');
     expect(fakeSupabaseAdmin.getTable('contacts').filter(c => c.email === 'shared@example.com' && c.tenant_id === tenantA)).toHaveLength(1);
+  });
+
+  describe('push direction (ArchiOffice → Google Contacts)', () => {
+    it('does not push anything when no category is selected in settings', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'c-1', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
+      global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ connections: [] }) })) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
+    });
+
+    it('never pushes a contact marked personal, even in a selected category', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-personal', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'c-push-personal', tenant_id: tenantId, email: 'a@example.com', category: 'Client',
+        first_name: 'A', last_name: 'One', is_personal: true,
+      }]);
+      global.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ connections: [] }) })) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 0 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-personal')?.google_resource_name).toBeUndefined();
+    });
+
+    it('creates a new Google contact for an unlinked contact in a selected category', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-1', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'c-push-create', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
+
+      global.fetch = vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/people/me/connections')) return { ok: true, json: async () => ({ connections: [] }) };
+        if (init?.method === 'POST' && String(url).includes('people:createContact')) {
+          return { ok: true, json: async () => ({ resourceName: 'people/new123' }) };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 1, pushedUpdated: 0, pulledOnConflict: 0 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-create')?.google_resource_name).toBe('people/new123');
+    });
+
+    it('links to an existing Google connection by email instead of creating a duplicate', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-2', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{ id: 'c-push-link', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
+
+      global.fetch = vi.fn(async (url: string) => {
+        if (String(url).includes('/people/me/connections')) {
+          return { ok: true, json: async () => ({ connections: [{ resourceName: 'people/already123', emailAddresses: [{ value: 'a@example.com' }] }] }) };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 1, pushedCreated: 0, pushedUpdated: 1, pulledOnConflict: 0 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-link')?.google_resource_name).toBe('people/already123');
+    });
+
+    it('a more recently modified local contact overwrites the linked Google contact', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-3', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'c-push-local-wins', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One',
+        google_resource_name: 'people/linked1', updated_at: '2026-06-01T00:00:00.000Z',
+      }]);
+
+      global.fetch = vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/people/me/connections')) return { ok: true, json: async () => ({ connections: [] }) };
+        if (String(url).includes('people/linked1') && (!init || !init.method)) {
+          return { ok: true, json: async () => ({ etag: 'etag-1', metadata: { sources: [{ type: 'CONTACT', updateTime: '2026-01-01T00:00:00.000Z' }] } }) };
+        }
+        if (init?.method === 'PATCH' && String(url).includes('people/linked1:updateContact')) {
+          return { ok: true, json: async () => ({}) };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 1, pulledOnConflict: 0 });
+    });
+
+    it('a more recently modified Google contact overwrites the local one instead of being clobbered', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      fakeSupabaseAdmin.seed('settings', [{ id: 's-4', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
+      fakeSupabaseAdmin.seed('contacts', [{
+        id: 'c-push-google-wins', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One',
+        google_resource_name: 'people/linked1', updated_at: '2026-01-01T00:00:00.000Z',
+      }]);
+
+      global.fetch = vi.fn(async (url: string, init?: any) => {
+        if (String(url).includes('/people/me/connections')) return { ok: true, json: async () => ({ connections: [] }) };
+        if (String(url).includes('people/linked1') && (!init || !init.method)) {
+          return {
+            ok: true,
+            json: async () => ({
+              names: [{ givenName: 'Fresher', familyName: 'FromGoogle' }],
+              emailAddresses: [{ value: 'a@example.com' }],
+              metadata: { sources: [{ type: 'CONTACT', updateTime: '2026-06-01T00:00:00.000Z' }] },
+            }),
+          };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
+      }) as any;
+
+      const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ imported: 0, updated: 0, pushedCreated: 0, pushedUpdated: 0, pulledOnConflict: 1 });
+      expect(fakeSupabaseAdmin.getTable('contacts').find(c => c.id === 'c-push-google-wins')?.first_name).toBe('Fresher');
+    });
   });
 
   it('requires url and username for CardDAV sync', async () => {
@@ -151,6 +274,49 @@ describe('Geo Proxy input validation', () => {
     expect(res.status).toBe(400);
   });
 
+  it('filters official historical monuments by their real distance', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            Reference: 'PA00123456',
+            Denomination_de_l_edifice: 'église',
+            Commune_forme_index: 'Nancy',
+            Departement_en_lettres: 'Meurthe-et-Moselle',
+            Date_et_typologie_de_la_protection: '1925 : inscrit MH',
+            coordonnees_au_format_WGS84: '48.6922,6.1845',
+          },
+          {
+            Reference: 'PA00999999',
+            Denomination_de_l_edifice: 'château éloigné',
+            Commune_forme_index: 'Nancy',
+            coordonnees_au_format_WGS84: '48.7100,6.2100',
+          },
+        ],
+      }),
+    })) as any;
+
+    try {
+      const res = await request(app).get('/api/historical-monuments')
+        .query({ lat: '48.6921', lon: '6.1844', insee: '54395', distance: '500' })
+        .set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.records).toHaveLength(1);
+      expect(res.body.records[0].recordid).toBe('PA00123456');
+      expect(res.body.records[0].fields.dist).toBeLessThan(500);
+      const requestedUrl = String((global.fetch as any).mock.calls[0][0]);
+      expect(requestedUrl).toContain('COG_Insee_lors_de_la_protection__exact=54395');
+      expect(requestedUrl).toContain('page_size=200');
+      expect(requestedUrl).not.toContain('page_size=1000');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('rejects cadastre/parcel without lon/lat or bbox', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
@@ -163,6 +329,85 @@ describe('Geo Proxy input validation', () => {
     const { token } = makeUser(tenantId);
     const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '1,2,3' }).set(authHeader(token));
     expect(res.status).toBe(400);
+  });
+
+  it('rejects cadastre/parcel with inverted or oversized bounds', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const inverted = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.2,48.7,6.1,48.8' }).set(authHeader(token));
+    const oversized = await request(app).get('/api/cadastre/parcel').query({ bbox: '6,48,6.5,48.5' }).set(authHeader(token));
+    expect(inverted.status).toBe(400);
+    expect(oversized.status).toBe(400);
+  });
+
+  describe('cadastre network calls', () => {
+    const originalFetch = global.fetch;
+    afterEach(() => { global.fetch = originalFetch; });
+
+    it('proxies, maps and caches a cadastral bbox response', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          features: [{
+            geometry: { type: 'Polygon', coordinates: [[[6.11, 48.71], [6.12, 48.71], [6.12, 48.72], [6.11, 48.71]]] },
+            properties: { idu: '54395000AB0123', code_insee: '54395', contenance: 420 },
+          }],
+        }),
+      })) as any;
+
+      const query = { bbox: '6.110001,48.710001,6.120001,48.720001' };
+      const first = await request(app).get('/api/cadastre/parcel').query(query).set(authHeader(token));
+      const second = await request(app).get('/api/cadastre/parcel').query(query).set(authHeader(token));
+
+      expect(first.status).toBe(200);
+      expect(first.headers['x-cache']).toBe('MISS');
+      expect(first.body.features[0].properties).toMatchObject({ section: 'AB', numero: '00123', contenance: 420 });
+      expect(second.status).toBe(200);
+      expect(second.headers['x-cache']).toBe('HIT');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a timed-out cadastral call to 504', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => { const e: any = new Error('aborted'); e.name = 'AbortError'; throw e; }) as any;
+
+      const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.130001,48.730001,6.140001,48.740001' }).set(authHeader(token));
+      expect(res.status).toBe(504);
+    });
+
+    it('falls back to a nearby bbox when the BAN point is on the street', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({ type: 'FeatureCollection', features: [] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({
+            type: 'FeatureCollection',
+            features: [{
+              geometry: { type: 'Polygon', coordinates: [[[6.15, 48.75], [6.16, 48.75], [6.16, 48.76], [6.15, 48.75]]] },
+              properties: { idu: '54395000AC0042', code_insee: '54395', contenance: 250 },
+            }],
+          }),
+        }) as any;
+
+      const res = await request(app).get('/api/cadastre/parcel')
+        .query({ lon: '6.155001', lat: '48.755001' })
+        .set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.features).toHaveLength(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(decodeURIComponent(String((global.fetch as any).mock.calls[1][0]))).toContain('"type":"Polygon"');
+    });
   });
 
   // The following five (rnb-buildings, georisques, urbanisme, bdnb-geocode,

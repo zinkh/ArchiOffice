@@ -45,7 +45,14 @@ function toGeminiContents(messages: LlmMessage[]): { role: string; parts: Gemini
 
   for (const msg of messages) {
     if (msg.role === 'user') {
-      contents.push({ role: 'user', parts: [{ text: msg.content }] });
+      // Les images passent AVANT le texte : c'est l'ordre que Gemini
+      // recommande pour qu'un modèle multimodal ancre correctement sa
+      // réponse texte sur l'image plutôt que l'inverse.
+      const parts: GeminiPart[] = (msg.images || []).map(img => ({
+        inlineData: { mimeType: img.mimeType, data: img.data.toString('base64') },
+      }));
+      if (msg.content) parts.push({ text: msg.content });
+      contents.push({ role: 'user', parts });
       continue;
     }
 
@@ -172,19 +179,37 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
   return {
     id: 'gemini',
     model,
+    supportsVision: true,
+    // googleSearch se déclare comme un tool de plus, au même titre qu'un
+    // functionDeclarations — Gemini exécute la recherche lui-même et rend
+    // directement le texte sourcé, sans jamais produire de functionCall à
+    // notre charge (voir geminiTools plus bas, dans chat()).
+    supportsWebSearch: true,
 
-    async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, webSearch }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {
         const { GoogleGenAI } = await import('@google/genai');
         client = new GoogleGenAI({ apiKey: opts.apiKey });
       }
+
+      const hasFunctionDeclarations = !!tools && tools.length > 0;
+      const geminiTools: Record<string, unknown>[] = [];
+      if (hasFunctionDeclarations) geminiTools.push({ functionDeclarations: tools as any });
+      if (webSearch) geminiTools.push({ googleSearch: {} });
 
       const response = await client.models.generateContent({
         model,
         contents: toGeminiContents(messages),
         config: {
           ...(system ? { systemInstruction: system } : {}),
-          ...(tools && tools.length > 0 ? { tools: [{ functionDeclarations: tools as any }] } : {}),
+          ...(geminiTools.length > 0 ? { tools: geminiTools } : {}),
+          // Mélanger un tool natif (googleSearch) avec des functionDeclarations
+          // dans la même requête est refusé par l'API (400 « Please enable
+          // tool_config.include_server_side_tool_invocations... ») sans ce
+          // réglage explicite — sans lui, un agent avec à la fois la recherche
+          // web ET une ressource en écriture voyait TOUT l'échange échouer, pas
+          // seulement la recherche.
+          ...(hasFunctionDeclarations && webSearch ? { toolConfig: { includeServerSideToolInvocations: true } } : {}),
         },
       });
 

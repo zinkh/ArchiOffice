@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconX, IconCheck, IconClock, IconAlertTriangle,
   IconChevronRight, IconFilter, IconTrash, IconPencil,
@@ -8,11 +9,13 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { formatCurrency } from '../lib/utils';
 
 // ── Status config
 const STATUS_CONFIG = {
@@ -29,24 +32,20 @@ const ORIGINE_LABELS: Record<string, string> = {
   autres:           'Autres',
 };
 
-const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm";
+const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm";
 const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' } as React.CSSProperties;
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.draft;
   const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
       <Icon size={11} />
       {cfg.label}
     </span>
   );
 }
 
-function formatCurrency(n?: number) {
-  if (n === undefined || n === null) return '—';
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
-}
 
 // ── PDF generation
 async function generateOsPdf(os: OrdreDeService, project?: Project) {
@@ -120,8 +119,7 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
     margin: { left: margin, right: margin },
     head: [['Champ', 'Valeur']],
     body: [
-      ['N° de marché', os.march_number || '—'],
-      ['Lot / Entreprise', [os.lot, os.entreprise].filter(Boolean).join(' · ') || '—'],
+      ['Marché travaux (lot / entreprise)', [os.lot, os.entreprise].filter(Boolean).join(' · ') || '—'],
       ['Origine de la demande', ORIGINE_LABELS[os.origine_demande || ''] || '—'],
       ['Montant du marché HT', formatCurrency(os.montant_marche_ht)],
       ['Délai d\'exécution', os.delai_execution ? `${os.delai_execution} ${os.delai_unit || 'jours'}` : '—'],
@@ -188,7 +186,16 @@ const emptyForm = (): Partial<OrdreDeService> => ({
   incidences_couts_type: 'non',
 });
 
+interface MarcheTravaux {
+  id: string;
+  project_id: string;
+  entreprise_nom: string;
+  lot_numero?: string;
+  lot_titre?: string;
+}
+
 export default function OrdresDeService() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentUser } = useUser();
   const [osList, setOsList] = useState<OrdreDeService[]>([]);
@@ -212,11 +219,37 @@ export default function OrdresDeService() {
   const [form, setForm] = useState<Partial<OrdreDeService>>(emptyForm());
   const [saving, setSaving] = useState(false);
 
+  // Marchés de travaux du projet choisi dans le formulaire — un OS doit
+  // toujours être rattaché à l'un d'eux (server/routes/ordresDeService.ts).
+  const [marches, setMarches] = useState<MarcheTravaux[]>([]);
+  const [isAddingMarche, setIsAddingMarche] = useState(false);
+  const [newMarche, setNewMarche] = useState({ entreprise_nom: '', lot_numero: '', lot_titre: '' });
+
   const refresh = useCallback(async () => {
     const data = await apiFetch<OrdreDeService[]>('/api/ordres_de_service');
     setOsList(data || []);
     setLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (!form.project_id) { setMarches([]); return; }
+    apiFetch<MarcheTravaux[]>(`/api/marches-entreprises/${form.project_id}`).then(d => setMarches(d || [])).catch(() => setMarches([]));
+  }, [form.project_id]);
+
+  const createMarche = async () => {
+    if (!form.project_id || !newMarche.entreprise_nom) return;
+    const created = await apiFetch<MarcheTravaux>('/api/marches-entreprises', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ project_id: form.project_id, ...newMarche }),
+    });
+    if (created) {
+      setMarches(prev => [...prev, created]);
+      setForm(prev => ({ ...prev, marche_id: created.id, entreprise: created.entreprise_nom, lot: [created.lot_numero, created.lot_titre].filter(Boolean).join(' — ') }));
+      setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '' });
+      setIsAddingMarche(false);
+    }
+  };
 
   useEffect(() => {
     apiFetch<Project[]>('/api/projects').then(d => setProjects(d || []));
@@ -244,8 +277,20 @@ export default function OrdresDeService() {
     setIsFormOpen(true);
   };
 
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || osList.length === 0) return;
+    const os = osList.find(o => o.id === openId);
+    if (os) openEdit(os);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [osList, searchParams]);
+
   const handleSave = async () => {
-    if (!form.title || !form.os_number) return;
+    if (!form.title || !form.os_number || !form.marche_id) return;
     setSaving(true);
     try {
       if (editingOs) {
@@ -263,7 +308,7 @@ export default function OrdresDeService() {
       }
       await refresh();
       setIsFormOpen(false);
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
     finally { setSaving(false); }
   };
 
@@ -282,7 +327,7 @@ export default function OrdresDeService() {
         body: JSON.stringify({ status: newStatus }),
       });
       await refresh();
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
   };
 
   const handleArConfirm = async () => {
@@ -295,7 +340,7 @@ export default function OrdresDeService() {
       });
       await refresh();
       setArModal(null);
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
   };
 
   const handleDelete = async () => {
@@ -357,7 +402,7 @@ export default function OrdresDeService() {
             <div className="absolute -bottom-2 -right-2 opacity-10" style={{ color: s.color }}><s.icon size={56} /></div>
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: s.color + '22', color: s.color }}><s.icon size={18} /></div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: s.color }}>{s.label}</p>
+              <p className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: s.color }}>{s.label}</p>
               <p className="text-2xl font-bold leading-none" style={{ color: s.color }}>{s.value}</p>
             </div>
           </div>
@@ -413,9 +458,9 @@ export default function OrdresDeService() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="min-w-full text-left border-collapse">
               <thead>
-                <tr className="text-[10px] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <tr className="text-[0.6875rem] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
                   <th className="px-4 py-3">N° OS</th>
                   <th className="px-4 py-3">Objet</th>
                   <th className="px-4 py-3">Affaire / Entreprise</th>
@@ -436,15 +481,14 @@ export default function OrdresDeService() {
                     >
                       <td className="px-4 py-3">
                         <span className="font-mono font-bold text-sm" style={{ color: 'var(--tblr-primary)' }}>OS {os.os_number}</span>
-                        {os.type === 'contrat_moe' && <span className="ml-1.5 text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: '#f8d7ff', color: '#ae3ec9' }}>MOE</span>}
                       </td>
                       <td className="px-4 py-3 max-w-[200px]">
                         <p className="text-sm font-semibold truncate" style={{ color: 'var(--tblr-text)' }} title={os.title}>{os.title}</p>
-                        {os.lot && <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>Lot : {os.lot}</p>}
+                        {os.lot && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Lot : {os.lot}</p>}
                       </td>
                       <td className="px-4 py-3">
                         {project && <p className="text-xs font-medium truncate max-w-[150px]" style={{ color: 'var(--tblr-text)' }}>{project.name}</p>}
-                        {os.entreprise && <p className="text-[11px] flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}><IconBuildingFactory2 size={10} />{os.entreprise}</p>}
+                        {os.entreprise && <p className="text-[0.6875rem] flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}><IconBuildingFactory2 size={10} />{os.entreprise}</p>}
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                         {os.date_emission
@@ -460,7 +504,7 @@ export default function OrdresDeService() {
                             {os.status === 'draft' && (
                               <button
                                 onClick={() => handleStatusChange(os, 'submitted')}
-                                className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
+                                className="text-[0.6875rem] px-2 py-0.5 rounded font-bold transition"
                                 style={{ background: '#e8f0fb', color: '#206bc4' }}
                                 title="Émettre l'OS"
                               >
@@ -471,7 +515,7 @@ export default function OrdresDeService() {
                               <>
                                 <button
                                   onClick={() => handleStatusChange(os, 'approved')}
-                                  className="text-[9px] px-2 py-0.5 rounded font-bold"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded font-bold"
                                   style={{ background: '#d3f9d8', color: '#2f9e44' }}
                                   title="Enregistrer l'accusé de réception"
                                 >
@@ -479,7 +523,7 @@ export default function OrdresDeService() {
                                 </button>
                                 <button
                                   onClick={() => handleStatusChange(os, 'rejected')}
-                                  className="text-[9px] px-2 py-0.5 rounded font-bold"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded font-bold"
                                   style={{ background: '#ffe3e3', color: '#d63939' }}
                                   title="Annuler"
                                 >
@@ -494,7 +538,7 @@ export default function OrdresDeService() {
                         {os.date_ar ? (
                           <div>
                             <p className="text-xs font-medium" style={{ color: '#2f9e44' }}>AR : {new Date(os.date_ar).toLocaleDateString('fr-FR')}</p>
-                            {os.date_execution && <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>Exec. : {new Date(os.date_execution).toLocaleDateString('fr-FR')}</p>}
+                            {os.date_execution && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Exec. : {new Date(os.date_execution).toLocaleDateString('fr-FR')}</p>}
                           </div>
                         ) : (
                           <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>—</span>
@@ -561,9 +605,10 @@ export default function OrdresDeService() {
         {isFormOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="my-4 w-full max-w-2xl rounded-2xl shadow-2xl"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -581,15 +626,11 @@ export default function OrdresDeService() {
               <div className="p-6 space-y-5">
                 {/* Identifiants */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
-                  <div className="grid grid-cols-3 gap-3">
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>N° OS *</label>
                       <input {...field('os_number')} className={inputCls} style={inputStyle} placeholder="001" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>N° marché</label>
-                      <input {...field('march_number')} className={inputCls} style={inputStyle} />
                     </div>
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Date *</label>
@@ -600,7 +641,7 @@ export default function OrdresDeService() {
 
                 {/* Objet */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Objet</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Objet</p>
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Titre *</label>
@@ -622,7 +663,7 @@ export default function OrdresDeService() {
 
                 {/* Parties */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Parties</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Parties</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Affaire</label>
@@ -636,27 +677,48 @@ export default function OrdresDeService() {
                       </select>
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Type</label>
-                      <select
-                        value={form.type ?? 'travaux'}
-                        onChange={e => setForm(prev => ({ ...prev, type: e.target.value as OrdreDeService['type'] }))}
-                        className={inputCls} style={inputStyle}
-                      >
-                        <option value="travaux">Travaux</option>
-                        <option value="contrat_moe">Contrat MOE</option>
-                      </select>
-                    </div>
-                    <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Émetteur (MOE)</label>
                       <input {...field('emetteur_os')} className={inputCls} style={inputStyle} placeholder="Agence d'architecture" />
                     </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Destinataire (Entreprise)</label>
-                      <input {...field('entreprise')} className={inputCls} style={inputStyle} placeholder="Nom de l'entreprise" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Lot</label>
-                      <input {...field('lot')} className={inputCls} style={inputStyle} placeholder="Ex: Gros œuvre" />
+                    <div className="col-span-2">
+                      <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Marché travaux *</label>
+                      <select
+                        value={form.marche_id ?? ''}
+                        disabled={!form.project_id}
+                        onChange={e => {
+                          const m = marches.find(x => x.id === e.target.value);
+                          setForm(prev => ({
+                            ...prev, marche_id: e.target.value,
+                            entreprise: m?.entreprise_nom || '',
+                            lot: m ? [m.lot_numero, m.lot_titre].filter(Boolean).join(' — ') : '',
+                          }));
+                        }}
+                        className={inputCls} style={inputStyle}
+                      >
+                        <option value="">{form.project_id ? '— Choisir un marché —' : '— Choisir une affaire d\'abord —'}</option>
+                        {marches.map(m => <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>)}
+                      </select>
+                      {form.project_id && marches.length === 0 && !isAddingMarche && (
+                        <button type="button" onClick={() => setIsAddingMarche(true)} className="mt-1.5 text-xs font-bold" style={{ color: 'var(--tblr-primary)' }}>
+                          Aucun marché sur cette affaire — en créer un
+                        </button>
+                      )}
+                      {isAddingMarche && (
+                        <div className="mt-2 p-3 rounded-lg space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input placeholder="Entreprise *" className={inputCls} style={inputStyle}
+                              value={newMarche.entreprise_nom} onChange={e => setNewMarche({ ...newMarche, entreprise_nom: e.target.value })} />
+                            <input placeholder="N° lot" className={inputCls} style={inputStyle}
+                              value={newMarche.lot_numero} onChange={e => setNewMarche({ ...newMarche, lot_numero: e.target.value })} />
+                          </div>
+                          <input placeholder="Intitulé du lot" className={inputCls} style={inputStyle}
+                            value={newMarche.lot_titre} onChange={e => setNewMarche({ ...newMarche, lot_titre: e.target.value })} />
+                          <div className="flex gap-2 justify-end">
+                            <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1 text-xs font-bold" style={{ color: 'var(--tblr-muted)' }}>Annuler</button>
+                            <button type="button" onClick={createMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1 rounded-lg text-xs font-bold text-white disabled:opacity-50" style={{ background: 'var(--tblr-primary)' }}>Créer</button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Origine de la demande</label>
@@ -676,7 +738,7 @@ export default function OrdresDeService() {
 
                 {/* Délais & Coûts */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Délais & Coûts</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Délais & Coûts</p>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Délai d'exécution</label>
@@ -766,7 +828,7 @@ export default function OrdresDeService() {
                 </button>
                 <button
                   onClick={handleSave}
-                  disabled={saving || !form.title || !form.os_number}
+                  disabled={saving || !form.title || !form.os_number || !form.marche_id}
                   className="flex-1 py-2.5 rounded-xl font-bold text-sm disabled:opacity-40"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
@@ -780,7 +842,7 @@ export default function OrdresDeService() {
         {/* AR modal */}
         {arModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-4"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -817,7 +879,7 @@ export default function OrdresDeService() {
         {/* Delete confirm */}
         {osToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-5 text-center"
               style={{ background: 'var(--tblr-surface)' }}
             >

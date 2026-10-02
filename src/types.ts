@@ -16,6 +16,10 @@ export interface Document {
   phase?: DocumentPhase;
   version: number;
   file_url: string;
+  /** Où vit le fichier. Dérivé de file_url, jamais la source de vérité de la
+   *  résolution — voir server/externalStorage/externalRef.ts. Absent sur une
+   *  ligne écrite avant l'arrivée du stockage externe : vaut alors 'supabase'. */
+  storage_backend?: 'supabase' | 'external';
   uploaded_by: string; // TeamMember ID
   uploaded_at: string;
   description?: string;
@@ -51,17 +55,48 @@ export interface DocumentDiffusion {
   notes?: string;
 }
 
+export type TemplateOperationType = 'neuf' | 'rehabilitation' | 'extension' | 'maison_individuelle' | 'permis_seul' | 'autre';
+export type TemplateMarcheType = 'prive' | 'public';
+
+export interface TemplateLot { lot_number: string; lot_title: string }
+/** Délais relatifs à la date de démarrage de l'affaire (jours calendaires). */
+export interface TemplateMilestone { title: string; due_date_offset_days: number }
+export interface TemplateTask {
+  title: string;
+  description?: string;
+  start_offset_days: number;
+  duration_days: number;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+}
+
 export interface ProjectTemplate {
   id: string;
   name: string;
   description: string;
-  // Default values
+  operation_type?: TemplateOperationType;
+  marche_type?: TemplateMarcheType;
+  // Valeurs par défaut
   default_status: 'Planning' | 'In Progress' | 'Completed' | 'On Hold';
   default_budget: number;
-  default_category?: string;
-  default_lots_list?: ProjectLot[];
-  default_milestones?: { title: string; due_date_offset_days: number }[];
   default_description: string;
+  // Structure créée avec l'affaire (jsonb côté base)
+  default_lots?: TemplateLot[];
+  default_milestones?: TemplateMilestone[];
+  default_tasks?: TemplateTask[];
+  /**
+   * Répartition des missions MOE (même forme que `ContratMOE.missions_list`,
+   * donc reprise telle quelle par un contrat ; convertie en répartition
+   * d'honoraires pour une proposition, voir `feeDistributionFromTemplate`).
+   */
+  default_missions?: ContratMOEMission[];
+  /** Modèle issu du catalogue de démarrage (clé stable), sinon absent. */
+  catalog_key?: string | null;
+}
+
+/** Entrée du catalogue de démarrage, proposée tant qu'elle n'a pas été installée. */
+export interface ProjectTemplateCatalogEntry extends Omit<ProjectTemplate, 'id'> {
+  catalog_key: string;
+  installed?: boolean;
 }
 
 export interface DocumentTemplateVariable {
@@ -84,6 +119,16 @@ export interface DocumentTemplate {
   is_default: boolean;
   source_template_id?: string | null;
   created_at: string;
+}
+
+export type EmailTemplateKind = 'invoice' | 'tender_solicitation' | 'tender_relance';
+
+export interface EmailTemplate {
+  id: string;
+  kind: EmailTemplateKind;
+  subject: string;
+  body: string;
+  updated_at?: string;
 }
 
 export interface TimeEntry {
@@ -247,8 +292,12 @@ export interface Project {
   client_vat_number?: string;
   client_email?: string;
   is_public_client?: boolean;
+  /** Modèle de projet à appliquer à la création (lots, jalons, tâches types). Jamais relu. */
+  template_id?: string;
   is_complete_mission?: boolean;
   is_chantier?: boolean;
+  /** Précharge ce projet en lecture seule dans le cache hors-ligne (voir src/lib/offlinePrefetch.ts). */
+  offline_enabled?: boolean;
   etudes_notes?: string;
   chantier_notes?: string;
   surface?: number;
@@ -263,6 +312,8 @@ export interface Project {
   categories_list?: ProjectCategory[];
   external_intervenants?: string;
   entreprises?: string;
+  /** Dernière ouverture de la fiche par la personne connectée (GET /api/projects) — classement « ouverts récemment ». */
+  last_opened_at?: string | null;
 
   // Fields from Proposal
   reference?: string;
@@ -322,9 +373,15 @@ export interface Project {
   programme?: string;
 }
 
+// Un ordre de service s'adresse toujours à une entreprise sur un marché de
+// travaux (marche_id -> marches_entreprises) — jamais au contrat MOE de
+// l'agence elle-même : voir AvenantMoe pour ça, et
+// supabase/migrate_avenants_moe.sql pour l'historique de la séparation.
 export interface OrdreDeService {
   id: string;
   project_id: string;
+  /** Requis à la création (server/routes/ordresDeService.ts) ; nullable en base pour ne pas casser une lecture. */
+  marche_id?: string | null;
   os_number: string;
   march_number?: string;
   title: string;
@@ -332,7 +389,7 @@ export interface OrdreDeService {
   description?: string;
   lot?: string;
   status: 'draft' | 'submitted' | 'approved' | 'rejected';
-  type?: 'travaux' | 'contrat_moe';
+  type?: 'travaux';
   maitrise_oeuvre_adresse?: string;
   entreprise?: string;
   origine_demande?: 'maitrise_ouvrage' | 'maitrise_oeuvre' | 'aleas' | 'autres';
@@ -354,6 +411,30 @@ export interface OrdreDeService {
   notes_ar?: string;
   delai_execution?: number;
   delai_unit?: string;
+}
+
+// Avenant au contrat de maîtrise d'œuvre de l'agence (contrats_moe) — même
+// forme qu'un OrdreDeService pour les champs communs (numérotation, statut,
+// délais, montants), mais rattaché au contrat MOE et jamais à un marché de
+// travaux ni à une entreprise.
+export interface AvenantMoe {
+  id: string;
+  tenant_id?: string;
+  contrat_moe_id: string;
+  project_id?: string;
+  os_number: string;
+  title: string;
+  date: string;
+  description?: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected';
+  origine_demande?: 'maitrise_ouvrage' | 'maitrise_oeuvre' | 'aleas' | 'autres';
+  objet?: string;
+  date_signature?: string;
+  incidences_delais_type?: 'non' | 'oui';
+  incidences_delais_details?: string;
+  delai_execution?: number;
+  montant_devis_presente?: number;
+  montant_devis_accepte?: number;
 }
 
 export interface Visa {
@@ -383,6 +464,19 @@ export interface Reception {
   pv_valide?: boolean;
 }
 
+export interface ReservePhoto {
+  id: string;
+  reserve_id: string;
+  reserve_kind: 'opr' | 'gpa';
+  file_url: string;
+  caption?: string | null;
+  uploaded_at: string;
+  /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+  /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
+  localPreviewUrl?: string;
+}
+
 export interface Reserve {
   id: string;
   project_id: string;
@@ -399,6 +493,12 @@ export interface Reserve {
   x?: number;
   y?: number;
   number?: number;
+  /** Commentaire libre : l'état constaté, ce qui reste à faire. */
+  description?: string | null;
+  /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
+  photos?: ReservePhoto[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Permit {
@@ -444,6 +544,12 @@ export interface GpaReserve {
   x?: number;
   y?: number;
   number?: number;
+  /** Commentaire libre : l'état constaté, ce qui reste à faire. */
+  description?: string | null;
+  /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
+  photos?: ReservePhoto[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Plan {
@@ -472,6 +578,10 @@ export interface TeamMember {
   address?: string;
   jobTitle?: string;
   department?: string;
+  /** Préférence personnelle : afficher ses propres contacts personnels dans la liste (défaut : oui). */
+  showPersonalContacts?: boolean;
+  /** Signature de courrier personnelle, ajoutée aux nouveaux messages rédigés dans l'application. */
+  mailSignature?: string;
   tenantId?: string | null;
   // Platform back-office access — orthogonal to system_role (see
   // server/superAdminAuth.ts). Only ever set on the current user's own
@@ -520,6 +630,29 @@ export interface TenderSpecialty {
   contact_name?: string;
 }
 
+export interface TenderEvaluationCriterion {
+  id?: string;
+  tender_id?: string;
+  label: string;
+  weight_pct: number;
+  sort_order?: number;
+}
+
+// Un membre du groupement retenu à l'issue de la consultation (architecte
+// mandataire, bureau d'études, économiste...) — voir
+// supabase/migrate_tender_groupement_retenu.sql. contact_id, quand renseigné,
+// est ce qui permettra plus tard de retrouver les opérations sur lesquelles
+// un bureau d'études donné a déjà été retenu ; name est un repli en texte
+// libre pour un membre qui n'est pas (encore) une fiche Contact du cabinet.
+export interface TenderGroupementMembre {
+  id?: string;
+  tender_id?: string;
+  role: string;
+  contact_id?: string | null;
+  name?: string | null;
+  sort_order?: number;
+}
+
 export interface Tender {
   id: string;
   title: string;
@@ -528,6 +661,7 @@ export interface Tender {
   status: 'Draft' | 'Submitted' | 'Won' | 'Lost';
   value: number;
   notes: string;
+  description?: string;
   mandataire_id?: string;
   mandataire_name?: string;
   type?: string;
@@ -542,8 +676,124 @@ export interface Tender {
   withdrawal_deadline?: string;
   specialties_list?: TenderSpecialty[];
   milestones_list?: Milestone[];
+  evaluation_criteria_list?: TenderEvaluationCriterion[];
   archived?: boolean;
   ville_execution?: string;
+  // Enveloppe prévisionnelle des honoraires — saisie manuellement ou
+  // recherchée par l'IA dans le DCE (plan Enterprise). Résultat de la
+  // consultation, une fois connu : groupement retenu (plusieurs entreprises
+  // possibles — architecte, bureau d'études, économiste) et montant des
+  // honoraires réellement obtenus. Le pourcentage honoraires/enveloppe se
+  // calcule à l'affichage, jamais stocké.
+  enveloppe_previsionnelle?: number | null;
+  groupement_retenu_list?: TenderGroupementMembre[];
+  honoraires_retenus_montant?: number | null;
+  // Onglet Honoraires (MAPA uniquement, src/pages/TenderDetail.tsx) : calcul
+  // des honoraires et répartition entre cotraitants, exactement comme dans
+  // une proposition (src/components/HonorairesSection.tsx). `value` porte
+  // déjà le montant des honoraires (voir tenders_valuation_label).
+  fee_distribution?: string; // JSON string, même format que Proposal.fee_distribution
+  vat_rate?: number;
+  decimal_precision?: number;
+  // Exclusivité demandée aux cotraitants — 'totale' (interdit de répondre
+  // dans une autre équipe, tous lots confondus), 'partielle' (interdit
+  // seulement sur le même lot/la même spécialité), ou absente (aucune
+  // exigence). Onglet Partenaires.
+  exclusivite?: 'totale' | 'partielle' | null;
+  /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+}
+
+// Une sollicitation d'un bureau d'études pour une spécialité donnée — onglet
+// Partenaires d'un appel d'offres. Indépendante de TenderSpecialty : pour
+// une même spécialité on consulte souvent plusieurs entreprises avant d'en
+// retenir une. Voir GET/POST /api/tender-partner-solicitations
+// (server/routes/tenderPartnerSolicitations.ts).
+export interface TenderPartnerSolicitation {
+  id: string;
+  tender_id: string;
+  specialty_name: string;
+  contact_id: string;
+  status: 'a_solliciter' | 'sollicite' | 'relance' | 'accepte' | 'decline';
+  sent_at?: string | null;
+  last_relance_at?: string | null;
+  relance_count: number;
+  response_notes?: string | null;
+  created_at?: string;
+}
+
+// Une autre affaire du cabinet dont le résultat (groupement retenu) est
+// connu, retrouvée par type de procédure ou spécialités communes — voir
+// GET /api/tenders/:id/candidatures-similaires (server/routes/tenders.ts).
+export interface SimilarTender {
+  id: string;
+  title: string;
+  client: string;
+  type?: string | null;
+  groupement_retenu_list: TenderGroupementMembre[];
+  honoraires_retenus_montant?: number | null;
+  enveloppe_previsionnelle?: number | null;
+  submission_deadline?: string | null;
+}
+
+// Dossier de candidature — voir supabase/migrate_tender_dossier.sql
+export interface TenderCompetitor {
+  id: string;
+  tender_id: string;
+  name: string;
+  info?: string;
+  risk_level: 'faible' | 'moyen' | 'eleve';
+  created_at?: string;
+}
+
+export type TenderPieceSection = 'candidature' | 'offre_technique' | 'offre_financiere';
+export type TenderPieceStatus = 'a_fournir' | 'fournie' | 'detectee_ia';
+
+export interface TenderPieceRequise {
+  id: string;
+  tender_id: string;
+  section: TenderPieceSection;
+  label: string;
+  obligatoire: boolean;
+  quantity_required?: number;
+  status: TenderPieceStatus;
+  source_hint?: string;
+  document_id?: string;
+  created_at?: string;
+}
+
+export interface TenderReference {
+  id: string;
+  tender_id: string;
+  project_id?: string;
+  custom_reference_id?: string;
+  required: boolean;
+  created_at?: string;
+  // Champs de lecture, joints côté serveur pour l'affichage (nom, client...)
+  name?: string;
+  client?: string;
+  category?: string;
+  end_date?: string;
+  source?: 'project' | 'manual';
+}
+
+export interface TenderMethodologyNote {
+  id: string;
+  tender_id: string;
+  title: string;
+  content: string;
+  status: 'a_rediger' | 'redige';
+  sort_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface TenderActivityNote {
+  id: string;
+  tender_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
 }
 
 export type TenderSourceType = 'rss' | 'boamp' | 'ted';
@@ -601,6 +851,10 @@ export interface TenderRssMatch {
   pouvoir_adjudicateur?: string | null;
   montant_travaux?: number | null;
   date_limite_reponse?: string | null;
+  // Type de procédure (Concours/MAPA), détecté heuristiquement dans le texte
+  // de l'annonce (server/tenderFieldExtractor.ts) — repris comme
+  // tenders.type à la conversion.
+  type_marche?: string | null;
 }
 
 export interface Specification {
@@ -686,6 +940,19 @@ export interface Contact {
   website?: string;
   created_at: string;
   created_by: string;
+  // Excludes the contact from the Google Contacts push sync (server/routes/
+  // contactSync.ts) regardless of category — a family member or personal
+  // reference entered here for reminders/notes, not meant to leave the cabinet.
+  is_personal?: boolean;
+  // Set server-side only (never client-writable — see server/routes/
+  // contacts.ts) when is_personal is true: the one user this contact is
+  // visible to. Null on a "pro" contact, which stays shared by the tenant.
+  owner_user_id?: string | null;
+  // Free multi-value tags, shown/edited only for the matching category
+  // (src/components/ContactFormFields.tsx): corps_etat for "Entreprise"
+  // contacts, specialite for "Bureau d'études" ones.
+  corps_etat?: string[];
+  specialite?: string[];
 }
 
 export interface ContactCategory {
@@ -861,6 +1128,8 @@ export interface Proposal {
   comp_fee_percent?: number;
   vat_rate?: number;
   decimal_precision?: number;
+  /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Invoice {
@@ -871,6 +1140,24 @@ export interface Invoice {
   // server/zohoSync.ts) until it's attached to one from the edit modal.
   project_id: string | null;
   project_name?: string;
+  // Le Maître d'Ouvrage de la facture — indépendant de project_id (une
+  // facture générale ou importée d'un connecteur comptable n'a pas de
+  // projet). Rempli depuis projects.client_id à la création quand les deux
+  // existent, toujours modifiable ensuite (voir invoices.client_id).
+  client_id?: string | null;
+  // Lecture seule, jointe par GET /api/invoices/:id à des fins d'affichage —
+  // jamais envoyée sur un POST/PUT (voir server/routes/invoices.ts).
+  client?: {
+    name: string;
+    siret?: string | null;
+    vat_number?: string | null;
+    address?: string | null;
+    city?: string | null;
+    zip?: string | null;
+    country?: string | null;
+    phone?: string | null;
+    email?: string | null;
+  } | null;
   amount: number;
   tax_amount?: number;
   total_amount?: number;
@@ -907,6 +1194,11 @@ export interface Invoice {
   buyer_siret?: string;
   buyer_service_code?: string;
   engagement_number?: string;
+  // Posé par la synchro Zoho (server/zohoSync.ts::flagInvoicesDeletedUpstream)
+  // quand la facture liée a disparu de Zoho — jamais de suppression locale en
+  // miroir, une facture déjà numérotée doit rester dans la séquence légale.
+  zoho_invoice_id?: string;
+  accounting_deleted_at?: string | null;
 }
 
 export interface InvoiceItem {
@@ -924,6 +1216,36 @@ export interface InvoicePhase {
   montant_phase: number;
 }
 
+/** Statut de présence à une réunion de chantier : Présent, Retard, Absent Excusé, Absent Non Excusé. */
+export type PresenceStatus = 'P' | 'R' | 'AE' | 'ANE';
+
+export interface SiteReportAttendee {
+  name: string;
+  role: string;
+  /** Intervenant du projet (project_stakeholders) dont cette ligne reprend la présence — absent pour une ligne saisie librement. */
+  contact_id?: string;
+  present: boolean;
+  excused?: boolean;
+  /** Statut détaillé P/R/AE/ANE. Une ligne ancienne sans ce champ se déduit de present/excused. */
+  status?: PresenceStatus;
+  /** Coché : cet intervenant reçoit la diffusion du CR (colonne « D » du modèle). */
+  diffusion?: boolean;
+}
+
+/** Suivi d'un lot pour un CR donné (page 2 du modèle : présence, effectif, retards, intempéries). */
+export interface SiteReportLotTracking {
+  lot_id: string;
+  status?: PresenceStatus;
+  effectif?: number;
+  retard_execution?: boolean;
+  retard_remise_docs?: boolean;
+  intemperies?: boolean;
+  convoque_reunion_suivante?: boolean;
+  lieu?: string;
+  /** Lot concerné par des travaux (W), des documents à remettre (D), les deux, ou aucun. */
+  concerned?: 'W' | 'D' | 'WD';
+}
+
 export interface SiteReport {
   id: string;
   project_id: string;
@@ -937,14 +1259,18 @@ export interface SiteReport {
   meteo?: string;
   temperature?: number;
   effectif_total?: number;
-  attendance?: { name: string; role: string; present: boolean; excused?: boolean }[];
+  attendance?: SiteReportAttendee[];
+  lot_tracking?: SiteReportLotTracking[];
   statut?: 'brouillon' | 'diffuse' | 'archive';
   decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
+  /** Créé hors ligne, pas encore atteint le serveur — voir src/lib/offlineQueue.ts. */
+  pendingSync?: boolean;
 }
 
 export interface SiteReportNote {
   id: string;
   report_id: string;
+  /** Rubrique du CR — texte libre, personnalisable par l'architecte (pas de liste fermée). */
   category: string;
   note_number: number;
   responsible_company?: string;
@@ -979,6 +1305,8 @@ export interface Observation {
   type?: 'observation' | 'reserve' | 'a_faire';
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface DPGFItem {
@@ -1042,6 +1370,10 @@ export interface MeetingPhoto {
   file_url: string;
   caption?: string;
   uploaded_at: string;
+  /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+  /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
+  localPreviewUrl?: string;
 }
 
 // ── Agents IA ──────────────────────────────────────────────────────────────
@@ -1117,16 +1449,41 @@ export interface Meeting {
   updated_at?: string;
   photos?: MeetingPhoto[];
   attendees?: MeetingAttendee[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
+
+/**
+ * Catégorie d'une mission du contrat, reprise de la répartition des
+ * propositions (`FeeDistributionGrid`, `Proposals.tsx`) pour que les deux
+ * écrans classent les missions de la même façon : mission de base, mission
+ * d'exécution, ou mission complémentaire ajoutée pour cette affaire.
+ * Facultative : une mission enregistrée avant l'existence de ce champ est
+ * traitée comme `'base'`.
+ */
+export type ContratMissionCategory = 'base' | 'exe' | 'complementaire';
 
 export interface ContratMOEMission {
   id: string;
   name: string;
   pct?: number;
   incluse: boolean;
+  category?: ContratMissionCategory;
 }
 
-export interface ContratCotraitant {
+/**
+ * TVA d'un membre du groupement. Tous les cotraitants ne sont pas assujettis
+ * (micro-entreprise, franchise en base) : le taux appliqué aux honoraires est
+ * donc propre à chaque membre, pas au contrat.
+ * `tva_applicable` absent vaut « assujetti » (le cas courant) et `tva_rate`
+ * absent vaut le taux de droit commun (20 %).
+ */
+export interface ContratMembreTVA {
+  tva_applicable?: boolean;
+  tva_rate?: number;
+}
+
+export interface ContratCotraitant extends ContratMembreTVA {
   id: string;
   contact_id?: string;
   contact_name?: string;
@@ -1135,13 +1492,25 @@ export interface ContratCotraitant {
   montant_honoraires?: number;
 }
 
-export interface ContratSousTraitant {
+/**
+ * Qui règle ce sous-traitant : l'agence (comptabilité agence, par défaut),
+ * un cotraitant du même contrat (son `id` dans `ContratMOE.cotraitants`), ou
+ * le maître d'ouvrage directement (`'moa'`, hors comptabilité agence).
+ * Remplace l'ancien booléen `paiement_direct_moa` — un sous-traitant peut
+ * être réglé par n'importe lequel des membres du groupement, pas seulement
+ * l'agence ou le MOA.
+ */
+export type ContratSousTraitantPayeur = 'agence' | 'moa' | string;
+
+export interface ContratSousTraitant extends ContratMembreTVA {
   id: string;
   contact_id?: string;
   contact_name?: string;
   specialty?: string;
   montant?: number;
-  paiement_direct_moa: boolean;
+  payeur?: ContratSousTraitantPayeur;
+  /** @deprecated remplacé par `payeur` ('moa' vaut pour l'ancien `true`) — conservé en lecture pour les contrats déjà enregistrés. */
+  paiement_direct_moa?: boolean;
 }
 
 export interface ContratMOE {
@@ -1183,8 +1552,25 @@ export interface ContratMOE {
 export interface NoteHonorairePhase {
   phase_id: string;
   phase_name: string;
+  /**
+   * Sur les `phases` de la note : le pourcentage de la mission facturé dans
+   * cette note pour TOUT le groupement — la seule valeur d'avancement saisie,
+   * les montants de chaque membre s'en déduisant par répartition.
+   * Sur les `phases` d'un intervenant : n'est plus renseigné (c'est `part_pct`
+   * qui porte sa quote-part) ; conservé en lecture pour les notes
+   * enregistrées avant cette refonte, où chaque intervenant portait son
+   * propre avancement.
+   */
   avancement_pct: number;
   montant_phase: number;
+  /**
+   * Quote-part de l'intervenant dans le montant groupement de cette mission
+   * (%) — par exemple l'agence 60 % et un cotraitant 40 % de l'esquisse.
+   * Sur les `phases` de la note elle-même, c'est la part de l'agence.
+   * Les parts d'une mission totalisent normalement 100 % ; ce qu'un membre
+   * règle à un sous-traitant se déduit ensuite de son propre montant.
+   */
+  part_pct?: number;
 }
 
 export interface NoteHonoraireCotraitant {
@@ -1205,7 +1591,10 @@ export interface NoteHonoraireSousTraitant {
   montant_ht: number;
   tva_rate: number;
   montant_ttc: number;
-  paiement_direct_moa: boolean;
+  /** cf. ContratSousTraitantPayeur — reprise depuis le contrat à la création de la note. */
+  payeur?: ContratSousTraitantPayeur;
+  /** @deprecated remplacé par `payeur`. */
+  paiement_direct_moa?: boolean;
 }
 
 // ─── MAF — Déclaration des activités professionnelles ────────────────────────

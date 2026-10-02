@@ -5,6 +5,7 @@
 // one to a signed URL (valid ~1h) via GET /api/storage/signed-url, which
 // checks the caller's tenant owns the object before minting it.
 import { apiFetch } from './api';
+import i18n from '../i18n';
 
 export async function resolveSignedUrl(fileUrl: string): Promise<string> {
   const { url } = await apiFetch<{ url: string }>(`/api/storage/signed-url?url=${encodeURIComponent(fileUrl)}`);
@@ -20,6 +21,6 @@ export async function openSignedUrl(fileUrl: string): Promise<void> {
     window.open(url, '_blank', 'noopener,noreferrer');
   } catch (err) {
     console.error('[signedStorageUrl] Failed to resolve download link:', err);
-    alert("Impossible d'accéder à ce fichier pour le moment.");
+    alert(i18n.t('signed_storage_url_unavailable'));
   }
 }

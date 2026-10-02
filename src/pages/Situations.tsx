@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconEdit, IconCheck, IconX, IconDownload,
   IconCalculator, IconChevronDown, IconChevronRight, IconAlertTriangle,
@@ -127,6 +128,7 @@ const INDICES_COURANTS: { code: string; label: string }[] = [
 
 // ── Composant principal ─────────────────────────────────────────────────────
 export default function Situations({ projectId: propProjectId }: { projectId?: string }) {
+  const { t } = useTranslation();
   const { projectId: routeProjectId } = useParams<{ projectId: string }>();
   const projectId = propProjectId || routeProjectId || '';
 
@@ -370,7 +372,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
 
   // ── Supprimer une situation ───────────────────────────────────────────────
   const handleDeleteSit = async (id: string) => {
-    if (!confirm('Supprimer cette situation ?')) return;
+    if (!confirm(t('situations_confirm_delete_situation'))) return;
     await apiFetch(`/api/situations/${id}`, { method: 'DELETE' });
     if (selectedSit?.id === id) setSelectedSit(null);
     await loadSituations();
@@ -405,7 +407,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
   };
 
   const handleDeleteMarche = async (id: string) => {
-    if (!confirm('Supprimer ce marché ?')) return;
+    if (!confirm(t('situations_confirm_delete_marche'))) return;
     await apiFetch(`/api/marches-entreprises/${id}`, { method: 'DELETE' });
     await loadMarches();
   };
@@ -516,7 +518,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   <p className="text-xs text-[var(--tblr-muted)]">{new Date(s.date_situation).toLocaleDateString('fr-FR')}</p>
                 </div>
                 <div className="flex items-center gap-1">
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-lg font-medium ${statColor(s.etat)}`}>{s.etat}</span>
+                  <span className={`text-[0.6875rem] px-1.5 py-0.5 rounded-lg font-medium ${statColor(s.etat)}`}>{s.etat}</span>
                   <button onClick={e => { e.stopPropagation(); handleDeleteSit(s.id); }} className="p-0.5 rounded-lg hover:bg-red-50 text-red-400 opacity-0 group-hover:opacity-100"><IconTrash size={12} /></button>
                 </div>
               </div>
@@ -579,7 +581,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   <p className="text-sm text-[var(--tblr-muted)] text-center py-6">Aucun poste DPGF — ajoutez des items dans le DPGF du projet</p>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs border-collapse">
+                    <table className="min-w-full text-xs border-collapse">
                       <thead>
                         <tr className="text-[var(--tblr-muted)] border-b" style={{ borderColor: 'var(--tblr-border)' }}>
                           <th className="text-left py-2 pr-2 font-medium">Désignation</th>
@@ -670,7 +672,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   <p className="font-medium">Sit. n°{s.numero_situation}</p>
                   <p className="text-xs text-[var(--tblr-muted)]">{new Date(s.date_situation).toLocaleDateString('fr-FR')}</p>
                 </div>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-lg font-medium ${statColor(s.etat)}`}>{s.etat}</span>
+                <span className={`text-[0.6875rem] px-1.5 py-0.5 rounded-lg font-medium ${statColor(s.etat)}`}>{s.etat}</span>
               </div>
             ))}
           </div>
@@ -691,16 +693,16 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                     <div className="flex justify-between items-center">
                       <div className="flex items-center gap-2">
                         <h3 className="font-semibold">État d'acompte n°{selectedSit.numero_situation}</h3>
-                        <span className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                        <span className="px-1.5 py-0.5 rounded-lg text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                           Marché {projectIsPublic ? 'public' : 'privé'}
                         </span>
                         {linkedId && status && (
-                          <span className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-primary-lt)', color: info.color }}>
+                          <span className="px-1.5 py-0.5 rounded-lg text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: 'var(--tblr-primary-lt)', color: info.color }}>
                             Facture entreprise : {status}
                           </span>
                         )}
                         {selectedSit.etat_acompte_joint_at && (
-                          <span className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+                          <span className="px-1.5 py-0.5 rounded-lg text-[0.6875rem] font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
                             État d'acompte joint
                           </span>
                         )}
@@ -784,7 +786,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                         <input type="number" step="0.000001" value={etatForm.revision_coeff}
                           onChange={e => setEtatForm(f => ({ ...f, revision_coeff: parseFloat(e.target.value) || 1 }))}
                           className="w-full text-sm border rounded-lg px-2 py-1.5 tabular-nums" style={{ borderColor: 'var(--tblr-border)' }} />
-                        <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">
+                        <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">
                           Cn = {marche.revision_formule?.fixe} + Σ(poids × In/I0) — voir indices INSEE BT/TP
                         </p>
                       </Field>
@@ -1046,7 +1048,7 @@ function MarcheForm({
             <Field label={`Partie fixe a₀ (total formule = 1, actuel: ${somme.toFixed(3)})`}>
               <input type="number" step={0.01} min={0} max={1} value={rf.fixe} onChange={e => setForm({ ...form, revision_formule: { ...rf, fixe: parseFloat(e.target.value) || 0 } })}
                 className={`w-full text-sm border rounded-lg px-2 py-1.5 bg-white ${!formulaOk ? 'border-red-400' : ''}`} style={formulaOk ? { borderColor: 'var(--tblr-border)' } : {}} />
-              {!formulaOk && <p className="text-[10px] text-red-600 mt-0.5">⚠ a₀ + Σ poids doit être égal à 1 (actuel : {somme.toFixed(3)})</p>}
+              {!formulaOk && <p className="text-[0.6875rem] text-red-600 mt-0.5">⚠ a₀ + Σ poids doit être égal à 1 (actuel : {somme.toFixed(3)})</p>}
             </Field>
             <div className="space-y-2">
               {rf.indices.map((ind, i) => (

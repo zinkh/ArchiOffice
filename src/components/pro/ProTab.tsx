@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
 import { BPUWorkspace } from './BPUWorkspace';
+import { LotsManager } from './LotsManager';
+import { appliquerOrdreLots, comparerNumerosDeLot, lotsDivergent, planImportLots, type LotProjet } from '../../lib/lotsOrder';
 import { PrintPageDecorations } from '../PrintPageDecorations';
 import { DPGF, Ligne, type OffreDocument } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
@@ -15,18 +18,23 @@ import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
   IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
+  IconChecklist, IconCamera, IconHistory, IconClipboardList,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
 import { apiFetch } from '../../lib/api';
+import { validateProDocument } from '../../lib/proValidation';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
-type SubTab = 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
+type SubTab = 'LOTS' | 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
+interface DpgfVersion { id: string; label: string; phase?: string; version?: string; created_at: string }
 
 interface ProTabProps {
   projectId: string;
   projectName?: string;
+  /** Rappelé après création/suppression d'un lot, pour que la fiche projet (qui en garde une copie dans `lots_list`) se resynchronise. */
+  onLotsChanged?: () => void;
 }
 
 const EMPTY_DPGF = (projectId: string): DPGF => ({
@@ -69,14 +77,43 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
+export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsChanged }) => {
+  const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
+  const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
 
   // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
   const dpgfDoc = useAutosavedDoc<DPGF>({
     key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
   });
   const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
+
+  const controlerDossier = useCallback(() => {
+    if (!dpgf) return;
+    const issues = validateProDocument(dpgf);
+    if (!issues.length) return window.alert('Contrôle terminé : aucune anomalie détectée.');
+    const errors = issues.filter(i => i.severity === 'error');
+    const warnings = issues.filter(i => i.severity === 'warning');
+    window.alert([
+      `Contrôle PRO/DCE : ${errors.length} erreur(s), ${warnings.length} vigilance(s).`, '',
+      ...issues.slice(0, 40).map(i => `${i.severity === 'error' ? '⛔' : '⚠'} ${i.message}`),
+      ...(issues.length > 40 ? [`… et ${issues.length - 40} autre(s).`] : []),
+    ].join('\n'));
+  }, [dpgf]);
+
+  const creerInstantane = useCallback(async () => {
+    if (!dpgf) return;
+    await handleSave();
+    const label = window.prompt('Libellé de la version (ex. APD validé, DCE indice A) :', `${dpgf.version || '1.0'} — ${dpgf.titre}`)?.trim();
+    if (!label) return;
+    const phase = window.prompt('Phase associée (APS, APD, PRO, DCE…) :', '')?.trim() || null;
+    await apiFetch(`/api/projects/${projectId}/dpgf/versions`, { method: 'POST', body: JSON.stringify({ label, phase, version: dpgf.version }) });
+    window.alert(`Version « ${label} » figée.`);
+  }, [dpgf, handleSave, projectId]);
+
+  const ouvrirVersions = useCallback(async () => {
+    setVersions(await apiFetch<DpgfVersion[]>(`/api/projects/${projectId}/dpgf/versions`));
+  }, [projectId]);
 
   // Offres reçues sur le DPGF. Chargées à part du document lui-même (route
   // dédiée, cf. server/routes/dpgf.ts) : GET /api/projects/:id/dpgf ne rend
@@ -125,6 +162,106 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const { doc: bpu, setDoc: setBpu, loading: bpuLoading, saveStatus: bpuSaveStatus, saveNow: handleBpuSave } = bpuDoc;
 
   const isBpuTab = activeSubTab === 'BPU' || activeSubTab === 'DQE';
+
+  // La liste des lots du projet fait foi : son ordre et ses numéros sont
+  // reportés sur le DPGF (donc le CCTP, même document) et sur le bordereau.
+  // Lots du projet : source de vérité, lus avant tout alignement.
+  const [projectLots, setProjectLots] = useState<LotProjet[]>([]);
+  const [projectLotsLoaded, setProjectLotsLoaded] = useState(false);
+  useEffect(() => {
+    let annule = false;
+    setProjectLotsLoaded(false);
+    apiFetch<any[]>(`/api/projects/${projectId}/lots`)
+      .then(rows => {
+        if (annule) return;
+        setProjectLots((rows ?? [])
+          .map(r => ({ id: r.id, lot_number: r.lot_number, lot_title: r.lot_title }))
+          .sort((a, b) => comparerNumerosDeLot(a.lot_number, b.lot_number)));
+        setProjectLotsLoaded(true);
+      })
+      .catch(() => { if (!annule) setProjectLotsLoaded(true); });
+    return () => { annule = true; };
+  }, [projectId]);
+
+  // Le document et la liste des lots divergent (CCTP rédigé avant la liste, par
+  // exemple) : rien n'est modifié en silence, l'architecte choisit le sens.
+  const divergence = projectLotsLoaded && !dpgfLoading && lotsDivergent(dpgf, projectLots);
+  const [lotsVersion, setLotsVersion] = useState(0);
+
+  // Sans lot au projet, les documents ne sont pas touchés : une liste vide
+  // ne doit pas vider un CCTP déjà rédigé.
+  const synchroniserLots = useCallback((lotsProjet: LotProjet[]) => {
+    setProjectLots(lotsProjet);
+    if (lotsProjet.length) {
+      if (dpgf && !lotsDivergent(dpgf, lotsProjet)) setDpgf(appliquerOrdreLots(dpgf, lotsProjet));
+      if (bpuTouched && bpu && !lotsDivergent(bpu, lotsProjet)) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+    }
+    onLotsChanged?.();
+  }, [dpgf, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
+
+  // À l'ouverture, un document dont les lots sont tous rattachés à la liste
+  // (ou sans lot) est aligné une seule fois : numéros et intitulés identiques.
+  const lotsAlignesPour = useRef<string | null>(null);
+  useEffect(() => {
+    if (dpgfLoading || !dpgf || !projectLotsLoaded) return;
+    if (lotsAlignesPour.current === projectId) return;
+    lotsAlignesPour.current = projectId;
+    if (projectLots.length && !lotsDivergent(dpgf, projectLots)) setDpgf(appliquerOrdreLots(dpgf, projectLots));
+  }, [dpgfLoading, dpgf, projectLotsLoaded, projectLots, projectId, setDpgf]);
+  useEffect(() => { lotsAlignesPour.current = null; }, [projectId]);
+
+  /** Sens document → liste : la liste des lots reprend numéros et intitulés du CCTP/DPGF. */
+  const importerLotsDuDocument = useCallback(async () => {
+    if (!dpgf) return;
+    const plan = planImportLots(dpgf, projectLots);
+    try {
+      const rattachement = new Map<string, string>();
+      for (const l of plan) {
+        if (l.projectLotId) {
+          await apiFetch(`/api/lots/${l.projectLotId}`, { method: 'PUT', body: JSON.stringify({ lot_number: l.numero, lot_title: l.titre }) });
+          rattachement.set(l.lotDocId, l.projectLotId);
+        } else {
+          const { id } = await apiFetch<{ id: string }>(`/api/projects/${projectId}/lots`, { method: 'POST', body: JSON.stringify({ lot_number: l.numero, lot_title: l.titre }) });
+          rattachement.set(l.lotDocId, id);
+        }
+      }
+      const rows = await apiFetch<any[]>(`/api/projects/${projectId}/lots`);
+      const lotsProjet = (rows ?? [])
+        .map(r => ({ id: r.id, lot_number: r.lot_number, lot_title: r.lot_title }))
+        .sort((a, b) => comparerNumerosDeLot(a.lot_number, b.lot_number));
+      const lie = { ...dpgf, lots: dpgf.lots.map(l => ({ ...l, projectLotId: rattachement.get(l.id) ?? l.projectLotId })) };
+      setProjectLots(lotsProjet);
+      setDpgf(appliquerOrdreLots(lie, lotsProjet));
+      if (bpuTouched && bpu && !lotsDivergent(bpu, lotsProjet)) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+      setLotsVersion(v => v + 1);
+      onLotsChanged?.();
+    } catch (e: any) {
+      window.alert(`Import des lots impossible : ${e?.message ?? e}`);
+    }
+  }, [dpgf, projectLots, projectId, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
+
+  /** Sens liste → document : le document reprend exactement la liste (lots hors liste retirés après confirmation). */
+  const alignerDocumentSurListe = useCallback(() => {
+    if (!dpgf) return;
+    const apres = appliquerOrdreLots(dpgf, projectLots, { rapprocher: true, retirerHorsProjet: true });
+    const perdus = dpgf.lots.length - apres.lots.filter(l => dpgf.lots.some(x => x.id === l.id)).length;
+    const avecContenu = dpgf.lots.filter(l => !apres.lots.some(x => x.id === l.id) && (l.chapitres ?? []).some(c => c.lignes?.length || (c.cctpDescription ?? '').trim()));
+    const msg = `Aligner le CCTP/DPGF sur la liste des lots ?\n${perdus} lot(s) absent(s) de la liste seront retirés`
+      + (avecContenu.length ? `, dont ${avecContenu.length} avec du contenu (${avecContenu.map(l => `${l.numero} ${l.titre}`).slice(0, 5).join(' ; ')}).` : '.');
+    if (!window.confirm(msg)) return;
+    setDpgf(apres);
+    if (bpuTouched && bpu) setBpu(appliquerOrdreLots(bpu, projectLots, { rapprocher: true, retirerHorsProjet: true }));
+  }, [dpgf, projectLots, setDpgf, bpuTouched, bpu, setBpu]);
+
+  // Le bordereau, chargé plus tard, est aligné de la même façon à son ouverture.
+  const bpuAligne = useRef<string | null>(null);
+  useEffect(() => {
+    if (!bpuTouched || bpuLoading || !bpu || !projectLotsLoaded) return;
+    if (bpuAligne.current === projectId) return;
+    bpuAligne.current = projectId;
+    if (projectLots.length && bpu.lots.length && !lotsDivergent(bpu, projectLots)) setBpu(appliquerOrdreLots(bpu, projectLots));
+  }, [bpuTouched, bpuLoading, bpu, projectLotsLoaded, projectLots, projectId, setBpu]);
+  useEffect(() => { bpuAligne.current = null; }, [projectId]);
   useEffect(() => { if (isBpuTab) setBpuTouched(true); }, [isBpuTab]);
 
   // Initialise le bordereau depuis le DPGF, en préservant tout ce qui a déjà
@@ -139,17 +276,17 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     if (!bpu || !dpgf) return;
     const { dpgf: next, diff } = bpuToDpgf(bpu, dpgf);
     const lignes = [
-      `${diff.modifies.length} prix unitaire(s) seront modifiés dans le DPGF.`,
-      diff.nonChiffres.length ? `${diff.nonChiffres.length} article(s) du DPGF ne sont pas chiffrés au bordereau et resteront inchangés.` : '',
-      diff.absentsDuDpgf.length ? `${diff.absentsDuDpgf.length} article(s) n'existent que dans le bordereau et ne seront pas ajoutés.` : '',
+      t('pro_tab_bpu_revert_modified_count', { count: diff.modifies.length }),
+      diff.nonChiffres.length ? t('pro_tab_bpu_revert_not_priced_count', { count: diff.nonChiffres.length }) : '',
+      diff.absentsDuDpgf.length ? t('pro_tab_bpu_revert_absent_count', { count: diff.absentsDuDpgf.length }) : '',
       '',
       ...diff.modifies.slice(0, 12).map(m => `  ${m.numero} ${m.designation} : ${m.ancien} → ${m.nouveau} €`),
-      diff.modifies.length > 12 ? `  … et ${diff.modifies.length - 12} autre(s).` : '',
+      diff.modifies.length > 12 ? t('pro_tab_bpu_revert_more_count', { count: diff.modifies.length - 12 }) : '',
       '',
-      'Confirmer le reversement ?',
+      t('pro_tab_bpu_revert_confirm'),
     ].filter(Boolean).join('\n');
     if (window.confirm(lignes)) setDpgf(next);
-  }, [bpu, dpgf, setDpgf]);
+  }, [bpu, dpgf, setDpgf, t]);
 
   // Les exports portent la charte du cabinet : en-tête avec logo et
   // coordonnées, pied de page adresse et SIRET, pagination « P1|2 ».
@@ -172,18 +309,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     }
   }, [bpu, setBpu, projectName, settings]);
 
-  // Lots du projet, pour rattacher les lots du bordereau : c'est ce
-  // rattachement que le versement vers le comparatif ACT vient chercher.
-  const [projectLots, setProjectLots] = useState<{ id: string; lot_number: string; lot_title: string }[]>([]);
-  useEffect(() => {
-    if (!bpuTouched) return;
-    apiFetch<any[]>(`/api/projects/${projectId}/lots`)
-      .then(rows => setProjectLots((rows ?? []).map(r => ({
-        id: r.id, lot_number: r.lot_number, lot_title: r.lot_title,
-      }))))
-      .catch(() => { /* le rattachement reste possible plus tard */ });
-  }, [projectId, bpuTouched]);
-
   /** Envoie les articles sélectionnés vers la bibliothèque de prix du cabinet. */
   const envoyerVersBibliotheque = useCallback(async (lignes: any[]) => {
     if (!lignes.length) return;
@@ -198,13 +323,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         }),
       });
       const historique = res.prixRemontes
-        ? `, ${res.prixRemontes} prix enregistré(s) dans l’historique`
+        ? t('pro_tab_library_history_suffix', { count: res.prixRemontes })
         : '';
-      window.alert(`Bibliothèque mise à jour : ${res.created} article(s) ajouté(s), ${res.updated} mis à jour${historique}.`);
+      window.alert(t('pro_tab_library_updated', { created: res.created, updated: res.updated, historique }));
     } catch (e: any) {
-      window.alert(`L'envoi vers la bibliothèque a échoué : ${e?.message ?? 'erreur inconnue'}`);
+      window.alert(t('pro_tab_library_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }));
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   // ── Offres reçues des entreprises ───────────────────────────────────────────
   // Un seul dialogue sert les deux documents (OffreImportDialog) ; ce
@@ -227,10 +352,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     // fait dans le dos de l'architecte et il ne pensera pas à aller le lire.
     if (saved.prixRemontes) {
       window.alert(
-        `${saved.prixRemontes} prix de cette offre ont été versés dans la bibliothèque d’ouvrages.`,
+        t('pro_tab_offer_prices_added', { count: saved.prixRemontes }),
       );
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   /** Même chose côté DPGF, sur sa propre route et son propre état d'offres. */
   const enregistrerOffreDpgf = useCallback(async (offre: any) => {
@@ -241,10 +366,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     setDpgfOffres(prev => [...prev, saved]);
     if (saved.prixRemontes) {
       window.alert(
-        `${saved.prixRemontes} prix de cette offre ont été versés dans la bibliothèque d’ouvrages.`,
+        t('pro_tab_offer_prices_added', { count: saved.prixRemontes }),
       );
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   /**
    * Verse un résultat de versComparatif (DPGF ou BPU) dans le comparatif
@@ -260,11 +385,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
     if (lotsNonRattaches.length) {
       const liste = lotsNonRattaches.map(l => `  ${l.numero} ${l.titre}`).join('\n');
       if (!window.confirm(
-        `Ces lots du ${docLabel} ne sont rattachés à aucun lot du projet et ne seront pas versés :\n${liste}\n\nContinuer ?`,
+        t('pro_tab_lots_not_linked_confirm', { docLabel, liste }),
       )) return;
     }
     if (!comparatif.length) {
-      window.alert(`Aucun lot du ${docLabel} n'est rattaché à un lot du projet : rien à verser.`);
+      window.alert(t('pro_tab_no_lots_linked', { docLabel }));
       return;
     }
     try {
@@ -274,11 +399,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         method: 'PUT',
         body: JSON.stringify({ ...(act ?? {}), consultation }),
       });
-      window.alert(`Comparatif mis à jour : ${comparatif.length} lot(s) versé(s). Onglet ACT du projet.`);
+      window.alert(t('pro_tab_comparatif_updated', { count: comparatif.length }));
     } catch (e: any) {
-      window.alert(`Le versement a échoué : ${e?.message ?? 'erreur inconnue'}`);
+      window.alert(t('pro_tab_comparatif_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }));
     }
-  }, [projectId]);
+  }, [projectId, t]);
 
   const verserAuComparatifAct = useCallback(async () => {
     if (!bpu) return;
@@ -311,6 +436,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
   // ── Tab labels ───────────────────────────────────────────────────────────────
   const TABS: PillTabItem[] = [
+    { id: 'LOTS', label: 'LOTS', icon: IconClipboardList },
     { id: 'CCTP', label: 'CCTP', icon: IconFileDescription },
     { id: 'DPGF', label: 'DPGF', icon: IconTable },
     { id: 'ESTIMATION', label: 'ESTIMATION', icon: IconCalculator },
@@ -325,6 +451,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   const activeVersion = (isBpuTab ? bpu?.version : dpgf?.version) ?? '1.0';
 
   const PRINT_TITLES: Record<SubTab, string> = {
+    LOTS:       'Lots de travaux',
     CCTP:       'CCTP — Cahier des Clauses Techniques Particulières',
     DPGF:       'DPGF — Décomposition du Prix Global et Forfaitaire',
     ESTIMATION: 'Estimation Prévisionnelle',
@@ -333,7 +460,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
   };
 
   return (
-    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100vh - 200px)', minHeight: 500 }}>
+    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100dvh - 200px)', minHeight: 500 }}>
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
       {(dpgf || bpu) && (
@@ -370,6 +497,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
 
         {/* Save status + print + split — always visible on the right */}
         <div className="ml-auto flex items-center gap-2 px-3 no-print">
+          {!isBpuTab && dpgf && <>
+            <button onClick={controlerDossier} title="Contrôler la cohérence CCTP–DPGF–estimation" className="flex items-center gap-1 px-2 py-1.5 text-xs border rounded"><IconChecklist size={14} /> Contrôler</button>
+            <button onClick={() => void creerInstantane()} title="Figer l'état courant" className="flex items-center gap-1 px-2 py-1.5 text-xs border rounded"><IconCamera size={14} /> Figer</button>
+            <button onClick={() => void ouvrirVersions()} title="Historique des versions" className="p-1.5 border rounded"><IconHistory size={14} /></button>
+          </>}
           {activeSaveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
           {activeSaveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
           {activeSaveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
@@ -404,8 +536,35 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
         </div>
       </div>
 
+      {versions && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) setVersions(null); }}>
+        <div className="w-full max-w-2xl max-h-[75dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b"><div><h3 className="font-semibold">Versions figées du dossier PRO</h3><p className="text-xs text-zinc-500">CCTP, DPGF et estimation au même instant</p></div><button onClick={() => setVersions(null)}><IconX size={18} /></button></div>
+          <div className="divide-y">{versions.length ? versions.map(v => <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3"><div><div className="font-medium text-sm">{v.label}</div><div className="text-xs text-zinc-500">{v.phase || 'Sans phase'} · v{v.version || '—'} · {new Date(v.created_at).toLocaleString('fr-FR')}</div></div><button className="px-3 py-1.5 text-xs border rounded text-amber-700" onClick={async () => { if (!window.confirm(`Restaurer « ${v.label} » ? L'état courant doit être figé au préalable si vous souhaitez le conserver.`)) return; const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' }); setDpgf(restored); setVersions(null); }}>Restaurer</button></div>) : <div className="p-6 text-sm text-zinc-500">Aucune version figée.</div>}</div>
+        </div>
+      </div>}
+
       {/* ── Content ────────────────────────────────────────────────────────── */}
+      {divergence && !isBpuTab && (
+        <div className="px-4 py-2 flex flex-wrap items-center gap-3 text-sm border-b" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+          <span className="flex-1 min-w-[16rem]">
+            Les lots du CCTP/DPGF ne correspondent pas à la liste des lots du projet (numéros et intitulés doivent être identiques partout).
+          </span>
+          <button type="button" className="btn btn-sm" onClick={() => void importerLotsDuDocument()}>
+            Remplir la liste des lots depuis le CCTP
+          </button>
+          <button type="button" className="btn btn-sm" onClick={alignerDocumentSurListe}>
+            Aligner le CCTP sur la liste
+          </button>
+        </div>
+      )}
       <div className="flex-1 overflow-hidden flex">
+
+        {/* LOTS */}
+        {activeSubTab === 'LOTS' && (
+          <div className="flex-1 overflow-y-auto px-4">
+            <LotsManager key={lotsVersion} projectId={projectId} onChange={synchroniserLots} />
+          </div>
+        )}
 
         {/* CCTP */}
         {activeSubTab === 'CCTP' && (

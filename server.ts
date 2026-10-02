@@ -5,6 +5,11 @@ import dotenv from "dotenv";
 import helmet from "helmet";
 import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
+import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
+import { registerTelegramRoutes } from "./server/routes/telegram";
+import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
+import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
+import { resolveAutomationApiKey } from "./server/automationApiKeys";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -20,6 +25,7 @@ import { registerObservationRoutes } from "./server/routes/observations";
 import { registerMeetingRoutes } from "./server/routes/meetings";
 import { registerMeetingAttendeeRoutes } from "./server/routes/meetingAttendees";
 import { registerDocumentTemplateRoutes } from "./server/routes/documentTemplates";
+import { registerEmailTemplateRoutes } from "./server/routes/emailTemplates";
 import { registerContratsMoeRoutes } from "./server/routes/contratsMoe";
 import { registerNotesHonorairesRoutes } from "./server/routes/notesHonoraires";
 import { registerProfileRoutes } from "./server/routes/profile";
@@ -33,8 +39,15 @@ import { registerTimeTrackingRoutes } from "./server/routes/timeTracking";
 import { registerLeaveRoutes } from "./server/routes/leave";
 import { registerTenderRoutes } from "./server/routes/tenders";
 import { registerTenderRssRoutes } from "./server/routes/tenderRss";
+import { registerTenderCompetitorRoutes } from "./server/routes/tenderCompetitors";
+import { registerTenderPieceRoutes } from "./server/routes/tenderPieces";
+import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences";
+import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
+import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
+import { registerTenderAiRoutes } from "./server/routes/tenderAi";
+import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
+import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
-import { registerSpecificationRoutes } from "./server/routes/specifications";
 import { registerContactRoutes } from "./server/routes/contacts";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
 import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
@@ -65,10 +78,12 @@ import { getMemberRole, listMemberships, listTenantMemberIds, resolveActiveTenan
 import { registerProposalRoutes } from "./server/routes/proposals";
 import { registerInvoiceRoutes } from "./server/routes/invoices";
 import { registerOrdresDeServiceRoutes } from "./server/routes/ordresDeService";
+import { registerAvenantsMoeRoutes } from "./server/routes/avenantsMoe";
 import { registerVisaRoutes } from "./server/routes/visas";
 import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
+import { registerReservePhotoRoutes } from "./server/reservePhotos";
 import { registerPermitRoutes } from "./server/routes/permits";
 import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
@@ -76,10 +91,20 @@ import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
 import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
+import { registerMailDraftRoutes } from "./server/routes/mailDrafts";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
+import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
+import { registerAutomationApiKeyRoutes } from "./server/routes/automationApiKeys";
+import { registerWebhookRoutes } from "./server/routes/webhooks";
+import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
+import { registerStorageProviders } from "./server/externalStorage/providers";
+import { parseExternalRef } from "./server/externalStorage/externalRef";
+import { getConnectionById } from "./server/externalStorage/externalConnection";
+import { createProvider } from "./server/externalStorage/providerFactory";
+import { tenantSupabaseStorageBytes } from "./server/externalStorage/storageUsage";
 import { registerLotRoutes } from "./server/routes/lots";
 import { registerAiSuggestionRoutes } from "./server/routes/aiSuggestions";
 import { registerCopilotSuggestionRoutes } from "./server/routes/copilotSuggestions";
@@ -93,6 +118,7 @@ import { createClient } from "@supabase/supabase-js";
 import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startAgentAlerts } from "./server/agentAlerts";
+import { startAgentMailInbox } from "./server/agentMailInbox";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
 import { startTenantPurge } from "./server/tenantPurge";
@@ -485,7 +511,7 @@ export async function createApp() {
   async function settleAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     provider: string; model: string;
     reservedCents: number;
     inputTokens: number; outputTokens: number;
@@ -517,7 +543,7 @@ export async function createApp() {
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;
@@ -603,8 +629,7 @@ export async function createApp() {
       throw err;
     }
     const limits = PLAN_LIMITS[plan] ?? PLAN_LIMITS.trial;
-    const { data } = await supabaseAdmin.from('document_versions').select('size_bytes').eq('tenant_id', tenantId);
-    const usedBytes = (data || []).reduce((sum: number, r: any) => sum + (r.size_bytes || 0), 0);
+    const usedBytes = await tenantSupabaseStorageBytes(supabaseAdmin, tenantId);
     const limitBytes = limits.storage_mb * 1024 * 1024;
     if (usedBytes + incomingBytes > limitBytes) {
       const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
@@ -625,7 +650,7 @@ export async function createApp() {
   // that reference for a short-lived signed URL after checking the caller's
   // tenant owns it.
   async function ensureStorageBuckets() {
-    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'support-attachments']) {
+    for (const bucket of ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'support-attachments']) {
       const { data: existing } = await supabaseAdmin.storage.getBucket(bucket);
       if (!existing) {
         const { error } = await supabaseAdmin.storage.createBucket(bucket, { public: false, fileSizeLimit: 52428800 });
@@ -664,6 +689,30 @@ export async function createApp() {
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
+  // Les documents, plans et visas d'un cabinet qui a branché son propre espace
+  // (Google Drive, Dropbox, Nextcloud, kDrive) n'y vont plus. Cette couche est
+  // la seule à le savoir : les dix autres modules de routes continuent d'appeler
+  // uploadToStorage/deleteFromStorage directement, sans rien changer. Voir
+  // server/externalStorage/storeBusinessFile.ts.
+  const { storeBusinessFile, removeBusinessFile } = createBusinessFileStore({
+    supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota,
+  });
+  registerStorageProviders(supabaseAdmin);
+
+  /** Les octets d'un fichier hébergé sur l'espace de stockage du cabinet, ou
+   *  null si la référence n'en est pas une (l'appelant reprend alors ses
+   *  chemins habituels). */
+  async function readExternalBusinessFile(tenantId: string, fileUrl: string) {
+    const ref = parseExternalRef(fileUrl);
+    if (!ref) return null;
+    const connection = await getConnectionById(supabaseAdmin, tenantId, ref.connectionId);
+    if (!connection) return null;
+    const stream = await createProvider(connection).openReadStream(ref.externalId);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream.body) chunks.push(Buffer.from(chunk as any));
+    return { buffer: Buffer.concat(chunks), contentType: stream.contentType };
+  }
+
   // ───────────────────────────────────────────────────────────────────────────
 
   // The local-auth routes are only ever registered when OFFLINE_MODE=true (see
@@ -686,6 +735,21 @@ export async function createApp() {
     // inside the handler, not via our session auth. Was missing here, so
     // the auth middleware 401'd it before that check ever ran.
     "/api/ragic/webhook",
+    // Sert un fichier hébergé sur l'espace de stockage du cabinet. Atteinte
+    // par window.open() ou par le `src` d'une balise <img>, donc sans en-tête
+    // Authorization possible — exactement comme une URL signée Supabase. C'est
+    // le jeton signé du chemin qui authentifie, vérifié dans le handler
+    // (server/externalStorage/externalTicket.ts).
+    "/api/storage/external",
+    // La redirection de Google après consentement est une navigation nue, sans
+    // JWT : le cabinet est récupéré depuis le nonce à usage unique
+    // (server/oauthState.ts). Le préfixe est exact, donc
+    // /api/external-storage/callback-url, lui, reste authentifié.
+    "/api/external-storage/callback",
+    // Appelée par Telegram lui-même (pas de JWT possible) — authentifiée par
+    // le secret de webhook vérifié dans le handler (server/routes/telegram.ts),
+    // sur le même principe que /api/ragic/webhook ci-dessus.
+    "/api/telegram/webhook",
   ];
 
   app.use("/api", async (req: any, res: any, next: any) => {
@@ -702,7 +766,61 @@ export async function createApp() {
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Authentification requise" });
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-    if (error || !user) return res.status(401).json({ error: "Token invalide" });
+    if (error || !user) {
+      // Pas un JWT Supabase — peut être un jeton MCP (voir
+      // packages/archioffice-agents/src/server/mcp/*.ts) : les outils MCP
+      // rappellent cette même API en boucle locale avec leur propre jeton,
+      // exactement comme les outils d'agent le font avec le JWT de
+      // l'utilisateur (internalApi.ts). Préfixe reconnaissable (mcp_at_),
+      // donc pas de lookup en base pour un JWT Supabase mal formé.
+      if (token.startsWith('mcp_at_')) {
+        const { resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
+        const resolved = await resolveMcpAccessToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Même principe pour le bot Telegram (server/telegramBot.ts) : le
+      // webhook rappelle /api/agents/:id/chat avec le jeton de la liaison
+      // plutôt qu'un JWT, puisque Telegram n'en fournit aucun.
+      if (token.startsWith('tg_at_')) {
+        const resolved = await resolveTelegramAccessToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Même principe pour le relevé de la messagerie entrante partagée
+      // (server/agentMailInbox.ts) : un email transféré reconnu rappelle
+      // /api/agents/:id/chat avec ce jeton plutôt qu'un JWT, puisqu'il n'y a
+      // personne de vivant derrière ce déclenchement. Jeton à usage unique
+      // et de quelques minutes (server/agentMailRelayTokens.ts), à la
+      // différence des liaisons persistantes mcp_at_/tg_at_ ci-dessus.
+      if (token.startsWith('mail_at_')) {
+        const resolved = await resolveMailRelayToken(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      // Clé d'automatisation (n8n, ou tout appelant HTTP externe) — voir
+      // server/automationApiKeys.ts. Liaison persistante et révocable comme
+      // tg_at_, pas à usage unique comme mail_at_ : un scénario n8n rappelle
+      // la même clé à chaque exécution.
+      if (token.startsWith('auto_at_')) {
+        const resolved = await resolveAutomationApiKey(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
+      return res.status(401).json({ error: "Token invalide" });
+    }
     req.user = user;
 
     // Cabinet actif de la requête. L'en-tête n'est jamais cru sur parole :
@@ -866,6 +984,7 @@ export async function createApp() {
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });
   registerMeetingAttendeeRoutes(app, { supabaseAdmin, getTenantId });
   registerDocumentTemplateRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerEmailTemplateRoutes(app, { supabaseAdmin, getTenantId });
   registerContratsMoeRoutes(app, { supabaseAdmin, getTenantId, captureWithContext });
   registerNotesHonorairesRoutes(app, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber, getUserName, logActivity });
   registerProfileRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
@@ -879,15 +998,22 @@ export async function createApp() {
   registerLeaveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin, businessDaysBetween });
   registerTenderRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerTenderRssRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerTenderCompetitorRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderPieceRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderReferenceRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
+  registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
+  registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
-  registerSpecificationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSuperAdminRoutes(app, { supabaseAdmin });
   registerAdminSupportRoutes(app, { supabaseAdmin, uploadToStorage });
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
-  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCalendarAccountRoutes(app, { supabaseAdmin, getTenantId });
   registerGmailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -896,11 +1022,11 @@ export async function createApp() {
   registerMailAccountRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMailLinkRoutes(app, { supabaseAdmin, getTenantId });
   registerMailFolderLinkRoutes(app, { supabaseAdmin, getTenantId });
-  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerRagicRoutes(app, { supabaseAdmin, getTenantId });
-  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId });
-  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerRagicRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerRegistrationRoutes(app, { supabaseAdmin });
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
@@ -908,21 +1034,28 @@ export async function createApp() {
   registerProposalRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, upload });
   registerInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber });
   registerOrdresDeServiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerVisaRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage });
+  registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerVisaRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
-  registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
+  registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
+  registerReservePhotoRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
   registerPermitRoutes(app, { supabaseAdmin, getTenantId });
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
-  registerPlanRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, checkStorageQuota, uploadToStorage, deleteFromStorage, requireRole });
+  registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
+  registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
+  registerExternalStorageRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerAutomationApiKeyRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerWebhookRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
@@ -939,7 +1072,18 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
+  // Le package agents n'importe rien depuis server/ (module propriétaire
+  // autonome) et ne peut donc pas construire lui-même un adaptateur de
+  // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
+  // nonces OAuth : sans ça, un agent cesserait de lire les pièces jointes
+  // déposées depuis qu'un cabinet a branché son espace, en rapportant
+  // simplement que le document est vide.
+  setExternalFileReader(readExternalBusinessFile);
+  // Même principe pour le moteur de lecture des documents (local ou Nomic,
+  // choisi dans /admin) : les extracteurs du package n'ont pas de client
+  // Supabase à eux pour relire ce réglage.
+  setDocumentParserSettingsClient(supabaseAdmin);
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
     reserveAiCredit,
@@ -958,6 +1102,31 @@ export async function createApp() {
     notifyTenantAdmins,
   });
   registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
+
+  // ── Serveur MCP (Gemini Spark, "Connected Apps → Custom apps for Spark") ──
+  // Voir packages/archioffice-agents/src/server/mcp/*.ts. Fournisseur OAuth
+  // (pas consommateur comme Gmail/Calendar/Zoho) + endpoint StreamableHTTP,
+  // un sous-ensemble volontairement restreint des outils d'agent.
+  // Postés ici plutôt que dans mcp/*.ts (qui n'importe rien depuis server/,
+  // voir plus haut) : l'ordre d'enregistrement Express suffit à les appliquer
+  // aux routes que registerMcpOAuthRoutes/registerMcpEndpoint définissent
+  // juste après, quel que soit le module qui porte le handler final.
+  app.use('/oauth/mcp', mcpOAuthLimiter);
+  app.use('/mcp', mcpToolLimiter);
+  if (!process.env.APP_URL) {
+    // Contrairement aux autres usages d'APP_URL (liens dans un email, callback
+    // OAuth qu'on redéclenche soi-même), celui-ci est publié tel quel dans le
+    // document de découverte OAuth que Gemini lit — une valeur de repli
+    // inatteignable (127.0.0.1) casse la connexion sans qu'aucune requête ne
+    // remonte d'erreur explicite côté ArchiOffice : Gemini échoue en silence
+    // à joindre son propre `issuer`. Vaut la peine d'un avertissement au
+    // démarrage plutôt que de laisser deviner pourquoi la liaison ne marche
+    // jamais sur une instance où la variable a été oubliée.
+    console.warn('[mcp] APP_URL non défini — le lien Gemini/MCP ne fonctionnera pas tant que cette variable ne pointe pas sur le domaine public HTTPS de cette instance.');
+  }
+  const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
+  registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
+  registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
 
 
   // Must be registered after all routes but before the SPA fallback below —
@@ -1021,6 +1190,7 @@ export async function createApp() {
   // de fond, qui ne doivent pas tourner avant que la boucle locale réponde).
   const startAgentBackgroundJobs = () => {
     startAgentAlerts(supabaseAdmin);
+    startAgentMailInbox(supabaseAdmin, `http://127.0.0.1:${PORT}`);
     import('@zinkh/archioffice-agents/server')
       .then(({ startAgentScheduler }) => startAgentScheduler(supabaseAdmin, { deductAiCredit, notifyTenantAdmins }))
       .catch(e => console.error('[agentScheduler] démarrage impossible:', e.message));

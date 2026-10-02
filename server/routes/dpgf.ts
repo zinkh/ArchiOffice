@@ -42,6 +42,14 @@ async function loadRow(supabaseAdmin: any, tenantId: string, projectId: string) 
   return data ?? null;
 }
 
+/** Signale les anciennes routes ligne-à-ligne sans casser leurs consommateurs. */
+function legacyDpgfItemsHeaders(res: any) {
+  res.set('Deprecation', 'true');
+  res.set('Sunset', 'Wed, 31 Mar 2027 23:59:59 GMT');
+  res.set('Link', '</api/projects/{projectId}/dpgf>; rel="successor-version"');
+  res.set('Warning', '299 ArchiOffice "dpgf_items est déprécié ; utiliser le document structuré /api/projects/:projectId/dpgf"');
+}
+
 export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   app.get('/api/projects/:projectId/dpgf', async (req: any, res: any) => {
     try {
@@ -81,6 +89,61 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     } catch (error) {
       console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
+    }
+  });
+
+  // ── Instantanés de phase / indice ─────────────────────────────────────────
+  app.get('/api/projects/:projectId/dpgf/versions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions')
+        .select('id,label,phase,version,created_by,created_at').eq('project_id', req.params.projectId)
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      res.json(data ?? []);
+    } catch (e: any) {
+      console.error('[GET dpgf/versions]', e);
+      res.status(500).json({ error: 'Failed to fetch DPGF versions' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/dpgf/versions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+      const document = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      const label = String(req.body?.label || '').trim();
+      if (!label) return res.status(400).json({ error: 'Le libellé est obligatoire' });
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions').insert({
+        id: crypto.randomUUID(),
+        project_id: req.params.projectId, dpgf_id: row.id, label,
+        phase: req.body?.phase || null, version: req.body?.version || document?.version || null,
+        document, created_by: req.user.id, created_at: new Date().toISOString(),
+      }).select().single();
+      if (error) throw error;
+      res.status(201).json(data);
+    } catch (e: any) {
+      console.error('[POST dpgf/versions]', e);
+      res.status(500).json({ error: 'Failed to snapshot DPGF' });
+    }
+  });
+
+  app.post('/api/projects/:projectId/dpgf/versions/:versionId/restore', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
+      const { data: snapshot, error: readError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions')
+        .select('*').eq('id', req.params.versionId).eq('project_id', req.params.projectId).single();
+      if (readError || !snapshot) return res.status(404).json({ error: 'Version introuvable' });
+      const document = typeof snapshot.document === 'string' ? JSON.parse(snapshot.document) : snapshot.document;
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgfs').update({ data: JSON.stringify(document) }).eq('id', row.id);
+      if (error) throw error;
+      res.json(document);
+    } catch (e: any) {
+      console.error('[POST dpgf/versions/:versionId/restore]', e);
+      res.status(500).json({ error: 'Failed to restore DPGF version' });
     }
   });
 
@@ -203,6 +266,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.get('/api/dpgf/:projectId', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items').select('*').eq('project_id', req.params.projectId);
       if (error) throw error;
@@ -212,6 +276,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.post('/api/dpgf', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, dpgf_id, lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
@@ -234,6 +299,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.put('/api/dpgf/:id', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { lot_number, lot_title, item_number, description, unit, quantity, unit_price } = req.body;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items')
@@ -249,6 +315,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
 
   app.delete('/api/dpgf/:id', async (req: any, res: any) => {
     try {
+      legacyDpgfItemsHeaders(res);
       const tenantId = await getTenantId(req.user.id);
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_items').delete().eq('id', req.params.id);
       if (error) throw error;

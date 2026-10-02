@@ -178,7 +178,7 @@ export default function ResponsibleDashboard() {
     <div className="space-y-5">
       <div className="pb-4 hidden sm:block" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
         <h1 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('dashboard')}</h1>
-        <p className="text-[12px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
+        <p className="text-[0.75rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>
           {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
         </p>
       </div>
@@ -213,16 +213,16 @@ export default function ResponsibleDashboard() {
       <SectionCard title={t('kpi_budget_vs_fees')}>
         <div className="grid grid-cols-2 gap-3 mb-4">
           <div className="p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
-            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_estimated')}</p>
+            <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_estimated')}</p>
             <p className="text-lg font-bold" style={{ color: 'var(--tblr-text)' }}>{formatEur(totalFees)}</p>
           </div>
           <div className="p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)' }}>
-            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_actual')}</p>
+            <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('budget_actual')}</p>
             <p className="text-lg font-bold" style={{ color: totalConsumed > totalFees ? '#d63939' : 'var(--tblr-text)' }}>{formatEur(totalConsumed)}</p>
           </div>
         </div>
         {budgetByProject.length === 0 ? (
-          <p className="text-[13px] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('budget_no_data')}</p>
+          <p className="text-[0.8125rem] text-center py-8" style={{ color: 'var(--tblr-muted)' }}>{t('budget_no_data')}</p>
         ) : (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">

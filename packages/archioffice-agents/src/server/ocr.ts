@@ -31,6 +31,25 @@ const RASTER_TIMEOUT_MS = 20_000;
 
 export const OCR_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.tif', '.tiff', '.bmp', '.webp'];
 
+/** Sous-ensemble d'OCR_IMAGE_EXTENSIONS que Gemini ET Claude acceptent tous
+ *  les deux en entrée vision (.tif/.bmp n'en font partie chez aucun des
+ *  deux) — un fichier hors de cette liste retombe sur l'OCR texte classique
+ *  même quand le fournisseur actif sait lire des images. */
+const VISION_MIME_BY_EXTENSION: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+};
+
+export function visionMimeType(fileName: string): string | null {
+  const lower = fileName.toLowerCase();
+  for (const [ext, mime] of Object.entries(VISION_MIME_BY_EXTENSION)) {
+    if (lower.endsWith(ext)) return mime;
+  }
+  return null;
+}
+
 /** En dessous, un PDF est considéré comme dépourvu de couche texte utile. */
 export const OCR_MIN_TEXT_CHARS = 200;
 
@@ -66,7 +85,7 @@ function run(command: string, args: string[], timeoutMs: number): Promise<{ code
 }
 
 /** Rend les premières pages d'un PDF en PNG. null si pdftoppm est absent. */
-async function rasterizePdf(buffer: Buffer, maxPages: number): Promise<Buffer[] | null> {
+export async function rasterizePdf(buffer: Buffer, maxPages: number): Promise<Buffer[] | null> {
   const dir = await mkdtemp(path.join(tmpdir(), 'archioffice-ocr-'));
   try {
     const pdfPath = path.join(dir, 'in.pdf');

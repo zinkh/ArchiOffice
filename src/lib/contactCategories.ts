@@ -10,6 +10,7 @@
 export const CONTACT_CATEGORY_CLIENT = 'Client';
 export const CONTACT_CATEGORY_ENTREPRISE = 'Entreprise';
 export const CONTACT_CATEGORY_COTRAITANT = 'Cotraitant';
+export const CONTACT_CATEGORY_BUREAU_ETUDES = 'Bureau d\'Etudes';
 
 /** Minuscules, sans accents, ponctuation et espaces réduits — pour comparer deux libellés saisis à la main. */
 export function normalizeCategory(value?: string | null): string {
@@ -51,6 +52,12 @@ export function isClientContact(c: CategorizedContact): boolean {
 export function isEntrepriseContact(c: CategorizedContact): boolean {
   const n = normalizeCategory(c.category);
   return isUncategorized(c) || n.includes('entreprise');
+}
+
+/** Bureaux d'études — accepte "Bureau d'études", "Bureaux d'études", "BET". */
+export function isBureauEtudesContact(c: CategorizedContact): boolean {
+  const n = normalizeCategory(c.category);
+  return isUncategorized(c) || n.includes('bureau') || n === 'bet';
 }
 
 /**

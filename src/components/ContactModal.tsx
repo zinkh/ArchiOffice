@@ -1,5 +1,6 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import type { Contact, ContactCategory } from '../types';
@@ -18,11 +19,13 @@ interface ContactModalProps {
    * filtrées par catégorie — y compris de celle qui venait de le créer.
    */
   initialCategory?: string;
+  /** Champs pré-remplis à l'ouverture (ex. le nom tapé dans un champ de recherche qui n'a rien trouvé). */
+  initialData?: Partial<Contact>;
 }
 
-export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: ContactModalProps) {
+export function ContactModal({ isOpen, onClose, onSuccess, initialCategory, initialData }: ContactModalProps) {
   const { t } = useTranslation();
-  const [newContact, setNewContact] = useState<Partial<Contact>>({ category: initialCategory || '' });
+  const [newContact, setNewContact] = useState<Partial<Contact>>({ category: initialCategory || '', ...initialData });
   const [categories, setCategories] = useState<ContactCategory[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +36,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
   useEffect(() => {
     if (!isOpen) return;
     setError(null);
-    setNewContact({ category: initialCategory || '' });
+    setNewContact({ category: initialCategory || '', ...initialData });
     let cancelled = false;
     fetchJson<ContactCategory[]>('/api/contact-categories')
       .then(data => {
@@ -51,6 +54,7 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
       })
       .catch(err => console.error('Failed to fetch contact categories:', err));
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, initialCategory]);
 
   const defaultContact: Contact = {
@@ -157,60 +161,70 @@ export function ContactModal({ isOpen, onClose, onSuccess, initialCategory }: Co
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-      >
-        <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-          <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
-            {t('add_contact')}
-          </h3>
-          <button
-            onClick={onClose}
-            style={{ color: 'var(--tblr-muted)' }}
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          key="contact-modal"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+        >
+          <motion.div
+            ref={launchOriginRef}
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            className="rounded-xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-y-auto"
+            style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
           >
-            ✕
-          </button>
-        </div>
-        {error && (
-          <div className="mx-6 mt-4 px-3 py-2 rounded-lg border text-sm flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400">
-            <IconAlertTriangle size={16} className="shrink-0" />
-            {error}
-          </div>
-        )}
-        <form onSubmit={handleSubmit} className="p-6 space-y-8">
-          <ContactFormFields
-            contact={newContact}
-            categories={categories}
-            onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
-          />
+            <div className="p-6 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+              <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>
+                {t('add_contact')}
+              </h3>
+              <button
+                onClick={onClose}
+                style={{ color: 'var(--tblr-muted)' }}
+              >
+                ✕
+              </button>
+            </div>
+            {error && (
+              <div className="mx-6 mt-4 px-3 py-2 rounded-lg border text-sm flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400">
+                <IconAlertTriangle size={16} className="shrink-0" />
+                {error}
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="p-6 space-y-8">
+              <ContactFormFields
+                contact={newContact}
+                categories={categories}
+                onChange={patch => setNewContact(prev => ({ ...prev, ...patch }))}
+              />
 
-          <div className="flex justify-end gap-4 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-6 py-2 rounded-lg font-medium transition-colors"
-              style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
-            >
-              {t('cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
-              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-            >
-              {isSubmitting ? '...' : t('save')}
-            </button>
-          </div>
-        </form>
-      </motion.div>
-    </div>
+              <div className="flex justify-end gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="px-6 py-2 rounded-lg font-medium transition-colors"
+                  style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50"
+                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                >
+                  {isSubmitting ? '...' : t('save')}
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

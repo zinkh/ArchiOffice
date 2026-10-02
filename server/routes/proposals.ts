@@ -8,6 +8,7 @@ import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -142,9 +143,19 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
             const totalBaseAmount = missions
               .filter((m: any) => m.category === 'Mission base')
               .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
+            // Les catégories de la répartition des propositions (libellés en
+            // clair) se traduisent dans le vocabulaire fermé du contrat
+            // (`ContratMissionCategory`) : les deux écrans classent alors les
+            // missions de la même façon, sans que le contrat hérite de
+            // libellés d'affichage.
+            const categoryOf = (label?: string) =>
+              label === 'Mission Exécution' ? 'exe'
+                : label === 'Missions complémentaires' ? 'complementaire'
+                : 'base';
             const missions_list = missions.map((m: any) => ({
               id: m.id, name: m.name, incluse: true,
               pct: totalBaseAmount > 0 ? (m.amount || 0) / totalBaseAmount * 100 : 0,
+              category: categoryOf(m.category),
             }));
             const totalHonoraires = p.amount || totalBaseAmount || 1;
             const cotraitants = (specialties_list || []).map((spec: any) => {
@@ -166,6 +177,9 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
         } catch (err) {
           console.error('Failed to auto-create ContratMOE from accepted proposal:', err);
         }
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.accepted', { id, title: p.title, amount: p.amount, client_id: p.client_id || null, project_id: projectId });
+      } else if (p.status === 'Rejected' && oldProposal?.status !== 'Rejected') {
+        dispatchWebhookEvent(supabaseAdmin, tenantId, 'proposal.declined', { id, title: p.title, amount: p.amount, client_id: p.client_id || null });
       }
 
       const { data: proposal } = await supabaseAdmin.from('proposals').select('*, proposal_specialties(*), contacts(first_name, last_name)').eq('id', id).eq('tenant_id', tenantId).single();

@@ -89,6 +89,31 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
       const { error: ae } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
         .insert({ id: attendeeId, meeting_id: id, contact_id: contactId, role: role || null });
       if (ae) throw ae;
+
+      // A contact created from a meeting belongs to the affaire it was met on —
+      // attach it as a project stakeholder too, not just as a one-off attendee.
+      const { data: meeting } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings')
+        .select('project_id')
+        .eq('id', id)
+        .maybeSingle();
+      if (meeting?.project_id) {
+        const { data: existingStakeholder } = await tenantScopedFrom(supabaseAdmin, tenantId, 'project_stakeholders')
+          .select('id')
+          .eq('project_id', meeting.project_id)
+          .eq('contact_id', contactId)
+          .maybeSingle();
+        if (!existingStakeholder) {
+          await tenantScopedFrom(supabaseAdmin, tenantId, 'project_stakeholders').insert({
+            id: crypto.randomUUID(),
+            tenant_id: tenantId,
+            project_id: meeting.project_id,
+            name: [first_name, last_name].filter(Boolean).join(' ') || company_name || '',
+            role: role || job_title || '',
+            contact_id: contactId,
+          });
+        }
+      }
+
       const contact = { id: contactId, first_name, last_name, company_name, job_title, phone_mobile, phone: phone_mobile || '', email, email_work: null, email_home: null, phone_work: null };
       res.status(201).json({ id: attendeeId, contact_id: contactId, role, contact });
     } catch (e: any) {

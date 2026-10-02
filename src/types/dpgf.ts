@@ -49,6 +49,17 @@ export interface DecoupageNoeud {
   phaseId?: string;
 }
 
+/** Ventilation contrôlable de la quantité d'un article par zone ou local. */
+export interface QuantiteDetail {
+  id: string;
+  batimentId?: string;
+  phaseId?: string;
+  niveau?: string;
+  local?: string;
+  quantite: number;
+  note?: string;
+}
+
 export interface Ligne extends DecoupageNoeud {
   id: string;
   numero: string;
@@ -74,6 +85,14 @@ export interface Ligne extends DecoupageNoeud {
    * ferait ressaisir chaque projet dans un vocabulaire qui n'est pas le sien.
    */
   localisation?: string;
+  /**
+   * Moteur qui a proposé l'article (« Générer le CCTP » : IA de la plateforme
+   * ou Nomic). Repère de provenance comme `articleTypeId` : un texte rédigé
+   * par une IA reste signalé tant que personne ne l'a relu et assumé.
+   */
+  genereParIa?: 'llm' | 'nomic';
+  /** Quand elle existe, la quantité de la ligne est la somme de ces postes. */
+  quantiteDetails?: QuantiteDetail[];
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
   children?: Ligne[];
   cctpOnly?: boolean;

@@ -7,17 +7,30 @@
 // kept beyond what's attached here.
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX, IconArchive, IconTrash, IconFolderPlus, IconFolder, IconChevronDown, IconChevronRight, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconSearch, IconLink, IconUnlink, IconX, IconArchive, IconTrash, IconFolderPlus, IconFolder, IconChevronDown, IconChevronRight, IconStar, IconStarFilled, IconPencil } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { useMailAccounts, type MailProvider } from '../hooks/useMailAccounts';
 import MailMessageView from './MailMessageView';
 import MailFolderSidebar from './MailFolderSidebar';
+import MailDraftEditModal from './MailDraftEditModal';
 import { archiveMailMessage, deleteMailMessage } from '../lib/mailActions';
 
 interface CorrespondenceTabProps {
   localType: 'project' | 'contact' | 'tender' | 'proposal';
   localId: string;
   contactEmail?: string | null;
+  /** Mots qui rattachent un brouillon à cette fiche (nom, code) en plus de l'adresse du contact. */
+  relatedKeywords?: string[];
+}
+
+interface DraftRow {
+  accountId: string;
+  provider: MailProvider;
+  id: string;
+  to: string;
+  subject: string;
+  snippet: string;
+  date: string | null;
 }
 
 interface SearchResult {
@@ -68,7 +81,7 @@ const PROVIDER_ICON: Record<MailProvider, typeof IconBrandGoogle> = {
   infomaniak: IconMailbox,
 };
 
-export default function CorrespondenceTab({ localType, localId, contactEmail }: CorrespondenceTabProps) {
+export default function CorrespondenceTab({ localType, localId, contactEmail, relatedKeywords }: CorrespondenceTabProps) {
   const { t } = useTranslation();
   const {
     accounts, error, setError,
@@ -86,6 +99,34 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
   const [openFolderLinkId, setOpenFolderLinkId] = useState<string | null>(null);
   const [folderMessages, setFolderMessages] = useState<FolderMessage[]>([]);
   const [folderMessagesLoading, setFolderMessagesLoading] = useState(false);
+  const [drafts, setDrafts] = useState<DraftRow[]>([]);
+  const [showAllDrafts, setShowAllDrafts] = useState(false);
+  const [editingDraft, setEditingDraft] = useState<{ accountId: string; id: string } | null>(null);
+
+  // Brouillons récents de chaque boîte connectée, lus là où ils vivent
+  // (jamais copiés en base). Une boîte qui échoue n'empêche pas les autres.
+  const accountsKey = accounts.map(a => a.id).join(',');
+  const loadDrafts = useCallback(async () => {
+    const settled = await Promise.all(accounts.map(async (a): Promise<DraftRow[]> => {
+      try {
+        const rows = await apiFetch<any[]>(`/api/mail/drafts?account_id=${encodeURIComponent(a.id)}`);
+        return (Array.isArray(rows) ? rows : []).map(r => ({ accountId: a.id, provider: a.provider, id: r.id, to: r.to, subject: r.subject, snippet: r.snippet, date: r.date }));
+      } catch {
+        return [];
+      }
+    }));
+    setDrafts(settled.flat());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountsKey]);
+
+  useEffect(() => { loadDrafts(); }, [loadDrafts]);
+
+  const isRelatedDraft = (d: DraftRow) => {
+    const haystack = `${d.subject} ${d.snippet}`.toLowerCase();
+    if (contactEmail && d.to.toLowerCase().includes(contactEmail.toLowerCase())) return true;
+    return (relatedKeywords || []).some(k => k && haystack.includes(k.toLowerCase()));
+  };
+  const visibleDrafts = showAllDrafts ? drafts : drafts.filter(isRelatedDraft);
 
   // IMAP encodes its provider-agnostic external_message_id as "folder:uid"
   // (see search()/loadLinked() below) since IMAP has no message id
@@ -216,7 +257,7 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
   };
 
   const linkResult = async (result: SearchResult) => {
-    await apiFetch('/api/mail/links', {
+    const res = await apiFetch<{ filing?: { status: 'filed' | 'failed' | 'skipped'; folder?: string; error?: string } }>('/api/mail/links', {
       method: 'POST',
       body: JSON.stringify({
         provider: result.provider,
@@ -232,6 +273,15 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
         message_date: result.date ? new Date(result.date).toISOString() : null,
       }),
     });
+    // Rattaché à une opération, le message est classé dans sa boîte d'origine
+    // (dossier ou libellé « ArchiOffice/<affaire> ») et change alors d'identifiant
+    // sur Outlook/IMAP : on le retire des résultats plutôt que de laisser un
+    // bouton pointer sur l'ancien emplacement.
+    if (res?.filing?.status === 'filed') {
+      setResults(prev => prev.filter(x => !(x.accountId === result.accountId && x.externalMessageId === result.externalMessageId)));
+    } else if (res?.filing?.status === 'failed') {
+      setError(t('correspondence_filing_failed', { error: res.filing.error }) as string);
+    }
     await loadLinked();
   };
 
@@ -402,6 +452,43 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
       {anyConnected && (
         <div>
           <div className="flex items-center justify-between mb-1.5">
+            <h4 className="text-sm font-semibold">{t('mail_drafts_title')}</h4>
+            <button
+              onClick={() => setShowAllDrafts(v => !v)}
+              className="text-xs hover:underline"
+              style={{ color: 'var(--tblr-muted)' }}
+            >
+              {showAllDrafts ? t('mail_drafts_show_related') : t('mail_drafts_show_all')}
+            </button>
+          </div>
+          {visibleDrafts.length === 0 ? (
+            <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('mail_drafts_empty')}</p>
+          ) : (
+            <div className="space-y-1.5">
+              {visibleDrafts.map(d => (
+                <div
+                  key={`${d.accountId}-${d.id}`}
+                  onClick={() => setEditingDraft({ accountId: d.accountId, id: d.id })}
+                  className="flex items-center justify-between gap-3 p-2 rounded-lg text-xs cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                  style={{ border: '1px solid var(--tblr-border)' }}
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{d.subject || '(Sans objet)'}</div>
+                    <div className="truncate" style={{ color: 'var(--tblr-muted)' }}>{d.to || '—'}{d.date ? ` · ${new Date(d.date).toLocaleString()}` : ''}</div>
+                  </div>
+                  <span className="flex items-center gap-1 px-2 py-1 rounded-lg shrink-0" style={{ border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)' }}>
+                    <IconPencil size={12} /> {t('mail_drafts_edit')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {anyConnected && (
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
             <h4 className="text-sm font-semibold">{t('mail_folder_links_title')}</h4>
             <button
               onClick={() => setShowFolderPicker(v => !v)}
@@ -460,6 +547,15 @@ export default function CorrespondenceTab({ localType, localId, contactEmail }: 
             </div>
           )}
         </div>
+      )}
+
+      {editingDraft && (
+        <MailDraftEditModal
+          accountId={editingDraft.accountId}
+          draftId={editingDraft.id}
+          onClose={() => setEditingDraft(null)}
+          onSaved={loadDrafts}
+        />
       )}
 
       {readTarget && (

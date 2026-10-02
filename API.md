@@ -49,9 +49,10 @@ Omit the header and the server serves the user's **default** tenant (`profiles.t
   | 409 | Conflict — duplicate slug, no tenant attached, etc. |
   | 500 | Unhandled server error (message usually includes the underlying cause) |
   | 503 | A required integration isn't configured (e.g. `GEMINI_API_KEY` unset) |
-- **No pagination.** List endpoints return the full tenant-scoped table. Large tenants will get large responses — don't assume `limit`/`offset`/cursor query parameters exist.
+- **Almost no pagination.** List endpoints return the full tenant-scoped table, so large tenants get large responses. The two exceptions are `GET /api/projects` and `GET /api/invoices`, which accept optional `limit` + `cursor` and then answer `{ data, nextCursor }` instead of a bare array; pass neither and they behave exactly as before. Don't assume any other list endpoint takes them.
 - **No API versioning**, except the self-contained `/api/maf/v1/*` namespace.
-- **File uploads** use `multipart/form-data` with a `file` field (50 MB limit), handled by `multer` in memory and pushed to Supabase Storage. Used by the visas, plans, documents, proposal import, meeting photos, profile CV/avatar, and chat-attachment endpoints.
+- **File uploads** use `multipart/form-data` with a `file` field (50 MB limit), handled by `multer` in memory. Used by the visas, plans, documents, proposal import, meeting photos, profile CV/avatar, and chat-attachment endpoints. Most land in Supabase Storage; documents, document versions, visa attachments and plans instead go to the tenant's **own** storage space when it has connected one (see *Storage* below).
+- **A stored file reference is not a fetchable URL.** Whatever `file_url` / `document_url` / `attachment_url` a response returns is an opaque reference the server resolves — a private Supabase object, or an object on the tenant's own Drive. Exchange it for a link with `GET /api/storage/signed-url?url=<reference>`; never fetch it directly.
 
 ## Endpoint catalog
 
@@ -74,7 +75,7 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET/PUT /api/profile`, `GET /api/profile/:userId`, `POST/DELETE /api/profile/cv`, `POST/PUT/DELETE /api/profile/education(/:id)`, `POST/PUT/DELETE /api/profile/experience(/:id)`.
 
 ### Projects & planning
-- `GET/POST/PUT/DELETE /api/projects(/:id)`, `GET /api/projects/:id/full` (full project payload for the detail page).
+- `GET/POST/PUT/DELETE /api/projects(/:id)`, `GET /api/projects/:id/full` (full project payload for the detail page; also records the opening in `project_recent_views`, which `GET /api/projects` reads back as a per-user `last_opened_at` — the default « ouverts récemment » order of the projects list).
 - `GET/POST/DELETE /api/project_categories(/:id)`.
 - `GET/POST/PUT/DELETE /api/project-templates(/:id)`.
 - `GET/POST/PUT/DELETE /api/tasks(/:id)` — Gantt tasks.
@@ -103,15 +104,15 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET /api/situations/:projectId/avec-marche`.
 - `GET/POST/PUT/DELETE /api/marches-entreprises(/:id)`.
 
-### Specifications / CCTP
-- `GET/POST/PUT/DELETE /api/specifications(/:id)`.
-- `GET/POST /api/projects/:projectId/cctp`, `PUT/DELETE /api/cctps/:id` — newer, parallel CCTP model (see roadmap note above).
+### CCTP
+CCTP is not a separate resource — it's the `cctpDescription`/`cctpOnly` fields carried by the same lot/chapitre/article tree as the DPGF. See `GET/POST /api/projects/:projectId/dpgf` above. The former `/api/specifications` route (an older, no-longer-displayed CCTP model) and its table were removed.
 
 ### Site supervision
 - `GET/POST/PUT/DELETE /api/ordres_de_service(/:id)`, `PATCH /api/ordres_de_service/:id/status`, `GET /api/ordres_de_service/next-number`.
 - `GET/POST/PUT/DELETE /api/visas(/:id)` (file upload on create/update).
 - `GET/POST/PUT/DELETE /api/receptions(/:id)`.
-- `GET/POST/PUT/DELETE /api/reserves(/:id)`, `GET/POST/PUT/DELETE /api/gpa-reserves(/:id)` (1-year warranty period).
+- `GET/POST/PUT/DELETE /api/reserves(/:id)`, `GET/POST/PUT/DELETE /api/gpa-reserves(/:id)` (1-year warranty period). Each listed reserve carries its `photos` and a free-text `description`.
+- `GET/POST /api/reserves/:id/photos`, `PATCH/DELETE /api/reserves/:id/photos/:photoId` (and the same under `/api/gpa-reserves`) — site photos of a reserve (multipart `file`, PNG/JPEG/WebP, private `reserve-photos` bucket).
 - `GET/POST/PUT/DELETE /api/permits(/:id)`.
 - `GET/POST/PUT/DELETE /api/rfis(/:id)`.
 - `GET/POST /api/projects/:projectId/reports`, `PUT /api/reports/:reportId` — site-visit reports.
@@ -121,6 +122,20 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 ### Documents & plans
 - `GET/POST/PUT/DELETE /api/documents(/:id)` (file upload), `GET /api/documents/:id/versions`, `PATCH /api/documents/:id/statut`, `GET/POST /api/documents/:id/diffusions`, `PATCH /api/documents/:id/diffusions/:diffId/acknowledge`.
 - `GET/POST/DELETE /api/plans(/:id)` (file upload).
+
+### Storage
+- `GET /api/storage/signed-url?url=<reference>` — turns a stored file reference into a link valid for one hour. For a Supabase object it returns a signed Storage URL; for a file on the tenant's own space it returns an `/api/storage/external/<ticket>` URL on this same origin. Checks the caller's tenant owns the object (the `<tenantId>/` path prefix, or ownership of the storage connection) and answers `403` otherwise.
+- `GET /api/storage/external/:ticket` — serves a file held on the tenant's own space. **No bearer token**: the signed ticket in the path authenticates, exactly as a Supabase signed URL does, because this URL is opened by `window.open()` or set as an `<img src>`. Honours `Range` and replays `206`. Redirects (`302`) to a short-lived provider link where the provider offers one (Dropbox), streams otherwise.
+- `GET /api/external-storage/status` — the connected space, if any: provider, account, root folder, health. Never returns a token or password. Readable by any tenant member.
+- `POST /api/external-storage/webdav` `{ flavor: 'nextcloud'|'kdrive', baseUrl, username, password, rootFolderPath }` — connects a WebDAV space. The connection is **probed before being saved**, so a bad configuration fails here (`400`) rather than at the first upload. The URL is checked against the SSRF guard (`403` for a private/internal address).
+- `GET /api/external-storage/:provider/auth` — `google_drive` or `dropbox`. Returns `{ url }` for the consent screen; the client navigates there itself, since a bare navigation to this route would carry no JWT. `503` if the instance has no credentials for that provider.
+- `GET /api/external-storage/callback` — the provider's redirect back. No auth (the tenant comes from a one-time state nonce).
+- `GET /api/external-storage/callback-url?provider=` — the redirect URI to declare in the provider's console.
+- `POST /api/external-storage/test` — re-probes the active connection.
+- `POST /api/external-storage/:id/disable` — stops new writes; files already deposited stay readable.
+- `DELETE /api/external-storage/:id` — **revokes the stored credentials**, keeping the row. Files already deposited stop being readable from ArchiOffice (they remain in the tenant's own space). Not the same thing as `disable`.
+
+Writes on `/api/external-storage/*` require a tenant admin.
 
 ### Contacts
 - `GET/POST/PUT/DELETE /api/contacts(/:id)`.
@@ -137,6 +152,14 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET /api/notifications/unread-count`, `POST /api/notifications/mark-read`.
 - `GET/POST /api/conversations`, `GET/POST /api/conversations/:id/messages` (file upload), `POST /api/conversations/:id/read`, `GET /api/messages/unread-count`, `POST/DELETE /api/conversations/:id/participants(/:userId)`.
 - `POST /api/send-email` — outbound email via the tenant's configured SMTP.
+
+### Mail: drafts and linking to a record
+- `GET /api/mail/drafts?account_id=` — the 20 most recent drafts of one connected mailbox (`[{ id, to, subject, snippet, date }]`). Read live from the provider, never stored.
+- `GET /api/mail/drafts/:id?account_id=` — one draft's `{ id, to, cc, subject, text }`.
+- `PUT /api/mail/drafts/:id` — body `{ account_id, to, cc?, subject, text }`. Rewrites the draft in place; never sends. On IMAP the draft is re-appended and the old one deleted, so the returned `id` may be `null` and the uid changes.
+- `POST /api/mail/drafts` — create a draft (`{ to, cc?, subject, text, account_id? }`).
+- `POST /api/mail/links` — attach an email to a `project`, `contact`, `tender` or `proposal`. For a **project** with a `connection_id`, the message is also filed in its origin mailbox (Gmail label / Outlook or IMAP folder `ArchiOffice/<code> - <name>`, created on demand); pass `file_in_mailbox: false` to skip. The response carries the stored `external_message_id` (Outlook and IMAP renumber a moved message) and `filing: { status: 'filed' | 'failed' | 'skipped', folder?, error? }`. A filing failure never fails the link.
+- `PUT /api/team/:id` and `GET /api/me` also carry `mailSignature` (personal email signature, ≤ 2000 characters).
 
 ### Push notifications
 - `GET /api/push/config` — `{ configured, publicKey }`. The VAPID public key the browser needs to subscribe; `configured: false` on an instance with no VAPID keys, in which case Web Push is off and nothing else here fails.
@@ -158,6 +181,8 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET /api/billing/status`, `POST /api/billing/checkout`, `POST /api/billing/webhook` (Stancer, no auth), `GET /api/billing/history`, `GET /api/billing/credits/packs`, `POST /api/billing/credits/checkout`.
 
 ### External integrations
+Connection status endpoints are available to every tenant member. Tenant-wide administration (`auth`/connect, `disconnect`, `sync`, credential `test`, and configuration through `PUT /api/settings`) is restricted to users whose tenant role is `admin`. Operational invoice submission and status lookup keep their domain-specific permissions.
+
 Each of these follows roughly the same shape (`status`, `disconnect`, and OAuth `auth`/`callback` where the provider uses OAuth):
 - **Zoho CRM**: `GET /api/zoho/status`, `GET /api/zoho/callback-url`, `GET /api/zoho/auth`, `GET /api/zoho/callback`, `DELETE /api/zoho/disconnect`, `POST /api/zoho/sync`.
 - **Zoho Books**: `GET /api/zoho-books/status`, `GET /api/zoho-books/auth`, `GET /api/zoho-books/callback`, `DELETE /api/zoho-books/disconnect`, `POST /api/zoho-books/sync`.

@@ -5,6 +5,7 @@
 // invoices/auth/billing per the Phase 7 plan).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { computeInvoiceDueDate } from '../invoiceDueDate';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -89,18 +90,20 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
         // La facture référencée a disparu (suppression manuelle) : on en régénère une.
       }
 
-      const { data: settings } = await supabaseAdmin.from('settings').select('agencyName, address, siret, vatNumber').eq('tenant_id', tenantId).single();
+      const { data: settings } = await supabaseAdmin.from('settings').select('agencyName, address, siret, vatNumber, invoice_payment_terms_days').eq('tenant_id', tenantId).single();
 
       const invoiceId = crypto.randomUUID();
       const created_at = new Date().toISOString();
       const invoiceNumber = await getNextDocNumber(tenantId, 'num_prefix_facture', 'invoices', 'FAC');
       const affaireInvoiceNumber = (note as any).project_id ? await getNextAffaireInvoiceNumber(tenantId, (note as any).project_id) : null;
       const description = `Note d'honoraires ${(note as any).numero || ''}${(note as any).objet ? ' — ' + (note as any).objet : ''}`.trim();
+      const issueDate = (note as any).date || created_at.split('T')[0];
+      const dueDate = computeInvoiceDueDate(issueDate, (settings as any)?.invoice_payment_terms_days);
 
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
         id: invoiceId, tenant_id: tenantId, invoice_number: invoiceNumber, project_id: (note as any).project_id,
         amount: (note as any).montant_ht || 0, tax_amount: (note as any).montant_tva || 0, total_amount: (note as any).montant_ttc || 0,
-        status: 'Draft', due_date: null, issue_date: (note as any).date || created_at.split('T')[0],
+        status: 'Draft', due_date: dueDate, issue_date: issueDate,
         description, created_at,
         seller_name: (settings as any)?.agencyName || null, seller_address: (settings as any)?.address || null,
         seller_siret: (settings as any)?.siret || null, seller_vat_number: (settings as any)?.vatNumber || null,

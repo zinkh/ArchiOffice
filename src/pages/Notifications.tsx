@@ -157,7 +157,7 @@ function Avatar({ name, size = 38 }: { name: string; size?: number }) {
 
 function MentionBadge() {
   return (
-    <span className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[9px] font-bold uppercase tracking-wide">
+    <span className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-[0.6875rem] font-bold uppercase tracking-wide">
       @ Vous êtes mentionné(e)
     </span>
   );
@@ -181,7 +181,7 @@ function AttachmentView({ item }: { item: Attachment }) {
 
 function AttachmentChip({ file, onRemove }: { file: File; onRemove: () => void }) {
   return (
-    <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-700 rounded-lg text-[11px] text-zinc-500 dark:text-zinc-400 w-fit">
+    <div className="flex items-center gap-1.5 px-2 py-1 bg-zinc-100 dark:bg-zinc-700 rounded-lg text-[0.6875rem] text-zinc-500 dark:text-zinc-400 w-fit">
       <IconFile size={12} /> {file.name}
       <button onClick={onRemove} className="hover:text-red-500 transition-colors"><IconX size={11} /></button>
     </div>
@@ -484,7 +484,7 @@ export default function Notifications() {
               ref={composer.ref as React.RefObject<HTMLTextAreaElement>}
               rows={2}
               placeholder="Partagez quelque chose avec l'équipe... (@ pour mentionner, Ctrl+Entrée pour publier)"
-              className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400 transition-all"
+              className="w-full bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 resize-none text-zinc-900 dark:text-white placeholder:text-zinc-400 transition"
               value={composer.value}
               onChange={composer.handleChange}
               onKeyDown={e => composer.handleKeyDown(e, ke => { if (ke.ctrlKey || ke.metaKey) { ke.preventDefault(); handlePost(); } })}
@@ -553,7 +553,7 @@ export default function Notifications() {
                 key={f.key}
                 onClick={() => setFilter(f.key)}
                 className={cn(
-                  "flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition-all shrink-0",
+                  "flex items-center gap-2 px-4 py-3.5 text-sm font-medium whitespace-nowrap border-b-2 transition shrink-0",
                   isActive
                     ? "border-blue-500 text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10"
                     : "border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/30"
@@ -563,7 +563,7 @@ export default function Notifications() {
                 {t(f.label_key)}
                 {count > 0 && (
                   <span className={cn(
-                    "text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
+                    "text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
                     isActive
                       ? f.key === 'unread'
                         ? "bg-rose-500 text-white"
@@ -591,7 +591,7 @@ export default function Notifications() {
         ) : (
           <div className="divide-y divide-zinc-100 dark:divide-zinc-700/50">
             <AnimatePresence initial={false}>
-              {filteredItems.map((item, idx) => {
+              {filteredItems.map(item => {
                 const isOpen = expandedComments.has(item.id);
                 const CatIcon = TYPE_ICONS[item.target_type || (item.kind === 'post' ? 'post' : 'project')] || IconFileText;
                 const catStyle = CATEGORY_STYLES[item.category || ''] || 'bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300';
@@ -599,9 +599,6 @@ export default function Notifications() {
                 return (
                   <motion.div
                     key={item.id}
-                    initial={{ opacity: 0, y: -8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: idx * 0.03, duration: 0.2 }}
                     className={cn(
                       "px-5 py-4 transition-colors",
                       item.unread ? "bg-blue-50/40 dark:bg-blue-900/10 hover:bg-blue-50/60 dark:hover:bg-blue-900/20" : "hover:bg-zinc-50/60 dark:hover:bg-zinc-700/20"
@@ -638,13 +635,13 @@ export default function Notifications() {
                           {item.category && (
                             <>
                               <span>·</span>
-                              <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide", catStyle)}>
+                              <span className={cn("px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wide", catStyle)}>
                                 {item.category}
                               </span>
                             </>
                           )}
                           {item.unread && (
-                            <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded text-[9px] font-bold uppercase tracking-wide">
+                            <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded text-[0.6875rem] font-bold uppercase tracking-wide">
                               Nouveau
                             </span>
                           )}
@@ -663,7 +660,7 @@ export default function Notifications() {
                             <IconMessageCircle size={14} />
                             <span>Commentaire</span>
                             {item.comments_count > 0 && (
-                              <span className="bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 px-1.5 py-0.5 rounded-full text-[10px] font-bold">
+                              <span className="bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 px-1.5 py-0.5 rounded-full text-[0.6875rem] font-bold">
                                 {item.comments_count}
                               </span>
                             )}
@@ -700,7 +697,7 @@ export default function Notifications() {
                                     </div>
                                     <div className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">{renderTextWithMentions(c.content, teamMembers)}</div>
                                     <AttachmentView item={c} />
-                                    <p className="text-[10px] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
+                                    <p className="text-[0.6875rem] text-zinc-400 mt-1">{timeAgo(c.created_at)}</p>
                                   </div>
                                 </div>
                               ))}

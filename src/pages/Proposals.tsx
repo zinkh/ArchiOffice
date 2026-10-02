@@ -1,13 +1,17 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
-import type { Proposal, Contact, Milestone, MiqcpAssessment } from '../types';
+import type { Proposal, Contact, Milestone, MiqcpAssessment, ProjectTemplate } from '../types';
+import { OPERATION_LABELS, feeDistributionFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
-import { GeoportailMap, GoogleMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -29,26 +33,14 @@ import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
 import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardModal';
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
-
-import { saveAs } from 'file-saver';
-
-const DEFAULT_MISSIONS = [
-  { id: 'esquisse', name: 'Esquisse', category: 'Mission base', default_pct: 10 },
-  { id: 'aps', name: 'A.P.S.', category: 'Mission base', default_pct: 12 },
-  { id: 'apd', name: 'A.P.D.', category: 'Mission base', default_pct: 14 },
-  { id: 'projet', name: 'Projet', category: 'Mission base', default_pct: 18 },
-  { id: 'act', name: 'A.C.T.', category: 'Mission base', default_pct: 7 },
-  { id: 'visa', name: 'VISA', category: 'Mission base', default_pct: 7 },
-  { id: 'det', name: 'D.E.T.', category: 'Mission base', default_pct: 25 },
-  { id: 'aor', name: 'A.O.R.', category: 'Mission base', default_pct: 7 },
-  { id: 'opc', name: 'OPC', category: 'Mission Exécution' },
-];
+import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
+import { FeeDistributionGrid } from '../components/FeeDistributionGrid';
 
 const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
 const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
   <div>
-    <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+    <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
       {label} {required && <span className="text-red-500">*</span>}
     </label>
     {type === "select" ? (
@@ -103,10 +95,13 @@ export default function Proposals() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
+  const [templateId, setTemplateId] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
+  const [selectedParcelGeometry, setSelectedParcelGeometry] = useState<GeoJSON.Geometry | null>(null);
   const [exportProposal, setExportProposal] = useState<Proposal | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
@@ -182,20 +177,35 @@ export default function Proposals() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [proposalsData, contactsData, milestonesData] = await Promise.all([
+        const [proposalsData, contactsData, milestonesData, templatesData] = await Promise.all([
           fetchJson<Proposal[]>('/api/proposals'),
           fetchJson<Contact[]>('/api/contacts'),
-          fetchJson<Milestone[]>('/api/milestones')
+          fetchJson<Milestone[]>('/api/milestones'),
+          // Les modèles sont un confort : leur absence n'empêche pas d'ouvrir les devis.
+          fetchJson<ProjectTemplate[]>('/api/project-templates').catch(() => [] as ProjectTemplate[]),
         ]);
         setProposals(proposalsData);
         setContacts(contactsData);
         setMilestones(milestonesData);
+        setTemplates(templatesData);
       } catch (err) {
         console.error('Proposals data fetch failed:', err);
       }
     };
     loadData();
   }, []);
+
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || proposals.length === 0) return;
+    const proposal = proposals.find(p => p.id === openId);
+    if (proposal) handleEditClick(proposal);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [proposals, searchParams]);
 
   const fetchMilestones = async () => {
     try {
@@ -246,6 +256,7 @@ export default function Proposals() {
         setIsModalOpen(false);
         setEditingProposal(null);
         setNewProposal(initialProposalState);
+        setTemplateId('');
         setCostMode('manual');
       } else {
         const errBody = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
@@ -265,7 +276,25 @@ export default function Proposals() {
     setIsModalOpen(true);
   };
 
+  // Un modèle de projet pose le type d'opération et la répartition des
+  // honoraires par mission (montants calculés sur le total déjà saisi, sinon
+  // à zéro : ils se recalculent d'eux-mêmes quand les honoraires changent).
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const template = templates.find(t => t.id === id);
+    if (!template) return;
+    setNewProposal(prev => {
+      const fee = feeDistributionFromTemplate(template.default_missions, prev.amount || 0, prev.decimal_precision ?? 2);
+      return {
+        ...prev,
+        ...(template.operation_type && template.operation_type !== 'autre' ? { type_projet: OPERATION_LABELS[template.operation_type] } : {}),
+        ...(fee ? { fee_distribution: fee } : {}),
+      };
+    });
+  };
+
   const handleOpenCreateModal = () => {
+    setTemplateId('');
     setEditingProposal(null);
     setNewProposal(initialProposalState);
     setCostMode('manual');
@@ -284,7 +313,7 @@ export default function Proposals() {
         const updated = await res.json();
         setProposals(proposals.map(p => p.id === updated.id ? updated : p));
         if (newStatus === 'Accepted') {
-          alert('Proposal accepted! A new project has been created.');
+          alert(t('proposals_accepted_project_created'));
         }
       }
     } catch (err) {
@@ -300,18 +329,18 @@ export default function Proposals() {
     if (proposal.status !== 'Draft') {
       return handleUpdateStatus(proposal, 'Rejected');
     }
-    if (!confirm(`Supprimer définitivement le brouillon "${proposal.title}" ?`)) return;
+    if (!confirm(t('proposals_confirm_delete_draft', { title: proposal.title }))) return;
     try {
       const res = await fetch(`/api/proposals/${proposal.id}`, { method: 'DELETE' });
       if (res.ok) {
         setProposals(proposals.filter(p => p.id !== proposal.id));
       } else {
         const errorData = await res.json().catch(() => ({}));
-        alert(`Échec de la suppression : ${errorData.error || 'Erreur inconnue'}`);
+        alert(t('proposals_delete_failed', { error: errorData.error || t('proposals_unknown_error') }));
       }
     } catch (err) {
       console.error(err);
-      alert('Échec de la suppression du devis.');
+      alert(t('proposals_delete_failed_generic'));
     }
   };
 
@@ -345,13 +374,13 @@ export default function Proposals() {
       });
       if (res.ok) {
         fetchProposals();
-        alert('Proposal imported successfully');
+        alert(t('proposals_import_success'));
       } else {
-        alert('Failed to import proposal');
+        alert(t('proposals_import_failed'));
       }
     } catch (err) {
       console.error(err);
-      alert('Error importing proposal');
+      alert(t('proposals_import_error'));
     }
   };
 
@@ -367,32 +396,6 @@ export default function Proposals() {
 
   const proposalsPagination = usePagination(filteredProposals);
 
-  const calculateFeeRatios = (feeDistribution: string | undefined) => {
-    if (!feeDistribution) return { exeRatio: 1, totalRatio: 1 };
-    try {
-      const data = JSON.parse(feeDistribution);
-      const missions = data.missions || [];
-      const baseAmt = missions
-        .filter((m: any) => m.category === 'Mission base')
-        .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-      
-      if (baseAmt === 0) return { exeRatio: 1, totalRatio: 1 };
-
-      const exeAmt = missions
-        .filter((m: any) => m.category === 'Mission base' || m.category === 'Mission Exécution')
-        .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-      
-      const totalAmt = missions
-        .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-
-      return {
-        exeRatio: exeAmt / baseAmt,
-        totalRatio: totalAmt / baseAmt
-      };
-    } catch (e) {
-      return { exeRatio: 1, totalRatio: 1 };
-    }
-  };
 
   const feeRatios = React.useMemo(() => calculateFeeRatios(newProposal.fee_distribution), [newProposal.fee_distribution]);
   const calculatedExePercent = (newProposal.base_fee_percent || 0) * feeRatios.exeRatio;
@@ -474,7 +477,9 @@ export default function Proposals() {
             }
             // If current total is 0, use default percentages
             if (currentBaseTotal === 0) {
-              const defaultPct = DEFAULT_MISSIONS.find(dm => dm.id === m.id)?.default_pct || (100 / baseMissions.length);
+              // Le pourcentage propre à la mission (posé par un modèle de projet) prime
+              // sur celui de la liste par défaut, qui ne connaît que les missions MOP.
+              const defaultPct = (m.default_pct ?? DEFAULT_MISSIONS.find(dm => dm.id === m.id)?.default_pct) || (100 / baseMissions.length);
               return { ...m, amount: Number((targetBaseTotal * (defaultPct / 100)).toFixed(newProposal.decimal_precision || 2)) };
             }
             // Otherwise distribute based on relative percentage
@@ -498,7 +503,7 @@ export default function Proposals() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => document.getElementById('xml-file-upload')?.click()}
-            className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all"
+            className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
             <IconFileText size={18} />
@@ -507,7 +512,7 @@ export default function Proposals() {
           <input id="xml-file-upload" type="file" className="hidden" accept=".xml" onChange={handleImport} />
           <button
             onClick={handleOpenCreateModal}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
@@ -541,17 +546,17 @@ export default function Proposals() {
               { label: t('proposals_col_proposal'), primary: true, render: p => (
                 <div>
                   <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{p.title}</p>
-                  <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{p.reference}</p>
+                  <p className="text-[0.6875rem] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{p.reference}</p>
                 </div>
               )},
               { label: t('proposals_col_client'), render: p => p.client_name || 'Unknown' },
               { label: t('proposals_col_amount'), render: p => <span className="font-mono font-bold">{formatCurrency(p.amount)}</span> },
               { label: t('proposals_col_status'), render: p => (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{
+                <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={{
                   background: p.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : p.status === 'Rejected' ? 'rgba(214,57,57,0.1)' : p.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
                   color: p.status === 'Accepted' ? 'var(--tblr-success)' : p.status === 'Rejected' ? 'var(--tblr-danger)' : p.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                   border: '1px solid currentColor',
-                }}>{p.status}</span>
+                }}>{statusLabel(p.status)}</span>
               )},
             ]}
             actions={p => (
@@ -566,7 +571,7 @@ export default function Proposals() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="min-w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('proposals_col_proposal')}</th>
@@ -591,8 +596,8 @@ export default function Proposals() {
                       </div>
                       <div>
                         <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{proposal.title}</p>
-                        <p className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{proposal.reference}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString()}</p>
+                        <p className="text-[0.6875rem] uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{proposal.reference}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Created {new Date(proposal.created_at).toLocaleDateString('fr-FR')}</p>
                       </div>
                     </div>
                   </td>
@@ -603,12 +608,12 @@ export default function Proposals() {
                     {formatCurrency(proposal.amount)}
                   </td>
                   <td className="px-6 py-4">
-                    <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{
+                    <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={{
                       background: proposal.status === 'Accepted' ? 'rgba(47,179,135,0.1)' : proposal.status === 'Rejected' ? 'rgba(var(--tblr-danger-rgb,214,57,57),0.1)' : proposal.status === 'Sent' ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)',
                       color: proposal.status === 'Accepted' ? 'var(--tblr-success)' : proposal.status === 'Rejected' ? 'var(--tblr-danger)' : proposal.status === 'Sent' ? 'var(--tblr-primary)' : 'var(--tblr-muted)',
                       border: '1px solid currentColor',
                     }}>
-                      {proposal.status}
+                      {statusLabel(proposal.status)}
                     </span>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -694,10 +699,11 @@ export default function Proposals() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90vh]"
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90dvh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
@@ -718,15 +724,34 @@ export default function Proposals() {
                 {/* Section 1: General Info */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">01</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">01</span>
                     {t('proposals_section_general')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {!editingProposal && templates.length > 0 && (
+                      <div className="md:col-span-3">
+                        <FormField
+                          label="Modèle de projet"
+                          type="select"
+                          options={templates.map(tpl => ({ id: tpl.id, name: tpl.name }))}
+                          value={templateId}
+                          onChange={applyTemplate}
+                        />
+                        {(() => {
+                          const summary = summarizeTemplate({ default_missions: templates.find(tpl => tpl.id === templateId)?.default_missions });
+                          return summary ? (
+                            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                              Type d'opération et répartition des honoraires par mission repris du modèle ({summary}).
+                            </p>
+                          ) : null;
+                        })()}
+                      </div>
+                    )}
                     <FormField label="Référence" value={newProposal.reference} onChange={(v: any) => setNewProposal(prev => ({...prev, reference: v}))} />
                     <div className="md:col-span-2">
                       <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />
                     </div>
-                    <FormField label="Status" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected']} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
+                    <FormField label="Statut" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected'].map(s => ({ id: s, name: statusLabel(s) }))} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
                     <FormField label="Ind" value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
                   </div>
                 </div>
@@ -734,12 +759,12 @@ export default function Proposals() {
                 {/* Section 2: Client Details */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">02</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">02</span>
                     {t('proposals_section_client')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
-                      <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                      <label className="block text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
                         Client Database <span className="text-red-500">*</span>
                       </label>
                       <ContactAutocomplete 
@@ -818,7 +843,7 @@ export default function Proposals() {
                 {/* Section 3: Project Specifics */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">03</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">03</span>
                     {t('proposals_section_project')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -830,7 +855,7 @@ export default function Proposals() {
                 {/* Section 4: Terrain & Technical */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">04</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">04</span>
                     {t('proposals_section_terrain')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -905,7 +930,7 @@ export default function Proposals() {
                 {/* Section 5: Surfaces & Capacity */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">05</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">05</span>
                     {t('proposals_section_surfaces')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -923,7 +948,7 @@ export default function Proposals() {
                 {newProposal.adresse_terrain && (
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">06</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">06</span>
                       {t('proposals_section_urban_risks')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -936,25 +961,41 @@ export default function Proposals() {
                         />
                       </InfoPanelBoundary>
                       <InfoPanelBoundary label="Cadastre"><CadastreDownload address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={newProposal.adresse_terrain || ''} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 h-64">
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <InfoPanelBoundary label="Cadastre"><GeoportailMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Cadastre</div>
-                        </div>
-                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <InfoPanelBoundary label="OpenStreetMap"><GoogleMap address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">OpenStreetMap</div>
+                          <InfoPanelBoundary label="Cadastre">
+                            <GeoportailMap
+                              address={newProposal.adresse_terrain || ''}
+                              banId={newProposal.ban_id_terrain}
+                              onParcelSelect={(parcel: CadastreParcel) => {
+                                setSelectedParcelGeometry(parcel.geometry || null);
+                                const reference = [
+                                  parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
+                                  parcel.section,
+                                  parcel.numero,
+                                ].filter(Boolean).join(' ');
+                                setNewProposal(prev => ({
+                                  ...prev,
+                                  ref_cadastrale: reference || prev.ref_cadastrale,
+                                  surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                                }));
+                              }}
+                            />
+                          </InfoPanelBoundary>
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">
+                            Vue aérienne · Cadastre
+                          </div>
                         </div>
                         <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
                           <InfoPanelBoundary label="Géorisques"><GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[10px] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
+                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
                         </div>
                       </div>
                     </div>
@@ -964,23 +1005,23 @@ export default function Proposals() {
                 {/* Section 07: Honoraires */}
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">07</span>
+                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">07</span>
                     Honoraires
                   </h3>
                   {/* Mode selector for Montant des travaux */}
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Montant des travaux :</span>
+                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Montant des travaux :</span>
                     <button
                       type="button"
                       onClick={() => setCostMode('manual')}
-                      className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                     >
                       Saisie manuelle
                     </button>
                     <button
                       type="button"
                       onClick={() => setCostMode('ratio')}
-                      className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
                     >
                       Calcul par ratio
                     </button>
@@ -989,12 +1030,12 @@ export default function Proposals() {
                     <button
                       type="button"
                       onClick={() => setIsMiqcpWizardOpen(true)}
-                      className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                      className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                     >
                       {t('miqcp_wizard_open_btn')}
                     </button>
                     {miqcpAssessment && (
-                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
                         {t('miqcp_wizard_summary', {
                           cc: miqcpAssessment.coefficientComplexite.toFixed(2),
                           taux: miqcpAssessment.tauxReference.toFixed(2),
@@ -1010,15 +1051,15 @@ export default function Proposals() {
                     </div>
                   ) : (
                     <div className="space-y-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
-                      <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                      <p className="text-[0.6875rem] text-blue-600 dark:text-blue-400 font-medium">
                         Montant des travaux = Surface existante × Ratio réhabilitation + Surface extension/neuf × Ratio extension
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="space-y-1">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface existante (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface existante (m²)</label>
                           <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
                             {newProposal.surface_plancher || '0'} m²
-                            <span className="text-[9px] text-zinc-400 ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-zinc-400 ml-1">(section 05)</span>
                           </div>
                         </div>
                         <FormField
@@ -1028,10 +1069,10 @@ export default function Proposals() {
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_rehab: Number(v)}))}
                         />
                         <div className="space-y-1">
-                          <label className="block text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface extension/neuf (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface extension/neuf (m²)</label>
                           <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
                             {newProposal.surface_plancher_ext || '0'} m²
-                            <span className="text-[9px] text-zinc-400 ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-zinc-400 ml-1">(section 05)</span>
                           </div>
                         </div>
                         <FormField
@@ -1042,7 +1083,7 @@ export default function Proposals() {
                         />
                       </div>
                       <div className="flex items-center gap-3 mt-1">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">Montant des travaux calculé :</span>
+                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500">Montant des travaux calculé :</span>
                         <span className="text-sm font-bold text-blue-700 dark:text-blue-400">
                           {(newProposal.construction_cost || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €
                         </span>
@@ -1056,13 +1097,13 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedExePercent.toFixed(2)} %
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {calculatedTotalPercent.toFixed(2)} %
                       </div>
@@ -1071,13 +1112,13 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Taux de TVA (%)" type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
                       <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
                         {formatCurrency(vatAmount)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
+                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
                       <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-400">
                         {formatCurrency(totalTTC)}
                       </div>
@@ -1089,7 +1130,7 @@ export default function Proposals() {
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">08</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">08</span>
                       {t('proposals_section_cotraitants')}
                     </h3>
                     <button
@@ -1158,12 +1199,12 @@ export default function Proposals() {
                 <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">10</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">10</span>
                       {t('proposals_section_fee_distribution')}
                     </h3>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                        <label className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
                         <input 
                           type="number" 
                           min="0" 
@@ -1175,15 +1216,15 @@ export default function Proposals() {
                       </div>
                       <button 
                         type="button"
-                        onClick={() => exportToXlsx(newProposal, contacts)}
-                        className="text-[10px] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
+                        onClick={() => exportFeeDistributionToXlsx(newProposal.fee_distribution, newProposal.specialties_list, contacts, newProposal.vat_rate, newProposal.reference || 'Projet')}
+                        className="text-[0.6875rem] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
                       >
                         <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}
                       </button>
                       <button
                         type="button"
                         onClick={handleLoadMiqcpPhaseRepartition}
-                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                       >
                         {t('miqcp_wizard_load_phase_repartition_btn')}
                       </button>
@@ -1195,7 +1236,7 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_base')}
                       </button>
@@ -1207,7 +1248,7 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[10px] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-green-600 hover:text-green-700 font-bold uppercase tracking-wider bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_execution')}
                       </button>
@@ -1219,16 +1260,17 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[10px] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-purple-600 hover:text-purple-700 font-bold uppercase tracking-wider bg-purple-50 dark:bg-purple-900/20 px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_complementary')}
                       </button>
                     </div>
                   </div>
                   <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
-                    <FeeDistributionGrid 
-                      proposal={newProposal} 
-                      contacts={contacts} 
+                    <FeeDistributionGrid
+                      doc={newProposal}
+                      milestoneEntityField="proposal_id"
+                      contacts={contacts}
                       milestones={milestones}
                       onMilestonesChange={(updated) => {
                         if (editingProposal) {
@@ -1238,7 +1280,7 @@ export default function Proposals() {
                           });
                         }
                       }}
-                      onChange={(data) => setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(data) }))} 
+                      onChange={(data) => setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(data) }))}
                     />
                   </div>
                 </div>
@@ -1247,7 +1289,7 @@ export default function Proposals() {
                 {editingProposal && (
                   <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
                     <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[10px]">09</span>
+                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">09</span>
                       {t('proposals_section_schedule')}
                     </h3>
                     <MilestoneGantt 
@@ -1283,7 +1325,7 @@ export default function Proposals() {
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold press"
                   style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                 >
                   {t('btn_cancel')}
@@ -1291,7 +1333,7 @@ export default function Proposals() {
                 <button
                   type="submit"
                   form="proposal-form"
-                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold press"
                   style={{ background: 'var(--tblr-primary)', color: '#fff' }}
                 >
                   {editingProposal ? t('proposals_update_btn') : t('proposals_create_btn')}
@@ -1345,439 +1387,3 @@ export default function Proposals() {
     </div>
   );
 }
-
-const FeeDistributionGrid = ({ proposal, contacts, onChange, milestones, onMilestonesChange }: {
-  proposal: Partial<Proposal>,
-  contacts: Contact[],
-  onChange: (data: any) => void,
-  milestones: Milestone[],
-  onMilestonesChange: (milestones: Milestone[]) => void
-}) => {
-  const data = React.useMemo(() => {
-    if (proposal.fee_distribution) {
-      try {
-        return JSON.parse(proposal.fee_distribution);
-      } catch (e) {}
-    }
-    return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
-  }, [proposal.fee_distribution]);
-
-  React.useEffect(() => {
-    if (!proposal.id) return;
-    const currentMissions = data.missions;
-    const currentMilestones = milestones.filter(m => m.proposal_id === proposal.id);
-    let hasChanges = false;
-    const updatedMilestones = [...currentMilestones];
-    currentMissions.forEach((mission: any) => {
-      if (!currentMilestones.find(m => m.title === mission.name)) {
-        updatedMilestones.push({
-          id: `ms-${Date.now()}-${Math.random()}`,
-          proposal_id: proposal.id,
-          title: mission.name,
-          due_date: new Date().toISOString(),
-          completed: false,
-          duration_days: 30
-        });
-        hasChanges = true;
-      }
-    });
-    const finalMilestones = updatedMilestones.filter(m =>
-      currentMissions.find((mission: any) => mission.name === m.title)
-    );
-    if (finalMilestones.length !== currentMilestones.length || hasChanges) {
-      onMilestonesChange(finalMilestones);
-    }
-  }, [data.missions, proposal.id]);
-
-  const selectedContacts = React.useMemo(() => {
-    const list = proposal.specialties_list || [];
-    return list.map((s: any) => {
-      const contact = contacts.find(c => c.id === s.contact_id);
-      return {
-        id: s.contact_id || s.id,
-        name: contact ? `${contact.first_name} ${contact.last_name}` : s.specialty_name,
-        role: s.specialty_name
-      };
-    }).filter((c: any) => c.id);
-  }, [proposal.specialties_list, contacts]);
-
-  const precision = (typeof proposal.decimal_precision === 'number' && !isNaN(proposal.decimal_precision)) ? proposal.decimal_precision : 2;
-  const safeNum = (val: number) => isNaN(val) ? 0 : Number(val.toFixed(precision));
-
-  const totalBaseAmount = React.useMemo(() => {
-    return data.missions
-      .filter((m: any) => m.category === 'Mission base')
-      .reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-  }, [data.missions]);
-
-  const updateMission = (missionId: string, field: string, value: any) => {
-    const newData = { ...data, missions: data.missions.map((m: any) => m.id === missionId ? { ...m, [field]: value } : m) };
-    onChange(newData);
-  };
-
-  const updateMissionPct = (missionId: string, key: string, value: number) => {
-    const newData = {
-      ...data,
-      missions: data.missions.map((m: any) =>
-        m.id === missionId ? { ...m, percentages: { ...m.percentages, [key]: value } } : m
-      )
-    };
-    onChange(newData);
-  };
-
-  const handleRelPct = (missionId: string, newRelPct: number) => {
-    const newData = { ...data, missions: [...data.missions] };
-    const missionIndex = newData.missions.findIndex((m: any) => m.id === missionId);
-    if (missionIndex === -1) return;
-    const isBaseMission = newData.missions[missionIndex].category === 'Mission base';
-    if (isBaseMission) {
-      const baseMissions = newData.missions.filter((m: any) => m.category === 'Mission base');
-      const idx = baseMissions.findIndex((m: any) => m.id === missionId);
-      const targetTotal = proposal.amount || 0;
-      let sumAbove = 0;
-      for (let i = 0; i < idx; i++) {
-        sumAbove += (baseMissions[i].amount / targetTotal) * 100;
-      }
-      const remaining = 100 - sumAbove - newRelPct;
-      newData.missions[missionIndex] = { ...newData.missions[missionIndex], amount: (newRelPct * targetTotal) / 100 };
-      const missionsBelow = baseMissions.slice(idx + 1);
-      const sumBelow = missionsBelow.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-      if (missionsBelow.length > 0) {
-        missionsBelow.forEach((mb: any) => {
-          const mbIdx = newData.missions.findIndex((m: any) => m.id === mb.id);
-          newData.missions[mbIdx] = {
-            ...newData.missions[mbIdx],
-            amount: sumBelow > 0
-              ? (mb.amount / sumBelow) * remaining * targetTotal / 100
-              : (remaining / missionsBelow.length * targetTotal) / 100
-          };
-        });
-      }
-    } else {
-      newData.missions[missionIndex] = { ...newData.missions[missionIndex], amount: (newRelPct * totalBaseAmount) / 100 };
-    }
-    onChange(newData);
-  };
-
-  const deleteMission = (missionId: string) => {
-    const newData = { ...data, missions: data.missions.filter((m: any) => m.id !== missionId) };
-    onChange(newData);
-  };
-
-  const thStyle: React.CSSProperties = { padding: '4px 6px', border: '1px solid #e2e8f0', background: '#f1f5f9', fontSize: 12, fontWeight: 600, textAlign: 'center', whiteSpace: 'nowrap' };
-  const tdStyle: React.CSSProperties = { padding: '2px 4px', border: '1px solid #e2e8f0', fontSize: 12 };
-  const inputStyle: React.CSSProperties = { width: '100%', border: 'none', background: 'transparent', fontSize: 12, padding: '2px', outline: 'none', textAlign: 'right' };
-  const catStyle: React.CSSProperties = { padding: '3px 6px', border: '1px solid #e2e8f0', background: '#e2e8f0', fontWeight: 700, fontSize: 12 };
-  const totalStyle: React.CSSProperties = { padding: '3px 6px', border: '1px solid #e2e8f0', background: '#f8fafc', fontWeight: 700, fontSize: 12, textAlign: 'right' };
-
-  const colCount = 6 + selectedContacts.length * 2 + 1;
-
-  const renderMissionRow = (m: any) => {
-    const isBase = m.category === 'Mission base';
-    const amt = m.amount || 0;
-    const relPct = totalBaseAmount > 0 ? (amt / totalBaseAmount) * 100 : 0;
-    const archPct = m.percentages['architect'] || 0;
-    const archAmt = amt * (archPct / 100);
-    let sumPct = archPct;
-    selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
-    const soldeAmt = amt * ((100 - sumPct) / 100);
-    return (
-      <tr key={m.id}>
-        <td style={tdStyle}>
-          <input style={{ ...inputStyle, textAlign: 'left' }} defaultValue={m.name}
-            onBlur={e => updateMission(m.id, 'name', e.target.value)} />
-        </td>
-        <td style={tdStyle}>
-          <input style={inputStyle} type="number" step="any" defaultValue={safeNum(amt)}
-            onBlur={e => updateMission(m.id, 'amount', parseFloat(e.target.value) || 0)} />
-        </td>
-        <td style={tdStyle}>
-          <input style={inputStyle} type="number" step="any" defaultValue={safeNum(relPct)}
-            onBlur={e => handleRelPct(m.id, parseFloat(e.target.value) || 0)} />
-        </td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>{safeNum(soldeAmt).toLocaleString('fr-FR')}</td>
-        <td style={tdStyle}>
-          <input style={inputStyle} type="number" step="any" defaultValue={safeNum(archPct)}
-            onBlur={e => updateMissionPct(m.id, 'architect', parseFloat(e.target.value) || 0)} />
-        </td>
-        <td style={{ ...tdStyle, textAlign: 'right' }}>{safeNum(archAmt).toLocaleString('fr-FR')}</td>
-        {selectedContacts.map((c: any) => {
-          const pct = m.percentages[c.id] || 0;
-          const cAmt = amt * (pct / 100);
-          return (
-            <React.Fragment key={c.id}>
-              <td style={tdStyle}>
-                <input style={inputStyle} type="number" step="any" defaultValue={safeNum(pct)}
-                  onBlur={e => updateMissionPct(m.id, c.id, parseFloat(e.target.value) || 0)} />
-              </td>
-              <td style={{ ...tdStyle, textAlign: 'right' }}>{safeNum(cAmt).toLocaleString('fr-FR')}</td>
-            </React.Fragment>
-          );
-        })}
-        <td style={{ ...tdStyle, textAlign: 'center' }}>
-          {!isBase && (
-            <button onClick={() => deleteMission(m.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 14 }} title="Supprimer">🗑️</button>
-          )}
-        </td>
-      </tr>
-    );
-  };
-
-  const renderTotalRow = (label: string, missions: any[]) => {
-    const totalAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-    const relPct = totalBaseAmount > 0 ? (totalAmt / totalBaseAmount) * 100 : 0;
-    const totalSolde = missions.reduce((acc: number, m: any) => {
-      const mAmt = m.amount || 0;
-      const archPct = m.percentages['architect'] || 0;
-      let sumPct = archPct;
-      selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
-      return acc + mAmt * ((100 - sumPct) / 100);
-    }, 0);
-    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages['architect'] || 0) / 100), 0);
-    return (
-      <tr key={label}>
-        <td style={totalStyle}>{label}</td>
-        <td style={totalStyle}>{safeNum(totalAmt).toLocaleString('fr-FR')}</td>
-        <td style={totalStyle}>{safeNum(relPct).toLocaleString('fr-FR')}</td>
-        <td style={totalStyle}>{safeNum(totalSolde).toLocaleString('fr-FR')}</td>
-        <td style={totalStyle}>—</td>
-        <td style={totalStyle}>{safeNum(totalArchAmt).toLocaleString('fr-FR')}</td>
-        {selectedContacts.map((c: any) => {
-          const cAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages[c.id] || 0) / 100), 0);
-          return (
-            <React.Fragment key={c.id}>
-              <td style={totalStyle}>—</td>
-              <td style={totalStyle}>{safeNum(cAmt).toLocaleString('fr-FR')}</td>
-            </React.Fragment>
-          );
-        })}
-        <td style={totalStyle} />
-      </tr>
-    );
-  };
-
-  const baseMissions = data.missions.filter((m: any) => m.category === 'Mission base');
-  const exeMissions = data.missions.filter((m: any) => m.category === 'Mission Exécution');
-  const compMissions = data.missions.filter((m: any) => m.category === 'Missions complémentaires');
-  const allMissions = [...baseMissions, ...exeMissions, ...compMissions];
-
-  const totalHT = allMissions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
-  const vatRate = proposal.vat_rate || 20;
-  const vatAmt = totalHT * (vatRate / 100);
-  const totalTTC = totalHT + vatAmt;
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
-        <thead>
-          <tr>
-            <th style={thStyle} rowSpan={2}>Désignation</th>
-            <th style={thStyle} rowSpan={2}>Montant HT</th>
-            <th style={thStyle} rowSpan={2}>Rel %</th>
-            <th style={thStyle} rowSpan={2}>Solde</th>
-            <th style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>Architecte</th>
-            {selectedContacts.map((c: any) => (
-              <th key={c.id} style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>{c.name}</th>
-            ))}
-            <th style={thStyle} rowSpan={2} />
-          </tr>
-          <tr>
-            <th style={thStyle}>%</th>
-            <th style={thStyle}>€</th>
-            {selectedContacts.map((c: any) => (
-              <React.Fragment key={c.id}>
-                <th style={thStyle}>%</th>
-                <th style={thStyle}>€</th>
-              </React.Fragment>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          <tr><td style={catStyle} colSpan={colCount}>Mission base</td></tr>
-          {baseMissions.map(renderMissionRow)}
-          {renderTotalRow('Sous-total Base', baseMissions)}
-
-          <tr><td style={catStyle} colSpan={colCount}>Mission Exécution</td></tr>
-          {exeMissions.map(renderMissionRow)}
-          {renderTotalRow('Sous-total Exécution', exeMissions)}
-          {renderTotalRow('Total Base + Exé', [...baseMissions, ...exeMissions])}
-
-          <tr><td style={catStyle} colSpan={colCount}>Missions complémentaires</td></tr>
-          {compMissions.map(renderMissionRow)}
-          {renderTotalRow('Sous-total Complémentaire', compMissions)}
-          {renderTotalRow('TOTAL GENERAL HT', allMissions)}
-
-          <tr>
-            <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b' }}>TVA ({vatRate}%)</td>
-            <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b', textAlign: 'right' }}>{safeNum(vatAmt).toLocaleString('fr-FR')}</td>
-            {Array.from({ length: colCount - 2 }).map((_, i) => <td key={i} style={tdStyle} />)}
-          </tr>
-          <tr>
-            <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af' }}>TOTAL TTC</td>
-            <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af', textAlign: 'right' }}>{safeNum(totalTTC).toLocaleString('fr-FR')}</td>
-            {Array.from({ length: colCount - 2 }).map((_, i) => <td key={i} style={tdStyle} />)}
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  );
-};
-
-const exportToXlsx = async (proposal: Partial<Proposal>, contacts: Contact[]) => {
-  if (!proposal.fee_distribution) return;
-  try {
-    const XLSX = await import('xlsx');
-    const data = JSON.parse(proposal.fee_distribution);
-    const specialties = proposal.specialties_list || [];
-    const selectedContacts = specialties.map(s => {
-      const contact = contacts.find(c => c.id === s.contact_id);
-      return {
-        id: s.contact_id || s.id,
-        name: contact ? `${contact.first_name} ${contact.last_name}` : s.specialty_name
-      };
-    }).filter(c => c.id);
-
-    const aoa: any[][] = [];
-    
-    // Header Level 1
-    const h1 = ["Désignation", "Montant HT", "Rel %", "Solde", "Architecte", ""];
-    selectedContacts.forEach(c => h1.push(c.name, ""));
-    aoa.push(h1);
-
-    // Header Level 2
-    const h2 = ["", "", "", "", "%", "€"];
-    selectedContacts.forEach(() => h2.push("%", "€"));
-    aoa.push(h2);
-
-    const getCol = (idx: number) => {
-      let letter = '';
-      idx++;
-      while (idx > 0) {
-        let mod = (idx - 1) % 26;
-        letter = String.fromCharCode(65 + mod) + letter;
-        idx = Math.floor((idx - mod) / 26);
-      }
-      return letter;
-    };
-
-    const categories = [
-      { label: "Mission base", category: "Mission base" },
-      { label: "Mission Exécution", category: "Mission Exécution" },
-      { label: "Missions complémentaires", category: "Missions complémentaires" }
-    ];
-
-    let currentRow = 2; // Rows already in aoa
-    const baseSubtotalRowRef = { row: 0 };
-
-    categories.forEach((cat) => {
-      aoa.push([cat.label]);
-      currentRow++;
-      
-      const missions = data.missions.filter((m: any) => m.category === cat.category);
-      const startRow = currentRow + 1;
-      
-      missions.forEach((m: any) => {
-        currentRow++;
-        const r = currentRow;
-        const rowData: any[] = [m.name];
-        
-        // Montant HT (Col B)
-        rowData.push(m.amount || 0);
-        
-        // Rel % (Col C) - Placeholder, filled later
-        rowData.push(0); 
-
-        // Solde (Col D)
-        let soldeFormula = `B${r}*(100-(${getCol(4)}${r}`;
-        selectedContacts.forEach((_, i) => {
-          soldeFormula += `+${getCol(6 + i * 2)}${r}`;
-        });
-        soldeFormula += "))/100";
-        rowData.push({ f: soldeFormula });
-
-        // Architecte % (Col E)
-        rowData.push(m.percentages['architect'] || 0);
-
-        // Architecte € (Col F)
-        rowData.push({ f: `B${r}*E${r}/100` });
-
-        // Contacts
-        selectedContacts.forEach((c, i) => {
-          const pct = m.percentages[c.id] || 0;
-          rowData.push(pct); // % (Col G, I...)
-          rowData.push({ f: `B${r}*${getCol(6 + i * 2)}${r}/100` }); // € (Col H, J...)
-        });
-        
-        aoa.push(rowData);
-      });
-
-      // Subtotal Row
-      currentRow++;
-      const subRowIdx = currentRow;
-      if (cat.category === "Mission base") baseSubtotalRowRef.row = subRowIdx;
-      
-      const subRow: any[] = [`Sous-total ${cat.label}`];
-      // Montant HT (Col B)
-      subRow.push({ f: `SUM(B${startRow}:B${subRowIdx - 1})` });
-      // Rel % (Col C)
-      subRow.push({ f: `SUM(C${startRow}:C${subRowIdx - 1})` });
-      // Solde (Col D)
-      subRow.push({ f: `SUM(D${startRow}:D${subRowIdx - 1})` });
-      // Architecte % (Col E)
-      subRow.push("");
-      // Architecte € (Col F)
-      subRow.push({ f: `SUM(F${startRow}:F${subRowIdx - 1})` });
-      
-      selectedContacts.forEach((_, i) => {
-        subRow.push("");
-        subRow.push({ f: `SUM(${getCol(7 + i * 2)}${startRow}:${getCol(7 + i * 2)}${subRowIdx - 1})` });
-      });
-      
-      aoa.push(subRow);
-      aoa.push([]);
-      currentRow++;
-    });
-
-    // Fix Rel % formulas for all missions
-    const baseSubtotalRow = baseSubtotalRowRef.row;
-    let rowPtr = 2;
-    categories.forEach(cat => {
-      rowPtr++; // Category label
-      const missions = data.missions.filter((m: any) => m.category === cat.category);
-      missions.forEach(() => {
-        rowPtr++;
-        aoa[rowPtr - 1][2] = { f: `B${rowPtr}/$B$${baseSubtotalRow}*100` };
-      });
-      rowPtr++; // Subtotal
-      rowPtr++; // Empty
-    });
-
-    // Totals
-    const subtotalRows: number[] = [];
-    aoa.forEach((row, i) => {
-      if (row[0] && typeof row[0] === 'string' && row[0].startsWith("Sous-total")) {
-        subtotalRows.push(i + 1);
-      }
-    });
-    
-    const htSumFormula = subtotalRows.map(r => `B${r}`).join("+");
-    aoa.push(["TOTAL GENERAL HT", { f: htSumFormula }]);
-    currentRow++;
-    
-    const vatRate = proposal.vat_rate || 20;
-    aoa.push([`TVA (${vatRate}%)`, { f: `B${currentRow}*${vatRate}/100` }]);
-    currentRow++;
-    
-    aoa.push(["TOTAL GENERAL TTC", { f: `B${currentRow-1}+B${currentRow}` }]);
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Répartition Honoraires");
-    
-    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `Repartition_Honoraires_${proposal.reference || 'Projet'}.xlsx`);
-  } catch (e) {
-    console.error("Export failed:", e);
-  }
-};

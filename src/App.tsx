@@ -13,9 +13,9 @@ import {
   IconMessageCircle,
   IconUser,
   IconBuilding,
-  IconShieldLock,
 } from '@tabler/icons-react';
 import { BrandLogo } from './components/ArchiOfficeLogo';
+import { PendingWritesIndicator } from './components/PendingWritesIndicator';
 import { UpdateBanner } from './components/UpdateBanner';
 import { useNotificationBridge } from './hooks/useNotificationBridge';
 import ImpersonationBanner from './components/ImpersonationBanner';
@@ -25,7 +25,9 @@ import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
 import { ThemeProvider, useTheme } from './components/theme-provider';
 import { UserProvider, useUser } from './UserContext';
-import { Sidebar, NAV_ITEMS } from './components/Sidebar';
+import { Sidebar, SidebarNav, NAV_ITEMS } from './components/Sidebar';
+import { MobileShortcutBar } from './components/MobileShortcutBar';
+import { MobileNavDrawer } from './components/MobileNavDrawer';
 import { apiFetch } from './lib/api';
 import { isOfflineBuild } from './lib/authToken';
 import { getSyncStatus, triggerSyncNow, SyncStatusResponse } from './lib/cloudSync';
@@ -50,6 +52,7 @@ const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail'));
 const References = lazy(() => import('./pages/References'));
 const Documents = lazy(() => import('./pages/Documents'));
+const ShareTarget = lazy(() => import('./pages/ShareTarget'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Billing = lazy(() => import('./pages/Billing'));
 const TenderDetail = lazy(() => import('./pages/TenderDetail'));
@@ -58,6 +61,7 @@ const CloudImportProgress = lazy(() => import('./pages/CloudImportProgress'));
 const Register = lazy(() => import('./pages/Register'));
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const McpAuthorize = lazy(() => import('./pages/McpAuthorize'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const AgencySetup = lazy(() => import('./pages/AgencySetup'));
 import { TenantSwitcher } from './components/TenantSwitcher';
@@ -82,7 +86,7 @@ const DocumentTemplates = lazy(() => import('./pages/DocumentTemplates'));
 const TimeTracking = lazy(() => import('./pages/TimeTracking'));
 const Leave = lazy(() => import('./pages/Leave'));
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
-import { AgentChatProvider, Agents, AgentConfig, AgentAlerts } from '@zinkh/archioffice-agents/client';
+import { AgentChatProvider, Agents, AgentConfig, AgentAlerts, AgentLearning, AgentChatPage } from '@zinkh/archioffice-agents/client';
 
 function SyncStatus() {
   const { t } = useTranslation();
@@ -132,7 +136,7 @@ function SyncStatus() {
     return (
       <div className="flex items-center gap-2">
         <div
-          className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+          className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
           style={cloudStatus.isOnline
             ? { background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }
             : { background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
@@ -156,7 +160,7 @@ function SyncStatus() {
   if (!isOnline) {
     return (
       <div
-        className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+        className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
         style={{ background: '#fff4e6', color: '#f76707', border: '1px solid #ffd8a8' }}
       >
         <IconCloudOff size={13} />
@@ -167,7 +171,7 @@ function SyncStatus() {
 
   return (
     <div
-      className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded"
+      className="flex items-center gap-1.5 px-2 py-1 text-[0.6875rem] font-semibold uppercase tracking-wider rounded"
       style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}
     >
       <IconCheck size={13} />
@@ -293,7 +297,10 @@ function Header() {
       style={{
         background: 'var(--tblr-surface)',
         borderColor: 'var(--tblr-border)',
-        height: 'var(--tblr-navbar-h)',
+        // viewport-fit=cover : sous la barre d'état d'une PWA installée,
+        // le fond de l'en-tête remonte jusqu'en haut, son contenu non.
+        height: 'calc(var(--tblr-navbar-h) + env(safe-area-inset-top, 0px))',
+        paddingTop: 'env(safe-area-inset-top, 0px)',
         boxShadow: 'var(--tblr-shadow)',
       }}
     >
@@ -328,7 +335,7 @@ function Header() {
               unique, lui, ne voit rien de nouveau. */}
           {tenants.length > 1 && (
             <span
-              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium truncate max-w-[220px]"
+              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-medium truncate max-w-[220px]"
               style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
               title={t('tenant_switcher_current')}
             >
@@ -344,6 +351,12 @@ function Header() {
           {/* Sync status */}
           <div className="hidden lg:flex mr-2">
             <SyncStatus />
+          </div>
+
+          {/* Écritures « suivi de chantier » en attente d'envoi — visible sur
+              tous les écrans, y compris téléphone : c'est là qu'elle sert. */}
+          <div className="flex mr-2">
+            <PendingWritesIndicator />
           </div>
 
           {/* Search */}
@@ -368,7 +381,7 @@ function Header() {
                   borderRadius: 'var(--tblr-radius)',
                   fontSize: '13px',
                 }}
-                className="pl-8 pr-3 py-1.5 w-52 outline-none transition-[width,border-color,box-shadow] focus:w-72 focus:border-[var(--tblr-primary)] focus:shadow-[0_0_0_3px_var(--tblr-primary-lt)]"
+                className="pl-8 pr-3 py-1.5 w-52 outline-none transition-[border-color,box-shadow] focus:w-72 focus:border-[var(--tblr-primary)] focus:shadow-[0_0_0_3px_var(--tblr-primary-lt)]"
               />
               {isSearching && (
                 <div
@@ -381,7 +394,7 @@ function Header() {
             {/* Search dropdown — Tabler card style */}
             {isSearchOpen && searchQuery.length >= 2 && (
               <div
-                className="absolute top-full mt-1 left-0 w-96 z-50 overflow-hidden max-h-[70vh] overflow-y-auto"
+                className="absolute top-full mt-1 left-0 w-96 z-50 overflow-hidden max-h-[70dvh] overflow-y-auto"
                 style={{
                   background: 'var(--tblr-surface)',
                   border: '1px solid var(--tblr-border)',
@@ -406,7 +419,7 @@ function Header() {
                       return (
                         <div key={key}>
                           <div
-                            className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider border-b"
+                            className="px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider border-b"
                             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}
                           >
                             {label}
@@ -428,7 +441,7 @@ function Header() {
                                 {letter}
                               </span>
                               <div className="min-w-0 flex-1">
-                                <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
+                                <p className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
                                   {item._label}
                                 </p>
                                 {(item.client || item.email) && (
@@ -460,10 +473,12 @@ function Header() {
             {theme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
           </button>
 
-          {/* Messages */}
+          {/* Messages — desktop only : sur mobile ce raccourci vit dans le
+              menu de raccourcis en bas d'écran (Messagerie), et l'icône
+              ci-dessous fusionne son compteur avec celui des notifications. */}
           <button
             onClick={() => navigate('/messages')}
-            className="p-1.5 rounded transition-colors relative"
+            className="hidden md:inline-flex p-1.5 rounded transition-colors relative"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
             onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -472,7 +487,7 @@ function Header() {
             <IconMessageCircle size={18} />
             {unreadMessages > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[0.625rem] font-bold rounded-full flex items-center justify-center leading-none"
                 style={{ background: 'var(--tblr-danger)' }}
               >
                 {unreadMessages > 99 ? '99+' : unreadMessages}
@@ -480,10 +495,11 @@ function Header() {
             )}
           </button>
 
-          {/* Notifications */}
+          {/* Notifications — desktop only, voir l'icône fusionnée ci-dessous
+              pour le mobile. */}
           <button
             onClick={() => navigate('/notifications')}
-            className="p-1.5 rounded transition-colors relative"
+            className="hidden md:inline-flex p-1.5 rounded transition-colors relative"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
             onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -492,10 +508,32 @@ function Header() {
             <IconBell size={18} />
             {unreadCount > 0 && (
               <span
-                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[9px] font-bold rounded-full flex items-center justify-center leading-none"
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[0.625rem] font-bold rounded-full flex items-center justify-center leading-none"
                 style={{ background: 'var(--tblr-danger)' }}
               >
                 {unreadCount > 99 ? '99+' : unreadCount}
+              </span>
+            )}
+          </button>
+
+          {/* Notifications & Messages fusionnées — mobile uniquement. Les
+              deux icônes séparées ci-dessus prennent trop de place sur un
+              écran étroit alors que /notifications porte déjà un filtre
+              « Messages » : une seule icône, un seul badge qui additionne
+              les deux compteurs, vers la page qui couvre les deux. */}
+          <button
+            onClick={() => navigate('/notifications')}
+            className="md:hidden p-1.5 rounded transition-colors relative"
+            style={{ color: 'var(--tblr-muted)' }}
+            title="Notifications et messages"
+          >
+            <IconBell size={18} />
+            {(unreadCount + unreadMessages) > 0 && (
+              <span
+                className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 text-white text-[0.625rem] font-bold rounded-full flex items-center justify-center leading-none"
+                style={{ background: 'var(--tblr-danger)' }}
+              >
+                {(unreadCount + unreadMessages) > 99 ? '99+' : unreadCount + unreadMessages}
               </span>
             )}
           </button>
@@ -546,10 +584,10 @@ function Header() {
                           />
                         </div>
                         <div className="overflow-hidden">
-                          <p className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
+                          <p className="text-[0.8125rem] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
                             {currentUser?.name}
                           </p>
-                          <p className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                          <p className="text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                             {currentUser?.email}
                           </p>
                         </div>
@@ -559,7 +597,7 @@ function Header() {
                     <div className="p-1">
                       <button
                         onClick={() => { navigate('/profile'); setIsUserMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
                         style={{ color: 'var(--tblr-text)' }}
                         onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -569,7 +607,7 @@ function Header() {
                       </button>
                       <button
                         onClick={() => { navigate('/settings'); setIsUserMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
                         style={{ color: 'var(--tblr-text)' }}
                         onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -579,7 +617,7 @@ function Header() {
                       </button>
                       <button
                         onClick={() => { signOut(); setIsUserMenuOpen(false); }}
-                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
                         style={{ color: 'var(--tblr-danger)' }}
                         onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseOut={e => (e.currentTarget.style.background = '')}
@@ -598,93 +636,32 @@ function Header() {
 
     </header>
 
-      {/* Mobile nav drawer — slides in from left */}
-      <AnimatePresence>
-        {isMobileMenuOpen && (
-          <>
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-40 md:hidden"
-              style={{ background: 'rgba(0,0,0,0.45)' }}
-              onClick={() => setIsMobileMenuOpen(false)}
-            />
-            {/* Drawer */}
-            <motion.div
-              initial={{ x: '-100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '-100%' }}
-              transition={{ type: 'tween', duration: 0.25 }}
-              className="fixed inset-y-0 left-0 z-50 w-72 md:hidden flex flex-col overflow-y-auto"
-              style={{ background: 'var(--tblr-surface)', borderRight: '1px solid var(--tblr-border)' }}
-            >
-              {/* Drawer header */}
-              <div
-                className="flex items-center gap-2.5 px-4 py-4 border-b shrink-0"
-                style={{ borderColor: 'var(--tblr-border)' }}
-              >
-                <BrandLogo logoUrl={settings?.logoUrl} size={28} />
-                <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
-              </div>
-              {/* Nav items */}
-              <nav className="flex flex-col p-2 gap-0.5 flex-1">
-                {NAV_ITEMS.map((item) => {
-                  const isActive = location.pathname === item.path;
-                  return (
-                    <Link
-                      key={item.path}
-                      to={item.path}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                      className={cn(
-                        'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
-                        isActive
-                          ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                          : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                      )}
-                    >
-                      <item.icon size={18} />
-                      <span>{t(item.name)}</span>
-                    </Link>
-                  );
-                })}
-                {currentUser?.isSuperAdmin && (
-                  <div className="mt-2 pt-2 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
-                    {[{ path: '/admin', label: 'Super Admin', icon: IconShieldLock }, { path: '/admin/support', label: 'Support (back-office)', icon: IconMessageCircle }].map(item => {
-                      const isActive = location.pathname === item.path;
-                      return (
-                        <Link
-                          key={item.path}
-                          to={item.path}
-                          onClick={() => setIsMobileMenuOpen(false)}
-                          className={cn(
-                            'flex items-center gap-3 px-3 py-2.5 rounded text-[13px] font-medium transition-colors',
-                            isActive
-                              ? 'text-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]'
-                              : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]'
-                          )}
-                        >
-                          <item.icon size={18} />
-                          <span>{item.label}</span>
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </nav>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+      {/* Menu mobile : glisse depuis la gauche, se referme d'un geste vers la
+          gauche (voir MobileNavDrawer). */}
+      <MobileNavDrawer open={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)}>
+        {/* Drawer header */}
+        <div
+          className="flex items-center gap-2.5 px-4 py-4 border-b shrink-0"
+          style={{ borderColor: 'var(--tblr-border)' }}
+        >
+          <BrandLogo logoUrl={settings?.logoUrl} size={28} />
+          <span className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>ArchiOffice</span>
+        </div>
+        {/* Nav items — mêmes catégories repliables (Gestion, Affaires,
+            Outils…) que la barre latérale desktop, plutôt qu'une liste
+            à plat : `SidebarNav` porte à la fois le regroupement et
+            l'état des connecteurs (Super PDP, Chorus Pro, MAF), déjà
+            fetché côté desktop mais tout aussi valable ici puisque la
+            barre desktop reste montée (masquée en CSS) même sur mobile. */}
+        <SidebarNav onNavigate={() => setIsMobileMenuOpen(false)} />
+      </MobileNavDrawer>
     </>
   );
 }
 
 function PageLoadingFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
+    <div className="min-h-svh flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
       <div
         className="animate-spin w-7 h-7 border-2 border-t-transparent rounded-full"
         style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
@@ -707,7 +684,7 @@ function ProtectedLayout() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
+      <div className="min-h-svh flex items-center justify-center" style={{ background: 'var(--tblr-bg)' }}>
         <div
           className="animate-spin w-7 h-7 border-2 border-t-transparent rounded-full"
           style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
@@ -760,19 +737,19 @@ function ProtectedLayout() {
   // per-column-scroll treatment only makes sense once there's room for the
   // columns to sit side by side (lg+); below that the page falls back to
   // normal, page-level scrolling like every other route.
-  const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname);
+  const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname) || /^\/agents\/[^/]+\/chat$/.test(location.pathname);
 
   return (
     <AgentChatProvider>
     <div
-      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-screen lg:h-screen lg:overflow-hidden' : 'min-h-screen')}
+      className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
     >
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
         <Header />
 
-        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 py-4 sm:px-6 sm:py-6 max-w-[1400px] w-full mx-auto'}>
+        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}>
           <Outlet />
         </main>
 
@@ -781,7 +758,7 @@ function ProtectedLayout() {
             className="border-t mt-auto py-4 px-6"
             style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
           >
-            <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>
+            <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row justify-between items-center gap-2 text-[0.75rem]" style={{ color: 'var(--tblr-muted)' }}>
               <div>{t('footer_rights')}</div>
               <div className="flex gap-4">
                 <Link to="/privacy" className="hover:underline" style={{ color: 'var(--tblr-muted)' }}>{t('footer_privacy')}</Link>
@@ -791,6 +768,10 @@ function ProtectedLayout() {
           </footer>
         )}
       </div>
+
+      {/* Menu de raccourcis mobile — masqué sur les routes plein écran
+          (fiche projet, chat d'agent) qui gèrent déjà tout leur espace. */}
+      {!isFullBleedRoute && <MobileShortcutBar />}
     </div>
     </AgentChatProvider>
   );
@@ -834,6 +815,7 @@ export default function App() {
               <Route path="/projects/:id" element={<ProjectDetail />} />
               <Route path="/references" element={<References />} />
               <Route path="/documents" element={<Documents />} />
+              <Route path="/share-target" element={<ShareTarget />} />
               <Route path="/proposals" element={<Proposals />} />
               <Route path="/invoices" element={<Invoices />} />
               <Route path="/tenders" element={<Tenders />} />
@@ -850,6 +832,7 @@ export default function App() {
               <Route path="/settings" element={<Settings />} />
               <Route path="/billing" element={<Billing />} />
               <Route path="/notifications" element={<Notifications />} />
+              <Route path="/mcp/authorize" element={<McpAuthorize />} />
               <Route path="/profile" element={<Profile />} />
               <Route path="/profile/:userId" element={<Profile />} />
               <Route path="/messages" element={<Messages />} />
@@ -860,8 +843,10 @@ export default function App() {
               <Route path="/temps" element={<TimeTracking />} />
               <Route path="/conges" element={<Leave />} />
               <Route path="/agents" element={<Agents />} />
+              <Route path="/agents/:id/chat" element={<AgentChatPage />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
               <Route path="/agents/alertes" element={<AgentAlerts />} />
+              <Route path="/agents/apprentissage" element={<AgentLearning />} />
               <Route path="/admin" element={<RequireSuperAdmin><AdminDashboard /></RequireSuperAdmin>} />
               <Route path="/admin/tenants/:id" element={<RequireSuperAdmin><AdminTenantDetail /></RequireSuperAdmin>} />
               <Route path="/admin/support" element={<RequireSuperAdmin><AdminSupport /></RequireSuperAdmin>} />

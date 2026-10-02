@@ -2,6 +2,7 @@
 // history (ESQ/APS/APD/PC/PRO/DCE/ACT/VISA/DET/AOR) ───" section.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -59,6 +60,9 @@ export function registerProjectPhaseHistoryRoutes(app: Express, { supabaseAdmin,
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Passage du projet "${(project as any).name}" en phase ${phase}`, (project as any).name, projectId, 'project', 'Projets');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'project.phase_changed', {
+        project_id: projectId, project_name: (project as any).name, phase, previous_phase: (current as any)?.phase ?? null,
+      });
 
       res.status(201).json(created);
     } catch (e: any) {

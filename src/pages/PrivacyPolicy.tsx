@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { IconArrowLeft, IconCommand } from '@tabler/icons-react';
+import { IconArrowLeft } from '@tabler/icons-react';
+import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 
 const content = {
   en: {
@@ -177,6 +178,8 @@ En utilisant le Service, vous acceptez la collecte et l'utilisation des informat
 
 Par ailleurs, si votre cabinet active l'une des intégrations optionnelles suivantes (Réglages > Plugins), les données que vous synchronisez explicitement via cette intégration sont également partagées avec ce prestataire, dans le cadre de la relation propre de votre cabinet avec lui : **Zoho** (Invoice/Books), **Odoo**, **Ragic**, ou **Chorus Pro** (AIFE — Ministère de l'Économie, obligatoire pour la facturation électronique du secteur public). Ces intégrations sont désactivées par défaut et n'échangent des données qu'une fois configurées et activées par votre cabinet.
 
+Le cas du **stockage sur votre propre espace** (Google Drive, Dropbox, Nextcloud, kDrive) est différent, et plutôt à votre avantage : une fois cette intégration activée, vos nouveaux documents et plans ne sont plus hébergés chez nous mais chez vous, sur un compte qui vous appartient et dont vous restez seul responsable. Nous n'en conservons qu'une référence permettant de les rouvrir depuis ArchiOffice. Les fichiers déposés avant l'activation restent, eux, hébergés chez notre prestataire de stockage.
+
 Nous pouvons également partager des données avec des **autorités légales** lorsque la loi, une décision de justice ou la protection des droits et de la sécurité l'exige, et lors d'un **transfert d'entreprise** (fusion, acquisition, vente d'actifs), auquel cas les utilisateurs seront informés.`,
       },
       {
@@ -184,7 +187,7 @@ Nous pouvons également partager des données avec des **autorités légales** l
         body: `Nous conservons vos données aussi longtemps que votre compte ou celui de votre cabinet est actif.
 
 • **Vos données personnelles de profil** (nom, coordonnées, CV, avatar, formations, expériences) peuvent être supprimées immédiatement et définitivement à tout moment, par vous-même, depuis Profil > Confidentialité — sans demande ni délai d'attente.
-• **Les données professionnelles de votre cabinet** (projets, factures, documents, contacts...) sont supprimées via une fermeture de cabinet demandée par un administrateur (Réglages > Zone dangereuse). Cela déclenche un délai de grâce de 30 jours, annulable à tout moment, à l'issue duquel la suppression s'exécute automatiquement et définitivement.
+• **Les données professionnelles de votre cabinet** (projets, factures, documents, contacts...) sont supprimées via une fermeture de cabinet demandée par un administrateur (Réglages > Zone dangereuse). Cela déclenche un délai de grâce de 30 jours, annulable à tout moment, à l'issue duquel la suppression s'exécute automatiquement et définitivement. Les fichiers que vous avez fait déposer sur votre propre espace de stockage ne sont **pas** supprimés par cette opération : ils vous appartiennent et restent chez vous ; seule disparaît la possibilité de les rouvrir depuis ArchiOffice.
 • **Les documents à conservation légale obligatoire** (notamment les documents comptables, que la loi française impose de conserver 10 ans) ne sont pas concernés par ces suppressions et restent sous la responsabilité de votre cabinet, à archiver au préalable — utilisez **Réglages > Archivage** pour télécharger à tout moment un export complet et exploitable de l'activité du cabinet (un fichier CSV par table de données, ainsi que tous les fichiers déposés), indépendamment de toute demande de suppression.
 • Les copies de sauvegarde peuvent subsister pendant 60 jours supplémentaires après une suppression.
 • Les statistiques d'utilisation anonymisées peuvent être conservées indéfiniment.`,
@@ -248,7 +251,7 @@ export default function PrivacyPolicy() {
   const c = content[lang];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-svh bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -258,9 +261,7 @@ export default function PrivacyPolicy() {
               {lang === 'fr' ? 'Retour' : 'Back'}
             </Link>
             <div className="flex items-center gap-2">
-              <div className="w-7 h-7 bg-gray-900 rounded-lg flex items-center justify-center">
-                <IconCommand size={14} className="text-white" />
-              </div>
+              <ArchiOfficeLogo size={24} />
               <span className="font-semibold text-gray-900 text-sm">ArchiOffice</span>
             </div>
           </div>

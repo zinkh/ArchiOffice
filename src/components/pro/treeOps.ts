@@ -135,6 +135,30 @@ export function recomputeLot<L extends LotLike>(lot: L): L {
   return { ...lot, sousTotal };
 }
 
+/**
+ * Retire un batimentId/phaseId devenu orphelin de tout l'arbre. Appelé quand
+ * un bâtiment ou une phase est supprimé du registre du document : sans ça,
+ * les lots/chapitres/articles qui pointaient dessus gardaient un identifiant
+ * mort, affiché « sans affectation » sans que rien ne dise qu'une suppression
+ * en était la cause.
+ */
+export function purgerDecoupage<L extends LotLike>(
+  lots: L[], champ: 'batimentId' | 'phaseId', id: string,
+): L[] {
+  const purgerNoeud = (noeud: any) => (noeud[champ] === id ? { ...noeud, [champ]: undefined } : noeud);
+  const purgerLigne = (ligne: any): any => {
+    const next = purgerNoeud(ligne);
+    return next.children?.length ? { ...next, children: next.children.map(purgerLigne) } : next;
+  };
+  return lots.map(lot => ({
+    ...purgerNoeud(lot),
+    chapitres: lot.chapitres.map((chap: any) => ({
+      ...purgerNoeud(chap),
+      lignes: chap.lignes.map(purgerLigne),
+    })),
+  })) as L[];
+}
+
 /** Parcourt tous les articles d'un arbre de lots, sous-articles compris. */
 export function forEachLigne<L extends LotLike>(
   lots: L[],

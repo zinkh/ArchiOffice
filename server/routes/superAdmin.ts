@@ -427,6 +427,45 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
     }
   });
 
+  // ─── Moteur de lecture des documents ────────────────────────────────────
+  // Local (pdf-parse + Tesseract) ou Nomic Parse, pour toute la plateforme :
+  // pièces jointes des agents, analyse du DCE, génération du CCTP. Même
+  // règle que le fournisseur IA : la clé NOMIC_API_KEY reste dans
+  // l'environnement, et basculer sur Nomic sans elle est refusé.
+  app.get('/api/admin/document-parser', requireSuperAdmin, async (_req: any, res: any) => {
+    try {
+      const { describeDocumentParser, isNomicConfigured } = await import('@zinkh/archioffice-agents/server');
+      const current = await describeDocumentParser();
+      res.json({
+        current,
+        engines: [
+          { engine: 'local', label: 'Local (pdf-parse + Tesseract)', configured: true, envKey: null },
+          { engine: 'nomic', label: 'Nomic Parse', configured: isNomicConfigured(), envKey: 'NOMIC_API_KEY' },
+        ],
+      });
+    } catch (e: any) {
+      console.error('[GET /api/admin/document-parser]', e); res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/admin/document-parser', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { engine } = req.body ?? {};
+      const { DOCUMENT_PARSER_ENGINES, setDocumentParserEngine, isNomicConfigured } = await import('@zinkh/archioffice-agents/server');
+      if (!DOCUMENT_PARSER_ENGINES.includes(engine)) {
+        return res.status(400).json({ error: `Moteur inconnu : ${String(engine)}` });
+      }
+      if (engine === 'nomic' && !isNomicConfigured()) {
+        return res.status(400).json({ error: 'Aucune clé API configurée pour Nomic. Renseignez NOMIC_API_KEY avant de basculer dessus.' });
+      }
+      await setDocumentParserEngine(supabaseAdmin, engine, req.user?.id);
+      await logAdminAction(supabaseAdmin, req.user, 'platform.document_parser_changed', null, { engine });
+      res.json({ ok: true, engine });
+    } catch (e: any) {
+      console.error('[PUT /api/admin/document-parser]', e); res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get('/api/admin/platform-admins', requireSuperAdmin, async (_req: any, res: any) => {
     try {
       const { data, error } = await supabaseAdmin.from('platform_admins').select('user_id, email, created_at').order('created_at', { ascending: true });

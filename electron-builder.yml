@@ -26,9 +26,20 @@ publish:
   releaseType: release
 # The Express server is bundled into a single self-contained file by esbuild
 # (dist-server/server.cjs) and the frontend is the static dist/ SPA, so
-# neither needs any node_modules shipped. Neither embedded-postgres nor pg has
-# a native .node addon needing an Electron ABI rebuild (embedded-postgres
-# ships a plain OS executable), so npmRebuild stays off.
+# neither needs any node_modules shipped. This must stay true for EVERY
+# runtime dependency `server.ts` pulls in (transitively or not) — a package
+# left `--external` in build:server (package.json) without an entry in
+# extraResources below produces exactly the same failure @modelcontextprotocol/sdk
+# did in 1.0.8: `dist-server/server.cjs` requires it, resources/node_modules
+# doesn't have it, the packaged app crashes at every launch with
+# MODULE_NOT_FOUND — Postgres/PostgREST both come up fine first, so the splash
+# screen only reports the failure on its last step ("Démarrage du serveur
+# applicatif"), 90s later. Fixed by dropping that flag and letting esbuild
+# bundle the SDK like everything else (its own dependency closure — Express 5,
+# Hono, ajv, zod, jose... — is too deep to hand-list here the way pg's is
+# below). Neither embedded-postgres nor pg has a native .node addon needing an
+# Electron ABI rebuild (embedded-postgres ships a plain OS executable), so
+# npmRebuild stays off.
 npmRebuild: false
 # asar stays enabled (default) for speed and a compact install — but
 # embedded-postgres isn't asar-aware: it resolves its own binary path via

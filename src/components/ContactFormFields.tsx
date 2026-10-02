@@ -4,6 +4,8 @@ import { IconMail, IconPhone, IconBrandLinkedin, IconUser, IconX } from '@tabler
 import type { Contact, ContactCategory } from '../types';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { CompanyAutocomplete } from './CompanyAutocomplete';
+import { TagChipInput } from './TagChipInput';
+import { isEntrepriseContact, isBureauEtudesContact } from '../lib/contactCategories';
 import { frenchVatNumber, parseDirectors, streetWithoutCity, type CompanyDirector } from '../lib/siren';
 
 /**
@@ -19,13 +21,16 @@ interface ContactFormFieldsProps {
   /** Applique une modification partielle : le parent garde la propriété de l'état. */
   onChange: (patch: Partial<Contact>) => void;
   categories: ContactCategory[];
+  /** Valeurs déjà utilisées par d'autres contacts, proposées en complétion des puces Corps d'état / Spécialité. */
+  corpsEtatSuggestions?: string[];
+  specialiteSuggestions?: string[];
 }
 
 const NEW_CATEGORY = '__new__';
 
 const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 const inputClass = "w-full px-3 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20";
-const labelClass = "text-[10px] font-bold uppercase tracking-wider";
+const labelClass = "text-[0.6875rem] font-bold uppercase tracking-wider";
 const labelStyle: React.CSSProperties = { color: 'var(--tblr-muted)' };
 const sectionClass = "text-sm font-bold uppercase tracking-widest pb-2";
 const sectionStyle: React.CSSProperties = { color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' };
@@ -50,7 +55,7 @@ function workToHome(c: Partial<Contact>): Partial<Contact> {
   };
 }
 
-export function ContactFormFields({ contact, onChange, categories }: ContactFormFieldsProps) {
+export function ContactFormFields({ contact, onChange, categories, corpsEtatSuggestions = [], specialiteSuggestions = [] }: ContactFormFieldsProps) {
   const { t } = useTranslation();
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [sameAddress, setSameAddress] = useState(() => homeMirrorsWork(contact));
@@ -205,12 +210,12 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
                 setWorkAddress(patch);
               }}
             />
-            <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_search_hint')}</p>
+            <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_company_search_hint')}</p>
           </div>
           {directors.length > 0 && (
             <div className="md:col-span-3 rounded-lg p-3 space-y-2" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-wider" style={labelStyle}>{t('contacts_directors_label')}</p>
+                <p className="text-[0.6875rem] font-bold uppercase tracking-wider" style={labelStyle}>{t('contacts_directors_label')}</p>
                 <button type="button" onClick={() => setDirectors([])} style={labelStyle} title={t('contacts_directors_dismiss')}>
                   <IconX size={14} />
                 </button>
@@ -260,7 +265,7 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
         <h4 className={sectionClass} style={sectionStyle}>{t('contacts_section_contact_info')}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-4">
-            <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_emails_label')}</h5>
+            <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_emails_label')}</h5>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <IconMail size={16} style={labelStyle} />
@@ -287,7 +292,7 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
             </div>
           </div>
           <div className="space-y-4">
-            <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_phones_label')}</h5>
+            <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_phones_label')}</h5>
             <div className="grid grid-cols-1 gap-2">
               <div className="flex items-center gap-2">
                 <IconPhone size={16} style={labelStyle} />
@@ -319,7 +324,7 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
         <h4 className={sectionClass} style={sectionStyle}>{t('contacts_section_addresses')}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="space-y-3">
-            <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_address_work_label')}</h5>
+            <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_address_work_label')}</h5>
             <AddressAutocomplete
               value={contact.address_work_street || ''}
               placeholder={t('contacts_street_placeholder')}
@@ -350,8 +355,8 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
           </div>
           <div className="space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h5 className="text-[10px] font-bold uppercase" style={labelStyle}>{t('contacts_address_home_label')}</h5>
-              <label className="flex items-center gap-1.5 text-[11px] cursor-pointer" style={labelStyle}>
+              <h5 className="text-[0.6875rem] font-bold uppercase" style={labelStyle}>{t('contacts_address_home_label')}</h5>
+              <label className="flex items-center gap-1.5 text-[0.6875rem] cursor-pointer" style={labelStyle}>
                 <input
                   type="checkbox"
                   checked={sameAddress}
@@ -437,6 +442,54 @@ export function ContactFormFields({ contact, onChange, categories }: ContactForm
                 />
               )}
             </div>
+            <div className="space-y-1">
+              <label className={labelClass} style={labelStyle}>{t('contacts_is_personal_label')}</label>
+              <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: 'var(--tblr-border)' }}>
+                <button
+                  type="button"
+                  className="flex-1 py-1.5 text-xs font-medium transition-colors"
+                  style={!contact.is_personal
+                    ? { background: 'var(--tblr-primary)', color: '#fff' }
+                    : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+                  onClick={() => onChange({ is_personal: false })}
+                >
+                  {t('contacts_is_personal_pro')}
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 py-1.5 text-xs font-medium transition-colors"
+                  style={contact.is_personal
+                    ? { background: 'var(--tblr-primary)', color: '#fff' }
+                    : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+                  onClick={() => onChange({ is_personal: true })}
+                >
+                  {t('contacts_is_personal_perso')}
+                </button>
+              </div>
+              <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_is_personal_hint')}</p>
+            </div>
+            {isEntrepriseContact(contact as Contact) && !!contact.category && (
+              <div className="space-y-1">
+                <label className={labelClass} style={labelStyle}>{t('contacts_corps_etat_label')}</label>
+                <TagChipInput
+                  value={contact.corps_etat || []}
+                  onChange={next => onChange({ corps_etat: next })}
+                  suggestions={corpsEtatSuggestions}
+                  placeholder={t('contacts_corps_etat_placeholder')}
+                />
+              </div>
+            )}
+            {isBureauEtudesContact(contact as Contact) && !!contact.category && (
+              <div className="space-y-1">
+                <label className={labelClass} style={labelStyle}>{t('contacts_specialite_label')}</label>
+                <TagChipInput
+                  value={contact.specialite || []}
+                  onChange={next => onChange({ specialite: next })}
+                  suggestions={specialiteSuggestions}
+                  placeholder={t('contacts_specialite_placeholder')}
+                />
+              </div>
+            )}
             <div className="space-y-1">
               <label className={labelClass} style={labelStyle}>{t('contacts_tags_label')}</label>
               <input

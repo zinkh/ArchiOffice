@@ -1,3 +1,4 @@
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { supabase } from './supabase';
 
 export function isOfflineBuild(): boolean {
@@ -167,11 +168,23 @@ async function fetchAccessToken(): Promise<string | null> {
 
   const needsRefresh = !session?.access_token
     || (session.expires_at && session.expires_at * 1000 < Date.now() + TOKEN_EXPIRY_MARGIN_MS);
+  // Hors-ligne, le jeton d'accès (1 h) peut avoir expiré : le renouveler est
+  // impossible, mais la session, elle, reste valable. On garde alors le jeton
+  // périmé (les écritures partent en file, voir offlineQueue.ts) plutôt que de
+  // tenter un refresh qui échouerait et passerait pour une session morte.
+  if (needsRefresh && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return session?.access_token ?? null;
+  }
   if (needsRefresh) {
     try {
       const { data: refreshed, error } = await withTimeout(supabase.auth.refreshSession(), AUTH_TIMEOUT_MS);
       if (refreshed.session) {
         session = refreshed.session;
+      } else if (error && isAuthRetryableFetchError(error)) {
+        // Coupure réseau pendant le refresh (hors-ligne, tunnel, wifi de
+        // chantier) : le serveur n'a rien répondu, la session n'est pas morte.
+        // La déclarer perdue effaçait le jeton et renvoyait sur l'écran de
+        // connexion en plein brouillon.
       } else if (error) {
         // Supabase actually responded and confirmed the refresh token itself
         // is dead (expired/revoked) — the session really is over.

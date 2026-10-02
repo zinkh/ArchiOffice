@@ -5,6 +5,7 @@ import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
 import { exportLeaveBalancesTablePdf, exportLeaveBalanceFichePdf } from '../lib/hrExport';
+import { formatDate } from '../lib/date';
 import type { LeaveRequest, LeaveBalance, LeaveBalanceAllEntry, LeaveType, TeamMember } from '../types';
 
 export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
@@ -191,7 +192,8 @@ export default function Leave() {
           </div>
 
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
                 <tr>
                   <th className="text-left p-3">{t('leave_col_type')}</th>
@@ -205,7 +207,7 @@ export default function Leave() {
                 {myRequests.map(r => (
                   <tr key={r.id} className="border-t border-zinc-100 dark:border-zinc-700">
                     <td className="p-3">{LEAVE_TYPE_LABELS[r.leave_type]}{r.motif && ` (${MOTIF_OPTIONS.find(m => m.value === r.motif)?.label || r.motif})`}</td>
-                    <td className="p-3">{r.start_date} → {r.end_date}</td>
+                    <td className="p-3">{formatDate(r.start_date)} → {formatDate(r.end_date)}</td>
                     <td className="p-3">{r.business_days}</td>
                     <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span></td>
                     <td className="p-3">
@@ -217,13 +219,15 @@ export default function Leave() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
 
       {tab === 'validations' && teamRequests !== null && (
         <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-900">
               <tr>
                 <th className="text-left p-3">{t('leave_col_employee')}</th>
@@ -239,7 +243,7 @@ export default function Leave() {
                 <tr key={r.id} className="border-t border-zinc-100 dark:border-zinc-700">
                   <td className="p-3">{nameById[r.user_id] || r.user_id}</td>
                   <td className="p-3">{LEAVE_TYPE_LABELS[r.leave_type]}</td>
-                  <td className="p-3">{r.start_date} → {r.end_date}</td>
+                  <td className="p-3">{formatDate(r.start_date)} → {formatDate(r.end_date)}</td>
                   <td className="p-3">{r.business_days}</td>
                   <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span></td>
                   <td className="p-3">
@@ -256,6 +260,7 @@ export default function Leave() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -276,7 +281,8 @@ export default function Leave() {
             </button>
           </div>
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
                 <tr>
                   <th className="text-left p-3">{t('leave_col_employee')}</th>
@@ -318,6 +324,7 @@ export default function Leave() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           <p className="text-xs text-zinc-400">{t('leave_balances_hint')}</p>
         </div>
