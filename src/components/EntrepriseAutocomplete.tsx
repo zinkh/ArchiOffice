@@ -15,6 +15,7 @@ interface EntrepriseAutocompleteProps {
   onCreate: (name: string) => void;
   placeholder?: string;
   className?: string;
+  autoFocus?: boolean;
 }
 
 /**
@@ -25,7 +26,7 @@ interface EntrepriseAutocompleteProps {
  * cas courant, pas l'exception.
  */
 export function EntrepriseAutocomplete({
-  contacts, contactId, fallbackName, onSelect, onCreate, placeholder, className,
+  contacts, contactId, fallbackName, onSelect, onCreate, placeholder, className, autoFocus,
 }: EntrepriseAutocompleteProps) {
   const selected = contacts.find(c => c.id === contactId);
   const [query, setQuery] = useState(selected?.company_name || fallbackName || '');
@@ -78,6 +79,7 @@ export function EntrepriseAutocomplete({
         type="text"
         className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
         value={query}
+        autoFocus={autoFocus}
         placeholder={placeholder || 'Rechercher ou créer une entreprise…'}
         onChange={e => { setQuery(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}

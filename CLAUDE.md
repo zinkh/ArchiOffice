@@ -479,6 +479,15 @@ migration).
   ne sont que des intitulés : les fichiers se joignent dans la fenêtre de
   message. Pas d'envoi groupé volontairement (chaque entreprise ne doit voir
   que son propre message).
+- **Ajout d'une entreprise** (`EntrepriseAddForm.tsx`, bouton « Ajouter » de l'en-tête) : un mini
+  formulaire au-dessus du tableau (entreprise choisie dans les contacts ou créée sur place, email,
+  corps d'état, lots, dates, DCE à envoyer) remplace l'ancienne ligne vide ajoutée tout en bas. À
+  l'enregistrement la ligne se classe sous son lot (le tableau est regroupé par lot), les filtres sont
+  levés, la page défile jusqu'à elle et elle est surlignée (`miseEnAvant`). Sans lot choisi, les lots
+  sont PROPOSÉS d'après le corps d'état de la fiche (`lotsCorrespondants`, même rapprochement par
+  radicaux que les suggestions de contacts) tant qu'on n'y a pas touché. Une fiche déjà consultée n'est
+  jamais dupliquée : les lots choisis s'ajoutent à sa ligne. « Enregistrer et ajouter une autre » garde
+  les lots, usage courant en série sur un même lot.
 - **Actions groupées** sur la sélection (lots, DCE transmis aujourd'hui,
   relance, ne répond pas, retirer). Sous 768 px le tableau devient une liste
   de cartes (`useMediaQuery`, un seul rendu monté à la fois).

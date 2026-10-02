@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   IconSearch, IconSend, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus,
 } from '@tabler/icons-react';
@@ -43,6 +43,8 @@ interface Props {
   corpsEtatCodesFromContact: (contact: Contact) => string[];
   /** Qualifications des fiches contacts, par identifiant de contact. */
   qualifications?: Record<string, Qualification[]>;
+  /** Ligne tout juste ajoutée : on lève les filtres, on défile jusqu'à elle et on la surligne un instant. */
+  miseEnAvant?: { id: string; n: number } | null;
 }
 
 const PILL: Record<StatutEntreprise, string> = {
@@ -117,7 +119,7 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, onSent, onClose 
 export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, entrepriseContacts,
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
-  corpsEtatCodesFromContact, qualifications = {},
+  corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -126,6 +128,21 @@ export default function ACTEntreprisesTable({
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [suggestLotId, setSuggestLotId] = useState<string | null>(null);
   const [mailPour, setMailPour] = useState<string | null>(null);
+
+  const [clignote, setClignote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!miseEnAvant) return;
+    // Un filtre actif pourrait cacher la nouvelle ligne : on le lève.
+    setFiltres(FILTRES_VIDES);
+    setClignote(miseEnAvant.id);
+    // Après le rendu des groupes recalculés.
+    const raf = requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelector(`[data-entreprise-id="${CSS.escape(miseEnAvant.id)}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }));
+    const fin = setTimeout(() => setClignote(null), 2600);
+    return () => { cancelAnimationFrame(raf); clearTimeout(fin); };
+  }, [miseEnAvant]);
 
   const patch = (id: string, p: Partial<EntrepriseRow>) =>
     onChange(entreprises.map(e => (e.id === id ? { ...e, ...p } : e)));
@@ -524,8 +541,8 @@ export default function ACTEntreprisesTable({
                     </tr>
                   )}
                   {groupe.entreprises.map(e => (
-                    <tr key={`${e.id}::${groupe.key}`} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30 align-top', e.ne_repond_pas && 'opacity-60')}>
-                      <td className="px-3 py-2.5 sticky left-0 z-[1] bg-[var(--tblr-surface)] border-r border-[var(--tblr-border)]">
+                    <tr key={`${e.id}::${groupe.key}`} data-entreprise-id={e.id} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30 align-top transition-colors duration-700', e.ne_repond_pas && 'opacity-60', clignote === e.id && 'bg-blue-50 dark:bg-blue-900/20')}>
+                      <td className={cn('px-3 py-2.5 sticky left-0 z-[1] bg-[var(--tblr-surface)] border-r border-[var(--tblr-border)] transition-colors duration-700', clignote === e.id && '!bg-blue-50 dark:!bg-blue-900/20')}>
                         <div className="flex items-start gap-2">
                           <div className="pt-2">{caseSelection(e)}</div>
                           <div className="flex-1 min-w-0">{champNom(e)}</div>
@@ -559,8 +576,8 @@ export default function ACTEntreprisesTable({
               )}
               <ul className="space-y-2.5">
                 {groupe.entreprises.map(e => (
-                  <li key={`${e.id}::${groupe.key}`}
-                    className={cn('rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] p-3 space-y-2.5', e.ne_repond_pas && 'opacity-60')}>
+                  <li key={`${e.id}::${groupe.key}`} data-entreprise-id={e.id}
+                    className={cn('rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] p-3 space-y-2.5 transition-colors duration-700', e.ne_repond_pas && 'opacity-60', clignote === e.id && 'bg-blue-50 dark:bg-blue-900/20 border-blue-300')}>
                     <div className="flex items-start gap-2">
                       <div className="pt-2">{caseSelection(e)}</div>
                       <div className="flex-1 min-w-0">{champNom(e)}</div>

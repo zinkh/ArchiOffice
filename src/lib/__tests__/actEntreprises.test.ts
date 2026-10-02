@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  radicauxMetier, todayIso, listeAPlat, SANS_LOT, FILTRES_VIDES, type EntrepriseSuivi,
+  radicauxMetier, todayIso, listeAPlat, SANS_LOT, lotsCorrespondants, FILTRES_VIDES, type EntrepriseSuivi,
 } from '../actEntreprises';
 
 const ent = (p: Partial<EntrepriseSuivi> = {}): EntrepriseSuivi => ({
@@ -126,5 +126,24 @@ describe('listeAPlat', () => {
     const avant = es.map(e => e.id);
     listeAPlat(es, '', lots);
     expect(es.map(e => e.id)).toEqual(avant);
+  });
+});
+
+describe('lotsCorrespondants', () => {
+  const lots = [
+    { id: 'l1', lot_number: '01', lot_title: 'Gros-oeuvre - VRD - Espaces verts' },
+    { id: 'l2', lot_number: '02', lot_title: 'CHARPENTE BOIS' },
+    { id: 'l3', lot_number: '05', lot_title: 'Menuiseries intérieures' },
+  ];
+  it('propose les lots dont l\'intitulé recoupe un corps d\'état', () => {
+    expect(lotsCorrespondants(['Charpente - Ossature bois'], lots)).toEqual(['l2']);
+    expect(lotsCorrespondants(['Menuiserie - Fermeture'], lots)).toEqual(['l3']);
+  });
+  it('plusieurs corps d\'état, plusieurs lots', () => {
+    expect(lotsCorrespondants(['Charpente', 'Menuiseries intérieures'], lots).sort()).toEqual(['l2', 'l3']);
+  });
+  it('rien quand aucun corps d\'état ne recoupe un lot', () => {
+    expect(lotsCorrespondants(['Électricité'], lots)).toEqual([]);
+    expect(lotsCorrespondants([], lots)).toEqual([]);
   });
 });

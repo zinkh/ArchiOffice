@@ -20,6 +20,7 @@ import {
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
 import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
+import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
 import { useQualifications } from '../hooks/useQualifications';
 import { ContactModal } from './ContactModal';
 import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
@@ -135,6 +136,9 @@ const TYPE_DOC_LABELS: Record<string, string> = {
   Plans: 'Plans',
   Autre: 'Autre document',
 };
+
+/** Identifiant de « ligne » donné à la création d'une fiche lancée depuis le formulaire d'ajout. */
+const NOUVELLE_LIGNE = '__nouvelle__';
 
 /** Délai entre la dernière modification et l'enregistrement automatique. */
 const AUTOSAVE_DELAY_MS = 1200;
@@ -431,6 +435,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
 
   const { parContactId: qualificationsParContact, reload: rechargerQualifications } = useQualifications();
   const [rechercheOuverte, setRechercheOuverte] = useState(false);
+  // Formulaire d'ajout au-dessus du tableau, et ligne à mettre en avant une fois classée.
+  const [ajoutOuvert, setAjoutOuvert] = useState(false);
+  const [ficheCreee, setFicheCreee] = useState<Contact | null>(null);
+  const [miseEnAvant, setMiseEnAvant] = useState<{ id: string; n: number } | null>(null);
 
   // Nouvelle fiche entreprise à créer depuis la saisie de la consultation.
   const [contactModalFor, setContactModalFor] = useState<{ rowId: string; name: string } | null>(null);
@@ -545,6 +553,43 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   const changeCorpsEtat = (e: EntrepriseConsultee, next: string[]) => {
     updateEntreprise(e.id, { corps_etat_codes: next });
     if (e.contact_id) void syncCorpsEtatToContact(e.contact_id, next);
+  };
+
+  /**
+   * Ajoute l'entreprise du formulaire. Une fiche déjà consultée n'est pas
+   * dupliquée : les lots choisis s'ajoutent à sa ligne. La ligne se classe
+   * d'elle-même sous son lot (le tableau est regroupé par lot), et on la met en
+   * avant pour qu'on la voie arriver.
+   */
+  const enregistrerNouvelleEntreprise = (v: NouvelleEntreprise, continuer: boolean) => {
+    const existante = consultation.entreprises.find(e => e.contact_id === v.contact_id);
+    const id = existante?.id ?? crypto.randomUUID();
+    const union = (a: string[] = [], b: string[] = []) => [...new Set([...a, ...b])];
+    const codes = union(existante?.corps_etat_codes, v.corps_etat_codes);
+    const ligne: EntrepriseConsultee = existante
+      ? {
+          ...existante,
+          email: existante.email || v.email,
+          lots_ids: union(existante.lots_ids, v.lots_ids),
+          corps_etat_codes: codes,
+          dce_transmis_le: existante.dce_transmis_le || v.dce_transmis_le,
+          relance_le: existante.relance_le || v.relance_le,
+          offre_recue_le: existante.offre_recue_le || v.offre_recue_le,
+        }
+      : {
+          id, contact_id: v.contact_id, nom: v.nom, email: v.email, lots_ids: v.lots_ids,
+          envoyer_dce: v.envoyer_dce, corps_etat_codes: v.corps_etat_codes,
+          dce_transmis_le: v.dce_transmis_le, relance_le: v.relance_le, offre_recue_le: v.offre_recue_le,
+        };
+    update({
+      ...consultation,
+      entreprises: existante
+        ? consultation.entreprises.map(e => (e.id === id ? ligne : e))
+        : [...consultation.entreprises, ligne],
+    });
+    if (v.corps_etat_codes.length > 0) void syncCorpsEtatToContact(v.contact_id, codes);
+    setMiseEnAvant({ id, n: Date.now() });
+    if (!continuer) setAjoutOuvert(false);
   };
 
   /** Une entreprise choisie dans la recherche rejoint la consultation, éventuellement sur un lot. */
@@ -813,15 +858,37 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 >
                   <IconSearch size={13} /> Rechercher
                 </button>
-                <button onClick={() => {
-                  const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
-                  update({ ...consultation, entreprises: [...consultation.entreprises, newE] });
-                }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
+                <button
+                  onClick={() => setAjoutOuvert(o => !o)}
+                  aria-expanded={ajoutOuvert}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition',
+                    ajoutOuvert
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700',
+                  )}
+                >
                   <IconPlus size={13} /> Ajouter
                 </button>
               </div>
             </div>
+            {ajoutOuvert && (
+              <EntrepriseAddForm
+                contacts={entrepriseContacts}
+                lots={lots}
+                corpsEtatOptions={corpsEtatOptions}
+                lotOptions={lotOptions}
+                corpsEtatCodesFromContact={corpsEtatCodesFromContact}
+                libellesDeCodes={codes => codes.map(c => corpsEtat.find(ce => ce.code === c)?.libelle).filter((l): l is string => !!l)}
+                ficheCreee={ficheCreee}
+                onFicheConsommee={() => setFicheCreee(null)}
+                onCreateContact={name => setContactModalFor({ rowId: NOUVELLE_LIGNE, name })}
+                onSave={enregistrerNouvelleEntreprise}
+                onCancel={() => setAjoutOuvert(false)}
+              />
+            )}
             <ACTEntreprisesTable
+              miseEnAvant={miseEnAvant}
               projectName={projectName}
               lots={lots}
               entreprises={consultation.entreprises}
@@ -1544,6 +1611,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
           onClose={() => setContactModalFor(null)}
           onSuccess={c => {
             setExtraContacts(prev => [...prev, c]);
+            if (contactModalFor.rowId === NOUVELLE_LIGNE) {
+              // Création lancée depuis le formulaire d'ajout : la fiche y est sélectionnée.
+              setFicheCreee(c);
+              setContactModalFor(null);
+              return;
+            }
             const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
             const email = c.email_work || c.email || '';
             updateEntreprise(contactModalFor.rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
