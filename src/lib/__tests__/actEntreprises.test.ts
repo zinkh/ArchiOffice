@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  radicauxMetier, todayIso, FILTRES_VIDES, type EntrepriseSuivi,
+  radicauxMetier, todayIso, listeAPlat, SANS_LOT, FILTRES_VIDES, type EntrepriseSuivi,
 } from '../actEntreprises';
 
 const ent = (p: Partial<EntrepriseSuivi> = {}): EntrepriseSuivi => ({
@@ -102,5 +102,29 @@ describe('filtrerEntreprises', () => {
 describe('todayIso', () => {
   it('formate en heure locale', () => {
     expect(todayIso(new Date(2026, 9, 2, 0, 30))).toBe('2026-10-02');
+  });
+});
+
+describe('listeAPlat', () => {
+  const lots = [{ id: 'l1', lot_number: '01', lot_title: 'Gros œuvre' }, { id: 'l2', lot_number: '02', lot_title: 'Charpente' }];
+  const es = [
+    ent({ id: 'b', nom: 'Zinc & Fils', lots_ids: ['l1', 'l2'] }),
+    ent({ id: 'a', nom: 'étanchéité Est', lots_ids: ['l2'] }),
+    ent({ id: 'v', nom: '', lots_ids: [] }),
+    ent({ id: 'c', nom: 'Bati', lots_ids: ['disparu'] }),
+  ];
+  it('rend chaque entreprise une seule fois, triée par nom, les noms vides en dernier', () => {
+    expect(listeAPlat(es, '', lots).map(e => e.id)).toEqual(['c', 'a', 'b', 'v']);
+  });
+  it('filtre par appartenance à un lot', () => {
+    expect(listeAPlat(es, 'l2', lots).map(e => e.id)).toEqual(['a', 'b']);
+  });
+  it('« sans lot » retient aussi les entreprises dont le lot a été supprimé', () => {
+    expect(listeAPlat(es, SANS_LOT, lots).map(e => e.id)).toEqual(['c', 'v']);
+  });
+  it('ne modifie pas la liste d\'origine', () => {
+    const avant = es.map(e => e.id);
+    listeAPlat(es, '', lots);
+    expect(es.map(e => e.id)).toEqual(avant);
   });
 });

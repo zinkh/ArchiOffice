@@ -196,3 +196,30 @@ export function filtrerEntreprises<T extends EntrepriseSuivi>(
     return true;
   });
 }
+
+// ── Liste à plat (une ligne par entreprise) ──────────────────────────────────
+
+export type Regroupement = 'lot' | 'aucun';
+
+/**
+ * Une ligne par entreprise, triée par nom (les noms vides en dernier), avec le
+ * filtre par lot appliqué à l'appartenance : le regroupement par lot répète au
+ * contraire une entreprise dans chacun de ses lots.
+ */
+export function listeAPlat<T extends EntrepriseSuivi>(
+  entreprises: T[],
+  lotFiltre: string,
+  lots: LotSuivi[],
+): T[] {
+  const lotIds = new Set(lots.map(l => l.id));
+  return entreprises
+    .filter(e => {
+      if (!lotFiltre) return true;
+      if (lotFiltre === SANS_LOT) return !e.lots_ids.some(id => lotIds.has(id));
+      return e.lots_ids.includes(lotFiltre);
+    })
+    .sort((a, b) => {
+      if (!a.nom.trim() !== !b.nom.trim()) return a.nom.trim() ? -1 : 1;
+      return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' });
+    });
+}

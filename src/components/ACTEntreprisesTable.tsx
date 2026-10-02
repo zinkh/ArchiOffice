@@ -8,7 +8,7 @@ import {
   type EntrepriseSuivi, type StatutEntreprise, type FiltresEntreprises,
   STATUT_LABELS, STATUT_ORDER, SANS_LOT, MIN_ENTREPRISES_PAR_LOT, FILTRES_VIDES,
   statutEntreprise, resumeSuivi, couverture, suggererContacts, filtrerEntreprises,
-  filtresActifs, nomContact, todayIso,
+  filtresActifs, nomContact, todayIso, listeAPlat, type Regroupement,
 } from '../lib/actEntreprises';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useMailAccounts } from '../hooks/useMailAccounts';
@@ -57,6 +57,11 @@ const STATUT_OPTIONS: MultiSelectOption[] = [
 
 const FIELD = 'text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500';
 const TH = 'px-3 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]';
+
+const CLE_REGROUPEMENT = 'act-entreprises-regroupement';
+function lireRegroupement(): Regroupement {
+  try { return localStorage.getItem(CLE_REGROUPEMENT) === 'aucun' ? 'aucun' : 'lot'; } catch { return 'lot'; }
+}
 
 const fmtDate = (iso?: string) => (iso ? new Date(iso).toLocaleDateString('fr-FR') : '');
 
@@ -126,11 +131,20 @@ export default function ACTEntreprisesTable({
   const resume = useMemo(() => resumeSuivi(entreprises, today), [entreprises, today]);
   const couv = useMemo(() => couverture(entreprises, lots), [entreprises, lots]);
 
+  const [regroupement, setRegroupement] = useState<Regroupement>(lireRegroupement);
+  const choisirRegroupement = (r: Regroupement) => {
+    setRegroupement(r);
+    try { localStorage.setItem(CLE_REGROUPEMENT, r); } catch { /* préférence facultative */ }
+  };
+  const plat = regroupement === 'aucun';
+
   const groupes = useMemo(() => {
     const filtrees = filtrerEntreprises(entreprises, filtres, today);
+    if (plat) return [{ key: '__plat__', libelle: '', entreprises: listeAPlat(filtrees, filtres.lot, lots) }]
+      .filter(g => g.entreprises.length > 0);
     const tous = groupByLot(filtrees, lots);
     return filtres.lot ? tous.filter(g => g.key === filtres.lot) : tous;
-  }, [entreprises, filtres, lots, today]);
+  }, [entreprises, filtres, lots, today, plat]);
 
   const idsAffiches = useMemo(() => new Set(groupes.flatMap(g => g.entreprises.map(e => e.id))), [groupes]);
   const nbAffichees = idsAffiches.size;
@@ -414,6 +428,17 @@ export default function ACTEntreprisesTable({
             <option value="">Tous les statuts</option>
             {STATUT_ORDER.map(s => <option key={s} value={s}>{STATUT_LABELS[s]}</option>)}
           </select>
+          <div role="group" aria-label="Regroupement du tableau" className="inline-flex rounded-lg border border-[var(--tblr-border)] overflow-hidden text-xs font-bold">
+            {([['lot', 'Par lot'], ['aucun', 'Une ligne par entreprise']] as const).map(([valeur, libelle]) => (
+              <button
+                key={valeur} type="button" aria-pressed={regroupement === valeur}
+                onClick={() => choisirRegroupement(valeur)}
+                className={cn('px-2.5 py-1.5 transition', regroupement === valeur
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white dark:bg-zinc-900 text-[var(--tblr-muted)] hover:bg-zinc-50 dark:hover:bg-zinc-800')}
+              >{libelle}</button>
+            ))}
+          </div>
           {filtresActifs(filtres) && (
             <button type="button" onClick={() => setFiltres(FILTRES_VIDES)} className="text-xs font-bold text-blue-600 hover:underline">Réinitialiser</button>
           )}
@@ -479,11 +504,13 @@ export default function ACTEntreprisesTable({
             <tbody className="divide-y divide-[var(--tblr-border)]">
               {groupes.map(groupe => (
                 <React.Fragment key={groupe.key}>
-                  <tr className="bg-zinc-100 dark:bg-zinc-800">
-                    <td colSpan={nbCols - 1} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
-                      {groupe.libelle} <span className="font-bold text-[var(--tblr-muted)]">· {groupe.entreprises.length}</span>
-                    </td>
-                  </tr>
+                  {!plat && (
+                    <tr className="bg-zinc-100 dark:bg-zinc-800">
+                      <td colSpan={nbCols - 1} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                        {groupe.libelle} <span className="font-bold text-[var(--tblr-muted)]">· {groupe.entreprises.length}</span>
+                      </td>
+                    </tr>
+                  )}
                   {groupe.entreprises.map(e => (
                     <tr key={`${e.id}::${groupe.key}`} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30 align-top', e.ne_repond_pas && 'opacity-60')}>
                       <td className="px-3 py-2.5 sticky left-0 z-[1] bg-[var(--tblr-surface)] border-r border-[var(--tblr-border)]">
@@ -512,10 +539,12 @@ export default function ACTEntreprisesTable({
       ) : (
         <div className="p-3 space-y-4">
           {groupes.map(groupe => (
-            <section key={groupe.key} aria-label={groupe.libelle}>
-              <h4 className="px-1 pb-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
-                {groupe.libelle} <span className="font-bold text-[var(--tblr-muted)]">· {groupe.entreprises.length}</span>
-              </h4>
+            <section key={groupe.key} aria-label={plat ? 'Entreprises consultées' : groupe.libelle}>
+              {!plat && (
+                <h4 className="px-1 pb-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
+                  {groupe.libelle} <span className="font-bold text-[var(--tblr-muted)]">· {groupe.entreprises.length}</span>
+                </h4>
+              )}
               <ul className="space-y-2.5">
                 {groupe.entreprises.map(e => (
                   <li key={`${e.id}::${groupe.key}`}
