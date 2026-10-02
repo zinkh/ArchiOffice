@@ -25,6 +25,7 @@ const EXPORT_TABLES: readonly string[] = Array.from(new Set([
   'profiles', 'billing_events', 'activities',
   'agents', 'agent_conversations', 'agent_messages', 'agent_token_usage',
   'agent_alert_rules', 'agent_alerts', 'agent_schedules', 'agent_schedule_runs',
+  'agent_mail_reviews',
   'conversations', 'conversation_participants', 'messages',
   'document_diffusions', 'document_templates',
   'feed_posts', 'feed_comments', 'feed_likes',

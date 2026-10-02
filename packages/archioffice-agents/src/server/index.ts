@@ -3,6 +3,7 @@ export { buildAgentSystemPrompt } from './systemPrompts.js';
 export { buildAgentContext, extractKnowledgeDocText, readStorageObject } from './context.js';
 export { parseArtifactFromText, generateArtifact } from './artifacts.js';
 export { startAgentScheduler, runDueSchedules, runSchedule, computeNextRun, backfillNextRuns } from './scheduler.js';
+export { executeMailTool } from './mailTools.js';
 export { registerAgentScheduleRoutes } from './scheduleRoutes.js';
 export { setExternalFileReader, type ExternalFileReader } from './externalFiles.js';
 export { registerMcpOAuthRoutes } from './mcp/oauthRoutes.js';

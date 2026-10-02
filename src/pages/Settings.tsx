@@ -26,6 +26,7 @@ import { MailAccountsCard } from '../components/MailAccountsCard';
 import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
+import { AgentMailReviewCard } from '../components/AgentMailReviewCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
 import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
 import { SwapText } from '../components/ui/SwapText';
@@ -3409,6 +3410,10 @@ export default function Settings() {
           s'affiche que si l'instance a un domaine de réception configuré
           (server/agentMailInbox.ts). */}
       <AgentMailInboxCard />
+
+      {/* Revue matinale des mails par un agent (server/agentMailReview.ts) :
+          réglage personnel, une boîte mail l'étant. */}
+      <AgentMailReviewCard />
         </>
       )}
         </div>

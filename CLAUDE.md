@@ -1406,6 +1406,43 @@ cette première version. `notifyUsers()` (`server/push.ts`) prévient
 seulement la personne reconnue qu'un email transféré a été traité, avec un
 lien direct vers cette conversation.
 
+### Revue matinale des mails par un agent
+
+Chaque matin, l'agent choisi par la personne (Sophie) relit SA boîte, repère les
+mails qui attendent une réponse et lui envoie une notification push par mail,
+avec une proposition de réponse. Réglage personnel et non par cabinet (une boîte
+mail l'est) : `agent_mail_reviews`, une ligne par couple cabinet x personne
+(`supabase/migrate_agent_mail_review.sql`), réglée depuis `/settings`
+(`AgentMailReviewCard.tsx`, avec « Lancer maintenant » et la dernière revue).
+
+**Un job dédié, pas une exécution planifiée d'agent** : `scheduler.ts` est sans
+outil, faute de jeton utilisateur hors session. `server/agentMailReview.ts` lit
+les boîtes par la boucle locale (`executeMailTool`, `list_emails` puis
+`read_email`) avec un jeton `mail_at_` de la personne, donc avec ses seuls droits.
+La revue est en LECTURE : le modèle n'a aucun outil, rien n'est envoyé ni écrit
+dans la boîte, un mail piégé ne peut produire qu'un texte de proposition.
+
+- **Un seul appel au modèle** pour toute la revue (mails numérotés, sortie JSON
+  `{"mails":[{n, reponse_attendue, urgence, raison, proposition}]}`), rattachée
+  aux messages par leur numéro et non par un identifiant que le modèle recopierait.
+- **Heure locale** (`hour_local` + `timezone`, 8 h Paris par défaut), pas une
+  heure UTC : 8 h reste 8 h au passage à l'heure d'été. Lun-ven par défaut ; la
+  fenêtre relue court depuis la dernière revue (20 à 72 h), donc le lundi couvre
+  le week-end.
+- **Écartés avant le modèle** : ses propres envois, les expéditeurs automatiques
+  (`noreply`, newsletters...), le trop ancien. L'agent doit avoir `mail_enabled`.
+- **Notifications** : une par mail (tag distinct, catégorie « Alertes IA » donc
+  coupable depuis les préférences), plus une de synthèse au-delà d'un mail. Rien
+  quand aucun mail n'attend de réponse. Lien vers `/mailbox`.
+- **Échéance réservée avant la lecture** (mise à jour conditionnelle de
+  `next_run_at`) : une revue longue ou un second processus ne la rejoue pas. Une
+  revue manuelle ne déplace jamais l'échéance du matin (limitée à une toutes les
+  2 minutes). Sans crédit IA, la revue est sautée comme une exécution planifiée.
+- **Jeton de relais multi-usage** : `issueMailRelayToken(..., { maxUses })`. Le
+  jeton ordinaire reste à usage unique ; `max_uses`/`use_count` ne sont écrites
+  que pour une revue (qui rappelle l'API une cinquantaine de fois en quelques
+  secondes), avec décompte conditionnel. Durée de vie inchangée : 5 minutes.
+
 ### Délégation entre agents
 
 Incident du 7 septembre 2026 : un agent avait créé 19 CCTP vides en réponse à
