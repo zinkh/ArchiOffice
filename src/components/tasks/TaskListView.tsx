@@ -72,7 +72,7 @@ export function TaskListView({ tasks, projects, team, onOpen, onStatusChange, em
 
   return (
     <div className="overflow-x-auto rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-      <table className="w-full text-sm">
+      <table className="min-w-full text-sm">
         <thead>
           <tr style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             {columns.map(col => {

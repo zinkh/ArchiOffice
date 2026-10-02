@@ -192,7 +192,8 @@ export default function Leave() {
           </div>
 
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
                 <tr>
                   <th className="text-left p-3">{t('leave_col_type')}</th>
@@ -218,13 +219,15 @@ export default function Leave() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
 
       {tab === 'validations' && teamRequests !== null && (
         <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-900">
               <tr>
                 <th className="text-left p-3">{t('leave_col_employee')}</th>
@@ -257,6 +260,7 @@ export default function Leave() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -277,7 +281,8 @@ export default function Leave() {
             </button>
           </div>
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
                 <tr>
                   <th className="text-left p-3">{t('leave_col_employee')}</th>
@@ -319,6 +324,7 @@ export default function Leave() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           <p className="text-xs text-zinc-400">{t('leave_balances_hint')}</p>
         </div>

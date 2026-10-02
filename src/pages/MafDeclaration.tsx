@@ -587,7 +587,8 @@ function SuiviView({ tauxContrat, onChangeStatut }: {
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Projet</th>
@@ -653,6 +654,7 @@ function SuiviView({ tauxContrat, onChangeStatut }: {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -922,7 +924,8 @@ export default function MafDeclaration() {
                   Aucune entrée pour cet intercalaire. Cliquez sur &laquo; + Ajouter &raquo; pour commencer.
                 </div>
               ) : (
-                <table className="w-full text-sm">
+                <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
                   <thead>
                     <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                       <th className="text-left px-4 py-3 text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Projet / Mission</th>
@@ -1014,6 +1017,7 @@ export default function MafDeclaration() {
                     </tfoot>
                   )}
                 </table>
+                </div>
               )}
             </div>
           )}

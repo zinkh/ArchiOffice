@@ -2128,7 +2128,7 @@ export default function ProjectDetail() {
                     );
                   })()}
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-4 py-3 text-left">N°</th>
@@ -3993,7 +3993,7 @@ export default function ProjectDetail() {
                     </div>
                   )}
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-4 py-3 text-left">N°</th>
@@ -4318,7 +4318,7 @@ export default function ProjectDetail() {
                   )}
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-6 py-3 text-left">N° Facture</th>
@@ -4558,7 +4558,7 @@ export default function ProjectDetail() {
                     }
                   />
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-6 py-3 text-left">Titre</th>
@@ -4930,7 +4930,7 @@ export default function ProjectDetail() {
                   )}
 
                   <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
+                    <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
                           <th className="px-6 py-3 text-left">Référence</th>
@@ -5228,7 +5228,7 @@ export default function ProjectDetail() {
                       }
                     />
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="min-w-full text-sm">
                         <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                           <tr>
                             <th className="px-6 py-3 text-left">Nom</th>
@@ -5410,7 +5410,7 @@ export default function ProjectDetail() {
                         }
                       />
                       <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
+                        <table className="min-w-full text-sm">
                           <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                             <tr>
                               <th className="px-6 py-3 text-left">Nom</th>

@@ -143,7 +143,8 @@ export default function ChorusProPortal() {
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Facture</th>
@@ -193,6 +194,7 @@ export default function ChorusProPortal() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -205,7 +207,8 @@ export default function ChorusProPortal() {
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Situation</th>
@@ -263,6 +266,7 @@ export default function ChorusProPortal() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

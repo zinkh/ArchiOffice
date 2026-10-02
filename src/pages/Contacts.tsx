@@ -761,7 +761,7 @@ export default function Contacts() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm text-left">
+          <table className="min-w-full text-sm text-left">
             <thead style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
               <tr>
                 <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('prefix')}>
