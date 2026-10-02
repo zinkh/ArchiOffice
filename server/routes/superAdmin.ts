@@ -12,6 +12,13 @@ import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
 import { sendPlatformMail } from '../mailer';
 import { invalidateSuspensionCache } from '../tenantSuspension';
+import {
+  createTenantBackup,
+  createTenantBackupInBackground,
+  getBackupDownloadUrl,
+  listTenantBackups,
+  restoreTenantBackup,
+} from '../tenantBackup';
 import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn, updateMembership } from '../tenantMemberships';
 
 export interface RouteDeps {
@@ -195,6 +202,11 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       invalidateSuspensionCache();
 
       await logAdminAction(supabaseAdmin, req.user, 'tenant.suspended', id, { reason: reason.slice(0, 2000) });
+      // Sauvegarde figée à la suspension : le cabinet ne peut plus bouger, c'est
+      // l'état de référence à retrouver. Lancée en arrière-plan (elle peut être
+      // longue) et sans échec bloquant : son résultat se lit dans la liste des
+      // sauvegardes du cabinet.
+      void createTenantBackupInBackground(supabaseAdmin, id, 'suspension', req.user.id);
       res.json({ ok: true, suspended_at: suspendedAt });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants/:id/suspend]", e); res.status(500).json({ error: e.message }); }
@@ -217,6 +229,68 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       res.json({ ok: true });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants/:id/unsuspend]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Sauvegardes d'un cabinet (server/tenantBackup.ts) : nocturnes, prises à la
+  // suspension et à la demande de fermeture, ou à la demande du superadmin.
+  // Lisibles et restaurables par lui seul — aucun administrateur de cabinet ne
+  // les voit ni ne peut les supprimer.
+  app.get('/api/admin/tenants/:id/backups', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      res.json(await listTenantBackups(supabaseAdmin, req.params.id));
+    } catch (e: any) {
+      console.error("[GET /api/admin/tenants/:id/backups]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/tenants/:id/backups', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      // Une sauvegarde peut durer des minutes : on n'attend que de savoir si
+      // elle démarre (cabinet inconnu, sauvegarde déjà en cours), puis on rend
+      // la main. La suite se lit dans la liste.
+      const running = createTenantBackup(supabaseAdmin, id, 'manual', { createdBy: req.user.id });
+      const outcome = await Promise.race([
+        running.then(() => 'done' as const),
+        new Promise<'running'>(resolve => setTimeout(() => resolve('running'), 1500)),
+      ]);
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.backup_created', id, { trigger: 'manual' });
+      res.status(outcome === 'done' ? 200 : 202).json({ ok: true, running: outcome === 'running' });
+      if (outcome === 'running') running.catch(() => {});
+    } catch (e: any) {
+      if (e?.status) return res.status(e.status).json({ error: e.message });
+      console.error("[POST /api/admin/tenants/:id/backups]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  app.get('/api/admin/tenants/:id/backups/:backupId/download', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const url = await getBackupDownloadUrl(supabaseAdmin, req.params.id, req.params.backupId);
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.backup_downloaded', req.params.id, { backup_id: req.params.backupId });
+      res.json({ url });
+    } catch (e: any) {
+      if (e?.status) return res.status(e.status).json({ error: e.message });
+      console.error("[GET /api/admin/tenants/:id/backups/:backupId/download]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Restauration non destructive : remet ce qui manque, n'écrase rien. Par
+  // défaut un simple aperçu (`dry_run`) : une restauration réelle doit être
+  // demandée explicitement avec `dry_run: false`.
+  app.post('/api/admin/tenants/:id/backups/:backupId/restore', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id, backupId } = req.params;
+      const dryRun = req.body?.dry_run !== false;
+      const summary = await restoreTenantBackup(supabaseAdmin, id, backupId, { dryRun });
+      if (!dryRun) {
+        await logAdminAction(supabaseAdmin, req.user, 'tenant.backup_restored', id, {
+          backup_id: backupId,
+          rows_restored: summary.rows.reduce((n, r) => n + r.restored, 0),
+          files_restored: summary.files.restored,
+          failures: summary.failures.length,
+        });
+      }
+      res.json(summary);
+    } catch (e: any) {
+      if (e?.status) return res.status(e.status).json({ error: e.message });
+      console.error("[POST /api/admin/tenants/:id/backups/:backupId/restore]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Dernier recours quand un cabinet n'a plus d'administrateur utilisable

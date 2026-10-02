@@ -20,7 +20,7 @@ import { createProvider } from './externalStorage/providerFactory';
 // same maintenance duty syncTables.ts's own header comment already calls
 // out for SYNC_TABLES. sync_log (internal sync bookkeeping) is deliberately
 // excluded, and `tenants` itself is handled separately in the manifest.
-const EXPORT_TABLES: readonly string[] = Array.from(new Set([
+export const EXPORT_TABLES: readonly string[] = Array.from(new Set([
   ...SYNC_TABLES,
   'profiles', 'billing_events', 'activities',
   'agents', 'agent_conversations', 'agent_messages', 'agent_token_usage',
@@ -48,7 +48,7 @@ const EXPORT_TABLES: readonly string[] = Array.from(new Set([
 // Pure junction tables with no tenant_id/id column of their own (composite
 // PK) — same three as server/syncTables.ts's JUNCTION_TABLES, re-derived
 // here from their parent table's exported row ids.
-const JUNCTION_EXPORT_TABLES: readonly { table: string; parentTable: string; parentIdColumn: string }[] = [
+export const JUNCTION_EXPORT_TABLES: readonly { table: string; parentTable: string; parentIdColumn: string }[] = [
   { table: 'project_categories_junction', parentTable: 'projects', parentIdColumn: 'project_id' },
   { table: 'project_team', parentTable: 'projects', parentIdColumn: 'project_id' },
   { table: 'observation_reports', parentTable: 'observations', parentIdColumn: 'observation_id' },
@@ -71,7 +71,7 @@ const REDACTED_SETTINGS_COLUMNS = new Set([
 
 // Buckets whose objects are namespaced by `${tenantId}/...` — see
 // server.ts's uploadToStorage call sites.
-const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'logos'];
+export const TENANT_PREFIXED_BUCKETS = ['documents', 'plans', 'cv', 'message-attachments', 'feed-attachments', 'meeting-photos', 'reserve-photos', 'logos'];
 
 const PAGE_SIZE = 1000;
 
@@ -90,7 +90,7 @@ function toCsv(rows: Record<string, any>[]): string {
   return lines.join('\n');
 }
 
-function redact(table: string, rows: Record<string, any>[]): Record<string, any>[] {
+export function redact(table: string, rows: Record<string, any>[]): Record<string, any>[] {
   // Était codé en dur sur `settings`, seule table à porter des secrets à
   // l'époque. Les jetons d'un espace de stockage externe vivent ailleurs, d'où
   // la table de correspondance : un secret de plus ne doit pas demander de
@@ -106,7 +106,7 @@ function redact(table: string, rows: Record<string, any>[]): Record<string, any>
   });
 }
 
-async function fetchAllRows(supabaseAdmin: SupabaseClient, table: string, tenantId: string): Promise<any[]> {
+export async function fetchAllRows(supabaseAdmin: SupabaseClient, table: string, tenantId: string): Promise<any[]> {
   const rows: any[] = [];
   let offset = 0;
   for (;;) {

@@ -125,6 +125,7 @@ import { registerAgentMailReviewRoutes } from "./server/routes/agentMailReview";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
 import { startTenantPurge } from "./server/tenantPurge";
+import { startTenantBackups } from "./server/tenantBackup";
 import { startNotificationArchiver } from "./server/notificationArchiver";
 import { startLifecycleEmails } from "./server/lifecycleEmails";
 import { startPlanChanges } from "./server/planChanges";
@@ -1249,6 +1250,10 @@ async function startServer() {
     // RGPD — purge automatisée des cabinets dont le délai de grâce de
     // fermeture (30 jours, server/routes/settings.ts) est écoulé.
     startTenantPurge(supabaseAdmin);
+    // Sauvegardes par cabinet (server/tenantBackup.ts) — nocturnes, restaurables
+    // par le superadmin seul. Pas en mode hors-ligne : le client de bureau n'a
+    // ni bucket de sauvegarde ni copie de stockage côté serveur.
+    if (process.env.OFFLINE_MODE !== 'true') startTenantBackups(supabaseAdmin);
     // Auto-archivage du flux d'activité selon la durée de rétention réglée
     // par catégorie (server/notificationArchiver.ts).
     startNotificationArchiver(supabaseAdmin);

@@ -1178,3 +1178,36 @@ ALTER TABLE reserve_photos       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_recent_views ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON reserve_photos       USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON project_recent_views USING (tenant_id = my_tenant_id());
+
+-- Sauvegardes par cabinet (superadmin uniquement) — supabase/migrate_tenant_backups.sql.
+-- Pas de FK vers tenants : une sauvegarde survit à la suppression du cabinet.
+CREATE TABLE IF NOT EXISTS tenant_backups (
+  id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  tenant_id     UUID NOT NULL,
+  tenant_name   TEXT,
+  trigger       TEXT NOT NULL CHECK (trigger IN ('nightly', 'suspension', 'closure_request', 'manual')),
+  status        TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'complete', 'failed')),
+  data_path     TEXT,
+  row_counts    JSONB,
+  file_count    INTEGER NOT NULL DEFAULT 0,
+  data_bytes    BIGINT NOT NULL DEFAULT 0,
+  error         TEXT,
+  created_by    UUID,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  completed_at  TIMESTAMPTZ,
+  expires_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_backups_tenant ON tenant_backups (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_backups_expiry ON tenant_backups (expires_at) WHERE expires_at IS NOT NULL;
+CREATE TABLE IF NOT EXISTS tenant_backup_files (
+  tenant_id     UUID NOT NULL,
+  bucket        TEXT NOT NULL,
+  path          TEXT NOT NULL,
+  size_bytes    BIGINT NOT NULL DEFAULT 0,
+  backed_up_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (tenant_id, bucket, path)
+);
+CREATE INDEX IF NOT EXISTS idx_tenant_backup_files_seen ON tenant_backup_files (tenant_id, last_seen_at);
+ALTER TABLE tenant_backups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_backup_files ENABLE ROW LEVEL SECURITY;
