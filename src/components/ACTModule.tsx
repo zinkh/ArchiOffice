@@ -134,6 +134,10 @@ const TYPE_DOC_LABELS: Record<string, string> = {
   Autre: 'Autre document',
 };
 
+/** Délai entre la dernière modification et l'enregistrement automatique. */
+const AUTOSAVE_DELAY_MS = 1200;
+const AUTOSAVE_RETRY_MS = 5000;
+
 const EMPTY_CONSULTATION: Consultation = {
   dce_documents: [],
   entreprises: [],
@@ -395,6 +399,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Enregistrement automatique : rien n'est écrit avant la fin de la lecture
+  // (une saisie arrivée trop tôt écraserait la consultation enregistrée par
+  // une consultation vide), et un échec relance une tentative plus tard.
+  const [loaded, setLoaded] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
+  const editVersion = useRef(0);
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
   const { settings } = useSettings();
   const [corpsEtat, setCorpsEtat] = useState<CorpsEtat[]>([]);
 
@@ -470,26 +482,56 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
       }
       if (data?.act_phase) setPhase(data.act_phase as Phase);
     } catch { /* first load */ }
+    finally { setLoaded(true); }
   }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const save = useCallback(async (c: Consultation, p: Phase) => {
-    setSaving(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/act`, {
-        method: 'PUT',
-        body: JSON.stringify({ consultation: c, act_phase: p }),
-      });
-      setDirty(false);
-    } catch (e) { console.error(e); }
-    finally { setSaving(false); }
+  const save = useCallback((c: Consultation, p: Phase): Promise<void> => {
+    // Les écritures partent l'une après l'autre : deux requêtes en vol
+    // pourraient sinon se doubler, et la plus ancienne gagner.
+    const version = editVersion.current;
+    const run = async () => {
+      setSaving(true);
+      try {
+        await apiFetch(`/api/projects/${projectId}/act`, {
+          method: 'PUT',
+          body: JSON.stringify({ consultation: c, act_phase: p }),
+        });
+        setSaveError(false);
+        // Une modification faite pendant l'écriture reste à enregistrer.
+        if (editVersion.current === version) setDirty(false);
+      } catch (e) {
+        console.error(e);
+        setSaveError(true);
+        setTimeout(() => setRetryTick(t => t + 1), AUTOSAVE_RETRY_MS);
+      } finally { setSaving(false); }
+    };
+    saveChain.current = saveChain.current.then(run, run);
+    return saveChain.current;
   }, [projectId]);
 
   const update = (c: Consultation) => {
+    editVersion.current += 1;
     setConsultation(c);
     setDirty(true);
   };
+
+  // Enregistrement automatique, quelques instants après la dernière modification :
+  // ajouter une entreprise ou changer un lot n'exige plus d'appuyer sur « Sauvegarder ».
+  useEffect(() => {
+    if (!dirty || !loaded) return;
+    const timer = setTimeout(() => { void save(consultation, phase); }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [consultation, phase, dirty, loaded, retryTick, save]);
+
+  // Quitter l'onglet avant l'échéance du délai ne perd pas la dernière saisie.
+  const latest = useRef({ consultation, phase, dirty, loaded, save });
+  latest.current = { consultation, phase, dirty, loaded, save };
+  useEffect(() => () => {
+    const { consultation: c, phase: p, dirty: d, loaded: l, save: doSave } = latest.current;
+    if (d && l) void doSave(c, p);
+  }, []);
 
   const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
     update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
@@ -521,8 +563,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
   const goPhase = (p: Phase) => {
-    if (dirty) save(consultation, p);
-    else save(consultation, p);
+    void save(consultation, p);
     setPhase(p);
   };
 
@@ -562,6 +603,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
             );
           })}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            <span
+              role="status" aria-live="polite"
+              className={cn('hidden sm:inline text-[0.6875rem] font-bold', saveError ? 'text-red-600' : 'text-[var(--tblr-muted)]')}
+            >
+              {saveError
+                ? "Échec de l'enregistrement, nouvel essai…"
+                : saving ? 'Enregistrement…'
+                : dirty ? 'Modifications en attente'
+                : 'Enregistré'}
+            </span>
             <button
               onClick={() => save(consultation, phase)}
               disabled={saving}

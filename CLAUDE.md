@@ -481,6 +481,15 @@ migration).
 - **Actions groupées** sur la sélection (lots, DCE transmis aujourd'hui,
   relance, ne répond pas, retirer). Sous 768 px le tableau devient une liste
   de cartes (`useMediaQuery`, un seul rendu monté à la fois).
+- **Enregistrement automatique** (`ACTModule.tsx`) : toute modification de la
+  consultation (ajout d'une entreprise compris) est écrite 1,2 s après la
+  dernière frappe, le bouton « Sauvegarder » restant disponible. Trois garde-fous
+  à ne pas défaire : rien n'est écrit avant la fin de la lecture (`loaded`),
+  sinon une saisie précoce écraserait la consultation enregistrée par une
+  consultation vide ; les écritures sont chaînées (`saveChain`) et
+  `editVersion` empêche une écriture en vol d'effacer l'état « à enregistrer »
+  d'une modification arrivée entre-temps ; un échec relance une tentative
+  après 5 s et le dernier état est écrit au démontage.
 - `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
   et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
 
