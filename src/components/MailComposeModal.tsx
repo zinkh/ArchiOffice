@@ -26,9 +26,17 @@ export interface MailReplyContext {
   fromAddress: string; // becomes the "to" field
 }
 
+/** Valeurs de départ d'un nouveau message (ex. envoi du DCE depuis le module ACT). */
+export interface MailComposeInitial {
+  to?: string;
+  subject?: string;
+  body?: string;
+}
+
 interface MailComposeModalProps {
   accounts: MailAccount[];
   replyTo?: MailReplyContext | null;
+  initial?: MailComposeInitial;
   onClose: () => void;
   onSent?: () => void;
 }
@@ -51,7 +59,7 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
   return data;
 }
 
-export default function MailComposeModal({ accounts, replyTo, onClose, onSent }: MailComposeModalProps) {
+export default function MailComposeModal({ accounts, replyTo, initial, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const sendable = accounts.filter(canSendNatively);
@@ -61,13 +69,13 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
     replyTo ? replyTo.accountId : sendable.find(a => a.isDefault)?.id || sendable[0]?.id || null
   );
   const account = sendable.find(a => a.id === accountId) || null;
-  const [to, setTo] = useState(replyTo?.fromAddress || '');
+  const [to, setTo] = useState(replyTo?.fromAddress || initial?.to || '');
   const [subject, setSubject] = useState(
-    replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : ''
+    replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : initial?.subject || ''
   );
   // La signature personnelle (Réglages → Mon profil) est posée d'office sous
   // le corps, modifiable ou supprimable avant l'envoi.
-  const [body, setBody] = useState(currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : '');
+  const [body, setBody] = useState(`${initial?.body || ''}${currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : ''}`);
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);

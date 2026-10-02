@@ -18,6 +18,7 @@ import {
   exportLotsToExcel, exportLotsToPDF,
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
+import ACTEntreprisesTable from './ACTEntreprisesTable';
 import { ContactModal } from './ContactModal';
 import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
 
@@ -379,73 +380,6 @@ async function generateComparatifExcel(lots: ProjectLot[], consultation: Consult
   XLSX.writeFile(wb, `Comparatif_${projectName.replace(/\s+/g, '_')}.xlsx`);
 }
 
-// ── Sélecteur multiple de corps d'état (nomenclature FFB) ────────────────────
-// Une entreprise couvre souvent plusieurs métiers (ex. Menuiserie ET
-// Serrurerie) — un menu déroulant à cases à cocher plutôt qu'un <select>
-// simple, sur le même modèle de popover que EntrepriseAutocomplete.
-
-function CorpsEtatPicker({ corpsEtat, selected, onToggle }: { corpsEtat: CorpsEtat[]; selected: string[]; onToggle: (code: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
-
-  useEffect(() => {
-    function onClickOutside(ev: MouseEvent) {
-      const target = ev.target as Node;
-      if ((wrapperRef.current && wrapperRef.current.contains(target)) || (dropdownRef.current && dropdownRef.current.contains(target))) return;
-      setOpen(false);
-    }
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, []);
-
-  useEffect(() => {
-    if (!open) { setPos(null); return; }
-    const recalc = () => {
-      if (!wrapperRef.current) return;
-      const r = wrapperRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 4, left: r.left, width: Math.max(r.width, 240) });
-    };
-    recalc();
-    window.addEventListener('scroll', recalc, true);
-    window.addEventListener('resize', recalc);
-    return () => { window.removeEventListener('scroll', recalc, true); window.removeEventListener('resize', recalc); };
-  }, [open]);
-
-  const labels = selected.map(code => corpsEtat.find(ce => ce.code === code)?.libelle).filter((l): l is string => !!l);
-
-  return (
-    <div ref={wrapperRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        className="w-full min-h-[30px] text-left text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500 flex flex-wrap gap-1"
-      >
-        {labels.length === 0 && <span className="text-[var(--tblr-muted)]">— Non classé —</span>}
-        {labels.map(l => (
-          <span key={l} className="px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 text-[0.6875rem] font-bold">{l}</span>
-        ))}
-      </button>
-      {open && pos && createPortal(
-        <div
-          ref={dropdownRef}
-          style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, zIndex: 9999 }}
-          className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-xl max-h-72 overflow-y-auto p-1.5 flex flex-col gap-0.5"
-        >
-          {corpsEtat.map(ce => (
-            <label key={ce.code} className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-zinc-50 dark:hover:bg-zinc-700 cursor-pointer">
-              <input type="checkbox" checked={selected.includes(ce.code)} onChange={() => onToggle(ce.code)} className="rounded w-3.5 h-3.5" />
-              {ce.libelle}
-            </label>
-          ))}
-        </div>,
-        document.body,
-      )}
-    </div>
-  );
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 interface ACTModuleProps {
@@ -561,12 +495,28 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
     update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
   };
 
-  const toggleCorpsEtat = (e: EntrepriseConsultee, code: string) => {
-    const codes = e.corps_etat_codes || [];
-    const next = codes.includes(code) ? codes.filter(c => c !== code) : [...codes, code];
+  const changeCorpsEtat = (e: EntrepriseConsultee, next: string[]) => {
     updateEntreprise(e.id, { corps_etat_codes: next });
     if (e.contact_id) void syncCorpsEtatToContact(e.contact_id, next);
   };
+
+  const corpsEtatOptions = useMemo(
+    () => corpsEtat.map(ce => ({ value: ce.code, label: ce.libelle })),
+    [corpsEtat],
+  );
+  const lotOptions = useMemo(
+    () => lots.map(l => ({ value: l.id, label: `Lot ${l.lot_number} — ${l.lot_title}`, shortLabel: `Lot ${l.lot_number}` })),
+    [lots],
+  );
+
+  const dcePieces = useMemo(
+    () => consultation.dce_documents.map(d => ({
+      libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
+      tous_lots: d.tous_lots,
+      lots_ids: d.lots_ids,
+    })),
+    [consultation.dce_documents],
+  );
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
@@ -792,120 +742,24 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1000px]">
-                <thead className="bg-[var(--tblr-surface-2)]">
-                  <tr>
-                    <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
-                    <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Corps d'état</th>
-                    <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Email</th>
-                    <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Lots assignés</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">DCE transmis le</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Relance</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Offre reçue le</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Envoyer DCE</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Ne répond pas</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--tblr-border)]">
-                  {groupByLot(consultation.entreprises, lots).map(groupe => (
-                    <React.Fragment key={groupe.key}>
-                      <tr className="bg-zinc-100 dark:bg-zinc-800">
-                        <td colSpan={10} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
-                          {groupe.libelle}
-                        </td>
-                      </tr>
-                      {groupe.entreprises.map(e => (
-                        <tr key={`${e.id}::${groupe.key}`} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', e.ne_repond_pas && 'opacity-60')}>
-                          <td className="px-4 py-3">
-                            <EntrepriseAutocomplete
-                              contacts={entrepriseContacts}
-                              contactId={e.contact_id}
-                              fallbackName={e.nom}
-                              onSelect={c => {
-                                const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
-                                const email = c.email_work || c.email || '';
-                                updateEntreprise(e.id, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
-                              }}
-                              onCreate={name => setContactModalFor({ rowId: e.id, name })}
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <CorpsEtatPicker
-                              corpsEtat={corpsEtat}
-                              selected={e.corps_etat_codes || []}
-                              onToggle={code => toggleCorpsEtat(e, code)}
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              placeholder="email@entreprise.fr" value={e.email || ''}
-                              onChange={ev => updateEntreprise(e.id, { email: ev.target.value })} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap gap-1.5">
-                              {lots.map(lot => (
-                                <label key={lot.id} className={cn(
-                                  'flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-bold cursor-pointer transition-colors',
-                                  e.lots_ids.includes(lot.id)
-                                    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                    : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-zinc-200'
-                                )}>
-                                  <input type="checkbox" className="hidden"
-                                    checked={e.lots_ids.includes(lot.id)}
-                                    onChange={ev => {
-                                      const ids = ev.target.checked ? [...e.lots_ids, lot.id] : e.lots_ids.filter(i => i !== lot.id);
-                                      updateEntreprise(e.id, { lots_ids: ids });
-                                    }}
-                                  />
-                                  {e.lots_ids.includes(lot.id) && <IconCheck size={9} />}
-                                  Lot {lot.lot_number}
-                                </label>
-                              ))}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <input type="date"
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              value={e.dce_transmis_le || ''}
-                              onChange={ev => updateEntreprise(e.id, { dce_transmis_le: ev.target.value || undefined })} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input type="date"
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              value={e.relance_le || ''}
-                              onChange={ev => updateEntreprise(e.id, { relance_le: ev.target.value || undefined })} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input type="date"
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              value={e.offre_recue_le || ''}
-                              onChange={ev => updateEntreprise(e.id, { offre_recue_le: ev.target.value || undefined })} />
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <input type="checkbox" checked={!!e.envoyer_dce}
-                              onChange={ev => updateEntreprise(e.id, { envoyer_dce: ev.target.checked })}
-                              className="w-4 h-4 rounded accent-blue-600" />
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <input type="checkbox" checked={!!e.ne_repond_pas}
-                              onChange={ev => updateEntreprise(e.id, { ne_repond_pas: ev.target.checked })}
-                              className="w-4 h-4 rounded accent-red-600" />
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <button onClick={() => update({ ...consultation, entreprises: consultation.entreprises.filter(en => en.id !== e.id) })} className="p-1 text-zinc-300 hover:text-red-500"><IconTrash size={13} /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                  {consultation.entreprises.length === 0 && (
-                    <tr><td colSpan={10} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise consultée.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ACTEntreprisesTable
+              projectName={projectName}
+              lots={lots}
+              entreprises={consultation.entreprises}
+              onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
+              dcePieces={dcePieces}
+              entrepriseContacts={entrepriseContacts}
+              corpsEtatOptions={corpsEtatOptions}
+              lotOptions={lotOptions}
+              onChangeCorpsEtat={changeCorpsEtat}
+              corpsEtatCodesFromContact={corpsEtatCodesFromContact}
+              onSelectContact={(rowId, c) => {
+                const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+                const email = c.email_work || c.email || '';
+                updateEntreprise(rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
+              }}
+              onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
+            />
           </div>
         </div>
       )}
