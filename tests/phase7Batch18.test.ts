@@ -127,6 +127,26 @@ describe('Role and manager changes', () => {
     expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === 'promotee')?.system_role).toBe('admin');
   });
 
+  it('refuses to demote the last admin of a tenant', async () => {
+    const tenantId = makeTenant();
+    const { token, userId } = makeUser(tenantId, 'admin');
+
+    const res = await request(app).put(`/api/team/${userId}/role`).set(authHeader(token)).send({ role: 'user' });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('LAST_ADMIN');
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.system_role).toBe('admin');
+  });
+
+  it('allows demoting an admin once another admin exists', async () => {
+    const tenantId = makeTenant();
+    const { token, userId } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('profiles', [{ id: 'second-admin', tenant_id: tenantId, system_role: 'admin', email: 'a2@example.test' }]);
+
+    const res = await request(app).put(`/api/team/${userId}/role`).set(authHeader(token)).send({ role: 'user' });
+    expect(res.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === userId)?.system_role).toBe('user');
+  });
+
   it('blocks a non-admin from changing roles', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId, 'user');

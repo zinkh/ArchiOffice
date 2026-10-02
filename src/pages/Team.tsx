@@ -106,12 +106,28 @@ export default function Team() {
   };
 
   const handleRoleChange = async (id: string, newRole: 'admin' | 'manager' | 'pm' | 'user') => {
+    const target = team.find(member => member.id === id);
+    if (target?.system_role === 'admin' && newRole !== 'admin') {
+      // Un cabinet ne doit jamais se retrouver sans administrateur : le
+      // serveur refuse aussi, mais autant l'expliquer avant l'appel.
+      if (team.filter(member => member.system_role === 'admin').length <= 1) {
+        setNotice({ kind: 'error', text: t('team_last_admin_blocked') });
+        return;
+      }
+      // Seul un administrateur peut rendre ce rôle : rétrogradé, plus personne
+      // ne peut défaire le geste depuis ce compte.
+      const confirmed = window.confirm(t(
+        id === currentUser?.id ? 'team_confirm_demote_self' : 'team_confirm_demote_admin',
+        { name: target.name },
+      ));
+      if (!confirmed) return;
+    }
     try {
       await updateUserRole(id, newRole);
       setTeam(team.map(member => member.id === id ? { ...member, system_role: newRole } : member));
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      setNotice({ kind: 'error', text: t('team_update_role_failed') });
+      setNotice({ kind: 'error', text: err?.message && err.message !== 'Failed to update role' ? err.message : t('team_update_role_failed') });
     }
   };
 
