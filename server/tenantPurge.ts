@@ -68,6 +68,11 @@ export async function purgeExpiredTenants(supabaseAdmin: SupabaseClient): Promis
     .from('tenants')
     .select('id')
     .not('deletion_requested_at', 'is', null)
+    // Un cabinet suspendu par le superadmin (litige, piratage) n'est jamais
+    // purgé, même si une fermeture a été demandée avant ou pendant la
+    // suspension : c'est précisément le cas où la demande peut être
+    // malveillante. Ses données restent intactes jusqu'à décision du superadmin.
+    .is('suspended_at', null)
     .lte('deletion_requested_at', cutoff);
   if (error) {
     console.error('[tenantPurge] Failed to list tenants pending deletion:', error.message);

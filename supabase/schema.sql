@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS tenants (
   -- délai de grâce de 30 jours avant purge automatisée — server/tenantPurge.ts.
   deletion_requested_at TIMESTAMPTZ,
   deletion_requested_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  -- Suspension par le superadmin (litige, piratage) : cabinet bloqué pour tous
+  -- ses membres, données conservées — supabase/migrate_tenant_suspension.sql.
+  suspended_at TIMESTAMPTZ,
+  suspended_by UUID,
+  suspension_reason TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 

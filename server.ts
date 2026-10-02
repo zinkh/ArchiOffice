@@ -74,6 +74,7 @@ import { registerAgencySetupRoutes } from "./server/routes/agencySetup";
 import { registerTeamRoutes } from "./server/routes/team";
 import { registerTenantMembershipRoutes } from "./server/routes/tenantMemberships";
 import { runWithTenantContext, activeTenantFor, TENANT_HEADER } from "./server/tenantContext";
+import { suspensionFor, TENANT_SUSPENDED_CODE, TENANT_SUSPENDED_MESSAGE } from "./server/tenantSuspension";
 import { getMemberRole, listMemberships, listTenantMemberIds, resolveActiveTenantId, tenantMembershipsByUser } from "./server/tenantMemberships";
 import { registerProposalRoutes } from "./server/routes/proposals";
 import { registerInvoiceRoutes } from "./server/routes/invoices";
@@ -765,6 +766,21 @@ export async function createApp() {
     if (AUTH_EXEMPT.some(p => pathOnly === p || pathOnly.startsWith(p + "/"))) {
       return next();
     }
+    // Point de passage unique vers la route : un cabinet suspendu par le
+    // superadmin est refusé ici pour TOUS les modes d'authentification (session,
+    // jetons MCP, Telegram, relais mail, clé d'automatisation) — voir
+    // server/tenantSuspension.ts. `humanUser` n'est fourni que pour une session
+    // humaine, ce qui laisse au superadmin l'accès à un cabinet suspendu.
+    const proceed = async (userId: string, tenantId: string | null, humanUser?: any) => {
+      const suspension = await suspensionFor(supabaseAdmin, {
+        userId, tenantId, user: humanUser, method: req.method, pathOnly,
+      });
+      if (suspension) {
+        return res.status(403).json({ error: TENANT_SUSPENDED_MESSAGE, code: TENANT_SUSPENDED_CODE });
+      }
+      return runWithTenantContext({ userId, tenantId }, next);
+    };
+
     const token = req.headers.authorization?.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Authentification requise" });
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
@@ -781,7 +797,7 @@ export async function createApp() {
         if (resolved) {
           req.user = { id: resolved.userId };
           req.activeTenantId = resolved.tenantId;
-          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+          return proceed(resolved.userId, resolved.tenantId);
         }
       }
       // Même principe pour le bot Telegram (server/telegramBot.ts) : le
@@ -792,7 +808,7 @@ export async function createApp() {
         if (resolved) {
           req.user = { id: resolved.userId };
           req.activeTenantId = resolved.tenantId;
-          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+          return proceed(resolved.userId, resolved.tenantId);
         }
       }
       // Même principe pour le relevé de la messagerie entrante partagée
@@ -806,7 +822,7 @@ export async function createApp() {
         if (resolved) {
           req.user = { id: resolved.userId };
           req.activeTenantId = resolved.tenantId;
-          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+          return proceed(resolved.userId, resolved.tenantId);
         }
       }
       // Clé d'automatisation (n8n, ou tout appelant HTTP externe) — voir
@@ -818,7 +834,7 @@ export async function createApp() {
         if (resolved) {
           req.user = { id: resolved.userId };
           req.activeTenantId = resolved.tenantId;
-          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+          return proceed(resolved.userId, resolved.tenantId);
         }
       }
       return res.status(401).json({ error: "Token invalide" });
@@ -844,7 +860,7 @@ export async function createApp() {
     // `next()` (et toute la suite asynchrone de la requête) s'exécute dans ce
     // contexte : c'est ainsi que getTenantId() le retrouve sans que chaque
     // route ait à le transporter.
-    runWithTenantContext({ userId: user.id, tenantId: activeTenantId }, next);
+    return proceed(user.id, activeTenantId, user);
   });
 
   app.get("/api/health", (req, res) => {

@@ -11,7 +11,8 @@ import type { Express } from 'express';
 import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
 import { sendPlatformMail } from '../mailer';
-import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn } from '../tenantMemberships';
+import { invalidateSuspensionCache } from '../tenantSuspension';
+import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn, updateMembership } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -64,7 +65,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
     try {
       const { data: tenants, error } = await supabaseAdmin
         .from('tenants')
-        .select('id, slug, name, plan, trial_ends_at, created_at, ai_credit_balance_eur_cents')
+        .select('id, slug, name, plan, trial_ends_at, created_at, ai_credit_balance_eur_cents, suspended_at')
         .order('created_at', { ascending: false });
       if (error) throw error;
       const enriched = await Promise.all((tenants ?? []).map(async (t) => {
@@ -99,7 +100,7 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       const { id } = req.params;
       const { data: tenant, error } = await supabaseAdmin
         .from('tenants')
-        .select('id, slug, name, plan, trial_ends_at, created_at, ai_credit_balance_eur_cents, internal_notes')
+        .select('id, slug, name, plan, trial_ends_at, created_at, ai_credit_balance_eur_cents, internal_notes, suspended_at, suspension_reason')
         .eq('id', id)
         .single();
       if (error || !tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
@@ -165,6 +166,84 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       res.json({ action_link: linkData.properties.action_link, impersonated_email: (member as any).email });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants/:id/impersonate]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Suspension d'un cabinet (litige entre associés, compte piraté ou
+  // malveillant) : bloqué pour tous ses membres, administrateurs compris, sans
+  // que rien ne soit supprimé — voir server/tenantSuspension.ts. Seul le
+  // superadmin lève la suspension. Le motif est obligatoire et doit porter le
+  // justificatif (accord écrit des associés, décision de justice...) : il est
+  // conservé sur le cabinet et dans le journal d'audit.
+  const MIN_SUSPENSION_REASON_LENGTH = 10;
+
+  app.post('/api/admin/tenants/:id/suspend', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : '';
+      if (reason.length < MIN_SUSPENSION_REASON_LENGTH) {
+        return res.status(400).json({ error: 'Un motif avec son justificatif est obligatoire pour suspendre un cabinet' });
+      }
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('id, suspended_at').eq('id', id).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
+      if ((tenant as any).suspended_at) return res.status(409).json({ error: 'Ce cabinet est déjà suspendu' });
+
+      const suspendedAt = new Date().toISOString();
+      const { error } = await supabaseAdmin.from('tenants')
+        .update({ suspended_at: suspendedAt, suspended_by: req.user.id, suspension_reason: reason.slice(0, 2000) })
+        .eq('id', id);
+      if (error) throw error;
+      invalidateSuspensionCache();
+
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.suspended', id, { reason: reason.slice(0, 2000) });
+      res.json({ ok: true, suspended_at: suspendedAt });
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants/:id/suspend]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  app.post('/api/admin/tenants/:id/unsuspend', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('id, suspended_at').eq('id', id).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
+      if (!(tenant as any).suspended_at) return res.status(409).json({ error: "Ce cabinet n'est pas suspendu" });
+
+      const { error } = await supabaseAdmin.from('tenants')
+        .update({ suspended_at: null, suspended_by: null, suspension_reason: null })
+        .eq('id', id);
+      if (error) throw error;
+      invalidateSuspensionCache();
+
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.unsuspended', id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants/:id/unsuspend]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Dernier recours quand un cabinet n'a plus d'administrateur utilisable
+  // (rôle rétrogradé, adresse du compte corrompue...) : seul un admin peut
+  // nommer un admin depuis l'application, donc plus personne ne peut le
+  // faire. Le superadmin ne fait que promouvoir un membre existant, jamais
+  // l'inverse, et chaque nomination est journalisée.
+  app.post('/api/admin/tenants/:id/members/:userId/appoint-admin', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id: tenantId, userId } = req.params;
+      const membership = await findMembership(supabaseAdmin, userId, tenantId);
+      if (!membership) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+      if (membership.systemRole === 'admin') return res.json({ ok: true, alreadyAdmin: true });
+
+      await updateMembership(supabaseAdmin, { userId, tenantId, systemRole: 'admin' });
+      // `profiles` porte le rôle du cabinet par défaut (et sert de repli aux
+      // instances sans adhésions) : le filtre évite de promouvoir la personne
+      // dans un autre cabinet.
+      const { error } = await supabaseAdmin.from('profiles').update({ system_role: 'admin' }).eq('id', userId).eq('tenant_id', tenantId);
+      if (error) throw error;
+
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.admin_appointed', tenantId, {
+        appointed_user_id: userId, previous_system_role: membership.systemRole,
+      });
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants/:id/members/:userId/appoint-admin]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Free-form email from the platform team to a tenant — either one named

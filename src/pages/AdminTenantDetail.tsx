@@ -5,7 +5,8 @@ import { apiFetch } from '../lib/api';
 import {
   IconArrowLeft, IconLoader2, IconUsers, IconBuildingSkyscraper,
   IconCoin, IconNotes, IconDeviceFloppy, IconHistory, IconReceipt,
-  IconLogin, IconMessageCircle, IconMail, IconX, IconSend,
+  IconLogin, IconMessageCircle, IconMail, IconX, IconSend, IconShieldCheck,
+  IconLock, IconLockOpen,
 } from '@tabler/icons-react';
 import { PLAN_LABELS, PlanSelect } from './AdminDashboard';
 
@@ -20,6 +21,7 @@ interface TenantDetail {
   trial_ends_at: string | null; created_at: string;
   ai_credit_balance_eur_cents?: number;
   internal_notes: string | null;
+  suspended_at?: string | null; suspension_reason?: string | null;
   user_count: number; project_count: number;
   owner_email: string | null; owner_name: string | null;
   members: Member[];
@@ -36,6 +38,9 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'tenant.created': 'Cabinet créé',
   'tenant.deleted': 'Cabinet supprimé',
   'tenant.impersonated': 'Connexion en tant que…',
+  'tenant.admin_appointed': 'Administrateur nommé',
+  'tenant.suspended': 'Cabinet suspendu',
+  'tenant.unsuspended': 'Suspension levée',
   'tenant.email_sent': 'Email envoyé',
 };
 
@@ -148,6 +153,8 @@ export default function AdminTenantDetail() {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [impersonating, setImpersonating] = useState<string | null>(null);
   const [emailTarget, setEmailTarget] = useState<EmailTarget | null>(null);
+  const [appointing, setAppointing] = useState<string | null>(null);
+  const [suspending, setSuspending] = useState(false);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -184,6 +191,51 @@ export default function AdminTenantDetail() {
       alert(e.message ?? t('admin_tenant_detail_impersonate_failed'));
     } finally {
       setImpersonating(null);
+    }
+  }
+
+  async function handleSuspend() {
+    if (!id || !tenant) return;
+    // Le motif est obligatoire : il doit porter le justificatif (accord écrit
+    // des associés, décision de justice...) et reste dans le journal d'audit.
+    const reason = window.prompt(t('admin_tenant_detail_prompt_suspend', { name: tenant.name }));
+    if (!reason?.trim()) return;
+    setSuspending(true);
+    try {
+      await apiFetch(`/api/admin/tenants/${id}/suspend`, { method: 'POST', body: JSON.stringify({ reason }) });
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? t('admin_tenant_detail_suspend_failed'));
+    } finally {
+      setSuspending(false);
+    }
+  }
+
+  async function handleUnsuspend() {
+    if (!id || !tenant) return;
+    if (!window.confirm(t('admin_tenant_detail_confirm_unsuspend', { name: tenant.name }))) return;
+    setSuspending(true);
+    try {
+      await apiFetch(`/api/admin/tenants/${id}/unsuspend`, { method: 'POST' });
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? t('admin_tenant_detail_unsuspend_failed'));
+    } finally {
+      setSuspending(false);
+    }
+  }
+
+  async function handleAppointAdmin(memberId: string, memberName: string) {
+    if (!id) return;
+    if (!window.confirm(t('admin_tenant_detail_confirm_appoint_admin', { name: memberName }))) return;
+    setAppointing(memberId);
+    try {
+      await apiFetch(`/api/admin/tenants/${id}/members/${memberId}/appoint-admin`, { method: 'POST' });
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? t('admin_tenant_detail_appoint_admin_failed'));
+    } finally {
+      setAppointing(null);
     }
   }
 
@@ -238,10 +290,35 @@ export default function AdminTenantDetail() {
           <p className="text-sm mt-0.5 font-mono" style={{ color: 'var(--tblr-muted)' }}>{tenant.slug}</p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={tenant.suspended_at ? handleUnsuspend : handleSuspend}
+            disabled={suspending}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-sm font-semibold disabled:opacity-60"
+            style={{ borderColor: 'var(--tblr-border)', color: tenant.suspended_at ? 'var(--tblr-text)' : '#b91c1c' }}
+          >
+            {suspending
+              ? <IconLoader2 size={14} className="animate-spin" />
+              : tenant.suspended_at ? <IconLockOpen size={14} /> : <IconLock size={14} />}
+            {tenant.suspended_at ? t('admin_tenant_detail_unsuspend') : t('admin_tenant_detail_suspend')}
+          </button>
           <PlanSelect tenantId={tenant.id} current={tenant.plan} onChange={plan => setTenant(t => t ? { ...t, plan } : t)} />
           <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Créé le {fmtDate(tenant.created_at)}</span>
         </div>
       </div>
+
+      {tenant.suspended_at && (
+        <div className="rounded-lg border px-4 py-3 text-sm" style={{ borderColor: '#b91c1c', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}>
+          <p className="font-semibold flex items-center gap-1.5">
+            <IconLock size={14} />
+            {t('admin_tenant_detail_suspended_since', { date: fmtDate(tenant.suspended_at) })}
+          </p>
+          {tenant.suspension_reason && (
+            <p className="mt-1" style={{ color: 'var(--tblr-muted)' }}>
+              {t('admin_tenant_detail_suspension_reason_label')} : {tenant.suspension_reason}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -338,6 +415,17 @@ export default function AdminTenantDetail() {
                       >
                         {impersonating === m.id ? <IconLoader2 size={13} className="animate-spin" /> : <IconLogin size={13} />}
                       </button>
+                      {m.system_role !== 'admin' && (
+                        <button
+                          onClick={() => handleAppointAdmin(m.id, m.name || m.email)}
+                          disabled={appointing === m.id}
+                          title={t('admin_tenant_detail_appoint_admin_title', { name: m.name || m.email })}
+                          className="p-1 rounded hover:bg-[var(--tblr-surface-2)]"
+                          style={{ color: 'var(--tblr-muted)' }}
+                        >
+                          {appointing === m.id ? <IconLoader2 size={13} className="animate-spin" /> : <IconShieldCheck size={13} />}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

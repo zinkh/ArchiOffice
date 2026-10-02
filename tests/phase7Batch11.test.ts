@@ -153,3 +153,38 @@ describe('Super-Admin tenant mutations', () => {
     expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === tenantId)).toBeUndefined();
   });
 });
+
+describe('Super-Admin appoints a tenant administrator', () => {
+  it('promotes an existing member of a tenant left without admin', async () => {
+    const tenantId = makeTenant();
+    fakeSupabaseAdmin.seed('profiles', [{ id: 'orphan-member', tenant_id: tenantId, system_role: 'user', email: 'm@example.test' }]);
+
+    const res = await request(app)
+      .post(`/api/admin/tenants/${tenantId}/members/orphan-member/appoint-admin`)
+      .set(authHeader(makeSuperAdminToken()));
+    expect(res.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === 'orphan-member')?.system_role).toBe('admin');
+  });
+
+  it('refuses a user who is not a member of that tenant', async () => {
+    const tenantId = makeTenant();
+    const otherTenant = makeTenant();
+    fakeSupabaseAdmin.seed('profiles', [{ id: 'elsewhere', tenant_id: otherTenant, system_role: 'user', email: 'e@example.test' }]);
+
+    const res = await request(app)
+      .post(`/api/admin/tenants/${tenantId}/members/elsewhere/appoint-admin`)
+      .set(authHeader(makeSuperAdminToken()));
+    expect(res.status).toBe(404);
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === 'elsewhere')?.system_role).toBe('user');
+  });
+
+  it('is closed to everyone but the super-admin', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('profiles', [{ id: 'target', tenant_id: tenantId, system_role: 'user' }]);
+
+    const res = await request(app).post(`/api/admin/tenants/${tenantId}/members/target/appoint-admin`).set(authHeader(token));
+    expect(res.status).toBe(403);
+    expect(fakeSupabaseAdmin.getTable('profiles').find(p => p.id === 'target')?.system_role).toBe('user');
+  });
+});
