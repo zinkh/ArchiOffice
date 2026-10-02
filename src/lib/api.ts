@@ -1,5 +1,6 @@
 import { getAccessToken } from './authToken';
 import { applyTenantHeader, handleTenantRejection } from './activeTenant';
+import { signalTenantSuspended, TENANT_SUSPENDED_CODE } from './tenantSuspended';
 
 export const baseFetchJson = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
   const fetchFn = (window as any)._originalFetch || window.fetch;
@@ -28,6 +29,9 @@ export const baseFetchJson = async <T = any>(url: string, options?: RequestInit)
     // du compte, plutôt que de rejouer une requête que le serveur refusera
     // toujours (src/lib/activeTenant.ts).
     if (res.status === 403 && code === 'TENANT_NOT_MEMBER') handleTenantRejection();
+    // Cabinet suspendu par le superadmin : l'écran de blocage prend le relais
+    // (src/components/TenantSuspendedGate.tsx).
+    if (res.status === 403 && code === TENANT_SUSPENDED_CODE) signalTenantSuspended(message);
 
     const err: any = new Error(message);
     err.status = res.status;

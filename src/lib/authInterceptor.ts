@@ -1,5 +1,6 @@
 import { getAccessToken, isOfflineBuild, isSessionDefinitelyGone } from './authToken';
 import { applyTenantHeader } from './activeTenant';
+import { inspectForSuspension } from './tenantSuspended';
 import { supabase } from './supabase';
 
 /**
@@ -39,7 +40,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       // serveur sert le cabinet par défaut du compte, qui n'est pas forcément
       // celui affiché à l'écran (src/lib/activeTenant.ts).
       applyTenantHeader(headers);
-      return rawFetch(input, { ...init, headers });
+      const res = await rawFetch(input, { ...init, headers });
+      inspectForSuspension(res);
+      return res;
     }
   }
 

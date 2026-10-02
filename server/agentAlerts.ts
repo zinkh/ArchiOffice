@@ -533,7 +533,9 @@ export async function runAlertCycleForTenant(supabaseAdmin: SupabaseClient, tena
 }
 
 export async function runAlertCycle(supabaseAdmin: SupabaseClient): Promise<void> {
-  const { data: tenants, error } = await supabaseAdmin.from('tenants').select('id');
+  // Un cabinet suspendu par le superadmin est gelé : ni alerte, ni mail, ni
+  // notification (server/tenantSuspension.ts).
+  const { data: tenants, error } = await supabaseAdmin.from('tenants').select('id').is('suspended_at', null);
   if (error) {
     console.error('[agentAlerts] liste des cabinets impossible:', error.message);
     return;

@@ -17,6 +17,7 @@ import {
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { PendingWritesIndicator } from './components/PendingWritesIndicator';
 import { UpdateBanner } from './components/UpdateBanner';
+import { TenantSuspendedGate } from './components/TenantSuspendedGate';
 import { useNotificationBridge } from './hooks/useNotificationBridge';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
@@ -795,6 +796,7 @@ export default function App() {
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
       <UserProvider>
         <UpdateBanner />
+        <TenantSuspendedGate />
         <Router>
           <ImpersonationBanner />
           <Suspense fallback={<PageLoadingFallback />}>
