@@ -452,6 +452,38 @@ DPGF, estimation, BPU/DQE). Deux sens, jamais de suppression silencieuse :
 
 Un projet sans lot ne touche jamais aux documents.
 
+### Suivi des entreprises consultées (ACT)
+
+Le tableau « Entreprises consultées » de l'onglet ACT vit dans
+`src/components/ACTEntreprisesTable.tsx`, sa logique pure dans
+`src/lib/actEntreprises.ts` (testée) : aucune nouvelle donnée, tout se déduit
+des champs déjà enregistrés dans `consultation.entreprises` (jsonb, aucune
+migration).
+
+- **Statut déduit, jamais saisi** (`statutEntreprise`) : « ne répond pas » >
+  offre reçue > DCE transmis (« À relancer » dès que `relance_le` est atteinte
+  sans offre, sinon « DCE envoyé ») > DCE à envoyer (`envoyer_dce`) > DCE non
+  prévu. `relance_le` se lit donc comme la date de relance PRÉVUE. Les deux
+  anciennes cases « Envoyer DCE » / « Ne répond pas » sont dans le menu de la
+  pastille de statut.
+- **Couverture** (`couverture`) : lot sous `MIN_ENTREPRISES_PAR_LOT` (3)
+  entreprises (les « ne répond pas » ne comptent pas), entreprises sans lot,
+  sans email alors que le DCE reste à envoyer. Un lot sous-couvert propose des
+  contacts « Entreprise » dont un corps d'état recoupe l'intitulé du lot
+  (`suggererContacts`, rapprochement par radicaux de 5 lettres : une
+  suggestion que l'architecte confirme, pas une affectation).
+- **Envoi du DCE** : le bouton de ligne ouvre `MailComposeModal` (prop
+  `initial`) prérempli avec les lots de l'entreprise et les pièces du DCE qui
+  la concernent ; à l'envoi, `dce_transmis_le` est posée. Les pièces du DCE
+  ne sont que des intitulés : les fichiers se joignent dans la fenêtre de
+  message. Pas d'envoi groupé volontairement (chaque entreprise ne doit voir
+  que son propre message).
+- **Actions groupées** sur la sélection (lots, DCE transmis aujourd'hui,
+  relance, ne répond pas, retirer). Sous 768 px le tableau devient une liste
+  de cartes (`useMediaQuery`, un seul rendu monté à la fois).
+- `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
+  et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes

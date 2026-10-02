@@ -18,7 +18,7 @@ import {
   exportLotsToExcel, exportLotsToPDF,
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
-import { MultiSelectDropdown } from './MultiSelectDropdown';
+import ACTEntreprisesTable from './ACTEntreprisesTable';
 import { ContactModal } from './ContactModal';
 import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
 
@@ -509,6 +509,15 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
     [lots],
   );
 
+  const dcePieces = useMemo(
+    () => consultation.dce_documents.map(d => ({
+      libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
+      tous_lots: d.tous_lots,
+      lots_ids: d.lots_ids,
+    })),
+    [consultation.dce_documents],
+  );
+
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
   const goPhase = (p: Phase) => {
@@ -733,113 +742,24 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 </button>
               </div>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[1100px]">
-                <thead className="bg-[var(--tblr-surface-2)]">
-                  <tr>
-                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] sticky left-0 z-[2] bg-[var(--tblr-surface-2)] min-w-[260px] w-[260px]">Entreprise</th>
-                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] min-w-[200px]">Corps d'état</th>
-                    <th className="px-3 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] min-w-[200px]">Lots assignés</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">DCE transmis le</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Relance</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Offre reçue le</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Envoyer DCE</th>
-                    <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Ne répond pas</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--tblr-border)]">
-                  {groupByLot(consultation.entreprises, lots).map(groupe => (
-                    <React.Fragment key={groupe.key}>
-                      <tr className="bg-zinc-100 dark:bg-zinc-800">
-                        <td colSpan={9} className="px-4 py-1.5 text-[0.6875rem] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300">
-                          {groupe.libelle}
-                        </td>
-                      </tr>
-                      {groupe.entreprises.map(e => (
-                        <tr key={`${e.id}::${groupe.key}`} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', e.ne_repond_pas && 'opacity-60')}>
-                          <td className="px-3 py-2.5 sticky left-0 z-[1] bg-[var(--tblr-surface)] border-r border-[var(--tblr-border)]">
-                            <EntrepriseAutocomplete
-                              contacts={entrepriseContacts}
-                              contactId={e.contact_id}
-                              fallbackName={e.nom}
-                              onSelect={c => {
-                                const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
-                                const email = c.email_work || c.email || '';
-                                updateEntreprise(e.id, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
-                              }}
-                              onCreate={name => setContactModalFor({ rowId: e.id, name })}
-                            />
-                            <input className="mt-1 w-full text-[0.6875rem] border border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-border)] rounded-md px-2 py-1 bg-transparent text-[var(--tblr-muted)] outline-none"
-                              type="email" aria-label="Email de l'entreprise"
-                              placeholder="email@entreprise.fr" value={e.email || ''}
-                              onChange={ev => updateEntreprise(e.id, { email: ev.target.value })} />
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <MultiSelectDropdown
-                              options={corpsEtatOptions}
-                              selected={e.corps_etat_codes || []}
-                              onChange={next => changeCorpsEtat(e, next)}
-                              placeholder="Non classé"
-                              maxChips={1}
-                              tone="green"
-                              searchable
-                              ariaLabel={`Corps d'état de ${e.nom || 'l\'entreprise'}`}
-                            />
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <MultiSelectDropdown
-                              options={lotOptions}
-                              selected={e.lots_ids}
-                              onChange={next => updateEntreprise(e.id, { lots_ids: next })}
-                              placeholder="Aucun lot"
-                              maxChips={3}
-                              tone="blue"
-                              bulkActions
-                              ariaLabel={`Lots de ${e.nom || 'l\'entreprise'}`}
-                            />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input type="date"
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              value={e.dce_transmis_le || ''}
-                              onChange={ev => updateEntreprise(e.id, { dce_transmis_le: ev.target.value || undefined })} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input type="date"
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              value={e.relance_le || ''}
-                              onChange={ev => updateEntreprise(e.id, { relance_le: ev.target.value || undefined })} />
-                          </td>
-                          <td className="px-4 py-3">
-                            <input type="date"
-                              className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                              value={e.offre_recue_le || ''}
-                              onChange={ev => updateEntreprise(e.id, { offre_recue_le: ev.target.value || undefined })} />
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <input type="checkbox" checked={!!e.envoyer_dce}
-                              onChange={ev => updateEntreprise(e.id, { envoyer_dce: ev.target.checked })}
-                              className="w-4 h-4 rounded accent-blue-600" />
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <input type="checkbox" checked={!!e.ne_repond_pas}
-                              onChange={ev => updateEntreprise(e.id, { ne_repond_pas: ev.target.checked })}
-                              className="w-4 h-4 rounded accent-red-600" />
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <button onClick={() => update({ ...consultation, entreprises: consultation.entreprises.filter(en => en.id !== e.id) })} className="p-1 text-zinc-300 hover:text-red-500"><IconTrash size={13} /></button>
-                          </td>
-                        </tr>
-                      ))}
-                    </React.Fragment>
-                  ))}
-                  {consultation.entreprises.length === 0 && (
-                    <tr><td colSpan={9} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise consultée.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <ACTEntreprisesTable
+              projectName={projectName}
+              lots={lots}
+              entreprises={consultation.entreprises}
+              onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
+              dcePieces={dcePieces}
+              entrepriseContacts={entrepriseContacts}
+              corpsEtatOptions={corpsEtatOptions}
+              lotOptions={lotOptions}
+              onChangeCorpsEtat={changeCorpsEtat}
+              corpsEtatCodesFromContact={corpsEtatCodesFromContact}
+              onSelectContact={(rowId, c) => {
+                const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+                const email = c.email_work || c.email || '';
+                updateEntreprise(rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
+              }}
+              onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
+            />
           </div>
         </div>
       )}

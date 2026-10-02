@@ -26,6 +26,10 @@ interface MultiSelectDropdownProps {
   bulkActions?: boolean;
   /** Nom accessible du bouton. */
   ariaLabel?: string;
+  /** Remplace le résumé par pastilles : le bouton n'est alors que ce contenu (ex. une pastille de statut). */
+  triggerContent?: React.ReactNode;
+  /** Largeur minimale de la liste (px), pour un déclencheur étroit. */
+  menuMinWidth?: number;
 }
 
 const TONES = {
@@ -41,7 +45,7 @@ const TONES = {
  */
 export function MultiSelectDropdown({
   options, selected, onChange, placeholder, maxChips = 2, tone = 'green',
-  searchable = false, bulkActions = false, ariaLabel,
+  searchable = false, bulkActions = false, ariaLabel, triggerContent, menuMinWidth = 260,
 }: MultiSelectDropdownProps) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
@@ -69,7 +73,7 @@ export function MultiSelectDropdown({
     const recalc = () => {
       if (!wrapperRef.current) return;
       const r = wrapperRef.current.getBoundingClientRect();
-      const width = Math.max(r.width, 260);
+      const width = Math.max(r.width, menuMinWidth);
       // Reste dans l'écran : bascule au-dessus du bouton s'il n'y a pas la place dessous.
       const spaceBelow = window.innerHeight - r.bottom;
       const top = spaceBelow < 300 && r.top > spaceBelow ? Math.max(8, r.top - 4 - 300) : r.bottom + 4;
@@ -104,8 +108,11 @@ export function MultiSelectDropdown({
         aria-expanded={open}
         aria-label={ariaLabel}
         onClick={() => setOpen(o => !o)}
-        className="w-full min-h-[30px] text-left text-xs border border-[var(--tblr-border)] rounded-lg pl-2 pr-1.5 py-1 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1"
+        className={triggerContent
+          ? 'text-left outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-full'
+          : 'w-full min-h-[30px] text-left text-xs border border-[var(--tblr-border)] rounded-lg pl-2 pr-1.5 py-1 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1'}
       >
+        {triggerContent ? triggerContent : <>
         <span className="flex flex-wrap gap-1 flex-1 min-w-0">
           {selectedOptions.length === 0 && <span className="text-[var(--tblr-muted)]">{placeholder}</span>}
           {shown.map(o => (
@@ -118,6 +125,7 @@ export function MultiSelectDropdown({
           )}
         </span>
         <IconChevronDown size={13} className={cn('shrink-0 text-[var(--tblr-muted)] transition-transform', open && 'rotate-180')} />
+        </>}
       </button>
       {open && pos && createPortal(
         <div
