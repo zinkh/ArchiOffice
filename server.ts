@@ -119,6 +119,8 @@ import * as Sentry from "@sentry/node";
 import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startAgentAlerts } from "./server/agentAlerts";
 import { startAgentMailInbox } from "./server/agentMailInbox";
+import { startAgentMailReview } from "./server/agentMailReview";
+import { registerAgentMailReviewRoutes } from "./server/routes/agentMailReview";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
 import { startTenantPurge } from "./server/tenantPurge";
@@ -1102,6 +1104,12 @@ export async function createApp() {
     notifyTenantAdmins,
   });
   registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
+  // Revue matinale des mails : la boucle locale est la même que celle du
+  // relevé de messagerie entrante (voir startAgentBackgroundJobs).
+  registerAgentMailReviewRoutes(app, {
+    supabaseAdmin, getTenantId,
+    reviewDeps: { baseUrl: `http://127.0.0.1:${PORT}`, deductAiCredit },
+  });
 
   // ── Serveur MCP (Gemini Spark, "Connected Apps → Custom apps for Spark") ──
   // Voir packages/archioffice-agents/src/server/mcp/*.ts. Fournisseur OAuth
@@ -1191,6 +1199,7 @@ export async function createApp() {
   const startAgentBackgroundJobs = () => {
     startAgentAlerts(supabaseAdmin);
     startAgentMailInbox(supabaseAdmin, `http://127.0.0.1:${PORT}`);
+    startAgentMailReview(supabaseAdmin, { baseUrl: `http://127.0.0.1:${PORT}`, deductAiCredit });
     import('@zinkh/archioffice-agents/server')
       .then(({ startAgentScheduler }) => startAgentScheduler(supabaseAdmin, { deductAiCredit, notifyTenantAdmins }))
       .catch(e => console.error('[agentScheduler] démarrage impossible:', e.message));
