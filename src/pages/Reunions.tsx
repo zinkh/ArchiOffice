@@ -448,6 +448,9 @@ export default function Reunions() {
         address: s.address,
         phone: s.phone,
         email: s.email,
+        siret: s.siret,
+        oaNumber: s.oaNumber,
+        vatNumber: s.vatNumber,
       });
     }).catch(() => {});
   }, []);

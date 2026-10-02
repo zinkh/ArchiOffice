@@ -64,7 +64,7 @@ export default function Leave() {
   const { settings } = useSettings();
   const isAdmin = currentUser?.system_role === 'admin';
   const currentYear = new Date().getFullYear();
-  const agencySettings = { agencyName: settings?.agencyName, address: settings?.address, phone: settings?.phone, email: settings?.email };
+  const agencySettings = settings ?? {};
 
   const [tab, setTab] = useState<'mine' | 'validations' | 'balances'>('mine');
   const [balances, setBalances] = useState<LeaveBalance[]>([]);

@@ -44,9 +44,9 @@ describe('xlsxLetterhead', () => {
   it('place le titre sous l\'en-tête quand le tableau est trop étroit', async () => {
     const wb = await nouveauClasseur();
     const f = ajouterFeuille(wb, {
-      nom: 'Etroit', settings, title: 'Titre', colonnes: [{ header: 'A', width: 20 }, { header: 'B', width: 10 }],
+      nom: 'Etroit', settings, title: 'Un titre de document bien trop long pour ce tableau étroit', colonnes: [{ header: 'A', width: 20 }, { header: 'B', width: 10 }],
     });
-    expect(f.ws.getCell('A5').value).toBe('Titre');
+    expect(f.ws.getCell('A5').value).toBe('Un titre de document bien trop long pour ce tableau étroit');
     expect(f.ws.getCell('A8').value).toBe('A');
   });
 });
@@ -71,5 +71,29 @@ describe('export des entreprises consultées', () => {
     expect(colA).toContain('LOT 01 — GROS ŒUVRE');
     expect(colA).toContain('SANS LOT ASSIGNÉ');
     expect(colA.some(v => v.includes('CORPS'))).toBe(false);
+  });
+});
+
+describe('exporterListe', () => {
+  it('écrit une liste sous l\'en-tête du cabinet, montants en nombres', async () => {
+    const { exporterListe, FORMAT_EURO } = await import('../xlsxLetterhead');
+    saveAsMock.mockClear();
+    await exporterListe({
+      fichier: 'liste.xlsx', nom: 'Liste', title: 'Liste', subtitle: '2 lignes', settings,
+      colonnes: [
+        { cle: 'nom', header: 'Nom', width: 20 },
+        { cle: 'a', header: 'A', width: 20 },
+        { cle: 'montant', header: 'Montant', width: 16, align: 'right', numFmt: FORMAT_EURO },
+      ],
+      lignes: [{ nom: 'Un', a: 'x', montant: 1500 }, { nom: 'Deux', a: 'y', montant: '' }],
+    });
+    const { Workbook } = await import('exceljs');
+    const wb = new Workbook();
+    await wb.xlsx.load(await (saveAsMock.mock.calls[0][0] as Blob).arrayBuffer() as any);
+    const ws = wb.worksheets[0];
+    expect(ws.getCell('A1').value).toBe('AAZS & Associés');
+    expect(ws.getCell('A7').value).toBe('Un');
+    expect(ws.getCell('C7').value).toBe(1500);
+    expect(ws.getCell('C8').value).toBeNull();
   });
 });

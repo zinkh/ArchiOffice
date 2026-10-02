@@ -3,11 +3,14 @@
 // les références soient identiques entre le classeur vierge envoyé aux
 // candidats et la version chiffrée : c'est cette identité qui rend le
 // rapprochement possible au retour.
-import { saveAs } from 'file-saver';
 import type { BPU, BPULot, BPUChapitre, BPULigne } from '../types/bpu';
 import { natureEffective } from '../types/bpu';
 import type { AgencySettings } from './proposalExport';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
+import {
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_NOMBRE,
+  type Colonne, type Cellule,
+} from './xlsxLetterhead';
 import { montantEnLettres } from './numberToFrenchWords';
 
 export type ExportMode = 'bpu' | 'dqe';
@@ -104,6 +107,8 @@ export interface ExcelOptions {
   /** Bordereau à remplir : la colonne P.U. part vide. */
   vierge: boolean;
   projectName?: string;
+  /** Charte du cabinet (logo, coordonnées, pied de page). */
+  settings?: AgencySettings;
 }
 
 /** En-têtes de colonnes, dans l'ordre exact du classeur. */
@@ -117,95 +122,111 @@ export function excelHeaders(bpu: BPU, mode: ExportMode): string[] {
   return cols;
 }
 
-export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName }: ExcelOptions): Promise<void> {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName, settings = {} }: ExcelOptions): Promise<void> {
+  const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const rows = flattenBPU(bpu);
   const titre = mode === 'bpu' ? 'BPU — Bordereau de Prix Unitaires' : 'DQE — Détail Quantitatif Estimatif';
   const headers = excelHeaders(bpu, mode);
-  const nCols = headers.length;
-  const pad = (arr: any[]) => [...arr, ...Array(Math.max(0, nCols - arr.length)).fill('')];
+  const m = bpu.marche;
 
-  const data: any[][] = [
-    pad([projectName || bpu.projectId]),
-    pad([titre]),
-    pad([TYPE_MARCHE_LABELS[bpu.marche.typeMarche] ?? '', '', bpu.marche.objet ?? '']),
-    pad([
-      bpu.marche.montantMiniHT != null ? `Minimum : ${fmt(bpu.marche.montantMiniHT)} € HT` : '',
-      '',
-      bpu.marche.montantMaxiHT != null ? `Maximum : ${fmt(bpu.marche.montantMaxiHT)} € HT` : '',
-    ]),
-    pad([`Version ${bpu.version}`, '', new Date().toLocaleDateString('fr-FR')]),
+  // Même mise en page que le PDF : l'en-tête du cabinet, puis le rappel du cadre
+  // du marché. L'import relit ce classeur par la ligne d'entête de colonnes
+  // (detectHeader), pas par un numéro de ligne : tout ce qui précède est libre.
+  const infos = [
+    [
+      TYPE_MARCHE_LABELS[m.typeMarche] ?? '',
+      m.objet ? `Objet : ${m.objet}` : '',
+      m.montantMiniHT != null ? `Minimum : ${fmt(m.montantMiniHT)} € HT` : '',
+      m.montantMaxiHT != null ? `Maximum : ${fmt(m.montantMaxiHT)} € HT` : '',
+    ].filter(Boolean).join('   ·   '),
+    vierge ? 'Colonnes A à D : ne pas modifier. Renseigner uniquement la colonne des prix unitaires.' : '',
+  ].filter(Boolean);
+
+  const colonnes: Colonne[] = [
+    { header: 'Réf.', width: 9 },
+    { header: 'N°', width: 12 },
+    { header: 'Désignation', width: 55 },
+    { header: 'Unité', width: 8, align: 'center' },
   ];
+  if (mode === 'dqe') colonnes.push({ header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE });
+  colonnes.push({ header: 'P.U. HT (€)', width: 14, align: 'right', numFmt: FORMAT_NOMBRE });
+  if (mode === 'dqe') colonnes.push({ header: 'Montant HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE });
+  if (bpu.prixEnLettres) colonnes.push({ header: 'P.U. en lettres', width: 45 });
+  if (bpu.tranches.length) colonnes.push({ header: 'Tranche', width: 10 });
+  // Les intitulés de colonnes sont ceux que l'import reconnaît : jamais modifiés ici.
+  colonnes.forEach((c, i) => { c.header = headers[i]; });
 
-  if (vierge) {
-    data.push(pad([
-      "Colonnes A à D : ne pas modifier. Renseigner uniquement la colonne des prix unitaires.",
-    ]));
-  }
-  data.push(pad([]));
-  data.push(headers);
+  const feuille = ajouterFeuille(wb, {
+    nom: SHEET_BPU, settings, logo,
+    title: titre,
+    subtitle: projectName || bpu.projectId,
+    reference: `v${bpu.version}`,
+    infos,
+    colonnes,
+  });
 
   for (const r of rows) {
     const indent = '  '.repeat(r.depth);
-    const line: any[] = [r.ref, r.numero, indent + r.designation, r.unite];
+    const line: Cellule[] = [r.ref, r.numero, indent + r.designation, r.unite];
     if (mode === 'dqe') line.push(r.kind === 'article' && r.quantite ? r.quantite : '');
     // Sur un bordereau vierge, le prix est laissé au candidat.
     line.push(vierge || r.kind !== 'article' ? '' : (r.prixUnitaire || ''));
     if (mode === 'dqe') line.push(vierge || r.kind === 'chapitre' ? '' : (r.prixTotal || ''));
     if (bpu.prixEnLettres) line.push(vierge ? '' : r.prixEnLettres);
     if (bpu.tranches.length) line.push(r.tranche);
-    data.push(pad(line));
+    // Pas de fusion des lignes de lot : l'import lit leur référence et leur intitulé.
+    if (r.kind === 'lot') feuille.ligne(line, { gras: true, fond: 'groupe' });
+    else if (r.kind === 'chapitre') feuille.ligne(line, { gras: true, fond: 'doux' });
+    else feuille.ligne(line);
   }
 
   // Un bordereau n'a pas de total : seul le DQE chiffré en porte un.
   if (mode === 'dqe' && !vierge) {
-    const totalLine = Array(nCols).fill('');
+    feuille.vide();
+    const totalLine: Cellule[] = Array(colonnes.length).fill('');
     totalLine[2] = 'MONTANT ESTIMATIF HT';
     totalLine[headers.indexOf('Montant HT (€)')] = bpu.totalHT;
-    data.push([], totalLine);
+    feuille.total(totalLine);
   }
-
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  const widths = [{ wch: 8 }, { wch: 12 }, { wch: 55 }, { wch: 8 }];
-  if (mode === 'dqe') widths.push({ wch: 12 });
-  widths.push({ wch: 14 });
-  if (mode === 'dqe') widths.push({ wch: 16 });
-  if (bpu.prixEnLettres) widths.push({ wch: 45 });
-  if (bpu.tranches.length) widths.push({ wch: 10 });
-  ws['!cols'] = widths;
-  XLSX.utils.book_append_sheet(wb, ws, SHEET_BPU);
 
   // Cadre du marché sur sa propre feuille : un candidat doit le lire sans le
   // confondre avec les lignes de prix.
-  const m = bpu.marche;
-  const marcheRows: any[][] = [
-    ['Cadre du marché', ''],
-    ['Type', TYPE_MARCHE_LABELS[m.typeMarche] ?? m.typeMarche],
-    ['Objet', m.objet ?? ''],
-    ['Référence', m.referenceMarche ?? ''],
-    ['Pouvoir adjudicateur', m.pouvoirAdjudicateur ?? ''],
-    ['Montant minimum HT', m.montantMiniHT ?? ''],
-    ['Montant maximum HT', m.montantMaxiHT ?? ''],
-    ['Durée initiale (mois)', m.dureeInitialeMois ?? ''],
-    ['Reconductions', m.nbReconductions ?? ''],
-    ['Durée d’une reconduction (mois)', m.dureeReconductionMois ?? ''],
-    ['Révision des prix', m.revisionPrix ?? ''],
-    ['Délai de paiement (jours)', m.delaiPaiementJours ?? ''],
-    ['Date limite de remise des offres', m.dateLimiteRemiseOffres ?? ''],
-  ];
+  const cadre = ajouterFeuille(wb, {
+    nom: SHEET_MARCHE, settings, logo,
+    title: 'Cadre du marché',
+    subtitle: projectName || bpu.projectId,
+    paysage: false,
+    colonnes: [
+      { header: 'Rubrique', width: 34 },
+      { header: 'Valeur', width: 45 },
+      { header: '', width: 14 },
+    ],
+  });
+  const ligneCadre = (libelle: string, valeur: Cellule) => cadre.ligne([libelle, valeur ?? '']);
+  ligneCadre('Type', TYPE_MARCHE_LABELS[m.typeMarche] ?? m.typeMarche);
+  ligneCadre('Objet', m.objet ?? '');
+  ligneCadre('Référence', m.referenceMarche ?? '');
+  ligneCadre('Pouvoir adjudicateur', m.pouvoirAdjudicateur ?? '');
+  ligneCadre('Montant minimum HT', m.montantMiniHT ?? '');
+  ligneCadre('Montant maximum HT', m.montantMaxiHT ?? '');
+  ligneCadre('Durée initiale (mois)', m.dureeInitialeMois ?? '');
+  ligneCadre('Reconductions', m.nbReconductions ?? '');
+  ligneCadre('Durée d’une reconduction (mois)', m.dureeReconductionMois ?? '');
+  ligneCadre('Révision des prix', m.revisionPrix ?? '');
+  ligneCadre('Délai de paiement (jours)', m.delaiPaiementJours ?? '');
+  ligneCadre('Date limite de remise des offres', m.dateLimiteRemiseOffres ?? '');
   if (bpu.tranches.length) {
-    marcheRows.push([], ['Tranches', ''], ['Code', 'Libellé', 'Type']);
-    for (const t of bpu.tranches) marcheRows.push([t.code, t.libelle, t.type]);
+    cadre.vide();
+    cadre.ligne(['Tranches'], { gras: true, fond: 'groupe' });
+    cadre.ligne(['Code', 'Libellé', 'Type'], { gras: true, fond: 'doux' });
+    for (const t of bpu.tranches) cadre.ligne([t.code, t.libelle, t.type]);
   }
-  const wsMarche = XLSX.utils.aoa_to_sheet(marcheRows);
-  wsMarche['!cols'] = [{ wch: 34 }, { wch: 45 }, { wch: 14 }];
-  XLSX.utils.book_append_sheet(wb, wsMarche, SHEET_MARCHE);
 
   // Feuille technique masquée : chemin rapide de l'import, jamais indispensable.
   // Elle disparaît à un enregistrement en CSV, le rapprochement doit donc
   // savoir se passer d'elle.
-  const metaRows: any[][] = [
+  const meta = wb.addWorksheet(SHEET_META, { state: 'hidden' });
+  const metaRows: Cellule[][] = [
     ['schema_version', BPU_SHEET_SCHEMA],
     ['bpu_id', bpu.id],
     ['project_id', bpu.projectId],
@@ -216,17 +237,10 @@ export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName }: 
     ['ref', 'numero', 'designation'],
     ...rows.filter(r => r.kind === 'article').map(r => [r.ref, r.numero, r.designation]),
   ];
-  const wsMeta = XLSX.utils.aoa_to_sheet(metaRows);
-  XLSX.utils.book_append_sheet(wb, wsMeta, SHEET_META);
-  const idxMeta = wb.SheetNames.indexOf(SHEET_META);
-  wb.Workbook = { ...(wb.Workbook ?? {}), Sheets: wb.SheetNames.map((_, i) => (i === idxMeta ? { Hidden: 1 } : {})) };
+  for (const r of metaRows) meta.addRow(r.map(v => v ?? ''));
 
-  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
   const suffixe = vierge ? '_a_remplir' : '';
-  saveAs(
-    new Blob([buf], { type: 'application/octet-stream' }),
-    `${mode.toUpperCase()}_${sanitize(projectName || bpu.titre)}${suffixe}.xlsx`,
-  );
+  await enregistrerClasseur(wb, `${mode.toUpperCase()}_${sanitize(projectName || bpu.titre)}${suffixe}.xlsx`);
 }
 
 // ── PDF ───────────────────────────────────────────────────────────────────────
@@ -286,8 +300,7 @@ export async function exportBPUtoPDF(bpu: BPU, { mode, projectName, settings, vi
     startY: y,
     head: [head],
     body,
-    headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    bodyStyles: { fontSize: 8 },
+    ...tableauGris(),
     // 25 mm réservés en bas pour le pied de page et la pagination.
     margin: { left: 14, right: 14, bottom: 25 },
     columnStyles: {
@@ -301,10 +314,10 @@ export async function exportBPUtoPDF(bpu: BPU, { mode, projectName, settings, vi
       if (!r || data.section !== 'body') return;
       if (r.kind === 'lot') {
         data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [200, 220, 240];
+        data.cell.styles.fillColor = TABLEAU_GRIS.groupe;
       } else if (r.kind === 'chapitre') {
         data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [235, 240, 248];
+        data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
       }
       // Les colonnes chiffrées sont alignées à droite.
       if (data.column.index >= 4) data.cell.styles.halign = 'right';
@@ -314,7 +327,7 @@ export async function exportBPUtoPDF(bpu: BPU, { mode, projectName, settings, vi
       ? [[...Array(head.indexOf('Montant HT (€)')).fill(''), 'MONTANT ESTIMATIF HT', `${fmt(bpu.totalHT)} €`]
           .slice(0, head.length)]
       : undefined,
-    footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', halign: 'right' },
+    footStyles: { ...tableauGris().footStyles, halign: 'right' },
   });
 
   if (mode === 'bpu') {

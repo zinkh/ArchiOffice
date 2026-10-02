@@ -639,31 +639,35 @@ export default function Projects() {
   };
 
   const handleExportXLSX = async () => {
-    let agencyName = '';
-    try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }
-    const XLSX = await import('xlsx');
-    const rows = filteredProjects.map(p => ({
-      'Nom': p.name,
-      'Client': p.client || '',
-      'Statut': p.status || '',
-      'Catégorie': (p as any).category_name || '',
-      'Chef de projet': (p as any).project_manager_name || p.project_manager || '',
-      'Date début': p.start_date || '',
-      'Date fin': p.end_date || '',
-      'Budget': p.budget || 0,
-      'Surface': p.surface || 0,
-      'Adresse': p.address || '',
-    }));
-    const worksheet = XLSX.utils.json_to_sheet([]);
-    if (agencyName) {
-      XLSX.utils.sheet_add_aoa(worksheet, [[agencyName], ['Liste des projets']], { origin: 'A1' });
-      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A4' });
-    } else {
-      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A1' });
-    }
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Projets');
-    XLSX.writeFile(workbook, 'projets.xlsx');
+    const { exporterListe, FORMAT_EURO } = await import('../lib/xlsxLetterhead');
+    let settings: any = {};
+    try { settings = (await fetch('/api/settings').then(r => r.ok ? r.json() : null)) ?? {}; } catch { /* */ }
+    await exporterListe({
+      fichier: 'projets.xlsx',
+      nom: 'Projets',
+      title: 'Liste des projets',
+      subtitle: `${filteredProjects.length} projet${filteredProjects.length > 1 ? 's' : ''}`,
+      settings,
+      colonnes: [
+        { cle: 'nom', header: 'Nom', width: 36 },
+        { cle: 'client', header: 'Client', width: 26 },
+        { cle: 'statut', header: 'Statut', width: 14 },
+        { cle: 'categorie', header: 'Catégorie', width: 18 },
+        { cle: 'chef', header: 'Chef de projet', width: 22 },
+        { cle: 'debut', header: 'Date début', width: 14, align: 'center' },
+        { cle: 'fin', header: 'Date fin', width: 14, align: 'center' },
+        { cle: 'budget', header: 'Budget', width: 18, align: 'right', numFmt: FORMAT_EURO },
+        { cle: 'surface', header: 'Surface (m²)', width: 14, align: 'right', numFmt: '#,##0.##' },
+        { cle: 'adresse', header: 'Adresse', width: 40 },
+      ],
+      lignes: filteredProjects.map(p => ({
+        nom: p.name, client: p.client || '', statut: p.status || '',
+        categorie: (p as any).category_name || '',
+        chef: (p as any).project_manager_name || p.project_manager || '',
+        debut: p.start_date || '', fin: p.end_date || '',
+        budget: p.budget || '', surface: p.surface || '', adresse: p.address || '',
+      })),
+    });
   };
 
   return (

@@ -1,6 +1,10 @@
-import { saveAs } from 'file-saver';
 import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
+import type { AgencySettings } from './proposalExport';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
+import {
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE,
+} from './xlsxLetterhead';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -24,10 +28,13 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
   unite: string;
   quantite: string;
   prixTotal: string;
+  /** Valeurs brutes, pour l'Excel : un montant doit y rester un nombre. */
+  q: number;
+  total: number;
 }> {
   const rows: ReturnType<typeof flattenDPGFGroupe> = [];
   for (const [, g] of grouperDpgf(dpgf, groupement)) {
-    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixTotal: fmt(g.total) });
+    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixTotal: fmt(g.total), q: 0, total: g.total });
     for (const a of g.articles) {
       rows.push({
         type: 'article',
@@ -38,6 +45,7 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
         unite: a.ligne.unite,
         quantite: a.ligne.quantite > 0 ? fmt(a.ligne.quantite) : '',
         prixTotal: a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
+        q: a.ligne.quantite, total: a.ligne.prixTotal,
       });
     }
   }
@@ -53,12 +61,15 @@ function flattenDPGF(lots: Lot[]): Array<{
   prixUnitaire: string;
   prixTotal: string;
   type: string;
+  q: number;
+  pu: number;
+  total: number;
 }> {
   const rows: ReturnType<typeof flattenDPGF> = [];
   for (const lot of lots) {
-    rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot' });
+    rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot', q: 0, pu: 0, total: lot.sousTotal });
     for (const chap of lot.chapitres) {
-      rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre' });
+      rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre', q: 0, pu: 0, total: 0 });
       // Descend dans les sous-articles : la version précédente s'arrêtait au
       // premier niveau et faisait disparaître silencieusement tout ce qui se
       // trouvait en dessous de chaque export PDF ou Excel.
@@ -73,6 +84,7 @@ function flattenDPGF(lots: Lot[]): Array<{
             prixUnitaire: ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
             prixTotal: ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
             type: ligne.type,
+            q: ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal,
           });
           if (ligne.children?.length) walk(ligne.children, depth + 1);
         }
@@ -85,33 +97,31 @@ function flattenDPGF(lots: Lot[]): Array<{
 
 // ── DPGF PDF ─────────────────────────────────────────────────────────────────
 
-export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot') {
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+export async function exportDPGFtoPDF(
+  dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
+) {
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
+    loadLogoDataUrl(settings.logoUrl),
   ]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text('DPGF — Décomposition du Prix Global et Forfaitaire', 14, 15);
-  if (projectName) {
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(projectName, 14, 22);
-  }
-  doc.setFontSize(9);
   const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
-  doc.text(`Version ${dpgf.version} — ${new Date(dpgf.dateCreation).toLocaleDateString('fr-FR')}${classement}`, 14, 27);
+  const letterhead = {
+    title: 'DPGF — Décomposition du Prix Global et Forfaitaire',
+    subtitle: projectName,
+    reference: `v${dpgf.version}${classement}`,
+    margin: 14, logo,
+  };
+  const startY = drawAgencyHeader(doc, settings, letterhead);
 
   if (groupement === 'lot') {
     const rows = flattenDPGF(dpgf.lots);
     autoTable(doc, {
-      startY: 32,
+      ...tableauGris(),
+      startY,
       head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
       body: rows.map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
-      headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      bodyStyles: { fontSize: 8 },
       columnStyles: {
         0: { cellWidth: 20 },
         1: { cellWidth: 'auto' },
@@ -120,34 +130,28 @@ export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string, groupeme
         4: { cellWidth: 28, halign: 'right' },
         5: { cellWidth: 28, halign: 'right' },
       },
-      didParseCell: (data) => {
+      didParseCell: (data: any) => {
         const row = rows[data.row.index];
-        if (!row) return;
+        if (!row || data.section !== 'body') return;
         if (row.type === 'lot') {
           data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.fillColor = [200, 220, 240];
+          data.cell.styles.fillColor = TABLEAU_GRIS.groupe;
         } else if (row.type === 'chapitre') {
           data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.fillColor = [235, 240, 248];
+          data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
         } else if (row.type === 'titre') {
-          data.cell.styles.fillColor = [248, 248, 248];
           data.cell.styles.fontStyle = 'italic';
         }
       },
-      foot: [[
-        '', 'TOTAL HT', '', '', '',
-        fmt(dpgf.totalHT) + ' €',
-      ]],
-      footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
+      foot: [['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €']],
     });
   } else {
     const rows = flattenDPGFGroupe(dpgf, groupement);
     autoTable(doc, {
-      startY: 32,
+      ...tableauGris(),
+      startY,
       head: [['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)']],
       body: rows.map(r => [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite, r.prixTotal]),
-      headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      bodyStyles: { fontSize: 8 },
       columnStyles: {
         0: { cellWidth: 18 },
         1: { cellWidth: 'auto' },
@@ -157,52 +161,44 @@ export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string, groupeme
         5: { cellWidth: 20, halign: 'right' },
         6: { cellWidth: 28, halign: 'right' },
       },
-      didParseCell: (data) => {
+      didParseCell: (data: any) => {
         const row = rows[data.row.index];
-        if (row?.type === 'groupe') {
+        if (row?.type === 'groupe' && data.section === 'body') {
           data.cell.styles.fontStyle = 'bold';
-          data.cell.styles.fillColor = [200, 220, 240];
+          data.cell.styles.fillColor = TABLEAU_GRIS.groupe;
         }
       },
       foot: [['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €']],
-      footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
     });
   }
 
+  drawAgencyFooters(doc, settings, letterhead);
   doc.save(`DPGF_${dpgf.titre.replace(/\s+/g, '_')}.pdf`);
 }
 
 // ── Estimation PDF ────────────────────────────────────────────────────────────
 
-export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string) {
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}) {
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
+    loadLogoDataUrl(settings.logoUrl),
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text('ESTIMATION — Récapitulatif par lot', 14, 15);
-  if (projectName) {
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    doc.text(projectName, 14, 22);
-  }
-
-  const lotRows = dpgf.lots.map(lot => [
-    lot.numero,
-    lot.titre,
-    fmt(lot.sousTotal) + ' €',
-    fmt(lot.sousTotal * (1 + dpgf.TVA / 100)) + ' €',
-  ]);
+  const letterhead = { title: 'ESTIMATION — Récapitulatif par lot', subtitle: projectName, margin: 14, logo };
+  const startY = drawAgencyHeader(doc, settings, letterhead);
 
   autoTable(doc, {
-    startY: 28,
+    ...tableauGris(),
+    startY,
     head: [['N°', 'Lot', 'Montant HT', 'Montant TTC']],
-    body: lotRows,
-    headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
+    body: dpgf.lots.map(lot => [
+      lot.numero,
+      lot.titre,
+      fmt(lot.sousTotal) + ' €',
+      fmt(lot.sousTotal * (1 + dpgf.TVA / 100)) + ' €',
+    ]),
+    styles: { fontSize: 9, textColor: TABLEAU_GRIS.texte, cellPadding: 2.5 },
     columnStyles: {
       0: { cellWidth: 15 },
       1: { cellWidth: 'auto' },
@@ -210,102 +206,131 @@ export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string) {
       3: { cellWidth: 35, halign: 'right' },
     },
     foot: [['', 'TOTAL', fmt(dpgf.totalHT) + ' €', fmt(dpgf.totalTTC) + ' €']],
-    footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
   });
 
   const finalY = (doc as any).lastAutoTable.finalY + 8;
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...TABLEAU_GRIS.texte);
   doc.text(`TVA ${dpgf.TVA}% : ${fmt(dpgf.totalTTC - dpgf.totalHT)} €`, 14, finalY);
   doc.setFont('helvetica', 'bold');
   doc.text(`Total TTC : ${fmt(dpgf.totalTTC)} €`, 14, finalY + 6);
 
+  drawAgencyFooters(doc, settings, letterhead);
   doc.save(`Estimation_${dpgf.titre.replace(/\s+/g, '_')}.pdf`);
 }
 
 // ── DPGF Excel ────────────────────────────────────────────────────────────────
 
-export async function exportDPGFtoExcel(dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot') {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
-  const sousTitre = groupement !== 'lot' ? `DPGF v${dpgf.version} — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : `DPGF v${dpgf.version}`;
+export async function exportDPGFtoExcel(
+  dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
+) {
+  const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
+  const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
+  const commun = {
+    nom: 'DPGF', settings, logo,
+    title: 'DPGF — Décomposition du Prix Global et Forfaitaire',
+    subtitle: projectName || dpgf.titre,
+    reference: `v${dpgf.version}${classement}`,
+  };
+  const nombre = (n: number) => (n > 0 ? n : undefined);
 
-  const wsData: any[][] = groupement === 'lot'
-    ? [
-      [projectName || dpgf.titre, '', '', '', '', ''],
-      [sousTitre, '', '', '', '', ''],
-      ['', '', '', '', '', ''],
-      ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)'],
-      ...flattenDPGF(dpgf.lots).map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
-      ['', '', '', '', 'TOTAL HT', fmt(dpgf.totalHT) + ' €'],
-    ]
-    : [
-      [projectName || dpgf.titre, '', '', '', '', '', ''],
-      [sousTitre, '', '', '', '', '', ''],
-      ['', '', '', '', '', '', ''],
-      ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)'],
-      ...flattenDPGFGroupe(dpgf, groupement).map(r => [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite, r.prixTotal]),
-      ['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €'],
-    ];
-
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = groupement === 'lot'
-    ? [{ wch: 10 }, { wch: 50 }, { wch: 10 }, { wch: 12 }, { wch: 15 }, { wch: 15 }]
-    : [{ wch: 10 }, { wch: 42 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(wb, ws, 'DPGF');
-
-  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`);
+  if (groupement === 'lot') {
+    const f = ajouterFeuille(wb, {
+      ...commun,
+      colonnes: [
+        { header: 'N°', width: 10 },
+        { header: 'Désignation', width: 55 },
+        { header: 'Unité', width: 10, align: 'center' },
+        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'P.U. HT (€)', width: 15, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Total HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+      ],
+    });
+    for (const r of flattenDPGF(dpgf.lots)) {
+      const valeurs = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q), nombre(r.pu), nombre(r.total)];
+      if (r.type === 'lot') f.ligne(valeurs, { gras: true, fond: 'groupe' });
+      else if (r.type === 'chapitre') f.ligne(valeurs, { gras: true, fond: 'doux' });
+      else f.ligne(valeurs, r.type === 'titre' ? { italique: true } : {});
+    }
+    f.total(['', 'TOTAL HT', '', '', '', dpgf.totalHT]);
+  } else {
+    const f = ajouterFeuille(wb, {
+      ...commun,
+      colonnes: [
+        { header: 'N°', width: 10 },
+        { header: 'Désignation', width: 45 },
+        { header: 'Lot', width: 24 },
+        { header: 'Localisation', width: 20 },
+        { header: 'Unité', width: 10, align: 'center' },
+        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Total HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+      ],
+    });
+    for (const r of flattenDPGFGroupe(dpgf, groupement)) {
+      const valeurs = [r.numero, r.designation, r.lot, r.localisation, r.unite, nombre(r.q), nombre(r.total)];
+      f.ligne(valeurs, r.type === 'groupe' ? { gras: true, fond: 'groupe' } : {});
+    }
+    f.total(['', 'TOTAL HT', '', '', '', '', dpgf.totalHT]);
+  }
+  await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`);
 }
 
 // ── Estimation Excel ──────────────────────────────────────────────────────────
 
-export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string) {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}) {
+  const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
+  const nombre = (n: number) => (n > 0 ? n : undefined);
 
-  const detailData: any[][] = [
-    [projectName || dpgf.titre],
-    ['ESTIMATION DÉTAILLÉE'],
-    [''],
-    ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT', 'Total HT', `TVA ${dpgf.TVA}%`, 'Total TTC'],
-  ];
-
+  const detail = ajouterFeuille(wb, {
+    nom: 'Détail', settings, logo,
+    title: 'ESTIMATION DÉTAILLÉE',
+    subtitle: projectName || dpgf.titre,
+    colonnes: [
+      { header: 'N°', width: 10 },
+      { header: 'Désignation', width: 50 },
+      { header: 'Unité', width: 10, align: 'center' },
+      { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
+      { header: 'P.U. HT', width: 14, align: 'right', numFmt: FORMAT_NOMBRE },
+      { header: 'Total HT', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+      { header: `TVA ${dpgf.TVA}%`, width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+      { header: 'Total TTC', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+    ],
+  });
   for (const lot of dpgf.lots) {
-    detailData.push([lot.numero, lot.titre, '', '', '', fmt(lot.sousTotal), fmt(lot.sousTotal * dpgf.TVA / 100), fmt(lot.sousTotal * (1 + dpgf.TVA / 100))]);
+    detail.ligne(
+      [lot.numero, lot.titre, '', '', '', lot.sousTotal, lot.sousTotal * dpgf.TVA / 100, lot.sousTotal * (1 + dpgf.TVA / 100)],
+      { gras: true, fond: 'groupe' },
+    );
     for (const chap of lot.chapitres) {
-      detailData.push(['', `  ${chap.numero} ${chap.titre}`, '', '', '', '', '', '']);
+      detail.ligne(['', `${chap.numero} ${chap.titre}`], { gras: true, fond: 'doux' });
       for (const ligne of chap.lignes) {
-        detailData.push([
-          ligne.numero,
-          `    ${ligne.designation}`,
-          ligne.unite,
-          ligne.quantite > 0 ? ligne.quantite : '',
-          ligne.prixUnitaire > 0 ? ligne.prixUnitaire : '',
-          ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
-          '',
-          '',
+        detail.ligne([
+          ligne.numero, `  ${ligne.designation}`, ligne.unite,
+          nombre(ligne.quantite), nombre(ligne.prixUnitaire), nombre(ligne.prixTotal),
         ]);
       }
     }
   }
+  detail.total(['', 'TOTAL', '', '', '', dpgf.totalHT, dpgf.totalTTC - dpgf.totalHT, dpgf.totalTTC]);
 
-  detailData.push(['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT), fmt(dpgf.totalTTC - dpgf.totalHT), fmt(dpgf.totalTTC)]);
+  const recap = ajouterFeuille(wb, {
+    nom: 'Récapitulatif', settings, logo,
+    title: 'ESTIMATION — Récapitulatif par lot',
+    subtitle: projectName || dpgf.titre,
+    paysage: false,
+    colonnes: [
+      { header: 'N° Lot', width: 10 },
+      { header: 'Intitulé', width: 40 },
+      { header: 'Montant HT', width: 16, align: 'right', numFmt: FORMAT_EURO },
+      { header: `TVA ${dpgf.TVA}%`, width: 16, align: 'right', numFmt: FORMAT_EURO },
+      { header: 'Montant TTC', width: 16, align: 'right', numFmt: FORMAT_EURO },
+    ],
+  });
+  for (const l of dpgf.lots) {
+    recap.ligne([l.numero, l.titre, l.sousTotal, l.sousTotal * dpgf.TVA / 100, l.sousTotal * (1 + dpgf.TVA / 100)]);
+  }
+  recap.total(['', 'TOTAL', dpgf.totalHT, dpgf.totalTTC - dpgf.totalHT, dpgf.totalTTC]);
 
-  const wsDet = XLSX.utils.aoa_to_sheet(detailData);
-  wsDet['!cols'] = [{ wch: 10 }, { wch: 45 }, { wch: 10 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 }];
-  XLSX.utils.book_append_sheet(wb, wsDet, 'Détail');
-
-  // Récapitulatif sheet
-  const recapData: any[][] = [
-    ['N° Lot', 'Intitulé', 'Montant HT', `TVA ${dpgf.TVA}%`, 'Montant TTC'],
-    ...dpgf.lots.map(l => [l.numero, l.titre, l.sousTotal, l.sousTotal * dpgf.TVA / 100, l.sousTotal * (1 + dpgf.TVA / 100)]),
-    ['', 'TOTAL', dpgf.totalHT, dpgf.totalTTC - dpgf.totalHT, dpgf.totalTTC],
-  ];
-  const wsRecap = XLSX.utils.aoa_to_sheet(recapData);
-  wsRecap['!cols'] = [{ wch: 10 }, { wch: 40 }, { wch: 15 }, { wch: 15 }, { wch: 15 }];
-  XLSX.utils.book_append_sheet(wb, wsRecap, 'Récapitulatif');
-
-  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`);
+  await enregistrerClasseur(wb, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`);
 }

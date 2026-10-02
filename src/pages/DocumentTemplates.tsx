@@ -139,7 +139,7 @@ export default function DocumentTemplates() {
       const { filled_content } = await apiFetch<{ filled_content: string }>(`/api/document_templates/${generateFor.id}/generate`, {
         method: 'POST', body: JSON.stringify({ variable_values: genValues }),
       });
-      const agency = { agencyName: settings?.agencyName, logoUrl: settings?.logoUrl, address: settings?.address, phone: settings?.phone, email: settings?.email };
+      const agency = settings ?? {};
       const blob = format === 'pdf'
         ? await exportTemplatePdf(generateFor.name, filled_content, agency)
         : await exportTemplateDocx(generateFor.name, filled_content, agency);

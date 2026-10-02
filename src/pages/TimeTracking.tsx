@@ -201,7 +201,7 @@ export default function TimeTracking() {
                 userName: currentUser?.name || 'Utilisateur',
                 weekStartStr, weekEndStr, entries, projectName,
                 totalHours: summary.total_hours,
-                agencySettings: { agencyName: settings?.agencyName, address: settings?.address, phone: settings?.phone, email: settings?.email },
+                agencySettings: settings ?? {},
               })}
               className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700"
             >
@@ -272,7 +272,7 @@ export default function TimeTracking() {
             <div className="flex justify-between items-center flex-wrap gap-2">
               <h3 className="font-bold">{t('time_tracking_matrix_title')}</h3>
               {matrix && (
-                <button onClick={() => exportAdminMatrixExcel(matrix, `${weekStartStr}_${weekEndStr}`)} className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
+                <button onClick={() => exportAdminMatrixExcel(matrix, `${weekStartStr}_${weekEndStr}`, settings ?? {})} className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
                   <IconFileSpreadsheet size={15} /> {t('time_tracking_export_excel')}
                 </button>
               )}
@@ -316,7 +316,7 @@ export default function TimeTracking() {
               <input type="month" className="p-2 border rounded text-sm dark:bg-zinc-900 dark:border-zinc-700" value={monthValue} onChange={e => setMonthValue(e.target.value)} />
               <button
                 disabled={!monthlyRows || monthlyLoading}
-                onClick={() => monthlyRows && exportMonthlySummaryExcel(monthValue, monthlyRows)}
+                onClick={() => monthlyRows && exportMonthlySummaryExcel(monthValue, monthlyRows, settings ?? {})}
                 className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 <IconFileSpreadsheet size={15} /> {t('time_tracking_export_excel')}

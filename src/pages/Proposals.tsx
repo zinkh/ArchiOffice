@@ -1216,7 +1216,7 @@ export default function Proposals() {
                       </div>
                       <button 
                         type="button"
-                        onClick={() => exportFeeDistributionToXlsx(newProposal.fee_distribution, newProposal.specialties_list, contacts, newProposal.vat_rate, newProposal.reference || 'Projet')}
+                        onClick={() => exportFeeDistributionToXlsx(newProposal.fee_distribution, newProposal.specialties_list, contacts, newProposal.vat_rate, newProposal.reference || 'Projet', settings ?? {})}
                         className="text-[0.6875rem] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
                       >
                         <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}

@@ -167,3 +167,39 @@ export function drawAgencyFooters(pdf: any, settings: AgencySettings, opts: Lett
     pdf.text(`P${p}|${total}`, pageW - margin, pageH - 7, { align: 'right' });
   }
 }
+
+// ── Tableaux : nuances de gris, comme le reste de la charte ───────────────────
+// Partagés par les PDF qui passaient jusqu'ici par un bleu propre à chacun.
+
+export const TABLEAU_GRIS = {
+  entete: [60, 60, 60] as [number, number, number],
+  groupe: [225, 225, 225] as [number, number, number],
+  sousGroupe: [240, 240, 240] as [number, number, number],
+  alterne: [243, 244, 246] as [number, number, number],
+  texte: GRIS_TEXTE,
+};
+
+/** Options autoTable communes : entête gris foncé, lignes alternées, pied de page libre en bas. */
+export function tableauGris(margin = 14): Record<string, any> {
+  return {
+    margin: { left: margin, right: margin, bottom: 18 },
+    styles: { fontSize: 8, textColor: TABLEAU_GRIS.texte, cellPadding: 2 },
+    headStyles: { fillColor: TABLEAU_GRIS.entete, textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: TABLEAU_GRIS.alterne },
+    footStyles: { fillColor: TABLEAU_GRIS.entete, textColor: 255, fontStyle: 'bold' },
+  };
+}
+
+/**
+ * Réglages du cabinet pour un PDF produit hors d'un composant qui les a déjà
+ * (générateurs au niveau d'un module). Meilleur effort : sans réponse, le
+ * document part avec un en-tête vide plutôt que de ne pas partir.
+ */
+export async function fetchAgencySettings(): Promise<AgencySettings> {
+  try {
+    const r = await fetch('/api/settings');
+    return r.ok ? ((await r.json()) ?? {}) : {};
+  } catch {
+    return {};
+  }
+}

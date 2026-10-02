@@ -312,12 +312,37 @@ export default function Contacts() {
     }));
   };
 
-  const handleExport = () => {
-    import('xlsx').then(XLSX => {
-      const worksheet = XLSX.utils.json_to_sheet(contacts);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Contacts');
-      XLSX.writeFile(workbook, 'contacts.xlsx');
+  const handleExport = async () => {
+    const { exporterListe } = await import('../lib/xlsxLetterhead');
+    let agence = {};
+    try { agence = await apiFetch<any>('/api/settings') ?? {}; } catch { /* le classeur part sans l'en-tête */ }
+    const adresse = (c: any) => [c.address_work_street, [c.address_work_zip, c.address_work_city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+    await exporterListe({
+      fichier: 'contacts.xlsx',
+      nom: 'Contacts',
+      title: 'Contacts',
+      subtitle: `${contacts.length} contact${contacts.length > 1 ? 's' : ''}`,
+      settings: agence,
+      colonnes: [
+        { cle: 'societe', header: 'Société', width: 28 },
+        { cle: 'prenom', header: 'Prénom', width: 16 },
+        { cle: 'nom', header: 'Nom', width: 18 },
+        { cle: 'fonction', header: 'Fonction', width: 20 },
+        { cle: 'categorie', header: 'Catégorie', width: 16 },
+        { cle: 'corps', header: "Corps d'état", width: 24 },
+        { cle: 'email', header: 'Email', width: 30 },
+        { cle: 'telephone', header: 'Téléphone', width: 16 },
+        { cle: 'mobile', header: 'Mobile', width: 16 },
+        { cle: 'adresse', header: 'Adresse', width: 38 },
+        { cle: 'siret', header: 'SIRET', width: 18 },
+      ],
+      lignes: contacts.map((c: any) => ({
+        societe: c.company_name || '', prenom: c.first_name || '', nom: c.last_name || '',
+        fonction: c.job_title || '', categorie: c.category || '',
+        corps: (c.corps_etat || []).join(', '),
+        email: c.email || c.email_work || '', telephone: c.phone || c.phone_work || '',
+        mobile: c.phone_mobile || '', adresse: adresse(c), siret: c.siret || '',
+      })),
     });
   };
 

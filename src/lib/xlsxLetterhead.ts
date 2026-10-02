@@ -50,9 +50,14 @@ export interface FeuilleOptions {
   reference?: string;
   colonnes: Colonne[];
   paysage?: boolean;
+  /** Lignes de texte sous l'en-tête et avant le tableau (cadre d'un marché, consigne...). */
+  infos?: string[];
+  /** Onglet masqué (feuille technique lue par un import). */
+  masque?: boolean;
 }
 
-export type Cellule = string | number | null | undefined;
+/** `{ f }` : une formule, pour les classeurs qui doivent rester des calculettes. */
+export type Cellule = string | number | null | undefined | { f: string };
 
 export interface StyleLigne {
   gras?: boolean;
@@ -64,6 +69,8 @@ export interface StyleLigne {
 
 export interface Feuille {
   ws: Worksheet;
+  /** Numéro de la ligne d'entête de tableau : les lignes écrites ensuite le suivent une à une. */
+  entete: number;
   ligne: (valeurs: Cellule[], style?: StyleLigne) => void;
   /** Ligne de groupe (lot, corps d'état...) : fond gris, texte gras, sur toute la largeur. */
   groupe: (libelle: string) => void;
@@ -100,29 +107,41 @@ export async function nouveauClasseur(): Promise<Workbook> {
 export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   const { settings, colonnes } = opts;
   const nbCol = Math.max(colonnes.length, 1);
-  // Largeur du logo, connue avant la mise en place des colonnes : un tableau
-  // trop étroit pour porter logo + coordonnées + titre place le titre dessous.
+  // ── Géométrie de l'en-tête, calculée avant de poser quoi que ce soit ──────
+  // Les cellules n'ont pas de largeur variable : le logo doit tenir à gauche du
+  // texte, et le titre (aligné à droite) ne doit pas passer sur le nom du cabinet.
+  const largeurs = colonnes.map(c => c.width);
   const largeurLogo = opts.logo ? Math.round((opts.logo.width / opts.logo.height) * LOGO_HAUTEUR_PX) : 0;
-  const largeurAvantTitre = colonnes.slice(0, -1).reduce((t, c) => t + c.width * PX_PAR_CARACTERE, 0);
-  const texteSurTitre = nbCol < 3 || largeurAvantTitre < largeurLogo + 160;
-  const base = LIGNES_ENTETE + (texteSurTitre ? LIGNES_TITRE_SOUS_ENTETE : 0);
+  let colTexte = 1; // 1-based : première colonne qui porte le texte du cabinet
+  if (opts.logo) {
+    let x = 0;
+    let idx = 0;
+    while (idx < nbCol && x < largeurLogo + 10) { x += largeurs[idx] * PX_PAR_CARACTERE; idx++; }
+    // Le logo dépasse toutes les colonnes sauf la dernière : on élargit la première.
+    if (idx >= nbCol && nbCol > 1) {
+      largeurs[0] = Math.ceil((largeurLogo + 10) / PX_PAR_CARACTERE);
+      idx = 1;
+    }
+    colTexte = Math.min(idx + 1, nbCol);
+  }
+  const largeurDispo = largeurs.slice(colTexte - 1).reduce((t, w) => t + w * PX_PAR_CARACTERE, 0);
+  const largeurNom = (settings.agencyName || '').length * 8.2;
+  const largeurTitre = opts.title.length * 8.8;
+  const texteSurTitre = nbCol < 2 || colTexte >= nbCol || largeurNom + largeurTitre + 40 > largeurDispo;
+  const nbInfos = opts.infos?.length ?? 0;
+  const base = LIGNES_ENTETE + (texteSurTitre ? LIGNES_TITRE_SOUS_ENTETE : 0) + nbInfos;
   const ws = wb.addWorksheet(nomOnglet(opts.nom), {
+    state: opts.masque ? 'hidden' : 'visible',
     views: [{ showGridLines: false, state: 'frozen', ySplit: base + 1 }],
   });
-  colonnes.forEach((c, i) => { ws.getColumn(i + 1).width = c.width; });
+  largeurs.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
 
   // ── En-tête : logo à gauche, coordonnées à côté, titre à droite ───────────
-  let colTexte = 1;
   if (opts.logo) {
     try {
       const id = wb.addImage({ base64: opts.logo.dataUrl, extension: 'png' });
       ws.addImage(id, { tl: { col: 0, row: 0 }, ext: { width: largeurLogo, height: LOGO_HAUTEUR_PX } });
-      // Le texte démarre à la première colonne qui commence après le logo.
-      let x = 0;
-      colTexte = 0;
-      while (colTexte < nbCol && x < largeurLogo + 10) { x += colonnes[colTexte].width * PX_PAR_CARACTERE; colTexte++; }
-      colTexte = Math.min(colTexte + 1, nbCol);
-    } catch { colTexte = 1; }
+    } catch { /* un logo illisible ne doit pas empêcher l'export */ }
   }
   const colTitre = nbCol;
 
@@ -155,6 +174,14 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
     ws.getCell(4, c).border = { bottom: { style: 'thin', color: { argb: GRIS_FILET } } };
   }
   ws.getRow(LIGNES_ENTETE).height = texteSurTitre ? 20 : 8;
+  // Lignes d'information : fusionnées sur la largeur du tableau, en gris doux.
+  const premiereInfo = LIGNES_ENTETE + (texteSurTitre ? LIGNES_TITRE_SOUS_ENTETE : 0);
+  (opts.infos ?? []).forEach((texte, i) => {
+    const r = premiereInfo + i;
+    cellule(r, 1, texte, 8, false, GRIS_DOUX);
+    if (nbCol > 1) ws.mergeCells(r, 1, r, nbCol);
+    ws.getRow(r).height = 14;
+  });
   ws.getRow(base).height = 8;
 
   // ── Entête du tableau ──────────────────────────────────────────────────────
@@ -178,7 +205,11 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
     margins: { left: 0.55, right: 0.55, top: 0.6, bottom: 0.75, header: 0.3, footer: 0.35 },
     printTitlesRow: `${base + 1}:${base + 1}`,
   };
-  const pied = echapperPied(agencyFooterLine(settings)).slice(0, 180);
+  // Le pied d'une feuille Excel tient en 255 caractères : on retire des mentions
+  // entières plutôt que de couper la dernière en plein milieu.
+  const mentions = agencyFooterLine(settings).split('  ·  ');
+  while (mentions.length > 1 && mentions.join('  ·  ').length > 170) mentions.pop();
+  const pied = echapperPied(mentions.join('  ·  '));
   ws.headerFooter = {
     oddFooter: `&L&"Calibri,Regular"&7 ${pied}&R&"Calibri,Bold"&8 P&P|&N`,
   };
@@ -190,14 +221,15 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
     colonnes.forEach((col, i) => {
       const cell = row.getCell(i + 1);
       const v = valeurs[i];
-      cell.value = v === undefined || v === null || v === '' ? null : v;
+      cell.value = v === undefined || v === null || v === '' ? null
+        : typeof v === 'object' ? { formula: v.f } : v;
       cell.font = {
         name: 'Calibri', size: 9,
         bold: !!style.gras, italic: !!style.italique,
         color: { argb: entetePlein ? 'FFFFFFFF' : GRIS_TEXTE },
       };
       cell.alignment = { horizontal: col.align ?? 'left', vertical: 'top', wrapText: col.align !== 'right' };
-      if (typeof v === 'number' && col.numFmt) cell.numFmt = col.numFmt;
+      if ((typeof v === 'number' || typeof v === 'object') && v !== null && col.numFmt) cell.numFmt = col.numFmt;
       cell.border = { bottom: { style: 'hair', color: { argb: GRIS_FILET } } };
     });
     return row;
@@ -209,6 +241,7 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
 
   return {
     ws,
+    entete: base + 1,
     ligne(valeurs, style = {}) {
       const row = ecrire(valeurs, style);
       if (style.fond === 'groupe') peindre(row, GRIS_GROUPE);
@@ -238,4 +271,34 @@ export async function enregistrerClasseur(wb: Workbook, nomFichier: string): Pro
     new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
     nomFichier,
   );
+}
+
+export interface ColonneListe extends Colonne {
+  /** Clé de la valeur dans chaque ligne. */
+  cle: string;
+}
+
+/**
+ * Export d'une simple liste (annuaire, projets, appels d'offres...) : un
+ * classeur à une feuille sous l'en-tête du cabinet. Les lignes rendent leurs
+ * valeurs telles quelles, un montant restant un nombre.
+ */
+export async function exporterListe(opts: {
+  fichier: string;
+  nom: string;
+  title: string;
+  subtitle?: string;
+  settings: AgencySettings;
+  colonnes: ColonneListe[];
+  lignes: Record<string, Cellule>[];
+  paysage?: boolean;
+}): Promise<void> {
+  const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(opts.settings)]);
+  const f = ajouterFeuille(wb, {
+    nom: opts.nom, settings: opts.settings, logo,
+    title: opts.title, subtitle: opts.subtitle,
+    colonnes: opts.colonnes, paysage: opts.paysage,
+  });
+  for (const ligne of opts.lignes) f.ligne(opts.colonnes.map(c => ligne[c.cle]));
+  await enregistrerClasseur(wb, opts.fichier);
 }

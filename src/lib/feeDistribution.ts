@@ -5,6 +5,11 @@
 // les deux doivent calculer exactement de la même façon, donc une seule
 // implémentation plutôt que deux qui dérivent avec le temps.
 import type { Contact } from '../types';
+import type { AgencySettings } from './proposalExport';
+import {
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO,
+  type Cellule, type Colonne, type StyleLigne,
+} from './xlsxLetterhead';
 
 export interface FeeDistributionMission {
   id: string;
@@ -71,18 +76,23 @@ export interface FeeDistributionSpecialty {
   contact_id?: string;
 }
 
-/** Exporte la grille de répartition en xlsx, formules incluses — mêmes colonnes que FeeDistributionGrid. */
+/**
+ * Exporte la grille de répartition en xlsx, formules incluses — mêmes colonnes
+ * que FeeDistributionGrid. Le classeur reste une calculette (le solde, le
+ * relatif et les sous-totaux se recalculent) sous l'en-tête du cabinet : les
+ * formules visent donc des lignes décalées par cet en-tête, d'où le compteur
+ * de lignes tenu ici plutôt qu'un rang déduit du tableau.
+ */
 export async function exportFeeDistributionToXlsx(
   feeDistribution: string | undefined,
   specialtiesList: FeeDistributionSpecialty[] | undefined,
   contacts: Contact[],
   vatRate: number | undefined,
   filenameLabel: string,
+  settings: AgencySettings = {},
 ): Promise<void> {
   if (!feeDistribution) return;
   try {
-    const XLSX = await import('xlsx');
-    const { saveAs } = await import('file-saver');
     const data = JSON.parse(feeDistribution);
     const specialties = specialtiesList || [];
     const selectedContacts = specialties.map(s => {
@@ -93,15 +103,26 @@ export async function exportFeeDistributionToXlsx(
       };
     }).filter(c => c.id);
 
-    const aoa: any[][] = [];
-
-    const h1: any[] = ["Désignation", "Montant HT", "Rel %", "Solde", "Architecte", ""];
-    selectedContacts.forEach(c => h1.push(c.name, ""));
-    aoa.push(h1);
-
-    const h2: any[] = ["", "", "", "", "%", "€"];
-    selectedContacts.forEach(() => h2.push("%", "€"));
-    aoa.push(h2);
+    const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
+    const pct = '0.##';
+    const colonnes: Colonne[] = [
+      { header: 'Désignation', width: 36 },
+      { header: 'Montant HT', width: 16, align: 'right', numFmt: FORMAT_EURO },
+      { header: 'Rel %', width: 9, align: 'right', numFmt: pct },
+      { header: 'Solde', width: 14, align: 'right', numFmt: FORMAT_EURO },
+      { header: 'Architecte %', width: 12, align: 'right', numFmt: pct },
+      { header: 'Architecte €', width: 14, align: 'right', numFmt: FORMAT_EURO },
+    ];
+    selectedContacts.forEach(c => {
+      colonnes.push({ header: `${c.name} %`, width: 12, align: 'right', numFmt: pct });
+      colonnes.push({ header: `${c.name} €`, width: 14, align: 'right', numFmt: FORMAT_EURO });
+    });
+    const f = ajouterFeuille(wb, {
+      nom: 'Répartition Honoraires', settings, logo,
+      title: 'Répartition des honoraires',
+      subtitle: filenameLabel,
+      colonnes,
+    });
 
     const getCol = (idx: number) => {
       let letter = '';
@@ -120,23 +141,23 @@ export async function exportFeeDistributionToXlsx(
       { label: "Missions complémentaires", category: "Missions complémentaires" },
     ];
 
-    let currentRow = 2; // Rows already in aoa
-    const baseSubtotalRowRef = { row: 0 };
+    // Numéro de la dernière ligne écrite : la suivante porte ce numéro + 1.
+    let ligne = f.entete;
+    const ecrire = (valeurs: Cellule[], style?: StyleLigne) => { f.ligne(valeurs, style); ligne++; };
+    const sousTotaux: number[] = [];
+    let baseSubtotalRow = 0;
+    // Lignes de mission dont la colonne « Rel % » (part dans le total de la mission
+    // de base) attend la ligne du sous-total, connue seulement après la première catégorie.
+    const lignesRelatives: number[] = [];
 
     categories.forEach((cat) => {
-      aoa.push([cat.label]);
-      currentRow++;
-
+      ecrire([cat.label], { gras: true, fond: 'doux' });
       const missions = data.missions.filter((m: any) => m.category === cat.category);
-      const startRow = currentRow + 1;
+      const startRow = ligne + 1;
 
       missions.forEach((m: any) => {
-        currentRow++;
-        const r = currentRow;
-        const rowData: any[] = [m.name];
-
-        rowData.push(m.amount || 0);
-        rowData.push(0);
+        const r = ligne + 1;
+        const rowData: Cellule[] = [m.name, m.amount || 0, 0];
 
         let soldeFormula = `B${r}*(100-(${getCol(4)}${r}`;
         selectedContacts.forEach((_, i) => {
@@ -149,72 +170,45 @@ export async function exportFeeDistributionToXlsx(
         rowData.push({ f: `B${r}*E${r}/100` });
 
         selectedContacts.forEach((c, i) => {
-          const pct = m.percentages[c.id as string] || 0;
-          rowData.push(pct);
+          rowData.push(m.percentages[c.id as string] || 0);
           rowData.push({ f: `B${r}*${getCol(6 + i * 2)}${r}/100` });
         });
 
-        aoa.push(rowData);
+        lignesRelatives.push(r);
+        ecrire(rowData);
       });
 
-      currentRow++;
-      const subRowIdx = currentRow;
-      if (cat.category === "Mission base") baseSubtotalRowRef.row = subRowIdx;
+      const subRowIdx = ligne + 1;
+      if (cat.category === "Mission base") baseSubtotalRow = subRowIdx;
+      sousTotaux.push(subRowIdx);
 
-      const subRow: any[] = [`Sous-total ${cat.label}`];
+      const subRow: Cellule[] = [`Sous-total ${cat.label}`];
       subRow.push({ f: `SUM(B${startRow}:B${subRowIdx - 1})` });
       subRow.push({ f: `SUM(C${startRow}:C${subRowIdx - 1})` });
       subRow.push({ f: `SUM(D${startRow}:D${subRowIdx - 1})` });
       subRow.push("");
       subRow.push({ f: `SUM(F${startRow}:F${subRowIdx - 1})` });
-
       selectedContacts.forEach((_, i) => {
         subRow.push("");
         subRow.push({ f: `SUM(${getCol(7 + i * 2)}${startRow}:${getCol(7 + i * 2)}${subRowIdx - 1})` });
       });
-
-      aoa.push(subRow);
-      aoa.push([]);
-      currentRow++;
+      ecrire(subRow, { gras: true, fond: 'groupe' });
+      f.vide(); ligne++;
     });
 
-    const baseSubtotalRow = baseSubtotalRowRef.row;
-    let rowPtr = 2;
-    categories.forEach(cat => {
-      rowPtr++;
-      const missions = data.missions.filter((m: any) => m.category === cat.category);
-      missions.forEach(() => {
-        rowPtr++;
-        aoa[rowPtr - 1][2] = { f: `B${rowPtr}/$B$${baseSubtotalRow}*100` };
-      });
-      rowPtr++;
-      rowPtr++;
-    });
+    for (const row of lignesRelatives) {
+      const cell = f.ws.getRow(row).getCell(3);
+      cell.value = { formula: `B${row}/$B$${baseSubtotalRow}*100` };
+      cell.numFmt = pct;
+    }
 
-    const subtotalRows: number[] = [];
-    aoa.forEach((row, i) => {
-      if (row[0] && typeof row[0] === 'string' && row[0].startsWith("Sous-total")) {
-        subtotalRows.push(i + 1);
-      }
-    });
-
-    const htSumFormula = subtotalRows.map(r => `B${r}`).join("+");
-    aoa.push(["TOTAL GENERAL HT", { f: htSumFormula }]);
-    currentRow++;
-
+    const htSumFormula = sousTotaux.map(r => `B${r}`).join("+");
+    f.total(["TOTAL GENERAL HT", { f: htSumFormula }]); ligne++;
     const vat = vatRate || 20;
-    aoa.push([`TVA (${vat}%)`, { f: `B${currentRow}*${vat}/100` }]);
-    currentRow++;
+    f.ligne([`TVA (${vat}%)`, { f: `B${ligne}*${vat}/100` }]); ligne++;
+    f.total(["TOTAL GENERAL TTC", { f: `B${ligne - 1}+B${ligne}` }]);
 
-    aoa.push(["TOTAL GENERAL TTC", { f: `B${currentRow - 1}+B${currentRow}` }]);
-
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Répartition Honoraires");
-
-    const excelBuffer = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
-    const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    saveAs(blob, `Repartition_Honoraires_${filenameLabel || 'Projet'}.xlsx`);
+    await enregistrerClasseur(wb, `Repartition_Honoraires_${filenameLabel || 'Projet'}.xlsx`);
   } catch (e) {
     console.error("Export failed:", e);
   }

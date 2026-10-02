@@ -53,6 +53,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offlinePrefetch';
@@ -1120,34 +1121,35 @@ export default function ProjectDetail() {
       aleas: "Aléas", autres: "Autres",
     };
 
-    // Header
-    doc.setFillColor(32, 107, 196);
-    doc.rect(0, 0, W, 30, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-    doc.text("AVENANT AU CONTRAT DE MAÎTRISE D'ŒUVRE", margin, 12);
-    doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-    doc.text(`N° Avenant : ${os.os_number}`, margin, 21);
-    doc.text(`Date : ${os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}`, W - margin, 21, { align: 'right' });
+    const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
+    const GRIS_DOUX: [number, number, number] = [107, 114, 128];
+    const GRIS_FOND: [number, number, number] = [243, 244, 246];
 
-    // Sub-header
-    doc.setFillColor(245, 247, 251);
-    doc.rect(0, 30, W, 12, 'F');
-    doc.setTextColor(80, 100, 130); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
-    doc.text(`Projet : ${projectName}`, margin, 38);
-    doc.text(TYPE_LABELS[os.objet || ''] || (os.objet || 'Avenant'), W - margin, 38, { align: 'right' });
+    // En-tête et pied du cabinet, comme les autres documents.
+    const agence = await fetchAgencySettings();
+    const logo = await loadLogoDataUrl(agence.logoUrl);
+    const letterhead = {
+      title: "Avenant au contrat de maîtrise d'œuvre",
+      subtitle: `N° Avenant : ${os.os_number}`,
+      reference: os.date ? new Date(os.date).toLocaleDateString('fr-FR') : undefined,
+      margin, logo,
+    };
+    const headerEnd = drawAgencyHeader(doc, agence, letterhead);
+    doc.setTextColor(...GRIS_DOUX); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.text(`Projet : ${projectName}`, margin, headerEnd + 1);
+    doc.text(TYPE_LABELS[os.objet || ''] || (os.objet || 'Avenant'), W - margin, headerEnd + 1, { align: 'right' });
 
-    let y = 50;
+    let y = headerEnd + 9;
     const section = (title: string) => {
-      doc.setFillColor(240, 245, 255);
+      doc.setFillColor(...GRIS_FOND);
       doc.rect(margin, y, W - 2 * margin, 7, 'F');
-      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(32, 107, 196);
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...GRIS_TEXTE);
       doc.text(title, margin + 3, y + 5); y += 11;
     };
     const row = (label: string, value: string, x = margin, w = W - 2 * margin) => {
-      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(120, 130, 150);
+      doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(...GRIS_DOUX);
       doc.text(label.toUpperCase(), x, y);
-      doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 40);
+      doc.setFont('helvetica', 'normal'); doc.setTextColor(...GRIS_TEXTE);
       const lines = doc.splitTextToSize(value || '—', w - 2);
       doc.text(lines, x, y + 5); y += 5 + lines.length * 4 + 3;
     };
@@ -1178,10 +1180,10 @@ export default function ProjectDetail() {
         ['Nouveaux honoraires révisés', honorairesInitiaux + cumulAvenants > 0 ? new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(honorairesInitiaux + cumulAvenants) : '—'],
       ],
       styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255 },
       columnStyles: { 1: { halign: 'right', fontStyle: 'bold' } },
       bodyStyles: { fillColor: false },
-      alternateRowStyles: { fillColor: [248, 250, 255] },
+      alternateRowStyles: { fillColor: GRIS_FOND },
     });
     y = (doc as any).lastAutoTable.finalY + 8;
 
@@ -1195,9 +1197,9 @@ export default function ProjectDetail() {
     // Signatures
     if (y > 240) { doc.addPage(); y = 20; }
     y += 8;
-    doc.setFillColor(245, 247, 251);
+    doc.setFillColor(...GRIS_FOND);
     doc.rect(margin, y, W - 2 * margin, 40, 'F');
-    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(60, 70, 90);
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(...GRIS_TEXTE);
     doc.text('SIGNATURES', W / 2, y + 7, { align: 'center' });
     const sigY = y + 15;
     doc.setFontSize(8); doc.setFont('helvetica', 'normal');
@@ -1207,11 +1209,7 @@ export default function ProjectDetail() {
       doc.text(os.date_signature ? `Signé le : ${new Date(os.date_signature).toLocaleDateString('fr-FR')}` : 'Date et signature :', x + 5, sigY + 12);
     });
 
-    const n = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= n; i++) {
-      doc.setPage(i); doc.setFontSize(7); doc.setTextColor(160, 170, 185);
-      doc.text(`Avenant N° ${os.os_number} — ${projectName} — Page ${i}/${n}`, W / 2, 292, { align: 'center' });
-    }
+    drawAgencyFooters(doc, agence, letterhead);
     doc.save(`Avenant_${os.os_number.replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}.pdf`);
   };
 
@@ -1296,19 +1294,18 @@ export default function ProjectDetail() {
       import('jspdf-autotable'),
     ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    doc.setFillColor(30, 64, 175);
-    doc.rect(0, 0, 210, 28, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-    doc.text('ORDRE DE SERVICE', 14, 12);
-    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-    doc.text(`N° ${os.os_number}`, 14, 20);
-    doc.text(`Projet : ${project?.name ?? ''}`, 80, 14);
-    doc.text(`Date : ${os.date_emission ?? os.date ?? ''}`, 80, 20);
+    // En-tête et pied du cabinet, comme les autres documents.
+    const agence = await fetchAgencySettings();
+    const logo = await loadLogoDataUrl(agence.logoUrl);
     const statusLabels: Record<string, string> = { draft: 'Brouillon', submitted: 'Émis', approved: 'AR reçu', rejected: 'Annulé' };
-    doc.text(`Statut : ${statusLabels[os.status] ?? os.status}`, 80, 26);
-    doc.setTextColor(30, 30, 30);
-    let y = 36;
+    const letterhead = {
+      title: 'Ordre de service',
+      subtitle: `N° ${os.os_number}${project?.name ? ` — ${project.name}` : ''}`,
+      reference: `${statusLabels[os.status] ?? os.status}${os.date_emission ?? os.date ? ` · ${os.date_emission ?? os.date}` : ''}`,
+      margin: 14, logo,
+    };
+    doc.setTextColor(17, 24, 39);
+    let y = drawAgencyHeader(doc, agence, letterhead);
     autoTable(doc, {
       startY: y,
       head: [['Parties', '']],
@@ -1318,7 +1315,7 @@ export default function ProjectDetail() {
         ['Lot', os.lot ?? '—'],
       ],
       theme: 'grid',
-      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255, fontSize: 9 },
       bodyStyles: { fontSize: 9 },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 70 } },
       margin: { left: 14, right: 14 },
@@ -1340,7 +1337,7 @@ export default function ProjectDetail() {
         ['Montant accepté HT', os.montant_devis_accepte != null ? `${Number(os.montant_devis_accepte).toLocaleString('fr-FR')} €` : '—'],
       ],
       theme: 'striped',
-      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontSize: 9 },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255, fontSize: 9 },
       bodyStyles: { fontSize: 9 },
       columnStyles: { 0: { fontStyle: 'bold', cellWidth: 70 } },
       margin: { left: 14, right: 14 },
@@ -1348,7 +1345,7 @@ export default function ProjectDetail() {
     y = (doc as any).lastAutoTable.finalY + 10;
     if (y > 220) { doc.addPage(); y = 20; }
     const sigY = Math.max(y, 230);
-    doc.setFillColor(245, 245, 245);
+    doc.setFillColor(243, 244, 246);
     doc.rect(14, sigY, 82, 30, 'F'); doc.rect(114, sigY, 82, 30, 'F');
     doc.setFontSize(8); doc.setFont('helvetica', 'bold');
     doc.text('Maître d\'œuvre (Émetteur)', 55, sigY + 6, { align: 'center' });
@@ -1359,17 +1356,13 @@ export default function ProjectDetail() {
     doc.text(`Date d'AR : ${os.date_ar ?? '_______'}`, 118, sigY + 22);
     if (os.status === 'approved' && os.date_ar) {
       const arY = sigY + 36;
-      doc.setFillColor(240, 253, 244); doc.rect(14, arY, 182, 20, 'F');
-      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(22, 163, 74);
+      doc.setFillColor(243, 244, 246); doc.rect(14, arY, 182, 20, 'F');
+      doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39);
       doc.text('ACCUSÉ DE RÉCEPTION', 14, arY + 7);
       doc.setFont('helvetica', 'normal'); doc.setTextColor(30, 30, 30);
       doc.text(`Reçu le : ${os.date_ar}  |  Exécution prévue le : ${os.date_execution ?? '—'}`, 14, arY + 14);
     }
-    const n = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= n; i++) {
-      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
-      doc.text(`OS N° ${os.os_number} — ${project?.name ?? ''} — Page ${i}/${n}`, 105, 290, { align: 'center' });
-    }
+    drawAgencyFooters(doc, agence, letterhead);
     doc.save(`OS_${os.os_number}_${(project?.name ?? '').replace(/\s+/g, '_')}.pdf`);
   };
 
@@ -1379,17 +1372,18 @@ export default function ProjectDetail() {
       import('jspdf-autotable'),
     ]);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const blue: [number, number, number] = [30, 64, 175];
-    // Header
-    doc.setFillColor(...blue);
-    doc.rect(0, 0, 210, 32, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16); doc.setFont('helvetica', 'bold');
-    doc.text('PROCÈS-VERBAL DE RÉCEPTION', 105, 13, { align: 'center' });
-    doc.setFontSize(10); doc.setFont('helvetica', 'normal');
-    doc.text(`${rec.reference_pv ? `Réf. : ${rec.reference_pv}  |  ` : ''}${rec.type === 'definitive' ? 'Réception Définitive' : 'Réception Provisoire'}`, 105, 22, { align: 'center' });
-    doc.setTextColor(30, 30, 30);
-    let y = 40;
+    const blue: [number, number, number] = [60, 60, 60];
+    // En-tête et pied du cabinet, comme les autres documents.
+    const agence = await fetchAgencySettings();
+    const logo = await loadLogoDataUrl(agence.logoUrl);
+    const letterhead = {
+      title: 'Procès-verbal de réception',
+      subtitle: projectName,
+      reference: `${rec.reference_pv ? `Réf. : ${rec.reference_pv} · ` : ''}${rec.type === 'definitive' ? 'Réception définitive' : 'Réception provisoire'}`,
+      margin: 14, logo,
+    };
+    doc.setTextColor(17, 24, 39);
+    let y = drawAgencyHeader(doc, agence, letterhead) + 2;
     // Section opération
     doc.setFontSize(11); doc.setFont('helvetica', 'bold');
     doc.text('Opération', 14, y); y += 5;
@@ -1475,7 +1469,7 @@ export default function ProjectDetail() {
     // Signatures
     if (y > 230) { doc.addPage(); y = 20; }
     const sigY = Math.max(y + 10, 240);
-    doc.setFillColor(245, 245, 245);
+    doc.setFillColor(243, 244, 246);
     doc.rect(14, sigY, 82, 30, 'F'); doc.rect(114, sigY, 82, 30, 'F');
     doc.setFontSize(8); doc.setFont('helvetica', 'bold');
     doc.text('Maître d\'œuvre (MOE)', 55, sigY + 7, { align: 'center' });
@@ -1485,12 +1479,7 @@ export default function ProjectDetail() {
     doc.text('Signature & cachet :', 118, sigY + 17);
     doc.text(`Date : ${new Date(rec.date).toLocaleDateString('fr-FR')}`, 18, sigY + 25);
     doc.text(`Date : ${new Date(rec.date).toLocaleDateString('fr-FR')}`, 118, sigY + 25);
-    // Footer
-    const n = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= n; i++) {
-      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(150);
-      doc.text(`${rec.reference_pv || 'PV'} — ${projectName} — Page ${i}/${n}`, 105, 290, { align: 'center' });
-    }
+    drawAgencyFooters(doc, agence, letterhead);
     doc.save(`PV_${(rec.reference_pv || rec.id).replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}.pdf`);
   };
 

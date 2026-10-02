@@ -16,6 +16,7 @@ import type { OrdreDeService, Project } from '../types';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { formatCurrency } from '../lib/utils';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 
 // ── Status config
 const STATUS_CONFIG = {
@@ -55,42 +56,41 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210, margin = 20;
+  const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
+  const GRIS_DOUX: [number, number, number] = [107, 114, 128];
+  const GRIS_FOND: [number, number, number] = [243, 244, 246];
 
-  // Header band
-  doc.setFillColor(32, 107, 196);
-  doc.rect(0, 0, W, 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
-  doc.text('ORDRE DE SERVICE', margin, 12);
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`N° OS : ${os.os_number}`, margin, 20);
-  if (os.date) doc.text(`Date : ${new Date(os.date).toLocaleDateString('fr-FR')}`, W - margin, 20, { align: 'right' });
-
-  // Status badge area
+  // En-tête et pied du cabinet, comme les autres documents.
+  const settings = await fetchAgencySettings();
+  const logo = await loadLogoDataUrl(settings.logoUrl);
   const statusCfg = STATUS_CONFIG[os.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.draft;
-  doc.setFillColor(245, 247, 251);
-  doc.rect(0, 28, W, 12, 'F');
-  doc.setTextColor(100, 120, 150);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`STATUT : ${statusCfg.label.toUpperCase()}`, margin, 36);
-  if (project) doc.text(`AFFAIRE : ${project.name}`, W / 2, 36, { align: 'center' });
+  const letterhead = {
+    title: 'Ordre de service',
+    subtitle: `N° OS : ${os.os_number}${os.date ? ` · ${new Date(os.date).toLocaleDateString('fr-FR')}` : ''}`,
+    reference: `Statut : ${statusCfg.label}`,
+    margin, logo,
+  };
+  const headerEnd = drawAgencyHeader(doc, settings, letterhead);
+  if (project) {
+    doc.setTextColor(...GRIS_DOUX);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`AFFAIRE : ${project.name}`, margin, headerEnd + 1);
+  }
 
-  let y = 48;
+  let y = headerEnd + 8;
 
   // Parties
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(...GRIS_FOND);
   doc.rect(margin, y, (W - 2 * margin) / 2 - 3, 28, 'F');
   doc.rect(W / 2 + 3, y, (W - 2 * margin) / 2 - 3, 28, 'F');
 
-  doc.setTextColor(100, 120, 150);
+  doc.setTextColor(...GRIS_DOUX);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
   doc.text("MAÎTRISE D'ŒUVRE", margin + 3, y + 5);
   doc.text('ENTREPRISE', W / 2 + 6, y + 5);
-  doc.setTextColor(30, 40, 60);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   const moeLines = doc.splitTextToSize(os.maitrise_oeuvre_adresse || os.emetteur_os || '—', 70);
@@ -103,11 +103,11 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
   // Objet
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(32, 107, 196);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.text("OBJET DE L'ORDRE DE SERVICE", margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(30, 40, 60);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.setFontSize(9);
   const objetLines = doc.splitTextToSize(os.objet || os.description || '—', W - 2 * margin);
   doc.text(objetLines, margin, y);
@@ -130,9 +130,9 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
       ['Montant devis présenté HT', formatCurrency(os.montant_devis_presente)],
       ['Montant devis accepté HT', formatCurrency(os.montant_devis_accepte)],
     ],
-    headStyles: { fillColor: [32, 107, 196], textColor: 255, fontSize: 8, fontStyle: 'bold' },
-    bodyStyles: { fontSize: 8, textColor: [30, 40, 60] },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
+    headStyles: { fillColor: [60, 60, 60], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+    bodyStyles: { fontSize: 8, textColor: GRIS_TEXTE },
+    alternateRowStyles: { fillColor: GRIS_FOND },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
   });
 
@@ -140,18 +140,18 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
 
   // Signature block
   const sigY = Math.min(finalY, 230);
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(...GRIS_FOND);
   doc.rect(margin, sigY, (W - 2 * margin) / 2 - 4, 38, 'F');
   doc.rect(W / 2 + 4, sigY, (W - 2 * margin) / 2 - 4, 38, 'F');
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 120, 150);
+  doc.setTextColor(...GRIS_DOUX);
   doc.text("SIGNATURE MAÎTRISE D'ŒUVRE", margin + 3, sigY + 6);
   doc.text('SIGNATURE ENTREPRISE', W / 2 + 7, sigY + 6);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.setTextColor(150, 160, 175);
+  doc.setTextColor(...GRIS_DOUX);
   doc.text('Date : ______________________', margin + 3, sigY + 30);
   doc.text('Date : ______________________', W / 2 + 7, sigY + 30);
 
@@ -160,17 +160,12 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
     const arY = sigY + 44;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(47, 158, 68);
+    doc.setTextColor(...GRIS_TEXTE);
     if (os.date_ar) doc.text(`Accusé de réception : ${new Date(os.date_ar).toLocaleDateString('fr-FR')}`, margin, arY);
     if (os.date_execution) doc.text(`Date d'exécution : ${new Date(os.date_execution).toLocaleDateString('fr-FR')}`, W / 2, arY);
   }
 
-  // Footer
-  doc.setFontSize(7);
-  doc.setTextColor(180, 190, 200);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`ArchiOffice · OS N°${os.os_number} · Généré le ${new Date().toLocaleDateString('fr-FR')}`, W / 2, 290, { align: 'center' });
-
+  drawAgencyFooters(doc, settings, letterhead);
   doc.save(`OS-${os.os_number}-${(os.title || 'document').replace(/[^a-z0-9]/gi, '_')}.pdf`);
 }
 

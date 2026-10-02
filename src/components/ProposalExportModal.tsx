@@ -177,7 +177,11 @@ function PageHeader({ d }: { d: ProposalPdfData }) {
   );
 }
 
+/** Nombre total de pages du document, connu une fois toutes les sections rendues. */
+const PageTotalContext = React.createContext(0);
+
 function PageFooter({ d, page }: { d: ProposalPdfData; page: number }) {
+  const total = React.useContext(PageTotalContext);
   return (
     <div style={{
       position: 'absolute', bottom: '10mm', left: '25mm', right: '25mm',
@@ -185,7 +189,8 @@ function PageFooter({ d, page }: { d: ProposalPdfData; page: number }) {
       color: '#94a3b8', borderTop: '0.5px solid #e2e8f0', paddingTop: '2mm',
     }}>
       <div>{d.agenceNom} - {d.dateEmission}</div>
-      <div>Page {page}</div>
+      {/* Pagination du cabinet : P1|2 */}
+      <div style={{ fontWeight: 'bold', color: '#111827' }}>P{page}|{total}</div>
     </div>
   );
 }
@@ -886,7 +891,7 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
           <div className="flex-1 overflow-auto p-8 bg-zinc-100 dark:bg-zinc-950">
             <style dangerouslySetInnerHTML={{ __html: getPdfStyles() }} />
             <div ref={previewRef} className="flex flex-col items-center gap-6">
-              {pages}
+              <PageTotalContext.Provider value={pageCounter}>{pages}</PageTotalContext.Provider>
             </div>
           </div>
         </div>

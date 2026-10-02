@@ -13,6 +13,7 @@ import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
 import type { Referentiels, CorpsEtat } from '../types/library';
 import { useSettings } from '../hooks/useSettings';
+import { generateRAO, generateComparatifExcel } from '../lib/actAnalysisExport';
 import {
   exportEntreprisesConsulteesToExcel, exportEntreprisesConsulteesToPDF, groupByLot,
   exportLotsToExcel, exportLotsToPDF,
@@ -167,227 +168,6 @@ const EMPTY_CONSULTATION: Consultation = {
 function fmt(n?: number) {
   if (n == null) return '—';
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
-}
-
-// ── RAO PDF ───────────────────────────────────────────────────────────────────
-
-async function generateRAO(
-  lots: ProjectLot[],
-  consultation: Consultation,
-  projectName: string,
-  lotId?: string
-) {
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
-    import('jspdf'),
-    import('jspdf-autotable'),
-  ]);
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const W = 297;
-  const margin = 14;
-
-  const lotsToAnalyse = lotId
-    ? lots.filter(l => l.id === lotId)
-    : lots.filter(l => consultation.offres.some(o => o.lot_id === l.id));
-
-  let pageAdded = false;
-
-  lotsToAnalyse.forEach((lot, idx) => {
-    if (idx > 0) { doc.addPage(); pageAdded = true; }
-
-    // Header
-    doc.setFillColor(32, 107, 196);
-    doc.rect(0, 0, W, 20, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.text('RAPPORT D\'ANALYSE DES OFFRES', margin, 13);
-    doc.setFontSize(9);
-    doc.text(`${projectName} — Lot ${lot.lot_number} : ${lot.lot_title}`, W - margin, 13, { align: 'right' });
-
-    const offresLot = consultation.offres.filter(o => o.lot_id === lot.id);
-    if (offresLot.length === 0) {
-      doc.setTextColor(120, 120, 120);
-      doc.setFontSize(10);
-      doc.text('Aucune offre saisie pour ce lot.', W / 2, 60, { align: 'center' });
-      return;
-    }
-
-    // Montants
-    const montantsConformes = offresLot.filter(o => o.conforme).map(o => o.montant_base);
-    const minMontant = Math.min(...montantsConformes);
-
-    // Tableau
-    const head = [['Entreprise', 'Montant HT', '% / moins-disant', 'Conformité', 'Note prix', 'Note tech.', ...consultation.criteres.map(c => `${c.nom}\n(${c.poids}%)`), 'NOTE GLOBALE', 'Rang']];
-    const body = offresLot.map(offre => {
-      const entreprise = consultation.entreprises.find(e => e.id === offre.entreprise_id);
-      const nomEntreprise = entreprise?.nom || '—';
-      const pctMinDisant = minMontant > 0 ? ((offre.montant_base - minMontant) / minMontant * 100).toFixed(1) + '%' : '—';
-      const notePrix = offre.conforme && offre.montant_base > 0 ? (minMontant / offre.montant_base * 100).toFixed(1) : '—';
-      const poidsPrix = consultation.criteres.find(c => c.id === 'prix')?.poids ?? 60;
-      const poidsTech = consultation.criteres.find(c => c.id === 'tech')?.poids ?? 40;
-      const noteGlobale = offre.conforme
-        ? ((parseFloat(notePrix) || 0) * poidsPrix / 100 + (offre.note_technique || 0) * poidsTech / 100).toFixed(1)
-        : 'NC';
-      const extraCriteres = consultation.criteres.filter(c => c.id !== 'prix' && c.id !== 'tech').map(() => '—');
-      return [
-        nomEntreprise,
-        fmt(offre.montant_base),
-        offre.conforme ? `+${pctMinDisant}` : 'NC',
-        offre.conforme ? '✓ Conforme' : `✗ ${offre.motif_nc || 'Non conforme'}`,
-        notePrix,
-        String(offre.note_technique || '—'),
-        ...extraCriteres,
-        noteGlobale,
-        '—',
-      ];
-    });
-
-    // Trier par note globale
-    body.sort((a, b) => {
-      const nA = parseFloat(a[a.length - 2]) || -1;
-      const nB = parseFloat(b[b.length - 2]) || -1;
-      return nB - nA;
-    });
-    body.forEach((row, i) => { row[row.length - 1] = String(i + 1); });
-
-    autoTable(doc, {
-      startY: 28,
-      margin: { left: margin, right: margin },
-      head,
-      body,
-      styles: { fontSize: 7.5, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 250, 255] },
-      columnStyles: { 0: { cellWidth: 40 } },
-    });
-
-    // Attribution
-    const attribution = consultation.attributions.find(a => a.lot_id === lot.id);
-    if (attribution) {
-      const entreprise = consultation.entreprises.find(e => e.id === attribution.entreprise_id);
-      const finalY = (doc as any).lastAutoTable.finalY + 6;
-      doc.setFillColor(212, 237, 218);
-      doc.rect(margin, finalY, W - 2 * margin, 10, 'F');
-      doc.setTextColor(47, 133, 90);
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`▶  LOT ATTRIBUÉ À : ${entreprise?.nom || '—'} — ${fmt(attribution.montant)} HT`, margin + 3, finalY + 6.5);
-    }
-  });
-
-  if (!pageAdded && lotsToAnalyse.length === 0) {
-    doc.setTextColor(120, 120, 120);
-    doc.setFontSize(11);
-    doc.text('Aucun lot avec des offres à analyser.', W / 2, 60, { align: 'center' });
-  }
-
-  const pages = (doc as any).internal.getNumberOfPages();
-  for (let i = 1; i <= pages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(7);
-    doc.setTextColor(160, 160, 170);
-    doc.text(`RAO — ${projectName} — Page ${i}/${pages}`, W / 2, 206, { align: 'center' });
-  }
-  doc.save(`RAO_${projectName.replace(/\s+/g, '_')}_${lotId ? `Lot${lotId}` : 'Global'}.pdf`);
-}
-
-// ── Excel Comparatif ──────────────────────────────────────────────────────────
-
-async function generateComparatifExcel(lots: ProjectLot[], consultation: Consultation, projectName: string) {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
-  const rows: (string | number | undefined)[][] = [];
-  const styles: { row: number; col: number; style: string }[] = [];
-
-  const entreprises = consultation.entreprises;
-
-  rows.push([projectName]);
-  rows.push([`Date : ${new Date().toLocaleDateString('fr-FR')}`]);
-  rows.push([]);
-  const headerRow: (string | number | undefined)[] = ['Code', 'Titre', 'Estimatif HT (€)', ...entreprises.map(e => e.nom)];
-  rows.push(headerRow);
-
-  for (const lot of lots) {
-    const cl = (consultation.comparatif || []).find(c => c.lot_id === lot.id);
-    const lotRow: (string | number | undefined)[] = [`Lot ${lot.lot_number} - ${lot.lot_title}`, '', '', ...entreprises.map(() => undefined)];
-    rows.push(lotRow);
-
-    if (cl && cl.articles.length > 0) {
-      for (const article of cl.articles) {
-        if (article.is_section_header) {
-          rows.push([article.code || '', article.titre, '', ...entreprises.map(() => undefined)]);
-        } else if (article.is_subtotal) {
-          const subtotalRow: (string | number | undefined)[] = ['', article.titre, ''];
-          for (const e of entreprises) {
-            const val = article.prix[e.id];
-            subtotalRow.push(val != null ? val : undefined);
-          }
-          rows.push(subtotalRow);
-        } else {
-          const articleRow: (string | number | undefined)[] = [
-            article.code || '',
-            article.titre,
-            article.estimatif != null ? article.estimatif : undefined,
-          ];
-          for (const e of entreprises) {
-            const val = article.prix[e.id];
-            articleRow.push(val != null ? val : undefined);
-          }
-          rows.push(articleRow);
-        }
-      }
-    }
-
-    // Sous-total lot depuis offres
-    const lotOffresRow: (string | number | undefined)[] = ['', 'Sous-total du lot HT', ''];
-    for (const e of entreprises) {
-      const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
-      lotOffresRow.push(offre && offre.montant_base ? offre.montant_base : undefined);
-    }
-    rows.push(lotOffresRow);
-    rows.push([]);
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  // Column widths
-  ws['!cols'] = [
-    { wch: 12 }, { wch: 45 }, { wch: 16 },
-    ...entreprises.map(() => ({ wch: 18 })),
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Comparaison');
-
-  // Per-company sheets
-  for (const e of entreprises) {
-    const eRows: (string | number | undefined)[][] = [];
-    eRows.push([e.nom]);
-    eRows.push([]);
-    eRows.push(['Code', 'Désignation', 'Estimatif HT', 'Offre HT']);
-
-    for (const lot of lots) {
-      const cl = (consultation.comparatif || []).find(c => c.lot_id === lot.id);
-      eRows.push([`Lot ${lot.lot_number} - ${lot.lot_title}`, '', '', '']);
-      if (cl) {
-        for (const article of cl.articles) {
-          if (!article.is_section_header && !article.is_subtotal) {
-            const val = article.prix[e.id];
-            eRows.push([article.code || '', article.titre, article.estimatif ?? '', val ?? '']);
-          }
-        }
-      }
-      const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
-      eRows.push(['', 'Total lot HT', '', offre?.montant_base ?? '']);
-      eRows.push([]);
-    }
-
-    const ews = XLSX.utils.aoa_to_sheet(eRows);
-    ews['!cols'] = [{ wch: 12 }, { wch: 45 }, { wch: 16 }, { wch: 18 }];
-    const sheetName = e.nom.substring(0, 31).replace(/[\\/:*?[\]]/g, '_');
-    XLSX.utils.book_append_sheet(wb, ews, sheetName);
-  }
-
-  XLSX.writeFile(wb, `Comparatif_${projectName.replace(/\s+/g, '_')}.xlsx`);
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -1261,7 +1041,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                   <IconCheck size={13} /> Auto-remplir totaux
                 </button>
                 <button
-                  onClick={() => generateComparatifExcel(lots, consultation, projectName)}
+                  onClick={() => generateComparatifExcel(lots, consultation, projectName, settings ?? {})}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition"
                 >
                   <IconDownload size={13} /> Export Excel
@@ -1465,7 +1245,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               <p className="text-[0.6875rem] text-[var(--tblr-muted)]">Génère un PDF comparatif pour tous les lots ou par lot</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => generateRAO(lots, consultation, projectName)}
+              <button onClick={() => generateRAO(lots, consultation, projectName, settings ?? {})}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition">
                 <IconDownload size={14} /> RAO Global
               </button>
@@ -1502,7 +1282,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                       </span>
                     )}
                   </h3>
-                  <button onClick={() => generateRAO(lots, consultation, projectName, lot.id)}
+                  <button onClick={() => generateRAO(lots, consultation, projectName, settings ?? {}, lot.id)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition">
                     <IconDownload size={13} /> RAO Lot
                   </button>

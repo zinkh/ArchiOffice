@@ -429,7 +429,9 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 {/* Legal Footer */}
                 <div className="mt-auto pt-8 border-t border-zinc-200 text-[7pt] text-center text-zinc-400">
                   <p>Facture conforme à la norme NF EN 16931 (Factur-X Ready)</p>
-                  <p>{data.seller_name} - SIRET {data.seller_siret}</p>
+                  <p>{[data.seller_name, data.seller_address, data.seller_siret ? `SIRET ${data.seller_siret}` : '', data.seller_vat_number ? `TVA ${data.seller_vat_number}` : ''].filter(Boolean).join('  ·  ')}</p>
+                  {/* Pagination du cabinet : P1|2, en bas à droite */}
+                  <p className="text-right font-bold text-zinc-700">P1|1</p>
                 </div>
               </div>
             </div>

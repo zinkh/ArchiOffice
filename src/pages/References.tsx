@@ -35,7 +35,6 @@ import type { Project, Contact, ProjectCategory } from '../types';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { toRefItem, customToRefItem } from '../lib/referenceItems';
 import type { Cotraitant, RefImage, CustomRef, RefItem } from '../lib/referenceItems';
-import { loadImageAsDataUrl } from '../lib/imageUtils';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT } from '../lib/contactCategories';
@@ -1092,41 +1091,53 @@ export default function References() {
   }
 
   const exportToPDF = async () => {
-    const [{ jsPDF }, { default: autoTable }] = await Promise.all([
+    const [{ jsPDF }, { default: autoTable }, { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings, tableauGris }] = await Promise.all([
       import('jspdf'),
       import('jspdf-autotable'),
+      import('../lib/pdfLetterhead'),
     ]);
     const selected = filteredItems.filter(p => selectedIds.has(p.id));
-    const doc = new jsPDF();
-    let startY = 20;
-    try {
-      const s = await apiFetch<any>('/api/settings');
-      if (s?.logoUrl) { try { const d = await loadImageAsDataUrl(s.logoUrl); doc.addImage(d, 'PNG', 14, 8, 30, 12); startY = 28; } catch { /* skip */ } }
-      const txt = s?.agencyName || 'Références';
-      doc.setFontSize(13); doc.setFont('helvetica', 'bold');
-      doc.text(txt, s?.logoUrl ? 48 : 14, 15);
-      if (s?.agencyName) { doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.text('Références', s.logoUrl ? 48 : 14, 21); }
-    } catch { doc.text('Références', 14, 15); }
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const settings = await fetchAgencySettings();
+    const logo = await loadLogoDataUrl(settings.logoUrl);
+    const letterhead = { title: 'Références', subtitle: `${selected.length} opération${selected.length > 1 ? 's' : ''}`, margin: 14, logo };
+    const startY = drawAgencyHeader(doc, settings, letterhead);
     autoTable(doc, {
+      ...tableauGris(),
+      startY,
       head: [['Projet', 'Client', 'Date', 'Surface', 'Budget', 'Statut']],
       body: selected.map(p => [p.name, p.client, p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '---', p.surface ? `${p.surface} m²` : '---', formatCurrency(p.budget), p.status]),
-      startY,
+      columnStyles: { 3: { halign: 'right' }, 4: { halign: 'right' } },
     });
+    drawAgencyFooters(doc, settings, letterhead);
     doc.save('references.pdf');
   };
 
   const exportToExcel = async () => {
-    const XLSX = await import('xlsx');
+    const { exporterListe, FORMAT_EURO } = await import('../lib/xlsxLetterhead');
     const selected = filteredItems.filter(p => selectedIds.has(p.id));
-    let agencyName = '';
-    try { const s = await apiFetch<any>('/api/settings'); agencyName = s?.agencyName || ''; } catch { /* */ }
-    const rows = selected.map(p => ({ Projet: p.name, Client: p.client, 'Date de livraison': p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '---', Surface: p.surface ? `${p.surface} m²` : '---', Budget: formatCurrency(p.budget), Statut: p.status }));
-    const ws = XLSX.utils.json_to_sheet([]);
-    if (agencyName) { XLSX.utils.sheet_add_aoa(ws, [[agencyName]], { origin: 'A1' }); XLSX.utils.sheet_add_aoa(ws, [['Références']], { origin: 'A2' }); XLSX.utils.sheet_add_json(ws, rows, { origin: 'A4' }); }
-    else { XLSX.utils.sheet_add_json(ws, rows, { origin: 'A1' }); }
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Références');
-    XLSX.writeFile(wb, 'references.xlsx');
+    let settings = {};
+    try { settings = (await apiFetch<any>('/api/settings')) ?? {}; } catch { /* le classeur part sans l'en-tête */ }
+    await exporterListe({
+      fichier: 'references.xlsx',
+      nom: 'Références',
+      title: 'Références',
+      subtitle: `${selected.length} opération${selected.length > 1 ? 's' : ''}`,
+      settings,
+      colonnes: [
+        { cle: 'projet', header: 'Projet', width: 36 },
+        { cle: 'client', header: 'Client', width: 28 },
+        { cle: 'date', header: 'Date de livraison', width: 18, align: 'center' },
+        { cle: 'surface', header: 'Surface (m²)', width: 14, align: 'right', numFmt: '#,##0.##' },
+        { cle: 'budget', header: 'Budget', width: 18, align: 'right', numFmt: FORMAT_EURO },
+        { cle: 'statut', header: 'Statut', width: 16 },
+      ],
+      lignes: selected.map(p => ({
+        projet: p.name, client: p.client,
+        date: p.end_date ? new Date(p.end_date).toLocaleDateString('fr-FR') : '',
+        surface: p.surface || '', budget: p.budget || '', statut: p.status,
+      })),
+    });
   };
 
   // ── Row renderer (shared between grouped and flat views) ───────────────────
