@@ -155,6 +155,7 @@ recorded here so the reasoning doesn't have to be re-derived.
   sharing inside the tenant's own space, so their bytes are streamed through us
   (`Range` requests are passed upstream, so pdf.js still works on large plans).
   That puts external reads back on the same hot path as uploads.
+- **`@tanstack/react-table` is pinned to v8.** v9 (dependabot PR #226, closed) rewrites the whole API — `useReactTable`, `getCoreRowModel` and `getFilteredRowModel` become `createCoreRowModel`-style factories, `VisibilityState` and the column `size` option are gone, and the generics changed — so `src/components/ObservationsTable.tsx` (the only consumer: resizable columns, filtering, column visibility) no longer compiles against it. TODO: either migrate that component to the v9 API, or replace the library with a lighter table for that one screen; until then the `^8` range in `package.json` is intentional.
 - **Webhooks are inbound-only** (billing events from Stancer, sync notifications from Ragic) — there's no outbound event/webhook system for third parties wanting to react to changes in ArchiOffice.
 
 Screenshots and a demo GIF are also still on the list — see the TODO in [README.md](README.md#screenshots) if you'd like to contribute some.
