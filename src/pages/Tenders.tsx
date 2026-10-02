@@ -261,31 +261,34 @@ export default function Tenders() {
   };
 
   const handleExportXLSX = async () => {
-    let agencyName = '';
-    try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }
-    const XLSX = await import('xlsx');
-    const rows = filteredTenders.map(t => ({
-      'Titre': t.title,
-      'Ville d\'exécution': t.ville_execution || '',
-      'Client': t.client || '',
-      'Statut': t.status || '',
-      'Type': t.type || '',
-      'Date de rendu': t.submission_deadline || '',
-      'Valeur estimée': t.value || 0,
-      'Honoraires (%)': t.honoraires_percent || 0,
-      'Surface': t.surface || 0,
-      'Coût travaux': t.construction_cost || 0,
-    }));
-    const worksheet = XLSX.utils.json_to_sheet([]);
-    if (agencyName) {
-      XLSX.utils.sheet_add_aoa(worksheet, [[agencyName], ['Appels d\'offres']], { origin: 'A1' });
-      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A4' });
-    } else {
-      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A1' });
-    }
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Appels d\'offres');
-    XLSX.writeFile(workbook, 'appels-offres.xlsx');
+    const { exporterListe, FORMAT_EURO } = await import('../lib/xlsxLetterhead');
+    let settings: any = {};
+    try { settings = (await fetch('/api/settings').then(r => r.ok ? r.json() : null)) ?? {}; } catch { /* */ }
+    await exporterListe({
+      fichier: 'appels-offres.xlsx',
+      nom: "Appels d'offres",
+      title: "Appels d'offres",
+      subtitle: `${filteredTenders.length} dossier${filteredTenders.length > 1 ? 's' : ''}`,
+      settings,
+      colonnes: [
+        { cle: 'titre', header: 'Titre', width: 38 },
+        { cle: 'ville', header: "Ville d'exécution", width: 22 },
+        { cle: 'client', header: 'Client', width: 26 },
+        { cle: 'statut', header: 'Statut', width: 14 },
+        { cle: 'type', header: 'Type', width: 14 },
+        { cle: 'rendu', header: 'Date de rendu', width: 16, align: 'center' },
+        { cle: 'valeur', header: 'Valeur estimée', width: 18, align: 'right', numFmt: FORMAT_EURO },
+        { cle: 'honoraires', header: 'Honoraires (%)', width: 14, align: 'right', numFmt: '0.##' },
+        { cle: 'surface', header: 'Surface (m²)', width: 14, align: 'right', numFmt: '#,##0.##' },
+        { cle: 'travaux', header: 'Coût travaux', width: 18, align: 'right', numFmt: FORMAT_EURO },
+      ],
+      lignes: filteredTenders.map(t => ({
+        titre: t.title, ville: t.ville_execution || '', client: t.client || '',
+        statut: t.status || '', type: t.type || '', rendu: t.submission_deadline || '',
+        valeur: t.value || '', honoraires: t.honoraires_percent || '',
+        surface: t.surface || '', travaux: t.construction_cost || '',
+      })),
+    });
   };
 
   const getStatusIcon = (status: Tender['status']) => {

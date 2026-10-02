@@ -303,7 +303,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     if (avecRefs !== bpu) setBpu(avecRefs);
     const mode = colSet === 'bpu' ? 'bpu' : 'dqe';
     if (kind === 'xlsx') {
-      await exportBPUtoExcel(avecRefs, { mode, vierge, projectName });
+      await exportBPUtoExcel(avecRefs, { mode, vierge, projectName, settings: settings ?? {} });
     } else {
       await exportBPUtoPDF(avecRefs, { mode, projectName, settings: settings ?? {}, vierge });
     }

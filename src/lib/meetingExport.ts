@@ -5,16 +5,12 @@ import type { Paragraph, TextRun, ImageRun, Table, TableRow } from 'docx';
 import type { Meeting, MeetingAttendee } from '../types';
 import { compressImage, type CompressedImage } from './imageCompression';
 import { resolveSignedUrl } from './signedStorageUrl';
+import type { AgencySettings as BaseAgencySettings } from './proposalExport';
+import { drawAgencyFooters } from './pdfLetterhead';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
-export interface AgencySettings {
-  agencyName?: string;
-  logoUrl?: string;
-  address?: string;
-  phone?: string;
-  email?: string;
-}
+export type AgencySettings = BaseAgencySettings;
 
 const SUBSECTION_LABELS: Record<string, string> = {
   projet: 'Réunion de projet',
@@ -99,8 +95,8 @@ export async function exportMeetingToPDF(
 
   y += headerH;
 
-  // Blue rule
-  pdf.setDrawColor(37, 99, 235);
+  // Filet gris, comme l'en-tête des autres documents
+  pdf.setDrawColor(209, 213, 219);
   pdf.setLineWidth(0.6);
   pdf.line(margin, y, pageW - margin, y);
   y += 7;
@@ -128,9 +124,9 @@ export async function exportMeetingToPDF(
     const headerRowY = y;
 
     // Header row background
-    pdf.setFillColor(239, 246, 255);
+    pdf.setFillColor(243, 244, 246);
     pdf.rect(margin, y, contentW, rowH, 'F');
-    applyFont('bold', 8, '#1e40af');
+    applyFont('bold', 8, '#111827');
     pdf.text('Nom', margin + 2, y + 5);
     pdf.text('Rôle / Entreprise', margin + col1 + 2, y + 5);
     pdf.text('Contact', margin + col1 + col2 + 2, y + 5);
@@ -239,20 +235,8 @@ export async function exportMeetingToPDF(
     }
   }
 
-  // ── Footer on every page ──────────────────────────────────────────────────
-  const totalPages = (pdf as any).internal.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
-    pdf.setPage(p);
-    pdf.setDrawColor(209, 213, 219);
-    pdf.setLineWidth(0.25);
-    pdf.line(margin, pageH - 12, pageW - margin, pageH - 12);
-    applyFont('normal', 7, '#9ca3af');
-    pdf.text(
-      `${settings.agencyName || ''}  ·  ${meeting.title}  ·  ${formatDate(meeting.date)}`,
-      margin, pageH - 7,
-    );
-    pdf.text(`${p} / ${totalPages}`, pageW - margin, pageH - 7, { align: 'right' });
-  }
+  // ── Pied de page du cabinet sur chaque page (adresse, SIRET, P1|2) ─────────
+  drawAgencyFooters(pdf, settings, { title: meeting.title, margin });
 
   const filename = `reunion_${sanitizeFilename(meeting.title)}_${meeting.date}.pdf`;
   pdf.save(filename);

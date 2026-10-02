@@ -19,6 +19,7 @@ import { MiqcpComplexityWizardModal } from './MiqcpComplexityWizardModal';
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
 import { FeeDistributionGrid } from './FeeDistributionGrid';
+import { useSettings } from '../hooks/useSettings';
 
 export interface HonorairesSpecialty {
   id?: string;
@@ -76,6 +77,7 @@ function NumberField({ label, value, onChange }: { label: string; value: number 
 }
 
 export function HonorairesSection({ doc, onChange, contacts, onContactCreated, milestones, onMilestonesChange, milestoneEntityField, filenameLabel, showCotraitantsTable = true }: HonorairesSectionProps) {
+  const { settings } = useSettings();
   const { t } = useTranslation();
   const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = React.useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = React.useState(false);
@@ -302,7 +304,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             </div>
             <button
               type="button"
-              onClick={() => exportFeeDistributionToXlsx(doc.fee_distribution, doc.specialties_list, contacts, doc.vat_rate, filenameLabel)}
+              onClick={() => exportFeeDistributionToXlsx(doc.fee_distribution, doc.specialties_list, contacts, doc.vat_rate, filenameLabel, settings ?? {})}
               className="text-[0.6875rem] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
             >
               <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}

@@ -9,6 +9,7 @@ import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot } from '../../types/dpgf';
 import { evalFormula } from './treeOps';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
+import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
 import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
 
@@ -50,6 +51,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   dpgf, onChange, onSave, projectName, externalDrop, onDragStart,
   showTree: showTreeProp, onToggleTree,
 }) => {
+  const { settings } = useSettings();
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
     new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
@@ -184,8 +186,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         {
           label: 'Formats',
           actions: [
-            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportEstimationtoPDF(dpgf, projectName) },
-            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportEstimationtoExcel(dpgf, projectName) },
+            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportEstimationtoPDF(dpgf, projectName, settings ?? {}) },
+            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportEstimationtoExcel(dpgf, projectName, settings ?? {}) },
           ],
         },
       ],

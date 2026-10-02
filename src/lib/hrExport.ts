@@ -1,17 +1,16 @@
 // Exports for the HR pages (Suivi du temps / Congés): weekly personal timesheet
-// and congés fiches as PDF (autoTable, matching proExport.ts's convention), the
-// admin employee×project matrix and the monthly accountant summary as Excel
-// (xlsx, matching proExport.ts's convention). jsPDF/jspdf-autotable/xlsx are
-// only pulled in when an export actually runs.
-import { saveAs } from 'file-saver';
+// and congés fiches as PDF, the admin employee×project matrix and the monthly
+// accountant summary as Excel. Tous portent la charte du cabinet (en-tête,
+// pied, pagination P1|2) : pdfLetterhead.ts et xlsxLetterhead.ts. jsPDF et
+// ExcelJS ne sont chargés que lorsqu'un export tourne.
+import type { AgencySettings as BaseAgencySettings } from './proposalExport';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris } from './pdfLetterhead';
+import {
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_NOMBRE,
+} from './xlsxLetterhead';
 import type { TimeEntry, TimeAdminMatrix, TimeMonthlySummaryEntry, LeaveBalanceAllEntry } from '../types';
 
-export interface AgencySettings {
-  agencyName?: string;
-  address?: string;
-  phone?: string;
-  email?: string;
-}
+export type AgencySettings = BaseAgencySettings;
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9_\-]/g, '_');
@@ -21,28 +20,6 @@ function formatHours(h: number): string {
   const hours = Math.floor(h);
   const minutes = Math.round((h - hours) * 60);
   return `${hours}h${minutes.toString().padStart(2, '0')}`;
-}
-
-function pdfHeader(doc: any, title: string, subtitle: string, agency: AgencySettings) {
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'bold');
-  doc.text(agency.agencyName || 'Mon Agence', 14, 14);
-  doc.setFontSize(8);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(107, 114, 128);
-  let y = 19;
-  if (agency.address) { doc.text(agency.address, 14, y); y += 4; }
-  if (agency.phone) { doc.text(`Tél : ${agency.phone}`, 14, y); y += 4; }
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(14);
-  doc.setFont('helvetica', 'bold');
-  doc.text(title, 14, y + 6);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(107, 114, 128);
-  doc.text(subtitle, 14, y + 12);
-  doc.setTextColor(0, 0, 0);
-  return y + 18;
 }
 
 // ── Weekly personal timesheet (PDF) ──────────────────────────────────────────
@@ -57,12 +34,14 @@ export async function exportWeeklyTimesheetPdf(params: {
   agencySettings: AgencySettings;
 }): Promise<void> {
   const { userName, weekStartStr, weekEndStr, entries, projectName, totalHours, agencySettings } = params;
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
+    loadLogoDataUrl(agencySettings.logoUrl),
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const startY = pdfHeader(doc, 'Fiche hebdomadaire de temps travaillé', `${userName} — semaine du ${weekStartStr} au ${weekEndStr}`, agencySettings);
+  const letterhead = { title: 'Fiche hebdomadaire de temps travaillé', subtitle: `${userName} — semaine du ${weekStartStr} au ${weekEndStr}`, margin: 14, logo };
+  const startY = drawAgencyHeader(doc, agencySettings, letterhead);
 
   const sorted = [...entries].sort((a, b) => a.start_time.localeCompare(b.start_time));
   const rows = sorted.map(e => [
@@ -74,81 +53,83 @@ export async function exportWeeklyTimesheetPdf(params: {
   ]);
 
   autoTable(doc, {
+    ...tableauGris(),
     startY,
     head: [['Date', 'Affaire', 'Début', 'Fin', 'Heures']],
     body: rows,
-    headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
+    styles: { fontSize: 9, textColor: [17, 24, 39], cellPadding: 2.5 },
     foot: [['', '', '', 'Total', formatHours(totalHours)]],
-    footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
   });
 
+  drawAgencyFooters(doc, agencySettings, letterhead);
   doc.save(`Fiche_hebdo_${sanitizeFilename(userName)}_${weekStartStr}.pdf`);
 }
 
 // ── Admin: hours per employee × per project (Excel) ──────────────────────────
 
-export async function exportAdminMatrixExcel(matrix: TimeAdminMatrix, periodLabel: string): Promise<void> {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+export async function exportAdminMatrixExcel(
+  matrix: TimeAdminMatrix, periodLabel: string, agencySettings: AgencySettings = {},
+): Promise<void> {
+  const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(agencySettings)]);
 
   const byUserProject: Record<string, number> = {};
   for (const c of matrix.cells) byUserProject[`${c.user_id}::${c.project_id || '__none__'}`] = c.hours;
 
-  const header = ['Salarié', ...matrix.projects.map(p => p.name), 'Sans affaire', 'Total'];
-  const body = matrix.employees.map(emp => {
+  const f = ajouterFeuille(wb, {
+    nom: 'Heures par affaire', settings: agencySettings, logo,
+    title: 'Heures par salarié et par affaire',
+    subtitle: periodLabel,
+    colonnes: [
+      { header: 'Salarié', width: 26 },
+      ...matrix.projects.map(p => ({ header: p.name, width: 14, align: 'right' as const, numFmt: FORMAT_NOMBRE })),
+      { header: 'Sans affaire', width: 14, align: 'right', numFmt: FORMAT_NOMBRE },
+      { header: 'Total', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
+    ],
+  });
+  for (const emp of matrix.employees) {
     const projectCells = matrix.projects.map(p => byUserProject[`${emp.id}::${p.id}`] || 0);
     const noneCell = byUserProject[`${emp.id}::__none__`] || 0;
     const total = projectCells.reduce((s, v) => s + v, 0) + noneCell;
-    return [emp.name, ...projectCells.map(h => Number(h.toFixed(2))), Number(noneCell.toFixed(2)), Number(total.toFixed(2))];
-  });
+    f.ligne([emp.name, ...projectCells.map(h => Number(h.toFixed(2))), Number(noneCell.toFixed(2)), Number(total.toFixed(2))]);
+  }
 
-  const wsData: any[][] = [
-    [`Heures par salarié et par affaire — ${periodLabel}`],
-    [],
-    header,
-    ...body,
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 24 }, ...matrix.projects.map(() => ({ wch: 14 })), { wch: 14 }, { wch: 12 }];
-  XLSX.utils.book_append_sheet(wb, ws, 'Heures par affaire');
-
-  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), `Heures_par_affaire_${sanitizeFilename(periodLabel)}.xlsx`);
+  await enregistrerClasseur(wb, `Heures_par_affaire_${sanitizeFilename(periodLabel)}.xlsx`);
 }
 
 // ── Admin: monthly total per employee, for the accountant (Excel) ────────────
 
-export async function exportMonthlySummaryExcel(monthLabel: string, rows: TimeMonthlySummaryEntry[]): Promise<void> {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
+export async function exportMonthlySummaryExcel(
+  monthLabel: string, rows: TimeMonthlySummaryEntry[], agencySettings: AgencySettings = {},
+): Promise<void> {
+  const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(agencySettings)]);
 
-  const total = rows.reduce((s, r) => s + r.total_hours, 0);
-  const wsData: any[][] = [
-    [`Heures travaillées — ${monthLabel}`],
-    [],
-    ['Salarié', 'Heures travaillées'],
-    ...rows.map(r => [r.name, Number(r.total_hours.toFixed(2))]),
-    [],
-    ['TOTAL', Number(total.toFixed(2))],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 28 }, { wch: 18 }];
-  XLSX.utils.book_append_sheet(wb, ws, 'Heures mensuelles');
+  const f = ajouterFeuille(wb, {
+    nom: 'Heures mensuelles', settings: agencySettings, logo,
+    title: 'Heures travaillées',
+    subtitle: monthLabel,
+    paysage: false,
+    colonnes: [
+      { header: 'Salarié', width: 30 },
+      { header: 'Heures travaillées', width: 20, align: 'right', numFmt: FORMAT_NOMBRE },
+    ],
+  });
+  for (const r of rows) f.ligne([r.name, Number(r.total_hours.toFixed(2))]);
+  f.total(['TOTAL', Number(rows.reduce((s, r) => s + r.total_hours, 0).toFixed(2))]);
 
-  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
-  saveAs(new Blob([buf], { type: 'application/octet-stream' }), `Heures_mensuelles_${sanitizeFilename(monthLabel)}.xlsx`);
+  await enregistrerClasseur(wb, `Heures_mensuelles_${sanitizeFilename(monthLabel)}.xlsx`);
 }
 
 // ── Congés: global table, all employees (PDF) ────────────────────────────────
 
 export async function exportLeaveBalancesTablePdf(yearLabel: string, rows: LeaveBalanceAllEntry[], agencySettings: AgencySettings): Promise<void> {
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
+    loadLogoDataUrl(agencySettings.logoUrl),
   ]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const startY = pdfHeader(doc, 'Soldes de congés', `Situation au ${new Date().toLocaleDateString('fr-FR')} — année ${yearLabel}`, agencySettings);
+  const letterhead = { title: 'Soldes de congés', subtitle: `Situation au ${new Date().toLocaleDateString('fr-FR')} — année ${yearLabel}`, margin: 14, logo };
+  const startY = drawAgencyHeader(doc, agencySettings, letterhead);
 
   const findBalance = (r: LeaveBalanceAllEntry, type: 'conges_payes' | 'rtt') => r.balances.find(b => b.leave_type === type);
   const body = rows.map(r => {
@@ -162,34 +143,40 @@ export async function exportLeaveBalancesTablePdf(yearLabel: string, rows: Leave
   });
 
   autoTable(doc, {
+    ...tableauGris(),
     startY,
     head: [['Salarié', 'CP alloué', 'CP pris', 'CP restant', 'RTT alloué', 'RTT pris', 'RTT restant']],
     body,
-    headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
+    styles: { fontSize: 9, textColor: [17, 24, 39], cellPadding: 2.5 },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' }, 6: { halign: 'right' } },
   });
 
+  drawAgencyFooters(doc, agencySettings, letterhead);
   doc.save(`Soldes_conges_${yearLabel}.pdf`);
 }
 
 // ── Congés: individual fiche (PDF) ────────────────────────────────────────────
 
 export async function exportLeaveBalanceFichePdf(entry: LeaveBalanceAllEntry, agencySettings: AgencySettings): Promise<void> {
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
+    loadLogoDataUrl(agencySettings.logoUrl),
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const startY = pdfHeader(doc, `Fiche de congés — ${entry.name}`, `Situation au ${new Date().toLocaleDateString('fr-FR')} — année ${entry.year}`, agencySettings);
+  const letterhead = { title: `Fiche de congés — ${entry.name}`, subtitle: `Situation au ${new Date().toLocaleDateString('fr-FR')} — année ${entry.year}`, margin: 14, logo };
+  const startY = drawAgencyHeader(doc, agencySettings, letterhead);
 
   const LABELS: Record<string, string> = { conges_payes: 'Congés payés', rtt: 'RTT' };
   autoTable(doc, {
+    ...tableauGris(),
     startY,
     head: [['Type', 'Alloué', 'Pris', 'Restant']],
     body: entry.balances.map(b => [LABELS[b.leave_type] || b.leave_type, b.allocated_days, b.used_days, b.remaining_days]),
-    headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 9 },
-    bodyStyles: { fontSize: 9 },
+    styles: { fontSize: 9, textColor: [17, 24, 39], cellPadding: 2.5 },
+    columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' }, 3: { halign: 'right' } },
   });
 
+  drawAgencyFooters(doc, agencySettings, letterhead);
   doc.save(`Fiche_conges_${sanitizeFilename(entry.name)}_${entry.year}.pdf`);
 }

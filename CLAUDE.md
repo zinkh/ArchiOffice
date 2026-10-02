@@ -194,7 +194,7 @@ Shared interfaces live in `src/types.ts`. CCTP-specific types are in `src/types/
 |---|---|---|
 | PDF | jsPDF + jspdf-autotable | Inline in pages or `src/lib/` |
 | Word/DOCX | docx | `src/lib/meetingExport.ts`, inline in pages |
-| Excel | xlsx | Inline in pages |
+| Excel | exceljs (écriture, `src/lib/xlsxLetterhead.ts`), xlsx (lecture des imports) | `src/lib/` |
 | XML (DPGF import) | fast-xml-parser | `src/lib/xmlHelper.ts` |
 
 ### Numérotation des factures et connecteurs comptables (Zoho / Odoo)
@@ -502,6 +502,38 @@ migration).
   après 5 s et le dernier état est écrit au démontage.
 - `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
   et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
+
+### Exports PDF et Excel : une seule charte
+
+Tout document produit depuis l'interface porte la charte du cabinet : en-tête
+(logo, coordonnées, titre à droite), tableaux en nuances de gris, pied de page
+(adresse, SIRET...) et pagination « P1|2 » en bas à droite. La couleur n'est
+admise que pour une donnée qui en a besoin (statut d'une réserve, retard).
+
+- **PDF** : `src/lib/pdfLetterhead.ts` (`drawAgencyHeader`, `drawAgencyFooters`,
+  `tableauGris()` / `TABLEAU_GRIS` pour les tableaux autoTable, `fetchAgencySettings()`
+  pour un générateur qui n'a pas les réglages sous la main). Ne plus écrire de
+  bandeau coloré ni de « Page i/n » à la main.
+- **Excel** : `src/lib/xlsxLetterhead.ts`, sur ExcelJS (chargé à la demande) :
+  `ajouterFeuille()` pose l'en-tête, l'entête de tableau, le volet figé et la mise
+  en page d'impression (A4 ajusté en largeur, titres répétés, pied avec `&P|&N`) ;
+  `exporterListe()` couvre une simple liste. SheetJS (`xlsx`) ne reste utilisé que pour
+  LIRE des imports : il ne sait ni styler ni placer une image. Un montant reste un
+  nombre dans la cellule (format `FORMAT_EURO`), jamais un texte formaté.
+- **Les entreprises consultées** (ACT) sont classées par LOT, en PDF comme en Excel
+  (`groupByLot`, `src/lib/actExport.ts`), plus par corps d'état. Une entreprise sur
+  plusieurs lots apparaît sous chacun, une entreprise sans lot sous « Sans lot assigné ».
+  Le rapport d'analyse des offres et le comparatif sont dans `src/lib/actAnalysisExport.ts`.
+- **BPU/DQE** (`bpuExport.ts`) : le classeur est aussi un format d'aller-retour que
+  `bpuImport.ts` relit. L'en-tête du cabinet y est donc libre (l'import repère la
+  ligne d'entête de colonnes, `detectHeader`, pas un numéro de ligne), mais les
+  INTITULÉS de colonnes, la colonne A (références `#L1`, `#C1.2`, `A1`...), les lignes de
+  lot/chapitre non fusionnées et la feuille masquée `_meta` ne changent pas.
+  `src/lib/__tests__/bpuExcelRoundTrip.test.ts` exporte puis relit.
+- **Répartition d'honoraires** (`feeDistribution.ts`) : reste une calculette, ses formules
+  visent des lignes décalées par l'en-tête, d'où un compteur de lignes tenu à l'écriture.
+- **Hors périmètre** : la facture d'abonnement ArchiOffice (`subscriptionInvoice.ts`),
+  émise par la plateforme et non par le cabinet, et les exports Word.
 
 ### Qualifications des entreprises et recherche d'entreprises
 

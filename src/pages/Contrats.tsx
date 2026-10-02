@@ -17,6 +17,7 @@ import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_ENTREPRISE, CONTACT_CATEGORY_
 import { cn } from '../lib/utils';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -126,36 +127,33 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210;
   const margin = 20;
+  const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
+  const GRIS_DOUX: [number, number, number] = [107, 114, 128];
+  const GRIS_FOND: [number, number, number] = [243, 244, 246];
 
-  // Header
-  doc.setFillColor(32, 107, 196);
-  doc.rect(0, 0, W, 30, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(17);
-  doc.setFont('helvetica', 'bold');
-  doc.text('CONTRAT DE MAÎTRISE D\'ŒUVRE', margin, 13);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  if (contrat.numero) doc.text(`Réf. : ${contrat.numero}`, margin, 21);
-  doc.text(`Date : ${new Date().toLocaleDateString('fr-FR')}`, W - margin, 21, { align: 'right' });
-
-  // Type badge
-  doc.setFillColor(245, 247, 251);
-  doc.rect(0, 30, W, 12, 'F');
-  doc.setTextColor(100, 120, 150);
+  // En-tête et pied du cabinet, comme les autres documents.
+  const settings = await fetchAgencySettings();
+  const logo = await loadLogoDataUrl(settings.logoUrl);
+  const letterhead = {
+    title: "Contrat de maîtrise d'œuvre",
+    subtitle: TYPE_CONTRAT_LABELS[contrat.type_contrat] ?? contrat.type_contrat,
+    reference: contrat.numero ? `Réf. : ${contrat.numero}` : undefined,
+    margin, logo,
+  };
+  const headerEnd = drawAgencyHeader(doc, settings, letterhead);
+  doc.setTextColor(...GRIS_DOUX);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text(TYPE_CONTRAT_LABELS[contrat.type_contrat] ?? contrat.type_contrat, margin, 38);
-  doc.text(TYPE_MOA_LABELS[contrat.type_moa] ?? contrat.type_moa, W / 2, 38, { align: 'center' });
+  doc.text(TYPE_MOA_LABELS[contrat.type_moa] ?? contrat.type_moa, margin, headerEnd + 1);
 
-  let y = 50;
+  let y = headerEnd + 9;
 
   const sectionTitle = (title: string) => {
-    doc.setFillColor(240, 245, 255);
+    doc.setFillColor(...GRIS_FOND);
     doc.rect(margin, y, W - 2 * margin, 7, 'F');
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(32, 107, 196);
+    doc.setTextColor(...GRIS_TEXTE);
     doc.text(title, margin + 3, y + 5);
     y += 10;
   };
@@ -163,10 +161,10 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   const field = (label: string, value: string, x: number, colW: number) => {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(120, 130, 150);
+    doc.setTextColor(...GRIS_DOUX);
     doc.text(label.toUpperCase(), x, y);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(30, 30, 40);
+    doc.setTextColor(...GRIS_TEXTE);
     doc.text(value || '—', x, y + 5);
     return y + 10;
   };
@@ -200,8 +198,8 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
       head: [['Mission', 'Part honoraires (%)']],
       body: missionsIncluses.map(m => [m.name, m.pct != null && m.pct > 0 ? `${m.pct} %` : '—']),
       styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
-      alternateRowStyles: { fillColor: [248, 250, 255] },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255 },
+      alternateRowStyles: { fillColor: GRIS_FOND },
     });
     y = (doc as any).lastAutoTable.finalY + 8;
   }
@@ -245,7 +243,7 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
       head: [['Clause', 'Contenu']],
       body: clauses,
       styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255 },
       columnStyles: { 0: { cellWidth: 35, fontStyle: 'bold' } },
     });
     y = (doc as any).lastAutoTable.finalY + 8;
@@ -263,11 +261,11 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   // Signatures
   if (y > 240) { doc.addPage(); y = 20; }
   y += 10;
-  doc.setFillColor(245, 247, 251);
+  doc.setFillColor(...GRIS_FOND);
   doc.rect(margin, y, W - 2 * margin, 35, 'F');
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(60, 70, 90);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.text('Fait en deux exemplaires originaux', W / 2, y + 6, { align: 'center' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -276,14 +274,7 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   doc.text('Signature et cachet :', margin + 5, y + 25);
   doc.text('Signature et cachet :', margin + colW + 10, y + 25);
 
-  // Footer
-  const pageCount = (doc as any).internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(7);
-    doc.setTextColor(160, 170, 185);
-    doc.text(`Contrat MOE — ${contrat.numero || 'Brouillon'} — Page ${i}/${pageCount}`, W / 2, 292, { align: 'center' });
-  }
+  drawAgencyFooters(doc, settings, letterhead);
 
   doc.save(`Contrat_MOE_${contrat.numero || contrat.intitule_projet || 'nouveau'}.pdf`);
 }

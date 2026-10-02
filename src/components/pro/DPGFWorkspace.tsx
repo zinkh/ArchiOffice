@@ -9,6 +9,7 @@ import {
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
 import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
+import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
@@ -118,6 +119,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   dpgf, onChange, onSave, projectName, onDropExternal, onDragStart,
   showTree: showTreeProp, onToggleTree, onImportOffre, onPushToAct, offres = [],
 }) => {
+  const { settings } = useSettings();
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
@@ -603,8 +605,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Formats',
           actions: [
-            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement) },
-            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement) },
+            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}) },
+            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement, settings ?? {}) },
           ],
         },
       ],
