@@ -14,6 +14,7 @@ import {
   addMembership,
   findMembership,
   listMembershipsWithTenants,
+  listTenantAdminIds,
   listTenantMemberIds,
   tenantMembershipsByUser,
   updateMembership,
@@ -277,8 +278,22 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       const tenantId = await requireTenantAdmin(req.user.id);
       const { id } = req.params;
       const { role } = req.body;
-      if (!(await findMembership(supabaseAdmin, id, tenantId))) {
+      const target = await findMembership(supabaseAdmin, id, tenantId);
+      if (!target) {
         return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+      }
+      // Seul un administrateur peut changer un rôle : rétrograder le dernier
+      // laisserait le cabinet sans personne pour le rétablir (ni inviter,
+      // facturer ou fermer). Le refus est donc définitif côté serveur, quel
+      // que soit l'écran qui appelle.
+      if (target.systemRole === 'admin' && role !== 'admin') {
+        const adminIds = await listTenantAdminIds(supabaseAdmin, tenantId);
+        if (!adminIds.some((adminId) => adminId !== id)) {
+          return res.status(409).json({
+            error: "Un cabinet doit toujours compter au moins un administrateur. Nommez d'abord un autre administrateur avant de modifier ce rôle.",
+            code: 'LAST_ADMIN',
+          });
+        }
       }
       // Le rôle est celui tenu dans CE cabinet : le modifier ici ne doit rien
       // changer au rôle que la même personne tient dans l'autre.
