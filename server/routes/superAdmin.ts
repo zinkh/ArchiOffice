@@ -11,7 +11,7 @@ import type { Express } from 'express';
 import { isSuperAdmin } from '../superAdminAuth';
 import { logAdminAction } from '../adminAudit';
 import { sendPlatformMail } from '../mailer';
-import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn } from '../tenantMemberships';
+import { addMembership, findMembership, listTenantAdminIds, listTenantMemberIds, listTenantProfiles, listUsersOnlyIn, updateMembership } from '../tenantMemberships';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -165,6 +165,33 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       res.json({ action_link: linkData.properties.action_link, impersonated_email: (member as any).email });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants/:id/impersonate]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // Dernier recours quand un cabinet n'a plus d'administrateur utilisable
+  // (rôle rétrogradé, adresse du compte corrompue...) : seul un admin peut
+  // nommer un admin depuis l'application, donc plus personne ne peut le
+  // faire. Le superadmin ne fait que promouvoir un membre existant, jamais
+  // l'inverse, et chaque nomination est journalisée.
+  app.post('/api/admin/tenants/:id/members/:userId/appoint-admin', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id: tenantId, userId } = req.params;
+      const membership = await findMembership(supabaseAdmin, userId, tenantId);
+      if (!membership) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+      if (membership.systemRole === 'admin') return res.json({ ok: true, alreadyAdmin: true });
+
+      await updateMembership(supabaseAdmin, { userId, tenantId, systemRole: 'admin' });
+      // `profiles` porte le rôle du cabinet par défaut (et sert de repli aux
+      // instances sans adhésions) : le filtre évite de promouvoir la personne
+      // dans un autre cabinet.
+      const { error } = await supabaseAdmin.from('profiles').update({ system_role: 'admin' }).eq('id', userId).eq('tenant_id', tenantId);
+      if (error) throw error;
+
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.admin_appointed', tenantId, {
+        appointed_user_id: userId, previous_system_role: membership.systemRole,
+      });
+      res.json({ ok: true });
+    } catch (e: any) {
+      console.error("[POST /api/admin/tenants/:id/members/:userId/appoint-admin]", e); res.status(500).json({ error: e.message }); }
   });
 
   // Free-form email from the platform team to a tenant — either one named
