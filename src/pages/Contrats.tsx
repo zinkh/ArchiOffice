@@ -629,7 +629,7 @@ function ContratModal({
                   </p>
 
                   <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
-                    <table className="w-full text-xs">
+                    <table className="min-w-full text-xs">
                       <thead>
                         <tr style={{ background: 'var(--tblr-surface-2)' }}>
                           <th className="text-center px-2 py-2 font-semibold w-8" style={{ color: 'var(--tblr-muted)' }} title="Mission incluse au contrat">✓</th>
@@ -813,7 +813,7 @@ function ContratModal({
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun cotraitant</p>
                     ) : (
                       <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
-                        <table className="w-full text-xs">
+                        <table className="min-w-full text-xs">
                           <thead>
                             <tr style={{ background: 'var(--tblr-surface-2)' }}>
                               <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '26%' }}>Contact</th>
@@ -904,7 +904,7 @@ function ContratModal({
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun sous-traitant</p>
                     ) : (
                       <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
-                        <table className="w-full text-xs">
+                        <table className="min-w-full text-xs">
                           <thead>
                             <tr style={{ background: 'var(--tblr-surface-2)' }}>
                               <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Contact</th>

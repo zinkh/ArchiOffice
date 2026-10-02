@@ -581,7 +581,7 @@ export default function Situations({ projectId: propProjectId }: { projectId?: s
                   <p className="text-sm text-[var(--tblr-muted)] text-center py-6">Aucun poste DPGF — ajoutez des items dans le DPGF du projet</p>
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full text-xs border-collapse">
+                    <table className="min-w-full text-xs border-collapse">
                       <thead>
                         <tr className="text-[var(--tblr-muted)] border-b" style={{ borderColor: 'var(--tblr-border)' }}>
                           <th className="text-left py-2 pr-2 font-medium">Désignation</th>
