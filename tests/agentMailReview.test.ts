@@ -14,7 +14,7 @@ vi.mock('@zinkh/archioffice-agents/server/llm', () => ({
 
 import {
   computeNextReviewRun, lookbackHoursFor, selectCandidates, parseReviewJson,
-  buildReviewItems, notificationForItem, executeMailReview, runDueMailReviews, type MailReview,
+  buildReviewItems, notificationForItem, extractReplyAddress, replySubject, executeMailReview, runDueMailReviews, type MailReview,
 } from '../server/agentMailReview';
 import { issueMailRelayToken, resolveMailRelayToken } from '../server/agentMailRelayTokens';
 
@@ -151,6 +151,28 @@ describe('notificationForItem', () => {
   });
 });
 
+describe('extractReplyAddress / replySubject', () => {
+  it('extrait l\'adresse d\'un en-tête avec nom ou d\'une adresse seule', () => {
+    expect(extractReplyAddress('Marie Dupont <marie@x.test>')).toBe('marie@x.test');
+    expect(extractReplyAddress('"Dupont, Marie" <marie@x.test>')).toBe('marie@x.test');
+    expect(extractReplyAddress('marie@x.test')).toBe('marie@x.test');
+  });
+  it('rend null sans adresse exploitable', () => {
+    expect(extractReplyAddress('Marie Dupont')).toBeNull();
+    expect(extractReplyAddress('')).toBeNull();
+  });
+  it('préfixe « Re: » une seule fois et aplatit les retours à la ligne', () => {
+    expect(replySubject('Devis toiture')).toBe('Re: Devis toiture');
+    expect(replySubject('RE: Devis toiture')).toBe('RE: Devis toiture');
+    expect(replySubject('Devis\r\ntoiture')).toBe('Re: Devis toiture');
+    expect(replySubject('')).toBe('Re: (sans objet)');
+  });
+  it('signale dans le push qu\'un brouillon est prêt', () => {
+    const n = notificationForItem({ id: 'x', from: 'A <a@x.test>', subject: 'S', urgency: 'normale', reason: '', proposal: 'Bonjour', draft: 'created' }, 'Sophie');
+    expect(n.body).toBe('Brouillon enregistré. Sophie propose : Bonjour');
+  });
+});
+
 describe('jeton de relais multi-usage', () => {
   it('reste à usage unique par défaut', async () => {
     const db = new FakeSupabaseAdmin();
@@ -178,9 +200,11 @@ describe('revue de bout en bout', () => {
   const NOW = new Date('2026-10-05T06:00:00Z');
   let db: FakeSupabaseAdmin;
   let review: MailReview;
+  let drafts: any[];
 
   beforeEach(() => {
     chat.mockReset();
+    drafts = [];
     db = new FakeSupabaseAdmin();
     db.seed('agents', [{ id: 'sophie', tenant_id: 't1', name: 'Sophie', is_active: true, mail_enabled: true, context_scopes: [] }]);
     db.seed('tenants', [{ id: 't1', ai_credit_balance_eur_cents: 500, agent_billing_mode: 'prepaid' }]);
@@ -191,7 +215,7 @@ describe('revue de bout en bout', () => {
     };
     db.seed('agent_mail_reviews', [review]);
 
-    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) => {
       const json = (body: unknown) => ({ ok: true, json: async () => body });
       if (url.endsWith('/api/mail/accounts')) return json([{ id: 'acc1', provider: 'google', email: 'moi@aazs.fr', isDefault: true }]);
       if (url.includes('/api/gmail/messages?')) return json({ messages: [
@@ -199,6 +223,10 @@ describe('revue de bout en bout', () => {
         { id: 'g2', subject: 'Merci', from: 'Lea <lea@x.test>', date: '2026-10-05T04:00:00Z' },
         { id: 'g3', subject: 'Promo', from: 'noreply@shop.test', date: '2026-10-05T03:00:00Z' },
       ] });
+      if (url.endsWith('/api/mail/drafts')) {
+        drafts.push(JSON.parse(String(init?.body)));
+        return json({ success: true, id: 'd1' });
+      }
       if (url.includes('/api/gmail/messages/')) return json({ subject: 'Devis toiture', from: 'Paul', content: 'Pouvez-vous me confirmer le devis ?', bodyText: 'Pouvez-vous me confirmer le devis ?' });
       return { ok: false, json: async () => ({}) };
     }));
@@ -229,6 +257,13 @@ describe('revue de bout en bout', () => {
     expect(pushes).toHaveLength(1); // une seule proposition : pas de notification de synthèse
     expect(pushes[0]).toMatchObject({ user_id: 'u1', category: 'Alertes IA', url: '/mailbox' });
     expect(pushes[0].body).toContain('je confirme le devis');
+    expect(pushes[0].body.startsWith('Brouillon enregistré.')).toBe(true);
+
+    // La proposition est enregistrée en brouillon dans la boîte d'arrivée, jamais envoyée.
+    expect(drafts).toEqual([{
+      to: 'paul@x.test', subject: 'Re: Devis toiture',
+      text: 'Bonjour Paul, je confirme le devis.', account_id: 'acc1',
+    }]);
 
     const saved = db.getTable('agent_mail_reviews')[0];
     expect(saved).toMatchObject({ last_status: 'ok', last_count: 1 });
@@ -244,6 +279,21 @@ describe('revue de bout en bout', () => {
     const titles = db.getTable('notification_outbox').map(n => n.title);
     expect(titles).toHaveLength(3);
     expect(titles[0]).toContain('2 mails attendent');
+  });
+
+  it('notifie quand même, sans la mention de brouillon, si le brouillon échoue', async () => {
+    chat.mockResolvedValue({
+      text: '{"mails":[{"n":1,"reponse_attendue":true,"proposition":"Bonjour Paul"}]}',
+      usage: { inputTokens: 1, outputTokens: 1 },
+    });
+    const okFetch = (globalThis.fetch as any);
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: any) =>
+      url.endsWith('/api/mail/drafts') ? { ok: false, json: async () => ({ error: 'boîte refusée' }) } : okFetch(url, init)));
+    const outcome = await executeMailReview(db as any, review, { baseUrl: 'http://local' }, { scheduled: true, now: NOW });
+    expect(outcome.items[0].draft).toBe('failed');
+    const [push] = db.getTable('notification_outbox');
+    expect(push.body.startsWith('Brouillon enregistré.')).toBe(false);
+    expect(push.body).toContain('Bonjour Paul');
   });
 
   it('n\'envoie rien quand aucun mail n\'attend de réponse', async () => {

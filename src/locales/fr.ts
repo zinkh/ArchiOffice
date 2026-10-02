@@ -46,7 +46,7 @@ export default {
       "agent_mail_inbox_no_agent": "Aucun agent actif dans ce cabinet. Créez-en un depuis la page Agents avant de désigner un agent de triage.",
       "agent_mail_inbox_error": "Une erreur est survenue.",
       "agent_mail_review_title": "Revue matinale des mails",
-      "agent_mail_review_explanation": "Chaque matin, l'agent choisi relit votre boîte mail, repère les messages qui attendent une réponse et vous envoie une notification par message, avec une proposition de réponse. Rien n'est envoyé ni écrit dans votre boîte : vous relisez et répondez vous-même.",
+      "agent_mail_review_explanation": "Chaque matin, l'agent choisi relit votre boîte mail, repère les messages qui attendent une réponse et vous envoie une notification par message, avec une proposition de réponse. Chaque proposition est aussi enregistrée dans les brouillons de la boîte concernée : rien n'est jamais envoyé, vous relisez, complétez et envoyez vous-même.",
       "agent_mail_review_no_agent": "Aucun agent actif n'a accès à la messagerie. Activez la lecture des mails dans la configuration d'un agent (page Agents) pour utiliser la revue matinale.",
       "agent_mail_review_agent_label": "Agent :",
       "agent_mail_review_agent_choose": "Choisir un agent",

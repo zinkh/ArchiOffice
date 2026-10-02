@@ -1419,8 +1419,14 @@ mail l'est) : `agent_mail_reviews`, une ligne par couple cabinet x personne
 outil, faute de jeton utilisateur hors session. `server/agentMailReview.ts` lit
 les boîtes par la boucle locale (`executeMailTool`, `list_emails` puis
 `read_email`) avec un jeton `mail_at_` de la personne, donc avec ses seuls droits.
-La revue est en LECTURE : le modèle n'a aucun outil, rien n'est envoyé ni écrit
-dans la boîte, un mail piégé ne peut produire qu'un texte de proposition.
+Le modèle n'a aucun outil et rien n'est jamais ENVOYÉ : un mail piégé ne peut
+produire qu'un texte de proposition. Seule écriture dans la boîte : chaque
+proposition est enregistrée en BROUILLON (`create_draft`, jeton `mail_at_` propre
+aux brouillons, `createReplyDrafts`) dans la boîte où le mail est arrivé, adressé
+à l'expéditeur, objet « Re: ». Ce n'est pas une réponse dans le fil (nouveau
+message). Meilleur effort : un brouillon qui échoue ne prive pas du push, il en
+retire seulement la mention « Brouillon enregistré. ». Limite de débit de la route
+de brouillons : 30 par 15 minutes et par personne, partagée avec ses envois.
 
 - **Un seul appel au modèle** pour toute la revue (mails numérotés, sortie JSON
   `{"mails":[{n, reponse_attendue, urgence, raison, proposition}]}`), rattachée

@@ -56,6 +56,10 @@ export interface ReviewItem {
   urgency: 'haute' | 'normale' | 'basse';
   reason: string;
   proposal: string;
+  /** Boîte où le mail est arrivé : c'est là que le brouillon de réponse est enregistré. */
+  accountEmail?: string | null;
+  /** Issue de l'enregistrement du brouillon ; absent tant qu'il n'a pas été tenté. */
+  draft?: 'created' | 'failed';
 }
 
 export interface MailReviewDeps {
@@ -200,6 +204,7 @@ export function buildReviewItems(raw: RawReviewItem[], mails: CandidateMail[], l
       urgency,
       reason: typeof entry.raison === 'string' ? entry.raison.trim() : '',
       proposal,
+      accountEmail: mail.accountEmail,
     });
   }
   items.sort((a, b) => URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency]);
@@ -217,10 +222,25 @@ function clip(text: string, max: number): string {
 
 export function notificationForItem(item: ReviewItem, agentName: string): { title: string; body: string } {
   const flag = item.urgency === 'haute' ? 'Urgent · ' : '';
+  // En tête du corps : la fin est tronquée, pas le début.
+  const drafted = item.draft === 'created' ? 'Brouillon enregistré. ' : '';
   return {
     title: clip(`${flag}${displayName(item.from)} · ${item.subject}`, 90),
-    body: clip(`${agentName} propose : ${item.proposal.replace(/\s+/g, ' ')}`, PROPOSAL_PUSH_CHARS),
+    body: clip(`${drafted}${agentName} propose : ${item.proposal.replace(/\s+/g, ' ')}`, PROPOSAL_PUSH_CHARS),
   };
+}
+
+/** L'adresse à qui répondre, extraite d'un en-tête `Nom <adresse>` ou d'une adresse seule. */
+export function extractReplyAddress(from: string): string | null {
+  const angled = from.match(/<([^<>\s@]+@[^<>\s@]+)>/);
+  const bare = from.trim().match(/^[^<>\s@,;]+@[^<>\s@,;]+$/);
+  return (angled?.[1] || bare?.[0] || null);
+}
+
+/** « Re : » une seule fois, jamais empilé ; sans retour à la ligne (refusé par la route de brouillons). */
+export function replySubject(subject: string): string {
+  const clean = subject.replace(/[\r\n]+/g, ' ').trim() || '(sans objet)';
+  return /^(re|réf?)\s*:/i.test(clean) ? clean : `Re: ${clean}`;
 }
 
 function reviewInstructions(mailCount: number, maxMails: number): string {
@@ -382,6 +402,7 @@ export async function executeMailReview(
       }
 
       const items = buildReviewItems(parseReviewJson(result.text || ''), mails, review.max_mails);
+      await createReplyDrafts(supabaseAdmin, review, deps, items);
       await notifyReview(supabaseAdmin, review, (agent as any).name || 'Votre agent', items, mails.length);
       return done({ status: 'ok', items, reviewed: mails.length });
     } catch (e: any) {
@@ -389,6 +410,39 @@ export async function executeMailReview(
     }
   } catch (e: any) {
     return fail('error', e?.message || 'Erreur inconnue');
+  }
+}
+
+/**
+ * Enregistre chaque proposition comme brouillon dans la boîte où le mail est
+ * arrivé (create_draft : visible dans Brouillons, JAMAIS envoyé). Meilleur
+ * effort : un brouillon qui échoue ne prive pas de la notification, il n'en
+ * change que la mention. Ce n'est pas une réponse dans le fil : le brouillon
+ * est un nouveau message adressé à l'expéditeur, objet « Re: ».
+ */
+async function createReplyDrafts(
+  supabaseAdmin: any,
+  review: MailReview,
+  deps: MailReviewDeps,
+  items: ReviewItem[],
+): Promise<void> {
+  if (items.length === 0) return;
+  const { executeMailTool } = await import('@zinkh/archioffice-agents/server');
+  // Jeton propre aux brouillons : celui de la lecture a pu expirer pendant l'appel au modèle.
+  const token = await issueMailRelayToken(supabaseAdmin, review.tenant_id, review.user_id, { maxUses: items.length * 2 + 2 });
+  const auth = { authorization: `Bearer ${token}`, tenantId: review.tenant_id };
+  for (const item of items) {
+    const to = extractReplyAddress(item.from);
+    if (!to) { item.draft = 'failed'; continue; }
+    try {
+      const outcome = await executeMailTool(deps.baseUrl, auth, 'create_draft', {
+        to, subject: replySubject(item.subject), body: item.proposal,
+        ...(item.accountEmail ? { compte: item.accountEmail } : {}),
+      }, false);
+      item.draft = (outcome.response as any)?.success ? 'created' : 'failed';
+    } catch {
+      item.draft = 'failed';
+    }
   }
 }
 
