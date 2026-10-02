@@ -5,6 +5,7 @@ import type { Express } from 'express';
 import nodemailer from 'nodemailer';
 import rateLimit from 'express-rate-limit';
 import { streamTenantExport } from '../tenantExport';
+import { createTenantBackupInBackground } from '../tenantBackup';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { buildMailInboxAlias } from '../agentMailInbox';
 
@@ -225,6 +226,10 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       const now = new Date().toISOString();
       const { error } = await supabaseAdmin.from('tenants').update({ deletion_requested_at: now, deletion_requested_by: req.user.id }).eq('id', tenantId);
       if (error) throw error;
+      // Une fermeture programmée détruit tout au bout du délai de grâce : on
+      // fige l'état du cabinet dès la demande, hors de portée de ses
+      // administrateurs. Meilleur effort et en arrière-plan.
+      void createTenantBackupInBackground(supabaseAdmin, tenantId, 'closure_request', req.user.id);
       res.json({ success: true, deletion_requested_at: now });
     } catch (error: any) {
       console.error("[POST /api/settings/tenant-deletion]", error);

@@ -102,7 +102,7 @@ describe('buildAgentContext — bibliothèque de connaissances', () => {
     const path = 'tenant-1/agents/agent-1/reglement.txt';
     db.seed('documents', [{ id: 'doc-1', tenant_id: 'tenant-1', resource_type: 'agents', resource_id: 'agent-1', name: 'reglement.txt', file_url: `https://fake.supabase.test/storage/v1/object/public/documents/${path}` }]);
     await db.storage.from('documents').upload(path, Buffer.from('contenu'));
-    // FakeSupabaseAdmin's download() always returns fixed bytes without a
+    // FakeSupabaseAdmin's download() returns the uploaded bytes without a
     // content-type — text extraction needs one to route to the plain-text
     // branch (see extractKnowledgeDocText, context.ts), so it's added here
     // locally rather than in the shared fake, which every other test relies
@@ -119,6 +119,6 @@ describe('buildAgentContext — bibliothèque de connaissances', () => {
     const ctx = await buildAgentContext(db, 'tenant-1', 'user-1', 'agent-1', [], [], false, true);
     expect(ctx.knowledgeDocuments).toHaveLength(1);
     expect(ctx.knowledgeDocuments[0].title).toBe('reglement.txt');
-    expect(ctx.knowledgeDocuments[0].excerpt).toContain('fake-file-content');
+    expect(ctx.knowledgeDocuments[0].excerpt).toContain('contenu');
   });
 });

@@ -130,15 +130,45 @@ export class FakeSupabaseAdmin {
   // the returned public URL back around — so a Set of "uploaded" paths per
   // bucket is enough to make delete/remove/list/download meaningful.
   private storageObjects = new Map<string, Set<string>>();
+  // Octets réellement déposés (clé `bucket\0chemin`), pour les tests qui relisent
+  // ce qu'ils ont écrit — sauvegarde et restauration d'un cabinet. Un objet sans
+  // entrée ici (déposé avant ce suivi, ou seedé) garde l'ancien contenu factice.
+  private storageBytes = new Map<string, Buffer>();
+  private bytesKey(bucket: string, path: string) { return `${bucket}\0${path}`; }
+  /** Test setup : dépose un objet avec un contenu précis. */
+  putObject(bucket: string, path: string, content: string | Buffer) {
+    if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
+    this.storageObjects.get(bucket)!.add(path);
+    this.storageBytes.set(this.bytesKey(bucket, path), Buffer.from(content));
+  }
+  /** Test assertions : l'objet existe-t-il ? */
+  hasObject(bucket: string, path: string): boolean {
+    return !!this.storageObjects.get(bucket)?.has(path);
+  }
+  readObject(bucket: string, path: string): Buffer | undefined {
+    return this.storageBytes.get(this.bytesKey(bucket, path));
+  }
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
     createBucket: async (name: string, _opts?: any) => { this.buckets.add(name); return { data: { name }, error: null }; },
     updateBucket: async (name: string, _opts?: any) => ({ data: { name }, error: null }),
     from: (bucket: string) => ({
-      upload: async (path: string, _buffer: Buffer, _opts?: any) => {
+      upload: async (path: string, buffer: Buffer, _opts?: any) => {
         if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
         this.storageObjects.get(bucket)!.add(path);
+        if (Buffer.isBuffer(buffer)) this.storageBytes.set(this.bytesKey(bucket, path), buffer);
         return { data: { path }, error: null };
+      },
+      // Copie côté « serveur », éventuellement vers un autre bucket, comme
+      // l'API réelle (options.destinationBucket).
+      copy: async (from: string, to: string, opts?: { destinationBucket?: string }) => {
+        if (!this.storageObjects.get(bucket)?.has(from)) return { data: null, error: { message: 'Object not found' } };
+        const dest = opts?.destinationBucket ?? bucket;
+        if (!this.storageObjects.has(dest)) this.storageObjects.set(dest, new Set());
+        this.storageObjects.get(dest)!.add(to);
+        const bytes = this.storageBytes.get(this.bytesKey(bucket, from));
+        if (bytes) this.storageBytes.set(this.bytesKey(dest, to), bytes);
+        return { data: { path: to }, error: null };
       },
       getPublicUrl: (path: string) => ({ data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${bucket}/${path}` } }),
       // Mirrors the real API closely enough for server/routes/storageAccess.ts's
@@ -163,17 +193,23 @@ export class FakeSupabaseAdmin {
           if (!first) continue;
           seen.set(first, seen.get(first) || more.length > 0);
         }
-        const entries = [...seen.entries()].map(([name, isFolder]) => ({ name, id: isFolder ? null : 'fake-object-id' }));
+        const entries = [...seen.entries()].map(([name, isFolder]) => ({
+          name,
+          id: isFolder ? null : 'fake-object-id',
+          metadata: isFolder ? null : { size: this.storageBytes.get(this.bytesKey(bucket, `${prefix}/${name}`))?.length ?? 0 },
+        }));
         return { data: entries, error: null };
       },
       download: async (path: string) => {
         const set = this.storageObjects.get(bucket);
         if (!set?.has(path)) return { data: null, error: { message: 'Object not found' } };
-        return { data: { arrayBuffer: async () => new TextEncoder().encode('fake-file-content').buffer }, error: null };
+        const bytes = this.storageBytes.get(this.bytesKey(bucket, path));
+        const content = bytes ? new Uint8Array(bytes) : new TextEncoder().encode('fake-file-content');
+        return { data: { arrayBuffer: async () => content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) }, error: null };
       },
       remove: async (paths: string[]) => {
         const set = this.storageObjects.get(bucket);
-        if (set) paths.forEach(p => set.delete(p));
+        if (set) paths.forEach(p => { set.delete(p); this.storageBytes.delete(this.bytesKey(bucket, p)); });
         return { data: null, error: null };
       },
     }),

@@ -6,7 +6,7 @@ import {
   IconArrowLeft, IconLoader2, IconUsers, IconBuildingSkyscraper,
   IconCoin, IconNotes, IconDeviceFloppy, IconHistory, IconReceipt,
   IconLogin, IconMessageCircle, IconMail, IconX, IconSend, IconShieldCheck,
-  IconLock, IconLockOpen,
+  IconLock, IconLockOpen, IconDatabase, IconDownload, IconRestore,
 } from '@tabler/icons-react';
 import { PLAN_LABELS, PlanSelect } from './AdminDashboard';
 
@@ -41,6 +41,9 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'tenant.admin_appointed': 'Administrateur nommé',
   'tenant.suspended': 'Cabinet suspendu',
   'tenant.unsuspended': 'Suspension levée',
+  'tenant.backup_created': 'Sauvegarde lancée',
+  'tenant.backup_downloaded': 'Sauvegarde téléchargée',
+  'tenant.backup_restored': 'Sauvegarde restaurée',
   'tenant.email_sent': 'Email envoyé',
 };
 
@@ -66,6 +69,180 @@ function Card({ title, icon, action, children }: { title: string; icon: React.Re
       </div>
       {children}
     </div>
+  );
+}
+
+interface BackupRow {
+  id: string; trigger: string; status: 'pending' | 'complete' | 'failed';
+  row_counts: Record<string, number> | null; file_count: number; data_bytes: number;
+  error: string | null; created_at: string; expires_at: string | null;
+}
+
+interface RestoreSummary {
+  dry_run: boolean; backup_id: string;
+  rows: { table: string; missing: number; restored: number; failed: number }[];
+  files: { missing: number; restored: number; failed: number };
+  failures: string[];
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} o`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} Ko`;
+  return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+// Sauvegardes du cabinet : nocturnes, prises à la suspension et à la demande
+// de fermeture, ou lancées ici. La restauration remet ce qui manque et
+// n'écrase jamais ce qui existe ; elle commence toujours par un aperçu.
+function TenantBackupsCard({ tenantId }: { tenantId: string }) {
+  const { t } = useTranslation();
+  const [backups, setBackups] = useState<BackupRow[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [preview, setPreview] = useState<RestoreSummary | null>(null);
+
+  const load = useCallback(async () => {
+    try { setBackups(await apiFetch<BackupRow[]>(`/api/admin/tenants/${tenantId}/backups`)); } catch { /* liste vide */ }
+  }, [tenantId]);
+  useEffect(() => { load(); }, [load]);
+
+  async function handleBackupNow() {
+    setBusy('new');
+    try {
+      await apiFetch(`/api/admin/tenants/${tenantId}/backups`, { method: 'POST' });
+      await load();
+    } catch (e: any) {
+      alert(e.message ?? t('admin_backups_failed'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDownload(backupId: string) {
+    setBusy(backupId);
+    try {
+      const res = await apiFetch<{ url: string }>(`/api/admin/tenants/${tenantId}/backups/${backupId}/download`);
+      window.open(res.url, '_blank');
+    } catch (e: any) {
+      alert(e.message ?? t('admin_backups_failed'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRestore(backupId: string, dryRun: boolean) {
+    if (!dryRun && !window.confirm(t('admin_backups_confirm_restore'))) return;
+    setBusy(backupId);
+    try {
+      const summary = await apiFetch<RestoreSummary>(`/api/admin/tenants/${tenantId}/backups/${backupId}/restore`, {
+        method: 'POST', body: JSON.stringify({ dry_run: dryRun }),
+      });
+      setPreview(summary);
+    } catch (e: any) {
+      alert(e.message ?? t('admin_backups_failed'));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const totalMissing = preview ? preview.rows.reduce((n, r) => n + r.missing, 0) + preview.files.missing : 0;
+  const totalRestored = preview ? preview.rows.reduce((n, r) => n + r.restored, 0) + preview.files.restored : 0;
+
+  return (
+    <Card
+      title={t('admin_backups_title')}
+      icon={<IconDatabase size={16} style={{ color: 'var(--tblr-primary)' }} />}
+      action={
+        <button
+          onClick={handleBackupNow}
+          disabled={busy === 'new'}
+          className="flex items-center gap-1.5 text-[0.6875rem] font-semibold px-2 py-1 rounded hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+          style={{ color: 'var(--tblr-primary)' }}
+        >
+          {busy === 'new' ? <IconLoader2 size={13} className="animate-spin" /> : <IconDatabase size={13} />}
+          {t('admin_backups_now')}
+        </button>
+      }
+    >
+      {backups.length === 0 ? (
+        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('admin_backups_empty')}</p>
+      ) : (
+        <div className="overflow-x-auto -mx-1">
+          <table className="min-w-full text-sm">
+            <tbody>
+              {backups.map(b => (
+                <tr key={b.id} className="border-t" style={{ borderColor: 'var(--tblr-border)' }}>
+                  <td className="py-2 pr-2">
+                    <p style={{ color: 'var(--tblr-text)' }}>{fmtDateTime(b.created_at)}</p>
+                    <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
+                      {t(`admin_backups_trigger_${b.trigger}`, { defaultValue: b.trigger })}
+                      {' · '}
+                      {b.status === 'complete'
+                        ? `${Object.values(b.row_counts ?? {}).reduce((n, v) => n + v, 0)} ${t('admin_backups_rows')}, ${b.file_count} ${t('admin_backups_files')}, ${fmtBytes(b.data_bytes)}`
+                        : b.status === 'pending' ? t('admin_backups_pending') : t('admin_backups_failed_status')}
+                      {' · '}
+                      {b.expires_at ? t('admin_backups_expires', { date: fmtDate(b.expires_at) }) : t('admin_backups_kept')}
+                    </p>
+                    {b.error && <p className="text-[0.6875rem]" style={{ color: '#b91c1c' }}>{b.error}</p>}
+                  </td>
+                  <td className="py-2 pl-2 text-right whitespace-nowrap">
+                    {b.status === 'complete' && (
+                      <>
+                        <button
+                          onClick={() => handleDownload(b.id)} disabled={busy === b.id}
+                          title={t('admin_backups_download')}
+                          className="p-1 rounded hover:bg-[var(--tblr-surface-2)]" style={{ color: 'var(--tblr-muted)' }}
+                        >
+                          <IconDownload size={13} />
+                        </button>
+                        <button
+                          onClick={() => handleRestore(b.id, true)} disabled={busy === b.id}
+                          title={t('admin_backups_preview')}
+                          className="p-1 rounded hover:bg-[var(--tblr-surface-2)]" style={{ color: 'var(--tblr-muted)' }}
+                        >
+                          {busy === b.id ? <IconLoader2 size={13} className="animate-spin" /> : <IconRestore size={13} />}
+                        </button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {preview && (
+        <div className="rounded-lg border px-3 py-2 text-sm space-y-1" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <p className="font-semibold">
+            {preview.dry_run
+              ? t('admin_backups_preview_result', { count: totalMissing })
+              : t('admin_backups_restore_result', { count: totalRestored })}
+          </p>
+          <ul className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
+            {preview.rows.map(r => (
+              <li key={r.table}>{r.table} : {preview.dry_run ? r.missing : `${r.restored}/${r.missing}`}</li>
+            ))}
+            {preview.files.missing > 0 && (
+              <li>{t('admin_backups_files')} : {preview.dry_run ? preview.files.missing : `${preview.files.restored}/${preview.files.missing}`}</li>
+            )}
+          </ul>
+          {preview.failures.length > 0 && (
+            <ul className="text-[0.6875rem]" style={{ color: '#b91c1c' }}>
+              {preview.failures.map((f, i) => <li key={i}>{f}</li>)}
+            </ul>
+          )}
+          {preview.dry_run && totalMissing > 0 && (
+            <button
+              onClick={() => handleRestore(preview.backup_id, false)} disabled={busy === preview.backup_id}
+              className="mt-1 flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-semibold"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+            >
+              <IconRestore size={14} /> {t('admin_backups_restore')}
+            </button>
+          )}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -366,6 +543,8 @@ export default function AdminTenantDetail() {
           Enregistrer
         </button>
       </Card>
+
+      <TenantBackupsCard tenantId={tenant.id} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Members */}
