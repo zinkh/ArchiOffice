@@ -141,6 +141,8 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET/POST/PUT/DELETE /api/contacts(/:id)`.
 - `GET/POST/DELETE /api/contact-categories(/:id)`.
 - `POST /api/sync/google-contacts`, `POST /api/sync/carddav`.
+- `GET /api/qualifications` (all the cabinet's company qualifications; `?contact_id=` for one company), `POST /api/contacts/:contactId/qualifications`, `PUT/DELETE /api/qualifications/:id`, `POST /api/qualifications/:id/verify` (`{ verified: false }` withdraws it), `POST /api/contacts/:contactId/qualifications/rge-sync` (imports the RGE qualifications for the contact's SIRET from the ADEME open data; never overwrites a hand-entered row).
+- `GET /api/entreprises/search?q=&departement=&batiment=1&rge=1&page=` — company search (SIRENE directory), each result enriched with its RGE qualifications, the NAF label and the matching contact id if the cabinet already has the SIRET. Rate-limited to 30 requests a minute per user.
 
 ### Meetings
 - `GET/POST/PUT/DELETE /api/meetings(/:id)`.

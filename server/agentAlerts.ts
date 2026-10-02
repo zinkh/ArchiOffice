@@ -18,6 +18,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { notifyTenantAdmins } from './mailer';
 import { notifyTenantAdminsPush } from './push';
 import { dispatchWebhookEvent } from './webhookDispatch';
+import { joursAvant, parContact, resumeQualifications, type Qualification } from '../src/lib/qualifications';
 
 const DEFAULT_CHECK_INTERVAL_HOURS = 6;
 
@@ -47,6 +48,10 @@ export interface TenantSnapshot {
   ordresDeService: Row[];
   reserves: Row[];
   notesHonoraires: Row[];
+  /** `contact_qualifications` du cabinet. */
+  qualifications: Row[];
+  /** `act_data` (project_id, consultation) : qui est consulté sur quelle affaire. */
+  consultations: Row[];
 }
 
 export interface AlertRuleDef {
@@ -321,6 +326,47 @@ export const ALERT_RULES: AlertRuleDef[] = [
     },
   },
   {
+    code: 'qualification_expiree',
+    label: 'Qualification d\'une entreprise consultée expirée ou proche de l\'échéance',
+    description:
+      "Une entreprise consultée sur une affaire en cours n'a plus aucune qualification valide enregistrée " +
+      "(Qualibat, RGE...) : la meilleure arrive à échéance dans le délai réglé, ou l'a dépassée. " +
+      "Une entreprise qui conserve au moins une qualification en cours de validité ne déclenche rien.",
+    defaultSeverity: 'warning',
+    defaultThresholdDays: 30,
+    evaluate(snapshot, thresholdDays) {
+      const parContactId = parContact(snapshot.qualifications as unknown as Qualification[]);
+      const today = snapshot.now.toISOString().slice(0, 10);
+      const enCours = new Set(snapshot.projects.filter(p => p.status !== 'Completed').map(p => String(p.id)));
+      const alerts: DetectedAlert[] = [];
+      for (const act of snapshot.consultations) {
+        if (!enCours.has(String(act.project_id))) continue;
+        const project = snapshot.projects.find(p => String(p.id) === String(act.project_id));
+        const entreprises: Row[] = Array.isArray(act.consultation?.entreprises) ? act.consultation.entreprises : [];
+        for (const e of entreprises) {
+          if (!e?.contact_id || e.ne_repond_pas) continue;
+          const resume = resumeQualifications(parContactId[String(e.contact_id)] || [], today);
+          const fin = resume.principale?.date_fin;
+          if (!fin || (resume.statut !== 'expiree' && resume.statut !== 'bientot')) continue;
+          const reste = joursAvant(fin, today);
+          if (reste > thresholdDays) continue;
+          const nom = e.nom || 'Entreprise sans nom';
+          alerts.push({
+            dedupKey: `qualification_expiree:${act.project_id}:${e.contact_id}`,
+            title: `Qualification ${reste < 0 ? 'expirée' : 'bientôt expirée'} : ${nom}`,
+            message:
+              `La meilleure qualification enregistrée pour « ${nom} », consultée sur « ${project ? projectLabel(project) : 'une affaire'} », ` +
+              (reste < 0 ? `a expiré il y a ${-reste} jours.` : `expire dans ${reste} jours.`) +
+              ` Demander un certificat à jour avant d'attribuer un lot.`,
+            targetType: 'project',
+            targetId: String(act.project_id),
+          });
+        }
+      }
+      return alerts;
+    },
+  },
+  {
     code: 'tache_en_retard',
     label: 'Tâches en retard',
     description: "Des tâches ont dépassé leur date de fin sans être terminées.",
@@ -364,7 +410,7 @@ async function selectAll(supabaseAdmin: SupabaseClient, table: string, tenantId:
 }
 
 export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId: string, now = new Date()): Promise<TenantSnapshot> {
-  const [projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires] =
+  const [projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations] =
     await Promise.all([
       selectAll(supabaseAdmin, 'projects', tenantId, 'id, name, status, start_date, end_date, project_code'),
       selectAll(supabaseAdmin, 'project_phase_history', tenantId, 'project_id, phase, entered_at, exited_at'),
@@ -377,8 +423,10 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
       selectAll(supabaseAdmin, 'ordres_de_service', tenantId, 'id, project_id, date'),
       selectAll(supabaseAdmin, 'reserves', tenantId, 'id, project_id, status, created_at, due_date'),
       selectAll(supabaseAdmin, 'notes_honoraires', tenantId, 'id, project_id, contrat_id, date'),
+      selectAll(supabaseAdmin, 'contact_qualifications', tenantId, 'id, contact_id, organisme, reference, date_fin, source, verified_at'),
+      selectAll(supabaseAdmin, 'act_data', tenantId, 'project_id, consultation'),
     ]);
-  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires };
+  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations };
 }
 
 export interface RuleSetting {

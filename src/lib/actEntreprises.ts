@@ -166,6 +166,23 @@ export function suggererContacts<T extends ContactSuggere>(
     .map(x => x.c);
 }
 
+/**
+ * Lots dont l'intitulé recoupe l'un des corps d'état donnés : sert à proposer
+ * le classement d'une entreprise qu'on vient d'ajouter sans lot (« Charpente -
+ * Ossature bois » -> « Lot 02 Charpente bois »). Une proposition modifiable,
+ * jamais une affectation : même rapprochement que `suggererContacts`.
+ */
+export function lotsCorrespondants(libellesCorpsEtat: string[], lots: LotSuivi[]): string[] {
+  const radicauxCorps = radicauxMetier(libellesCorpsEtat.join(' '));
+  if (radicauxCorps.size === 0) return [];
+  return lots
+    .filter(lot => {
+      for (const r of radicauxMetier(lot.lot_title)) if (radicauxCorps.has(r)) return true;
+      return false;
+    })
+    .map(lot => lot.id);
+}
+
 // ── Filtres ──────────────────────────────────────────────────────────────────
 
 export interface FiltresEntreprises {

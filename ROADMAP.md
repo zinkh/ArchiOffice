@@ -22,6 +22,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Internal feed, notifications, direct messaging | ✅ | |
 | Project correspondence: editable drafts, personal signature, filing in the origin mailbox | ✅ | Linking an email to a project files it in a Gmail label / Outlook or IMAP folder `ArchiOffice/<project>` (best effort). Drafts are edited in place in the provider mailbox; there is no stored draft-to-project link, the tab matches drafts by client address and project name/code. |
 | Team management, roles, multi-tenant join requests | ✅ | Roles: `admin`, `manager`, `pm`, `user`. |
+| Company qualifications (Qualibat, Qualifelec, RGE...), search for building companies | 🟡 | Per-contact qualifications with validity status, an "expires soon" alert on consulted companies, import of RGE qualifications from the ADEME open data, and a company search (SIRENE directory + RGE badge) from the ACT consultation table. Qualibat itself is **not** queried: see the Qualibat entry under Integrations and the TODO under Known gaps. |
 | Billing & plan quotas | ✅ | Payment processing via **Stancer** (not Stripe), quota enforcement (`projects`, `users`, `documents`) tied to plan/trial status. |
 
 ## Document export
@@ -50,6 +51,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | kDrive (Infomaniak) | ✅ Active — same WebDAV adapter as Nextcloud |
 | Google Drive | ✅ Active — OAuth (`drive.file` scope), documents and plans stored on the tenant's own Drive |
 | Dropbox | ✅ Active — OAuth, documents and plans stored on the tenant's own Dropbox |
+| Qualibat (API Entreprise, `certifications_batiment`) | ⏳ Blocked — the API is reserved for public administrations and needs a DataPass authorisation we don't hold; by SIRET only, no search. See the TODO below |
 | Salesforce | ⏳ Planned — listed in Settings, no backend |
 | Slack | ⏳ Planned — listed in Settings, no backend |
 | Microsoft Teams | ⏳ Planned — listed in Settings, no backend |
@@ -132,6 +134,9 @@ recorded here so the reasoning doesn't have to be re-derived.
 | API versioning | ⏳ | Flat `/api/*` surface with no version prefix, except the self-contained `/api/maf/v1/*` namespace. |
 
 ## Known gaps worth knowing about before you rely on something
+
+- **TODO: ask Qualibat for access to its API.** The cabinet has no DataPass access, so the [API Entreprise Qualibat endpoint](https://entreprise.api.gouv.fr/catalogue/qualibat/certifications_batiment) (reserved for administrations and local authorities) is out of reach. Write to Qualibat to ask whether it offers its own API or a partnership for private firms: checking a certificate by SIRET, and ideally searching its directory by trade and département, which the API Entreprise endpoint does not offer. In the meantime the cabinet records qualifications by hand (or imports the RGE ones from the ADEME open data) and checks the certificate on the Qualibat website. Two follow-ups once an answer is in: point `QUALIBAT_ANNUAIRE_URL` (`src/lib/qualifications.ts`) at the actual directory page, and add a `source = 'qualibat'` feed to `contact_qualifications` (the table already allows `api_entreprise` as a source; a Qualibat-specific one would need a CHECK update).
+- **The ADEME RGE dataset was not exercised against the live service when it was integrated** (network access was filtered in the development environment). `server/rgeLookup.ts` reads its columns tolerantly and the dataset name can be overridden with `ADEME_RGE_DATASET`, but the first real import should be checked by hand on a known company.
 
 - **No pagination on most list endpoints** (`/api/documents`, `/api/tasks`, `/api/contacts`, `/api/tenders`, `/api/rfis`, `/api/reserves`, `/api/meetings`, and others) — large tenants get full, unpaged arrays back. `/api/projects` and `/api/invoices` got opt-in cursor pagination (`?limit=&cursor=`, returning `{ data, nextCursor }`) and dropped their per-row relational fan-out (cotraitants/lots/stakeholders/categories, line items) down to a single per-item detail fetch — see CLAUDE.md's "Pagination et fan-out sur les listes" — but the remaining endpoints above still return everything, unpaged, on every call.
 - **Uploads go through the server's memory**, not a direct signed upload to storage. Every route on the multer/`memoryStorage()` path (`server/documentUpload.ts`, `server/imageUpload.ts`) buffers the whole file (up to 50 Mo) in the Node process before it reaches storage — Supabase's, or the tenant's own space. Several concurrent large uploads can add up to real memory pressure. A direct-to-storage signed-upload flow (client asks the server for a short-lived signed upload URL, then uploads straight to the now-private storage bucket) would remove the server from that hot path entirely; not started, and it would have to be reworked per provider now that three of them exist.
