@@ -110,6 +110,7 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `APP_URL` | Yes | Deployed app base URL |
 | `SMTP_HOST/PORT/USER/PASS` | Optional | Email via Nodemailer |
 | `GEORISQUES_TOKEN` | Optional | French geological risk API |
+| `ADEME_RGE_DATASET` | Optional | Nom du jeu de données ADEME des entreprises RGE (défaut `liste-des-entreprises-rge-2`), lu par l'import de qualifications |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Optional | Web Push (PWA notifications). Generate once per instance with `node scripts/generate-vapid-keys.mjs`; unset means Web Push is off and nothing else breaks |
 | `VAPID_SUBJECT` | Optional | Contact address the push service uses to reach the operator (`mailto:` or `https:`). Falls back to `APP_URL` |
 | `AGENT_MAIL_INBOX_HOST/PORT/USERNAME/PASSWORD` | Optional | Shared IMAP mailbox for inbound "forward an email to an agent" (`server/agentMailInbox.ts`) — job inactive unless all four are set |
@@ -492,6 +493,47 @@ migration).
   après 5 s et le dernier état est écrit au démontage.
 - `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
   et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
+
+### Qualifications des entreprises et recherche d'entreprises
+
+`contact_qualifications` (`supabase/migrate_contact_qualifications.sql`) : une ligne par qualification
+détenue par une entreprise (Qualibat, Qualifelec, Qualit'EnR, Certibat, RGE, autre), clé d'unicité
+(contact, organisme, référence), `source` (`saisie`, `ademe`, `api_entreprise`) et `verified_at`/
+`verified_by` pour le contrôle du certificat. Hors `SYNC_TABLES` : rien à propager vers un poste local.
+La logique pure (statuts, résumé, SIRET, validation) est dans `src/lib/qualifications.ts`, partagée par
+le serveur et l'écran.
+
+**Qualibat n'est PAS interrogé.** Son API (API Entreprise, `certifications_batiment`) est réservée aux
+administrations (habilitation DataPass que le cabinet n'a pas), se consulte par SIRET et n'offre aucune
+recherche ; l'annuaire de Qualibat n'a pas d'API ouverte et ne doit pas être aspiré. D'où trois sources,
+aucune ne valant verdict :
+
+- **Saisie** par l'architecte sur la fiche contact (`ContactQualifications.tsx`), avec « Vérifier sur
+  Qualibat » (copie le SIRET, ouvre `QUALIBAT_ANNUAIRE_URL`) puis le bouclier « contrôlée ». **Modifier
+  organisme, référence ou dates retire le contrôle** : l'attestation portait sur ce qui était affiché.
+- **Import RGE** (`server/rgeLookup.ts`, `POST /api/contacts/:id/qualifications/rge-sync`) depuis les
+  données ouvertes de l'ADEME. Il ne couvre QUE les qualifications RGE : une réponse vide veut dire « pas
+  de qualification RGE connue », jamais « non qualifiée » (l'écran le dit). Rejouable, jamais d'écrasement
+  d'une ligne saisie à la main (seules les lignes `source = 'ademe'` sont mises à jour), cache de 6 h,
+  nom du jeu de données surchargeable par `ADEME_RGE_DATASET` (non vérifié contre le service réel).
+- **API Entreprise** : prévue dans le modèle (`source = 'api_entreprise'`), non branchée. TODO dans
+  ROADMAP.md : demander à Qualibat un accès.
+
+**Statut** (`statutQualification`) : valide, expire bientôt (60 jours), expirée, sans échéance. L'entreprise
+est jugée sur sa MEILLEURE qualification (`resumeQualifications`) : une seule en cours de validité suffit
+pour attribuer un lot. Pastille dans le tableau ACT (`QualificationBadge`, une lecture groupée
+`GET /api/qualifications` par `useQualifications`, jamais une requête par ligne) et règle d'alerte
+`qualification_expiree` (`agentAlerts.ts`, délai réglable, 30 jours par défaut) limitée aux entreprises
+consultées sur une affaire en cours (`act_data.consultation.entreprises[].contact_id`).
+
+**Recherche d'entreprises** (`GET /api/entreprises/search`, `server/routes/entreprisesSearch.ts`,
+`EntrepriseSearchDialog.tsx`, bouton « Rechercher » du tableau ACT) : API publique « Recherche
+d'entreprises » (SIRENE) interrogée par le serveur, paramètres validés avant d'être transmis, 30 requêtes
+par minute et par personne. Chaque résultat est enrichi, chaque enrichissement étant facultatif (un échec
+laisse la liste intacte) : qualifications RGE, libellé NAF (`ref_naf`), fiche contact existante du cabinet
+(SIRET normalisé). Ajouter une entreprise crée la fiche (catégorie Entreprise, SIRET, TVA déduite du
+SIREN, adresse) puis rejoue l'import RGE ; la consultation n'est modifiée que par « Ajouter à la
+consultation », avec un lot facultatif.
 
 ### Groupement vs agence dans les notes d'honoraires
 

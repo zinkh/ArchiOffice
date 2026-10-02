@@ -5,6 +5,7 @@ import type { Contact, ContactCategory } from '../types';
 import { AddressAutocomplete } from './AddressAutocomplete';
 import { CompanyAutocomplete } from './CompanyAutocomplete';
 import { TagChipInput } from './TagChipInput';
+import { ContactQualifications } from './ContactQualifications';
 import { isEntrepriseContact, isBureauEtudesContact } from '../lib/contactCategories';
 import { frenchVatNumber, parseDirectors, streetWithoutCity, type CompanyDirector } from '../lib/siren';
 
@@ -478,6 +479,9 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
                   placeholder={t('contacts_corps_etat_placeholder')}
                 />
               </div>
+            )}
+            {isEntrepriseContact(contact as Contact) && !!contact.category && !!contact.id && (
+              <ContactQualifications contactId={contact.id} siret={contact.siret || ''} />
             )}
             {isBureauEtudesContact(contact as Contact) && !!contact.category && (
               <div className="space-y-1">

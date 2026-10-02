@@ -6,7 +6,7 @@ import {
   IconFileText, IconBuilding, IconUsers, IconScale, IconTrophy,
   IconDownload, IconMessageDots, IconMail, IconAlertTriangle,
   IconClipboardList, IconCurrencyEuro, IconPercentage, IconStar,
-  IconX, IconEdit, IconEye, IconSend, IconCircleCheck,
+  IconX, IconEdit, IconEye, IconSend, IconCircleCheck, IconSearch,
 } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -19,6 +19,8 @@ import {
 } from '../lib/actExport';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import ACTEntreprisesTable from './ACTEntreprisesTable';
+import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
+import { useQualifications } from '../hooks/useQualifications';
 import { ContactModal } from './ContactModal';
 import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
 
@@ -427,6 +429,9 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   }, [contacts, extraContacts]);
   const entrepriseContacts = useMemo(() => allContacts.filter(isEntrepriseContact), [allContacts]);
 
+  const { parContactId: qualificationsParContact, reload: rechargerQualifications } = useQualifications();
+  const [rechercheOuverte, setRechercheOuverte] = useState(false);
+
   // Nouvelle fiche entreprise à créer depuis la saisie de la consultation.
   const [contactModalFor, setContactModalFor] = useState<{ rowId: string; name: string } | null>(null);
 
@@ -540,6 +545,23 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   const changeCorpsEtat = (e: EntrepriseConsultee, next: string[]) => {
     updateEntreprise(e.id, { corps_etat_codes: next });
     if (e.contact_id) void syncCorpsEtatToContact(e.contact_id, next);
+  };
+
+  /** Une entreprise choisie dans la recherche rejoint la consultation, éventuellement sur un lot. */
+  const ajouterDepuisRecherche = (choix: EntrepriseChoisie) => {
+    if (consultation.entreprises.some(e => e.contact_id === choix.contactId)) return;
+    const fiche = {
+      id: choix.contactId, first_name: '', last_name: '', company_name: choix.nom,
+      category: CONTACT_CATEGORY_ENTREPRISE, siret: choix.siret,
+    } as unknown as Contact;
+    setExtraContacts(prev => [...prev.filter(c => c.id !== choix.contactId), fiche]);
+    update({
+      ...consultation,
+      entreprises: [...consultation.entreprises, {
+        id: crypto.randomUUID(), contact_id: choix.contactId, nom: choix.nom, email: choix.email,
+        lots_ids: choix.lotId ? [choix.lotId] : [], envoyer_dce: true, corps_etat_codes: [],
+      }],
+    });
   };
 
   const corpsEtatOptions = useMemo(
@@ -785,6 +807,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 >
                   <IconDownload size={13} /> PDF
                 </button>
+                <button
+                  onClick={() => setRechercheOuverte(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                >
+                  <IconSearch size={13} /> Rechercher
+                </button>
                 <button onClick={() => {
                   const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
                   update({ ...consultation, entreprises: [...consultation.entreprises, newE] });
@@ -804,6 +832,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               lotOptions={lotOptions}
               onChangeCorpsEtat={changeCorpsEtat}
               corpsEtatCodesFromContact={corpsEtatCodesFromContact}
+              qualifications={qualificationsParContact}
               onSelectContact={(rowId, c) => {
                 const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
                 const email = c.email_work || c.email || '';
@@ -813,6 +842,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
             />
           </div>
         </div>
+      )}
+
+      {rechercheOuverte && (
+        <EntrepriseSearchDialog
+          lots={lots}
+          dejaConsultes={new Set(consultation.entreprises.map(e => e.contact_id).filter((x): x is string => !!x))}
+          onClose={() => setRechercheOuverte(false)}
+          onAddToConsultation={ajouterDepuisRecherche}
+          onContactReady={() => void rechargerQualifications()}
+        />
       )}
 
       {/* ── Phase 2 : Critères ────────────────────────────────────────── */}

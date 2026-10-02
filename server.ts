@@ -49,6 +49,8 @@ import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
 import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerContactRoutes } from "./server/routes/contacts";
+import { registerQualificationRoutes } from "./server/routes/qualifications";
+import { registerEntrepriseSearchRoutes } from "./server/routes/entreprisesSearch";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
 import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
 import { registerSupportRoutes } from "./server/routes/support";
@@ -1010,6 +1012,8 @@ export async function createApp() {
   registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerQualificationRoutes(app, { supabaseAdmin, getTenantId, getUserName });
+  registerEntrepriseSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerSuperAdminRoutes(app, { supabaseAdmin });
   registerAdminSupportRoutes(app, { supabaseAdmin, uploadToStorage });
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });

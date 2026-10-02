@@ -84,6 +84,7 @@ function snapshot(over: Partial<TenantSnapshot> = {}): TenantSnapshot {
     tenantId: 't1', now: NOW,
     projects: [], phaseHistory: [], contrats: [], invoices: [], proposals: [],
     tenders: [], tasks: [], meetings: [], ordresDeService: [], reserves: [], notesHonoraires: [],
+    qualifications: [], consultations: [],
     ...over,
   };
 }
@@ -676,5 +677,55 @@ describe('comptes-rendus de chantier DET', () => {
     });
     expect(result.response.error).toContain('Plusieurs brouillons');
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('alertes : qualification d\'une entreprise consultée', () => {
+  const projet = { id: 'p1', name: 'Villa Martin', status: 'In Progress' };
+  const consultation = (entreprises: any[]) => [{ project_id: 'p1', consultation: { entreprises } }];
+  const qualif = (p: any = {}) => ({ id: 'q', contact_id: 'c1', organisme: 'qualibat', reference: '2111', date_fin: '2026-05-01', ...p });
+
+  it('signale une entreprise dont la meilleure qualification est expirée', () => {
+    const found = detect('qualification_expiree', snapshot({
+      projects: [projet],
+      consultations: consultation([{ contact_id: 'c1', nom: 'Dupont SARL' }]),
+      qualifications: [qualif()],
+    }));
+    expect(found).toHaveLength(1);
+    expect(found[0].dedupKey).toBe('qualification_expiree:p1:c1');
+    expect(found[0].title).toContain('expirée');
+  });
+
+  it('signale une qualification qui expire dans le délai réglé', () => {
+    const found = detect('qualification_expiree', snapshot({
+      projects: [projet],
+      consultations: consultation([{ contact_id: 'c1', nom: 'Dupont SARL' }]),
+      qualifications: [qualif({ date_fin: '2026-06-20' })], // 19 jours après NOW
+    }));
+    expect(found).toHaveLength(1);
+    expect(found[0].title).toContain('bientôt');
+  });
+
+  it('ne dit rien si une autre qualification est en cours de validité', () => {
+    const found = detect('qualification_expiree', snapshot({
+      projects: [projet],
+      consultations: consultation([{ contact_id: 'c1', nom: 'Dupont SARL' }]),
+      qualifications: [qualif(), qualif({ id: 'q2', reference: '3112', date_fin: '2028-01-01' })],
+    }));
+    expect(found).toHaveLength(0);
+  });
+
+  it('ne dit rien pour une qualification valide, absente ou sans date', () => {
+    const base = { projects: [projet], consultations: consultation([{ contact_id: 'c1', nom: 'D' }]) };
+    expect(detect('qualification_expiree', snapshot({ ...base, qualifications: [qualif({ date_fin: '2030-01-01' })] }))).toHaveLength(0);
+    expect(detect('qualification_expiree', snapshot({ ...base, qualifications: [] }))).toHaveLength(0);
+    expect(detect('qualification_expiree', snapshot({ ...base, qualifications: [qualif({ date_fin: null })] }))).toHaveLength(0);
+  });
+
+  it('ignore une entreprise qui ne répond pas, sans fiche, ou une affaire terminée', () => {
+    const q = [qualif()];
+    expect(detect('qualification_expiree', snapshot({ projects: [projet], qualifications: q, consultations: consultation([{ contact_id: 'c1', ne_repond_pas: true }]) }))).toHaveLength(0);
+    expect(detect('qualification_expiree', snapshot({ projects: [projet], qualifications: q, consultations: consultation([{ nom: 'Sans fiche' }]) }))).toHaveLength(0);
+    expect(detect('qualification_expiree', snapshot({ projects: [{ ...projet, status: 'Completed' }], qualifications: q, consultations: consultation([{ contact_id: 'c1' }]) }))).toHaveLength(0);
   });
 });

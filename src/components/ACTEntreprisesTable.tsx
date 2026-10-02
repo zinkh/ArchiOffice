@@ -15,6 +15,8 @@ import { useMailAccounts } from '../hooks/useMailAccounts';
 import type { Contact, ProjectLot } from '../types';
 import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
 import { MultiSelectDropdown, type MultiSelectOption } from './MultiSelectDropdown';
+import { QualificationBadge } from './QualificationBadge';
+import { resumeQualifications, type Qualification } from '../lib/qualifications';
 import MailComposeModal from './MailComposeModal';
 
 export type EntrepriseRow = EntrepriseSuivi & { corps_etat_codes?: string[] };
@@ -39,6 +41,8 @@ interface Props {
   onSelectContact: (rowId: string, contact: Contact) => void;
   onCreateContact: (rowId: string, name: string) => void;
   corpsEtatCodesFromContact: (contact: Contact) => string[];
+  /** Qualifications des fiches contacts, par identifiant de contact. */
+  qualifications?: Record<string, Qualification[]>;
 }
 
 const PILL: Record<StatutEntreprise, string> = {
@@ -113,7 +117,7 @@ function DceMailDialog({ projectName, entreprise, lots, pieces, onSent, onClose 
 export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, entrepriseContacts,
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
-  corpsEtatCodesFromContact,
+  corpsEtatCodesFromContact, qualifications = {},
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -205,6 +209,14 @@ export default function ACTEntreprisesTable({
         placeholder="email@entreprise.fr" value={e.email || ''}
         onChange={ev => patch(e.id, { email: ev.target.value })}
       />
+      {e.contact_id && (
+        <div className="mt-1 px-1">
+          <QualificationBadge
+            resume={resumeQualifications(qualifications[e.contact_id] || [], today)}
+            liste={qualifications[e.contact_id] || []}
+          />
+        </div>
+      )}
     </>
   );
 
