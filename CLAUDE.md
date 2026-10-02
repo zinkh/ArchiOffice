@@ -503,6 +503,25 @@ migration).
 - `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
   et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
 
+### Exports ACT : par lot, PDF et Excel à la même mise en page
+
+Les exports « Entreprises consultées » (PDF et Excel) sont classés par LOT de
+travaux (`groupByLot`, `src/lib/actExport.ts`), plus par corps d'état : c'est le
+classement dont l'architecte a besoin pour consulter, et celui de l'écran. Une
+entreprise sur plusieurs lots apparaît sous chacun, une entreprise sans lot
+sous « Sans lot assigné », en dernier.
+
+L'Excel reprend la mise en page du PDF (`src/lib/xlsxLetterhead.ts`) : logo et
+coordonnées du cabinet en tête, titre à droite, tableau en nuances de gris,
+lignes de groupe grisées, volet figé sous l'entête, et à l'impression A4 ajusté
+en largeur avec pied de page (adresse, SIRET...) et pagination « P1|2 »
+(`&P|&N`). SheetJS (`xlsx`) ne sait ni styler ni placer une image : ces
+classeurs passent par ExcelJS, chargé à la demande. Un tableau trop étroit pour
+porter logo, coordonnées et titre côte à côte place le titre sous l'en-tête.
+Les autres exports Excel (DPGF, estimation, heures, BPU/DQE, comparatif ACT)
+restent sur SheetJS : le BPU/DQE est de surcroît un format d'aller-retour que
+l'import relit cellule par cellule.
+
 ### Qualifications des entreprises et recherche d'entreprises
 
 `contact_qualifications` (`supabase/migrate_contact_qualifications.sql`) : une ligne par qualification

@@ -707,8 +707,8 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => exportLotsToExcel(lots, projectName)}
-                  disabled={lots.length === 0}
+                  onClick={() => settings && exportLotsToExcel(lots, settings, projectName)}
+                  disabled={!settings || lots.length === 0}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> Excel
@@ -840,13 +840,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => exportEntreprisesConsulteesToExcel(consultation.entreprises, corpsEtat, lots, projectName)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition"
+                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName)}
+                  disabled={!settings}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
                 >
                   <IconDownload size={13} /> Excel
                 </button>
                 <button
-                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, corpsEtat, lots, settings, projectName)}
+                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName)}
                   disabled={!settings}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
                 >
