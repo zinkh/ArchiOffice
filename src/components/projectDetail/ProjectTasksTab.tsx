@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { IconPlus, IconChecklist, IconProgress, IconAlertTriangle } from '@tabler/icons-react';
 import { parseISO, isPast } from 'date-fns';
@@ -83,18 +84,20 @@ export default function ProjectTasksTab({ projectId, projects }: ProjectTasksTab
         />
       )}
 
-      {modal && (
-        <TaskFormModal
-          initial={modal}
-          projects={projects}
-          team={team}
-          allTasks={tasks}
-          lockProject
-          onClose={() => setModal(null)}
-          onSaved={afterWrite}
-          onDeleted={afterWrite}
-        />
-      )}
+      <AnimatePresence>
+        {modal && (
+          <TaskFormModal key="task-form-modal"
+            initial={modal}
+            projects={projects}
+            team={team}
+            allTasks={tasks}
+            lockProject
+            onClose={() => setModal(null)}
+            onSaved={afterWrite}
+            onDeleted={afterWrite}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

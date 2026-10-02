@@ -209,7 +209,7 @@ export default function ShareTarget() {
 
   if (loading) {
     return (
-      <div className="min-h-[50vh] flex items-center justify-center">
+      <div className="min-h-[50dvh] flex items-center justify-center">
         <IconLoader2 size={28} className="animate-spin" style={{ color: 'var(--tblr-primary)' }} />
       </div>
     );

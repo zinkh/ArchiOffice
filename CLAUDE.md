@@ -99,6 +99,8 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `GEMINI_API_KEY` | One AI key required | Google Gemini (the default provider) |
 | `ANTHROPIC_API_KEY` | Optional | Claude, when a tenant or the instance runs on Anthropic |
 | `MISTRAL_API_KEY` | Optional | Mistral (French, EU-hosted) |
+| `NOMIC_API_KEY` | Optional | Nomic Platform (`nk-…`) : lecture des plans/DCE (Nomic Parse) et génération du CCTP (Nomic Extract). Sans elle, seul le moteur local existe |
+| `NOMIC_API_URL` / `DOCUMENT_PARSER` | Optional | Hôte de l'API Nomic (défaut `https://api-atlas.nomic.ai`) ; moteur de lecture par défaut de l'instance (`local` ou `nomic`), surclassé par le réglage `/admin` |
 | `AI_PROVIDER` / `AI_MODEL` | Optional | Instance-wide provider/model default, overridable at runtime from `/admin` (`gemini` + `gemini-3-flash-preview` when unset) |
 | `AI_PRICE_MARKUP` | Optional | Operator margin over each model's real cost (default `1.3333`) |
 | `VITE_SUPABASE_URL` | Yes | Supabase URL (injected into frontend at build time) |
@@ -245,6 +247,37 @@ unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
 cabinet de porter le même numéro, quelle que soit la cause (course locale,
 numéro fourni par un client, import).
 
+### Délai de paiement et date d'échéance
+
+Une facture sans date d'échéance explicite (typiquement la facture brouillon
+générée depuis une note d'honoraires, `POST /api/notes_honoraires/:id/
+facture`) était insérée avec `due_date: null` — affiché à l'écran comme
+« 01/01/1970 » (`new Date(null)` vaut l'epoch, que `toLocaleDateString` formate
+sans se plaindre plutôt que d'échouer).
+
+`settings.invoice_payment_terms_days` (`supabase/migrate_invoice_payment_terms.sql`,
+réglable depuis `/settings` → Cabinet, « Facturation — Délai de paiement »,
+NULL valant 30 jours) fixe désormais le nombre de jours ajoutés à la date
+d'émission pour calculer l'échéance chaque fois qu'elle n'est pas fournie
+explicitement — `server/invoiceDueDate.ts::computeInvoiceDueDate()`, appelé
+par `POST /api/invoices` et `POST /api/notes_honoraires/:id/facture`. Une
+échéance explicitement fournie par l'appelant continue de gagner : ce réglage
+ne fait que combler l'absence, jamais l'écraser.
+
+**Se synchronise avec Zoho et Odoo sans code supplémentaire.** Les trois
+connecteurs (`pushInvoiceToZohoInvoice`/`Books`, `pushInvoiceToOdoo`) lisent
+déjà `invoices.due_date` de la ligne locale au moment du push — l'échéance
+calculée à la création part donc avec la facture dès le premier envoi, sans
+notion de délai de paiement à répliquer côté connecteur.
+
+Les écrans qui affichaient `new Date(invoice.due_date).toLocaleDateString()`
+sans garde (`Invoices.tsx`, `InvoiceGenerator.tsx`) sont corrigés pour rendre
+« --- » plutôt que l'epoch sur une facture antérieure à ce changement, dont
+`due_date` reste `null` tant qu'elle n'est pas rouverte et resauvegardée. Le
+formulaire de création de facture et `InvoiceGenerator` préremplissent
+désormais l'échéance par défaut à partir de ce même réglage plutôt que 14 ou
+30 jours codés en dur.
+
 ### Le Maître d'Ouvrage d'une facture (`invoices.client_id`)
 
 Jusqu'ici `invoices` n'avait aucun lien vers `contacts` : le « client » d'une
@@ -385,6 +418,39 @@ attendre qu'ils soient chargés recrée le bug.
 `project_phase_history`, la fiche affiche déjà « Phase ESQ » : le stepper de
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
+
+### Ordre des lots : la liste des lots du projet fait foi
+
+`LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
+pointeur (`startPressDrag`, poignée à gauche de chaque ligne). Pas de colonne
+de rang : `PUT /api/projects/:projectId/lots/order` reçoit les ids dans leur
+nouvel ordre et renumérote `lot_number` en « 01 », « 02 »... ; le numéro EST
+l'ordre (`GET` trie par numéro naturel). Aucune migration SQL.
+`src/lib/lotsOrder.ts::appliquerOrdreLots()` reporte ensuite cet ordre et ces
+numéros sur le DPGF (donc le CCTP, même document) et le bordereau, chapitres
+et articles compris (seul le préfixe « ancien. » est remplacé, un code de
+bibliothèque n'est jamais touché). Rattachement par `projectLotId`, à défaut par
+intitulé, et le lien est alors posé ; un lot du document absent du projet garde
+son numéro et passe en dernier. `ProTab.synchroniserLots` fait cette
+propagation, l'autosauvegarde enregistre.
+
+**Numéros et intitulés de lots strictement identiques partout** (liste, CCTP,
+DPGF, estimation, BPU/DQE). Deux sens, jamais de suppression silencieuse :
+
+- **Liste → documents** (cas normal : on crée d'abord les lots) :
+  `appliquerOrdreLots()` donne à chaque lot du document le numéro et l'intitulé
+  EXACTS du projet et crée les lots manquants (vides). Appliqué à chaque
+  modification de la vue LOTS et une fois à l'ouverture, mais seulement si le
+  document ne diverge pas (`lotsDivergent()` : aucun lot du document sans
+  rattachement `projectLotId` à un lot existant).
+- **Document → liste** (CCTP rédigé avant les lots) : si le document diverge, un
+  bandeau (ProTab) propose « Remplir la liste des lots depuis le CCTP »
+  (`planImportLots()` + `PUT /api/lots/:id` / `POST`, les lots existants
+  rapprochés par intitulé identique puis proche prennent numéro et intitulé du
+  document) ou « Aligner le CCTP sur la liste » (retire les lots hors liste,
+  après confirmation qui cite ceux qui portent du contenu).
+
+Un projet sans lot ne touche jamais aux documents.
 
 ### Groupement vs agence dans les notes d'honoraires
 
@@ -631,6 +697,50 @@ cause commune :
    insécable classique, U+00A0, par précaution) par une espace normale,
    un caractère WinAnsi ordinaire correctement mesuré et rendu.
 
+### Rédaction assistée de la note méthodologique d'un appel d'offres
+
+Onglet Note méthodologique de `/appels-offres/:id` (`src/pages/TenderDetail.tsx`,
+`server/routes/tenderAi.ts`, `server/routes/tenderMethodology.ts`) — réservée
+au plan Enterprise comme le reste de l'assistance IA sur les appels d'offres
+(`requireEnterprisePlan`). Deux gestes, tous deux sur le patron réserve →
+exécute → règle déjà en place pour le chat des agents :
+
+1. **« Préremplir les titres »** (`POST .../methodology/prefill-sections`)
+   pose le plan de sections avant toute rédaction. Sans DCE attaché à
+   l'appel d'offres, pas d'appel IA : `DEFAULT_METHODOLOGY_TITLES` (une
+   structure usuelle de mémoire technique MOE) suffit et ne coûte rien. Un
+   DCE attaché fait préférer le sommaire réellement exigé par le règlement
+   de consultation quand il en impose un. Les titres déjà présents (comparés
+   sans tenir compte de la casse) ne sont jamais dupliqués.
+2. **« Rédiger avec IA »** (`POST .../methodology/:noteId/draft-ai`) rédige
+   le contenu d'une section en combinant TOUJOURS ce qui est disponible,
+   plutôt que de faire choisir entre des sources exclusives (un bouton par
+   source avait été essayé, puis abandonné — une note gagne à croiser les
+   deux, jamais à choisir) :
+   - les spécialités mobilisées ET le nom du cotraitant nommément saisi en
+     face de chacune (onglet Partenaires, `tender_specialties.contact_id` →
+     `contacts.name`) — sans ce nom, la note ne pouvait citer que des
+     intitulés de métier génériques ;
+   - le texte des documents DCE de l'affaire (`documents` avec
+     `resource_type='tenders'`) — même lecture qu'« Analyser le DCE » ;
+   - la bibliothèque documentaire du cabinet (présentation, exemples de
+     notes déjà rédigées, présentation des cotraitants habituels...) :
+     `documents` avec `resource_type='agency_library'`, une seule ligne
+     logique par cabinet — `resource_id` est le `tenant_id` lui-même, pas
+     l'id d'une fiche, donc `POST /api/documents` le vérifie par égalité
+     directe plutôt que par `assertTenantEntity` (aucune table
+     `agency_library` à interroger). Gérée depuis `/settings` (onglet
+     Cabinet, `AgencyMethodologyLibraryCard.tsx`) avec le même composant
+     `ResourceAttachments` que les autres pièces jointes rattachées
+     génériquement.
+
+   Chacune des deux sources documentaires est best-effort et indépendante de
+   l'autre : l'absence de l'une n'empêche jamais d'utiliser l'autre, et la
+   rédaction reste possible avec le seul contexte de l'affaire si aucune des
+   deux n'est disponible. `extractCombinedText()` (`tenderAi.ts`) factorise
+   la lecture partagée par ce geste et par « Analyser le DCE »/« Chercher
+   dans le DCE ».
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres
@@ -838,6 +948,48 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
 
+### Nomic : lecture des plans et génération du CCTP
+
+Nomic n'a **pas d'API de chat** : ce n'est pas un quatrième fournisseur de
+`llm/`, mais un moteur de lecture (`/v1/parse`) et d'extraction structurée
+(`/v1/extract`) de pièces d'ingénierie. Client sans dépendance dans
+`packages/archioffice-agents/src/server/nomic.ts`, protocole relevé sur le SDK
+officiel : dépôt (`/v1/upload` puis PUT présigné), tâche, `/v1/status/:id`,
+résultat par `result_url`.
+
+**Moteur de lecture** (`documentParser.ts`) : `local` (pdf-parse + mammoth +
+Tesseract) ou `nomic`, réglé dans `/admin` (« Lecture des documents »,
+`GET/PUT /api/admin/document-parser`, stocké dans `platform_settings` sous
+`document_parser`, même cache de 30 s que le fournisseur IA). Priorité :
+`/admin` → `DOCUMENT_PARSER` → `local` ; basculer sur Nomic sans
+`NOMIC_API_KEY` est refusé. Il s'applique à `extractDocumentText`
+(pièces jointes de mail, `read_document`, courrier entrant), aux pièces jointes
+d'un message d'agent (après la branche vision, qui reste préférée pour une
+photo) et à `extractKnowledgeDocText` (analyse du DCE, génération du CCTP).
+**Deux règles à garder** : un échec de Nomic retombe sur le moteur local
+(`parseWithActiveEngine` rend `null`), et la bibliothèque de connaissances
+d'un agent reste TOUJOURS locale (`allowNomic = false`) : relue à chaque tour,
+elle serait refacturée à la page à chaque message. `server.ts` dépose le client
+Supabase au démarrage (`setDocumentParserSettingsClient`), sur le patron de
+`setExternalFileReader`.
+
+**« Générer » dans l'éditeur CCTP** (`CctpGenerateDialog.tsx`,
+`POST /api/projects/:projectId/cctp/generate`, `server/routes/cctpGeneration.ts`) :
+l'architecte coche jusqu'à 10 pièces de l'affaire et choisit le moteur.
+`llm` lit les pièces avec le moteur de lecture actif puis fait rédiger le
+modèle IA de la plateforme (réserve → exécute → règle, `endpoint_type =
+'cctp_generation'`) ; `nomic` dépose les fichiers bruts et laisse Nomic
+Extract remplir le schéma lots > chapitres > articles en voyant le plan
+lui-même. Le coût Nomic (lecture et extraction) est porté par le compte Nomic
+de l'opérateur et **n'est pas refacturé** aux crédits du cabinet : il n'a pas
+de tarif au jeton que `MODEL_CATALOG` pourrait porter, et inventer un montant
+est exclu. La route ne réécrit jamais le document : la proposition
+(`lotsDepuisGeneration`, `src/lib/cctpGeneration.ts`) s'ajoute APRÈS les lots
+existants, quantités et prix à 0, chaque article marqué `genereParIa` (badge
+« IA » dans l'arbre, comme « BIB » pour la bibliothèque), puis passe par
+l'enregistrement habituel. Seules les pièces dont `project_id` est l'affaire
+visée sont lues.
+
 ### Dictée vocale
 
 Un micro dans la barre de saisie du chat (`client/useDictation.ts`). Le texte
@@ -1028,6 +1180,54 @@ conversation avec cet agent — volontairement pensé pour des pièces courtes
 plusieurs centaines de pages : ce dépôt n'a pas de recherche par mots-clés
 ni d'embeddings, tout document déposé est relu en entier. `/agents/:id/edit`
 le dit explicitement dans le texte d'aide du réglage.
+
+### Apprentissage des agents : proposer, jamais appliquer
+
+Un agent qui se voyait corrigé, ou qui butait sur une capacité qu'il n'avait
+pas, n'avait aucun moyen de le retenir au-delà de la conversation en cours —
+au tour suivant, il repartait de zéro. `learning_enabled`
+(`supabase/migrate_agent_learning.sql`), une colonne de plus sur `agents`
+réglable depuis `/agents/:id/edit`, off par défaut et jamais héritée d'un
+template (même traitement que `knowledge_enabled`), donne accès à l'outil
+`suggerer_amelioration(kind, titre, contenu, capacite_suggeree?)`
+(`packages/archioffice-agents/src/server/learningTools.ts`).
+
+**Trois natures de proposition**, jamais appliquées seules — même principe
+que `needs_confirmation` sur `create_record` : mémoriser une correction,
+signaler une capacité manquante ou rédiger une note change durablement le
+comportement d'un agent, ça se confirme, ça ne se déduit jamais.
+
+- `correction` — l'utilisateur vient de corriger une réponse ou une
+  hypothèse de l'agent.
+- `missing_capability` — l'agent n'a pas pu répondre correctement faute d'un
+  outil ou d'un accès qu'il n'a pas ; `capacite_suggeree` nomme la colonne
+  concernée (`mail_enabled`, `geo_enabled`...) pour que l'écran de revue
+  pointe directement vers `/agents/:id/edit`.
+- `knowledge_note` — l'agent propose lui-même une note pour sa mémoire (une
+  règle ou une préférence du cabinet apprise en tâche).
+
+**Une file d'attente, pas une écriture définitive.** L'outil dépose la
+proposition dans `agent_learning_suggestions`, statut `pending` — jamais dans
+`documents` ni dans le prompt. L'architecte la revoit depuis
+`/agents/apprentissage` (`AgentLearning.tsx`) et l'approuve ou la rejette
+(`PUT /api/agent-learning-suggestions/:id`) ; `POST` (appelé par l'outil,
+`as_agent_id`) revalide l'agent comme `POST /api/feed/posts` revalide
+`as_agent_id` — introuvable, inactif ou sans `learning_enabled` est refusé.
+Une proposition déjà traitée ne peut pas être retraitée (409).
+
+**Seule une proposition *approuvée* devient mémoire, et seulement pour
+`correction`/`knowledge_note`.** `buildAgentContext()` (`context.ts`) relit,
+quand `learningEnabled` est vrai, les lignes `agent_learning_suggestions` de
+CET agent au statut `approved` de ces deux natures, dans
+`ctx.learningNotes` — auto-injecté à chaque tour comme
+`knowledgeDocuments`, jamais via un `tool`, jamais tant que le statut reste
+`pending` (`MÉMOIRE D'APPRENTISSAGE`, `systemPrompts.ts`, plafonné à
+`MAX_LEARNING_NOTES`/`MAX_LEARNING_NOTE_CHARS` — du texte court déjà en base,
+pas un document à extraire). Une proposition `missing_capability` approuvée
+ne déclenche RIEN d'automatique côté agent : approuver documente seulement
+que l'architecte a vu la demande, activer la capacité reste un geste
+volontaire distinct depuis `/agents/:id/edit` — jamais l'écran de revue lui-
+même.
 
 ### Lecture des pièces jointes de messagerie par les agents
 
@@ -1308,6 +1508,74 @@ sans effet — dégradé, mais honnête, plutôt qu'un réglage qui échouerait
 silencieusement ou ferait échouer l'appel API — tant qu'un cabinet fait
 tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
+### Modèles de projet : une trame d'affaire, pas un préremplissage
+
+Un modèle (`project_templates`, `/templates`) ne se limitait à quatre valeurs
+de formulaire (nom, statut, budget, description) : il ne créait ni lots, ni
+jalons, ni tâches, donc rien de ce qu'il faut réellement ressaisir à chaque
+affaire. `supabase/migrate_project_templates_structure.sql` lui ajoute
+`operation_type` (`neuf`, `rehabilitation`, `extension`, `maison_individuelle`,
+`permis_seul`, `autre`), `marche_type` (`prive`, `public`), trois listes jsonb
+(`default_lots`, `default_milestones`, `default_tasks`) et `catalog_key`.
+
+**Application : `POST /api/projects` reçoit `template_id`, rien d'autre.**
+`server/projectTemplateApply.ts` relit le modèle en base (vérifié dans le
+cabinet, 400 sinon) et crée lots, jalons et tâches APRÈS l'affaire, en
+meilleur effort : un échec est rapporté dans `template_applied.failed`, jamais
+au prix de l'affaire déjà créée. Un modèle `public` pose `is_public_client`,
+et `type_projet` se déduit du type d'opération quand le corps n'en porte pas.
+Le client ne fait que désigner le modèle : il ne peut pas faire écrire autre
+chose que ce que le cabinet a enregistré.
+
+**Délais relatifs, jamais de dates.** Jalons et tâches portent des décalages en
+jours depuis `start_date` (`addDaysIso`, `src/lib/projectTemplates.ts`). Les
+listes sont assainies à l'écriture (`sanitizeLots/Milestones/Tasks`,
+`server/routes/projectTemplates.ts`) : bornées, typées, priorités filtrées.
+
+**Trois origines.** Saisi à la main ; installé depuis le catalogue de démarrage
+(`server/projectTemplateCatalog.ts`, huit trames : neuf, réhabilitation,
+extension en privé et en public, maison individuelle, permis de construire
+seul) ; ou tiré d'une affaire (`POST /api/project-templates/from-project/:id`,
+lots, jalons et tâches en décalages, sans montants). `catalog_key` sous index
+unique partiel `(tenant_id, catalog_key)` empêche d'installer deux fois la même
+entrée, sans dépendre du nom que le cabinet a pu changer. Le catalogue n'est
+qu'une copie de départ : une fois installé, le modèle appartient au cabinet.
+
+**À ne pas défaire.** Les jalons du catalogue portent des intitulés
+d'événements (« Dépôt du permis », « Réception des travaux »), jamais le nom
+d'une mission du contrat MOE (« Esquisse (ESQ) ») : `ProjectDetail.tsx` crée un
+jalon par mission incluse et apparie par titre, un doublon de nom serait fusionné
+avec lui (verrouillé par un test). Le public diffère du privé par la procédure
+de passation (publication de l'avis, commission d'analyse, notification) et non
+par le fond des lots. Les délais d'instruction d'un permis suivent le Code de
+l'urbanisme (1 mois DP, 2 mois PC de maison individuelle, 3 mois les autres).
+
+**Les missions MOE suivent le modèle jusque dans les contrats et les
+propositions** (`default_missions`, jsonb, `supabase/migrate_project_templates_missions.sql`).
+La liste a la forme de `contrats_moe.missions_list` (id, name, pct, incluse,
+category) : un contrat MOE la reprend TELLE QUELLE (`contratDefaultsFromTemplate`,
+`src/lib/projectTemplates.ts`, avec le type de contrat et le type de maître
+d'ouvrage), et une proposition la CONVERTIT en répartition d'honoraires
+(`feeDistributionFromTemplate`). Deux conversions à ne pas défaire :
+
+- **Base ET exécution partent sous « Mission base »** dans la proposition : c'est
+  la seule catégorie dont le montant suit le total des honoraires (effet de
+  synchronisation de `Proposals.tsx`), et c'est déjà ce que fait la répartition
+  par défaut des propositions. Seules les missions complémentaires restent à
+  part, à chiffrer à la main. L'id `pro` devient `projet`, comme dans
+  `feeDistribution.ts`.
+- **Un modèle n'invente pas de type de contrat** : extension et maison
+  individuelle sont des constructions neuves au contrat, un permis seul aussi
+  (c'est sa répartition, esquisse + avant-projet + dossier de permis, qui en
+  porte la portée réelle).
+
+La synchronisation de `Proposals.tsx` lit désormais le `default_pct` propre à la
+mission avant celui de `DEFAULT_MISSIONS` : sans cela, une mission hors MOP
+(diagnostic, dossier de permis) retombait sur une part égale. Le sélecteur de
+modèle n'apparaît qu'à la CRÉATION d'un contrat ou d'une proposition, jamais sur
+un document existant : le choisir remplace sa répartition. Un modèle tiré d'une
+affaire reprend les missions de son contrat MOE principal.
+
 ### Bibliothèque d'ouvrages
 
 `/specifications` (« Bibliothèque d'ouvrages ») n'est plus un éditeur de
@@ -1486,6 +1754,13 @@ enregistrement dans `server.ts`), `src/hooks/useCCTP.ts`, `src/types/cctp.ts`,
 et le code CCTP inatteignable de `ProjectDetail.tsx`
 (`fetchSpecifications`/`handleCreateSpec`, jamais appelés depuis un rendu, et
 l'état `specifications`/`isAddingSpec`/`newSpecTitle` qui allait avec).
+
+Les routes historiques ligne-à-ligne `/api/dpgf/:projectId` et `/api/dpgf`
+adossées à `dpgf_items` restent temporairement disponibles pour les situations
+et marchés existants, mais renvoient les en-têtes HTTP `Deprecation`, `Sunset`,
+`Link` et `Warning`. Tout nouveau code doit utiliser le document structuré
+`/api/projects/:projectId/dpgf`, seule source du CCTP, de la DPGF et de
+l'estimation. La date cible de retrait est le 31 mars 2027.
 
 **La table `cctps` elle-même n'a pas été supprimée**, à dessein : une
 instance de production en porte une ligne, écrite par l'ancien hook mort —
@@ -1746,6 +2021,72 @@ permettre `calendarList.list` — un compte connecté avant cet ajout garde
 l'ancien scope, plus étroit, et `calendarList` échoue alors en 403 avec la
 même forme que Gmail/Outlook (`isInsufficientScopeError`), proposant de
 reconnecter plutôt que d'échouer sans explication.
+
+### Aperçu d'opération, brouillons, signature et classement des emails
+
+**Volet « Plan d'actions »** (`ProjectOverview.tsx`, colonne D). Quatre gestes
+ouvrent une autre page déjà **rattachée à l'opération** par l'adresse, jamais
+par une sélection à refaire :
+
+| Bouton | Destination | Rattachement |
+|---|---|---|
+| Courrier | `/document_templates?project=<id>` | `DocumentTemplates` préremplit le sélecteur d'affaire ET coche « enregistrer dans le projet » |
+| Réunion | `/reunions?parent=project:<id>&new=1` | `Reunions.tsx` sélectionne l'affaire (mécanisme `?parent=` des liens d'agent) puis ouvre le formulaire de création ; `new` est posé APRÈS `selectProject`, qui referme ce formulaire |
+
+Sous « Prochains jalons », **« Prochaines tâches »** lit `useTasks({ projectId })` :
+les 5 premières tâches non terminées, échéance la plus proche d'abord (sans
+échéance en dernier), en rouge si dépassée ; un clic mène à `?tab=TACHES`. Ce sont
+bien des TÂCHES (`tasks`), distinctes des jalons (`milestones`) au-dessus.
+
+**Brouillons modifiables** (`CorrespondenceTab.tsx`, `MailDraftEditModal.tsx`,
+`server/mailDraft.ts`, `server/routes/mailDrafts.ts`). Un brouillon vit dans la
+boîte du fournisseur et n'est **jamais copié en base** : `GET /api/mail/drafts?
+account_id=` (20 récents), `GET /api/mail/drafts/:id?account_id=` (À, Cc, objet,
+corps) et `PUT /api/mail/drafts/:id` (réécrit, n'envoie jamais). `account_id` est
+toujours relu parmi les comptes de l'utilisateur. Gmail : `drafts.update` ; Outlook :
+`PATCH /me/messages/:id` (le corps repasse en texte brut) ; IMAP : pas de mise à
+jour possible, donc APPEND de la nouvelle version PUIS suppression de l'ancienne
+(un échec entre les deux laisse un doublon, jamais un brouillon perdu) et l'uid
+change. Aucun lien brouillon → opération n'est stocké (aucune migration) :
+l'onglet montre par défaut les brouillons adressés au client de l'affaire ou dont
+l'objet/l'extrait mentionne son nom, son code ou sa référence
+(`relatedKeywords`), avec un bascule « tous les brouillons ».
+
+**Signature de courrier** : `profiles.mail_signature` (TEXT,
+`migrate_profile_mail_signature.sql`), personnelle et non par cabinet (même
+principe que `show_personal_contacts`), réglée dans Réglages > Mon profil, lue et
+écrite par `GET /api/me` / `PUT /api/team/:id` (`mailSignature`, 2000 caractères
+maximum). `MailComposeModal` la pose sous le corps d'un nouveau message ou d'une
+réponse ; elle reste modifiable avant l'envoi. Les envois automatiques hors
+session (relances, alertes) ne la portent pas : aucune personne à qui l'attribuer.
+
+**Rattacher un email à une opération le classe dans sa boîte d'origine**
+(`server/mailFiling.ts`, appelé par `POST /api/mail/links`). Uniquement pour
+`local_type = 'project'`, avec un `connection_id`, sauf `file_in_mailbox: false` :
+
+| Fournisseur | Emplacement | Effet |
+|---|---|---|
+| Gmail | libellé `ArchiOffice/<code> - <nom>` | libellé posé ET `INBOX` retiré (le message quitte la boîte de réception) |
+| Outlook | dossier `<code> - <nom>` sous un dossier racine `ArchiOffice` | déplacement |
+| IMAP | dossier `ArchiOffice<délimiteur><code> - <nom>` (préfixe `INBOX.` si le serveur l'impose) | déplacement, dossier abonné |
+
+Dossier et libellé sont créés à la demande, retrouvés par leur nom exact sinon ;
+`projectFolderName()` retire séparateurs et caractères réservés (`/ \ : * ? " < > | .`)
+et plafonne à 60 caractères. Trois règles à ne pas défaire :
+
+1. **Outlook et IMAP renumérotent le message déplacé** (id Graph, uid). C'est le
+   NOUVEL identifiant qui est enregistré dans `email_links.external_message_id`
+   (rendu aussi dans la réponse) ; sans cela le lien ne rouvrirait plus rien. IMAP
+   lit `uidMap` et, sans UIDPLUS, retrouve le message par son Message-ID. Gmail
+   garde son id : un libellé n'est pas un déplacement. Le front retire le résultat
+   de la liste plutôt que de laisser un bouton sur l'ancien emplacement.
+2. **Meilleur effort, jamais bloquant.** Le rattachement est enregistré même si le
+   classement échoue ; la réponse porte `filing: { status: 'filed' | 'failed' |
+   'skipped', folder?, error? }` et l'écran affiche l'erreur. Cas typique : un compte
+   Gmail connecté avant `gmail.modify` ou un jeton Outlook sans `Mail.ReadWrite`
+   (proposer de reconnecter, comme pour l'archivage).
+3. **Retirer le lien ne remet pas le message en place** : le classement dans la
+   boîte est un geste de l'architecte, pas un état que l'application maintient.
 
 ### OCR
 
@@ -2124,6 +2465,74 @@ obliques), `MKCOL` répondant 405 vaut succès (la collection existe déjà), et
 `PUT` écrase sans prévenir — d'où la recherche d'un nom libre avant dépôt.
 `assertPublicHttpUrl()` (`server/ssrfGuard.ts`) est appliqué à
 l'enregistrement **et** à chaque appel : c'est une URL fournie par le cabinet.
+
+### Mouvement, gestes et préférences d'accessibilité
+
+Les animations suivent les principes d'interface fluide d'Apple, sans toucher
+à l'identité Tabler (couleurs, bordures, rayons) : seul le mouvement change.
+
+- **Ressort par défaut, jamais une durée fixe.** `src/main.tsx` enveloppe
+  l'application dans `<MotionConfig reducedMotion="user" transition={DEFAULT_SPRING}>`.
+  Les réglages partagés (`DEFAULT_SPRING`, `PANEL_SPRING`, `FLICK_SPRING`,
+  `projectMomentum()`) vivent dans `src/lib/motion.ts` : `bounce: 0` par
+  défaut, un léger rebond seulement quand un geste a lancé l'élément.
+- **« Réduire les animations » est respecté** : Motion ne garde alors que les
+  fondus (`reducedMotion="user"`), et `src/index.css` coupe `animate-pulse` et
+  l'enfoncement des boutons. `prefers-reduced-transparency` retire les flous,
+  `prefers-contrast: more` renforce bordures et textes secondaires.
+- **Les modales naissent de leur déclencheur.** `launchOriginRef`
+  (`src/lib/launchOrigin.ts`) pose le `transform-origin` d'une modale sur le
+  dernier point d'appui. Une nouvelle modale animée en `scale` le reçoit par
+  `ref={launchOriginRef}` (référence stable, calculée une fois au montage).
+- **Retour à l'appui, survol réservé à la souris.** `.btn:active` s'enfonce en
+  50 ms ; les `:hover` de `.btn-*` sont sous `@media (hover: hover)`, comme la
+  variante `hover:` de Tailwind 4, pour ne pas rester affichés sur tablette.
+- **Panneaux qu'on referme d'un geste** : le menu mobile
+  (`src/components/MobileNavDrawer.tsx`) et, sur téléphone, la fiche de
+  réserve (`ReserveDetail.tsx`, glissée par son en-tête). Le panneau suit le
+  doigt 1:1, résiste au-delà de sa butée, et la décision au relâché se prend
+  sur le point d'arrivée PROJETÉ (`projectMomentum`), pas sur la position du
+  doigt ; le ressort de retour repart de la vitesse du geste.
+- **Hauteurs d'écran en `dvh`**, jamais `100vh`/`h-screen` pour une mise en
+  page : sur Safari iOS, `100vh` inclut la barre d'adresse et coupe le bas.
+- **Glisser-déposer au pointeur, jamais en HTML5 natif** (`draggable`,
+  `onDragStart`...), qui ne suit pas le doigt sur téléphone. Kanban et
+  calendrier passent par `useDragToZone` (`src/hooks/useDragToZone.ts`), le
+  planning (Gantt) par `useBarDrag` ; les deux s'appuient sur
+  `startPressDrag` (`src/lib/pressDrag.ts`) : à la souris le glisser démarre
+  après quelques pixels, au doigt après un appui de 220 ms (un doigt qui bouge
+  avant fait défiler la page), Échap annule, et le clic qui suit un glisser
+  est avalé. Une copie soulevée suit le pointeur 1:1 depuis le point saisi ;
+  au relâché, `onDrop` doit mettre à jour l'état **de façon optimiste et
+  synchrone** (il est appelé dans un `flushSync`) pour que la copie puisse
+  rejoindre la nouvelle place de l'élément. `project: true` (Kanban) choisit
+  la colonne sur le point projeté du geste ; pas sur une grille serrée comme
+  les jours d'un mois. Une tâche déposée va en bas de sa colonne : l'ordre à
+  l'intérieur d'une colonne n'est pas enregistré.
+- **Pas d'apparition en cascade sur les pages de travail** (liste des
+  affaires, équipe, notifications) : elle rejouait à chaque visite d'une page
+  consultée des dizaines de fois par jour. Réservée aux moments rares
+  (page d'accueil publique). Les ajouts discrets restent : arrivée d'un
+  nouveau message dans le chat des agents (seulement s'il date de moins de
+  4 s, jamais l'historique rechargé), étapes de l'accueil qui glissent dans
+  le sens du parcours, libellés « Enregistré » en fondu (`SwapText`,
+  `src/components/ui/SwapText.tsx`).
+- **Couche plateforme mobile** (`index.html`, `src/index.css`, bloc
+  « Téléphone et tablette ») : `viewport-fit=cover` (sans lui, tous les
+  `env(safe-area-inset-*)` valent 0 : la barre de raccourcis mobile passait
+  sous l'indicateur d'accueil), en-tête et menu mobile rembourrés par les
+  insets ; champs à 16 px sous `(pointer: coarse)` pour qu'iOS ne zoome pas
+  (jamais `maximum-scale=1`) ; `overscroll-behavior: none` sur la racine ;
+  `touch-action: manipulation` et `user-select: none` sur les contrôles seuls ;
+  hauteurs en `dvh` (modales) ou `svh` (pages de connexion). `theme-color` suit
+  le thème APPLIQUÉ (`theme-provider.tsx`), posé par classe et non par le
+  réglage système.
+- **Typographie : 11 px minimum, tailles en `rem`.** Les tailles arbitraires
+  s'écrivent `text-[0.6875rem]` et non `text-[11px]`, pour suivre la taille de
+  texte choisie dans le navigateur (le corps est à `0.875rem`) ; 10 px n'est
+  toléré que dans une pastille de taille fixe (initiales dans un cercle
+  `w-5 h-5`). `--tracking-wider` est ramené à 0,03 em dans `@theme`, et `h1`/
+  `h2` sont légèrement resserrés. Les majuscules et couleurs Tabler restent.
 
 ### Maps
 

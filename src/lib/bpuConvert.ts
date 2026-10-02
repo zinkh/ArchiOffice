@@ -41,7 +41,10 @@ export function dpgfToBpu(dpgf: DPGF, existing?: BPU | null): BPU {
       prixUnitaireLettres: ancien?.prixUnitaireLettres,
       nature: ancien?.nature ?? 'base',
       trancheId: ancien?.trancheId,
-      articleTypeId: ancien?.articleTypeId,
+      // Le premier passage DPGF -> BPU ne doit pas rompre le fil avec la
+      // bibliothèque d'ouvrages. Un BPU existant garde sa provenance propre,
+      // sinon on reprend celle de la ligne DPGF.
+      articleTypeId: ancien?.articleTypeId ?? l.articleTypeId,
       qteMini: ancien?.qteMini,
       qteMaxi: ancien?.qteMaxi,
     };

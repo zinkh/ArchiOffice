@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Invoice, Project, InvoiceItem, InvoicePhase } from '../types';
@@ -61,7 +62,14 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             seller_vat_number: settings.vatNumber || prev.seller_vat_number,
             seller_iban: settings.seller_iban || prev.seller_iban,
             seller_bic: settings.seller_bic || prev.seller_bic,
-            currency: settings.currency || prev.currency
+            currency: settings.currency || prev.currency,
+            // Le délai de paiement par défaut du cabinet (settings.invoicePaymentTermsDays,
+            // réglable depuis /settings → Cabinet) ne doit remplacer l'échéance
+            // pré-remplie que pour une facture NOUVELLE — une facture existante
+            // rouverte pour édition (initialData.due_date déjà posé) garde la sienne.
+            due_date: !initialData?.due_date && Number.isFinite(settings.invoicePaymentTermsDays) && settings.invoicePaymentTermsDays >= 0
+              ? new Date(Date.now() + settings.invoicePaymentTermsDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+              : prev.due_date
           }));
           if (settings.logoUrl) setLogoUrl(settings.logoUrl);
         }
@@ -240,11 +248,13 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        ref={launchOriginRef}
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90dvh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
@@ -253,14 +263,14 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             <div className="flex bg-zinc-200 dark:bg-zinc-800 p-1 rounded-lg">
               <button 
                 onClick={() => setView('edit')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${view === 'edit' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${view === 'edit' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
               >
                 <IconEdit size={16} />
                 Édition
               </button>
               <button 
                 onClick={() => setView('preview')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${view === 'preview' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${view === 'preview' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
               >
                 <IconEye size={16} />
                 Aperçu
@@ -271,7 +281,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             <button 
               onClick={handleSave}
               disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 press"
             >
               {isSaving ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -283,7 +293,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             <button 
               onClick={exportPDF}
               disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 press"
             >
               {isGenerating ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -412,7 +422,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <span className="text-zinc-500">BIC :</span>
                     <span className="font-mono">{data.seller_bic}</span>
                     <span className="text-zinc-500">Échéance :</span>
-                    <span className="font-bold">{new Date(data.due_date || '').toLocaleDateString('fr-FR')}</span>
+                    <span className="font-bold">{data.due_date ? new Date(data.due_date).toLocaleDateString('fr-FR') : '---'}</span>
                   </div>
                 </div>
 
@@ -534,7 +544,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Détails Émetteur</h3>
                     <div className="space-y-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Nom / Agence</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">Nom / Agence</label>
                         <input 
                           type="text" 
                           value={data.seller_name || ''}
@@ -543,7 +553,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Adresse</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">Adresse</label>
                         <textarea 
                           value={data.seller_address || ''}
                           onChange={e => setData({...data, seller_address: e.target.value})}
@@ -551,7 +561,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">SIRET</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">SIRET</label>
                         <input 
                           type="text" 
                           value={data.seller_siret || ''}
@@ -560,7 +570,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">N° TVA</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">N° TVA</label>
                         <input 
                           type="text" 
                           value={data.seller_vat_number || ''}
@@ -569,7 +579,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">IBAN</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">IBAN</label>
                         <input 
                           type="text" 
                           value={data.seller_iban || ''}
@@ -578,7 +588,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">BIC</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">BIC</label>
                         <input 
                           type="text" 
                           value={data.seller_bic || ''}
@@ -613,6 +623,6 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
           )}
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }

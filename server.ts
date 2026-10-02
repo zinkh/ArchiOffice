@@ -9,6 +9,7 @@ import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerTelegramRoutes } from "./server/routes/telegram";
 import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
 import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
+import { resolveAutomationApiKey } from "./server/automationApiKeys";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
 import { registerDpgfRoutes } from "./server/routes/dpgf";
@@ -44,6 +45,7 @@ import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences"
 import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
 import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
 import { registerTenderAiRoutes } from "./server/routes/tenderAi";
+import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
 import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerContactRoutes } from "./server/routes/contacts";
@@ -95,6 +97,8 @@ import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
+import { registerAutomationApiKeyRoutes } from "./server/routes/automationApiKeys";
+import { registerWebhookRoutes } from "./server/routes/webhooks";
 import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
 import { registerStorageProviders } from "./server/externalStorage/providers";
 import { parseExternalRef } from "./server/externalStorage/externalRef";
@@ -507,7 +511,7 @@ export async function createApp() {
   async function settleAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     provider: string; model: string;
     reservedCents: number;
     inputTokens: number; outputTokens: number;
@@ -539,7 +543,7 @@ export async function createApp() {
   async function deductAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
     // Which model actually ran: per-token cost differs by an order of
     // magnitude between them, so the charge can't be computed without it.
     provider: string; model: string;
@@ -803,6 +807,18 @@ export async function createApp() {
           return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
         }
       }
+      // Clé d'automatisation (n8n, ou tout appelant HTTP externe) — voir
+      // server/automationApiKeys.ts. Liaison persistante et révocable comme
+      // tg_at_, pas à usage unique comme mail_at_ : un scénario n8n rappelle
+      // la même clé à chaque exécution.
+      if (token.startsWith('auto_at_')) {
+        const resolved = await resolveAutomationApiKey(supabaseAdmin, token);
+        if (resolved) {
+          req.user = { id: resolved.userId };
+          req.activeTenantId = resolved.tenantId;
+          return runWithTenantContext({ userId: resolved.userId, tenantId: resolved.tenantId }, next);
+        }
+      }
       return res.status(401).json({ error: "Token invalide" });
     }
     req.user = user;
@@ -988,6 +1004,7 @@ export async function createApp() {
   registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
   registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -996,7 +1013,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
-  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCalendarAccountRoutes(app, { supabaseAdmin, getTenantId });
   registerGmailSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
@@ -1005,11 +1022,11 @@ export async function createApp() {
   registerMailAccountRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMailLinkRoutes(app, { supabaseAdmin, getTenantId });
   registerMailFolderLinkRoutes(app, { supabaseAdmin, getTenantId });
-  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerRagicRoutes(app, { supabaseAdmin, getTenantId });
-  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
-  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId });
-  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerZohoBooksRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerRagicRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerOdooRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
+  registerSuperpdpRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerChorusProRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerRegistrationRoutes(app, { supabaseAdmin });
   registerAgencySetupRoutes(app, { supabaseAdmin });
   registerTeamRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, checkQuota });
@@ -1037,6 +1054,8 @@ export async function createApp() {
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
   registerExternalStorageRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerAutomationApiKeyRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
+  registerWebhookRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerLotRoutes(app, { supabaseAdmin, getTenantId });
   registerAiSuggestionRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, maybeRefreshMonthlyCredits, deductAiCredit });
   registerCopilotSuggestionRoutes(app, { supabaseAdmin, getTenantId });
@@ -1053,7 +1072,7 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
   // Le package agents n'importe rien depuis server/ (module propriétaire
   // autonome) et ne peut donc pas construire lui-même un adaptateur de
   // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
@@ -1061,6 +1080,10 @@ export async function createApp() {
   // déposées depuis qu'un cabinet a branché son espace, en rapportant
   // simplement que le document est vide.
   setExternalFileReader(readExternalBusinessFile);
+  // Même principe pour le moteur de lecture des documents (local ou Nomic,
+  // choisi dans /admin) : les extracteurs du package n'ont pas de client
+  // Supabase à eux pour relire ce réglage.
+  setDocumentParserSettingsClient(supabaseAdmin);
   registerAgentRoutes(app, supabaseAdmin, getTenantId, getTenantPlan, {
     deductAiCredit,
     reserveAiCredit,

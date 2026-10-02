@@ -3,7 +3,9 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileInvoice, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconEdit, IconFileCode, IconChevronDown, IconChevronRight, IconArrowsSort, IconSortAscending, IconSortDescending, IconLayoutGrid, IconList, IconRefresh, IconSend, IconInfoCircle, IconEye, IconCloudUpload, IconLoader2, IconBuildingBank } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
 import { fetchEmailTemplate, fillTemplate } from '../lib/emailTemplates';
 import { type EmailAttachment } from '../lib/emailAttachments';
@@ -16,6 +18,16 @@ import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { isClientContact } from '../lib/contactCategories';
+
+// Une facture sans échéance (avant que le délai de paiement par défaut du
+// cabinet ne s'applique systématiquement côté serveur, voir server/
+// invoiceDueDate.ts) affichait "01/01/1970" : new Date(null) vaut l'epoch,
+// que toLocaleDateString formate sans se plaindre.
+const formatDueDate = (dueDate: string | null | undefined): string => {
+  if (!dueDate) return '---';
+  const d = new Date(dueDate);
+  return Number.isNaN(d.getTime()) ? '---' : d.toLocaleDateString('fr-FR');
+};
 
 const MISSIONS = [
   { id: 'esquisse', name: 'Esquisse (ESQ)', default_pct: 10 },
@@ -183,7 +195,7 @@ function AcomptePhasesEditor({ phases, onChange, project, currency, t }: {
                 <span>€</span>
               </div>
               {montantAvancement > 0 && phase.montant_phase !== montantAvancement && (
-                <button type="button" className="text-[10px] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
+                <button type="button" className="text-[0.6875rem] font-bold" style={{ color: 'var(--tblr-primary)' }} onClick={() => updatePhase(idx, { montant_phase: montantAvancement })}>
                   Auto
                 </button>
               )}
@@ -240,13 +252,19 @@ export default function Invoices() {
   const [sendAttachments, setSendAttachments] = useState<EmailAttachment[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ success: boolean; message: string } | null>(null);
+  // Délai de paiement par défaut du cabinet (settings.invoicePaymentTermsDays,
+  // réglable depuis /settings → Cabinet) : sert à préremplir l'échéance d'une
+  // nouvelle facture tant qu'elle n'a pas été chargée, 30 jours étant la même
+  // valeur par défaut que côté serveur (server/invoiceDueDate.ts).
+  const [paymentTermsDays, setPaymentTermsDays] = useState(30);
+  const defaultDueDate = (days: number) => new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
   const [newInvoice, setNewInvoice] = useState<Partial<Invoice>>({
     project_id: '',
     amount: 0,
     description: '',
     status: 'Draft',
     invoice_type: 'standard',
-    due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    due_date: defaultDueDate(30)
   });
 
   useEffect(() => {
@@ -266,6 +284,9 @@ export default function Invoices() {
         setProjects(projectsData);
         setContacts(contactsData);
         if (settingsData?.currency) setCurrency(settingsData.currency);
+        if (Number.isFinite(settingsData?.invoicePaymentTermsDays) && settingsData.invoicePaymentTermsDays >= 0) {
+          setPaymentTermsDays(settingsData.invoicePaymentTermsDays);
+        }
       } catch (err) {
         console.error('Invoices data fetch failed:', err);
       }
@@ -439,12 +460,12 @@ export default function Invoices() {
       missions: missionLine,
       montant_ht: formatCurrency(invoice.amount, currency),
       montant_ttc: formatCurrency(invoice.total_amount ?? invoice.amount, currency),
-      echeance: new Date(invoice.due_date).toLocaleDateString('fr-FR'),
+      echeance: formatDueDate(invoice.due_date),
     };
     // Fallback text if the tenant's "invoice" email template can't be fetched —
     // exactly what this modal always sent before templates existed.
     const fallbackSubject = `${typeFacture} N° ${invoice.invoice_number}${affaireRef} – ${projetNom}`;
-    const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${new Date(invoice.due_date).toLocaleDateString('fr-FR')}\n\nCordialement`;
+    const fallbackMessage = `Bonjour,\n\nVeuillez trouver ci-joint ${typeFactureMinuscule} N° ${invoice.invoice_number}${affaireRef}.\n\n${missionLine}Montant HT : ${formatCurrency(invoice.amount, currency)}\nMontant TTC : ${formatCurrency(invoice.total_amount ?? invoice.amount, currency)}\nDate d'échéance : ${formatDueDate(invoice.due_date)}\n\nCordialement`;
     setSendingInvoice(invoice);
     setSendForm({ to: clientEmail, subject: fallbackSubject, message: fallbackMessage });
     setSendAttachments([]);
@@ -532,7 +553,7 @@ export default function Invoices() {
         description: '',
         status: 'Draft',
         invoice_type: 'standard',
-        due_date: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        due_date: defaultDueDate(paymentTermsDays)
       });
     } catch (err) {
       console.error('Create invoice failed:', err);
@@ -663,7 +684,7 @@ export default function Invoices() {
             <button
               onClick={handleZohoSync}
               disabled={isSyncingZoho}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95 disabled:opacity-60"
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg font-semibold press disabled:opacity-60"
               style={{ background: '#f76707', color: '#fff' }}
             >
               <IconRefresh size={18} className={isSyncingZoho ? 'animate-spin' : ''} />
@@ -671,8 +692,8 @@ export default function Invoices() {
             </button>
           )}
           <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold transition-all active:scale-95"
+            onClick={() => { setNewInvoice(inv => ({ ...inv, due_date: defaultDueDate(paymentTermsDays) })); setIsModalOpen(true); }}
+            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
             style={{ background: 'var(--tblr-primary)', color: '#fff' }}
           >
             <IconPlus size={20} />
@@ -713,14 +734,14 @@ export default function Invoices() {
             placeholder={t('invoices_search_placeholder')}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition-all"
+            className="w-full pl-10 pr-4 py-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500/20 transition"
             style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
         <div className="flex items-center gap-2 p-1 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
           <button
             onClick={() => setIsGroupedByProject(true)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition"
             style={isGroupedByProject
               ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
               : { color: 'var(--tblr-muted)' }}
@@ -730,7 +751,7 @@ export default function Invoices() {
           </button>
           <button
             onClick={() => setIsGroupedByProject(false)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition"
             style={!isGroupedByProject
               ? { background: 'var(--tblr-surface)', color: 'var(--tblr-primary)', boxShadow: 'var(--tblr-shadow)' }
               : { color: 'var(--tblr-muted)' }}
@@ -752,8 +773,8 @@ export default function Invoices() {
               { label: t('invoices_col_invoice_project'), primary: true, render: inv => (
                 <div>
                   <p className="font-semibold text-sm">{inv.invoice_number}</p>
-                  {inv.affaire_invoice_number && <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
-                  <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
+                  {inv.affaire_invoice_number && <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{inv.affaire_invoice_number}</p>}
+                  <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{inv.project_name}</p>
                 </div>
               )},
               { label: t('invoices_col_client'), render: inv => invoiceClientName(inv, projects, contacts) },
@@ -761,9 +782,9 @@ export default function Invoices() {
               { label: t('invoices_col_due_date'), render: inv => inv.due_date ? new Date(inv.due_date).toLocaleDateString('fr-FR') : '---' },
               { label: t('invoices_col_status'), render: inv => (
                 <div>
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={statusStyle(inv.status)}>{inv.status}</span>
+                  <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={statusStyle(inv.status)}>{statusLabel(inv.status)}</span>
                   {inv.accounting_deleted_at && (
-                    <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
+                    <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }}>Supprimée sur Zoho</span>
                   )}
                 </div>
               )},
@@ -789,7 +810,7 @@ export default function Invoices() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="min-w-full text-left border-collapse">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th
@@ -852,7 +873,7 @@ export default function Invoices() {
                               : <IconChevronRight size={16} style={{ color: 'var(--tblr-muted)' }} />}
                           </div>
                           <span className="font-bold text-sm transition-colors" style={{ color: 'var(--tblr-text)' }}>{group.name}</span>
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                          <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
                             {group.invoices.length > 1 ? t('invoices_count_invoices_plural', { count: group.invoices.length }) : t('invoices_count_invoices', { count: group.invoices.length })}
                           </span>
                         </div>
@@ -874,11 +895,11 @@ export default function Invoices() {
                               <div className="flex items-center gap-2">
                                 <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                                 {invoice.invoice_type === 'acompte' && (
-                                  <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                                  <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                                 )}
                               </div>
                               {invoice.affaire_invoice_number && (
-                                <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                                <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
                               )}
                               <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                             </div>
@@ -890,15 +911,15 @@ export default function Invoices() {
                         <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                           <div className="flex items-center gap-1.5">
                             <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
-                            {new Date(invoice.due_date).toLocaleDateString()}
+                            {formatDueDate(invoice.due_date)}
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
-                            {invoice.status}
+                          <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                            {statusLabel(invoice.status)}
                           </span>
                           {invoice.accounting_deleted_at && (
-                            <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                            <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
                               Supprimée sur Zoho
                             </span>
                           )}
@@ -987,13 +1008,13 @@ export default function Invoices() {
                               </button>
                             )}
                           </div>
-                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
-                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                          {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                           {pdpNotice?.invoiceId === invoice.id && (
-                            <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                            <div className="mt-1 text-[0.6875rem]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
                           )}
                           {chorusProNotice?.invoiceId === invoice.id && (
-                            <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
+                            <div className="mt-1 text-[0.6875rem]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                           )}
                         </td>
                       </tr>
@@ -1017,13 +1038,13 @@ export default function Invoices() {
                           <div className="flex items-center gap-2">
                             <p className="font-bold text-sm" style={{ color: 'var(--tblr-text)' }}>{invoice.invoice_number}</p>
                             {invoice.invoice_type === 'acompte' && (
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
+                              <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#fff3bf', color: '#e67700' }}>{t('invoices_badge_acompte')}</span>
                             )}
-                            <span className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
+                            <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>/</span>
                             <p className="text-xs font-medium" style={{ color: 'var(--tblr-primary)' }}>{invoice.project_name || 'General'}</p>
                           </div>
                           {invoice.affaire_invoice_number && (
-                            <p className="text-[10px] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
+                            <p className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>{invoice.affaire_invoice_number}</p>
                           )}
                           <p className="text-xs truncate max-w-[200px]" style={{ color: 'var(--tblr-muted)' }}>{invoice.description}</p>
                         </div>
@@ -1035,15 +1056,15 @@ export default function Invoices() {
                     <td className="px-6 py-4 text-sm" style={{ color: 'var(--tblr-text)' }}>
                       <div className="flex items-center gap-1.5">
                         <IconClock size={14} style={{ color: 'var(--tblr-muted)' }} />
-                        {new Date(invoice.due_date).toLocaleDateString()}
+                        {formatDueDate(invoice.due_date)}
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
-                        {invoice.status}
+                      <span className="px-2.5 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={statusStyle(invoice.status)}>
+                        {statusLabel(invoice.status)}
                       </span>
                       {invoice.accounting_deleted_at && (
-                        <span className="block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
+                        <span className="block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider w-fit" style={{ background: '#ffe0e0', color: 'var(--tblr-danger)' }} title={`Introuvable côté Zoho depuis le ${new Date(invoice.accounting_deleted_at).toLocaleDateString('fr-FR')} — probablement supprimée là-bas.`}>
                           Supprimée sur Zoho
                         </span>
                       )}
@@ -1132,13 +1153,13 @@ export default function Invoices() {
                           </button>
                         )}
                       </div>
-                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
-                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.superpdp_id && invoice.superpdp_status && (() => { const s = pdpStatusLabel(invoice.superpdp_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
+                      {invoice.chorus_pro_id && invoice.chorus_pro_status && (() => { const s = chorusProStatusLabel(invoice.chorus_pro_status); return <span className="inline-block mt-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-bold uppercase tracking-wider" style={s.style}>{s.label}</span>; })()}
                       {pdpNotice?.invoiceId === invoice.id && (
-                        <div className="mt-1 text-[10px]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
+                        <div className="mt-1 text-[0.6875rem]" style={{ color: pdpNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{pdpNotice.message}</div>
                       )}
                       {chorusProNotice?.invoiceId === invoice.id && (
-                        <div className="mt-1 text-[10px]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
+                        <div className="mt-1 text-[0.6875rem]" style={{ color: chorusProNotice.type === 'success' ? '#2f9e44' : 'var(--tblr-danger)' }}>{chorusProNotice.message}</div>
                       )}
                     </td>
                   </tr>
@@ -1167,7 +1188,7 @@ export default function Invoices() {
 
       <AnimatePresence>
         {isGeneratorOpen && selectedInvoice && (
-          <InvoiceGenerator
+          <InvoiceGenerator key="invoice-generator"
             onClose={() => setIsGeneratorOpen(false)}
             onSave={(updated) => {
               setInvoices(invoices.map(i => i.id === updated.id ? updated : i));
@@ -1181,9 +1202,10 @@ export default function Invoices() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -1215,7 +1237,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'standard'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition"
                       style={newInvoice.invoice_type === 'standard' || !newInvoice.invoice_type
                         ? { borderColor: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -1226,7 +1248,7 @@ export default function Invoices() {
                     <button
                       type="button"
                       onClick={() => setNewInvoice({...newInvoice, invoice_type: 'acompte'})}
-                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition-all"
+                      className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border-2 text-sm font-medium transition"
                       style={newInvoice.invoice_type === 'acompte'
                         ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
                         : { borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
@@ -1303,10 +1325,11 @@ export default function Invoices() {
         {editingInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90dvh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
@@ -1401,7 +1424,7 @@ export default function Invoices() {
                         key={type}
                         type="button"
                         onClick={() => setEditForm({ ...editForm, invoice_type: type })}
-                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition-all"
+                        className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg border-2 text-sm font-medium transition"
                         style={editForm.invoice_type === type
                           ? type === 'acompte'
                             ? { borderColor: '#e67700', background: '#fff3bf', color: '#e67700' }
@@ -1481,7 +1504,7 @@ export default function Invoices() {
                     onChange={e => setEditForm({ ...editForm, status: e.target.value as Invoice['status'] })}
                   >
                     {(['Draft', 'Sent', 'Paid', 'Overdue'] as const).map(s => (
-                      <option key={s} value={s}>{s}</option>
+                      <option key={s} value={s}>{statusLabel(s)}</option>
                     ))}
                   </select>
                 </div>
@@ -1520,9 +1543,10 @@ export default function Invoices() {
         {sendingInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -1616,9 +1640,10 @@ export default function Invoices() {
         {chorusProModalInvoice && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-lg overflow-hidden flex flex-col"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >

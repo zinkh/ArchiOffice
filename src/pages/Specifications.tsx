@@ -41,7 +41,7 @@ function BadgeOrigine({ origine }: { origine: OrigineArticle }) {
   const cabinet = origine !== 'reference';
   return (
     <span
-      className="px-1.5 py-0.5 rounded text-[10px] font-semibold whitespace-nowrap"
+      className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold whitespace-nowrap"
       style={cabinet
         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', border: '1px solid var(--tblr-primary)' }
         : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
@@ -288,7 +288,7 @@ export default function Specifications() {
         <nav className="flex-1 overflow-y-auto py-2">
           <button
             onClick={() => { setCorpsEtatActif(null); setDtuActif(''); }}
-            className="w-full text-left px-4 py-2 text-[13px] font-medium transition-colors"
+            className="w-full text-left px-4 py-2 text-[0.8125rem] font-medium transition-colors"
             style={corpsEtatActif === null
               ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
               : { color: 'var(--tblr-muted)' }}
@@ -302,7 +302,7 @@ export default function Specifications() {
               <div key={famille}>
                 <button
                   onClick={() => setFamillesOuvertes(p => ({ ...p, [famille]: !ouverte }))}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
                   style={{ color: 'var(--tblr-muted)' }}
                 >
                   {ouverte ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
@@ -315,13 +315,13 @@ export default function Specifications() {
                     <button
                       key={metier.code}
                       onClick={() => { setCorpsEtatActif(metier.code); setDtuActif(''); }}
-                      className="w-full flex items-center justify-between gap-2 pl-8 pr-4 py-1.5 text-[13px] text-left transition-colors"
+                      className="w-full flex items-center justify-between gap-2 pl-8 pr-4 py-1.5 text-[0.8125rem] text-left transition-colors"
                       style={actif
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
                     >
                       <span className="truncate">{metier.libelle}</span>
-                      <span className="text-[11px] flex-shrink-0 tabular-nums">{nombre || ''}</span>
+                      <span className="text-[0.6875rem] flex-shrink-0 tabular-nums">{nombre || ''}</span>
                     </button>
                   );
                 })}
@@ -361,7 +361,7 @@ export default function Specifications() {
             <select
               value={dtuActif}
               onChange={e => setDtuActif(e.target.value)}
-              className="flex-1 min-w-0 px-2 py-1.5 rounded-lg text-[13px] outline-none"
+              className="flex-1 min-w-0 px-2 py-1.5 rounded-lg text-[0.8125rem] outline-none"
               style={styleChamp}
             >
               <option value="">{t('library_all_dtu')}</option>
@@ -372,7 +372,7 @@ export default function Specifications() {
             <select
               value={origineActive}
               onChange={e => setOrigineActive(e.target.value)}
-              className="px-2 py-1.5 rounded-lg text-[13px] outline-none"
+              className="px-2 py-1.5 rounded-lg text-[0.8125rem] outline-none"
               style={styleChamp}
             >
               <option value="">{t('library_all_origins')}</option>
@@ -409,23 +409,23 @@ export default function Specifications() {
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
-                    <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
+                    <p className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
                       {article.designation}
                     </p>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <BadgeOrigine origine={article.origine} />
                       {article.dtu_code && (
-                        <span className="text-[11px] font-mono" style={{ color: 'var(--tblr-muted)' }}>
+                        <span className="text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>
                           {article.dtu_code}
                         </span>
                       )}
                       {article.unite && (
-                        <span className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{article.unite}</span>
+                        <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{article.unite}</span>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <span className="text-[13px] font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
+                    <span className="text-[0.8125rem] font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
                       {formatCurrency(Number(article.prix_unitaire) || 0)}
                     </span>
                     <button
@@ -657,7 +657,7 @@ export default function Specifications() {
                   <div className="grid grid-cols-3 gap-3 mb-3">
                     {([['library_min', stats.min], ['library_median', stats.mediane], ['library_max', stats.max]] as const).map(([label, valeur]) => (
                       <div key={label} className="px-3 py-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-                        <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{t(label)}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t(label)}</p>
                         <p className="text-sm font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
                           {valeur == null ? '—' : formatCurrency(valeur)}
                         </p>

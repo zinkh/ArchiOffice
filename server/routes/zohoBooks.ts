@@ -149,6 +149,7 @@ async function resolveZohoBooksCustomerAsLocalContact(
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
@@ -219,7 +220,7 @@ export async function pushInvoiceToZohoBooks(
   return { external_id: created.invoice_id, invoice_number: created.invoice_number, status: mapZohoStatus(created.status) || 'Draft' };
 }
 
-export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // Keyed by tenantId — see the matching comment in zohoInvoice.ts. An
   // unkeyed single value here let one tenant's cached Zoho token leak to
   // whichever other tenant synced next within the ~1h expiry window.
@@ -300,7 +301,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   // authenticated fetch; the frontend navigates to the returned URL itself.
   app.get('/api/zoho-books/auth', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('zoho_client_id, zoho_data_center').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_client_id) {
         return res.status(400).json({ error: 'Zoho credentials not configured' });
@@ -319,7 +320,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       res.json({ url: authUrl.toString() });
     } catch (error: any) {
       console.error("[GET /api/zoho-books/auth]", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 
@@ -372,7 +373,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
   // DELETE /api/zoho-books/disconnect
   app.delete('/api/zoho-books/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       zohoBooksAccessTokenCache.delete(tenantId);
       // Only Books' token — this used to null zoho_refresh_token, so
       // disconnecting Books also disconnected Zoho Invoice.
@@ -382,14 +383,14 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       res.json({ success: true });
     } catch (error: any) {
       console.error("[DELETE /api/zoho-books/disconnect]", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 
   // POST /api/zoho-books/sync  — sync invoices/estimates with Zoho Books
   app.post('/api/zoho-books/sync', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       if (!(settings as any)?.zoho_books_refresh_token) {
         return res.status(400).json({ error: 'Zoho Books non connecté' });
@@ -543,7 +544,7 @@ export function registerZohoBooksRoutes(app: Express, { supabaseAdmin, getTenant
       res.json({ pushed, pulled, deletedUpstream, remaining, errors });
     } catch (error: any) {
       console.error('[Zoho Books sync error]', error.message);
-      res.status(500).json({ error: error.message || 'Sync échouée' });
+      res.status(error.status || 500).json({ error: error.message || 'Sync échouée' });
     }
   });
 }

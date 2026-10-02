@@ -31,7 +31,7 @@ export function TenantSwitcher({ onNavigate }: { onNavigate?: () => void }) {
       {tenants.length > 1 && (
         <div className="p-1">
           <p
-            className="px-3 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wide"
+            className="px-3 pt-1.5 pb-1 text-[0.6875rem] font-semibold uppercase tracking-wide"
             style={{ color: 'var(--tblr-muted)' }}
           >
             {t('tenant_switcher_label')}
@@ -44,7 +44,7 @@ export function TenantSwitcher({ onNavigate }: { onNavigate?: () => void }) {
                 onClick={() => handleSwitch(tenant.tenantId)}
                 disabled={!!switching}
                 title={isActive ? t('tenant_switcher_current') : t('tenant_switcher_switch')}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors text-left disabled:opacity-60"
+                className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors text-left disabled:opacity-60"
                 style={{ color: 'var(--tblr-text)', background: isActive ? 'var(--tblr-surface-2)' : '' }}
                 onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                 onMouseOut={e => (e.currentTarget.style.background = isActive ? 'var(--tblr-surface-2)' : '')}
@@ -52,7 +52,7 @@ export function TenantSwitcher({ onNavigate }: { onNavigate?: () => void }) {
                 <IconBuilding size={15} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />
                 <span className="flex-1 min-w-0">
                   <span className="block truncate">{tenant.name || tenant.tenantId}</span>
-                  <span className="block text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                  <span className="block text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>
                     {switching === tenant.tenantId
                       ? t('tenant_switcher_switching')
                       : tenant.systemRole === 'admin'
@@ -69,7 +69,7 @@ export function TenantSwitcher({ onNavigate }: { onNavigate?: () => void }) {
       <div className="p-1 pt-0">
         <button
           onClick={() => { navigate('/agency-setup?add=1'); onNavigate?.(); }}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded text-[13px] transition-colors"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded text-[0.8125rem] transition-colors"
           style={{ color: 'var(--tblr-muted)' }}
           onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
           onMouseOut={e => (e.currentTarget.style.background = '')}

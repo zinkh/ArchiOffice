@@ -274,6 +274,49 @@ describe('Geo Proxy input validation', () => {
     expect(res.status).toBe(400);
   });
 
+  it('filters official historical monuments by their real distance', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const originalFetch = global.fetch;
+    global.fetch = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        data: [
+          {
+            Reference: 'PA00123456',
+            Denomination_de_l_edifice: 'église',
+            Commune_forme_index: 'Nancy',
+            Departement_en_lettres: 'Meurthe-et-Moselle',
+            Date_et_typologie_de_la_protection: '1925 : inscrit MH',
+            coordonnees_au_format_WGS84: '48.6922,6.1845',
+          },
+          {
+            Reference: 'PA00999999',
+            Denomination_de_l_edifice: 'château éloigné',
+            Commune_forme_index: 'Nancy',
+            coordonnees_au_format_WGS84: '48.7100,6.2100',
+          },
+        ],
+      }),
+    })) as any;
+
+    try {
+      const res = await request(app).get('/api/historical-monuments')
+        .query({ lat: '48.6921', lon: '6.1844', insee: '54395', distance: '500' })
+        .set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.records).toHaveLength(1);
+      expect(res.body.records[0].recordid).toBe('PA00123456');
+      expect(res.body.records[0].fields.dist).toBeLessThan(500);
+      const requestedUrl = String((global.fetch as any).mock.calls[0][0]);
+      expect(requestedUrl).toContain('COG_Insee_lors_de_la_protection__exact=54395');
+      expect(requestedUrl).toContain('page_size=200');
+      expect(requestedUrl).not.toContain('page_size=1000');
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   it('rejects cadastre/parcel without lon/lat or bbox', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
@@ -286,6 +329,85 @@ describe('Geo Proxy input validation', () => {
     const { token } = makeUser(tenantId);
     const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '1,2,3' }).set(authHeader(token));
     expect(res.status).toBe(400);
+  });
+
+  it('rejects cadastre/parcel with inverted or oversized bounds', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const inverted = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.2,48.7,6.1,48.8' }).set(authHeader(token));
+    const oversized = await request(app).get('/api/cadastre/parcel').query({ bbox: '6,48,6.5,48.5' }).set(authHeader(token));
+    expect(inverted.status).toBe(400);
+    expect(oversized.status).toBe(400);
+  });
+
+  describe('cadastre network calls', () => {
+    const originalFetch = global.fetch;
+    afterEach(() => { global.fetch = originalFetch; });
+
+    it('proxies, maps and caches a cadastral bbox response', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => ({
+        ok: true,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          features: [{
+            geometry: { type: 'Polygon', coordinates: [[[6.11, 48.71], [6.12, 48.71], [6.12, 48.72], [6.11, 48.71]]] },
+            properties: { idu: '54395000AB0123', code_insee: '54395', contenance: 420 },
+          }],
+        }),
+      })) as any;
+
+      const query = { bbox: '6.110001,48.710001,6.120001,48.720001' };
+      const first = await request(app).get('/api/cadastre/parcel').query(query).set(authHeader(token));
+      const second = await request(app).get('/api/cadastre/parcel').query(query).set(authHeader(token));
+
+      expect(first.status).toBe(200);
+      expect(first.headers['x-cache']).toBe('MISS');
+      expect(first.body.features[0].properties).toMatchObject({ section: 'AB', numero: '00123', contenance: 420 });
+      expect(second.status).toBe(200);
+      expect(second.headers['x-cache']).toBe('HIT');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a timed-out cadastral call to 504', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => { const e: any = new Error('aborted'); e.name = 'AbortError'; throw e; }) as any;
+
+      const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.130001,48.730001,6.140001,48.740001' }).set(authHeader(token));
+      expect(res.status).toBe(504);
+    });
+
+    it('falls back to a nearby bbox when the BAN point is on the street', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({ type: 'FeatureCollection', features: [] }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({
+            type: 'FeatureCollection',
+            features: [{
+              geometry: { type: 'Polygon', coordinates: [[[6.15, 48.75], [6.16, 48.75], [6.16, 48.76], [6.15, 48.75]]] },
+              properties: { idu: '54395000AC0042', code_insee: '54395', contenance: 250 },
+            }],
+          }),
+        }) as any;
+
+      const res = await request(app).get('/api/cadastre/parcel')
+        .query({ lon: '6.155001', lat: '48.755001' })
+        .set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.features).toHaveLength(1);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(decodeURIComponent(String((global.fetch as any).mock.calls[1][0]))).toContain('"type":"Polygon"');
+    });
   });
 
   // The following five (rnb-buildings, georisques, urbanisme, bdnb-geocode,

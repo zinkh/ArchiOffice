@@ -52,6 +52,7 @@ export default function AgentConfig() {
   const [notifyUsersEnabled, setNotifyUsersEnabled] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [knowledgeEnabled, setKnowledgeEnabled] = useState(false);
+  const [learningEnabled, setLearningEnabled] = useState(false);
   const [systemPromptOverride, setSystemPromptOverride] = useState('');
 
   useEffect(() => {
@@ -79,6 +80,7 @@ export default function AgentConfig() {
         setNotifyUsersEnabled(!!found.notify_users_enabled);
         setWebSearchEnabled(!!found.web_search_enabled);
         setKnowledgeEnabled(!!found.knowledge_enabled);
+        setLearningEnabled(!!found.learning_enabled);
         setSystemPromptOverride(found.system_prompt_override ?? '');
       })
       .finally(() => setLoading(false));
@@ -123,6 +125,7 @@ export default function AgentConfig() {
           notify_users_enabled: notifyUsersEnabled,
           web_search_enabled: webSearchEnabled,
           knowledge_enabled: knowledgeEnabled,
+          learning_enabled: learningEnabled,
           system_prompt_override: systemPromptOverride || null,
         }),
       });
@@ -184,7 +187,7 @@ export default function AgentConfig() {
               <button
                 key={c}
                 onClick={() => setAvatarColor(c)}
-                className="w-7 h-7 rounded-full border-2 transition-all"
+                className="w-7 h-7 rounded-full border-2 transition"
                 style={{ background: c, borderColor: avatarColor === c ? 'var(--tblr-text)' : 'transparent' }}
               />
             ))}
@@ -402,7 +405,24 @@ export default function AgentConfig() {
             />
             <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_knowledge')}</span>
           </label>
+
+          <label className="flex items-center gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={learningEnabled}
+              onChange={() => setLearningEnabled((v: boolean) => !v)}
+              className="w-4 h-4 rounded"
+              style={{ accentColor: 'var(--tblr-primary)' }}
+            />
+            <span className="text-[13px]" style={{ color: 'var(--tblr-text)' }}>{t('agent_config_learning')}</span>
+          </label>
         </div>
+
+        {learningEnabled && (
+          <p className="text-[11px] pt-1 border-t mt-3" style={{ color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}>
+            {t('agent_config_learning_hint')}
+          </p>
+        )}
 
         {knowledgeEnabled && (
           <div className="pt-1 border-t" style={{ borderColor: 'var(--tblr-border)' }}>

@@ -94,6 +94,27 @@ describe('Observations', () => {
 });
 
 describe('Meetings', () => {
+  it('classe les réunions selon le dossier parent, même si un ancien client envoie « projet »', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('proposals', [{ id: 'prop-meeting-type', tenant_id: tenantId }]);
+    fakeSupabaseAdmin.seed('tenders', [{ id: 'tender-meeting-type', tenant_id: tenantId }]);
+
+    const proposal = await request(app).post('/api/meetings').set(authHeader(token)).send({ proposal_id: 'prop-meeting-type', type: 'projet', title: 'Visite proposition', date: '2026-09-23' });
+    const tender = await request(app).post('/api/meetings').set(authHeader(token)).send({ tender_id: 'tender-meeting-type', title: 'Visite candidature', date: '2026-09-23' });
+
+    expect(proposal.status).toBe(201);
+    expect(tender.status).toBe(201);
+    expect(proposal.body.type).toBe('visite_proposition');
+    expect(tender.body.type).toBe('visite_candidature');
+    expect(fakeSupabaseAdmin.getTable('meetings').find((m: any) => m.id === proposal.body.id)?.type).toBe('visite_proposition');
+    expect(fakeSupabaseAdmin.getTable('meetings').find((m: any) => m.id === tender.body.id)?.type).toBe('visite_candidature');
+
+    fakeSupabaseAdmin.seed('meetings', [{ id: 'old-proposal-meeting', tenant_id: tenantId, proposal_id: 'prop-meeting-type', type: 'projet', title: 'Ancienne visite', date: '2026-01-01' }]);
+    const historical = await request(app).get('/api/meetings/old-proposal-meeting').set(authHeader(token));
+    expect(historical.body.type).toBe('visite_proposition');
+  });
+
   it('creates, reads, updates, and deletes a meeting within one tenant', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

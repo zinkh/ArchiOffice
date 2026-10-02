@@ -391,7 +391,7 @@ export default function Profile() {
                   {proj.role && <p className="text-xs text-zinc-400">{proj.role}</p>}
                 </div>
                 {proj.status && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shrink-0">
+                  <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shrink-0">
                     {proj.status}
                   </span>
                 )}
@@ -440,7 +440,7 @@ export default function Profile() {
                   {exp.description && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{exp.description}</p>}
                 </div>
                 {isViewingSelf && (
-                  <button onClick={() => deleteExperience(exp.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all shrink-0">
+                  <button onClick={() => deleteExperience(exp.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition shrink-0">
                     <IconTrash size={14} />
                   </button>
                 )}
@@ -490,7 +490,7 @@ export default function Profile() {
                   </p>
                 </div>
                 {isViewingSelf && (
-                  <button onClick={() => deleteEducation(edu.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all shrink-0">
+                  <button onClick={() => deleteEducation(edu.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition shrink-0">
                     <IconTrash size={14} />
                   </button>
                 )}

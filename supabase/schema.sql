@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS profiles (
   -- Préférence personnelle : afficher ou non ses propres contacts personnels
   -- dans la liste — voir migrate_contacts_personal_visibility.sql.
   show_personal_contacts BOOLEAN NOT NULL DEFAULT true,
+  -- Signature de courrier personnelle — voir migrate_profile_mail_signature.sql.
+  mail_signature TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -176,8 +178,8 @@ CREATE TABLE IF NOT EXISTS projects (
   status TEXT NOT NULL, budget NUMERIC, category TEXT,
   start_date TEXT, end_date TEXT, description TEXT, image_url TEXT,
   project_code TEXT, address TEXT, client_siret TEXT, client_vat_number TEXT,
-  client_email TEXT, is_public_client INTEGER DEFAULT 0,
-  reference TEXT, projet_detail TEXT, is_entreprise INTEGER DEFAULT 0,
+  client_email TEXT, is_public_client BOOLEAN DEFAULT false,
+  reference TEXT, projet_detail TEXT, is_entreprise BOOLEAN DEFAULT false,
   nom_societe TEXT, rcs TEXT, representant TEXT, qualite TEXT,
   adresse_client TEXT, cp_client TEXT, ville_client TEXT,
   telephone TEXT, portable TEXT, email_client TEXT,
@@ -187,9 +189,14 @@ CREATE TABLE IF NOT EXISTS projects (
   type_projet TEXT, categorie_projet TEXT, surface_plancher TEXT,
   surface_plancher_ext TEXT, surface_erp TEXT, surface_ert TEXT,
   effectif_public TEXT, effectif_personnel TEXT, ind TEXT, date_modification TEXT,
-  is_complete_mission TEXT, is_chantier TEXT, etudes_notes TEXT, chantier_notes TEXT,
+  is_complete_mission BOOLEAN DEFAULT false, is_chantier BOOLEAN DEFAULT false, etudes_notes TEXT, chantier_notes TEXT,
   surface TEXT, construction_cost TEXT, remuneration TEXT, progression TEXT,
-  project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT
+  project_manager TEXT, cotraitants TEXT, external_intervenants TEXT, entreprises TEXT,
+  -- Disponible hors connexion (voir supabase/migrate_project_offline_enabled.sql) :
+  -- cochée depuis la fiche projet, déclenche le préchargement en lecture seule
+  -- des données du projet dans le cache Dexie du navigateur — jamais activée
+  -- pour tous les projets à la fois, pour ne pas alourdir l'app sur les autres.
+  offline_enabled BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS project_categories_junction (
@@ -220,8 +227,8 @@ CREATE TABLE IF NOT EXISTS tenders (
   value NUMERIC, notes TEXT, mandataire_id TEXT, type TEXT,
   surface NUMERIC, construction_cost NUMERIC, honoraires_percent NUMERIC,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, miqcp_assessment TEXT,
-  mandatory_visit INTEGER DEFAULT 0, visit_date TEXT,
-  withdrawal_deadline TEXT, archived INTEGER DEFAULT 0,
+  mandatory_visit BOOLEAN DEFAULT false, visit_date TEXT,
+  withdrawal_deadline TEXT, archived BOOLEAN DEFAULT false,
   ville_execution TEXT, description TEXT
 );
 
@@ -300,7 +307,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   title TEXT NOT NULL, client_id TEXT REFERENCES contacts(id), amount NUMERIC, status TEXT NOT NULL,
   description TEXT, created_at TEXT, reference TEXT, projet_detail TEXT,
-  is_entreprise INTEGER DEFAULT 0, nom_societe TEXT, rcs TEXT,
+  is_entreprise BOOLEAN DEFAULT false, nom_societe TEXT, rcs TEXT,
   representant TEXT, qualite TEXT, adresse_client TEXT, cp_client TEXT,
   ville_client TEXT, telephone TEXT, portable TEXT, email_client TEXT,
   adresse_terrain TEXT, cp_ville_terrain TEXT, ref_cadastrale TEXT,
@@ -352,7 +359,7 @@ CREATE TABLE IF NOT EXISTS milestones (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, proposal_id TEXT, tender_id TEXT,
-  title TEXT NOT NULL, due_date TEXT NOT NULL, completed INTEGER DEFAULT 0,
+  title TEXT NOT NULL, due_date TEXT NOT NULL, completed BOOLEAN DEFAULT false,
   duration_days INTEGER, dependencies TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_milestones_tenant_project ON milestones(tenant_id, project_id);
@@ -459,7 +466,10 @@ CREATE TABLE IF NOT EXISTS site_reports (
   meetingnotes TEXT, nextmeeting TEXT, meteo TEXT,
   temperature TEXT, effectif_total TEXT,
   attendance JSONB DEFAULT '[]', statut TEXT NOT NULL DEFAULT 'brouillon',
-  decisions JSONB DEFAULT '[]'
+  decisions JSONB DEFAULT '[]',
+  -- Suivi par lot (page 2 du CR : présence P/R/AE/ANE, effectif, retards,
+  -- intempéries, lieu) — supabase/migrate_site_report_lot_tracking.sql
+  lot_tracking JSONB DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 
@@ -509,7 +519,7 @@ CREATE TABLE IF NOT EXISTS receptions (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT, date TEXT NOT NULL, type TEXT NOT NULL,
-  has_reserves INTEGER DEFAULT 0, reserves_count INTEGER DEFAULT 0,
+  has_reserves BOOLEAN DEFAULT false, reserves_count INTEGER DEFAULT 0,
   document_url TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_receptions_tenant_project ON receptions(tenant_id, project_id);
@@ -578,6 +588,18 @@ CREATE TABLE IF NOT EXISTS dpgfs (
   project_id TEXT, cctp_id TEXT, data TEXT
 );
 
+CREATE TABLE IF NOT EXISTS dpgf_versions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT NOT NULL,
+  dpgf_id TEXT REFERENCES dpgfs(id) ON DELETE CASCADE NOT NULL,
+  label TEXT NOT NULL, phase TEXT, version TEXT,
+  document JSONB NOT NULL, created_by UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dpgf_versions_project ON dpgf_versions(tenant_id, project_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS settings (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL UNIQUE,
@@ -611,8 +633,19 @@ CREATE TABLE IF NOT EXISTS project_templates (
   default_status TEXT DEFAULT 'Planning',
   default_budget NUMERIC DEFAULT 0,
   default_description TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  -- migrate_project_templates_structure.sql : trame complète de l'affaire
+  operation_type TEXT CHECK (operation_type IS NULL OR operation_type IN ('neuf', 'rehabilitation', 'extension', 'maison_individuelle', 'permis_seul', 'autre')),
+  marche_type TEXT CHECK (marche_type IS NULL OR marche_type IN ('prive', 'public')),
+  default_lots JSONB NOT NULL DEFAULT '[]'::jsonb,
+  default_milestones JSONB NOT NULL DEFAULT '[]'::jsonb,
+  default_tasks JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- migrate_project_templates_missions.sql : répartition des missions MOE
+  default_missions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  catalog_key TEXT
 );
+CREATE UNIQUE INDEX IF NOT EXISTS project_templates_tenant_catalog_key_idx
+  ON project_templates (tenant_id, catalog_key) WHERE catalog_key IS NOT NULL;
 
 -- ACT Data (Analyse Comparative des Offres)
 CREATE TABLE IF NOT EXISTS act_data (
@@ -721,6 +754,7 @@ ALTER TABLE receptions           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reserves             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dpgf_items           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE dpgf_versions        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_phase_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE situations           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE detail_situations    ENABLE ROW LEVEL SECURITY;
@@ -832,6 +866,8 @@ CREATE POLICY "tenant_isolation" ON plans
 CREATE POLICY "tenant_isolation" ON reserves
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON dpgf_items
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON dpgf_versions
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON project_phase_history
   USING (tenant_id = my_tenant_id());

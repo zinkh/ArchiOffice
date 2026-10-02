@@ -27,6 +27,7 @@ function timingSafeEqualStr(a: string, b: string): boolean {
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
 }
 
 function ragicHeaders(apiKey: string) {
@@ -46,7 +47,7 @@ function ragicUrl(account: string, sheet: string, recordId?: string | number) {
   return recordId != null ? `${base}/${recordId}` : base;
 }
 
-export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
+export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin }: RouteDeps) {
   // GET /api/ragic/status
   app.get('/api/ragic/status', async (req: any, res: any) => {
     try {
@@ -63,7 +64,7 @@ export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId }
   // DELETE /api/ragic/disconnect
   app.delete('/api/ragic/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({
         ragic_api_key: null,
         ragic_account: null,
@@ -75,14 +76,14 @@ export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId }
       res.json({ success: true });
     } catch (error: any) {
       console.error("[DELETE /api/ragic/disconnect]", error);
-      res.status(500).json({ error: error.message });
+      res.status(error.status || 500).json({ error: error.message });
     }
   });
 
   // POST /api/ragic/sync  — bidirectional sync for contacts, projects, invoices, proposals
   app.post('/api/ragic/sync', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).single();
       const s = settings as any;
       if (!s?.ragic_api_key || !s?.ragic_account) {
@@ -298,7 +299,7 @@ export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId }
       res.json({ results });
     } catch (error: any) {
       console.error('[Ragic sync error]', error.message);
-      res.status(500).json({ error: error.message || 'Sync Ragic échouée' });
+      res.status(error.status || 500).json({ error: error.message || 'Sync Ragic échouée' });
     }
   });
 

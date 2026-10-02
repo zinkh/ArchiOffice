@@ -5,6 +5,8 @@ export interface PillTabItem {
   id: string;
   label: string;
   icon?: React.ElementType;
+  /** Court repère affiché à côté du libellé (ex. « hors mission »). */
+  badge?: string;
 }
 
 interface PillTabsProps {
@@ -40,6 +42,14 @@ export function PillTabs({ tabs, activeId, onChange, className }: PillTabsProps)
           >
             {Icon && <Icon size={16} />}
             {tab.label}
+            {tab.badge && (
+              <span
+                className="px-1.5 py-0.5 rounded text-[0.625rem] font-bold uppercase tracking-wide"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
+              >
+                {tab.badge}
+              </span>
+            )}
           </button>
         );
       })}

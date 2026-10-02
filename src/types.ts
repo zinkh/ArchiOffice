@@ -55,17 +55,48 @@ export interface DocumentDiffusion {
   notes?: string;
 }
 
+export type TemplateOperationType = 'neuf' | 'rehabilitation' | 'extension' | 'maison_individuelle' | 'permis_seul' | 'autre';
+export type TemplateMarcheType = 'prive' | 'public';
+
+export interface TemplateLot { lot_number: string; lot_title: string }
+/** Délais relatifs à la date de démarrage de l'affaire (jours calendaires). */
+export interface TemplateMilestone { title: string; due_date_offset_days: number }
+export interface TemplateTask {
+  title: string;
+  description?: string;
+  start_offset_days: number;
+  duration_days: number;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+}
+
 export interface ProjectTemplate {
   id: string;
   name: string;
   description: string;
-  // Default values
+  operation_type?: TemplateOperationType;
+  marche_type?: TemplateMarcheType;
+  // Valeurs par défaut
   default_status: 'Planning' | 'In Progress' | 'Completed' | 'On Hold';
   default_budget: number;
-  default_category?: string;
-  default_lots_list?: ProjectLot[];
-  default_milestones?: { title: string; due_date_offset_days: number }[];
   default_description: string;
+  // Structure créée avec l'affaire (jsonb côté base)
+  default_lots?: TemplateLot[];
+  default_milestones?: TemplateMilestone[];
+  default_tasks?: TemplateTask[];
+  /**
+   * Répartition des missions MOE (même forme que `ContratMOE.missions_list`,
+   * donc reprise telle quelle par un contrat ; convertie en répartition
+   * d'honoraires pour une proposition, voir `feeDistributionFromTemplate`).
+   */
+  default_missions?: ContratMOEMission[];
+  /** Modèle issu du catalogue de démarrage (clé stable), sinon absent. */
+  catalog_key?: string | null;
+}
+
+/** Entrée du catalogue de démarrage, proposée tant qu'elle n'a pas été installée. */
+export interface ProjectTemplateCatalogEntry extends Omit<ProjectTemplate, 'id'> {
+  catalog_key: string;
+  installed?: boolean;
 }
 
 export interface DocumentTemplateVariable {
@@ -261,8 +292,12 @@ export interface Project {
   client_vat_number?: string;
   client_email?: string;
   is_public_client?: boolean;
+  /** Modèle de projet à appliquer à la création (lots, jalons, tâches types). Jamais relu. */
+  template_id?: string;
   is_complete_mission?: boolean;
   is_chantier?: boolean;
+  /** Précharge ce projet en lecture seule dans le cache hors-ligne (voir src/lib/offlinePrefetch.ts). */
+  offline_enabled?: boolean;
   etudes_notes?: string;
   chantier_notes?: string;
   surface?: number;
@@ -436,6 +471,10 @@ export interface ReservePhoto {
   file_url: string;
   caption?: string | null;
   uploaded_at: string;
+  /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+  /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
+  localPreviewUrl?: string;
 }
 
 export interface Reserve {
@@ -458,6 +497,8 @@ export interface Reserve {
   description?: string | null;
   /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
   photos?: ReservePhoto[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Permit {
@@ -507,6 +548,8 @@ export interface GpaReserve {
   description?: string | null;
   /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
   photos?: ReservePhoto[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Plan {
@@ -537,6 +580,8 @@ export interface TeamMember {
   department?: string;
   /** Préférence personnelle : afficher ses propres contacts personnels dans la liste (défaut : oui). */
   showPersonalContacts?: boolean;
+  /** Signature de courrier personnelle, ajoutée aux nouveaux messages rédigés dans l'application. */
+  mailSignature?: string;
   tenantId?: string | null;
   // Platform back-office access — orthogonal to system_role (see
   // server/superAdminAuth.ts). Only ever set on the current user's own
@@ -655,6 +700,8 @@ export interface Tender {
   // seulement sur le même lot/la même spécialité), ou absente (aucune
   // exigence). Onglet Partenaires.
   exclusivite?: 'totale' | 'partielle' | null;
+  /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 // Une sollicitation d'un bureau d'études pour une spécialité donnée — onglet
@@ -1081,6 +1128,8 @@ export interface Proposal {
   comp_fee_percent?: number;
   vat_rate?: number;
   decimal_precision?: number;
+  /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface Invoice {
@@ -1167,6 +1216,36 @@ export interface InvoicePhase {
   montant_phase: number;
 }
 
+/** Statut de présence à une réunion de chantier : Présent, Retard, Absent Excusé, Absent Non Excusé. */
+export type PresenceStatus = 'P' | 'R' | 'AE' | 'ANE';
+
+export interface SiteReportAttendee {
+  name: string;
+  role: string;
+  /** Intervenant du projet (project_stakeholders) dont cette ligne reprend la présence — absent pour une ligne saisie librement. */
+  contact_id?: string;
+  present: boolean;
+  excused?: boolean;
+  /** Statut détaillé P/R/AE/ANE. Une ligne ancienne sans ce champ se déduit de present/excused. */
+  status?: PresenceStatus;
+  /** Coché : cet intervenant reçoit la diffusion du CR (colonne « D » du modèle). */
+  diffusion?: boolean;
+}
+
+/** Suivi d'un lot pour un CR donné (page 2 du modèle : présence, effectif, retards, intempéries). */
+export interface SiteReportLotTracking {
+  lot_id: string;
+  status?: PresenceStatus;
+  effectif?: number;
+  retard_execution?: boolean;
+  retard_remise_docs?: boolean;
+  intemperies?: boolean;
+  convoque_reunion_suivante?: boolean;
+  lieu?: string;
+  /** Lot concerné par des travaux (W), des documents à remettre (D), les deux, ou aucun. */
+  concerned?: 'W' | 'D' | 'WD';
+}
+
 export interface SiteReport {
   id: string;
   project_id: string;
@@ -1180,14 +1259,18 @@ export interface SiteReport {
   meteo?: string;
   temperature?: number;
   effectif_total?: number;
-  attendance?: { name: string; role: string; present: boolean; excused?: boolean }[];
+  attendance?: SiteReportAttendee[];
+  lot_tracking?: SiteReportLotTracking[];
   statut?: 'brouillon' | 'diffuse' | 'archive';
   decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
+  /** Créé hors ligne, pas encore atteint le serveur — voir src/lib/offlineQueue.ts. */
+  pendingSync?: boolean;
 }
 
 export interface SiteReportNote {
   id: string;
   report_id: string;
+  /** Rubrique du CR — texte libre, personnalisable par l'architecte (pas de liste fermée). */
   category: string;
   note_number: number;
   responsible_company?: string;
@@ -1222,6 +1305,8 @@ export interface Observation {
   type?: 'observation' | 'reserve' | 'a_faire';
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 export interface DPGFItem {
@@ -1285,6 +1370,10 @@ export interface MeetingPhoto {
   file_url: string;
   caption?: string;
   uploaded_at: string;
+  /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+  /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
+  localPreviewUrl?: string;
 }
 
 // ── Agents IA ──────────────────────────────────────────────────────────────
@@ -1360,6 +1449,8 @@ export interface Meeting {
   updated_at?: string;
   photos?: MeetingPhoto[];
   attendees?: MeetingAttendee[];
+  /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
 }
 
 /**

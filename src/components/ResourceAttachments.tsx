@@ -6,7 +6,7 @@
 // delete_document). Volontairement autonome : pas de dépendance à l'onglet
 // Documents d'une affaire (qui reste sur project_id), pour rester utilisable
 // depuis n'importe quelle fiche sans y importer tout ProjectDetail.tsx.
-import { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { IconFile, IconTrash, IconUpload, IconLoader2 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -26,7 +26,8 @@ export interface ResourceAttachment {
 export type AttachableResourceType =
   | 'projects' | 'contacts' | 'proposals' | 'tenders' | 'permits' | 'meetings'
   | 'receptions' | 'reserves' | 'contrats_moe' | 'ordres_de_service' | 'visas'
-  | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents';
+  | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents'
+  | 'agency_library';
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return '';
@@ -57,6 +58,8 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const dragCounter = useRef(0);
 
   async function load() {
     setLoading(true);
@@ -104,11 +107,41 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
     }
   }
 
+  function handleDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    if (!e.dataTransfer.types.includes('Files')) return;
+    dragCounter.current += 1;
+    setDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current = Math.max(0, dragCounter.current - 1);
+    if (dragCounter.current === 0) setDragOver(false);
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setDragOver(false);
+    handleUpload(e.dataTransfer.files);
+  }
+
   return (
-    <div className="space-y-2">
+    <div
+      className={`space-y-2 rounded-lg transition-colors ${dragOver ? 'bg-[var(--tblr-primary-lt)] ring-2 ring-[var(--tblr-primary)] ring-dashed' : ''}`}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <div className="flex items-center justify-between">
         <span className="text-xs font-bold uppercase text-[var(--tblr-muted)]">Pièces jointes</span>
-        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition-all">
+        <label className="flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold cursor-pointer transition">
           {uploading ? <IconLoader2 size={13} className="animate-spin" /> : <IconUpload size={13} />}
           Ajouter
           <input type="file" multiple className="hidden" disabled={uploading} onChange={e => handleUpload(e.target.files)} />
@@ -118,7 +151,9 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
       {loading ? (
         <p className="text-xs text-[var(--tblr-muted)] italic">Chargement…</p>
       ) : docs.length === 0 ? (
-        <p className="text-xs text-[var(--tblr-muted)] italic">Aucune pièce jointe.</p>
+        <p className="text-xs text-[var(--tblr-muted)] italic">
+          {dragOver ? 'Déposez les fichiers ici…' : 'Aucune pièce jointe. Glissez-déposez des fichiers ici.'}
+        </p>
       ) : (
         <div className="space-y-1">
           {docs.map(doc => (
@@ -131,13 +166,13 @@ export function ResourceAttachments({ resourceType, resourceId, category }: {
               >
                 <IconFile size={14} className="shrink-0 text-[var(--tblr-muted)]" />
                 <span className="text-xs truncate">{doc.name}</span>
-                {doc.category && <span className="text-[10px] uppercase font-bold text-[var(--tblr-muted)] shrink-0">{doc.category}</span>}
-                <span className="text-[10px] text-[var(--tblr-muted)] shrink-0">{formatSize(doc.size_bytes)}</span>
+                {doc.category && <span className="text-[0.6875rem] uppercase font-bold text-[var(--tblr-muted)] shrink-0">{doc.category}</span>}
+                <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{formatSize(doc.size_bytes)}</span>
               </button>
               <button
                 type="button"
                 onClick={() => handleDelete(doc)}
-                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all rounded shrink-0"
+                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded shrink-0"
                 title="Supprimer"
               >
                 <IconTrash size={13} />

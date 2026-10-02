@@ -74,7 +74,7 @@ export function MobileAccordionTable({ columns, data, keyField, emptyText = 'Auc
                     className="flex items-start justify-between gap-4 py-2"
                     style={{ borderBottom: i < restCols.length - 1 ? '1px solid var(--tblr-border)' : undefined }}
                   >
-                    <span className="text-[11px] font-semibold uppercase tracking-wide shrink-0" style={{ color: 'var(--tblr-muted)' }}>
+                    <span className="text-[0.6875rem] font-semibold uppercase tracking-wide shrink-0" style={{ color: 'var(--tblr-muted)' }}>
                       {col.label}
                     </span>
                     <span className="text-xs text-right" style={{ color: 'var(--tblr-text)' }}>

@@ -57,7 +57,7 @@ export const DPGFTreeGrid: React.FC<DPGFTreeGridProps> = ({ lots }) => {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-left border-collapse">
+      <table className="min-w-full text-left border-collapse">
         <thead>
           {table.getHeaderGroups().map(headerGroup => (
             <tr key={headerGroup.id}>

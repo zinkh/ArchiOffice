@@ -81,6 +81,8 @@ export function buildRecordPath(resourceKey: string, record: Record<string, unkn
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=INFOS` : null;
     case 'marches_entreprises':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=DET` : null;
+    case 'site_reports':
+      return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=DET` : null;
     case 'notes_honoraires':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=HONOS` : null;
 

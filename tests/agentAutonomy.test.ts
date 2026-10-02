@@ -603,3 +603,78 @@ describe('remontée des erreurs d\'écriture au modèle', () => {
     expect(result.response.valeurs_par_defaut).toMatchObject({ status: 'Draft' });
   });
 });
+
+describe('comptes-rendus de chantier DET', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('propose une action dédiée uniquement aux agents autorisés à accéder aux opérations', () => {
+    const projectCaps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const meetingCaps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['meetings'] });
+    expect(buildAgentTools(projectCaps).map(t => t.name)).toContain('create_site_report');
+    expect(buildAgentTools(meetingCaps).map(t => t.name)).not.toContain('create_site_report');
+    expect(AGENT_RESOURCES.find(r => r.key === 'meetings')?.fields).not.toContain('est LA réunion de chantier');
+  });
+
+  it('crée le brouillon par la route DET du projet et renvoie son lien', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: any) => ({
+      ok: true,
+      status: init?.method === 'POST' ? 201 : 200,
+      json: async () => init?.method === 'POST' ? { id: 'cr-1', report_number: 2 } : [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'create_site_report', args: { project_id: 'proj-1', date: '2026-09-23' },
+    });
+    expect(fetchMock.mock.calls[1][0]).toBe('http://localhost/api/projects/proj-1/reports');
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body)).toEqual({ date: '2026-09-23' });
+    expect(result.response).toMatchObject({ success: true, id: 'cr-1', report_number: 2, statut: 'brouillon' });
+    expect(result.response.record_url).toContain('/projects/proj-1?tab=DET');
+  });
+
+  it('ne crée pas de deuxième CR à la même date', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, status: 200, json: async () => [{ id: 'cr-1', date: '2026-09-23', report_number: 1 }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'create_site_report', args: { project_id: 'proj-1', date: '2026-09-23' },
+    });
+    expect(result.response.needs_confirmation).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ajoute un point au brouillon DET sans créer de tâche', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => ({
+      ok: true,
+      status: init?.method === 'POST' ? 200 : 200,
+      json: async () => init?.method === 'POST' ? { id: 'obs-1', number: 3 }
+        : url.endsWith('/reports') ? [{ id: 'cr-1', report_number: 1, statut: 'brouillon' }] : [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    expect(buildAgentTools(caps).map(t => t.name)).toContain('add_site_report_observation');
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'add_site_report_observation', args: { project_id: 'vip-tc', texte: 'HCT : brancher la base vie' },
+    });
+    expect(fetchMock.mock.calls.map(c => c[0])).toEqual([
+      'http://localhost/api/projects/vip-tc/reports',
+      'http://localhost/api/reports/cr-1/observations',
+      'http://localhost/api/projects/vip-tc/observations',
+    ]);
+    expect(JSON.parse(fetchMock.mock.calls[2][1].body)).toMatchObject({ texte: 'HCT : brancher la base vie', created_report_id: 'cr-1' });
+    expect(result.response).toMatchObject({ success: true, id: 'obs-1', report_id: 'cr-1' });
+  });
+
+  it('demande quel brouillon modifier quand plusieurs existent', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => [
+      { id: 'cr-1', statut: 'brouillon' }, { id: 'cr-2', statut: 'brouillon' },
+    ] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const caps = capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+    const result = await executeAgentAction('http://localhost', { authorization: 'Bearer x' }, caps, {
+      name: 'add_site_report_observation', args: { project_id: 'vip-tc', texte: 'HCT : brancher la base vie' },
+    });
+    expect(result.response.error).toContain('Plusieurs brouillons');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -20,7 +20,7 @@ describe('Ragic', () => {
 
   it('reports connected from settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, ragic_api_key: 'key', ragic_account: 'acct' }]);
 
     const res = await request(app).get('/api/ragic/status').set(authHeader(token));
@@ -30,7 +30,7 @@ describe('Ragic', () => {
 
   it('disconnects, clearing all ragic_* settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, ragic_api_key: 'key', ragic_account: 'acct', ragic_sheet_contacts: 'sheet1' }]);
 
     const res = await request(app).delete('/api/ragic/disconnect').set(authHeader(token));
@@ -42,7 +42,7 @@ describe('Ragic', () => {
 
   it('requires configuration before syncing', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId }]);
 
     const res = await request(app).post('/api/ragic/sync').set(authHeader(token));
@@ -51,7 +51,7 @@ describe('Ragic', () => {
 
   it('pushes an unsynced contact and pulls a new one from Ragic, tenant-scoped', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, ragic_api_key: 'key', ragic_account: 'acct', ragic_sheet_contacts: 'contacts-sheet' }]);
     fakeSupabaseAdmin.seed('contacts', [{ id: 'c1', tenant_id: tenantId, first_name: 'Jean', last_name: 'Dupont', ragic_id: null }]);
 
@@ -111,7 +111,7 @@ describe('Odoo', () => {
 
   it('reports connected from settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, odoo_url: 'https://odoo.example.test', odoo_api_key: 'key' }]);
 
     const res = await request(app).get('/api/odoo/status').set(authHeader(token));
@@ -121,7 +121,7 @@ describe('Odoo', () => {
 
   it('disconnects, clearing odoo settings', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, odoo_url: 'x', odoo_db: 'd', odoo_username: 'u', odoo_api_key: 'k' }]);
 
     const res = await request(app).delete('/api/odoo/disconnect').set(authHeader(token));
@@ -131,7 +131,7 @@ describe('Odoo', () => {
 
   it('requires full configuration before syncing or testing', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, odoo_url: 'https://odoo.example.test' }]);
 
     const sync = await request(app).post('/api/odoo/sync').set(authHeader(token));
@@ -143,7 +143,7 @@ describe('Odoo', () => {
 
   it('reports connectivity and the company name on a successful test', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, odoo_url: 'https://odoo.example.test', odoo_db: 'db', odoo_username: 'user', odoo_api_key: 'key' }]);
 
     vi.spyOn(axios, 'post').mockResolvedValue({ data: { result: [{ name: 'Cabinet ArchiTest' }] } } as any);
@@ -155,7 +155,7 @@ describe('Odoo', () => {
 
   it('pushes an unsynced contact and pulls a new one from Odoo, tenant-scoped', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { token } = makeUser(tenantId, 'admin');
     fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, odoo_url: 'https://odoo.example.test', odoo_db: 'db', odoo_username: 'user', odoo_api_key: 'key' }]);
     fakeSupabaseAdmin.seed('contacts', [{ id: 'c1', tenant_id: tenantId, first_name: 'Jean', last_name: 'Dupont', odoo_id: null }]);
 

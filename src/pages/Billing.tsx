@@ -66,7 +66,7 @@ function UsageBar({ label, used, limit, suffix = '' }: { label: string; used: nu
         <div className="h-1.5 rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
           <div
             className={cn(
-              'h-full rounded-full transition-all',
+              'h-full rounded-full transition-colors',
               isFull ? 'bg-red-500' : isWarning ? 'bg-amber-500' : 'bg-blue-500'
             )}
             style={{ width: `${pct}%` }}

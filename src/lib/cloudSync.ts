@@ -24,9 +24,18 @@ async function parseJsonOrThrow(res: Response): Promise<any> {
   return data;
 }
 
-export async function checkCloudLinkStatus(): Promise<{ linked: boolean }> {
+export async function checkCloudLinkStatus(): Promise<{ linked: boolean; importCompleted: boolean | null; email: string | null }> {
   const res = await fetch('/api/auth/cloud-link-status');
   return parseJsonOrThrow(res);
+}
+
+/**
+ * Rétablit la session cloud (jeton de rafraîchissement expiré ou révoqué)
+ * d'un poste déjà lié — voir server/cloudLinkRoutes.ts. Ne demande que le
+ * mot de passe : l'email est déjà fixé par le lien existant.
+ */
+export async function reconnectCloud(password: string): Promise<{ ok: true }> {
+  return apiFetch('/api/auth/cloud-link-reconnect', { method: 'POST', body: JSON.stringify({ password }) });
 }
 
 export async function cloudLink(email: string, password: string, localPassword: string): Promise<LocalSession & { importJobId: string }> {
@@ -51,6 +60,12 @@ export async function retryImport(): Promise<{ importJobId: string }> {
   return apiFetch('/api/auth/cloud-link-retry-import', { method: 'POST' });
 }
 
+export interface ImportJobWarning {
+  table: string;
+  rowCount: number;
+  message: string;
+}
+
 export interface ImportJobStatus {
   status: 'running' | 'done' | 'error';
   tablesDone: number;
@@ -59,6 +74,7 @@ export interface ImportJobStatus {
   rowsDone: number;
   filesDone: number;
   error: string | null;
+  warnings: ImportJobWarning[];
 }
 
 export async function getImportProgress(jobId: string): Promise<ImportJobStatus> {

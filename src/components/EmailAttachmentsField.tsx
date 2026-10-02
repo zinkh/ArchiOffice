@@ -120,7 +120,7 @@ export default function EmailAttachmentsField({ attachments, onChange, documents
               >
                 {busy ? <IconLoader2 size={13} className="animate-spin shrink-0" /> : <IconFileText size={13} className="shrink-0" style={{ color: 'var(--tblr-muted)' }} />}
                 <span className="truncate flex-1">{doc.name}</span>
-                {attached && <span className="text-[10px] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{t('email_attachments_already_added')}</span>}
+                {attached && <span className="text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{t('email_attachments_already_added')}</span>}
               </button>
             );
           })}
@@ -139,11 +139,11 @@ export default function EmailAttachmentsField({ attachments, onChange, documents
       )}
 
       {totalBytes > MAX_EMAIL_ATTACHMENTS_BYTES && (
-        <p className="text-[11px] flex items-center gap-1" style={{ color: 'var(--tblr-warning)' }}>
+        <p className="text-[0.6875rem] flex items-center gap-1" style={{ color: 'var(--tblr-warning)' }}>
           <IconAlertTriangle size={12} /> {t('email_attachments_size_warning', { size: formatSize(totalBytes) })}
         </p>
       )}
-      {error && <p className="text-[11px] font-medium" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
+      {error && <p className="text-[0.6875rem] font-medium" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
     </div>
   );
 }

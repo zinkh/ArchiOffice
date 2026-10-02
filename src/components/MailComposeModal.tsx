@@ -14,6 +14,7 @@ import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { fileToEmailAttachment } from '../lib/emailAttachments';
 import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
+import { useUser } from '../UserContext';
 
 export interface MailReplyContext {
   accountId: string;
@@ -52,6 +53,7 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
 
 export default function MailComposeModal({ accounts, replyTo, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
   const sendable = accounts.filter(canSendNatively);
   const noSendableAccount = sendable.length === 0;
 
@@ -63,7 +65,9 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
   const [subject, setSubject] = useState(
     replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : ''
   );
-  const [body, setBody] = useState('');
+  // La signature personnelle (Réglages → Mon profil) est posée d'office sous
+  // le corps, modifiable ou supprimable avant l'envoi.
+  const [body, setBody] = useState(currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : '');
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -137,7 +141,7 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <form
         onSubmit={send}
-        className="rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
+        className="rounded-xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
         onClick={e => e.stopPropagation()}
       >

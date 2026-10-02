@@ -97,6 +97,10 @@ export function ArtifactCard({ artifact, onPreview }: { artifact: AgentArtifact;
   );
 }
 
+/** Arrivée d'un nouveau message : discrète, le chat servant plusieurs dizaines de fois par jour. */
+const NEW_MESSAGE_SPRING = { type: 'spring', bounce: 0, visualDuration: 0.2 } as const;
+const NEW_MESSAGE_WINDOW_MS = 4000;
+
 export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
   msg: AgentMessage & { artifact?: AgentArtifact };
   agentColor: string;
@@ -107,8 +111,20 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
   // La lecture à voix haute ne sert que les réponses de l'agent : ce que
   // l'utilisateur a écrit, il vient de le formuler lui-même.
   const isSpeaking = !isUser && speech.activeId === msg.id;
+  // Seul un message qui vient d'arriver glisse en place : l'historique
+  // rechargé à l'ouverture d'une conversation s'affiche tel quel. Décidé une
+  // fois, au montage, d'après l'âge du message.
+  const [isNew] = useState(() => {
+    const age = Date.now() - new Date(msg.created_at).getTime();
+    return age >= 0 && age < NEW_MESSAGE_WINDOW_MS;
+  });
   return (
-    <div className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <motion.div
+      className={`flex gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}
+      initial={isNew ? { opacity: 0, y: 6 } : false}
+      animate={{ opacity: 1, y: 0 }}
+      transition={NEW_MESSAGE_SPRING}
+    >
       {!isUser && (
         <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center mt-0.5" style={{ background: agentColor }}>
           <IconRobot size={13} color="white" />
@@ -144,7 +160,7 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
           </button>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -635,11 +651,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, x: 40 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 40 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden transition-[width,height] duration-200"
+            initial={{ opacity: 0, transform: 'translateX(40px)' }}
+            animate={{ opacity: 1, transform: 'translateX(0px)' }}
+            exit={{ opacity: 0, transform: 'translateX(40px)' }}
+            transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+            className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden"
             style={expanded ? {
               bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(900px, calc(100vw - 24px))',

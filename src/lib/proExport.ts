@@ -1,10 +1,48 @@
 import { saveAs } from 'file-saver';
-import { DPGF, Lot, Chapitre, Ligne } from '../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT } from '../types/dpgf';
+import { grouperDpgf } from './dpgfGrouping';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+/**
+ * Aplatit un DPGF classé par bâtiment/phase (jamais par lot : l'arbre par lot
+ * a déjà flattenDPGF, qui garde la hiérarchie lot > chapitre > article que ce
+ * classement-ci n'a pas). Même groupement que l'écran (DpgfGroupedView), pour
+ * que le document remis au client corresponde à ce que l'architecte a
+ * vérifié — un export figé sur « par lot » quel que soit le classement choisi
+ * à l'écran serait trompeur.
+ */
+function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'>): Array<{
+  type: 'groupe' | 'article';
+  numero: string;
+  designation: string;
+  lot: string;
+  localisation: string;
+  unite: string;
+  quantite: string;
+  prixTotal: string;
+}> {
+  const rows: ReturnType<typeof flattenDPGFGroupe> = [];
+  for (const [, g] of grouperDpgf(dpgf, groupement)) {
+    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixTotal: fmt(g.total) });
+    for (const a of g.articles) {
+      rows.push({
+        type: 'article',
+        numero: a.ligne.numero,
+        designation: a.ligne.designation,
+        lot: `${a.lot.numero} ${a.lot.titre}`,
+        localisation: a.ligne.localisation || '',
+        unite: a.ligne.unite,
+        quantite: a.ligne.quantite > 0 ? fmt(a.ligne.quantite) : '',
+        prixTotal: a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
+      });
+    }
+  }
+  return rows;
+}
 
 function flattenDPGF(lots: Lot[]): Array<{
   depth: number;
@@ -47,7 +85,7 @@ function flattenDPGF(lots: Lot[]): Array<{
 
 // ── DPGF PDF ─────────────────────────────────────────────────────────────────
 
-export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string) {
+export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot') {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
@@ -63,44 +101,73 @@ export async function exportDPGFtoPDF(dpgf: DPGF, projectName?: string) {
     doc.text(projectName, 14, 22);
   }
   doc.setFontSize(9);
-  doc.text(`Version ${dpgf.version} — ${new Date(dpgf.dateCreation).toLocaleDateString('fr-FR')}`, 14, 27);
+  const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
+  doc.text(`Version ${dpgf.version} — ${new Date(dpgf.dateCreation).toLocaleDateString('fr-FR')}${classement}`, 14, 27);
 
-  const rows = flattenDPGF(dpgf.lots);
-
-  autoTable(doc, {
-    startY: 32,
-    head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
-    body: rows.map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
-    headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    bodyStyles: { fontSize: 8 },
-    columnStyles: {
-      0: { cellWidth: 20 },
-      1: { cellWidth: 'auto' },
-      2: { cellWidth: 18, halign: 'center' },
-      3: { cellWidth: 22, halign: 'right' },
-      4: { cellWidth: 28, halign: 'right' },
-      5: { cellWidth: 28, halign: 'right' },
-    },
-    didParseCell: (data) => {
-      const row = rows[data.row.index];
-      if (!row) return;
-      if (row.type === 'lot') {
-        data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [200, 220, 240];
-      } else if (row.type === 'chapitre') {
-        data.cell.styles.fontStyle = 'bold';
-        data.cell.styles.fillColor = [235, 240, 248];
-      } else if (row.type === 'titre') {
-        data.cell.styles.fillColor = [248, 248, 248];
-        data.cell.styles.fontStyle = 'italic';
-      }
-    },
-    foot: [[
-      '', 'TOTAL HT', '', '', '',
-      fmt(dpgf.totalHT) + ' €',
-    ]],
-    footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
-  });
+  if (groupement === 'lot') {
+    const rows = flattenDPGF(dpgf.lots);
+    autoTable(doc, {
+      startY: 32,
+      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
+      body: rows.map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
+      headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 18, halign: 'center' },
+        3: { cellWidth: 22, halign: 'right' },
+        4: { cellWidth: 28, halign: 'right' },
+        5: { cellWidth: 28, halign: 'right' },
+      },
+      didParseCell: (data) => {
+        const row = rows[data.row.index];
+        if (!row) return;
+        if (row.type === 'lot') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [200, 220, 240];
+        } else if (row.type === 'chapitre') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [235, 240, 248];
+        } else if (row.type === 'titre') {
+          data.cell.styles.fillColor = [248, 248, 248];
+          data.cell.styles.fontStyle = 'italic';
+        }
+      },
+      foot: [[
+        '', 'TOTAL HT', '', '', '',
+        fmt(dpgf.totalHT) + ' €',
+      ]],
+      footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
+    });
+  } else {
+    const rows = flattenDPGFGroupe(dpgf, groupement);
+    autoTable(doc, {
+      startY: 32,
+      head: [['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)']],
+      body: rows.map(r => [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite, r.prixTotal]),
+      headStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 18 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 32 },
+        3: { cellWidth: 26 },
+        4: { cellWidth: 16, halign: 'center' },
+        5: { cellWidth: 20, halign: 'right' },
+        6: { cellWidth: 28, halign: 'right' },
+      },
+      didParseCell: (data) => {
+        const row = rows[data.row.index];
+        if (row?.type === 'groupe') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = [200, 220, 240];
+        }
+      },
+      foot: [['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €']],
+      footStyles: { fillColor: [30, 80, 140], textColor: 255, fontStyle: 'bold' },
+    });
+  }
 
   doc.save(`DPGF_${dpgf.titre.replace(/\s+/g, '_')}.pdf`);
 }
@@ -158,22 +225,33 @@ export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string) {
 
 // ── DPGF Excel ────────────────────────────────────────────────────────────────
 
-export async function exportDPGFtoExcel(dpgf: DPGF, projectName?: string) {
+export async function exportDPGFtoExcel(dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot') {
   const XLSX = await import('xlsx');
   const wb = XLSX.utils.book_new();
-  const rows = flattenDPGF(dpgf.lots);
+  const sousTitre = groupement !== 'lot' ? `DPGF v${dpgf.version} — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : `DPGF v${dpgf.version}`;
 
-  const wsData: any[][] = [
-    [projectName || dpgf.titre, '', '', '', '', ''],
-    [`DPGF v${dpgf.version}`, '', '', '', '', ''],
-    ['', '', '', '', '', ''],
-    ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)'],
-    ...rows.map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
-    ['', '', '', '', 'TOTAL HT', fmt(dpgf.totalHT) + ' €'],
-  ];
+  const wsData: any[][] = groupement === 'lot'
+    ? [
+      [projectName || dpgf.titre, '', '', '', '', ''],
+      [sousTitre, '', '', '', '', ''],
+      ['', '', '', '', '', ''],
+      ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)'],
+      ...flattenDPGF(dpgf.lots).map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
+      ['', '', '', '', 'TOTAL HT', fmt(dpgf.totalHT) + ' €'],
+    ]
+    : [
+      [projectName || dpgf.titre, '', '', '', '', '', ''],
+      [sousTitre, '', '', '', '', '', ''],
+      ['', '', '', '', '', '', ''],
+      ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)'],
+      ...flattenDPGFGroupe(dpgf, groupement).map(r => [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite, r.prixTotal]),
+      ['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €'],
+    ];
 
   const ws = XLSX.utils.aoa_to_sheet(wsData);
-  ws['!cols'] = [{ wch: 10 }, { wch: 50 }, { wch: 10 }, { wch: 12 }, { wch: 15 }, { wch: 15 }];
+  ws['!cols'] = groupement === 'lot'
+    ? [{ wch: 10 }, { wch: 50 }, { wch: 10 }, { wch: 12 }, { wch: 15 }, { wch: 15 }]
+    : [{ wch: 10 }, { wch: 42 }, { wch: 20 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 15 }];
   XLSX.utils.book_append_sheet(wb, ws, 'DPGF');
 
   const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });

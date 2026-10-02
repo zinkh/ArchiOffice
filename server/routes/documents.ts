@@ -30,10 +30,20 @@ import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/s
 // packages/archioffice-agents) : réglementation, DTU, notices — auto-injectés
 // dans le prompt de CET agent à chaque tour (buildAgentContext), jamais
 // affichés comme un document de projet.
+// 'agency_library' porte la bibliothèque documentaire du cabinet servant à la
+// rédaction assistée des notes méthodologiques d'appel d'offres (plan
+// Enterprise, voir server/routes/tenderAi.ts) : présentation du cabinet,
+// exemples de notes déjà rédigées, présentation des cotraitants habituels...
+// Une seule ligne logique par cabinet plutôt qu'une par fiche : resource_id
+// est toujours le tenant_id lui-même, donc aucune table à interroger pour
+// vérifier son appartenance — voir le cas spécial dans POST /api/documents
+// ci-dessous, assertTenantEntity ne pouvant pas viser 'tenants.id' avec la
+// colonne tenant_id qu'il compare par ailleurs.
 export const ATTACHABLE_RESOURCE_TYPES: string[] = [
   'projects', 'contacts', 'proposals', 'tenders', 'permits', 'meetings',
   'receptions', 'reserves', 'contrats_moe', 'ordres_de_service', 'visas',
   'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones', 'agents',
+  'agency_library',
 ];
 
 export interface RouteDeps {
@@ -71,11 +81,12 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
     contrats_moe: 'Contrats MOE', ordres_de_service: 'Ordres de service', visas: 'VISA',
     notes_honoraires: "Notes d'honoraires", marches_entreprises: 'Marchés entreprises',
     tasks: 'Tâches', milestones: 'Jalons', agents: 'Bibliothèque de connaissances',
+    agency_library: 'Bibliothèque notes méthodologiques',
   };
 
   async function folderPathForResource(resourceType: string, resourceId: string | null, tenantId: string): Promise<string[]> {
     if (resourceType === 'projects') return buildDocumentFolderPath(await loadFolderProject(resourceId, tenantId), null);
-    if (!resourceId) return buildDocumentFolderPath(null, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
+    if (!resourceId || resourceType === 'agency_library') return buildDocumentFolderPath(null, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
     const { data } = await supabaseAdmin.from(resourceType).select('project_id').eq('id', resourceId).eq('tenant_id', tenantId).maybeSingle();
     const linkedProjectId = (data as any)?.project_id || null;
     const project = linkedProjectId ? await loadFolderProject(linkedProjectId, tenantId) : null;
@@ -132,7 +143,11 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       }
       const resourceType = resourceTypeRaw || 'projects';
       const resourceIdVal = req.body.resource_id || (resourceType === 'projects' ? projectIdVal : null);
-      if (resourceType !== 'projects') {
+      if (resourceType === 'agency_library') {
+        // Pas de table à interroger : c'est le cabinet lui-même la
+        // ressource, donc resource_id ne peut être que son propre tenant_id.
+        if (resourceIdVal !== tenantId) return res.status(400).json({ error: 'resource_id invalide pour la bibliothèque du cabinet.' });
+      } else if (resourceType !== 'projects') {
         if (!resourceIdVal) return res.status(400).json({ error: 'resource_id est requis avec resource_type.' });
         if (!(await assertTenantEntity(supabaseAdmin, resourceType, resourceIdVal, tenantId))) {
           return res.status(400).json({ error: `Fiche "${resourceType}" introuvable pour ce cabinet.` });

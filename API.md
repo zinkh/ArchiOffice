@@ -153,6 +153,14 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET/POST /api/conversations`, `GET/POST /api/conversations/:id/messages` (file upload), `POST /api/conversations/:id/read`, `GET /api/messages/unread-count`, `POST/DELETE /api/conversations/:id/participants(/:userId)`.
 - `POST /api/send-email` — outbound email via the tenant's configured SMTP.
 
+### Mail: drafts and linking to a record
+- `GET /api/mail/drafts?account_id=` — the 20 most recent drafts of one connected mailbox (`[{ id, to, subject, snippet, date }]`). Read live from the provider, never stored.
+- `GET /api/mail/drafts/:id?account_id=` — one draft's `{ id, to, cc, subject, text }`.
+- `PUT /api/mail/drafts/:id` — body `{ account_id, to, cc?, subject, text }`. Rewrites the draft in place; never sends. On IMAP the draft is re-appended and the old one deleted, so the returned `id` may be `null` and the uid changes.
+- `POST /api/mail/drafts` — create a draft (`{ to, cc?, subject, text, account_id? }`).
+- `POST /api/mail/links` — attach an email to a `project`, `contact`, `tender` or `proposal`. For a **project** with a `connection_id`, the message is also filed in its origin mailbox (Gmail label / Outlook or IMAP folder `ArchiOffice/<code> - <name>`, created on demand); pass `file_in_mailbox: false` to skip. The response carries the stored `external_message_id` (Outlook and IMAP renumber a moved message) and `filing: { status: 'filed' | 'failed' | 'skipped', folder?, error? }`. A filing failure never fails the link.
+- `PUT /api/team/:id` and `GET /api/me` also carry `mailSignature` (personal email signature, ≤ 2000 characters).
+
 ### Push notifications
 - `GET /api/push/config` — `{ configured, publicKey }`. The VAPID public key the browser needs to subscribe; `configured: false` on an instance with no VAPID keys, in which case Web Push is off and nothing else here fails.
 - `POST /api/push/subscribe` — body is a `PushSubscription` (`{ endpoint, keys: { p256dh, auth } }`). Idempotent on `endpoint`; rejects a non-`https` endpoint with `400`.
@@ -173,6 +181,8 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET /api/billing/status`, `POST /api/billing/checkout`, `POST /api/billing/webhook` (Stancer, no auth), `GET /api/billing/history`, `GET /api/billing/credits/packs`, `POST /api/billing/credits/checkout`.
 
 ### External integrations
+Connection status endpoints are available to every tenant member. Tenant-wide administration (`auth`/connect, `disconnect`, `sync`, credential `test`, and configuration through `PUT /api/settings`) is restricted to users whose tenant role is `admin`. Operational invoice submission and status lookup keep their domain-specific permissions.
+
 Each of these follows roughly the same shape (`status`, `disconnect`, and OAuth `auth`/`callback` where the provider uses OAuth):
 - **Zoho CRM**: `GET /api/zoho/status`, `GET /api/zoho/callback-url`, `GET /api/zoho/auth`, `GET /api/zoho/callback`, `DELETE /api/zoho/disconnect`, `POST /api/zoho/sync`.
 - **Zoho Books**: `GET /api/zoho-books/status`, `GET /api/zoho-books/auth`, `GET /api/zoho-books/callback`, `DELETE /api/zoho-books/disconnect`, `POST /api/zoho-books/sync`.

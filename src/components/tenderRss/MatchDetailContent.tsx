@@ -30,7 +30,7 @@ export function StatusBadge({ status, t }: { status: TenderRssMatch['status']; t
   const colors = STATUS_COLORS[status];
   return (
     <span
-      className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase"
+      className="px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold uppercase"
       style={{ background: colors.bg, color: colors.fg }}
     >
       {statusLabel(status, t)}
@@ -61,7 +61,7 @@ export function MatchDetailContent({ match, t }: { match: TenderRssMatch; t: TFn
             <div key={i} className="flex items-start gap-2.5">
               <f.icon size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--tblr-muted)' }} />
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{f.label}</p>
+                <p className="text-[0.6875rem] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>{f.label}</p>
                 <p className="text-sm font-medium" style={{ color: 'var(--tblr-text)' }}>{f.value}</p>
               </div>
             </div>
@@ -71,7 +71,7 @@ export function MatchDetailContent({ match, t }: { match: TenderRssMatch; t: TFn
 
       {match.description && (
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_description_label')}</p>
+          <p className="text-[0.6875rem] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('tender_rss_description_label')}</p>
           <p className="text-sm whitespace-pre-wrap" style={{ color: 'var(--tblr-text)' }}>{match.description}</p>
         </div>
       )}

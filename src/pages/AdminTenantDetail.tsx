@@ -300,7 +300,7 @@ export default function AdminTenantDetail() {
               onClick={() => setEmailTarget({ mode: 'tenant', label: `Tous les membres de ${tenant.name}` })}
               disabled={tenant.members.length === 0}
               title="Envoyer un email à tous les membres"
-              className="flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+              className="flex items-center gap-1.5 text-[0.6875rem] font-semibold px-2 py-1 rounded hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
               style={{ color: 'var(--tblr-primary)' }}
             >
               <IconMail size={13} /> Email au cabinet
@@ -308,7 +308,7 @@ export default function AdminTenantDetail() {
           }
         >
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.members.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun membre</td></tr>
@@ -317,9 +317,9 @@ export default function AdminTenantDetail() {
                   <tr key={m.id} className="border-t" style={{ borderColor: 'var(--tblr-border)' }}>
                     <td className="py-2 pr-2">
                       <p style={{ color: 'var(--tblr-text)' }}>{m.name}</p>
-                      <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{m.email}</p>
+                      <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{m.email}</p>
                     </td>
-                    <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{m.role}{m.system_role === 'admin' ? ' · admin' : ''}</td>
+                    <td className="py-2 text-[0.6875rem] text-right" style={{ color: 'var(--tblr-muted)' }}>{m.role}{m.system_role === 'admin' ? ' · admin' : ''}</td>
                     <td className="py-2 pl-2 text-right whitespace-nowrap">
                       <button
                         onClick={() => setEmailTarget({ mode: 'member', memberId: m.id, label: `${m.name} (${m.email})` })}
@@ -349,7 +349,7 @@ export default function AdminTenantDetail() {
         {/* Recent projects */}
         <Card title="Projets récents" icon={<IconBuildingSkyscraper size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.recent_projects.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun projet</td></tr>
@@ -357,8 +357,8 @@ export default function AdminTenantDetail() {
                 {tenant.recent_projects.map(p => (
                   <tr key={p.id} className="border-t" style={{ borderColor: 'var(--tblr-border)' }}>
                     <td className="py-2 pr-2" style={{ color: 'var(--tblr-text)' }}>{p.name}</td>
-                    <td className="py-2 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{p.status}</td>
-                    <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(p.created_at)}</td>
+                    <td className="py-2 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{p.status}</td>
+                    <td className="py-2 text-[0.6875rem] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(p.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -369,7 +369,7 @@ export default function AdminTenantDetail() {
         {/* Billing history */}
         <Card title="Historique de paiement" icon={<IconReceipt size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.billing_events.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun événement de paiement</td></tr>
@@ -379,11 +379,11 @@ export default function AdminTenantDetail() {
                     <td className="py-2 pr-2" style={{ color: 'var(--tblr-text)' }}>
                       {b.event_type}{b.plan_id ? ` · ${PLAN_LABELS[b.plan_id] ?? b.plan_id}` : ''}
                     </td>
-                    <td className="py-2 text-[11px] font-mono" style={{ color: 'var(--tblr-muted)' }}>
+                    <td className="py-2 text-[0.6875rem] font-mono" style={{ color: 'var(--tblr-muted)' }}>
                       {b.amount != null ? `${(b.amount / 100).toFixed(2)} €` : '—'}
                     </td>
-                    <td className="py-2 text-[11px]" style={{ color: b.status === 'paid' ? '#22c55e' : 'var(--tblr-muted)' }}>{b.status}</td>
-                    <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(b.created_at)}</td>
+                    <td className="py-2 text-[0.6875rem]" style={{ color: b.status === 'paid' ? '#22c55e' : 'var(--tblr-muted)' }}>{b.status}</td>
+                    <td className="py-2 text-[0.6875rem] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(b.created_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -394,7 +394,7 @@ export default function AdminTenantDetail() {
         {/* Support tickets */}
         <Card title={`Tickets support (${tickets.length})`} icon={<IconMessageCircle size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tickets.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucun ticket</td></tr>
@@ -404,8 +404,8 @@ export default function AdminTenantDetail() {
                     <td className="py-2 pr-2">
                       <Link to={`/admin/support?tenant_id=${tenant.id}`} className="hover:underline" style={{ color: 'var(--tblr-text)' }}>{tk.subject}</Link>
                     </td>
-                    <td className="py-2 text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{TICKET_STATUS_LABELS[tk.status] ?? tk.status}</td>
-                    <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(tk.last_message_at)}</td>
+                    <td className="py-2 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{TICKET_STATUS_LABELS[tk.status] ?? tk.status}</td>
+                    <td className="py-2 text-[0.6875rem] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDate(tk.last_message_at)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -416,7 +416,7 @@ export default function AdminTenantDetail() {
         {/* Audit log */}
         <Card title="Journal d'activité admin" icon={<IconHistory size={16} style={{ color: 'var(--tblr-primary)' }} />}>
           <div className="overflow-x-auto -mx-1">
-            <table className="w-full text-sm">
+            <table className="min-w-full text-sm">
               <tbody>
                 {tenant.audit_log.length === 0 && (
                   <tr><td className="text-xs py-2" style={{ color: 'var(--tblr-muted)' }}>Aucune action enregistrée</td></tr>
@@ -425,9 +425,9 @@ export default function AdminTenantDetail() {
                   <tr key={a.id} className="border-t" style={{ borderColor: 'var(--tblr-border)' }}>
                     <td className="py-2 pr-2">
                       <p style={{ color: 'var(--tblr-text)' }}>{AUDIT_ACTION_LABELS[a.action] ?? a.action}</p>
-                      <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{a.actor_email ?? 'système'}</p>
+                      <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{a.actor_email ?? 'système'}</p>
                     </td>
-                    <td className="py-2 text-[11px] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDateTime(a.created_at)}</td>
+                    <td className="py-2 text-[0.6875rem] text-right" style={{ color: 'var(--tblr-muted)' }}>{fmtDateTime(a.created_at)}</td>
                   </tr>
                 ))}
               </tbody>

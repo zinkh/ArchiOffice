@@ -28,7 +28,11 @@ import {
   IconClipboardList,
 } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
-import { getAccessToken } from '../lib/authToken';
+import { CollapsiblePanel, PanelCollapseButton, useListPanel, useExpandLabel } from '../components/CollapsiblePanel';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { queuedJsonRequest, queuedMultipartRequest, listPendingWrites, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
@@ -152,7 +156,7 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
                     <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{att.contact.company_name}</span>
                   )}
                   {incomplete(att) && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border" style={{ background: '#fff3bf', color: '#e67700', borderColor: '#ffe066' }}>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold border" style={{ background: '#fff3bf', color: '#e67700', borderColor: '#ffe066' }}>
                       <IconAlertTriangle size={9} />
                       À compléter
                     </span>
@@ -259,7 +263,7 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
                         {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.company_name}
                       </span>
                       {isContactIncomplete(c) && (
-                        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[9px] font-semibold border whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', borderColor: '#ffe066' }}>
+                        <span className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-[0.6875rem] font-semibold border whitespace-nowrap" style={{ background: '#fff3bf', color: '#e67700', borderColor: '#ffe066' }}>
                           <IconAlertTriangle size={8} />
                           À compléter
                         </span>
@@ -356,6 +360,23 @@ export default function Reunions() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [selectedMeeting, setSelectedMeeting] = useState<Meeting | null>(null);
+
+  // ── Repli des colonnes de listes (écrans lg+), mémorisé par panneau et par page
+  const projectsPanel = useListPanel('reunions:projects');
+  const meetingsPanel = useListPanel('reunions:meetings');
+  const panelLabels = useExpandLabel(projectsPanel.collapsed);
+  const meetingsLabels = useExpandLabel(meetingsPanel.collapsed);
+  // iPad et écrans moyens : à l'ouverture d'une réunion, les deux listes se
+  // replient d'elles-mêmes pour laisser la place au détail. Repli passager
+  // (non mémorisé) : il ne remplace pas le choix fait par la personne.
+  const isNarrowDesktop = useMediaQuery('(max-width: 1279px)');
+  const openedMeetingId = selectedMeeting?.id;
+  useEffect(() => {
+    if (!openedMeetingId || !isNarrowDesktop) return;
+    projectsPanel.set(true, false);
+    meetingsPanel.set(true, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openedMeetingId, isNarrowDesktop]);
   const [loadingMeetings, setLoadingMeetings] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
@@ -369,6 +390,15 @@ export default function Reunions() {
   const [creatingMeeting, setCreatingMeeting] = useState(false);
   const [createError, setCreateError] = useState('');
 
+  // Créer une proposition ou un appel d'offres à la volée, y compris hors
+  // ligne — pour une visite de candidature ou de proposition, l'affaire
+  // n'existe souvent pas encore dans ArchiOffice au moment de la visite.
+  // Un titre suffit : le reste se complète plus tard, en ligne, depuis
+  // /propositions ou /appels-offres.
+  const [newParentKind, setNewParentKind] = useState<null | 'proposal' | 'tender'>(null);
+  const [newParentTitle, setNewParentTitle] = useState('');
+  const [creatingParent, setCreatingParent] = useState(false);
+
   const [editingCaption, setEditingCaption] = useState<string | null>(null);
   const [captionValue, setCaptionValue] = useState('');
   const [lightboxPhoto, setLightboxPhoto] = useState<MeetingPhoto | null>(null);
@@ -378,14 +408,38 @@ export default function Reunions() {
   const [exportingDocx, setExportingDocx] = useState(false);
 
   useEffect(() => {
+    // Hors ligne : réaffiche d'abord ce que src/db.ts a déjà en cache
+    // (rempli par cette page ou par /projects, /propositions,
+    // /appels-offres lors d'une précédente visite en ligne) — sans ça, les
+    // trois colonnes de gauche restent vides hors connexion et il devient
+    // impossible de rattacher une nouvelle réunion à une affaire.
+    (async () => {
+      try {
+        const [localProjects, localProposals, localTenders] = await Promise.all([
+          db.projects.toArray(),
+          db.proposals.toArray(),
+          db.tenders.toArray(),
+        ]);
+        if (localProjects.length > 0) setProjects(localProjects.filter(p => p.status !== 'Completed'));
+        if (localProposals.length > 0) setProposals(localProposals);
+        if (localTenders.length > 0) setTenders(localTenders);
+      } catch {
+        // IndexedDB indisponible (navigation privée, quota…) — pas de cache,
+        // on retombe simplement sur le réseau ci-dessous.
+      }
+    })();
+
     apiFetch<Project[]>('/api/projects').then(data => {
       setProjects(data.filter(p => p.status !== 'Completed'));
+      db.projects.clear().then(() => db.projects.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<Proposal[]>('/api/proposals').then(data => {
       setProposals(data);
+      db.proposals.clear().then(() => db.proposals.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<any[]>('/api/tenders').then(data => {
       setTenders(data);
+      db.tenders.clear().then(() => db.tenders.bulkPut(data)).catch(() => {});
     }).catch(() => {});
     apiFetch<any>('/api/settings').then(s => {
       setAgencySettings({
@@ -403,13 +457,31 @@ export default function Reunions() {
     setSelectedMeeting(null);
     try {
       let url = '';
-      if (kind === 'project') url = `/api/meetings?project_id=${id}&type=${section}`;
-      else if (kind === 'proposal') url = `/api/meetings?proposal_id=${id}`;
-      else url = `/api/meetings?tender_id=${id}`;
-      const data = await apiFetch<Meeting[]>(url);
-      setMeetings(data);
-    } catch {
-      setMeetings([]);
+      let scopeFilter: (m: Meeting) => boolean;
+      if (kind === 'project') {
+        url = `/api/meetings?project_id=${id}&type=${section}`;
+        scopeFilter = m => m.project_id === id && m.type === section;
+      } else if (kind === 'proposal') {
+        url = `/api/meetings?proposal_id=${id}`;
+        scopeFilter = m => m.proposal_id === id;
+      } else {
+        url = `/api/meetings?tender_id=${id}`;
+        scopeFilter = m => m.tender_id === id;
+      }
+      // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, la liste
+      // déjà consultée pour cette affaire reste affichée au lieu de
+      // disparaître — c'est ce que l'ancien apiFetch seul ne permettait pas.
+      // Les réunions créées hors-ligne et pas encore rejouées ne sont ni sur
+      // le serveur ni dans le cache : sans les relire dans la file, un
+      // rechargement de la page (ou une reconnexion) les faisait disparaître
+      // de l'écran alors qu'elles attendaient toujours d'être envoyées.
+      const pending = (await listPendingWrites('meeting'))
+        .filter(w => w.method === 'POST' && w.jsonBody)
+        .map(w => ({ ...w.jsonBody, created_at: new Date(w.createdAt).toISOString(), photos: [], pendingSync: true } as Meeting))
+        .filter(scopeFilter);
+      const withPending = (list: Meeting[]) => [...pending.filter(p => !list.some(m => m.id === p.id)), ...list];
+      const { hadLocalData, synced } = await cachedListFirst(db.meetingsCache, scopeFilter, url, list => setMeetings(withPending(list)));
+      if (!hadLocalData && !synced) setMeetings(withPending([]));
     } finally {
       setLoadingMeetings(false);
     }
@@ -445,6 +517,46 @@ export default function Reunions() {
     setMobileView('meetings');
   };
 
+  // Crée une proposition ou un appel d'offres minimal (un titre suffit) et le
+  // sélectionne aussitôt, pour pouvoir y accrocher une réunion de visite dans
+  // la foulée. Id généré côté client (voir src/lib/offlineQueue.ts) : hors
+  // ligne, la création est mise en file et la réunion créée juste après peut
+  // référencer cet id immédiatement, sans attendre le retour du réseau —
+  // POST /api/tenders accepte désormais cet id tel quel, comme le fait déjà
+  // POST /api/proposals (server/routes/tenders.ts).
+  const createParent = async () => {
+    const kind = newParentKind;
+    const title = newParentTitle.trim();
+    if (!kind || !title || creatingParent) return;
+    const id = crypto.randomUUID();
+    setCreatingParent(true);
+    try {
+      if (kind === 'proposal') {
+        const body = { id, title, status: 'Draft' as const };
+        const { queued, data } = await queuedJsonRequest<Proposal>({ entity: 'proposal', id, method: 'POST', url: '/api/proposals', body });
+        const proposal: Proposal = queued
+          ? { ...body, client_id: '', amount: 0, description: '', created_at: new Date().toISOString(), pendingSync: true }
+          : data!;
+        setProposals(prev => [proposal, ...prev]);
+        db.proposals.put(proposal).catch(() => {});
+        selectProposal(proposal);
+      } else {
+        const body = { id, title, client: '', submission_deadline: '', status: 'Draft' as const };
+        const { queued, data } = await queuedJsonRequest<Tender>({ entity: 'tender', id, method: 'POST', url: '/api/tenders', body });
+        const tender: Tender = queued
+          ? { ...body, value: 0, notes: '', pendingSync: true }
+          : data!;
+        setTenders(prev => [tender, ...prev]);
+        db.tenders.put(tender).catch(() => {});
+        selectTender(tender);
+      }
+      setNewParentKind(null);
+      setNewParentTitle('');
+    } finally {
+      setCreatingParent(false);
+    }
+  };
+
   // Lien direct depuis un agent (?parent=project:<id>|proposal:<id>|tender:<id>
   // et ?open=<meetingId>, voir recordLinks.ts côté serveur) : cette page
   // n'affiche jamais « toutes les réunions », il faut d'abord sélectionner le
@@ -468,7 +580,12 @@ export default function Reunions() {
     } else {
       return; // la liste concernée n'est pas encore chargée — on réessaiera au prochain rendu
     }
-    setSearchParams(prev => { prev.delete('parent'); return prev; }, { replace: true });
+    // ?new=1 : réunion lancée depuis l'aperçu d'une opération, le formulaire de
+    // création s'ouvre directement sur le parent sélectionné (posé APRÈS
+    // selectProject, qui referme ce formulaire).
+    const openNewForm = searchParams.get('new') === '1';
+    if (openNewForm) setShowNewMeeting(true);
+    setSearchParams(prev => { prev.delete('parent'); prev.delete('new'); return prev; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, proposals, tenders, searchParams]);
 
@@ -489,7 +606,13 @@ export default function Reunions() {
       setSelectedMeeting(data);
       setNotesValue(data.notes || '');
     } catch {
-      setSelectedMeeting(meeting);
+      // Réunion pas encore sur le serveur (créée hors-ligne) : on remet
+      // ses photos en file, avec un aperçu local, plutôt qu'une fiche vide.
+      const queuedPhotos = (await listPendingWrites('meetingPhoto'))
+        .filter(w => w.method === 'POST' && w.blob && w.url === `/api/meetings/${meeting.id}/photos`)
+        .map(w => ({ id: w.id, meeting_id: meeting.id, file_url: '', uploaded_at: new Date(w.createdAt).toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(w.blob!) } as MeetingPhoto));
+      const restored = { ...meeting, photos: [...(meeting.photos || []), ...queuedPhotos] };
+      setSelectedMeeting(restored);
       setNotesValue(meeting.notes || '');
     } finally {
       setLoadingDetail(false);
@@ -500,8 +623,10 @@ export default function Reunions() {
   const createMeeting = async () => {
     if (!newMeetingTitle.trim()) return;
 
+    const id = crypto.randomUUID();
     const body: any = {
-      type: 'projet' satisfies Subsection,
+      id,
+      type: (activeKind === 'project' ? 'projet' : activeKind === 'proposal' ? 'visite_proposition' : 'visite_candidature') satisfies Subsection,
       title: newMeetingTitle.trim(),
       date: newMeetingDate,
       notes: '',
@@ -515,15 +640,22 @@ export default function Reunions() {
     setCreatingMeeting(true);
     setCreateError('');
     try {
-      const data = await apiFetch<Meeting>('/api/meetings', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      setMeetings(prev => [data, ...prev]);
+      // Id généré côté client (voir src/lib/offlineQueue.ts) : hors-ligne,
+      // la création est mise en file et rejouée au retour du réseau — la
+      // réunion reste utilisable tout de suite avec les données déjà en main.
+      const { queued, data } = await queuedJsonRequest<Meeting>({ entity: 'meeting', id, method: 'POST', url: '/api/meetings', body });
+      const meeting: Meeting = queued ? { ...body, created_at: new Date().toISOString(), photos: [], pendingSync: true } : data!;
+      setMeetings(prev => [meeting, ...prev]);
       setNewMeetingTitle('');
       setNewMeetingDate(new Date().toISOString().substring(0, 10));
       setShowNewMeeting(false);
-      loadMeetingDetail(data);
+      if (queued) {
+        setSelectedMeeting(meeting);
+        setNotesValue(meeting.notes || '');
+        setMobileView('detail');
+      } else {
+        loadMeetingDetail(meeting);
+      }
     } catch {
       setCreateError('Erreur lors de la création. Veuillez réessayer.');
     } finally {
@@ -531,9 +663,29 @@ export default function Reunions() {
     }
   };
 
+  // Lève le badge « en attente » d'une réunion dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity } = (e as CustomEvent).detail || {};
+      if (entity === 'meeting') {
+        setMeetings(prev => prev.map(m => m.id === id ? { ...m, pendingSync: false } : m));
+        setSelectedMeeting(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      } else if (entity === 'proposal') {
+        setProposals(prev => prev.map(p => p.id === id ? { ...p, pendingSync: false } : p));
+        setSelectedProposal(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      } else if (entity === 'tender') {
+        setTenders(prev => prev.map(t => t.id === id ? { ...t, pendingSync: false } : t));
+        setSelectedTender(prev => prev && prev.id === id ? { ...prev, pendingSync: false } : prev);
+      }
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, []);
+
   const deleteMeeting = async (id: string) => {
     if (!confirm(t('reunions_confirm_delete'))) return;
-    await apiFetch(`/api/meetings/${id}`, { method: 'DELETE' });
+    await queuedJsonRequest({ entity: 'meeting', id: crypto.randomUUID(), method: 'DELETE', url: `/api/meetings/${id}` });
     setMeetings(prev => prev.filter(m => m.id !== id));
     if (selectedMeeting?.id === id) setSelectedMeeting(null);
   };
@@ -542,9 +694,9 @@ export default function Reunions() {
     if (!selectedMeeting) return;
     setSavingNotes(true);
     try {
-      await apiFetch(`/api/meetings/${selectedMeeting.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ title: selectedMeeting.title, date: selectedMeeting.date, notes: notesValue }),
+      await queuedJsonRequest({
+        entity: 'meeting', id: crypto.randomUUID(), method: 'PUT', url: `/api/meetings/${selectedMeeting.id}`,
+        body: { title: selectedMeeting.title, date: selectedMeeting.date, notes: notesValue },
       });
       setSelectedMeeting(prev => prev ? { ...prev, notes: notesValue } : prev);
       setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? { ...m, notes: notesValue } : m));
@@ -586,22 +738,23 @@ export default function Reunions() {
 
   const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedMeeting || !e.target.files?.length) return;
+    const meetingId = selectedMeeting.id;
     const files = Array.from(e.target.files);
     setUploadingPhoto(true);
     try {
-      const token = await getAccessToken();
       for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        const res = await fetch(`/api/meetings/${selectedMeeting.id}/photos`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
+        const photoId = crypto.randomUUID();
+        // Id généré côté client : un envoi rejoué après coupure réseau
+        // (src/lib/offlineQueue.ts) retrouve la même photo au lieu de la
+        // déposer une seconde fois.
+        const { queued, data } = await queuedMultipartRequest<MeetingPhoto>({
+          entity: 'meetingPhoto', id: photoId, method: 'POST', url: `/api/meetings/${meetingId}/photos`,
+          blob: file, blobFieldName: 'file', blobFilename: file.name, extraFields: { id: photoId },
         });
-        if (res.ok) {
-          const photo = await res.json();
-          setSelectedMeeting(prev => prev ? { ...prev, photos: [...(prev.photos || []), photo] } : prev);
-        }
+        const photo: MeetingPhoto = queued
+          ? { id: photoId, meeting_id: meetingId, file_url: '', uploaded_at: new Date().toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(file) }
+          : data!;
+        setSelectedMeeting(prev => prev && prev.id === meetingId ? { ...prev, photos: [...(prev.photos || []), photo] } : prev);
       }
     } finally {
       setUploadingPhoto(false);
@@ -609,16 +762,31 @@ export default function Reunions() {
     }
   };
 
+  // Lève le badge « en attente » d'une photo dès que son envoi a
+  // effectivement atteint le serveur, et remplace l'aperçu local par le
+  // fichier réel (l'objet renvoyé n'est pas connu à la mise en file, donc on
+  // recharge juste la fiche réunion pour le récupérer).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'meetingPhoto' || !selectedMeeting) return;
+      loadMeetingDetail(selectedMeeting);
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeeting?.id]);
+
   const deletePhoto = async (photoId: string) => {
     if (!selectedMeeting) return;
-    await apiFetch(`/api/meetings/${selectedMeeting.id}/photos/${photoId}`, { method: 'DELETE' });
+    await queuedJsonRequest({ entity: 'meetingPhoto', id: crypto.randomUUID(), method: 'DELETE', url: `/api/meetings/${selectedMeeting.id}/photos/${photoId}` });
     setSelectedMeeting(prev => prev ? { ...prev, photos: (prev.photos || []).filter(p => p.id !== photoId) } : prev);
   };
 
   const saveCaption = async (photoId: string) => {
-    await apiFetch(`/api/meetings/photos/${photoId}/caption`, {
-      method: 'PATCH',
-      body: JSON.stringify({ caption: captionValue }),
+    await queuedJsonRequest({
+      entity: 'meetingPhoto', id: crypto.randomUUID(), method: 'PATCH', url: `/api/meetings/photos/${photoId}/caption`,
+      body: { caption: captionValue },
     });
     setSelectedMeeting(prev => prev ? {
       ...prev,
@@ -648,30 +816,36 @@ export default function Reunions() {
   // ── Panel: project/entity list ───────────────────────────────────────────────
 
   const ProjectsPanel = (
-    <div className={`
-      flex flex-col overflow-hidden
-      md:w-72 md:flex-shrink-0 md:border-r
-      ${mobileView === 'projects' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
-    `} style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}>
-      <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-        <div className="relative">
+    <CollapsiblePanel
+      collapsed={projectsPanel.collapsed}
+      onExpand={() => projectsPanel.set(false)}
+      expandLabel={panelLabels.expand}
+      className={`
+        lg:border-r
+        ${mobileView === 'projects' ? 'w-full h-full' : 'hidden lg:flex'}
+      `}
+      style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}
+    >
+      <div className="p-3 flex-shrink-0 flex items-center gap-1" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+        <div className="relative flex-1 min-w-0">
           <IconSearch size={15} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--tblr-muted)' }} />
           <input
             type="text"
             placeholder="Rechercher..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            className="w-full pl-8 pr-3 py-2 text-[13px] rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
+            className="w-full pl-8 pr-3 py-2 text-[0.8125rem] rounded-lg outline-none focus:ring-1 focus:ring-blue-500"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
         </div>
+        <PanelCollapseButton onClick={projectsPanel.toggle} label={panelLabels.collapse} expanded />
       </div>
       <nav className="flex-1 overflow-y-auto py-2">
         {/* ── Projets section ── */}
         <div>
           <button
             onClick={() => toggleTopSection('projects')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
             style={{ color: 'var(--tblr-muted)' }}
             onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
             onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
@@ -683,7 +857,7 @@ export default function Reunions() {
           {expandedTopSections.projects && (
             <div className="pl-2 pb-1">
               {filteredProjects().length === 0 ? (
-                <p className="px-4 py-1.5 text-[13px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun projet actif</p>
+                <p className="px-4 py-1.5 text-[0.8125rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun projet actif</p>
               ) : (
                 filteredProjects().map(project => {
                   const isActive = activeKind === 'project' && selectedProject?.id === project.id;
@@ -691,7 +865,7 @@ export default function Reunions() {
                     <button
                       key={project.id}
                       onClick={() => selectProject(project)}
-                      className="w-full text-left px-4 py-2 text-[13px] transition-colors truncate"
+                      className="w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate"
                       style={isActive
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
@@ -699,7 +873,7 @@ export default function Reunions() {
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
                       <div className="truncate font-medium">{project.name}</div>
-                      <div className="truncate text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
+                      <div className="truncate text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
                     </button>
                   );
                 })
@@ -710,21 +884,66 @@ export default function Reunions() {
 
         {/* ── Propositions section ── */}
         <div>
-          <button
-            onClick={() => toggleTopSection('proposals')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
-            style={{ color: 'var(--tblr-muted)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
-          >
-            {expandedTopSections.proposals ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-            <IconBriefcase size={14} />
-            Propositions
-          </button>
+          <div className="flex items-center gap-0.5 pr-1.5">
+            <button
+              onClick={() => toggleTopSection('proposals')}
+              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              {expandedTopSections.proposals ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+              <IconBriefcase size={14} />
+              Propositions
+            </button>
+            <button
+              type="button"
+              onClick={() => { setNewParentKind('proposal'); setNewParentTitle(''); setExpandedTopSections(prev => ({ ...prev, proposals: true })); }}
+              className="flex-shrink-0 p-1 rounded transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              title="Nouvelle proposition"
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              <IconPlus size={14} />
+            </button>
+          </div>
           {expandedTopSections.proposals && (
             <div className="pl-2 pb-1">
-              {filteredProposals().length === 0 ? (
-                <p className="px-4 py-1.5 text-[13px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune proposition</p>
+              {newParentKind === 'proposal' && (
+                <div className="mx-2 mb-1.5 p-2 rounded-lg" style={{ background: 'var(--tblr-primary-lt)' }}>
+                  <input
+                    type="text"
+                    placeholder="Titre de la proposition"
+                    value={newParentTitle}
+                    onChange={e => setNewParentTitle(e.target.value)}
+                    autoFocus
+                    className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-1.5"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    onKeyDown={e => e.key === 'Enter' && createParent()}
+                  />
+                  <div className="flex gap-1">
+                    <button
+                      onClick={createParent}
+                      disabled={creatingParent || !newParentTitle.trim()}
+                      className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                    >
+                      {creatingParent ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                      Créer
+                    </button>
+                    <button
+                      onClick={() => setNewParentKind(null)}
+                      className="px-2 py-1 text-xs rounded transition-colors"
+                      style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {filteredProposals().length === 0 && newParentKind !== 'proposal' ? (
+                <p className="px-4 py-1.5 text-[0.8125rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune proposition</p>
               ) : (
                 filteredProposals().map(proposal => {
                   const isActive = activeKind === 'proposal' && selectedProposal?.id === proposal.id;
@@ -732,15 +951,18 @@ export default function Reunions() {
                     <button
                       key={proposal.id}
                       onClick={() => selectProposal(proposal)}
-                      className="w-full text-left px-4 py-2 text-[13px] transition-colors truncate"
+                      className="w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate"
                       style={isActive
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
                       onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
-                      <div className="truncate font-medium">{proposal.title}</div>
-                      <div className="truncate text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{proposal.client_name}</div>
+                      <div className="truncate font-medium flex items-center gap-1.5">
+                        {proposal.title}
+                        {proposal.pendingSync && <span className="text-[0.5625rem] px-1 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--tblr-warning-lt)', color: 'var(--tblr-warning)' }}>en attente</span>}
+                      </div>
+                      <div className="truncate text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{proposal.client_name}</div>
                     </button>
                   );
                 })
@@ -751,21 +973,66 @@ export default function Reunions() {
 
         {/* ── Appels d'offres section ── */}
         <div>
-          <button
-            onClick={() => toggleTopSection('tenders')}
-            className="w-full flex items-center gap-2 px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors"
-            style={{ color: 'var(--tblr-muted)' }}
-            onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
-            onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
-          >
-            {expandedTopSections.tenders ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
-            <IconClipboardList size={14} />
-            Appels d'offres
-          </button>
+          <div className="flex items-center gap-0.5 pr-1.5">
+            <button
+              onClick={() => toggleTopSection('tenders')}
+              className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-text)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              {expandedTopSections.tenders ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+              <IconClipboardList size={14} />
+              Appels d'offres
+            </button>
+            <button
+              type="button"
+              onClick={() => { setNewParentKind('tender'); setNewParentTitle(''); setExpandedTopSections(prev => ({ ...prev, tenders: true })); }}
+              className="flex-shrink-0 p-1 rounded transition-colors"
+              style={{ color: 'var(--tblr-muted)' }}
+              title="Nouvel appel d'offres"
+              onMouseEnter={e => { e.currentTarget.style.color = 'var(--tblr-primary)'; e.currentTarget.style.background = 'var(--tblr-surface)'; }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--tblr-muted)'; e.currentTarget.style.background = ''; }}
+            >
+              <IconPlus size={14} />
+            </button>
+          </div>
           {expandedTopSections.tenders && (
             <div className="pl-2 pb-1">
-              {filteredTenders().length === 0 ? (
-                <p className="px-4 py-1.5 text-[13px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun appel d'offres</p>
+              {newParentKind === 'tender' && (
+                <div className="mx-2 mb-1.5 p-2 rounded-lg" style={{ background: 'var(--tblr-primary-lt)' }}>
+                  <input
+                    type="text"
+                    placeholder="Titre de l'appel d'offres"
+                    value={newParentTitle}
+                    onChange={e => setNewParentTitle(e.target.value)}
+                    autoFocus
+                    className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-1.5"
+                    style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    onKeyDown={e => e.key === 'Enter' && createParent()}
+                  />
+                  <div className="flex gap-1">
+                    <button
+                      onClick={createParent}
+                      disabled={creatingParent || !newParentTitle.trim()}
+                      className="flex-1 py-1 text-xs rounded transition-colors disabled:opacity-50 flex items-center justify-center gap-1"
+                      style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+                    >
+                      {creatingParent ? <IconLoader2 size={11} className="animate-spin" /> : null}
+                      Créer
+                    </button>
+                    <button
+                      onClick={() => setNewParentKind(null)}
+                      className="px-2 py-1 text-xs rounded transition-colors"
+                      style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {filteredTenders().length === 0 && newParentKind !== 'tender' ? (
+                <p className="px-4 py-1.5 text-[0.8125rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucun appel d'offres</p>
               ) : (
                 filteredTenders().map(tender => {
                   const isActive = activeKind === 'tender' && selectedTender?.id === tender.id;
@@ -773,15 +1040,18 @@ export default function Reunions() {
                     <button
                       key={tender.id}
                       onClick={() => selectTender(tender)}
-                      className="w-full text-left px-4 py-2 text-[13px] transition-colors truncate"
+                      className="w-full text-left px-4 py-2 text-[0.8125rem] transition-colors truncate"
                       style={isActive
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
                         : { color: 'var(--tblr-muted)' }}
                       onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'var(--tblr-surface)'; e.currentTarget.style.color = 'var(--tblr-text)'; } }}
                       onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = ''; e.currentTarget.style.color = 'var(--tblr-muted)'; } }}
                     >
-                      <div className="truncate font-medium">{tender.title}</div>
-                      <div className="truncate text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{tender.client}</div>
+                      <div className="truncate font-medium flex items-center gap-1.5">
+                        {tender.title}
+                        {tender.pendingSync && <span className="text-[0.5625rem] px-1 py-0.5 rounded flex-shrink-0" style={{ background: 'var(--tblr-warning-lt)', color: 'var(--tblr-warning)' }}>en attente</span>}
+                      </div>
+                      <div className="truncate text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{tender.client}</div>
                     </button>
                   );
                 })
@@ -790,7 +1060,7 @@ export default function Reunions() {
           )}
         </div>
       </nav>
-    </div>
+    </CollapsiblePanel>
   );
 
   // ── Panel: meetings list ─────────────────────────────────────────────────────
@@ -801,13 +1071,23 @@ export default function Reunions() {
     : activeKind === 'proposal' ? 'Proposition' : "Appel d'offres";
 
   const MeetingsPanel = (
-    <div className={`
-      flex flex-col overflow-hidden
-      md:w-72 md:flex-shrink-0 md:border-r
-      ${mobileView === 'meetings' ? 'flex flex-col w-full h-full' : 'hidden md:flex'}
-    `} style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}>
+    <CollapsiblePanel
+      collapsed={meetingsPanel.collapsed}
+      onExpand={() => meetingsPanel.set(false)}
+      expandLabel={meetingsLabels.expand}
+      className={`
+        lg:border-r
+        ${mobileView === 'meetings' ? 'w-full h-full' : 'hidden lg:flex'}
+      `}
+      style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
+    >
+      {/* Repli de la colonne (écrans larges) */}
+      <div className="hidden lg:flex items-center justify-between gap-2 pl-3 pr-1 py-1 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
+        <span className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Réunions</span>
+        <PanelCollapseButton onClick={meetingsPanel.toggle} label={meetingsLabels.collapse} expanded />
+      </div>
       {/* Mobile back button */}
-      <div className="md:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+      <div className="lg:hidden flex items-center justify-between gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
         <button
           onClick={() => setMobileView('projects')}
           className="flex items-center gap-1 text-xs font-medium"
@@ -832,7 +1112,7 @@ export default function Reunions() {
         <>
           <div className="p-3 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
             <div className="flex items-center justify-between mb-1">
-              <h3 className="text-[13px] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
+              <h3 className="text-[0.8125rem] font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>{activeEntityName}</h3>
               <button
                 onClick={() => setShowNewMeeting(true)}
                 className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-colors flex-shrink-0"
@@ -845,7 +1125,7 @@ export default function Reunions() {
                 <span>Nouveau</span>
               </button>
             </div>
-            <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{activeEntitySubtitle}</p>
+            <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{activeEntitySubtitle}</p>
           </div>
 
           {showNewMeeting && (
@@ -856,7 +1136,7 @@ export default function Reunions() {
                 value={newMeetingTitle}
                 onChange={e => { setNewMeetingTitle(e.target.value); setCreateError(''); }}
                 autoFocus
-                className="w-full px-2 py-1.5 text-[13px] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
+                className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                 onKeyDown={e => e.key === 'Enter' && createMeeting()}
               />
@@ -864,11 +1144,11 @@ export default function Reunions() {
                 type="date"
                 value={newMeetingDate}
                 onChange={e => setNewMeetingDate(e.target.value)}
-                className="w-full px-2 py-1.5 text-[13px] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
+                className="w-full px-2 py-1.5 text-[0.8125rem] rounded outline-none focus:ring-1 focus:ring-blue-500 mb-2"
                 style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               />
               {createError && (
-                <p className="text-[10px] mb-1.5 px-1" style={{ color: 'var(--tblr-danger)' }}>{createError}</p>
+                <p className="text-[0.6875rem] mb-1.5 px-1" style={{ color: 'var(--tblr-danger)' }}>{createError}</p>
               )}
               <div className="flex gap-1">
                 <button
@@ -893,9 +1173,9 @@ export default function Reunions() {
 
           <div className="flex-1 overflow-y-auto">
             {loadingMeetings ? (
-              <div className="flex items-center justify-center h-20 text-[13px]" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
+              <div className="flex items-center justify-center h-20 text-[0.8125rem]" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
             ) : meetings.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-32 text-[13px] gap-2" style={{ color: 'var(--tblr-muted)' }}>
+              <div className="flex flex-col items-center justify-center h-32 text-[0.8125rem] gap-2" style={{ color: 'var(--tblr-muted)' }}>
                 <IconNotes size={24} className="opacity-30" />
                 <p>Aucune réunion</p>
                 <button onClick={() => setShowNewMeeting(true)} className="hover:underline" style={{ color: 'var(--tblr-primary)' }}>+ Ajouter</button>
@@ -919,15 +1199,22 @@ export default function Reunions() {
                 >
                   <div className="flex items-start justify-between gap-1">
                     <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{meeting.title}</p>
-                      <p className="text-[11px] mt-0.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
+                      <p className="text-[0.8125rem] font-medium truncate flex items-center gap-1.5" style={{ color: 'var(--tblr-text)' }}>
+                        {meeting.title}
+                        {meeting.pendingSync && (
+                          <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold flex-shrink-0" style={{ background: 'var(--tblr-warning-lt, #fff3bf)', color: 'var(--tblr-warning, #e67700)' }}>
+                            en attente
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[0.6875rem] mt-0.5 flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}>
                         <IconCalendar size={11} />
                         {formatDate(meeting.date)}
                       </p>
                     </div>
                     <button
                       onClick={e => { e.stopPropagation(); deleteMeeting(meeting.id); }}
-                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition-all"
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded transition"
                       style={{ color: 'var(--tblr-muted)' }}
                       onMouseEnter={e => (e.currentTarget.style.color = 'var(--tblr-danger)')}
                       onMouseLeave={e => (e.currentTarget.style.color = 'var(--tblr-muted)')}
@@ -941,31 +1228,31 @@ export default function Reunions() {
           </div>
         </>
       ) : (
-        <div className="flex flex-col items-center justify-center h-full text-[13px] gap-2 px-4 text-center" style={{ color: 'var(--tblr-muted)' }}>
+        <div className="flex flex-col items-center justify-center h-full text-[0.8125rem] gap-2 px-4 text-center" style={{ color: 'var(--tblr-muted)' }}>
           <IconBuilding size={28} className="opacity-20" />
           <p>Sélectionnez un projet, une proposition ou un appel d'offres</p>
           <button
             onClick={() => setMobileView('projects')}
-            className="md:hidden hover:underline mt-1"
+            className="lg:hidden hover:underline mt-1"
             style={{ color: 'var(--tblr-primary)' }}
           >
             ← Retour
           </button>
         </div>
       )}
-    </div>
+    </CollapsiblePanel>
   );
 
   // ── Panel: meeting detail ────────────────────────────────────────────────────
 
   const DetailPanel = (
     <div className={`
-      flex-1 overflow-y-auto
-      ${mobileView === 'detail' ? 'flex flex-col w-full' : 'hidden md:block'}
+      flex-1 min-w-0 overflow-y-auto overflow-x-hidden
+      ${mobileView === 'detail' ? 'flex flex-col w-full' : 'hidden lg:block'}
     `} style={{ background: 'var(--tblr-surface)' }}>
       {/* Mobile back button */}
       {mobileView === 'detail' && (
-        <div className="md:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+        <div className="lg:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
           <button
             onClick={() => setMobileView('meetings')}
             className="flex items-center gap-1 text-xs font-medium"
@@ -981,12 +1268,19 @@ export default function Reunions() {
         loadingDetail ? (
           <div className="flex items-center justify-center h-40 text-sm" style={{ color: 'var(--tblr-muted)' }}>Chargement...</div>
         ) : (
-          <div className="w-full p-4 sm:p-6">
+          <div className="w-full min-w-0 p-4 sm:p-6">
             {/* Header */}
             <div className="mb-6">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-2">
-                <h1 className="text-xl sm:text-2xl font-bold" style={{ color: 'var(--tblr-text)' }}>{selectedMeeting.title}</h1>
-                <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-start sm:justify-between gap-3 mb-2 min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold flex flex-wrap items-center gap-2 min-w-0 flex-1 break-words" style={{ color: 'var(--tblr-text)' }}>
+                  {selectedMeeting.title}
+                  {selectedMeeting.pendingSync && (
+                    <span className="px-2 py-0.5 rounded text-xs font-semibold" style={{ background: 'var(--tblr-warning-lt, #fff3bf)', color: 'var(--tblr-warning, #e67700)' }}>
+                      En attente d'envoi
+                    </span>
+                  )}
+                </h1>
+                <div className="flex flex-wrap items-center gap-2 min-w-0">
                   <button
                     onClick={handleExportPDF}
                     disabled={exportingPdf}
@@ -1032,7 +1326,13 @@ export default function Reunions() {
                 <IconUsers size={16} />
                 Intervenants
               </h2>
-              <AttendeesPanel meetingId={selectedMeeting.id} />
+              {selectedMeeting.pendingSync ? (
+                <p className="text-sm italic" style={{ color: 'var(--tblr-muted)' }}>
+                  Disponible une fois la réunion synchronisée (en attente d'envoi).
+                </p>
+              ) : (
+                <AttendeesPanel meetingId={selectedMeeting.id} />
+              )}
             </div>
 
             <hr className="mb-8" style={{ borderColor: 'var(--tblr-border)' }} />
@@ -1070,7 +1370,7 @@ export default function Reunions() {
 
             {/* Photos */}
             <div>
-              <div className="flex items-center justify-between mb-3 gap-2">
+              <div className="flex flex-wrap items-center justify-between mb-3 gap-2 min-w-0">
                 <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
                   <IconPhoto size={16} />
                   Photos ({(selectedMeeting.photos || []).length})
@@ -1111,12 +1411,27 @@ export default function Reunions() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
                   {(selectedMeeting.photos || []).map(photo => (
                     <div key={photo.id} className="group relative rounded-xl overflow-hidden aspect-square" style={{ background: 'var(--tblr-surface-2)' }}>
-                      <SignedImage
-                        src={photo.file_url}
-                        alt={photo.caption || 'Photo'}
-                        className="w-full h-full object-cover cursor-pointer"
-                        onClick={() => setLightboxPhoto(photo)}
-                      />
+                      {photo.pendingSync ? (
+                        // Pas encore de file_url côté serveur (envoi en file, hors-ligne) :
+                        // aperçu local, SignedImage n'aurait rien à résoudre.
+                        <img
+                          src={photo.localPreviewUrl}
+                          alt={photo.caption || 'Photo'}
+                          className="w-full h-full object-cover cursor-pointer opacity-70"
+                        />
+                      ) : (
+                        <SignedImage
+                          src={photo.file_url}
+                          alt={photo.caption || 'Photo'}
+                          className="w-full h-full object-cover cursor-pointer"
+                          onClick={() => setLightboxPhoto(photo)}
+                        />
+                      )}
+                      {photo.pendingSync && (
+                        <span className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold text-white bg-black/50 backdrop-blur-sm">
+                          En attente d'envoi
+                        </span>
+                      )}
                       <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex flex-col justify-between p-2 opacity-0 group-hover:opacity-100">
                         <div className="flex justify-end gap-1">
                           <button onClick={() => setLightboxPhoto(photo)} className="p-1 bg-white/20 backdrop-blur-sm rounded text-white hover:bg-white/30 transition-colors">
@@ -1174,7 +1489,7 @@ export default function Reunions() {
   );
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex h-full min-w-0 overflow-hidden">
       {ProjectsPanel}
       {MeetingsPanel}
       {DetailPanel}
@@ -1208,12 +1523,21 @@ export default function Reunions() {
           <button onClick={() => setLightboxPhoto(null)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full text-white hover:bg-white/20 transition-colors">
             <IconX size={20} />
           </button>
-          <SignedImage
-            src={lightboxPhoto.file_url}
-            alt={lightboxPhoto.caption || 'Photo'}
-            className="max-w-full max-h-[80vh] object-contain rounded-lg"
-            onClick={e => e.stopPropagation()}
-          />
+          {lightboxPhoto.pendingSync ? (
+            <img
+              src={lightboxPhoto.localPreviewUrl}
+              alt={lightboxPhoto.caption || 'Photo'}
+              className="max-w-full max-h-[80dvh] object-contain rounded-lg"
+              onClick={e => e.stopPropagation()}
+            />
+          ) : (
+            <SignedImage
+              src={lightboxPhoto.file_url}
+              alt={lightboxPhoto.caption || 'Photo'}
+              className="max-w-full max-h-[80dvh] object-contain rounded-lg"
+              onClick={e => e.stopPropagation()}
+            />
+          )}
           {lightboxPhoto.caption && <p className="mt-3 text-white/70 text-sm text-center">{lightboxPhoto.caption}</p>}
         </div>
       )}

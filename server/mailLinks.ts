@@ -6,6 +6,7 @@
 // POSTed here — they never read from or depend on this table directly.
 import type { Express } from 'express';
 import { tenantScopedFrom } from './tenantScopedFrom';
+import { fileMessageInProjectFolder } from './mailFiling';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -21,7 +22,7 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
       const tenantId = await getTenantId(req.user.id);
       const {
         provider, connection_id, local_type, local_id, external_message_id, external_thread_id,
-        subject, snippet, from_address, to_addresses, message_date,
+        subject, snippet, from_address, to_addresses, message_date, file_in_mailbox,
       } = req.body;
 
       if (!provider || !local_type || !local_id || !external_message_id) {
@@ -29,6 +30,31 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
       }
       if (!LOCAL_TYPES.has(local_type)) {
         return res.status(400).json({ error: 'local_type invalide' });
+      }
+
+      // Rattacher à une OPÉRATION classe aussi le message dans sa boîte
+      // d'origine (libellé Gmail, dossier Outlook ou IMAP « ArchiOffice/<affaire> »,
+      // créé au besoin) — voir server/mailFiling.ts. Meilleur effort : un échec
+      // ne bloque jamais le rattachement, il est rendu dans `filing`. Outlook
+      // et IMAP renumérotent le message déplacé : c'est le NOUVEL id qu'on
+      // enregistre, sinon le lien ne rouvrirait plus rien.
+      let storedMessageId: string = external_message_id;
+      let filing: { status: 'filed' | 'failed' | 'skipped'; folder?: string; error?: string } = { status: 'skipped' };
+      if (local_type === 'project' && connection_id && file_in_mailbox !== false) {
+        try {
+          const { data: project } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects')
+            .select('name, project_code').eq('id', local_id).maybeSingle();
+          const { data: account } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
+            .select('*').eq('id', connection_id).eq('user_id', req.user.id).maybeSingle();
+          if (project && account) {
+            const result = await fileMessageInProjectFolder(supabaseAdmin, account, project, external_message_id);
+            storedMessageId = result.newExternalMessageId;
+            filing = { status: 'filed', folder: result.folder };
+          }
+        } catch (e: any) {
+          console.error('[POST /api/mail/links] classement dans la boîte', e.message);
+          filing = { status: 'failed', error: e.message || 'Classement impossible' };
+        }
       }
 
       // connection_id désambiguïse deux comptes du même provider (support
@@ -50,7 +76,7 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
           connection_id: connection_id || null,
           local_type,
           local_id,
-          external_message_id,
+          external_message_id: storedMessageId,
           external_thread_id: external_thread_id || null,
           subject: subject || null,
           snippet: snippet || null,
@@ -62,7 +88,7 @@ export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantI
         .maybeSingle();
 
       if (error) throw error;
-      res.json(data || { success: true });
+      res.json({ ...(data || { success: true }), external_message_id: storedMessageId, filing });
     } catch (error: any) {
       console.error('[POST /api/mail/links]', error.message);
       res.status(500).json({ error: error.message || "Échec du rattachement de l'email" });
