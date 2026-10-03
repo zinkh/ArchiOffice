@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, ChangeEvent, useRef, type Dispatch, type SetStateAction } from 'react';
+import React, { useState, useEffect, useMemo, ChangeEvent, useRef, useId, type Dispatch, type SetStateAction } from 'react';
 import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
@@ -47,6 +47,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { statusLabel } from '../lib/statusLabel';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
@@ -54,6 +55,7 @@ import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offline
 import { db } from '../db';
 import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
+import { RESERVE_STATUSES, reserveStatusKey } from '../components/pro/reserveShared';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
 import { isProjectDirty } from '../lib/projectDirty';
@@ -99,37 +101,45 @@ import { ResourceAttachments } from '../components/ResourceAttachments';
 
 import { useTranslation } from 'react-i18next';
 
-const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id }: any) => (
+// Champ de la fiche complète : libellé relié au contrôle (htmlFor), quel que soit son type.
+const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp }: any) => {
+  const { t } = useTranslation();
+  const autoId = useId();
+  const id = idProp || autoId;
+  return (
   <div className="space-y-1">
-    <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">
-      {label} {required && <span className="text-red-500">*</span>}
+    <label htmlFor={id} className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">
+      {label} {required && <span className="text-red-500" aria-hidden>*</span>}
     </label>
     {type === 'select' ? (
-      <select 
+      <select
+        id={id}
         className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
       >
-        <option value="">Select {label}</option>
+        <option value="">{t('projectdetail_field_select')}</option>
         {options.map((opt: string) => (
           <option key={opt} value={opt}>{opt}</option>
         ))}
       </select>
     ) : type === 'textarea' ? (
-      <textarea 
+      <textarea
+        id={id}
         className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium min-h-[80px] resize-none"
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
       />
     ) : type === 'checkbox' ? (
       <div className="flex items-center gap-2 h-[42px]">
-        <input 
+        <input
+          id={id}
           type="checkbox"
           checked={!!value}
           onChange={(e) => onChange(e.target.checked)}
           className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
         />
-        <span className="text-sm text-[var(--tblr-muted)]">Oui</span>
+        <span className="text-sm text-[var(--tblr-muted)]">{t('projectdetail_field_yes')}</span>
       </div>
     ) : (
       <input 
@@ -141,22 +151,11 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
       />
     )}
   </div>
-);
+  );
+};
 
 const MISSION_PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR'];
 
-const PHASE_LABELS: Partial<Record<DocumentPhase, string>> = {
-  ESQ: 'Esquisse',
-  APS: 'Avant-Projet Sommaire',
-  APD: 'Avant-Projet Détaillé',
-  PC: 'Permis de Construire',
-  PRO: 'Projet',
-  DCE: 'Consultation entreprises',
-  ACT: 'Attribution des marchés',
-  VISA: "Visa d'exécution",
-  DET: 'Direction des travaux',
-  AOR: 'Assistance à réception',
-};
 
 // Maps ContratMOEMission ids (Contrats.tsx uses 'pro', Proposals.tsx's
 // fee_distribution uses 'projet' for the same phase — both are accepted here)
@@ -276,7 +275,7 @@ export default function ProjectDetail() {
     if (!upcomingPhase || !actualCurrentPhase) return;
     const ok = await confirmAction({
       title: t('project_phase_advance_title', { phase: upcomingPhase }),
-      message: t('project_phase_advance_message', { from: actualCurrentPhase, to: upcomingPhase, label: PHASE_LABELS[upcomingPhase] || upcomingPhase }),
+      message: t('project_phase_advance_message', { from: actualCurrentPhase, to: upcomingPhase, label: t(`mission_phase_${upcomingPhase}`) }),
       confirmLabel: t('project_phase_advance_confirm', { phase: upcomingPhase }),
       cancelLabel: t('projectdetail_dialog_cancel'),
       tone: 'primary',
@@ -1599,12 +1598,15 @@ export default function ProjectDetail() {
     deleteWithUndo(setOrdresDeService, osId, `/api/ordres_de_service/${osId}`, 'projectdetail_deleted_os');
   };
 
-  const osStatusBadge = (status: OrdreDeService['status']) => {
+  // Même cycle de statuts pour un OS et un avenant, mais pas les mêmes mots :
+  // un OS « approuvé » a son accusé de réception, un avenant est accepté.
+  const osStatusBadge = (status: OrdreDeService['status'], kind: 'os' | 'avenant' = 'os') => {
+    const prefix = kind === 'os' ? 'projectdetail_os_status_' : 'projectdetail_amendment_status_';
     const map: Record<OrdreDeService['status'], { label: string; cls: string }> = {
-      draft:     { label: 'Brouillon', cls: 'bg-zinc-100 text-[var(--tblr-muted)] dark:bg-zinc-800 dark:text-[var(--tblr-muted)]' },
-      submitted: { label: 'Émis',      cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
-      approved:  { label: 'AR reçu',   cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
-      rejected:  { label: 'Annulé',    cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
+      draft:     { label: t(`${prefix}draft`), cls: 'bg-zinc-100 text-[var(--tblr-muted)] dark:bg-zinc-800 dark:text-[var(--tblr-muted)]' },
+      submitted: { label: t(`${prefix}submitted`), cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' },
+      approved:  { label: t(`${prefix}approved`), cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' },
+      rejected:  { label: t(`${prefix}rejected`), cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' }
     };
     const { label, cls } = map[status] ?? map.draft;
     return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider ${cls}`}>{label}</span>;
@@ -1774,7 +1776,11 @@ export default function ProjectDetail() {
             className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[0.6875rem] font-semibold shrink-0 whitespace-nowrap"
             style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
           >
-            {project.is_chantier ? 'Mission chantier active' : project.status}
+            {project.is_chantier
+              ? t('projectdetail_header_chantier')
+              : (['Planning', 'In Progress', 'Completed', 'On Hold'].includes(project.status)
+                ? t(`projects_status_${project.status.toLowerCase().replace(' ', '_')}`)
+                : project.status)}
           </span>
         </div>
 
@@ -1810,9 +1816,11 @@ export default function ProjectDetail() {
         <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
           {currentUser?.system_role === 'admin' && (
             <button
+              type="button"
               onClick={() => { setDeleteProjectConfirmInput(''); setShowDeleteProjectConfirm(true); }}
               className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
-              title={t('delete')}
+              title={t('projectdetail_delete_project')}
+              aria-label={t('projectdetail_delete_project')}
             >
               <IconTrash size={18} />
             </button>
@@ -1853,7 +1861,7 @@ export default function ProjectDetail() {
             setNewMilestoneDate={setNewMilestoneDate}
             isAddingMilestone={isAddingMilestone}
             setIsAddingMilestone={setIsAddingMilestone}
-            onGoToInvoices={() => { setActiveTab('RDT'); setIsAddingInvoice(true); }}
+            onGoToInvoices={() => setActiveTab('HONOS')}
           />
         ) : (
           <div className={`lg:h-full overflow-visible lg:overflow-y-auto ${activeTab === 'PRO' ? 'p-0' : 'p-4 sm:p-6'}`}>
@@ -1876,27 +1884,25 @@ export default function ProjectDetail() {
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconFileText}
-                    title="Contrat de Maîtrise d'Œuvre"
-                    description="Contrat(s) associés à ce projet depuis la boîte à outils MOE"
+                    title={t('projectdetail_contract_title')}
+                    description={t('projectdetail_contract_desc')}
                     action={
                       <Link to="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} />
-                        Gérer les contrats
+                        {t('projectdetail_contract_manage')}
                       </Link>
                     }
                   />
                   {linkedContratsMoe.length === 0 ? (
                     <div className="p-8 text-center text-[var(--tblr-muted)] italic text-sm">
-                      Aucun contrat MOE lié à ce projet.{' '}
-                      <Link to="/contrats" className="text-blue-500 hover:underline">Créer un contrat</Link> et associez-le à ce projet.
+                      {t('projectdetail_contract_empty')}{' '}
+                      <Link to="/contrats" className="text-blue-500 hover:underline">{t('projectdetail_contract_empty_link')}</Link>
                     </div>
                   ) : (
                     <div className="divide-y divide-[var(--tblr-border)]">
                       {linkedContratsMoe.map((c: any) => {
-                        const TYPE_LABELS: Record<string, string> = {
-                          construction_neuve: 'Construction neuve', rehabilitation: 'Réhabilitation',
-                          concours: "Concours d'architecture", amo: 'Mission AMO', diagnostic: 'Diagnostic', urbanisme: 'Urbanisme',
-                        };
+                        const typeLabel = (type: string) => ['construction_neuve', 'rehabilitation', 'concours', 'amo', 'diagnostic', 'urbanisme'].includes(type)
+                          ? t(`projectdetail_contract_type_${type}`) : type;
                         const STATUS_COLORS: Record<string, string> = {
                           Brouillon: 'bg-zinc-100 text-[var(--tblr-muted)]', Envoyé: 'bg-blue-100 text-blue-700',
                           Signé: 'bg-green-100 text-green-700', Résilié: 'bg-red-100 text-red-700',
@@ -1908,15 +1914,15 @@ export default function ProjectDetail() {
                               <div className="flex items-center gap-2 flex-wrap mb-1">
                                 {c.numero && <span className="text-[0.6875rem] font-mono px-2 py-0.5 rounded bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]">{c.numero}</span>}
                                 <span className={cn("text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider", STATUS_COLORS[c.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{c.status}</span>
-                                <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600">{TYPE_LABELS[c.type_contrat] || c.type_contrat}</span>
+                                <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600">{typeLabel(c.type_contrat)}</span>
                               </div>
-                              <p className="font-semibold text-[var(--tblr-text)] text-sm">{c.intitule_projet || c.project_name || '—'}</p>
+                              <p className="font-semibold text-[var(--tblr-text)] text-sm">{c.intitule_projet || c.project_name || t('projectdetail_contract_untitled')}</p>
                               <div className="flex flex-wrap gap-4 mt-1 text-xs text-[var(--tblr-muted)]">
-                                {c.mode_honoraires === 'forfait' && c.montant_honoraires && <span className="text-blue-600 font-bold">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(c.montant_honoraires)} HT</span>}
-                                {c.mode_honoraires === 'pourcentage' && c.taux_honoraires && <span className="text-blue-600 font-bold">{c.taux_honoraires} % des travaux</span>}
-                                {c.indice_revision && <span>Indice : {c.indice_revision}</span>}
-                                {c.date_debut && <span>Du {new Date(c.date_debut).toLocaleDateString('fr-FR')}</span>}
-                                {c.date_fin && <span>au {new Date(c.date_fin).toLocaleDateString('fr-FR')}</span>}
+                                {c.mode_honoraires === 'forfait' && c.montant_honoraires && <span className="text-blue-600 font-bold">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(c.montant_honoraires)} {t('projectdetail_ht')}</span>}
+                                {c.mode_honoraires === 'pourcentage' && c.taux_honoraires && <span className="text-blue-600 font-bold">{t('projectdetail_contract_rate', { rate: c.taux_honoraires })}</span>}
+                                {c.indice_revision && <span>{t('projectdetail_contract_index', { index: c.indice_revision })}</span>}
+                                {c.date_debut && c.date_fin && <span>{t('projectdetail_contract_period', { from: new Date(c.date_debut).toLocaleDateString('fr-FR'), to: new Date(c.date_fin).toLocaleDateString('fr-FR') })}</span>}
+                                {c.date_debut && !c.date_fin && <span>{t('projectdetail_contract_from', { from: new Date(c.date_debut).toLocaleDateString('fr-FR') })}</span>}
                               </div>
                               {missionsIncluses.length > 0 && (
                                 <div className="flex flex-wrap gap-1 mt-2">
@@ -1937,7 +1943,7 @@ export default function ProjectDetail() {
 
                 {/* ── Honoraires MOE ─────────────────────────────────────── */}
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                  <CardHeader icon={IconCurrencyEuro} title="Honoraires de Maîtrise d'Œuvre" />
+                  <CardHeader icon={IconCurrencyEuro} title={t('projectdetail_fees_title')} />
                   <div className="p-6 space-y-6">
                     {/* KPIs */}
                     {(() => {
@@ -1949,10 +1955,10 @@ export default function ProjectDetail() {
                       return (
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                           {[
-                            { label: 'Honoraires initiaux', value: honInit, color: 'blue', sub: 'Contrat MOE signé' },
-                            { label: 'Cumul avenants', value: cumul, color: cumul >= 0 ? 'green' : 'red', sub: `${moeAvenantsApprouves.length} avenant(s) approuvé(s)` },
-                            { label: 'Honoraires révisés', value: honRevises, color: 'indigo', sub: 'Total contractuel' },
-                            { label: 'Restant à percevoir', value: restant, color: restant > 0 ? 'amber' : 'green', sub: `${new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(encaisses)} encaissés` },
+                            { label: t('projectdetail_fees_initial'), value: honInit, color: 'blue', sub: contratHonoraires ? t('projectdetail_fees_initial_sub_contract') : t('projectdetail_fees_initial_sub_manual') },
+                            { label: t('projectdetail_fees_amendments'), value: cumul, color: cumul >= 0 ? 'green' : 'red', sub: t('projectdetail_fees_amendments_sub', { count: moeAvenantsApprouves.length }) },
+                            { label: t('projectdetail_fees_revised'), value: honRevises, color: 'indigo', sub: t('projectdetail_fees_revised_sub') },
+                            { label: t('projectdetail_fees_remaining'), value: restant, color: restant > 0 ? 'amber' : 'green', sub: t('projectdetail_fees_remaining_sub', { amount: new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(encaisses) }) },
                           ].map(kpi => (
                             <StatTile
                               key={kpi.label}
@@ -1975,47 +1981,47 @@ export default function ProjectDetail() {
                       const readOnlyCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 text-[var(--tblr-text)] font-bold opacity-70 cursor-default';
                       const editCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold';
                       const origine = verrouille
-                        ? `Issu du contrat ${contratHonoraires.numero || 'MOE'}`
+                        ? (contratHonoraires.numero ? t('projectdetail_fees_from_contract_num', { num: contratHonoraires.numero }) : t('projectdetail_fees_from_contract'))
                         : undefined;
                       return (
                         <div className="space-y-2 pt-2 border-t border-[var(--tblr-border)]">
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                             <div className="space-y-2">
-                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Honoraires initiaux HT (€)</label>
+                              <label htmlFor="honos-initiaux" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_initial_input')}</label>
                               <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                                <input type="number" readOnly={verrouille} title={origine}
+                                <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                                <input id="honos-initiaux" type="number" readOnly={verrouille} title={origine}
                                   className={verrouille ? readOnlyCls : editCls}
                                   value={project.remuneration || 0}
                                   onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
                               </div>
                             </div>
                             <div className="space-y-2">
-                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Coût travaux prévisionnel HT (€)</label>
+                              <label htmlFor="honos-cout-travaux" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_works_cost_input')}</label>
                               <div className="relative">
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                                <input type="number" readOnly={verrouille} title={origine}
+                                <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                                <input id="honos-cout-travaux" type="number" readOnly={verrouille} title={origine}
                                   className={verrouille ? readOnlyCls : editCls}
                                   value={project.construction_cost || 0}
                                   onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
                               </div>
                             </div>
                             <div className="space-y-2">
-                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux honoraires (%)</label>
+                              <label htmlFor="honos-taux" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_rate_input')}</label>
                               <div className="relative">
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
-                                <input type="number" readOnly
+                                <span aria-hidden className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
+                                <input id="honos-taux" type="text" readOnly title={t('projectdetail_fees_rate_title')}
                                   className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default focus-visible:ring-2 focus-visible:ring-blue-500"
                                   value={project.construction_cost && project.remuneration
                                     ? Number(((project.remuneration / project.construction_cost) * 100).toFixed(10))
-                                    : '—'} />
+                                    : ''} placeholder={t('projectdetail_fees_rate_empty')} />
                               </div>
                             </div>
                           </div>
                           {verrouille && (
                             <p className="text-xs text-[var(--tblr-muted)]">
-                              Ces montants proviennent du contrat {contratHonoraires.numero ? `N° ${contratHonoraires.numero}` : 'de maîtrise d\'œuvre'} lié à cette affaire.
-                              {' '}<Link to="/contrats" className="underline hover:text-[var(--tblr-primary)]">Modifier le contrat</Link> pour les corriger.
+                              {contratHonoraires.numero ? t('projectdetail_fees_locked_num', { num: contratHonoraires.numero }) : t('projectdetail_fees_locked')}
+                              {' '}<Link to="/contrats" className="underline hover:text-[var(--tblr-primary)]">{t('projectdetail_fees_locked_link')}</Link>
                             </p>
                           )}
                         </div>
@@ -2035,7 +2041,7 @@ export default function ProjectDetail() {
                       const phases = linkedContratsMoe[0]?.missions_list?.filter((m: any) => m.incluse) ?? DEFAULT_PHASES;
                       return (
                         <div className="pt-2 border-t border-[var(--tblr-border)]">
-                          <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Répartition indicative par phase (base mission complète)</p>
+                          <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">{t('projectdetail_fees_split_title')}</p>
                           <div className="grid grid-cols-4 lg:grid-cols-8 gap-2">
                             {phases.map((phase: any) => (
                               <div key={phase.id} className="text-center p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
@@ -2055,13 +2061,13 @@ export default function ProjectDetail() {
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconClipboardList}
-                    title="Avenants Contrat MOE"
+                    title={t('projectdetail_amendments_title')}
                     description={(() => {
                       const moeApprouves = cumulAvenantsApprouves;
                       const honorairesInitiaux = Number(project.remuneration) || 0;
                       if (moeApprouves !== 0 || honorairesInitiaux !== 0) return (
                         <span className="font-semibold" style={{ color: 'var(--tblr-primary)' }}>
-                          Honoraires révisés : {formatCurrency(honorairesInitiaux + moeApprouves)}
+                          {t('projectdetail_amendments_revised', { amount: formatCurrency(honorairesInitiaux + moeApprouves) })}
                           {moeApprouves !== 0 && <span className="text-green-600 dark:text-green-400"> ({moeApprouves >= 0 ? '+' : ''}{formatCurrency(moeApprouves)})</span>}
                         </span>
                       );
@@ -2070,15 +2076,17 @@ export default function ProjectDetail() {
                     action={linkedContratsMoe.length === 0 ? (
                       <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-400 rounded-lg text-xs font-bold">
                         <IconAlertCircle size={14} />
-                        Contrat requis pour créer un avenant
+                        {t('projectdetail_amendments_need_contract')}
                       </div>
                     ) : (
                       <button
+                        type="button"
                         onClick={() => setIsAddingOsMoe(!isAddingOsMoe)}
+                        aria-expanded={isAddingOsMoe}
                         className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
-                        Nouvel avenant
+                        {t('projectdetail_amendments_new')}
                       </button>
                     )}
                   />
@@ -2086,91 +2094,92 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° Avenant *</label>
-                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_number')} <span aria-hidden className="text-red-500">*</span></label>
+                          <input id="avenant-numero" required type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.os_number} onChange={e => setNewOsMoe({...newOsMoe, os_number: e.target.value})}
                             placeholder={`A${String(moeAvenants.length + 1).padStart(2, '0')}`} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Type d'avenant</label>
-                          <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-type" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_type')}</label>
+                          <select id="avenant-type" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.objet} onChange={e => setNewOsMoe({...newOsMoe, objet: e.target.value})}>
-                            <option value="extension_mission">Extension de mission</option>
-                            <option value="modification_programme">Modification de programme</option>
-                            <option value="revision_honoraires">Révision des honoraires</option>
-                            <option value="imprevus">Imprévus / Aléas</option>
-                            <option value="autre">Autre</option>
+                            <option value="extension_mission">{t('projectdetail_amendment_type_extension_mission')}</option>
+                            <option value="modification_programme">{t('projectdetail_amendment_type_modification_programme')}</option>
+                            <option value="revision_honoraires">{t('projectdetail_amendment_type_revision_honoraires')}</option>
+                            <option value="imprevus">{t('projectdetail_amendment_type_imprevus')}</option>
+                            <option value="autre">{t('projectdetail_amendment_type_autre')}</option>
                           </select>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
-                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_date')}</label>
+                          <input id="avenant-date" type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.date} onChange={e => setNewOsMoe({...newOsMoe, date: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Origine</label>
-                          <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-origine" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_origin')}</label>
+                          <select id="avenant-origine" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.origine_demande} onChange={e => setNewOsMoe({...newOsMoe, origine_demande: e.target.value})}>
-                            <option value="maitrise_ouvrage">Maîtrise d'ouvrage</option>
-                            <option value="maitrise_oeuvre">Maîtrise d'œuvre</option>
-                            <option value="aleas">Aléas</option>
-                            <option value="autres">Autres</option>
+                            <option value="maitrise_ouvrage">{t('projectdetail_amendment_origin_maitrise_ouvrage')}</option>
+                            <option value="maitrise_oeuvre">{t('projectdetail_amendment_origin_maitrise_oeuvre')}</option>
+                            <option value="aleas">{t('projectdetail_amendment_origin_aleas')}</option>
+                            <option value="autres">{t('projectdetail_amendment_origin_autres')}</option>
                           </select>
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Intitulé de l'avenant *</label>
-                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-intitule" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_title')} <span aria-hidden className="text-red-500">*</span></label>
+                          <input id="avenant-intitule" required type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.title} onChange={e => setNewOsMoe({...newOsMoe, title: e.target.value})}
-                            placeholder="ex: Extension de mission OPC + coordination sécurité" />
+                            placeholder={t('projectdetail_amendment_title_placeholder')} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Motif détaillé</label>
-                          <textarea rows={2} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                          <label htmlFor="avenant-motif" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_reason')}</label>
+                          <textarea id="avenant-motif" rows={2} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none"
                             value={newOsMoe.description} onChange={e => setNewOsMoe({...newOsMoe, description: e.target.value})}
-                            placeholder="Contexte, raisons justifiant l'avenant…" />
+                            placeholder={t('projectdetail_amendment_reason_placeholder')} />
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Impact honoraires HT (€)</label>
-                          <input type="number" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-montant" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_amount')}</label>
+                          <input id="avenant-montant" type="number" aria-describedby="avenant-montant-aide" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.montant_devis_presente} onChange={e => setNewOsMoe({...newOsMoe, montant_devis_presente: e.target.value})}
-                            placeholder="ex: 3 500 (négatif si réduction)" />
+                            placeholder="3500" />
+                          <p id="avenant-montant-aide" className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_amendment_amount_help')}</p>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date signature MOA</label>
-                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-signature" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_signature')}</label>
+                          <input id="avenant-signature" type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.date_signature} onChange={e => setNewOsMoe({...newOsMoe, date_signature: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Impact sur délais</label>
-                          <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-delais" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_delay')}</label>
+                          <select id="avenant-delais" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.incidences_delais_type} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_type: e.target.value as 'non' | 'oui'})}>
-                            <option value="non">Sans incidence</option>
-                            <option value="oui">Avec incidence</option>
+                            <option value="non">{t('projectdetail_amendment_delay_no')}</option>
+                            <option value="oui">{t('projectdetail_amendment_delay_yes')}</option>
                           </select>
                         </div>
                         {newOsMoe.incidences_delais_type === 'oui' && (
                           <div className="space-y-1">
-                            <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Prolongation (jours)</label>
-                            <input type="number" min={0} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                              value={newOsMoe.delai_execution} onChange={e => setNewOsMoe({...newOsMoe, delai_execution: e.target.value})} placeholder="nb de jours" />
+                            <label htmlFor="avenant-prolongation" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_extension')}</label>
+                            <input id="avenant-prolongation" type="number" min={0} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              value={newOsMoe.delai_execution} onChange={e => setNewOsMoe({...newOsMoe, delai_execution: e.target.value})} placeholder="30" />
                           </div>
                         )}
                       </div>
                       {newOsMoe.incidences_delais_type === 'oui' && (
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Justification de l'incidence sur les délais</label>
-                          <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <label htmlFor="avenant-justif" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_amendment_delay_reason')}</label>
+                          <input id="avenant-justif" type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOsMoe.incidences_delais_details} onChange={e => setNewOsMoe({...newOsMoe, incidences_delais_details: e.target.value})}
-                            placeholder="ex: Complexification du programme nécessitant une phase PRO étendue" />
+                            placeholder={t('projectdetail_amendment_delay_reason_placeholder')} />
                         </div>
                       )}
                       <div className="flex justify-end gap-3">
-                        <button onClick={() => setIsAddingOsMoe(false)} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                        <button onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">Créer l'avenant</button>
+                        <button type="button" onClick={() => setIsAddingOsMoe(false)} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">{t('projectdetail_dialog_cancel')}</button>
+                        <button type="button" onClick={handleCreateOsMoe} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">{t('projectdetail_amendment_create')}</button>
                       </div>
                     </div>
                   )}
@@ -2182,12 +2191,12 @@ export default function ProjectDetail() {
                     if (moeAvenants.length === 0) return null;
                     return (
                       <div className="mx-6 mb-4 mt-2 flex items-center gap-6 text-xs px-4 py-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40">
-                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">Honoraires initiaux</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit)}</span></div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">{t('projectdetail_fees_initial')}</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit)}</span></div>
                         <div className="text-blue-300">+</div>
-                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">Cumul avenants approuvés</span><br/><span className={cn("font-black text-sm", cumul >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{cumul >= 0 ? '+' : ''}{formatCurrency(cumul)}</span></div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">{t('projectdetail_fees_amendments_accepted')}</span><br/><span className={cn("font-black text-sm", cumul >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400")}>{cumul >= 0 ? '+' : ''}{formatCurrency(cumul)}</span></div>
                         <div className="text-blue-300">=</div>
-                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">Honoraires révisés</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit + cumul)}</span></div>
-                        <div className="ml-auto text-blue-400 text-[0.6875rem]">{approuves.length}/{moeAvenants.length} approuvé{approuves.length > 1 ? 's' : ''}</div>
+                        <div><span className="text-blue-400 font-bold uppercase tracking-wider text-[0.6875rem]">{t('projectdetail_fees_revised')}</span><br/><span className="font-black text-blue-700 dark:text-blue-300 text-sm">{formatCurrency(honInit + cumul)}</span></div>
+                        <div className="ml-auto text-blue-400 text-[0.6875rem]">{t('projectdetail_amendments_accepted_ratio', { count: approuves.length, total: moeAvenants.length })}</div>
                       </div>
                     );
                   })()}
@@ -2195,37 +2204,35 @@ export default function ProjectDetail() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
-                          <th className="px-4 py-3 text-left">N°</th>
-                          <th className="px-4 py-3 text-left">Type</th>
-                          <th className="px-4 py-3 text-left">Intitulé</th>
-                          <th className="px-4 py-3 text-left">Date</th>
-                          <th className="px-4 py-3 text-right">Présenté HT</th>
-                          <th className="px-4 py-3 text-right">Accepté HT</th>
-                          <th className="px-4 py-3 text-center">Délais</th>
-                          <th className="px-4 py-3 text-center">Statut</th>
-                          <th className="px-4 py-3 text-center">Actions</th>
-                          <th className="px-4 py-3 w-16"></th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_number')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_type')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_title')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_date')}</th>
+                          <th className="px-4 py-3 text-right">{t('projectdetail_col_presented_ht')}</th>
+                          <th className="px-4 py-3 text-right">{t('projectdetail_col_accepted_ht')}</th>
+                          <th className="px-4 py-3 text-center">{t('projectdetail_col_delays')}</th>
+                          <th className="px-4 py-3 text-center">{t('projectdetail_col_status')}</th>
+                          <th className="px-4 py-3 text-center">{t('projectdetail_col_next_step')}</th>
+                          <th className="px-4 py-3 w-16"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
                         {(() => {
-                          const TYPE_SHORT: Record<string, string> = {
-                            extension_mission: 'Extension mission', modification_programme: 'Modif. programme',
-                            revision_honoraires: 'Révision hon.', imprevus: 'Imprévus', autre: 'Autre',
-                          };
+                          const typeShort = (type: string | undefined) => type && ['extension_mission', 'modification_programme', 'revision_honoraires', 'imprevus', 'autre'].includes(type)
+                            ? t(`projectdetail_amendment_type_${type}`) : (type || t('projectdetail_not_set'));
                           const honorairesInitiaux = Number(project.remuneration) || 0;
                           const cumulTotal = cumulAvenantsApprouves;
                           return moeAvenants.map((os) => (
                             <tr key={os.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
                               <td className="px-4 py-3 font-mono font-black text-[var(--tblr-text)] whitespace-nowrap text-xs">Av.{os.os_number}</td>
-                              <td className="px-4 py-3"><span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{TYPE_SHORT[os.objet || ''] || os.objet || '—'}</span></td>
+                              <td className="px-4 py-3"><span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400">{typeShort(os.objet)}</span></td>
                               <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200 max-w-[180px]">
                                 <p className="truncate font-medium">{os.title}</p>
                                 {os.description && <p className="text-[0.6875rem] text-[var(--tblr-muted)] truncate mt-0.5">{os.description}</p>}
                               </td>
                               <td className="px-4 py-3 text-[var(--tblr-muted)] text-xs whitespace-nowrap">
                                 {os.date ? new Date(os.date).toLocaleDateString('fr-FR') : '—'}
-                                {os.date_signature && <div className="text-[0.6875rem] text-green-600">Signé le {new Date(os.date_signature).toLocaleDateString('fr-FR')}</div>}
+                                {os.date_signature && <div className="text-[0.6875rem] text-green-600">{t('projectdetail_signed_on', { date: new Date(os.date_signature).toLocaleDateString('fr-FR') })}</div>}
                               </td>
                               <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300 whitespace-nowrap">{os.montant_devis_presente != null ? formatCurrency(Number(os.montant_devis_presente)) : '—'}</td>
                               <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
@@ -2235,31 +2242,31 @@ export default function ProjectDetail() {
                               </td>
                               <td className="px-4 py-3 text-center">
                                 {os.incidences_delais_type === 'oui'
-                                  ? <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? `+${os.delai_execution}j` : 'Oui'}</span>
+                                  ? <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? t('projectdetail_amendment_days_short', { days: os.delai_execution }) : t('projectdetail_field_yes')}</span>
                                   : <span className="text-[var(--tblr-muted)] text-[0.6875rem]">—</span>}
                               </td>
-                              <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
+                              <td className="px-4 py-3 text-center">{osStatusBadge(os.status, 'avenant')}</td>
                               <td className="px-4 py-3 text-center">
                                 <div className="flex items-center justify-center gap-1">
-                                  {os.status === 'draft' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[0.6875rem] font-bold transition"><IconSend size={11} /> Soumettre</button>}
+                                  {os.status === 'draft' && <button type="button" onClick={() => handleUpdateAvenantStatus(os.id, 'submitted')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 hover:bg-amber-200 text-amber-700 text-[0.6875rem] font-bold transition"><IconSend size={11} /> {t('projectdetail_amendment_action_submit')}</button>}
                                   {os.status === 'submitted' && (<>
-                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'approved')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition"><IconCheck size={11} /> Approuver</button>
-                                    <button onClick={() => handleUpdateAvenantStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[0.6875rem] font-bold transition"><IconX size={11} /> Rejeter</button>
+                                    <button type="button" onClick={() => handleUpdateAvenantStatus(os.id, 'approved')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition"><IconCheck size={11} /> {t('projectdetail_amendment_action_accept')}</button>
+                                    <button type="button" onClick={() => handleUpdateAvenantStatus(os.id, 'rejected')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-red-100 hover:bg-red-200 text-red-700 text-[0.6875rem] font-bold transition"><IconX size={11} /> {t('projectdetail_amendment_action_refuse')}</button>
                                   </>)}
-                                  {os.status === 'rejected' && <button onClick={() => handleUpdateAvenantStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[0.6875rem] font-bold transition"><IconRefresh size={11} /> Rouvrir</button>}
+                                  {os.status === 'rejected' && <button type="button" onClick={() => handleUpdateAvenantStatus(os.id, 'draft')} className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 text-zinc-600 text-[0.6875rem] font-bold transition"><IconRefresh size={11} /> {t('projectdetail_amendment_action_reopen')}</button>}
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
-                                  <button title="Exporter PDF avenant" onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-[var(--tblr-muted)] hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                  <button title="Supprimer l'avenant" aria-label="Supprimer l'avenant" onClick={() => handleDeleteAvenant(os.id)} className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                  <button type="button" title={t('projectdetail_amendment_export_pdf')} aria-label={t('projectdetail_amendment_export_pdf')} onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-[var(--tblr-muted)] hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
+                                  <button type="button" title={t('projectdetail_amendment_delete')} aria-label={t('projectdetail_amendment_delete')} onClick={() => handleDeleteAvenant(os.id)} className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
                                 </div>
                               </td>
                             </tr>
                           ));
                         })()}
                         {moeAvenants.length === 0 && (
-                          <tr><td colSpan={10} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun avenant. Cliquez sur "Nouvel avenant" pour commencer.</td></tr>
+                          <tr><td colSpan={10} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_amendments_empty')}</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -2319,7 +2326,7 @@ export default function ProjectDetail() {
                   // l'équipe de maîtrise d'œuvre (le groupement), alors que
                   // seule cette colonne, une fois isolée, donne la facture de
                   // l'agence elle-même.
-                  const agencyName = (settings as any)?.agencyName || 'Agence';
+                  const agencyName = (settings as any)?.agencyName || t('projectdetail_note_agency_fallback');
 
                   // Nom affiché d'un cotraitant/sous-traitant : toujours relu
                   // depuis le contrat courant (par contact_id), jamais depuis
@@ -2331,11 +2338,11 @@ export default function ProjectDetail() {
                   // nom connu plutôt que d'afficher un intitulé vide.
                   const ctDisplayName = (ct: any) => {
                     const rec = cotraitants.find((c: any) => (c.contact_id || c.contact_name) === (ct.contact_id || ct.nom));
-                    return rec?.contact_name || rec?.specialty || ct.nom || 'Cotraitant';
+                    return rec?.contact_name || rec?.specialty || ct.nom || t('projectdetail_note_cotraitant_fallback');
                   };
                   const stDisplayName = (st: any) => {
                     const rec = sousTraitants.find((s: any) => (s.contact_id || s.contact_name) === (st.contact_id || st.nom));
-                    return rec?.contact_name || rec?.specialty || st.nom || 'Sous-traitant';
+                    return rec?.contact_name || rec?.specialty || st.nom || t('projectdetail_note_soustraitant_fallback');
                   };
 
                   /**
@@ -2371,9 +2378,9 @@ export default function ProjectDetail() {
                   const payeurLabel = (st: any) => {
                     const payeur = payeurEffectif(st);
                     if (payeur === 'agence') return null;
-                    if (payeur === 'moa') return "réglé par le MOA";
+                    if (payeur === 'moa') return t('projectdetail_note_paid_by_moa');
                     const ct = cotraitants.find((c: any) => c.id === payeur);
-                    return ct ? `réglé par ${ct.contact_name || ct.specialty || 'cotraitant'}` : null;
+                    return ct ? t('projectdetail_note_paid_by', { name: ct.contact_name || ct.specialty || t('projectdetail_note_cotraitant_fallback') }) : null;
                   };
 
                   // Plafonds de ventilation : le cumul déjà facturé sur les notes
@@ -2738,15 +2745,20 @@ export default function ProjectDetail() {
                     Envoyée: 'bg-blue-100 text-blue-700',
                     Payée: 'bg-green-100 text-green-700',
                   };
+                  // Le statut est enregistré en français (valeur de base) ; seul
+                  // son affichage passe par la traduction.
+                  const NOTE_STATUS_KEYS: Record<string, string> = { Brouillon: 'draft', Envoyée: 'sent', Payée: 'paid' };
+                  const noteStatusLabel = (status: string) => NOTE_STATUS_KEYS[status] ? t(`projectdetail_note_status_${NOTE_STATUS_KEYS[status]}`) : status;
 
                   return (
                     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <CardHeader
                         icon={IconReceipt}
-                        title="Notes d'Honoraires"
-                        description="Acomptes sur honoraires de maîtrise d'œuvre avec avancement par phase"
+                        title={t('projectdetail_notes_title')}
+                        description={t('projectdetail_notes_desc')}
                         action={
                           <button
+                            type="button"
                             onClick={() => {
                               setNoteForm(initNoteForm());
                               setEditingNote(null);
@@ -2755,7 +2767,7 @@ export default function ProjectDetail() {
                             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                           >
                             <IconPlus size={14} />
-                            Nouvelle note
+                            {t('projectdetail_notes_new')}
                           </button>
                         }
                       />
@@ -2764,9 +2776,9 @@ export default function ProjectDetail() {
                       {notesHonoraires.length > 0 && (
                         <div className="px-6 pt-4 pb-2 grid grid-cols-3 gap-3">
                           {[
-                            { label: 'Montant HT facturé', value: totalNotesHT, color: 'blue' },
-                            { label: 'Montant TTC facturé', value: totalNotesTTC, color: 'indigo' },
-                            { label: 'Restant à facturer', value: Math.max(0, honRevises - totalNotesHT), color: 'amber' },
+                            { label: t('projectdetail_notes_kpi_ht'), value: totalNotesHT, color: 'blue' },
+                            { label: t('projectdetail_notes_kpi_ttc'), value: totalNotesTTC, color: 'indigo' },
+                            { label: t('projectdetail_notes_kpi_remaining'), value: Math.max(0, honRevises - totalNotesHT), color: 'amber' },
                           ].map(kpi => (
                             <StatTile
                               key={kpi.label}
@@ -2783,38 +2795,38 @@ export default function ProjectDetail() {
                         <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-5">
                           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                             <div className="space-y-1">
-                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° Note</label>
-                              <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              <label htmlFor="note-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_note_number')}</label>
+                              <input id="note-numero" type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.numero} onChange={e => setNoteForm({ ...noteForm, numero: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
-                              <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              <label htmlFor="note-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_col_date')}</label>
+                              <input id="note-date" type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.date} onChange={e => setNoteForm({ ...noteForm, date: e.target.value })} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">TVA (%)</label>
-                              <input type="number" min={0} max={30} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              <label htmlFor="note-tva" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_note_vat')}</label>
+                              <input id="note-tva" type="number" min={0} max={30} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.tva_rate} onChange={e => setNoteForm({ ...noteForm, tva_rate: parseFloat(e.target.value) || 20 })} />
                             </div>
                             <div className="space-y-1">
-                              <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
-                              <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              <label htmlFor="note-statut" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_col_status')}</label>
+                              <select id="note-statut" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                 value={noteForm.status} onChange={e => setNoteForm({ ...noteForm, status: e.target.value })}>
-                                {['Brouillon', 'Envoyée', 'Payée'].map(s => <option key={s} value={s}>{s}</option>)}
+                                {['Brouillon', 'Envoyée', 'Payée'].map(s => <option key={s} value={s}>{noteStatusLabel(s)}</option>)}
                               </select>
                             </div>
                           </div>
                           <div className="space-y-1">
-                            <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Objet</label>
-                            <input type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            <label htmlFor="note-objet" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_note_subject')}</label>
+                            <input id="note-objet" type="text" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={noteForm.objet} onChange={e => setNoteForm({ ...noteForm, objet: e.target.value })}
-                              placeholder="ex : Acompte sur honoraires ESQ + APS" />
+                              placeholder={t('projectdetail_note_subject_placeholder')} />
                           </div>
 
                           {/* Ventilation par mission — agence, cotraitants et sous-traitants */}
                           <div>
-                            <p className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase mb-3">Ventilation par mission</p>
+                            <p className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase mb-3">{t('projectdetail_note_breakdown')}</p>
                             {/* min-w-full (et non w-full) : avec un cotraitant et plusieurs
                                 sous-traitants, cette ligne dépasse vite la largeur de l'écran
                                 (deux colonnes % + € par membre). min-w-full garde le tableau à
@@ -2825,19 +2837,19 @@ export default function ProjectDetail() {
                               <table className="min-w-full text-xs border-collapse">
                                 <thead>
                                   <tr className="bg-[var(--tblr-surface-2)]">
-                                    <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom whitespace-nowrap">Mission</th>
+                                    <th rowSpan={2} className="text-left font-bold text-[var(--tblr-muted)] uppercase p-2 sticky left-0 bg-[var(--tblr-surface-2)] align-bottom whitespace-nowrap">{t('projectdetail_note_col_mission')}</th>
                                     {/* Groupement : le pourcentage de la mission facturé par
                                         l'ensemble de l'équipe dans cette note, et son montant. */}
-                                    <th colSpan={2} title="Total pour toute l'équipe de maîtrise d'œuvre (agence + cotraitants + sous-traitants) — ce que facture la note d'honoraires dans son ensemble" className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Groupement</th>
+                                    <th colSpan={2} title={t('projectdetail_note_col_groupement_title')} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">{t('projectdetail_note_col_groupement')}</th>
                                     {/* L'agence (mandataire) et les cotraitants sous une même
                                         entête : ce sont les membres du groupement titulaires du
                                         marché de maîtrise d'œuvre, par opposition aux
                                         sous-traitants regroupés à leur droite. */}
                                     <th colSpan={2 + (noteForm.cotraitants_facturation || []).length * 2} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">
-                                      {(noteForm.cotraitants_facturation || []).length > 0 ? 'Mandataire et cotraitants' : 'Mandataire'}
+                                      {(noteForm.cotraitants_facturation || []).length > 0 ? t('projectdetail_note_col_members') : t('projectdetail_note_col_mandataire')}
                                     </th>
                                     {(noteForm.sous_traitants_facturation || []).length > 0 && (
-                                      <th colSpan={(noteForm.sous_traitants_facturation || []).length} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">Sous-traitants</th>
+                                      <th colSpan={(noteForm.sous_traitants_facturation || []).length} className="text-center font-bold text-[var(--tblr-muted)] uppercase p-1 border-l border-[var(--tblr-border)]">{t('projectdetail_note_col_subcontractors')}</th>
                                     )}
                                   </tr>
                                   <tr className="bg-[var(--tblr-surface-2)]">
@@ -2907,7 +2919,7 @@ export default function ProjectDetail() {
                                           <span className="inline-flex items-center gap-1.5">
                                             {basePhase?.name || phase.phase_name}
                                             {(noteForm.cotraitants_facturation || []).length > 0 && (
-                                              <button type="button" title="Reprendre la répartition du contrat pour cette mission"
+                                              <button type="button" title={t('projectdetail_note_reset_split')} aria-label={t('projectdetail_note_reset_split_aria', { mission: basePhase?.name || phase.phase_name })}
                                                 className="p-0.5 rounded text-blue-500 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex-shrink-0"
                                                 onClick={() => resetRepartition(idx)}><IconRefresh size={12} /></button>
                                             )}
@@ -2916,7 +2928,8 @@ export default function ProjectDetail() {
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
                                           <div className="flex items-center gap-1 justify-center">
                                             <input type="number" min={0} max={pctRestant} step={5}
-                                              title={`Part de la mission facturée dans cette note pour tout le groupement (reste ${pctRestant.toFixed(1)} % à facturer)`}
+                                              title={t('projectdetail_note_groupement_pct_title', { remaining: pctRestant.toFixed(1) })}
+                                              aria-label={t('projectdetail_note_groupement_pct_aria', { mission: basePhase?.name || phase.phase_name })}
                                               className="w-14 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center font-bold outline-none focus:ring-2 focus:ring-blue-500"
                                               value={phase.avancement_pct}
                                               onChange={e => updateGroupementPct(idx, Math.min(pctRestant, Math.max(0, parseFloat(e.target.value) || 0)))} />
@@ -2924,11 +2937,11 @@ export default function ProjectDetail() {
                                           </div>
                                         </td>
                                         <td className="p-2 text-right font-bold text-zinc-700 dark:text-zinc-300 whitespace-nowrap"
-                                          title={`Montant total de la mission pour le groupement : ${eur(baseGroupement)}`}>
+                                          title={t('projectdetail_note_groupement_amount_title', { amount: eur(baseGroupement) })}>
                                           {eur(montantGroupement)}
                                           {repartitionIncomplete && (
-                                            <span className="block text-[0.6875rem] font-normal text-amber-600" title="La somme des parts des membres n'atteint pas 100 % du montant groupement">
-                                              répartition : {totalParts.toFixed(1)} %
+                                            <span className="block text-[0.6875rem] font-normal text-amber-600" title={t('projectdetail_note_split_incomplete_title')}>
+                                              {t('projectdetail_note_split_incomplete', { pct: totalParts.toFixed(1) })}
                                             </span>
                                           )}
                                         </td>
@@ -2938,7 +2951,8 @@ export default function ProjectDetail() {
                                         <td className="p-1 border-l border-[var(--tblr-border)]">
                                           <div className="flex items-center gap-1">
                                             <input type="number" min={0} max={100} step="any"
-                                              title="Quote-part de l'agence sur cette mission, une fois les sous-traitants payés"
+                                              title={t('projectdetail_note_share_title', { name: agencyName })}
+                                              aria-label={t('projectdetail_note_share_aria', { name: agencyName, mission: basePhase?.name || phase.phase_name })}
                                               className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
                                               value={phase.part_pct ?? 0}
                                               onChange={e => updatePartAgence(idx, Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))} />
@@ -2950,10 +2964,10 @@ export default function ProjectDetail() {
                                           {stTotalMission > 0 && (
                                             <span className="block text-[0.6875rem] font-normal text-amber-600"
                                               title={stReverse('agence') > 0
-                                                ? "Pourcentage réellement facturé, sous-traitants réglés par l'agence compris — elle les reverse ensuite"
-                                                : 'Pourcentage réellement facturé, la sous-traitance étant portée par un autre membre'}>
+                                                ? t('projectdetail_note_effective_pct_payer', { name: agencyName })
+                                                : t('projectdetail_note_effective_pct_other')}>
                                               {pct1(pctEffectif(Number(phase.montant_phase) || 0))} %
-                                              {stReverse('agence') > 0 && ` · dont ${eur(stReverse('agence'))} ST`}
+                                              {stReverse('agence') > 0 && ` · ${t('projectdetail_note_including_st', { amount: eur(stReverse('agence')) })}`}
                                             </span>
                                           )}
                                         </td>
@@ -2965,7 +2979,8 @@ export default function ProjectDetail() {
                                               <td className="p-1 border-l border-[var(--tblr-border)]">
                                                 <div className="flex items-center gap-1">
                                                   <input type="number" min={0} max={100} step="any"
-                                                    title={`Quote-part de ${ctDisplayName(ct)} sur cette mission, une fois les sous-traitants payés`}
+                                                    title={t('projectdetail_note_share_title', { name: ctDisplayName(ct) })}
+                                                    aria-label={t('projectdetail_note_share_aria', { name: ctDisplayName(ct), mission: basePhase?.name || phase.phase_name })}
                                                     className="w-12 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-center outline-none focus:ring-2 focus:ring-blue-500"
                                                     value={ctPhase.part_pct ?? 0}
                                                     onChange={e => updateIntervenantPhase('cotraitants_facturation', ctIdx, phase.phase_id, basePhase?.name || phase.phase_name, { part_pct: Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)) })} />
@@ -2977,10 +2992,10 @@ export default function ProjectDetail() {
                                                 {stTotalMission > 0 && (
                                                   <span className="block text-[0.6875rem] font-normal text-amber-600"
                                                     title={reverse > 0
-                                                      ? `Pourcentage réellement facturé, sous-traitants réglés par ${ctDisplayName(ct)} compris — il les reverse ensuite`
-                                                      : 'Pourcentage réellement facturé, la sous-traitance étant portée par un autre membre'}>
+                                                      ? t('projectdetail_note_effective_pct_payer', { name: ctDisplayName(ct) })
+                                                      : t('projectdetail_note_effective_pct_other')}>
                                                     {pct1(pctEffectif(Number(ctPhase.montant_phase) || 0))} %
-                                                    {reverse > 0 && ` · dont ${eur(reverse)} ST`}
+                                                    {reverse > 0 && ` · ${t('projectdetail_note_including_st', { amount: eur(reverse) })}`}
                                                   </span>
                                                 )}
                                               </td>
@@ -3010,7 +3025,8 @@ export default function ProjectDetail() {
                                           return (
                                             <td key={`st-${stIdx}`} className="p-1 border-l border-[var(--tblr-border)]">
                                               <input type="number" min={0} max={stCap}
-                                                title={`Montant réglé à ${stDisplayName(st)} sur cette mission — prélevé sur l'enveloppe de la mission, et compris dans le montant facturé par celui qui le règle`}
+                                                title={t('projectdetail_note_st_amount_title', { name: stDisplayName(st) })}
+                                                aria-label={t('projectdetail_note_st_amount_aria', { name: stDisplayName(st), mission: basePhase?.name || phase.phase_name })}
                                                 className="w-20 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded p-1 text-right outline-none focus:ring-2 focus:ring-blue-500"
                                                 value={stPhase.montant_phase}
                                                 onChange={e => updateIntervenantPhase('sous_traitants_facturation', stIdx, phase.phase_id, basePhase?.name || phase.phase_name, { montant_phase: Math.min(Math.max(0, parseFloat(e.target.value) || 0), stCap) })} />
@@ -3023,7 +3039,7 @@ export default function ProjectDetail() {
                                 </tbody>
                                 <tfoot>
                                   <tr className="border-t-2 border-[var(--tblr-border)] font-bold text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)]">
-                                    <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">Total HT</td>
+                                    <td className="p-2 sticky left-0 bg-[var(--tblr-surface-2)]">{t('projectdetail_note_total_ht')}</td>
                                     {(() => {
                                       // Le total du groupement est la somme des montants de
                                       // mission facturés (base × avancement), et NON la somme des
@@ -3039,7 +3055,7 @@ export default function ProjectDetail() {
                                       return (
                                         <>
                                           <td className="p-2 border-l border-[var(--tblr-border)] text-center whitespace-nowrap">
-                                            {baseGroupement > 0 ? `${(totalGroupement / baseGroupement * 100).toFixed(1)} %` : '—'}
+                                            {baseGroupement > 0 ? `${(totalGroupement / baseGroupement * 100).toFixed(1)} %` : ''}
                                           </td>
                                           <td className="p-2 text-right whitespace-nowrap">
                                             {new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(totalGroupement)}
@@ -3065,7 +3081,16 @@ export default function ProjectDetail() {
                                 </tfoot>
                               </table>
                             </div>
-                            <p className="mt-2 text-[0.6875rem] text-[var(--tblr-muted)]">Le pourcentage se saisit une seule fois par mission, dans la colonne « Groupement » : c'est la part de la mission facturée au maître d'ouvrage pour toute l'équipe (par exemple 100 % de l'esquisse et 50 % de l'APS). Ce montant ne bouge pas selon les sous-traitants saisis : ce qui leur est reversé sort de l'enveloppe de la mission, jamais en supplément. Les quote-parts des membres portent donc sur ce qui reste une fois les sous-traitants payés, et le membre qui en règle un le facture au maître d'ouvrage avant de le lui reverser — son montant est augmenté d'autant (« dont … ST »), celui des autres baissé, chacun touchant bien son pourcentage. La somme des colonnes des membres est ainsi égale, sur chaque ligne, à 100 % du montant de la mission, les colonnes sous-traitants n'en étant que le détail. Le cumul d'une mission, toutes notes confondues, ne peut pas dépasser 100 %. La facture, elle, ne porte que sur {agencyName} : seule cette colonne alimente la facture brouillon, les montants cotraitants restant hors comptabilité agence.</p>
+                            <p className="mt-2 text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_note_help_short', { agency: agencyName })}</p>
+                            <details className="mt-1 text-[0.6875rem] text-[var(--tblr-muted)]">
+                              <summary className="cursor-pointer font-semibold w-fit">{t('projectdetail_note_help_more')}</summary>
+                              <ul className="mt-1.5 space-y-1 list-disc pl-4 max-w-prose">
+                                <li>{t('projectdetail_note_help_1')}</li>
+                                <li>{t('projectdetail_note_help_2')}</li>
+                                <li>{t('projectdetail_note_help_3')}</li>
+                                <li>{t('projectdetail_note_help_4', { agency: agencyName })}</li>
+                              </ul>
+                            </details>
                           </div>
 
                           {/* Suivi du pourcentage de facturation */}
@@ -3078,7 +3103,7 @@ export default function ProjectDetail() {
                             return (
                               <div className="space-y-1">
                                 <div className="flex items-center justify-between text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">
-                                  <span>Avancement cumulé de la facturation (agence)</span>
+                                  <span>{t('projectdetail_note_cumulative', { agency: agencyName })}</span>
                                   <span className="text-zinc-700 dark:text-zinc-300">{pct.toFixed(1)} %</span>
                                 </div>
                                 <div className="h-1.5 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden">
@@ -3089,10 +3114,10 @@ export default function ProjectDetail() {
                           })()}
 
                           <div className="flex gap-2 justify-end pt-2 border-t border-[var(--tblr-border)]">
-                            <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
+                            <button type="button" onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">{t('projectdetail_dialog_cancel')}</button>
                             <button type="button" onClick={saveNote} disabled={isSavingNote} aria-busy={isSavingNote} className="px-4 py-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition disabled:opacity-60 disabled:cursor-wait">
                               {isSavingNote && <span aria-hidden className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
-                              {editingNote ? 'Mettre à jour' : 'Créer la note'}
+                              {editingNote ? t('projectdetail_note_save_edit') : t('projectdetail_note_save_new')}
                             </button>
                           </div>
                         </div>
@@ -3101,7 +3126,7 @@ export default function ProjectDetail() {
                       {/* Liste des notes */}
                       {notesHonoraires.length === 0 && !isAddingNote ? (
                         <div className="p-8 text-center text-[var(--tblr-muted)] italic text-sm">
-                          Aucune note d'honoraires. Cliquez sur "Nouvelle note" pour créer un acompte.
+                          {t('projectdetail_notes_empty')}
                         </div>
                       ) : (
                         <div className="divide-y divide-[var(--tblr-border)]">
@@ -3113,7 +3138,7 @@ export default function ProjectDetail() {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 flex-wrap mb-1">
                                       {note.numero && <span className="text-[0.6875rem] font-mono px-2 py-0.5 rounded bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]">{note.numero}</span>}
-                                      <span className={cn('text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', STATUS_NOTE_COLORS[note.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{note.status}</span>
+                                      <span className={cn('text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider', STATUS_NOTE_COLORS[note.status] || 'bg-zinc-100 text-[var(--tblr-muted)]')}>{noteStatusLabel(note.status)}</span>
                                       {note.date && <span className="text-[0.6875rem] text-[var(--tblr-muted)]">{new Date(note.date).toLocaleDateString('fr-FR')}</span>}
                                     </div>
                                     {note.objet && <p className="text-sm text-zinc-700 dark:text-zinc-300 font-medium">{note.objet}</p>}
@@ -3127,14 +3152,14 @@ export default function ProjectDetail() {
                                       </div>
                                     )}
                                     <div className="flex gap-4 mt-1 text-xs text-[var(--tblr-muted)]">
-                                      <span className="font-bold text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ht)} HT</span>
-                                      <span>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ttc)} TTC</span>
+                                      <span className="font-bold text-blue-600">{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ht)} {t('projectdetail_ht')}</span>
+                                      <span>{new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(note.montant_ttc)} {t('projectdetail_ttc')}</span>
                                       {note.pct_facturation_cumule != null && (
                                         <span className="flex items-center gap-1">
                                           <span className="inline-block w-16 h-1.5 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden align-middle">
                                             <span className="block h-full bg-blue-600" style={{ width: `${Math.max(0, Math.min(100, note.pct_facturation_cumule))}%` }} />
                                           </span>
-                                          {note.pct_facturation_cumule.toFixed(1)} % cumulé
+                                          {t('projectdetail_note_cumulative_pct', { pct: note.pct_facturation_cumule.toFixed(1) })}
                                         </span>
                                       )}
                                       {note.invoice_id && (
@@ -3162,7 +3187,7 @@ export default function ProjectDetail() {
                                         <span className="sm:hidden">{t('projectdetail_generate_invoice_short')}</span>
                                       </button>
                                     )}
-                                    <button type="button" title="Exporter en PDF" aria-label="Exporter en PDF" onClick={() => exportNotePdf(note)} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconFileDownload size={16} /></button>
+                                    <button type="button" title={t('projectdetail_note_export_pdf')} aria-label={t('projectdetail_note_export_pdf')} onClick={() => exportNotePdf(note)} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconFileDownload size={16} /></button>
                                     <button type="button" title={t('projectdetail_edit_note')} aria-label={t('projectdetail_edit_note')} onClick={() => {
                                       setEditingNote(note);
                                       setNoteForm(noteFormFromSaved(note));
@@ -3198,10 +3223,10 @@ export default function ProjectDetail() {
                             <IconUpload size={48} />
                           </div>
                         )}
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 rounded-lg font-bold border border-white/30 transition">
-                            <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} />
-                            Change Cover Image
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 pointer-coarse:bg-transparent pointer-coarse:items-start pointer-coarse:justify-end pointer-coarse:p-3 transition-opacity flex items-center justify-center">
+                          <label className="cursor-pointer bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-6 py-3 pointer-coarse:px-3 pointer-coarse:py-2 rounded-lg font-bold border border-white/30 transition focus-within:ring-2 focus-within:ring-white">
+                            <input type="file" className="sr-only" accept="image/*" onChange={handleImageUpload} />
+                            {project.image_url ? t('projectdetail_cover_change') : t('projectdetail_cover_add')}
                           </label>
                         </div>
                         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
@@ -3211,7 +3236,8 @@ export default function ProjectDetail() {
                             className="w-full bg-transparent border-none text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
                             value={project.name}
                             onChange={e => setProject({...project, name: e.target.value})}
-                            placeholder="Project Name"
+                            aria-label={t('projectdetail_full_name')}
+                            placeholder={t('projectdetail_full_name')}
                           />
                           <div className="flex flex-wrap items-center gap-4">
                             <ContactAutocomplete
@@ -3224,17 +3250,18 @@ export default function ProjectDetail() {
                                 }
                               }}
                               onAddNew={() => setIsContactModalOpen(true)}
-                              placeholder="Client Name"
+                              placeholder={t('projectdetail_full_client')}
                               inputClassName="bg-white/10 border border-white/20 text-white placeholder:text-white/60"
-                              addNewLabel="Add New Client"
+                              addNewLabel={t('projectdetail_full_client_new')}
                             />
-                            <span className="text-white/40">•</span>
+                            <span aria-hidden className="text-white/40">•</span>
                             <input 
                               type="text"
                               className="bg-white/10 border border-white/20 rounded-lg px-3 py-1 text-sm font-medium text-white placeholder:text-white/60 focus:ring-2 focus:ring-blue-500 outline-none"
                               value={project.category || ''}
                               onChange={e => setProject({...project, category: e.target.value})}
-                              placeholder="Category"
+                              aria-label={t('projectdetail_full_category')}
+                              placeholder={t('projectdetail_full_category')}
                             />
                           </div>
                         </div>
@@ -3243,23 +3270,25 @@ export default function ProjectDetail() {
                       <div className="p-8 space-y-8">
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                           <div className="md:col-span-2 space-y-2">
-                            <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Description</label>
-                            <textarea 
+                            <label htmlFor="fiche-description" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('project_overview_objet')}</label>
+                            <textarea
+                              id="fiche-description"
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] min-h-[120px] resize-none"
                               value={project.description}
                               onChange={e => setProject({...project, description: e.target.value})}
-                              placeholder="Project description..."
+                              placeholder={t('project_overview_objet_placeholder')}
                             />
                           </div>
                           <div className="space-y-6">
                             <div className="space-y-2">
-                              <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Chef de projet</label>
-                              <input 
+                              <label htmlFor="fiche-chef-projet" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('project_overview_project_manager')}</label>
+                              <input
+                                id="fiche-chef-projet"
                                 type="text"
                                 className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                                 value={project.project_manager || ''}
                                 onChange={e => setProject({...project, project_manager: e.target.value})}
-                                placeholder="Manager Name"
+                                placeholder={t('projectdetail_full_manager_placeholder')}
                               />
                             </div>
                           </div>
@@ -3267,8 +3296,9 @@ export default function ProjectDetail() {
 
                         <div className="grid grid-cols-1 md:grid-cols-5 gap-6 pt-8 border-t border-[var(--tblr-border)]">
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Surface (m²)</label>
-                            <input 
+                            <label htmlFor="fiche-surface" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_surface')}</label>
+                            <input
+                              id="fiche-surface"
                               type="number"
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                               value={project.surface || 0}
@@ -3276,32 +3306,39 @@ export default function ProjectDetail() {
                             />
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Coût Travaux</label>
+                            <label htmlFor="fiche-cout-travaux" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_works_cost_input')}</label>
                             <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                              <input 
+                              <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                              <input
+                                id="fiche-cout-travaux"
                                 type="number"
-                                className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
+                                readOnly={!!contratHonoraires}
+                                title={contratHonoraires ? t('projectdetail_fees_locked') : undefined}
+                                className={cn('w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold', contratHonoraires && 'opacity-70 cursor-default')}
                                 value={project.construction_cost || 0}
                                 onChange={e => setProject({...project, construction_cost: Number(e.target.value)})}
                               />
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Rémunération</label>
+                            <label htmlFor="fiche-remuneration" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_initial_input')}</label>
                             <div className="relative">
-                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                              <input 
+                              <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                              <input
+                                id="fiche-remuneration"
                                 type="number"
-                                className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
+                                readOnly={!!contratHonoraires}
+                                title={contratHonoraires ? t('projectdetail_fees_locked') : undefined}
+                                className={cn('w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold', contratHonoraires && 'opacity-70 cursor-default')}
                                 value={project.remuneration || 0}
                                 onChange={e => setProject({...project, remuneration: Number(e.target.value)})}
                               />
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Progression (%)</label>
-                            <input 
+                            <label htmlFor="fiche-progression" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_progress')}</label>
+                            <input
+                              id="fiche-progression"
                               type="number"
                               min="0"
                               max="100"
@@ -3311,8 +3348,9 @@ export default function ProjectDetail() {
                             />
                           </div>
                           <div className="space-y-2">
-                            <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Code Projet</label>
-                            <input 
+                            <label htmlFor="fiche-code" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_code')}</label>
+                            <input
+                              id="fiche-code"
                               type="text"
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                               value={project.project_code || ''}
@@ -3331,7 +3369,7 @@ export default function ProjectDetail() {
                           <div className="w-10 h-10 rounded-full flex items-center justify-center shrink-0" style={{ background: 'var(--tblr-surface-2)' }}>
                             <IconExternalLink size={20} style={{ color: 'var(--tblr-primary)' }} />
                           </div>
-                          <h3 className="text-base font-bold" style={{ color: 'var(--tblr-text)' }}>Localisation</h3>
+                          <h3 className="text-base font-bold" style={{ color: 'var(--tblr-text)' }}>{t('projectdetail_full_location')}</h3>
                         </div>
                         <div className="mt-4">
                           <AddressAutocomplete 
@@ -3344,12 +3382,12 @@ export default function ProjectDetail() {
                         <div className="space-y-6 p-6">
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <InfoPanelBoundary label="RNB"><RNBInfo address={project.address} /></InfoPanelBoundary>
-                            <InfoPanelBoundary label="Cadastre"><CadastreDownload address={project.address} /></InfoPanelBoundary>
-                            <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={project.address} /></InfoPanelBoundary>
+                            <InfoPanelBoundary label={t('projectdetail_full_cadastre')}><CadastreDownload address={project.address} /></InfoPanelBoundary>
+                            <InfoPanelBoundary label={t('projectdetail_full_monuments')}><HistoricalMonuments address={project.address} /></InfoPanelBoundary>
                           </div>
                           <div className="bg-zinc-100 dark:bg-zinc-800 rounded-lg overflow-hidden border border-[var(--tblr-border)]">
                             <div className="bg-white dark:bg-zinc-900 relative h-[500px]">
-                              <InfoPanelBoundary label="Cadastre">
+                              <InfoPanelBoundary label={t('projectdetail_full_cadastre')}>
                                 <GeoportailMap
                                   address={project.address}
                                   onSelectionChange={(parcels: CadastreParcel[]) => {
@@ -3372,12 +3410,14 @@ export default function ProjectDetail() {
                       <div className="p-6 rounded-lg space-y-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{t('projects_milestones_title')}</h3>
-                          <button 
+                          <button
+                            type="button"
                             onClick={() => setIsAddingMilestone(!isAddingMilestone)}
+                            aria-expanded={isAddingMilestone}
                             className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                           >
                             <IconPlus size={14} />
-                            Ajouter un milestone
+                            {t('project_overview_add_task')}
                           </button>
                         </div>
 
@@ -3385,18 +3425,20 @@ export default function ProjectDetail() {
                           <div className="p-6 bg-[var(--tblr-surface-2)] rounded-lg border border-[var(--tblr-border)] space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div className="space-y-1">
-                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Titre</label>
-                                <input 
+                                <label htmlFor="jalon-titre" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('project_overview_milestone_title')}</label>
+                                <input
+                                  id="jalon-titre"
                                   type="text"
                                   className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                   value={newMilestoneTitle}
                                   onChange={e => setNewMilestoneTitle(e.target.value)}
-                                  placeholder="ex: Permis de construire"
+                                  placeholder={t('projectdetail_milestone_placeholder')}
                                 />
                               </div>
                               <div className="space-y-1">
-                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
-                                <input 
+                                <label htmlFor="jalon-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('project_overview_milestone_date')}</label>
+                                <input
+                                  id="jalon-date"
                                   type="date"
                                   className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                                   value={newMilestoneDate}
@@ -3405,17 +3447,19 @@ export default function ProjectDetail() {
                               </div>
                             </div>
                             <div className="flex justify-end gap-3">
-                              <button 
+                              <button
+                                type="button"
                                 onClick={() => setIsAddingMilestone(false)}
                                 className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors"
                               >
-                                Annuler
+                                {t('projectdetail_dialog_cancel')}
                               </button>
-                              <button 
+                              <button
+                                type="button"
                                 onClick={handleAddMilestone}
                                 className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                               >
-                                Ajouter
+                                {t('project_overview_milestone_add')}
                               </button>
                             </div>
                           </div>
@@ -3449,7 +3493,11 @@ export default function ProjectDetail() {
                           {milestones.length > 0 ? milestones.map((m) => (
                             <div key={m.id} className="flex items-center justify-between group">
                               <div className="flex items-center gap-3">
-                                <button 
+                                <button
+                                  type="button"
+                                  role="checkbox"
+                                  aria-checked={!!m.completed}
+                                  aria-label={m.title}
                                   onClick={() => handleToggleMilestone(m)}
                                   className={cn(
                                     "transition-colors",
@@ -3464,11 +3512,11 @@ export default function ProjectDetail() {
                                   </p>
                                   <div className="flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)]">
                                     <IconCalendar size={10} />
-                                    {new Date(m.due_date).toLocaleDateString()}
+                                    {new Date(m.due_date).toLocaleDateString('fr-FR')}
                                   </div>
                                 </div>
                               </div>
-                              <button title="Supprimer le jalon" aria-label="Supprimer le jalon" 
+                              <button type="button" title={t('projectdetail_milestone_delete')} aria-label={t('projectdetail_milestone_delete_named', { title: m.title })}
                                 onClick={async () => {
                                   if (!(await confirmDelete('projectdetail_confirm_delete_milestone'))) return;
                                   const res = await fetch(`/api/milestones/${m.id}`, { method: 'DELETE' });
@@ -3481,7 +3529,7 @@ export default function ProjectDetail() {
                               </button>
                             </div>
                           )) : (
-                            <p className="text-xs text-[var(--tblr-muted)] italic text-center py-4">Aucun jalon défini.</p>
+                            <p className="text-xs text-[var(--tblr-muted)] italic text-center py-4">{t('project_overview_no_tasks')}</p>
                           )}
                         </div>
                       </div>
@@ -3490,13 +3538,13 @@ export default function ProjectDetail() {
                       <div className="p-6 rounded-lg space-y-8" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                         <div className="space-y-4">
                           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">01</span>
-                            Détails Client
+                            <span aria-hidden className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">01</span>
+                            {t('projectdetail_ff_section_client')}
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <FormField label="Entreprise?" type="checkbox" value={project.is_entreprise} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_entreprise: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_is_company')} type="checkbox" value={project.is_entreprise} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_entreprise: v}) : null)} />
                             <CompanyAutocomplete 
-                              label="Nom Société" 
+                              label={t('projectdetail_ff_company_name')}
                               value={project.nom_societe || ''} 
                               onChange={(val, details) => {
                                 if (details) {
@@ -3514,57 +3562,57 @@ export default function ProjectDetail() {
                                 }
                               }} 
                             />
-                            <FormField label="RCS / SIRET" value={project.rcs} onChange={(v: any) => setProject(prev => prev ? ({...prev, rcs: v}) : null)} />
-                            <FormField label="Représentant" value={project.representant} onChange={(v: any) => setProject(prev => prev ? ({...prev, representant: v}) : null)} />
-                            <FormField label="Qualité" value={project.qualite} onChange={(v: any) => setProject(prev => prev ? ({...prev, qualite: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_rcs')} value={project.rcs} onChange={(v: any) => setProject(prev => prev ? ({...prev, rcs: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_representative')} value={project.representant} onChange={(v: any) => setProject(prev => prev ? ({...prev, representant: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_capacity')} value={project.qualite} onChange={(v: any) => setProject(prev => prev ? ({...prev, qualite: v}) : null)} />
                           </div>
                           {/* Facturation électronique (Factur-X, Chorus Pro, Super PDP) */}
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
-                            <FormField label="SIRET client (Factur-X)" value={project.client_siret} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_siret: v}) : null)} />
-                            <FormField label="N° TVA client" value={project.client_vat_number} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_vat_number: v}) : null)} />
-                            <FormField label="Maîtrise d'ouvrage publique" type="checkbox" value={project.is_public_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_public_client: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_client_siret')} value={project.client_siret} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_siret: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_client_vat')} value={project.client_vat_number} onChange={(v: any) => setProject(prev => prev ? ({...prev, client_vat_number: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_public_client')} type="checkbox" value={project.is_public_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, is_public_client: v}) : null)} />
                           </div>
                           <p className="text-[0.6875rem] text-[var(--tblr-muted)] -mt-4">
-                            La maîtrise d'ouvrage publique détermine si les factures et situations de ce projet passent par Chorus Pro (marchés publics) ou par Super PDP (marchés privés).
+                            {t('projectdetail_ff_public_client_help')}
                           </p>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-6">
                               <FormField 
-                                label="Adresse Client" 
+                                label={t('projectdetail_ff_client_address')} 
                                 value={project.adresse_client || ''} 
                                 onChange={(v: any) => setProject(prev => prev ? ({...prev, adresse_client: v}) : null)} 
                               />
                               <FormField 
-                                label="Code Postal Client" 
+                                label={t('projectdetail_ff_client_postcode')} 
                                 value={project.cp_client || ''} 
                                 onChange={(v: any) => setProject(prev => prev ? ({...prev, cp_client: v}) : null)} 
                               />
                               <FormField 
-                                label="Ville Client" 
+                                label={t('projectdetail_ff_client_city')} 
                                 value={project.ville_client || ''} 
                                 onChange={(v: any) => setProject(prev => prev ? ({...prev, ville_client: v}) : null)} 
                               />
                             </div>
-                            <FormField label="Téléphone" value={project.telephone} onChange={(v: any) => setProject(prev => prev ? ({...prev, telephone: v}) : null)} />
-                            <FormField label="Portable" value={project.portable} onChange={(v: any) => setProject(prev => prev ? ({...prev, portable: v}) : null)} />
-                            <FormField label="Adresse Mail" type="email" value={project.email_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, email_client: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_phone')} value={project.telephone} onChange={(v: any) => setProject(prev => prev ? ({...prev, telephone: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_mobile')} value={project.portable} onChange={(v: any) => setProject(prev => prev ? ({...prev, portable: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_email')} type="email" value={project.email_client} onChange={(v: any) => setProject(prev => prev ? ({...prev, email_client: v}) : null)} />
                           </div>
                         </div>
 
                         <div className="space-y-4 pt-8 border-t border-[var(--tblr-border)]">
                           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">02</span>
-                            Spécificités du Projet & Terrain
+                            <span aria-hidden className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">02</span>
+                            {t('projectdetail_ff_section_site')}
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <FormField label="Référence" value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
-                            <FormField label="Ind" value={project.ind} onChange={(v: any) => setProject(prev => prev ? ({...prev, ind: v}) : null)} />
-                            <FormField label="Détail du Projet" type="textarea" value={project.projet_detail} onChange={(v: any) => setProject(prev => prev ? ({...prev, projet_detail: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_reference')} value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_index')} value={project.ind} onChange={(v: any) => setProject(prev => prev ? ({...prev, ind: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_detail')} type="textarea" value={project.projet_detail} onChange={(v: any) => setProject(prev => prev ? ({...prev, projet_detail: v}) : null)} />
                           </div>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             <div className="md:col-span-3 space-y-4">
                               <AddressAutocomplete 
-                                label="Adresse Complète Terrain" 
+                                label={t('projectdetail_ff_site_address')}
                                 value={project.adresse_terrain || ''} 
                                 onChange={(val: string) => {
                                   setProject(prev => {
@@ -3593,22 +3641,23 @@ export default function ProjectDetail() {
                                 }} 
                               />
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <FormField label="Code Postal Terrain" value={project.site_postcode} onChange={(v: any) => setProject(prev => prev ? ({...prev, site_postcode: v}) : null)} />
-                                <FormField label="Ville Terrain" value={project.site_city} onChange={(v: any) => setProject(prev => prev ? ({...prev, site_city: v}) : null)} />
+                                <FormField label={t('projectdetail_ff_site_postcode')} value={project.site_postcode} onChange={(v: any) => setProject(prev => prev ? ({...prev, site_postcode: v}) : null)} />
+                                <FormField label={t('projectdetail_ff_site_city')} value={project.site_city} onChange={(v: any) => setProject(prev => prev ? ({...prev, site_city: v}) : null)} />
                               </div>
                             </div>
-                            <FormField label="Référence Cadastrale" value={project.ref_cadastrale} onChange={(v: any) => setProject(prev => prev ? ({...prev, ref_cadastrale: v}) : null)} />
-                            <FormField label="Zone PLU" value={project.zone_plu} onChange={(v: any) => setProject(prev => prev ? ({...prev, zone_plu: v}) : null)} />
-                            <FormField label="Surface Parcelle" value={project.surface_parcelle} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_parcelle: v}) : null)} />
-                            <FormField label="Nom Etablissement" value={project.nom_etablissement} onChange={(v: any) => setProject(prev => prev ? ({...prev, nom_etablissement: v}) : null)} />
-                            <FormField label="Avant Travaux" value={project.avant_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, avant_trav: v}) : null)} />
-                            <FormField label="Après Travaux" value={project.apres_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, apres_trav: v}) : null)} />
-                            <FormField label="Type Et Cat" value={project.type_et_cat} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)} />
-                            <FormField label="Type" value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
-                            <FormField label="Catégorie" value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_cadastre')} value={project.ref_cadastrale} onChange={(v: any) => setProject(prev => prev ? ({...prev, ref_cadastrale: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_plu')} value={project.zone_plu} onChange={(v: any) => setProject(prev => prev ? ({...prev, zone_plu: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_plot_area')} value={project.surface_parcelle} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_parcelle: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_establishment')} value={project.nom_etablissement} onChange={(v: any) => setProject(prev => prev ? ({...prev, nom_etablissement: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_before_works')} value={project.avant_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, avant_trav: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_after_works')} value={project.apres_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, apres_trav: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_erp_type')} value={project.type_et_cat} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_type')} value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_category')} value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />
                             <div className="space-y-1">
-                              <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Type de mission (circulaire MAF)</label>
+                              <label htmlFor="fiche-maf" className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_ff_maf_mission')}</label>
                               <select
+                                id="fiche-maf"
                                 className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
                                 value={project.maf_intercalaire ?? ''}
                                 onChange={(e) => setProject(prev => prev ? ({
@@ -3617,24 +3666,25 @@ export default function ProjectDetail() {
                                   taux_mission: e.target.value === 'jaune' ? prev.taux_mission : undefined,
                                 }) : null)}
                               >
-                                <option value="">Select Type de mission</option>
+                                <option value="">{t('projectdetail_field_select')}</option>
                                 {MAF_INTERCALAIRE_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                               </select>
                             </div>
                             {project.maf_intercalaire === 'jaune' && (
                               <div className="space-y-1">
-                                <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Taux de la mission (T)</label>
+                                <label htmlFor="fiche-taux-mission" className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_ff_maf_rate')}</label>
                                 <select
+                                  id="fiche-taux-mission"
                                   className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
                                   value={project.taux_mission ?? ''}
                                   onChange={(e) => setProject(prev => prev ? ({...prev, taux_mission: e.target.value ? Number(e.target.value) : undefined}) : null)}
                                 >
-                                  <option value="">Select Taux</option>
+                                  <option value="">{t('projectdetail_field_select')}</option>
                                   {TAUX_MISSION_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                                 </select>
                               </div>
                             )}
-                            <FormField label="Part d'intérêt (P) %" type="number" value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
+                            <FormField label={t('projectdetail_ff_share')} type="number" value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
                           </div>
                           {mafCost && (
                             <div className="mt-4">
@@ -3645,16 +3695,16 @@ export default function ProjectDetail() {
 
                         <div className="space-y-4 pt-8 border-t border-[var(--tblr-border)]">
                           <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">03</span>
-                            Surfaces & Capacités
+                            <span aria-hidden className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">03</span>
+                            {t('projectdetail_ff_section_areas')}
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <FormField label="Surface Plancher" value={project.surface_plancher} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_plancher: v}) : null)} />
-                            <FormField label="Surface Plancher Ext" value={project.surface_plancher_ext} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_plancher_ext: v}) : null)} />
-                            <FormField label="Surface ERP" value={project.surface_erp} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_erp: v}) : null)} />
-                            <FormField label="Surface ERT" value={project.surface_ert} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_ert: v}) : null)} />
-                            <FormField label="Effectif Public" value={project.effectif_public} onChange={(v: any) => setProject(prev => prev ? ({...prev, effectif_public: v}) : null)} />
-                            <FormField label="Effectif Personnel" value={project.effectif_personnel} onChange={(v: any) => setProject(prev => prev ? ({...prev, effectif_personnel: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_floor_area')} value={project.surface_plancher} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_plancher: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_floor_area_ext')} value={project.surface_plancher_ext} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_plancher_ext: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_erp_area')} value={project.surface_erp} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_erp: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_ert_area')} value={project.surface_ert} onChange={(v: any) => setProject(prev => prev ? ({...prev, surface_ert: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_public_capacity')} value={project.effectif_public} onChange={(v: any) => setProject(prev => prev ? ({...prev, effectif_public: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_staff_capacity')} value={project.effectif_personnel} onChange={(v: any) => setProject(prev => prev ? ({...prev, effectif_personnel: v}) : null)} />
                           </div>
                         </div>
                       </div>
@@ -3665,23 +3715,25 @@ export default function ProjectDetail() {
                   <div className="space-y-8">
                     <div className="p-6 rounded-lg space-y-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('status')} *</label>
-                        <select 
+                        <label htmlFor="fiche-statut" className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('status')}</label>
+                        <select
+                          id="fiche-statut"
                           className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                           value={project.status}
                           onChange={e => setProject({...project, status: e.target.value as any})}
                         >
-                          <option value="Planning">Planning</option>
-                          <option value="In Progress">In Progress</option>
-                          <option value="Completed">Completed</option>
-                          <option value="On Hold">On Hold</option>
+                          <option value="Planning">{t('projects_status_planning')}</option>
+                          <option value="In Progress">{t('projects_status_in_progress')}</option>
+                          <option value="Completed">{t('projects_status_completed')}</option>
+                          <option value="On Hold">{t('projects_status_on_hold')}</option>
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('budget')} *</label>
+                        <label htmlFor="fiche-budget" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('budget')}</label>
                         <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
-                          <input 
+                          <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
+                          <input
+                            id="fiche-budget"
                             type="number"
                             className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                             value={project.budget || 0}
@@ -3691,8 +3743,9 @@ export default function ProjectDetail() {
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Start</label>
-                          <input 
+                          <label htmlFor="fiche-debut" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_ff_start')}</label>
+                          <input
+                            id="fiche-debut"
                             type="date"
                             className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)]"
                             value={project.start_date}
@@ -3700,8 +3753,9 @@ export default function ProjectDetail() {
                           />
                         </div>
                         <div className="space-y-2">
-                          <label className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('deadline')}</label>
-                          <input 
+                          <label htmlFor="fiche-echeance" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('deadline')}</label>
+                          <input
+                            id="fiche-echeance"
                             type="date"
                             className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)]"
                             value={project.end_date}
@@ -3719,7 +3773,7 @@ export default function ProjectDetail() {
                             onChange={e => setProject({...project, is_complete_mission: e.target.checked})}
                           />
                           <label htmlFor="is_complete_mission" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                            Mission Complète
+                            {t('project_overview_mission_complete')}
                           </label>
                         </div>
                         <div className="flex items-center gap-2">
@@ -3731,7 +3785,7 @@ export default function ProjectDetail() {
                             onChange={e => setProject({...project, is_chantier: e.target.checked})}
                           />
                           <label htmlFor="is_chantier" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                            Chantier
+                            {t('projectdetail_ff_chantier')}
                           </label>
                         </div>
                         <div className="flex items-center gap-2">
@@ -3750,7 +3804,7 @@ export default function ProjectDetail() {
                             }}
                           />
                           <label htmlFor="offline_enabled" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
-                            Disponible hors connexion
+                            {t('projectdetail_ff_offline')}
                           </label>
                         </div>
                       </div>
@@ -3759,7 +3813,7 @@ export default function ProjectDetail() {
                     <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
                       <PhaseStepper
-                        steps={missionPhases.map(phase => ({ id: phase, label: phase, description: PHASE_LABELS[phase] }))}
+                        steps={missionPhases.map(phase => ({ id: phase, label: phase, description: t(`mission_phase_${phase}`) }))}
                         currentId={actualCurrentPhase}
                         badges={phaseBadges}
                         onSelect={phase => handleSetPhase(phase as DocumentPhase)}
@@ -3771,7 +3825,7 @@ export default function ProjectDetail() {
                             <div key={entry.id} className="flex items-center justify-between text-xs" style={{ color: 'var(--tblr-text)' }}>
                               <span className="font-semibold">{entry.phase}</span>
                               <span style={{ color: 'var(--tblr-muted)' }}>
-                                {new Date(entry.entered_at).toLocaleDateString()} → {entry.exited_at ? new Date(entry.exited_at).toLocaleDateString() : t('project_phase_ongoing')}
+                                {new Date(entry.entered_at).toLocaleDateString('fr-FR')} → {entry.exited_at ? new Date(entry.exited_at).toLocaleDateString('fr-FR') : t('project_phase_ongoing')}
                               </span>
                             </div>
                           ))}
@@ -3787,13 +3841,14 @@ export default function ProjectDetail() {
                     icon={IconUsersGroup}
                     title={
                       <span className="flex items-center gap-2">
-                        Équipe du projet
+                        {t('projectdetail_team_title')}
                         <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{projectMembers.length}</span>
                       </span>
                     }
                     action={
                     <div className="flex items-center gap-2">
                       <select
+                        aria-label={t('projectdetail_team_add')}
                         className="px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         defaultValue=""
                         onChange={async e => {
@@ -3806,7 +3861,7 @@ export default function ProjectDetail() {
                           } catch (err) { console.error(err); }
                         }}
                       >
-                        <option value="">+ Ajouter un membre</option>
+                        <option value="">{t('projectdetail_team_add_option')}</option>
                         {team.filter(m => !projectMembers.find(pm => pm.user_id === m.id || pm.id === m.id)).map(m => (
                           <option key={m.id} value={m.id}>{m.name} ({m.role})</option>
                         ))}
@@ -3816,7 +3871,7 @@ export default function ProjectDetail() {
                   />
                   <div className="p-4">
                     {projectMembers.length === 0 ? (
-                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun membre assigné à ce projet. Utilisez le menu ci-dessus pour en ajouter.</p>
+                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">{t('projectdetail_team_empty')}</p>
                     ) : (
                       <div className="flex flex-wrap gap-3">
                         {projectMembers.map(m => (
@@ -3826,9 +3881,11 @@ export default function ProjectDetail() {
                             </div>
                             <div className="min-w-0">
                               <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 truncate">{m.name || m.email}</p>
-                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{m.role || 'member'}</p>
+                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{m.role || t('project_overview_team_member')}</p>
                             </div>
                             <button
+                              type="button"
+                              aria-label={t('projectdetail_team_remove_named', { name: m.name || m.email })}
                               onClick={async () => {
                                 try {
                                   const userId = m.user_id || m.id;
@@ -3837,8 +3894,8 @@ export default function ProjectDetail() {
                                 } catch (err) { console.error(err); }
                               }}
                               className="ml-1 p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
-                              title="Retirer du projet"
-                            >✕</button>
+                              title={t('projectdetail_team_remove')}
+                            ><IconX size={14} aria-hidden /></button>
                           </div>
                         ))}
                       </div>
@@ -3852,35 +3909,34 @@ export default function ProjectDetail() {
                     icon={IconRubberStamp}
                     title={
                       <span className="flex items-center gap-2">
-                        Permis
+                        {t('projectdetail_permits_title')}
                         <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{permits.length}</span>
                       </span>
                     }
                     action={
                       <button
+                        type="button"
                         onClick={() => setIsAddingPermit(!isAddingPermit)}
+                        aria-expanded={isAddingPermit}
                         className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
-                        <IconPlus size={14} />
-                        {isAddingPermit ? 'Annuler' : 'Ajouter'}
+                        {isAddingPermit ? <IconX size={14} /> : <IconPlus size={14} />}
+                        {isAddingPermit ? t('projectdetail_dialog_cancel') : t('projectdetail_permits_add')}
                       </button>
                     }
                   />
                   {isAddingPermit && (
                     <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.type} onChange={e => setNewPermit(prev => ({ ...prev, type: e.target.value as any }))}>
-                          <option value="PC">PC</option>
-                          <option value="DP">DP</option>
-                          <option value="AT">AT</option>
+                        <select aria-label={t('projectdetail_permit_type')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.type} onChange={e => setNewPermit(prev => ({ ...prev, type: e.target.value as any }))}>
+                          <option value="PC">{t('projectdetail_permit_type_PC')}</option>
+                          <option value="DP">{t('projectdetail_permit_type_DP')}</option>
+                          <option value="AT">{t('projectdetail_permit_type_AT')}</option>
                         </select>
-                        <input type="text" placeholder="Référence" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.reference} onChange={e => setNewPermit(prev => ({ ...prev, reference: e.target.value }))} />
-                        <input type="date" placeholder="Date de dépôt" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.submission_date} onChange={e => setNewPermit(prev => ({ ...prev, submission_date: e.target.value }))} />
-                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.status} onChange={e => setNewPermit(prev => ({ ...prev, status: e.target.value as any }))}>
-                          <option value="en_instruction">En instruction</option>
-                          <option value="accorde">Accordé</option>
-                          <option value="refuse">Refusé</option>
-                          <option value="recours">Recours</option>
+                        <input type="text" aria-label={t('projectdetail_permit_reference')} placeholder={t('projectdetail_permit_reference')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.reference} onChange={e => setNewPermit(prev => ({ ...prev, reference: e.target.value }))} />
+                        <input type="date" aria-label={t('projectdetail_permit_submitted_on')} title={t('projectdetail_permit_submitted_on')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.submission_date} onChange={e => setNewPermit(prev => ({ ...prev, submission_date: e.target.value }))} />
+                        <select aria-label={t('projectdetail_col_status')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.status} onChange={e => setNewPermit(prev => ({ ...prev, status: e.target.value as any }))}>
+                          {(['en_instruction', 'accorde', 'refuse', 'recours'] as const).map(s => <option key={s} value={s}>{t(`project_permit_status_${s}`)}</option>)}
                         </select>
                       </div>
                       <div className="flex justify-end">
@@ -3897,16 +3953,17 @@ export default function ProjectDetail() {
                               }
                             } catch (err) { console.error(err); }
                           }}
+                          type="button"
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
                         >
-                          Ajouter
+                          {t('projectdetail_permits_save')}
                         </button>
                       </div>
                     </div>
                   )}
                   <div className="p-4">
                     {permits.length === 0 ? (
-                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun permis pour ce projet.</p>
+                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">{t('projectdetail_permits_empty')}</p>
                     ) : (
                       <div className="space-y-2">
                         {permits.map(p => (
@@ -3915,15 +3972,18 @@ export default function ProjectDetail() {
                               <button
                                 type="button"
                                 onClick={() => setExpandedPermitId(expandedPermitId === p.id ? null : p.id)}
+                                aria-expanded={expandedPermitId === p.id}
+                                title={t('projectdetail_permit_toggle_files')}
                                 className="flex items-center gap-3 min-w-0 text-left"
                               >
                                 {expandedPermitId === p.id ? <IconChevronDown size={14} className="text-[var(--tblr-muted)] shrink-0" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)] shrink-0" />}
                                 <span className="text-xs font-bold uppercase px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{p.type}</span>
-                                <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || 'Sans référence'}</span>
-                                <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{p.submission_date ? new Date(p.submission_date).toLocaleDateString('fr-FR') : '—'}</span>
+                                <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate">{p.reference || t('projectdetail_permit_no_reference')}</span>
+                                {p.submission_date && <span className="text-[0.6875rem] text-[var(--tblr-muted)] shrink-0">{t('projectdetail_permit_submitted_date', { date: new Date(p.submission_date).toLocaleDateString('fr-FR') })}</span>}
                               </button>
                               <div className="flex items-center gap-2 shrink-0">
                                 <select
+                                  aria-label={t('projectdetail_permit_status_named', { ref: p.reference || p.type })}
                                   className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)] focus-visible:ring-2 focus-visible:ring-blue-500"
                                   value={p.status}
                                   onChange={async (e) => {
@@ -3932,17 +3992,16 @@ export default function ProjectDetail() {
                                     if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
                                   }}
                                 >
-                                  <option value="en_instruction">En instruction</option>
-                                  <option value="accorde">Accordé</option>
-                                  <option value="refuse">Refusé</option>
-                                  <option value="recours">Recours</option>
+                                  {(['en_instruction', 'accorde', 'refuse', 'recours'] as const).map(s => <option key={s} value={s}>{t(`project_permit_status_${s}`)}</option>)}
                                 </select>
                                 <button
+                                  type="button"
                                   onClick={async () => {
                                     deleteWithUndo(setPermits, p.id, `/api/permits/${p.id}`, 'projectdetail_deleted_permit');
                                   }}
                                   className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
-                                  title="Supprimer"
+                                  title={t('projectdetail_permit_delete')}
+                                  aria-label={t('projectdetail_permit_delete')}
                                 >
                                   <IconTrash size={14} />
                                 </button>
@@ -3977,25 +4036,27 @@ export default function ProjectDetail() {
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconTools}
-                    title="Ordres de Service Travaux"
+                    title={t('projectdetail_os_title')}
                     description={(() => {
                       const travauxApprouves = ordresDeService
                         .filter(o => (o.type === 'travaux' || !o.type) && o.status === 'approved')
                         .reduce((acc, o) => acc + (Number(o.montant_devis_accepte) || Number(o.montant_devis_presente) || 0), 0);
                       if (travauxApprouves !== 0) return (
                         <span className="text-green-600 dark:text-green-400 font-semibold">
-                          +{formatCurrency(travauxApprouves)} approuvés sur marchés
+                          {t('projectdetail_os_approved_total', { amount: formatCurrency(travauxApprouves) })}
                         </span>
                       );
                       return undefined;
                     })()}
                     action={
                       <button
+                        type="button"
                         onClick={() => setIsAddingOs(!isAddingOs)}
+                        aria-expanded={isAddingOs}
                         className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
-                        Nouvel OS
+                        {t('projectdetail_os_new')}
                       </button>
                     }
                   />
@@ -4003,23 +4064,25 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° OS</label>
-                          <input type="text"
+                          <label htmlFor="os-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_number')}</label>
+                          <input id="os-numero" type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.os_number} onChange={e => setNewOs({...newOs, os_number: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date d'émission</label>
-                          <input type="date"
+                          <label htmlFor="os-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_issue_date')}</label>
+                          <input id="os-date" type="date"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.date_emission} onChange={e => setNewOs({...newOs, date_emission: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Marché travaux *</label>
+                          <label htmlFor="os-marche" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_contract')} <span aria-hidden className="text-red-500">*</span></label>
                           <select
+                            id="os-marche"
+                            required
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.marche_id} onChange={e => handleMarcheChange(e.target.value)}>
-                            <option value="">Sélectionner un marché</option>
+                            <option value="">{t('projectdetail_os_contract_choose')}</option>
                             {marchesTravaux.map((m: any) => (
                               <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>
                             ))}
@@ -4028,88 +4091,90 @@ export default function ProjectDetail() {
                       </div>
                       {marchesTravaux.length === 0 && !isAddingMarche && (
                         <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-700 dark:text-amber-400">
-                          <span>Aucun marché de travaux sur ce projet — un OS doit être rattaché à un marché.</span>
-                          <button type="button" onClick={() => setIsAddingMarche(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[0.6875rem] whitespace-nowrap transition">+ Créer un marché</button>
+                          <span>{t('projectdetail_os_no_contract')}</span>
+                          <button type="button" onClick={() => setIsAddingMarche(true)} className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[0.6875rem] whitespace-nowrap transition">{t('projectdetail_os_create_contract')}</button>
                         </div>
                       )}
                       {isAddingMarche && (
                         <div className="p-4 rounded-lg bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] space-y-3">
-                          <p className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Nouveau marché de travaux</p>
+                          <p className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_contract_new_title')}</p>
                           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                            <input type="text" placeholder="Entreprise *"
+                            <input type="text" required aria-label={t('projectdetail_contract_company')} placeholder={t('projectdetail_contract_company_required')}
                               className="md:col-span-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newMarche.entreprise_nom} onChange={e => setNewMarche({ ...newMarche, entreprise_nom: e.target.value })} />
-                            <input type="text" placeholder="N° lot"
+                            <input type="text" aria-label={t('projectdetail_contract_lot_number')} placeholder={t('projectdetail_contract_lot_number')}
                               className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newMarche.lot_numero} onChange={e => setNewMarche({ ...newMarche, lot_numero: e.target.value })} />
-                            <input type="number" placeholder="Montant HT"
+                            <input type="number" aria-label={t('projectdetail_contract_amount_ht')} placeholder={t('projectdetail_contract_amount_ht')}
                               className="bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newMarche.montant_ht} onChange={e => setNewMarche({ ...newMarche, montant_ht: e.target.value })} />
                           </div>
-                          <input type="text" placeholder="Intitulé du lot (ex: Gros œuvre)"
+                          <input type="text" aria-label={t('projectdetail_contract_lot_title')} placeholder={t('projectdetail_contract_lot_title_placeholder')}
                             className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newMarche.lot_titre} onChange={e => setNewMarche({ ...newMarche, lot_titre: e.target.value })} />
                           <div className="flex gap-2 justify-end">
-                            <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1.5 text-xs font-bold text-[var(--tblr-muted)]">Annuler</button>
-                            <button type="button" onClick={handleCreateMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs transition">Créer le marché</button>
+                            <button type="button" onClick={() => setIsAddingMarche(false)} className="px-3 py-1.5 text-xs font-bold text-[var(--tblr-muted)]">{t('projectdetail_dialog_cancel')}</button>
+                            <button type="button" onClick={handleCreateMarche} disabled={!newMarche.entreprise_nom} className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs transition">{t('projectdetail_contract_create')}</button>
                           </div>
                         </div>
                       )}
                       <div className="space-y-1">
-                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Titre *</label>
-                        <input type="text"
+                        <label htmlFor="os-titre" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_title_field')} <span aria-hidden className="text-red-500">*</span></label>
+                        <input id="os-titre" required type="text"
                           className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                           value={newOs.title} onChange={e => setNewOs({...newOs, title: e.target.value})}
-                          placeholder="ex: Travaux supplémentaires fondations" />
+                          placeholder={t('projectdetail_os_title_placeholder')} />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Objet</label>
-                        <input type="text"
+                        <label htmlFor="os-objet" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_note_subject')}</label>
+                        <input id="os-objet" type="text"
                           className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                           value={newOs.objet} onChange={e => setNewOs({...newOs, objet: e.target.value})}
-                          placeholder="Description succincte de l'objet de l'OS" />
+                          placeholder={t('projectdetail_os_subject_placeholder')} />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Émetteur (MOE)</label>
-                          <input type="text"
+                          <label htmlFor="os-emetteur" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_issuer')}</label>
+                          <input id="os-emetteur" type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.emetteur_os} onChange={e => setNewOs({...newOs, emetteur_os: e.target.value})} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Entreprise destinataire</label>
-                          <input type="text"
+                          <label htmlFor="os-destinataire" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_recipient')}</label>
+                          <input id="os-destinataire" type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.destinataire_os || newOs.entreprise}
                             onChange={e => setNewOs(prev => ({...prev, destinataire_os: e.target.value, entreprise: e.target.value}))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Montant présenté HT</label>
-                          <input type="number"
+                          <label htmlFor="os-montant" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_amount')}</label>
+                          <input id="os-montant" type="number"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.montant_devis_presente} onChange={e => setNewOs({...newOs, montant_devis_presente: e.target.value})} />
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Délai d'exécution</label>
+                          <label htmlFor="os-delai" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_duration')}</label>
                           <div className="flex gap-2">
-                            <input type="number" placeholder="ex: 30"
+                            <input id="os-delai" type="number" placeholder="30"
                               className="w-20 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newOs.delai_execution} onChange={e => setNewOs({...newOs, delai_execution: e.target.value})} />
                             <select
+                              aria-label={t('projectdetail_os_duration_unit')}
                               className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newOs.delai_unit} onChange={e => setNewOs({...newOs, delai_unit: e.target.value})}>
-                              <option value="jours">Jours</option>
-                              <option value="semaines">Semaines</option>
-                              <option value="mois">Mois</option>
+                              <option value="jours">{t('projectdetail_unit_jours')}</option>
+                              <option value="semaines">{t('projectdetail_unit_semaines')}</option>
+                              <option value="mois">{t('projectdetail_unit_mois')}</option>
                             </select>
                           </div>
                         </div>
                         <div className="md:col-span-2 flex items-end">
-                          <button onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title}
+                          <button type="button" onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title}
+                            title={!newOs.marche_id || !newOs.title ? t('projectdetail_os_create_disabled') : undefined}
                             className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
-                            Créer l'OS
+                            {t('projectdetail_os_create')}
                           </button>
                         </div>
                       </div>
@@ -4119,22 +4184,22 @@ export default function ProjectDetail() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
-                          <th className="px-4 py-3 text-left">N°</th>
-                          <th className="px-4 py-3 text-left">Titre</th>
-                          <th className="px-4 py-3 text-left">Lot / Entreprise</th>
-                          <th className="px-4 py-3 text-left">Date émission</th>
-                          <th className="px-4 py-3 text-left">Délai</th>
-                          <th className="px-4 py-3 text-right">Présenté HT</th>
-                          <th className="px-4 py-3 text-right">Accepté HT</th>
-                          <th className="px-4 py-3 text-center">Statut</th>
-                          <th className="px-4 py-3 text-center">Actions</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_number')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_title')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_lot_company')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_os_issue_date')}</th>
+                          <th className="px-4 py-3 text-left">{t('projectdetail_col_duration')}</th>
+                          <th className="px-4 py-3 text-right">{t('projectdetail_col_presented_ht')}</th>
+                          <th className="px-4 py-3 text-right">{t('projectdetail_col_accepted_ht')}</th>
+                          <th className="px-4 py-3 text-center">{t('projectdetail_col_status')}</th>
+                          <th className="px-4 py-3 text-center">{t('projectdetail_col_actions')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).map((os) => (
                           <tr key={os.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors">
                             <td className="px-4 py-3 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap font-mono text-xs">
-                              OS {os.os_number}
+                              {t('projectdetail_os_label', { number: os.os_number })}
                             </td>
                             <td className="px-4 py-3 text-zinc-700 dark:text-zinc-200 max-w-[160px] truncate">{os.title}</td>
                             <td className="px-4 py-3 text-[var(--tblr-muted)] text-xs">
@@ -4142,9 +4207,9 @@ export default function ProjectDetail() {
                               {os.lot && (os.destinataire_os || os.entreprise) && ' · '}
                               {os.destinataire_os || os.entreprise}
                             </td>
-                            <td className="px-4 py-3 text-xs text-[var(--tblr-muted)]">{os.date_emission ?? os.date?.slice(0,10) ?? '—'}</td>
+                            <td className="px-4 py-3 text-xs text-[var(--tblr-muted)]">{(os.date_emission ?? os.date?.slice(0, 10)) ? new Date(os.date_emission ?? os.date!.slice(0, 10)).toLocaleDateString('fr-FR') : '—'}</td>
                             <td className="px-4 py-3 text-xs text-[var(--tblr-muted)]">
-                              {os.delai_execution ? `${os.delai_execution} ${os.delai_unit ?? 'j'}` : '—'}
+                              {os.delai_execution ? `${os.delai_execution} ${t(`projectdetail_unit_${os.delai_unit && ['jours', 'semaines', 'mois'].includes(os.delai_unit) ? os.delai_unit : 'jours'}`).toLowerCase()}` : '—'}
                             </td>
                             <td className="px-4 py-3 text-right text-zinc-600 dark:text-zinc-300">
                               {os.montant_devis_presente ? formatCurrency(Number(os.montant_devis_presente)) : '—'}
@@ -4158,44 +4223,45 @@ export default function ProjectDetail() {
                             <td className="px-4 py-3">
                               <div className="flex items-center gap-1">
                                 {os.status === 'draft' && (
-                                  <button onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
-                                    title="Émettre l'OS"
+                                  <button type="button" onClick={() => handleUpdateOsStatus(os.id, 'submitted')}
+                                    title={t('projectdetail_os_action_issue_title')}
                                     className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[0.6875rem] font-bold transition">
-                                    <IconSend size={11} /> Émettre
+                                    <IconSend size={11} /> {t('projectdetail_os_action_issue')}
                                   </button>
                                 )}
                                 {os.status === 'submitted' && (
-                                  <button onClick={() => handleUpdateOsStatus(os.id, 'approved')}
-                                    title="Enregistrer AR"
+                                  <button type="button" onClick={() => handleUpdateOsStatus(os.id, 'approved')}
+                                    title={t('projectdetail_os_action_ack_title')}
                                     className="flex items-center gap-1 px-2 py-1 rounded-lg bg-green-100 hover:bg-green-200 text-green-700 text-[0.6875rem] font-bold transition">
-                                    <IconCheck size={11} /> AR reçu
+                                    <IconCheck size={11} /> {t('projectdetail_os_action_ack')}
                                   </button>
                                 )}
                                 {(os.status === 'draft' || os.status === 'submitted') && (
-                                  <button onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
-                                    title="Annuler"
+                                  <button type="button" onClick={() => handleUpdateOsStatus(os.id, 'rejected')}
+                                    title={t('projectdetail_os_action_cancel')}
+                                    aria-label={t('projectdetail_os_action_cancel_named', { number: os.os_number })}
                                     className="p-1 text-red-400 hover:text-red-600 transition-colors">
                                     <IconX size={13} />
                                   </button>
                                 )}
-                                <button onClick={() => generateOsPdf(os)} title="Exporter PDF"
+                                <button type="button" onClick={() => generateOsPdf(os)} title={t('projectdetail_os_export_pdf')} aria-label={t('projectdetail_os_export_pdf')}
                                   className="p-1 text-[var(--tblr-muted)] hover:text-blue-500 transition-colors">
                                   <IconFileDownload size={13} />
                                 </button>
-                                <button title="Supprimer l'OS" aria-label="Supprimer l'OS" onClick={() => handleDeleteOs(os.id)}
+                                <button type="button" title={t('projectdetail_os_delete')} aria-label={t('projectdetail_os_delete')} onClick={() => handleDeleteOs(os.id)}
                                   className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors">
                                   <IconTrash size={13} />
                                 </button>
                               </div>
                               {os.status === 'approved' && os.date_ar && (
-                                <p className="text-[0.6875rem] text-green-600 mt-0.5">AR : {os.date_ar}</p>
+                                <p className="text-[0.6875rem] text-green-600 mt-0.5">{t('projectdetail_os_ack_on', { date: new Date(os.date_ar).toLocaleDateString('fr-FR') })}</p>
                               )}
                             </td>
                           </tr>
                         ))}
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).length === 0 && (
                           <tr>
-                            <td colSpan={9} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun ordre de service travaux.</td>
+                            <td colSpan={9} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_os_empty')}</td>
                           </tr>
                         )}
                       </tbody>
@@ -4209,26 +4275,28 @@ export default function ProjectDetail() {
                     icon={IconMessageDots}
                     title={
                       <span className="flex items-center gap-2">
-                        RFI — Demandes d'information
+                        {t('projectdetail_rfi_title')}
                         <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{rfis.length}</span>
                       </span>
                     }
                     action={
                       <button
+                        type="button"
                         onClick={() => setIsAddingRfi(!isAddingRfi)}
+                        aria-expanded={isAddingRfi}
                         className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
-                        <IconPlus size={14} />
-                        {isAddingRfi ? 'Annuler' : 'Ajouter'}
+                        {isAddingRfi ? <IconX size={14} /> : <IconPlus size={14} />}
+                        {isAddingRfi ? t('projectdetail_dialog_cancel') : t('projectdetail_rfi_add')}
                       </button>
                     }
                   />
                   {isAddingRfi && (
                     <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
-                      <textarea rows={2} placeholder="Question posée" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
+                      <textarea rows={2} aria-label={t('projectdetail_rfi_question')} placeholder={t('projectdetail_rfi_question')} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <input type="text" placeholder="Demandeur" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
-                        <input type="date" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
+                        <input type="text" aria-label={t('projectdetail_rfi_asked_by')} placeholder={t('projectdetail_rfi_asked_by')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
+                        <input type="date" aria-label={t('projectdetail_rfi_due')} title={t('projectdetail_rfi_due')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
                       </div>
                       <div className="flex justify-end">
                         <button
@@ -4244,26 +4312,29 @@ export default function ProjectDetail() {
                               }
                             } catch (err) { console.error(err); }
                           }}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
+                          type="button"
+                          disabled={!newRfi.question}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition"
                         >
-                          Ajouter
+                          {t('projectdetail_rfi_save')}
                         </button>
                       </div>
                     </div>
                   )}
                   <div className="p-4">
                     {rfis.length === 0 ? (
-                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucune RFI pour ce projet.</p>
+                      <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">{t('projectdetail_rfi_empty')}</p>
                     ) : (
                       <div className="space-y-2">
                         {rfis.map(r => (
                           <div key={r.id} className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
                             <div className="min-w-0">
                               <p className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">{r.question}</p>
-                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{r.due_date ? `Échéance ${new Date(r.due_date).toLocaleDateString('fr-FR')}` : 'Sans échéance'}</p>
+                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{r.due_date ? t('projectdetail_rfi_due_on', { date: new Date(r.due_date).toLocaleDateString('fr-FR') }) : t('projectdetail_rfi_no_due')}</p>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <select
+                                aria-label={t('projectdetail_rfi_status_named', { question: r.question })}
                                 className={cn(
                                   "text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer",
                                   r.status === 'repondu' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
@@ -4275,17 +4346,19 @@ export default function ProjectDetail() {
                                   if (res.ok) setRfis(prev => prev.map(x => x.id === r.id ? { ...x, status: status as any } : x));
                                 }}
                               >
-                                <option value="en_attente">En attente</option>
-                                <option value="repondu">Répondu</option>
+                                <option value="en_attente">{t('projectdetail_rfi_status_waiting')}</option>
+                                <option value="repondu">{t('projectdetail_rfi_status_answered')}</option>
                               </select>
                               <button
+                                type="button"
+                                aria-label={t('projectdetail_rfi_delete')}
                                 onClick={async () => {
                                   if (!(await confirmDelete('projectdetail_confirm_delete_rfi'))) return;
                                   const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
                                   if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
                                 }}
                                 className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
-                                title="Supprimer"
+                                title={t('projectdetail_rfi_delete')}
                               >
                                 <IconTrash size={14} />
                               </button>
@@ -4317,18 +4390,18 @@ export default function ProjectDetail() {
                       {(avenantsTravauxApprouves !== 0 || avenantsHonorairesApprouves !== 0) && (
                         <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/40 rounded-lg p-4 flex flex-wrap gap-6 items-center">
                           <div>
-                            <p className="text-[0.6875rem] font-bold text-blue-400 uppercase tracking-wider">Marchés révisés</p>
+                            <p className="text-[0.6875rem] font-bold text-blue-400 uppercase tracking-wider">{t('projectdetail_rdt_contracts_revised')}</p>
                             <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatCurrency(marchesRevises)}</p>
                             {avenantsTravauxApprouves !== 0 && (
-                              <p className="text-xs text-blue-500">{formatCurrency(marchesInitiaux)} initial {avenantsTravauxApprouves >= 0 ? '+' : ''}{formatCurrency(avenantsTravauxApprouves)} avenants</p>
+                              <p className="text-xs text-blue-500">{t('projectdetail_rdt_initial_plus', { initial: formatCurrency(marchesInitiaux), sign: avenantsTravauxApprouves >= 0 ? '+' : '', delta: formatCurrency(avenantsTravauxApprouves) })}</p>
                             )}
                           </div>
                           {honorairesRevises !== 0 && (
                             <div>
-                              <p className="text-[0.6875rem] font-bold text-blue-400 uppercase tracking-wider">Honoraires MOE révisés</p>
+                              <p className="text-[0.6875rem] font-bold text-blue-400 uppercase tracking-wider">{t('projectdetail_fees_revised')}</p>
                               <p className="text-xl font-bold text-blue-700 dark:text-blue-300">{formatCurrency(honorairesRevises)}</p>
                               {avenantsHonorairesApprouves !== 0 && (
-                                <p className="text-xs text-blue-500">{formatCurrency(honorairesInitiaux)} initial {avenantsHonorairesApprouves >= 0 ? '+' : ''}{formatCurrency(avenantsHonorairesApprouves)} avenants</p>
+                                <p className="text-xs text-blue-500">{t('projectdetail_rdt_initial_plus', { initial: formatCurrency(honorairesInitiaux), sign: avenantsHonorairesApprouves >= 0 ? '+' : '', delta: formatCurrency(avenantsHonorairesApprouves) })}</p>
                               )}
                             </div>
                           )}
@@ -4339,15 +4412,15 @@ export default function ProjectDetail() {
                 })()}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <StatTile
-                    label="Total Marchés"
+                    label={t('projectdetail_rdt_total_contracts')}
                     value={formatCurrency((project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0))}
                   />
                   <StatTile
-                    label="Total Payé"
+                    label={t('projectdetail_rdt_total_paid')}
                     value={<span className="text-green-600">{formatCurrency(totalInvoicesPaid)}</span>}
                   />
                   <StatTile
-                    label="Reste à payer"
+                    label={t('projectdetail_rdt_remaining')}
                     value={<span className="text-blue-600">{formatCurrency((project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0) - totalInvoicesPaid)}</span>}
                   />
                 </div>
@@ -4356,14 +4429,17 @@ export default function ProjectDetail() {
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconReportMoney}
-                    title="Factures Entreprises"
+                    title={t('projectdetail_rdt_invoices_title')}
+                    description={t('projectdetail_rdt_invoices_desc')}
                     action={
                       <button
+                        type="button"
                         onClick={() => setIsAddingInvoice(!isAddingInvoice)}
+                        aria-expanded={isAddingInvoice}
                         className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
-                        Ajouter une facture
+                        {t('projectdetail_rdt_invoice_add')}
                       </button>
                     }
                   />
@@ -4372,18 +4448,20 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">N° Facture</label>
-                          <input 
+                          <label htmlFor="rdt-facture-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_rdt_invoice_number')}</label>
+                          <input
+                            id="rdt-facture-numero"
                             type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newInvoice.invoice_number}
                             onChange={e => setNewInvoice({...newInvoice, invoice_number: e.target.value})}
-                            placeholder="ex: F-2024-001"
+                            placeholder="F-2026-001"
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Montant HT</label>
-                          <input 
+                          <label htmlFor="rdt-facture-montant" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_contract_amount_ht')}</label>
+                          <input
+                            id="rdt-facture-montant"
                             type="number"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newInvoice.amount}
@@ -4391,8 +4469,9 @@ export default function ProjectDetail() {
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Description</label>
-                          <input 
+                          <label htmlFor="rdt-facture-libelle" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_rdt_invoice_label')}</label>
+                          <input
+                            id="rdt-facture-libelle"
                             type="text"
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newInvoice.description}
@@ -4401,13 +4480,15 @@ export default function ProjectDetail() {
                         </div>
                       </div>
                       <div className="flex justify-end gap-3">
-                        <button 
+                        <button
+                          type="button"
                           onClick={() => setIsAddingInvoice(false)}
                           className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors"
                         >
-                          Annuler
+                          {t('projectdetail_dialog_cancel')}
                         </button>
-                        <button 
+                        <button
+                          type="button"
                           onClick={async () => {
                             try {
                               const res = await fetch('/api/invoices', {
@@ -4434,7 +4515,7 @@ export default function ProjectDetail() {
                           }}
                           className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                         >
-                          Ajouter
+                          {t('projectdetail_rdt_invoice_save')}
                         </button>
                       </div>
                     </div>
@@ -4444,19 +4525,20 @@ export default function ProjectDetail() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
-                          <th className="px-6 py-3 text-left">N° Facture</th>
-                          <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-left">Statut</th>
-                          <th className="px-6 py-3 text-right">Montant</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_rdt_invoice_number')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_date')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_status')}</th>
+                          <th className="px-6 py-3 text-right">{t('projectdetail_contract_amount_ht')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
                         {invoices.map((inv) => (
                           <tr key={inv.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors">
                             <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">{inv.invoice_number}</td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(inv.issue_date).toLocaleDateString()}</td>
+                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{inv.issue_date ? new Date(inv.issue_date).toLocaleDateString('fr-FR') : '—'}</td>
                             <td className="px-6 py-4">
-                              <select 
+                              <select
+                                aria-label={t('projectdetail_rdt_invoice_status_named', { number: inv.invoice_number })}
                                 className={cn(
                                   "bg-transparent font-bold text-[0.6875rem] uppercase tracking-wider outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer",
                                   inv.status === 'Paid' ? "text-green-600" :
@@ -4479,10 +4561,7 @@ export default function ProjectDetail() {
                                   }
                                 }}
                               >
-                                <option value="Draft">Draft</option>
-                                <option value="Sent">Sent</option>
-                                <option value="Paid">Paid</option>
-                                <option value="Overdue">Overdue</option>
+                                {(['Draft', 'Sent', 'Paid', 'Overdue'] as const).map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
                               </select>
                             </td>
                             <td className="px-6 py-4 text-right font-bold text-[var(--tblr-text)]">{formatCurrency(inv.amount)}</td>
@@ -4490,7 +4569,7 @@ export default function ProjectDetail() {
                         ))}
                         {invoices.length === 0 && (
                           <tr>
-                            <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucune facture.</td>
+                            <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_rdt_invoices_empty')}</td>
                           </tr>
                         )}
                       </tbody>
@@ -4523,54 +4602,60 @@ export default function ProjectDetail() {
                   <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setIsVisaModalOpen(false)}>
                     <div role="dialog" aria-modal="true" aria-labelledby="visa-modal-title" className="rounded-lg shadow-2xl w-full max-w-md mx-4 p-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 id="visa-modal-title" className="text-base font-bold text-[var(--tblr-text)]">{editingVisa ? 'Modifier le visa' : 'Nouveau visa'}</h4>
-                        <button title="Fermer" aria-label="Fermer" onClick={() => setIsVisaModalOpen(false)} className="p-1 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
+                        <h4 id="visa-modal-title" className="text-base font-bold text-[var(--tblr-text)]">{editingVisa ? t('projectdetail_visa_edit') : t('projectdetail_visa_new')}</h4>
+                        <button type="button" title={t('projectdetail_close')} aria-label={t('projectdetail_close')} onClick={() => setIsVisaModalOpen(false)} className="p-1 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
                           <IconX size={18} />
                         </button>
                       </div>
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Titre *</label>
+                          <label htmlFor="visa-titre" className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">{t('projectdetail_os_title_field')} <span aria-hidden className="text-red-500">*</span></label>
                           <input
+                            id="visa-titre"
+                            required
                             type="text"
                             value={visaForm.title}
                             onChange={e => setVisaForm(f => ({ ...f, title: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
-                            placeholder="Ex: Visa plans d'exécution façade"
+                            placeholder={t('projectdetail_visa_title_placeholder')}
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Lot</label>
+                          <label htmlFor="visa-lot" className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">{t('projectdetail_visa_lot')}</label>
                           <select
+                            id="visa-lot"
                             value={visaForm.lot_id}
                             onChange={e => setVisaForm(f => ({ ...f, lot_id: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
                           >
-                            <option value="">Aucun lot</option>
+                            <option value="">{t('projectdetail_visa_no_lot')}</option>
                             {(project.lots_list || []).map(l => (
                               <option key={l.id} value={l.id}>{l.lot_title}{l.contact_name ? ` — ${l.contact_name}` : ''}</option>
                             ))}
                           </select>
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Document à viser</label>
+                          <label htmlFor="visa-document" className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">{t('projectdetail_visa_document')}</label>
                           <input
+                            id="visa-document"
                             type="file"
                             onChange={e => setVisaFile(e.target.files?.[0] || null)}
                             className="w-full text-xs text-[var(--tblr-muted)] file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-zinc-100 dark:file:bg-zinc-800 file:text-[var(--tblr-text)]"
                           />
                           {editingVisa?.document_url && !visaFile && (
                             <button type="button" onClick={() => openSignedUrl(editingVisa.document_url!)} className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline">
-                              <IconExternalLink size={12} /> Document actuel
+                              <IconExternalLink size={12} /> {t('projectdetail_visa_current_document')}
                             </button>
                           )}
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-2">Statut</label>
-                          <div className="flex gap-2">
-                            {(['pending', 'approved', 'rejected', 'commented'] as const).map(s => (
+                          <p id="visa-statut-label" className="block text-xs font-semibold text-[var(--tblr-muted)] mb-2">{t('projectdetail_visa_opinion')}</p>
+                          <div role="group" aria-labelledby="visa-statut-label" className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                            {(['pending', 'approved', 'commented', 'rejected'] as const).map(s => (
                               <button
                                 key={s}
+                                type="button"
+                                aria-pressed={visaForm.status === s}
                                 onClick={() => setVisaForm(f => ({ ...f, status: s }))}
                                 className={cn(
                                   "flex-1 py-1.5 px-2 rounded-lg text-xs font-bold uppercase transition border",
@@ -4582,27 +4667,29 @@ export default function ProjectDetail() {
                                     : 'bg-white text-[var(--tblr-muted)] border-zinc-200 dark:bg-zinc-800 dark:border-zinc-700 dark:text-[var(--tblr-muted)]'
                                 )}
                               >
-                                {s === 'pending' ? 'Attente' : s === 'approved' ? 'Validé' : s === 'rejected' ? 'Rejeté' : 'Commenté'}
+                                {t(`projectdetail_visa_status_${s}`)}
                               </button>
                             ))}
                           </div>
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">Commentaires</label>
+                          <label htmlFor="visa-observations" className="block text-xs font-semibold text-[var(--tblr-muted)] mb-1">{t('projectdetail_visa_observations')}</label>
                           <textarea
+                            id="visa-observations"
                             rows={3}
                             value={visaForm.comments}
                             onChange={e => setVisaForm(f => ({ ...f, comments: e.target.value }))}
                             className="w-full px-3 py-2 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] resize-none"
-                            placeholder="Observations, réserves, demandes de modifications..."
+                            placeholder={t('projectdetail_visa_observations_placeholder')}
                           />
                         </div>
                       </div>
                       <div className="flex gap-2 mt-5">
-                        <button onClick={() => setIsVisaModalOpen(false)} className="flex-1 py-2 px-4 text-sm font-medium text-[var(--tblr-muted)] border border-[var(--tblr-border)] rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
-                          Annuler
+                        <button type="button" onClick={() => setIsVisaModalOpen(false)} className="flex-1 py-2 px-4 text-sm font-medium text-[var(--tblr-muted)] border border-[var(--tblr-border)] rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
+                          {t('projectdetail_dialog_cancel')}
                         </button>
                         <button
+                          type="button"
                           disabled={!visaForm.title.trim() || visaSaving}
                           onClick={async () => {
                             if (!visaForm.title.trim() || !id) return;
@@ -4649,7 +4736,7 @@ export default function ProjectDetail() {
                           }}
                           className="flex-1 py-2 px-4 text-sm font-bold text-white bg-[var(--tblr-primary)] hover:opacity-90 disabled:opacity-50 rounded-lg transition-colors"
                         >
-                          {visaSaving ? 'Enregistrement...' : editingVisa ? 'Enregistrer' : 'Créer'}
+                          {visaSaving ? t('projectdetail_autosave_saving') : editingVisa ? t('projectdetail_visa_save') : t('projectdetail_visa_create')}
                         </button>
                       </div>
                     </div>
@@ -4661,12 +4748,13 @@ export default function ProjectDetail() {
                     icon={IconRubberStamp}
                     title={
                       <span className="flex items-center gap-2">
-                        Visas
+                        {t('projectdetail_visas_title')}
                         <span className="text-xs font-medium bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] px-2 py-0.5 rounded-full">{visas.length}</span>
                       </span>
                     }
                     action={
                       <button
+                        type="button"
                         onClick={() => {
                           setEditingVisa(null);
                           setVisaFile(null);
@@ -4676,7 +4764,7 @@ export default function ProjectDetail() {
                         className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
-                        Ajouter un visa
+                        {t('projectdetail_visa_add')}
                       </button>
                     }
                   />
@@ -4684,17 +4772,17 @@ export default function ProjectDetail() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
-                          <th className="px-6 py-3 text-left">Titre</th>
-                          <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-left">Statut</th>
-                          <th className="px-6 py-3 text-left">Commentaires</th>
-                          <th className="px-6 py-3 text-right">Actions</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_title')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_date')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_visa_opinion')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_visa_observations')}</th>
+                          <th className="px-6 py-3 text-right"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
                         {Object.entries(visas.reduce((acc, v) => {
                           const lot = (project.lots_list || []).find(l => l.id === v.lot_id);
-                          const key = lot ? `${lot.lot_title}${lot.contact_name ? ` — ${lot.contact_name}` : ''}` : 'Sans lot';
+                          const key = lot ? `${lot.lot_title}${lot.contact_name ? ` · ${lot.contact_name}` : ''}` : t('projectdetail_visa_no_lot');
                           if (!acc[key]) acc[key] = [];
                           acc[key].push(v);
                           return acc;
@@ -4706,7 +4794,7 @@ export default function ProjectDetail() {
                               <button type="button" aria-expanded={!!visaExpandedGroups[groupKey]} onClick={() => setVisaExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="w-full flex items-center gap-2 px-6 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
                                 {visaExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                                 <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
-                                <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupVisas.length} visa{groupVisas.length > 1 ? 's' : ''})</span>
+                                <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">{t('projectdetail_visa_count', { count: groupVisas.length })}</span>
                               </button>
                             </td>
                           </tr>
@@ -4716,7 +4804,7 @@ export default function ProjectDetail() {
                               <div className="flex items-center gap-2">
                                 {visa.title}
                                 {visa.document_url && (
-                                  <button type="button" onClick={e => { e.stopPropagation(); openSignedUrl(visa.document_url!); }} title="Voir le document" className="text-[var(--tblr-muted)] hover:text-blue-600">
+                                  <button type="button" onClick={e => { e.stopPropagation(); openSignedUrl(visa.document_url!); }} title={t('projectdetail_visa_open_document')} aria-label={t('projectdetail_visa_open_document')} className="text-[var(--tblr-muted)] hover:text-blue-600">
                                     <IconExternalLink size={13} />
                                   </button>
                                 )}
@@ -4731,7 +4819,7 @@ export default function ProjectDetail() {
                                 visa.status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                                 "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-[var(--tblr-muted)]"
                               )}>
-                                {visa.status === 'pending' ? 'En attente' : visa.status === 'approved' ? 'Validé' : visa.status === 'rejected' ? 'Rejeté' : 'Commenté'}
+                                {t(`projectdetail_visa_status_${visa.status}`)}
                               </span>
                             </td>
                             <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 max-w-xs">
@@ -4742,7 +4830,9 @@ export default function ProjectDetail() {
                                 {/* Quick validate */}
                                 {visa.status !== 'approved' && (
                                   <button
-                                    title="Valider"
+                                    type="button"
+                                    title={t('projectdetail_visa_quick_approve')}
+                                    aria-label={t('projectdetail_visa_quick_approve_named', { title: visa.title })}
                                     onClick={async () => {
                                       try {
                                         const res = await fetch(`/api/visas/${visa.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...visa, status: 'approved' }) });
@@ -4757,7 +4847,9 @@ export default function ProjectDetail() {
                                 {/* Quick reject */}
                                 {visa.status !== 'rejected' && (
                                   <button
-                                    title="Rejeter"
+                                    type="button"
+                                    title={t('projectdetail_visa_quick_reject')}
+                                    aria-label={t('projectdetail_visa_quick_reject_named', { title: visa.title })}
                                     onClick={async () => {
                                       try {
                                         const res = await fetch(`/api/visas/${visa.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...visa, status: 'rejected' }) });
@@ -4771,7 +4863,9 @@ export default function ProjectDetail() {
                                 )}
                                 {/* Edit */}
                                 <button
-                                  title="Modifier"
+                                  type="button"
+                                  title={t('projectdetail_visa_edit')}
+                                  aria-label={t('projectdetail_visa_edit_named', { title: visa.title })}
                                   onClick={() => {
                                     setEditingVisa(visa);
                                     setVisaFile(null);
@@ -4780,11 +4874,13 @@ export default function ProjectDetail() {
                                   }}
                                   className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                                 >
-                                  <IconMessageDots size={15} />
+                                  <IconEdit size={15} />
                                 </button>
                                 {/* Delete */}
                                 <button
-                                  title="Supprimer"
+                                  type="button"
+                                  title={t('projectdetail_visa_delete')}
+                                  aria-label={t('projectdetail_visa_delete_named', { title: visa.title })}
                                   onClick={async () => {
                                     if (!(await confirmDelete('projectdetail_confirm_delete_visa'))) return;
                                     try {
@@ -4804,7 +4900,7 @@ export default function ProjectDetail() {
                         ))}
                         {visas.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun visa. Cliquez sur "Ajouter un visa" pour commencer.</td>
+                            <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_visas_empty')}</td>
                           </tr>
                         )}
                       </tbody>
@@ -4824,7 +4920,7 @@ export default function ProjectDetail() {
                 <ReserveTracker
                   projectId={id || ''}
                   apiBase="/api/reserves"
-                  title="Réserves"
+                  title={t('projectdetail_reserves_title')}
                   reserves={reserves}
                   setReserves={setReserves}
                   plans={plans}
@@ -4837,7 +4933,7 @@ export default function ProjectDetail() {
                 <ReserveTracker
                   projectId={id || ''}
                   apiBase="/api/gpa-reserves"
-                  title="Réserves GPA"
+                  title={t('projectdetail_reserves_gpa_title')}
                   reserves={gpaReserves}
                   setReserves={setGpaReserves}
                   plans={plans}
@@ -4852,14 +4948,15 @@ export default function ProjectDetail() {
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconClipboardCheck}
-                    title="Procès-verbaux de réception"
+                    title={t('projectdetail_pv_title')}
                     action={
                       <button
+                        type="button"
                         onClick={() => { setShowPvForm(true); setEditingReceptionId(null); setPvForm(defaultPvForm()); }}
                         className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
                       >
                         <IconPlus size={14} />
-                        Créer PV de réception
+                        {t('projectdetail_pv_new')}
                       </button>
                     }
                   />
@@ -4869,29 +4966,29 @@ export default function ProjectDetail() {
                     <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-5">
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Référence PV</label>
-                          <input type="text" placeholder="ex: PV-2024-001" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reference_pv} onChange={e => setPvForm(prev => ({ ...prev, reference_pv: e.target.value }))} />
+                          <label htmlFor="pv-reference" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_pv_reference')}</label>
+                          <input id="pv-reference" type="text" placeholder="PV-2026-001" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.reference_pv} onChange={e => setPvForm(prev => ({ ...prev, reference_pv: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Type</label>
-                          <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.type} onChange={e => setPvForm(prev => ({ ...prev, type: e.target.value as 'provisoire' | 'definitive' }))}>
-                            <option value="provisoire">Réception provisoire</option>
-                            <option value="definitive">Réception définitive</option>
+                          <label htmlFor="pv-type" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_col_type')}</label>
+                          <select id="pv-type" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.type} onChange={e => setPvForm(prev => ({ ...prev, type: e.target.value as 'provisoire' | 'definitive' }))}>
+                            <option value="provisoire">{t('projectdetail_pv_type_provisoire')}</option>
+                            <option value="definitive">{t('projectdetail_pv_type_definitive')}</option>
                           </select>
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date</label>
-                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date} onChange={e => setPvForm(prev => ({ ...prev, date: e.target.value }))} />
+                          <label htmlFor="pv-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_pv_date')}</label>
+                          <input id="pv-date" type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date} onChange={e => setPvForm(prev => ({ ...prev, date: e.target.value }))} />
                         </div>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Lieu</label>
-                          <input type="text" placeholder="ex: Site du projet" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.lieu} onChange={e => setPvForm(prev => ({ ...prev, lieu: e.target.value }))} />
+                          <label htmlFor="pv-lieu" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_pv_place')}</label>
+                          <input id="pv-lieu" type="text" placeholder={t('projectdetail_pv_place_placeholder')} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.lieu} onChange={e => setPvForm(prev => ({ ...prev, lieu: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date limite levée des réserves</label>
-                          <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date_limite_levee} onChange={e => setPvForm(prev => ({ ...prev, date_limite_levee: e.target.value }))} />
+                          <label htmlFor="pv-limite" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_pv_deadline')}</label>
+                          <input id="pv-limite" type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={pvForm.date_limite_levee} onChange={e => setPvForm(prev => ({ ...prev, date_limite_levee: e.target.value }))} />
                         </div>
                         <div className="space-y-1">
                         </div>
@@ -4900,12 +4997,12 @@ export default function ProjectDetail() {
                       {/* Liste des réserves */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">
-                            Réserves
+                          <h4 className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">
+                            {t('projectdetail_reserves_title')}
                             {pvForm.reserves_list.length > 0 && (
                               <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[0.6875rem]">{pvForm.reserves_list.length}</span>
                             )}
-                          </label>
+                          </h4>
                           <button
                             type="button"
                             onClick={() => setPvForm(prev => ({
@@ -4915,11 +5012,11 @@ export default function ProjectDetail() {
                             }))}
                             className="flex items-center gap-1 text-[0.6875rem] font-bold text-amber-600 hover:text-amber-700 transition-colors"
                           >
-                            <IconPlus size={12} /> Ajouter une réserve
+                            <IconPlus size={12} /> {t('projectdetail_pv_reserve_add')}
                           </button>
                         </div>
                         {pvForm.reserves_list.length === 0 && (
-                          <p className="text-xs text-[var(--tblr-muted)] italic py-1">Aucune réserve. Cliquez sur "Ajouter une réserve" pour saisir la liste.</p>
+                          <p className="text-xs text-[var(--tblr-muted)] italic py-1">{t('projectdetail_pv_reserves_empty')}</p>
                         )}
                         {pvForm.reserves_list.map((r, idx) => (
                           <div key={r.id} className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-900/10 p-3 space-y-2">
@@ -4927,12 +5024,13 @@ export default function ProjectDetail() {
                               <span className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] w-6 shrink-0 tabular-nums">#{idx + 1}</span>
                               <input
                                 type="text"
-                                placeholder="Intitulé de la réserve *"
+                                aria-label={t('projectdetail_pv_reserve_title_named', { n: idx + 1 })}
+                                placeholder={t('projectdetail_pv_reserve_title')}
                                 className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
                                 value={r.title}
                                 onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, title: e.target.value } : x) }))}
                               />
-                              <button title="Retirer la réserve" aria-label="Retirer la réserve"
+                              <button title={t('projectdetail_pv_reserve_remove')} aria-label={t('projectdetail_pv_reserve_remove_named', { n: idx + 1 })}
                                 type="button"
                                 onClick={() => setPvForm(prev => ({
                                   ...prev,
@@ -4945,23 +5043,18 @@ export default function ProjectDetail() {
                               </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2 pl-7">
-                              <input type="text" placeholder="Bâtiment" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.batiment} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, batiment: e.target.value } : x) }))} />
-                              <input type="text" placeholder="Local / Zone" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.local} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, local: e.target.value } : x) }))} />
-                              <input type="text" placeholder="Lot(s) concerné(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
-                              <input type="text" placeholder="Entreprise(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
+                              <input type="text" aria-label={t('projectdetail_pv_building')} placeholder={t('projectdetail_pv_building')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.batiment} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, batiment: e.target.value } : x) }))} />
+                              <input type="text" aria-label={t('projectdetail_pv_room')} placeholder={t('projectdetail_pv_room')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.local} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, local: e.target.value } : x) }))} />
+                              <input type="text" aria-label={t('projectdetail_pv_lots')} placeholder={t('projectdetail_pv_lots')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
+                              <input type="text" aria-label={t('projectdetail_pv_companies')} placeholder={t('projectdetail_pv_companies')} className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
                               <div className="space-y-0.5">
-                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date limite</label>
-                                <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
+                                <label htmlFor={`pv-reserve-${r.id}-date`} className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_pv_reserve_deadline')}</label>
+                                <input id={`pv-reserve-${r.id}-date`} type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
                               </div>
                               <div className="space-y-0.5">
-                                <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
-                                <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
-                                  <option value="A faire">À faire</option>
-                                  <option value="En cours">En cours</option>
-                                  <option value="Levée">Levée</option>
-                                  <option value="Refusée par l'entreprise">Refusée par l'entreprise</option>
-                                  <option value="Levée refusée par le MOE">Levée refusée par le MOE</option>
-                                  <option value="Quitus Transmis">Quitus Transmis</option>
+                                <label htmlFor={`pv-reserve-${r.id}-statut`} className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_col_status')}</label>
+                                <select id={`pv-reserve-${r.id}-statut`} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
+                                  {RESERVE_STATUSES.map(s => <option key={s} value={s}>{t(reserveStatusKey(s)!)}</option>)}
                                 </select>
                               </div>
                             </div>
@@ -4972,28 +5065,29 @@ export default function ProjectDetail() {
                       {/* Signataires */}
                       <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                          <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Signataires</label>
+                          <h4 className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_pv_signatories')}</h4>
                           <button type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: [...prev.signataires, { nom: '', role: '' }] }))} className="flex items-center gap-1 text-[0.6875rem] font-bold text-blue-600 hover:text-blue-700 transition-colors">
-                            <IconPlus size={12} /> Ajouter signataire
+                            <IconPlus size={12} /> {t('projectdetail_pv_signatory_add')}
                           </button>
                         </div>
                         {pvForm.signataires.map((sig, idx) => (
                           <div key={idx} className="flex gap-2 items-center">
-                            <input type="text" placeholder="Nom" className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.nom} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, nom: e.target.value } : s) }))} />
-                            <input type="text" placeholder="Rôle (ex: MOE, MOA)" className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.role} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, role: e.target.value } : s) }))} />
-                            <button title="Retirer le signataire" aria-label="Retirer le signataire" type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: prev.signataires.filter((_, i) => i !== idx) }))} className="p-2 text-red-400 hover:text-red-600 transition-colors"><IconX size={14} /></button>
+                            <input type="text" aria-label={t('projectdetail_pv_signatory_name')} placeholder={t('projectdetail_pv_signatory_name')} className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.nom} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, nom: e.target.value } : s) }))} />
+                            <input type="text" aria-label={t('projectdetail_pv_signatory_role')} placeholder={t('projectdetail_pv_signatory_role_placeholder')} className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.role} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, role: e.target.value } : s) }))} />
+                            <button title={t('projectdetail_pv_signatory_remove')} aria-label={t('projectdetail_pv_signatory_remove')} type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: prev.signataires.filter((_, i) => i !== idx) }))} className="p-2 text-red-400 hover:text-red-600 transition-colors"><IconX size={14} /></button>
                           </div>
                         ))}
                       </div>
 
                       <div className="space-y-1">
-                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Observations</label>
-                        <textarea rows={3} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={pvForm.observations} onChange={e => setPvForm(prev => ({ ...prev, observations: e.target.value }))} />
+                        <label htmlFor="pv-observations" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_visa_observations')}</label>
+                        <textarea id="pv-observations" rows={3} className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={pvForm.observations} onChange={e => setPvForm(prev => ({ ...prev, observations: e.target.value }))} />
                       </div>
 
                       <div className="flex justify-end gap-3">
-                        <button onClick={() => { setShowPvForm(false); setEditingReceptionId(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
+                        <button type="button" onClick={() => { setShowPvForm(false); setEditingReceptionId(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">{t('projectdetail_dialog_cancel')}</button>
                         <button
+                          type="button"
                           onClick={async () => {
                             try {
                               const rl = pvForm.reserves_list;
@@ -5029,7 +5123,7 @@ export default function ProjectDetail() {
                                   headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify({
                                     id: r.id, project_id: id, reception_id: receptionId,
-                                    title: r.title || '(sans titre)', batiment: r.batiment, local: r.local,
+                                    title: r.title || t('projectdetail_pv_reserve_untitled'), batiment: r.batiment, local: r.local,
                                     lots: JSON.stringify(r.lots ? r.lots.split(',').map((s: string) => s.trim()) : []),
                                     entreprises: JSON.stringify(r.entreprises ? r.entreprises.split(',').map((s: string) => s.trim()) : []),
                                     status: r.status || 'A faire', due_date: r.due_date || today, created_at: today,
@@ -5044,7 +5138,7 @@ export default function ProjectDetail() {
                           }}
                           className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
                         >
-                          {editingReceptionId ? 'Enregistrer' : 'Créer le PV'}
+                          {editingReceptionId ? t('projectdetail_pv_save') : t('projectdetail_pv_create')}
                         </button>
                       </div>
                     </div>
@@ -5054,14 +5148,14 @@ export default function ProjectDetail() {
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
-                          <th className="px-6 py-3 text-left">Référence</th>
-                          <th className="px-6 py-3 text-left">Type</th>
-                          <th className="px-6 py-3 text-left">Date</th>
-                          <th className="px-6 py-3 text-left">Lieu</th>
-                          <th className="px-6 py-3 text-left">Réserves</th>
-                          <th className="px-6 py-3 text-left">Délai levée</th>
-                          <th className="px-6 py-3 text-left">Statut</th>
-                          <th className="px-6 py-3 text-right w-28"></th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_ff_reference')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_type')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_date')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_pv_place')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_reserves_title')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_pv_col_deadline')}</th>
+                          <th className="px-6 py-3 text-left">{t('projectdetail_col_status')}</th>
+                          <th className="px-6 py-3 text-right w-28"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -5077,7 +5171,7 @@ export default function ProjectDetail() {
                               <td className="px-6 py-4 font-mono text-xs font-bold text-[var(--tblr-text)]">{rec.reference_pv || '—'}</td>
                               <td className="px-6 py-4">
                                 <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
-                                  {rec.type === 'provisoire' ? 'Provisoire' : 'Définitive'}
+                                  {rec.type === 'provisoire' ? t('projectdetail_pv_type_provisoire_short') : t('projectdetail_pv_type_definitive_short')}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(rec.date).toLocaleDateString('fr-FR')}</td>
@@ -5085,15 +5179,17 @@ export default function ProjectDetail() {
                               <td className="px-6 py-4">
                                 {pvReserves.length > 0 ? (
                                   <button
+                                    type="button"
+                                    aria-expanded={isExpanded}
                                     onClick={() => setExpandedPvId(isExpanded ? null : rec.id)}
                                     className={cn("flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider transition-colors", "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 hover:bg-amber-200")}
                                   >
                                     {isExpanded ? <IconChevronUp size={10} /> : <IconChevronDown size={10} />}
-                                    {pvReserves.length} réserve{pvReserves.length > 1 ? 's' : ''} · {reservesLevees} levée{reservesLevees > 1 ? 's' : ''}
+                                    {t('projectdetail_pv_reserves_count', { count: pvReserves.length })} · {t('projectdetail_pv_reserves_lifted', { count: reservesLevees })}
                                   </button>
                                 ) : (
                                   <span className="px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                                    Sans réserves
+                                    {t('projectdetail_pv_no_reserves')}
                                   </span>
                                 )}
                               </td>
@@ -5101,20 +5197,23 @@ export default function ProjectDetail() {
                                 {dlimit ? (
                                   <span className={cn("text-xs font-medium", isUrgent ? "text-orange-600 dark:text-orange-400 font-bold" : "text-zinc-600 dark:text-zinc-300")}>
                                     {dlimit.toLocaleDateString('fr-FR')}
-                                    {isUrgent && ' ⚠'}
+                                    {isUrgent && <span className="sr-only"> {t('projectdetail_pv_deadline_near')}</span>}
+                                    {isUrgent && <span aria-hidden> ⚠</span>}
                                   </span>
                                 ) : '—'}
                               </td>
                               <td className="px-6 py-4">
                                 <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", rec.pv_valide ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-zinc-100 text-[var(--tblr-muted)] dark:bg-zinc-800 dark:text-[var(--tblr-muted)]")}>
-                                  {rec.pv_valide ? 'Validé' : 'Brouillon'}
+                                  {rec.pv_valide ? t('projectdetail_pv_status_signed') : t('projectdetail_os_status_draft')}
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-right">
                                 <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
                                   {/* PDF export */}
                                   <button
-                                    title="Exporter PDF"
+                                    type="button"
+                                    title={t('projectdetail_pv_export_pdf')}
+                                    aria-label={t('projectdetail_pv_export_pdf')}
                                     onClick={() => {
                                       const signataires: { nom: string; role: string }[] = rec.signataires ? JSON.parse(rec.signataires) : [];
                                       generatePvPdf(rec, pvReserves, project?.name || 'Projet', signataires);
@@ -5125,15 +5224,19 @@ export default function ProjectDetail() {
                                   </button>
                                   {/* Edit */}
                                   <button
-                                    title="Modifier"
+                                    type="button"
+                                    title={t('projectdetail_pv_edit')}
+                                    aria-label={t('projectdetail_pv_edit')}
                                     onClick={() => openReceptionForm(rec)}
                                     className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-colors"
                                   >
-                                    <IconFileText size={15} />
+                                    <IconEdit size={15} />
                                   </button>
                                   {/* Delete */}
                                   <button
-                                    title="Supprimer"
+                                    type="button"
+                                    title={t('projectdetail_pv_delete')}
+                                    aria-label={t('projectdetail_pv_delete')}
                                     onClick={async () => {
                                       if (!(await confirmDelete('projectdetail_confirm_delete_pv_reception'))) return;
                                       try {
@@ -5155,22 +5258,22 @@ export default function ProjectDetail() {
                                   <div className="mx-6 mb-4 rounded-lg border border-amber-200 dark:border-amber-800/40 overflow-hidden">
                                     <div className="px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-200 dark:border-amber-800/40 flex items-center justify-between">
                                       <span className="text-[0.6875rem] font-black uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                                        Liste des réserves — {rec.reference_pv}
+                                        {rec.reference_pv ? t('projectdetail_pv_reserves_list_ref', { ref: rec.reference_pv }) : t('projectdetail_pv_reserves_list')}
                                       </span>
                                       <span className="text-[0.6875rem] text-amber-600 dark:text-amber-500">
-                                        {reservesLevees}/{pvReserves.length} levées
+                                        {t('projectdetail_pv_lifted_ratio', { count: reservesLevees, total: pvReserves.length })}
                                       </span>
                                     </div>
                                     <table className="w-full text-xs">
                                       <thead className="bg-amber-50/50 dark:bg-amber-900/10 text-amber-600 dark:text-amber-500 font-bold uppercase text-[0.6875rem] tracking-wider">
                                         <tr>
-                                          <th className="px-4 py-2 text-left w-8">#</th>
-                                          <th className="px-4 py-2 text-left">Intitulé</th>
-                                          <th className="px-4 py-2 text-left">Bâtiment / Local</th>
-                                          <th className="px-4 py-2 text-left">Lot / Entreprise</th>
-                                          <th className="px-4 py-2 text-left">Délai</th>
-                                          <th className="px-4 py-2 text-left">Statut</th>
-                                          <th className="px-4 py-2 text-right w-16"></th>
+                                          <th className="px-4 py-2 text-left w-8">{t('projectdetail_col_number')}</th>
+                                          <th className="px-4 py-2 text-left">{t('projectdetail_col_title')}</th>
+                                          <th className="px-4 py-2 text-left">{t('projectdetail_pv_col_place')}</th>
+                                          <th className="px-4 py-2 text-left">{t('projectdetail_col_lot_company')}</th>
+                                          <th className="px-4 py-2 text-left">{t('projectdetail_pv_reserve_deadline')}</th>
+                                          <th className="px-4 py-2 text-left">{t('projectdetail_col_status')}</th>
+                                          <th className="px-4 py-2 text-right w-16"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-amber-100 dark:divide-amber-900/20">
@@ -5201,10 +5304,12 @@ export default function ProjectDetail() {
                                               </td>
                                               <td className={cn("px-4 py-2 font-medium", isEnRetard ? "text-red-600 font-bold" : "text-[var(--tblr-muted)]")}>
                                                 {r.due_date ? new Date(r.due_date).toLocaleDateString('fr-FR') : '—'}
-                                                {isEnRetard && ' ⚠'}
+                                                {isEnRetard && <span className="sr-only"> {t('projectdetail_pv_reserve_late')}</span>}
+                                                {isEnRetard && <span aria-hidden> ⚠</span>}
                                               </td>
                                               <td className="px-4 py-2">
                                                 <select
+                                                  aria-label={t('projectdetail_pv_reserve_status_named', { title: r.title })}
                                                   value={r.status}
                                                   onChange={async (e) => {
                                                     const newStatus = e.target.value;
@@ -5213,16 +5318,11 @@ export default function ProjectDetail() {
                                                   }}
                                                   className={cn("text-[0.6875rem] font-bold px-2 py-0.5 rounded-full border-0 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
                                                 >
-                                                  <option value="A faire">À faire</option>
-                                                  <option value="En cours">En cours</option>
-                                                  <option value="Levée">Levée</option>
-                                                  <option value="Quitus Transmis">Quitus Transmis</option>
-                                                  <option value="Refusée par l'entreprise">Refusée entreprise</option>
-                                                  <option value="Levée refusée par le MOE">Refusée MOE</option>
+                                                  {RESERVE_STATUSES.map(s => <option key={s} value={s}>{t(reserveStatusKey(s)!)}</option>)}
                                                 </select>
                                               </td>
                                               <td className="px-4 py-2 text-right">
-                                                <button title="Supprimer la réserve" aria-label="Supprimer la réserve"
+                                                <button type="button" title={t('projectdetail_reserve_delete')} aria-label={t('projectdetail_reserve_delete_named', { title: r.title })}
                                                   onClick={async () => {
                                                     if (!(await confirmDelete('projectdetail_confirm_delete_reserve'))) return;
                                                     const res = await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
@@ -5248,7 +5348,7 @@ export default function ProjectDetail() {
                         })}
                         {receptions.length === 0 && (
                           <tr>
-                            <td colSpan={8} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun PV de réception. Cliquez sur "Créer PV de réception" pour commencer.</td>
+                            <td colSpan={8} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_pv_empty')}</td>
                           </tr>
                         )}
                       </tbody>
@@ -5268,7 +5368,7 @@ export default function ProjectDetail() {
                     }, {} as Record<string, { id: string; name: string }>)
                   );
                   const doeGroups = doeDocuments.reduce<Record<string, any[]>>((acc, doc) => {
-                    const key = doc.contact_name || 'Non assigné';
+                    const key = doc.contact_name || t('projectdetail_doe_unassigned');
                     if (!acc[key]) acc[key] = [];
                     acc[key].push(doc);
                     return acc;
@@ -5293,16 +5393,17 @@ export default function ProjectDetail() {
                   <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                     <CardHeader
                       icon={IconClipboardCheck}
-                      title="DOE — Dossier des Ouvrages Exécutés"
-                      description="Le DOE regroupe les plans conformes à exécution, notices de fonctionnement et documents remis en fin de chantier."
+                      title={t('projectdetail_doe_title')}
+                      description={t('projectdetail_doe_desc')}
                       action={
                       <div className="flex items-center gap-2">
                         <select
+                          aria-label={t('projectdetail_doe_company')}
                           value={doeContactId}
                           onChange={e => setDoeContactId(e.target.value)}
                           className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         >
-                          <option value="">Entreprise (non assigné)</option>
+                          <option value="">{t('projectdetail_doe_company_none')}</option>
                           {doeEntreprises.map(c => (
                             <option key={c.id} value={c.id}>{c.name}</option>
                           ))}
@@ -5339,12 +5440,14 @@ export default function ProjectDetail() {
                           }
                         }} />
                         <button
+                          type="button"
                           onClick={() => doeInputRef.current?.click()}
                           disabled={doeUploading}
+                          aria-busy={doeUploading}
                           className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
                         >
                           <IconFilePlus size={14} />
-                          {doeUploading ? 'Upload...' : 'Ajouter document DOE'}
+                          {doeUploading ? t('projectdetail_doe_uploading') : t('projectdetail_doe_add')}
                         </button>
                       </div>
                       }
@@ -5353,11 +5456,11 @@ export default function ProjectDetail() {
                       <table className="min-w-full text-sm">
                         <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                           <tr>
-                            <th className="px-6 py-3 text-left">Nom</th>
-                            <th className="px-6 py-3 text-left">Statut</th>
-                            <th className="px-6 py-3 text-left">Commentaires</th>
-                            <th className="px-6 py-3 text-left">Date</th>
-                            <th className="px-6 py-3 text-right w-32">Actions</th>
+                            <th className="px-6 py-3 text-left">{t('projectdetail_doe_col_name')}</th>
+                            <th className="px-6 py-3 text-left">{t('projectdetail_visa_opinion')}</th>
+                            <th className="px-6 py-3 text-left">{t('projectdetail_visa_observations')}</th>
+                            <th className="px-6 py-3 text-left">{t('projectdetail_doe_col_date')}</th>
+                            <th className="px-6 py-3 text-right w-32"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -5369,7 +5472,7 @@ export default function ProjectDetail() {
                                   <button type="button" aria-expanded={!!doeExpandedGroups[groupKey]} onClick={() => setDoeExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="w-full flex items-center gap-2 px-6 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
                                     {doeExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                                     <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
-                                    <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupDocs.length} document{groupDocs.length > 1 ? 's' : ''})</span>
+                                    <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">{t('projectdetail_doe_count', { count: groupDocs.length })}</span>
                                   </button>
                                 </td>
                               </tr>
@@ -5384,7 +5487,7 @@ export default function ProjectDetail() {
                                       doc.validation_status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
                                       "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-[var(--tblr-muted)]"
                                     )}>
-                                      {doc.validation_status === 'approved' ? 'Validé' : doc.validation_status === 'rejected' ? 'Rejeté' : doc.validation_status === 'commented' ? 'Commenté' : 'En attente'}
+                                      {t(`projectdetail_visa_status_${['approved', 'rejected', 'commented'].includes(doc.validation_status) ? doc.validation_status : 'pending'}`)}
                                     </span>
                                   </td>
                                   <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 max-w-xs">
@@ -5392,6 +5495,7 @@ export default function ProjectDetail() {
                                       <textarea
                                         rows={2}
                                         autoFocus
+                                        aria-label={t('projectdetail_visa_observations')}
                                         value={editDoeComments}
                                         onChange={e => setEditDoeComments(e.target.value)}
                                         className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs resize-none"
@@ -5406,17 +5510,20 @@ export default function ProjectDetail() {
                                       {editingDoeId === doc.id ? (
                                         <>
                                           <select
+                                            aria-label={t('projectdetail_doe_company')}
                                             value={editDoeContactId}
                                             onChange={e => setEditDoeContactId(e.target.value)}
                                             className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs mr-1"
                                           >
-                                            <option value="">Non assigné</option>
+                                            <option value="">{t('projectdetail_doe_unassigned')}</option>
                                             {doeEntreprises.map(c => (
                                               <option key={c.id} value={c.id}>{c.name}</option>
                                             ))}
                                           </select>
                                           <button
-                                            title="Enregistrer"
+                                            type="button"
+                                            title={t('projectdetail_doe_save')}
+                                            aria-label={t('projectdetail_doe_save')}
                                             onClick={async () => {
                                               const selected = doeEntreprises.find(c => c.id === editDoeContactId);
                                               await updateDoeValidation(doc, {
@@ -5431,7 +5538,9 @@ export default function ProjectDetail() {
                                             <IconCheck size={14} />
                                           </button>
                                           <button
-                                            title="Annuler"
+                                            type="button"
+                                            title={t('projectdetail_dialog_cancel')}
+                                            aria-label={t('projectdetail_dialog_cancel')}
                                             onClick={() => setEditingDoeId(null)}
                                             className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                                           >
@@ -5441,17 +5550,19 @@ export default function ProjectDetail() {
                                       ) : (
                                         <>
                                           {doc.validation_status !== 'approved' && (
-                                            <button title="Valider" onClick={() => updateDoeValidation(doc, { validation_status: 'approved' })} className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors">
+                                            <button type="button" title={t('projectdetail_visa_quick_approve')} aria-label={t('projectdetail_visa_quick_approve_named', { title: doc.name })} onClick={() => updateDoeValidation(doc, { validation_status: 'approved' })} className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors">
                                               <IconCheck size={15} />
                                             </button>
                                           )}
                                           {doc.validation_status !== 'rejected' && (
-                                            <button title="Rejeter" onClick={() => updateDoeValidation(doc, { validation_status: 'rejected' })} className="p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
+                                            <button type="button" title={t('projectdetail_visa_quick_reject')} aria-label={t('projectdetail_visa_quick_reject_named', { title: doc.name })} onClick={() => updateDoeValidation(doc, { validation_status: 'rejected' })} className="p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
                                               <IconX size={15} />
                                             </button>
                                           )}
                                           <button
-                                            title="Modifier l'entreprise / commentaires"
+                                            type="button"
+                                            title={t('projectdetail_doe_edit')}
+                                            aria-label={t('projectdetail_doe_edit_named', { name: doc.name })}
                                             onClick={() => {
                                               setEditingDoeId(doc.id);
                                               setEditDoeContactId(doc.contact_id || '');
@@ -5459,12 +5570,14 @@ export default function ProjectDetail() {
                                             }}
                                             className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
                                           >
-                                            <IconMessageDots size={15} />
+                                            <IconEdit size={15} />
                                           </button>
-                                          <button type="button" onClick={() => openSignedUrl(doc.file_url)} className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title="Télécharger">
+                                          <button type="button" onClick={() => openSignedUrl(doc.file_url)} className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title={t('projectdetail_doe_open')} aria-label={t('projectdetail_doe_open_named', { name: doc.name })}>
                                             <IconExternalLink size={15} />
                                           </button>
                                           <button
+                                            type="button"
+                                            aria-label={t('projectdetail_doe_delete_named', { name: doc.name })}
                                             onClick={async () => {
                                               if (!(await confirmDelete('projectdetail_confirm_delete_doe_document'))) return;
                                               try {
@@ -5473,7 +5586,7 @@ export default function ProjectDetail() {
                                               } catch (err) { console.error(err); }
                                             }}
                                             className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                                            title="Supprimer"
+                                            title={t('projectdetail_doe_delete')}
                                           >
                                             <IconTrash size={15} />
                                           </button>
@@ -5487,7 +5600,7 @@ export default function ProjectDetail() {
                           ))}
                           {doeDocuments.length === 0 && (
                             <tr>
-                              <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun document DOE. Ajoutez les plans conformes à exécution.</td>
+                              <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_doe_empty')}</td>
                             </tr>
                           )}
                         </tbody>
@@ -5505,7 +5618,7 @@ export default function ProjectDetail() {
                       <CardHeader
                         className="p-4 sm:p-6"
                         icon={IconClipboardCheck}
-                        title="Plans de l'opération"
+                        title={t('projectdetail_plans_title')}
                         action={
                         <div className="flex items-center gap-2 shrink-0">
                           <input
@@ -5515,16 +5628,18 @@ export default function ProjectDetail() {
                             onChange={handlePlanUpload}
                           />
                           <button
+                            type="button"
                             onClick={() => {
                               setUpdatingPlanId(null);
                               planInputRef.current?.click();
                             }}
                             disabled={planUploading}
+                            aria-busy={planUploading}
                             className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition whitespace-nowrap disabled:opacity-50"
                           >
                             <IconUpload size={14} />
-                            <span className="hidden sm:inline">{planUploading ? 'Upload...' : 'Importer un plan'}</span>
-                            <span className="sm:hidden">{planUploading ? '...' : 'Importer'}</span>
+                            <span className="hidden sm:inline">{planUploading ? t('projectdetail_doe_uploading') : t('projectdetail_plans_import')}</span>
+                            <span className="sm:hidden">{planUploading ? t('projectdetail_doe_uploading') : t('projectdetail_plans_import_short')}</span>
                           </button>
                         </div>
                         }
@@ -5533,10 +5648,10 @@ export default function ProjectDetail() {
                         <table className="min-w-full text-sm">
                           <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                             <tr>
-                              <th className="px-6 py-3 text-left">Nom</th>
-                              <th className="px-6 py-3 text-left w-20">Indice</th>
-                              <th className="px-6 py-3 text-left">Date</th>
-                              <th className="px-6 py-3 text-right w-24">Actions</th>
+                              <th className="px-6 py-3 text-left">{t('projectdetail_plans_col_name')}</th>
+                              <th className="px-6 py-3 text-left w-20">{t('projectdetail_ff_index')}</th>
+                              <th className="px-6 py-3 text-left">{t('projectdetail_doe_col_date')}</th>
+                              <th className="px-6 py-3 text-right w-24"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -5550,24 +5665,28 @@ export default function ProjectDetail() {
                                     {plan.index || 'A'}
                                   </span>
                                 </td>
-                                <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(plan.uploaded_at).toLocaleDateString()}</td>
+                                <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{new Date(plan.uploaded_at).toLocaleDateString('fr-FR')}</td>
                                 <td className="px-6 py-4 text-right">
                                   <div className="flex items-center justify-end gap-2">
                                     <button
+                                      type="button"
                                       onClick={() => {
                                         setUpdatingPlanId(plan.id);
                                         planInputRef.current?.click();
                                       }}
                                       disabled={planUploading}
-                                      title="Nouvel indice"
+                                      title={t('projectdetail_plans_new_index')}
+                                      aria-label={t('projectdetail_plans_new_index_named', { name: plan.name })}
                                       className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors disabled:opacity-50"
                                     >
                                       <IconRefresh size={16} />
                                     </button>
-                                    <button title="Ouvrir le plan" aria-label="Ouvrir le plan" type="button" onClick={() => openSignedUrl(plan.file_url)} className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors">
+                                    <button title={t('projectdetail_plans_open')} aria-label={t('projectdetail_plans_open_named', { name: plan.name })} type="button" onClick={() => openSignedUrl(plan.file_url)} className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors">
                                       <IconExternalLink size={16} />
                                     </button>
-                                    <button 
+                                    <button
+                                      type="button"
+                                      aria-label={t('projectdetail_plans_delete_named', { name: plan.name })}
                                       onClick={async () => {
                                         if (!(await confirmDelete('projectdetail_confirm_delete_plan'))) return;
                                         try {
@@ -5577,7 +5696,7 @@ export default function ProjectDetail() {
                                           console.error(err);
                                         }
                                       }}
-                                      title="Supprimer"
+                                      title={t('projectdetail_plans_delete')}
                                       className="p-2 text-[var(--tblr-muted)] hover:text-red-600 transition-colors"
                                     >
                                       <IconTrash size={16} />
@@ -5588,7 +5707,7 @@ export default function ProjectDetail() {
                             ))}
                             {aorPlans.length === 0 && (
                               <tr>
-                                <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucun plan de l'opération.</td>
+                                <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_plans_empty')}</td>
                               </tr>
                             )}
                           </tbody>
@@ -5617,33 +5736,33 @@ export default function ProjectDetail() {
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
               <h3 id="ar-modal-title" className="text-sm font-bold text-[var(--tblr-text)] mb-4">
-                Accusé de réception — OS N° {arOsTarget.os_number}
+                {t('projectdetail_ar_title', { number: arOsTarget.os_number })}
               </h3>
               <div className="space-y-3">
                 <div>
-                  <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Date d'AR *</label>
-                  <input type="date" value={arForm.date_ar} onChange={e => setArForm(f => ({...f, date_ar: e.target.value}))}
+                  <label htmlFor="ar-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">{t('projectdetail_ar_date')} <span aria-hidden className="text-red-500">*</span></label>
+                  <input id="ar-date" required type="date" value={arForm.date_ar} onChange={e => setArForm(f => ({...f, date_ar: e.target.value}))}
                     className="w-full bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
                 <div>
-                  <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Date d'exécution prévue</label>
-                  <input type="date" value={arForm.date_execution} onChange={e => setArForm(f => ({...f, date_execution: e.target.value}))}
+                  <label htmlFor="ar-execution" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">{t('projectdetail_ar_execution')}</label>
+                  <input id="ar-execution" type="date" value={arForm.date_execution} onChange={e => setArForm(f => ({...f, date_execution: e.target.value}))}
                     className="w-full bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
                 <div>
-                  <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">Notes</label>
-                  <textarea rows={3} value={arForm.notes_ar} onChange={e => setArForm(f => ({...f, notes_ar: e.target.value}))}
+                  <label htmlFor="ar-notes" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase block mb-1">{t('projectdetail_ar_notes')}</label>
+                  <textarea id="ar-notes" rows={3} value={arForm.notes_ar} onChange={e => setArForm(f => ({...f, notes_ar: e.target.value}))}
                     className="w-full bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg p-2 text-sm resize-none outline-none focus:ring-2 focus:ring-green-500" />
                 </div>
               </div>
               <div className="flex gap-2 mt-5 justify-end">
-                <button onClick={() => setArOsTarget(null)}
+                <button type="button" onClick={() => setArOsTarget(null)}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                  Annuler
+                  {t('projectdetail_dialog_cancel')}
                 </button>
-                <button onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar}
+                <button type="button" onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar} aria-busy={arSaving}
                   className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition">
-                  {arSaving ? 'Enregistrement…' : 'Confirmer AR'}
+                  {arSaving ? t('projectdetail_autosave_saving') : t('projectdetail_ar_confirm')}
                 </button>
               </div>
             </motion.div>
@@ -5671,6 +5790,7 @@ export default function ProjectDetail() {
               </p>
               <input
                 autoFocus
+                aria-label={t('projects_delete_confirm_instruction', { word: t('projects_delete_confirm_word') })}
                 className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-[var(--tblr-text)]"
                 value={deleteProjectConfirmInput}
                 onChange={e => setDeleteProjectConfirmInput(e.target.value)}
@@ -5682,11 +5802,12 @@ export default function ProjectDetail() {
                 }}
               />
               <div className="flex gap-2 mt-5 justify-end">
-                <button onClick={() => setShowDeleteProjectConfirm(false)}
+                <button type="button" onClick={() => setShowDeleteProjectConfirm(false)}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
                   {t('btn_cancel')}
                 </button>
                 <button
+                  type="button"
                   disabled={deleteProjectConfirmInput.trim().toLowerCase() !== t('projects_delete_confirm_word').toLowerCase() || isDeletingProject}
                   onClick={handleDelete}
                   className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition"

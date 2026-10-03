@@ -508,6 +508,33 @@ figés qui ignorent le thème sombre.
   emporte souvent un fichier. La facture d'une note s'y confirme aussi, avec
   un récapitulatif HT, TVA et TTC.
 
+### Fiche affaire : textes et libellés
+
+Tous les textes de la fiche (`ProjectDetail.tsx`, `ProjectOverview.tsx`)
+passent par i18next (`projectdetail_*`, `project_overview_*`), sauf le contenu
+des PDF générés (OS, avenant, PV de réception) : ce sont des pièces
+contractuelles françaises remises au maître d'ouvrage, volontairement non
+traduites. Quatre règles à garder :
+
+- **Une valeur stockée en français reste stockée telle quelle**, seul son
+  affichage se traduit : statuts de note (`NOTE_STATUS_KEYS`), de réserve
+  (`reserveStatusKey`, `src/components/pro/reserveShared.tsx`), d'affaire
+  (`projects_status_*`), d'autorisation d'urbanisme (`project_permit_status_*`).
+  Les noms de phase de la mission ont une seule source (`mission_phase_<CODE>`,
+  vocabulaire de la loi MOP : APD = avant-projet définitif).
+- **Un même cycle de statuts n'a pas les mêmes mots partout** :
+  `osStatusBadge(status, 'os' | 'avenant')`, un OS approuvé a son accusé de
+  réception, un avenant est accepté. Visas et DOE disent l'avis du maître
+  d'œuvre (favorable, avec observations, défavorable), jamais « validé ».
+- **Chaque champ a un libellé relié** (`htmlFor`/`id`, `FormField` le fait
+  seul avec `useId`), chaque bouton icône un `aria-label` qui nomme son objet.
+- **« Honoraires » dans le plan d'actions de l'aperçu mène à l'onglet HONOS**
+  (notes d'honoraires de l'agence), toujours actif. Il menait aux « factures
+  entreprises » de RDT et n'était actif qu'en mission chantier. La section de
+  RDT liste en fait les factures de l'agence (`/api/invoices`) et s'intitule
+  désormais ainsi. Les montants de l'aperçu et de la fiche complète sont en
+  lecture seule dès qu'un contrat est rattaché, comme dans HONOS.
+
 ### Journal de l'opération (notes de phase)
 
 Les observations de la fiche étaient deux champs (`etudes_notes`,

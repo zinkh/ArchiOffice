@@ -13,6 +13,18 @@ export const RESERVE_STATUSES: ReserveStatus[] = [
   'A faire', 'En cours', 'Levée', "Refusée par l'entreprise", 'Quitus Transmis', 'Levée refusée par le MOE',
 ];
 
+/** Clé i18n d'un statut : la valeur reste stockée en français, seul l'affichage se traduit. */
+const RESERVE_STATUS_KEYS: Record<ReserveStatus, string> = {
+  'A faire': 'reserve_status_todo',
+  'En cours': 'reserve_status_in_progress',
+  'Levée': 'reserve_status_lifted',
+  "Refusée par l'entreprise": 'reserve_status_refused_company',
+  'Quitus Transmis': 'reserve_status_discharge_sent',
+  'Levée refusée par le MOE': 'reserve_status_lift_refused',
+};
+export const reserveStatusKey = (status: string): string | null =>
+  RESERVE_STATUS_KEYS[status as ReserveStatus] ?? null;
+
 export const isReserveClosed = (r: Pick<ReserveLike, 'status'>) => r.status === 'Levée' || r.status === 'Quitus Transmis';
 
 /** Jours de retard (0 si à l'heure ou levée). */

@@ -25,11 +25,12 @@ import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhas
 import type { PhaseNotesApi } from '../../hooks/usePhaseNotes';
 import { PhaseJournal } from './PhaseJournal';
 
-const PHASE_LABELS: Record<string, string> = {
-  ESQ: 'Esquisse', APS: 'Avant-projet sommaire', APD: 'Avant-projet détaillé', PC: 'Permis de construire',
-  PRO: 'Projet', DCE: 'Consultation entreprises', ACT: 'Assistance contrats travaux', VISA: 'Visa',
-  DET: 'Direction exécution travaux', AOR: 'Assistance réception',
-};
+
+
+/** Libellé d'un type d'autorisation : PC en toutes lettres, les autres sigles tels quels. */
+function permitTypeLabel(type: string): string {
+  return type === 'PC' ? 'permis de construire' : type;
+}
 
 function formatMonthLabel(dateStr: string) {
   const label = new Date(dateStr).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -192,7 +193,7 @@ export function ProjectOverview({
 
         <div className="flex gap-1.5 flex-wrap mb-3.5">
           <span className="inline-flex items-center px-2 py-0.5 rounded text-[0.6875rem] font-semibold" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
-            Phase {currentPhase}
+            {t('project_overview_phase_badge', { phase: currentPhase })}
           </span>
           {project.category && (
             <span className="inline-flex items-center px-2 py-0.5 rounded text-[0.6875rem] font-semibold" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}>
@@ -213,36 +214,37 @@ export function ProjectOverview({
           >
             <IconAlertTriangle size={16} className="shrink-0" aria-hidden style={{ color: 'var(--tblr-warning)' }} />
             <div className="text-xs leading-snug" style={{ color: 'var(--tblr-text)' }}>
-              {pendingPermit.type === 'PC' ? 'Permis de construire' : pendingPermit.type} en instruction
-              {pendingPermit.reference ? ` (${pendingPermit.reference})` : ''}.{' '}
-              <button type="button" className="underline underline-offset-2 font-medium" onClick={() => navigate('/documents')}>Voir dans Documents</button>.
+              {pendingPermit.reference
+                ? t('project_overview_permit_pending_ref', { type: permitTypeLabel(pendingPermit.type), ref: pendingPermit.reference })
+                : t('project_overview_permit_pending', { type: permitTypeLabel(pendingPermit.type) })}{' '}
+              <button type="button" className="underline underline-offset-2 font-medium" onClick={() => navigate('/documents')}>{t('project_overview_permit_open_documents')}</button>
             </div>
           </div>
         )}
 
-        <CollapsibleSection title="Mission en cours" defaultOpen>
-          <InfoRow k="Type de mission" v={project.is_complete_mission ? 'Mission complète' : 'Mission partielle'} />
-          {project.project_manager && <InfoRow k="Chef de projet" v={project.project_manager} />}
-          {nextMilestone && <InfoRow k="Prochaine échéance" v={new Date(nextMilestone.due_date).toLocaleDateString('fr-FR')} />}
+        <CollapsibleSection title={t('project_overview_section_mission')} defaultOpen>
+          <InfoRow k={t('project_overview_mission_type')} v={project.is_complete_mission ? t('project_overview_mission_complete') : t('project_overview_mission_partial')} />
+          {project.project_manager && <InfoRow k={t('project_overview_project_manager')} v={project.project_manager} />}
+          {nextMilestone && <InfoRow k={t('project_overview_next_deadline')} v={new Date(nextMilestone.due_date).toLocaleDateString('fr-FR')} />}
         </CollapsibleSection>
 
-        <CollapsibleSection title="Infos administratives" defaultOpen>
-          {(project.reference || project.project_code) && <InfoRow k="Référence" v={project.reference || project.project_code} />}
-          {!!project.construction_cost && <InfoRow k="Budget travaux HT" v={formatCurrency(Number(project.construction_cost))} />}
-          {!!project.surface && <InfoRow k="Surface" v={`${project.surface} m²`} />}
-          <InfoRow k="Permis" v={permits.length === 0 ? 'Aucun' : (pendingPermit ? 'En instruction' : permits[permits.length - 1].status)} />
+        <CollapsibleSection title={t('project_overview_section_admin')} defaultOpen>
+          {(project.reference || project.project_code) && <InfoRow k={t('project_overview_reference')} v={project.reference || project.project_code} />}
+          {!!project.construction_cost && <InfoRow k={t('project_overview_works_budget_ht')} v={formatCurrency(Number(project.construction_cost))} />}
+          {!!project.surface && <InfoRow k={t('project_overview_surface')} v={`${project.surface} m²`} />}
+          <InfoRow k={t('project_overview_permit')} v={permits.length === 0 ? t('project_overview_permit_none') : t(`project_permit_status_${(pendingPermit ?? permits[permits.length - 1]).status}`)} />
         </CollapsibleSection>
 
-        <CollapsibleSection title="Contexte & programme" defaultOpen={false}>
-          <InfoRow k="Secteur" v={project.secteur_abf || '—'} />
-          <InfoRow k="Type de bien" v={project.type_projet || project.categorie_projet || '—'} />
-          <InfoRow k="Programme" v={project.programme ? (project.programme.length > 28 ? project.programme.slice(0, 28) + '…' : project.programme) : '—'} />
+        <CollapsibleSection title={t('project_overview_section_context')} defaultOpen={false}>
+          <InfoRow k={t('project_overview_sector')} v={project.secteur_abf || t('project_overview_not_set')} />
+          <InfoRow k={t('project_overview_property_type')} v={project.type_projet || project.categorie_projet || t('project_overview_not_set')} />
+          <InfoRow k={t('project_overview_programme')} v={project.programme ? (project.programme.length > 28 ? project.programme.slice(0, 28) + '…' : project.programme) : t('project_overview_not_set')} />
         </CollapsibleSection>
 
         {projectMembers.length > 0 && (
-          <CollapsibleSection title={`Équipe (${projectMembers.length})`} defaultOpen={false}>
+          <CollapsibleSection title={t('project_overview_section_team', { count: projectMembers.length })} defaultOpen={false}>
             {projectMembers.slice(0, 6).map(m => (
-              <InfoRow key={m.id || m.user_id} k={m.role || 'member'} v={m.name || m.email} />
+              <InfoRow key={m.id || m.user_id} k={m.role || t('project_overview_team_member')} v={m.name || m.email} />
             ))}
           </CollapsibleSection>
         )}
@@ -299,7 +301,7 @@ export function ProjectOverview({
           api={phaseNotes}
           phases={journalPhases}
           viewedPhase={viewedPhase}
-          phaseLabel={phase => PHASE_LABELS[phase] || phase}
+          phaseLabel={phase => t(`mission_phase_${phase}`)}
           defaultBudget={project.construction_cost ?? null}
         />
 
@@ -315,55 +317,57 @@ export function ProjectOverview({
         </h2>
 
         <div className="mb-4">
-          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--tblr-muted)' }}>Objet</label>
+          <label htmlFor={`${project.id}-objet`} className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_objet')}</label>
           <textarea
+            id={`${project.id}-objet`}
             className="w-full border rounded-lg p-2.5 text-[0.8125rem] outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)' }}
             rows={2}
             value={project.description || ''}
             onChange={e => setProject(prev => prev ? ({ ...prev, description: e.target.value }) : null)}
-            placeholder="Objet de la mission…"
+            placeholder={t('project_overview_objet_placeholder')}
           />
         </div>
 
         <div className="mb-4">
-          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--tblr-muted)' }}>Programme &amp; contraintes</label>
+          <label htmlFor={`${project.id}-programme`} className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_programme_constraints')}</label>
           <textarea
+            id={`${project.id}-programme`}
             className="w-full border rounded-lg p-2.5 text-[0.8125rem] leading-relaxed outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)', minHeight: 76 }}
             value={project.programme || ''}
             onChange={e => setProject(prev => prev ? ({ ...prev, programme: e.target.value }) : null)}
-            placeholder="Contraintes du programme, secteur, servitudes…"
+            placeholder={t('project_overview_programme_placeholder')}
           />
         </div>
 
-        <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>Données du projet</label>
+        <h3 className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_data')}</h3>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <div>
-            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>Surface SDP</div>
+            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_surface_sdp')}</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.surface || '—'}</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.surface || t('project_overview_not_set')}</span>
               <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>m²</span>
             </div>
           </div>
           <div>
-            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>Budget travaux</div>
+            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_works_budget')}</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.construction_cost ? formatCurrency(Number(project.construction_cost)) : '—'}</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.construction_cost ? formatCurrency(Number(project.construction_cost)) : t('project_overview_not_set')}</span>
             </div>
           </div>
           <div>
-            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>Avancement</div>
+            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_progress')}</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
               <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.progression ?? 0}</span>
               <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>%</span>
             </div>
           </div>
           <div>
-            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{daysToDeadline !== null && daysToDeadline < 0 ? 'Retard' : 'Échéance'}</div>
+            <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{daysToDeadline !== null && daysToDeadline < 0 ? t('project_overview_delay') : t('project_overview_deadline')}</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{daysToDeadline === null ? '—' : Math.abs(daysToDeadline)}</span>
-              <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>jours</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{daysToDeadline === null ? t('project_overview_not_set') : Math.abs(daysToDeadline)}</span>
+              <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_days')}</span>
             </div>
           </div>
         </div>
@@ -380,7 +384,7 @@ export function ProjectOverview({
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconReceipt size={17} style={{ color: 'var(--tblr-muted)' }} />
-            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Devis</span>
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_proposal')}</span>
           </button>
           <button
             type="button"
@@ -389,7 +393,7 @@ export function ProjectOverview({
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconMail size={17} style={{ color: 'var(--tblr-muted)' }} />
-            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Courrier</span>
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_letter')}</span>
           </button>
           <button
             type="button"
@@ -398,18 +402,17 @@ export function ProjectOverview({
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconCalendarEvent size={17} style={{ color: 'var(--tblr-muted)' }} />
-            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Réunion</span>
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_meeting')}</span>
           </button>
           <button
             type="button"
-            disabled={!project.is_chantier}
             onClick={onGoToInvoices}
-            title={project.is_chantier ? undefined : 'Activez le suivi chantier pour facturer'}
-            className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-40 disabled:cursor-not-allowed"
+            title={t('project_overview_action_fees_title')}
+            className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconFileInvoice size={17} style={{ color: 'var(--tblr-muted)' }} />
-            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Facture</span>
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_fees')}</span>
           </button>
           <button
             type="button"
@@ -418,7 +421,7 @@ export function ProjectOverview({
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconDots size={17} style={{ color: 'var(--tblr-muted)' }} />
-            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>Autres</span>
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_documents')}</span>
           </button>
         </div>
 
@@ -430,7 +433,8 @@ export function ProjectOverview({
               type="text"
               className="w-full border rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
-              placeholder="Titre du jalon"
+              aria-label={t('project_overview_milestone_title')}
+              placeholder={t('project_overview_milestone_title')}
               value={newMilestoneTitle}
               onChange={e => setNewMilestoneTitle(e.target.value)}
             />
@@ -438,12 +442,13 @@ export function ProjectOverview({
               type="date"
               className="w-full border rounded-lg p-2 text-xs outline-none focus:ring-2 focus:ring-blue-500"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+              aria-label={t('project_overview_milestone_date')}
               value={newMilestoneDate}
               onChange={e => setNewMilestoneDate(e.target.value)}
             />
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setIsAddingMilestone(false)} className="px-2.5 py-1.5 text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>Annuler</button>
-              <button type="button" onClick={onAddMilestone} className="px-3 py-1.5 rounded-lg text-[0.6875rem] font-semibold text-white" style={{ background: 'var(--tblr-primary)' }}>Ajouter</button>
+              <button type="button" onClick={() => setIsAddingMilestone(false)} className="px-2.5 py-1.5 text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('projectdetail_dialog_cancel')}</button>
+              <button type="button" onClick={onAddMilestone} className="px-3 py-1.5 rounded-lg text-[0.6875rem] font-semibold text-white" style={{ background: 'var(--tblr-primary)' }}>{t('project_overview_milestone_add')}</button>
             </div>
           </div>
         )}
@@ -498,10 +503,11 @@ export function ProjectOverview({
             const deadline = taskDeadline(task);
             const late = !!deadline && new Date(deadline).getTime() < Date.now();
             return (
-              <div
+              <button
+                type="button"
                 key={task.id}
                 onClick={() => navigate(`/projects/${encodeURIComponent(project.id)}?tab=TACHES`)}
-                className="flex items-start justify-between gap-2 py-1.5 border-t cursor-pointer"
+                className="w-full flex items-start justify-between gap-2 py-1.5 border-t text-left rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 style={{ borderColor: 'var(--tblr-surface-2)' }}
               >
                 <span className="text-[0.8125rem] leading-snug" style={{ color: 'var(--tblr-text)' }}>{task.title}</span>
@@ -510,7 +516,7 @@ export function ProjectOverview({
                     {new Date(deadline).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
                   </span>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
