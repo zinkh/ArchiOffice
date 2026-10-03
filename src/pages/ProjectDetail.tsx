@@ -36,17 +36,12 @@ import {
   IconCurrencyEuro,
   IconReceipt,
   IconEdit,
-  IconInfoCircle,
-  IconChecklist,
-  IconReceipt2,
-  IconFileDescription,
   IconUsersGroup,
   IconRubberStamp,
   IconTools,
   IconReportMoney,
   IconClipboardCheck,
-  IconMail,
-} from '@tabler/icons-react';
+  } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
@@ -63,6 +58,8 @@ import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
 import { isProjectDirty } from '../lib/projectDirty';
+import { CHANTIER_ONLY_TABS, DEFAULT_PROJECT_TAB, isProjectTab } from '../lib/projectTabs';
+import { ProjectTabBar } from '../components/projectDetail/ProjectTabBar';
 import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from '../components/ui/Toast';
@@ -89,7 +86,6 @@ import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
-import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
@@ -285,7 +281,13 @@ export default function ProjectDetail() {
   const [newRfi, setNewRfi] = useState({ question: '', asked_by: '', due_date: '' });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
-  const [activeTab, setActiveTab] = useState('INFOS');
+  // L'onglet ouvert vit dans l'adresse (?tab=) : il survit au rechargement et
+  // au retour arrière depuis un autre écran, et se partage par lien.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const tab = searchParams.get('tab');
+    return isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
+  });
   const [showFullEditor, setShowFullEditor] = useState(false);
   // Which phase's notes are shown in the overview's "Note de phase" column.
   // Distinct from the project's actual current phase (phaseHistory) — the
@@ -358,7 +360,7 @@ export default function ProjectDetail() {
   const [editDoeComments, setEditDoeComments] = useState('');
 
   useEffect(() => {
-    if (project && !project.is_chantier && ['ACT', 'DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
+    if (project && !project.is_chantier && (CHANTIER_ONLY_TABS as readonly string[]).includes(activeTab)) {
       setActiveTab('INFOS');
     }
   }, [project?.is_chantier, activeTab]);
@@ -369,17 +371,30 @@ export default function ProjectDetail() {
   // sont calculés au rendu (pas dans un effet) pour rester disponibles dès
   // le premier rendu du prop `initialOpenReserveId` de ReserveTracker plus
   // bas, qui gère lui-même 'reserves'.
-  const [searchParams, setSearchParams] = useSearchParams();
   const openParam = searchParams.get('open') || '';
   const [openResourceKey, openRecordId] = openParam.split(':');
 
+  // Adresse -> onglet : un lien (agent, aperçu « Prochaines tâches ») qui
+  // change `?tab=` sans quitter la fiche.
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (!tab || !project) return;
-    setActiveTab(tab);
-    setSearchParams(prev => { prev.delete('tab'); return prev; }, { replace: true });
+    const wanted = isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
+    setActiveTab(prev => (prev === wanted ? prev : wanted));
+  }, [searchParams]);
+
+  // Onglet -> adresse, en remplaçant l'entrée d'historique : changer d'onglet
+  // ne doit pas obliger à remonter dix fois le bouton Retour pour quitter la
+  // fiche. L'onglet par défaut n'apparaît pas dans l'adresse.
+  useEffect(() => {
+    const wanted = activeTab === DEFAULT_PROJECT_TAB ? null : activeTab;
+    if (searchParams.get('tab') === wanted) return;
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (wanted) next.set('tab', wanted); else next.delete('tab');
+      return next;
+    }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, searchParams]);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!openParam) return;
@@ -1729,6 +1744,8 @@ export default function ProjectDetail() {
             const displayedPhase = viewedPhase || actualCurrentPhase;
             return (
               <PhaseStepper
+                ariaLabel={t('project_phase_stepper_label')}
+                stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
                 size="compact"
                 steps={filteredPhases.map(phase => ({ id: phase, label: phase }))}
                 currentId={actualCurrentPhase}
@@ -1801,30 +1818,11 @@ export default function ProjectDetail() {
 
       {/* Tab bar */}
       <div className="shrink-0 px-4 pt-3">
-        <PillTabs
-          activeId={activeTab}
+        <ProjectTabBar
+          activeTab={activeTab}
           onChange={setActiveTab}
-          tabs={([
-            { id: 'INFOS', label: 'INFOS', icon: IconInfoCircle },
-            // Volontairement hors du filtre is_chantier ci-dessous : des
-            // tâches existent dès la phase études.
-            { id: 'TACHES', label: t('project_tasks_tab') as string, icon: IconChecklist },
-            { id: 'HONOS', label: 'HONOS', icon: IconReceipt2 },
-            { id: 'PRO', label: 'PRO', icon: IconFileDescription },
-            { id: 'ACT', label: 'ACT', icon: IconUsersGroup },
-            { id: 'VISA', label: 'VISA', icon: IconRubberStamp },
-            { id: 'DET', label: 'DET', icon: IconTools },
-            { id: 'RDT', label: 'RDT', icon: IconReportMoney },
-            { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
-            { id: 'CORRESPONDANCE', label: t('correspondence_title') as string, icon: IconMail },
-          ] as PillTabItem[])
-            .map(tab =>
-              chantierTabState[tab.id]?.horsMission ? { ...tab, badge: 'hors mission' } : tab
-            )
-            .filter(tab =>
-              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) &&
-                (!project.is_chantier || chantierTabState[tab.id]?.visible === false))
-            )}
+          isChantier={!!project.is_chantier}
+          chantierTabState={chantierTabState}
         />
       </div>
 

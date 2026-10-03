@@ -441,6 +441,28 @@ yeux, et se conclut par un toast « Ouvrir la facture » (`/invoices?open=<id>`)
 le serveur n'a pas confirmé. Les `alert()` de la fiche sont des toasts
 (`useToastWithUndo`).
 
+### Fiche affaire : onglets regroupés et onglet dans l'adresse
+
+Les dix onglets de la fiche (INFOS, TACHES, HONOS, PRO, ACT, VISA, DET, RDT,
+AOR, CORRESPONDANCE) gardent leurs identifiants et leur contenu, mais la barre
+(`ProjectTabBar.tsx`, logique pure dans `src/lib/projectTabs.ts`, testée) les
+présente en sept familles au plus : Infos, Tâches, Honoraires, Études (PRO),
+Consultation (ACT), Chantier, Correspondance. Les quatre missions de chantier
+passent en second niveau sous « Chantier », sigle MOP et nom complet ; revenir
+sur une famille rouvre la mission qu'on y consultait. Une famille sans onglet
+visible disparaît (hors mission chantier, cinq entrées). `PillTabs` porte
+désormais les rôles ARIA d'onglets et la navigation aux flèches.
+
+L'onglet ouvert vit dans `?tab=` (sauf INFOS, le défaut), écrit en
+`replace` pour ne pas empiler l'historique : il survit au rechargement et au
+retour depuis un autre écran. L'état initial est lu dans l'adresse dès le
+premier rendu (sinon l'écriture de l'onglet par défaut effacerait le
+paramètre avant sa lecture) ; un identifiant inconnu retombe sur INFOS. Les
+liens existants (`?tab=TACHES`, liens d'agent `?tab=&open=`) restent valides.
+Le stepper de phases de l'en-tête est nommé (« Phases de mission ») et chaque
+pastille dit ce qu'elle fait : afficher la note de phase, jamais changer la
+phase réelle.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
