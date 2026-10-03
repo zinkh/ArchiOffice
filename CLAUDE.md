@@ -530,10 +530,54 @@ traduites. Quatre règles à garder :
   seul avec `useId`), chaque bouton icône un `aria-label` qui nomme son objet.
 - **« Honoraires » dans le plan d'actions de l'aperçu mène à l'onglet HONOS**
   (notes d'honoraires de l'agence), toujours actif. Il menait aux « factures
-  entreprises » de RDT et n'était actif qu'en mission chantier. La section de
-  RDT liste en fait les factures de l'agence (`/api/invoices`) et s'intitule
-  désormais ainsi. Les montants de l'aperçu et de la fiche complète sont en
-  lecture seule dès qu'un contrat est rattaché, comme dans HONOS.
+  entreprises » de RDT et n'était actif qu'en mission chantier. RDT ne porte
+  plus aucune facture de l'agence : voir « Situations de travaux et
+  certificats de paiement ». Les montants de l'aperçu et de la fiche complète
+  sont en lecture seule dès qu'un contrat est rattaché, comme dans HONOS.
+
+### Situations de travaux et certificats de paiement (onglet RDT)
+
+L'onglet RDT listait les factures de l'AGENCE et en déduisait un « reste à
+payer » qui mélangeait marchés de travaux et honoraires. Il porte désormais ce
+que le maître d'œuvre traite en DET/RDT : les situations de travaux des
+entreprises et les certificats de paiement établis à partir d'elles
+(`src/components/projectDetail/situations/`), sans condition `is_chantier`.
+
+- **Un bloc par marché** (`marches_entreprises` : une entreprise, un lot).
+  « Reprendre les lots du projet » crée un marché par lot de `lots_list` qui a
+  une entreprise (`contact_name`, montant base + options + avenants), sans
+  doublon par numéro de lot.
+- **Une situation porte le cumul HT** des travaux depuis le début du marché :
+  `montant_presente_ht` (ce que facture l'entreprise) et `montant_admis_ht`
+  (ce que l'architecte retient ; vide = le présenté est admis), plus
+  `reference_entreprise` et `date_certificat`
+  (`supabase/migrate_situations_certificats.sql`). Numérotée PAR MARCHÉ.
+- **Le certificat se calcule en cumul** (`src/lib/certificatPaiement.ts`,
+  testé) : période = cumul admis − cumul admis de la situation précédente DU
+  MÊME MARCHÉ ; révision (si prix révisables), TVA, retenue de garantie (sur le
+  TTC, nulle sous caution bancaire ou sur une période négative), remboursement
+  d'avance, pénalités, net à payer. **Décompte de clôture** : total HT, liste
+  des situations, TVA, TTC, puis reste à payer TTC = TTC − pénalités − avance
+  versée − nets des certificats établis − retenue (libérable à la fin du délai
+  de garantie, annoncée à part).
+- **États stockés inchangés** (`Brouillon`, `Validée`, `Payée`), affichés « À
+  vérifier », « Certificat établi », « Payée ». « Établir le certificat »
+  enregistre `Validée` + `date_certificat` et télécharge le PDF ; les montants
+  sont alors verrouillés jusqu'à « Rouvrir la vérification ».
+- **Un seul rendu PDF** (`src/lib/certificatPaiementPdf.ts`), appelé par le
+  navigateur (`certificatPaiementExport.ts`) ET par le serveur
+  (`server/etatAcompte.ts`, logo via `loadAgencyIdentity`) pour la pièce jointe
+  déposée sur la facture de l'entreprise chez Chorus Pro (public) ou Super PDP
+  (privé) : le maître d'ouvrage reçoit le même document par les deux chemins.
+  Charte du cabinet, nuances de gris, « P1|2 », date du certificat en en-tête.
+- `POST/PUT /api/situations` (`server/routes/situations.ts`,
+  `tests/situationsTravaux.test.ts`) passent par une liste blanche de champs
+  (les colonnes Chorus Pro / Super PDP restent à leurs routes) et valident
+  montants, dates et état. L'ancien `POST` écrivait `numero`/`statut`, colonnes
+  inexistantes : aucune situation n'avait jamais pu être créée.
+- Les lignes `detail_situations` (avancement par poste de l'ancienne table
+  `dpgf_items`) ne servent plus au calcul ; `src/pages/Situations.tsx`, qui
+  les saisissait, est supprimé.
 
 ### Journal de l'opération (notes de phase)
 

@@ -38,7 +38,6 @@ import {
   IconUsersGroup,
   IconRubberStamp,
   IconTools,
-  IconReportMoney,
   IconClipboardCheck,
   } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -47,7 +46,6 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
-import { statusLabel } from '../lib/statusLabel';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
@@ -87,7 +85,7 @@ import ChantierModule from '../components/ChantierModule';
 import MilestoneGantt from '../components/MilestoneGantt';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ProTab } from '../components/pro/ProTab';
-import Situations from './Situations';
+import { SituationsTravaux } from '../components/projectDetail/situations/SituationsTravaux';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
 import { useMafCost } from '../hooks/useMafCost';
 import { useSettings } from '../hooks/useSettings';
@@ -341,12 +339,6 @@ export default function ProjectDetail() {
   const [visaSaving, setVisaSaving] = useState(false);
   const [visaExpandedGroups, setVisaExpandedGroups] = useState<Record<string, boolean>>({});
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
-  const [isAddingInvoice, setIsAddingInvoice] = useState(false);
-  const [newInvoice, setNewInvoice] = useState({
-    invoice_number: '',
-    amount: 0,
-    description: ''
-  });
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [generatingInvoiceNoteId, setGeneratingInvoiceNoteId] = useState<string | null>(null);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
@@ -1610,32 +1602,6 @@ export default function ProjectDetail() {
     };
     const { label, cls } = map[status] ?? map.draft;
     return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider ${cls}`}>{label}</span>;
-  };
-
-  const handleCreateInvoice = async () => {
-    if (!id || !newInvoice.invoice_number || !newInvoice.amount) return;
-    try {
-      const res = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newInvoice,
-          project_id: id,
-          issue_date: new Date().toISOString(),
-          due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-          status: 'Draft',
-          created_at: new Date().toISOString()
-        })
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setInvoices(prev => [...prev, data]);
-        setNewInvoice({ invoice_number: '', amount: 0, description: '' });
-        setIsAddingInvoice(false);
-      }
-    } catch (err) {
-      console.error(err);
-    }
   };
 
   const optimizeImage = (file: File): Promise<string> => {
@@ -4410,178 +4376,14 @@ export default function ProjectDetail() {
                     </>
                   );
                 })()}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <StatTile
-                    label={t('projectdetail_rdt_total_contracts')}
-                    value={formatCurrency((project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0))}
-                  />
-                  <StatTile
-                    label={t('projectdetail_rdt_total_paid')}
-                    value={<span className="text-green-600">{formatCurrency(totalInvoicesPaid)}</span>}
-                  />
-                  <StatTile
-                    label={t('projectdetail_rdt_remaining')}
-                    value={<span className="text-blue-600">{formatCurrency((project.lots_list || []).reduce((acc, lot) => acc + (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0), 0) - totalInvoicesPaid)}</span>}
-                  />
-                </div>
-
-                {/* Invoices List - Manageable */}
-                <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                  <CardHeader
-                    icon={IconReportMoney}
-                    title={t('projectdetail_rdt_invoices_title')}
-                    description={t('projectdetail_rdt_invoices_desc')}
-                    action={
-                      <button
-                        type="button"
-                        onClick={() => setIsAddingInvoice(!isAddingInvoice)}
-                        aria-expanded={isAddingInvoice}
-                        className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
-                      >
-                        <IconPlus size={14} />
-                        {t('projectdetail_rdt_invoice_add')}
-                      </button>
-                    }
-                  />
-
-                  {isAddingInvoice && (
-                    <div className="p-6 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="space-y-1">
-                          <label htmlFor="rdt-facture-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_rdt_invoice_number')}</label>
-                          <input
-                            id="rdt-facture-numero"
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newInvoice.invoice_number}
-                            onChange={e => setNewInvoice({...newInvoice, invoice_number: e.target.value})}
-                            placeholder="F-2026-001"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label htmlFor="rdt-facture-montant" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_contract_amount_ht')}</label>
-                          <input
-                            id="rdt-facture-montant"
-                            type="number"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newInvoice.amount}
-                            onChange={e => setNewInvoice({...newInvoice, amount: Number(e.target.value)})}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label htmlFor="rdt-facture-libelle" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_rdt_invoice_label')}</label>
-                          <input
-                            id="rdt-facture-libelle"
-                            type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newInvoice.description}
-                            onChange={e => setNewInvoice({...newInvoice, description: e.target.value})}
-                          />
-                        </div>
-                      </div>
-                      <div className="flex justify-end gap-3">
-                        <button
-                          type="button"
-                          onClick={() => setIsAddingInvoice(false)}
-                          className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors"
-                        >
-                          {t('projectdetail_dialog_cancel')}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const res = await fetch('/api/invoices', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                  ...newInvoice,
-                                  project_id: id,
-                                  status: 'Draft',
-                                  issue_date: new Date().toISOString(),
-                                  due_date: new Date(Date.now() + 30*24*60*60*1000).toISOString(),
-                                  created_at: new Date().toISOString()
-                                })
-                              });
-                              if (res.ok) {
-                                const data = await res.json();
-                                setInvoices(prev => [...prev, data]);
-                                setIsAddingInvoice(false);
-                                setNewInvoice({ invoice_number: '', amount: 0, description: '' });
-                              }
-                            } catch (err) {
-                              console.error(err);
-                            }
-                          }}
-                          className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition"
-                        >
-                          {t('projectdetail_rdt_invoice_save')}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="overflow-x-auto">
-                    <table className="min-w-full text-sm">
-                      <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
-                        <tr>
-                          <th className="px-6 py-3 text-left">{t('projectdetail_rdt_invoice_number')}</th>
-                          <th className="px-6 py-3 text-left">{t('projectdetail_col_date')}</th>
-                          <th className="px-6 py-3 text-left">{t('projectdetail_col_status')}</th>
-                          <th className="px-6 py-3 text-right">{t('projectdetail_contract_amount_ht')}</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-[var(--tblr-border)]">
-                        {invoices.map((inv) => (
-                          <tr key={inv.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors">
-                            <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">{inv.invoice_number}</td>
-                            <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300">{inv.issue_date ? new Date(inv.issue_date).toLocaleDateString('fr-FR') : '—'}</td>
-                            <td className="px-6 py-4">
-                              <select
-                                aria-label={t('projectdetail_rdt_invoice_status_named', { number: inv.invoice_number })}
-                                className={cn(
-                                  "bg-transparent font-bold text-[0.6875rem] uppercase tracking-wider outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer",
-                                  inv.status === 'Paid' ? "text-green-600" :
-                                  inv.status === 'Overdue' ? "text-red-600" :
-                                  "text-[var(--tblr-muted)]"
-                                )}
-                                value={inv.status}
-                                onChange={async (e) => {
-                                  try {
-                                    const res = await fetch(`/api/invoices/${inv.id}`, {
-                                      method: 'PUT',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ status: e.target.value })
-                                    });
-                                    if (res.ok) {
-                                      setInvoices(prev => prev.map(i => i.id === inv.id ? { ...i, status: e.target.value as any } : i));
-                                    }
-                                  } catch (err) {
-                                    console.error(err);
-                                  }
-                                }}
-                              >
-                                {(['Draft', 'Sent', 'Paid', 'Overdue'] as const).map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}
-                              </select>
-                            </td>
-                            <td className="px-6 py-4 text-right font-bold text-[var(--tblr-text)]">{formatCurrency(inv.amount)}</td>
-                          </tr>
-                        ))}
-                        {invoices.length === 0 && (
-                          <tr>
-                            <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_rdt_invoices_empty')}</td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {project.is_chantier && (
-                  <div className="mt-2">
-                    <Situations projectId={id!} />
-                  </div>
-                )}
+                <SituationsTravaux
+                  projectId={id!}
+                  lots={project.lots_list || []}
+                  operation={{ nom: project.name, code: project.project_code, adresse: project.address, maitreOuvrage: project.client }}
+                  clientSiret={project.client_siret}
+                  isPublicClient={!!project.is_public_client}
+                  showToast={showToast}
+                />
               </div>
             )}
             {activeTab === 'ACT' && (

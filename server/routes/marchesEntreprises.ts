@@ -8,7 +8,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
-import { buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { buildCertificatPdfBuffer } from '../etatAcompte';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -217,7 +217,7 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
       console.error("[PUT /api/situations/:id/etat-acompte]", e); res.status(500).json({ error: e.message }); }
   });
 
-  // GET /api/situations/:situationId/etat-acompte-pdf — PDF état d'acompte
+  // GET /api/situations/:situationId/etat-acompte-pdf — PDF du certificat de paiement
   app.get("/api/situations/:situationId/etat-acompte-pdf", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -229,18 +229,9 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
 
       if (!sit) return res.status(404).json({ error: 'not found' });
 
-      const marche = (sit as any).marche as any;
-      const { data: detailsRaw } = await tenantScopedFrom(supabaseAdmin, tenantId, 'detail_situations')
-        .select('*, dpgf_item:dpgf_items(designation, prix_unitaire_ht, quantite_prevue, unite)')
-        .eq('situation_id', sit.id);
-
-      const details = detailsRaw ?? [];
-      const { data: cfg } = await tenantScopedFrom(supabaseAdmin, tenantId, 'settings').select('agency_name').single();
-      const agencyName = (cfg as any)?.agency_name ?? '';
-
-      const buf = await buildEtatAcomptePdfBuffer(sit, marche, details, agencyName);
+      const buf = await buildCertificatPdfBuffer(supabaseAdmin, tenantId, sit, (sit as any).marche);
       res.set('Content-Type', 'application/pdf');
-      res.set('Content-Disposition', `attachment; filename="etat-acompte-${sit.numero_situation}.pdf"`);
+      res.set('Content-Disposition', `attachment; filename="certificat-paiement-${sit.numero_situation}.pdf"`);
       res.send(buf);
     } catch (e: any) {
       console.error("[GET /api/situations/:situationId/etat-acompte-pdf]", e); res.status(500).json({ error: e.message }); }

@@ -35,20 +35,76 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to fetch situation details" }); }
   });
 
+  // Champs d'une situation de travaux qu'un client peut écrire. Les colonnes
+  // de liaison Chorus Pro / Super PDP restent réservées à leurs propres routes.
+  const SITUATION_FIELDS = [
+    'numero_situation', 'date_situation', 'etat', 'marche_id', 'date_reception_situation',
+    'reference_entreprise', 'montant_presente_ht', 'montant_admis_ht', 'date_certificat',
+    'revision_coeff', 'penalites_ht', 'penalites_notes', 'avance_remboursement', 'notes_moe',
+  ] as const;
+  const SITUATION_ETATS = ['Brouillon', 'Validée', 'Payée'];
+  const AMOUNT_FIELDS = new Set(['montant_presente_ht', 'montant_admis_ht', 'revision_coeff', 'penalites_ht', 'avance_remboursement']);
+  const DATE_FIELDS = new Set(['date_reception_situation', 'date_certificat']);
+
+  /** Garde les champs connus, vide en null, montants en nombres. Rend une erreur lisible sinon. */
+  function pickSituation(body: any): { row: Record<string, any>; error?: string } {
+    const row: Record<string, any> = {};
+    for (const key of SITUATION_FIELDS) {
+      if (!(key in (body ?? {}))) continue;
+      let value = body[key];
+      if (typeof value === 'string') value = value.trim();
+      if (value === '' || value === undefined) value = null;
+      if (value !== null && AMOUNT_FIELDS.has(key)) {
+        const n = typeof value === 'number' ? value : parseFloat(String(value).replace(',', '.'));
+        if (!Number.isFinite(n)) return { row, error: `Montant invalide : ${key}.` };
+        value = n;
+      }
+      if (value !== null && DATE_FIELDS.has(key) && !/^\d{4}-\d{2}-\d{2}$/.test(String(value))) {
+        return { row, error: `Date invalide : ${key}.` };
+      }
+      if (key === 'etat' && value !== null && !SITUATION_ETATS.includes(value)) {
+        return { row, error: 'État de situation inconnu.' };
+      }
+      if (key === 'numero_situation' && value !== null) {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n < 1) return { row, error: 'Numéro de situation invalide.' };
+        value = n;
+      }
+      row[key] = value;
+    }
+    return { row };
+  }
+
   app.post('/api/situations', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { id: bodyId, project_id, numero, date_situation, statut } = req.body;
-      if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
+      const { project_id } = req.body ?? {};
+      if (!project_id || !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
-      const id = bodyId || crypto.randomUUID();
+      const { row, error: invalid } = pickSituation(req.body);
+      if (invalid) return res.status(400).json({ error: invalid });
+      if (row.marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', row.marche_id, tenantId))) {
+        return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
+      }
+      // Numérotée par marché : la première situation d'une entreprise est la n°1.
+      if (!row.numero_situation) {
+        let query = tenantScopedFrom(supabaseAdmin, tenantId, 'situations').select('numero_situation').eq('project_id', project_id);
+        query = row.marche_id ? query.eq('marche_id', row.marche_id) : query.is('marche_id', null);
+        const { data: existing } = await query;
+        row.numero_situation = (existing ?? []).reduce((max: number, s: any) => Math.max(max, Number(s.numero_situation) || 0), 0) + 1;
+      }
+      const id = crypto.randomUUID();
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
-        .insert({ id, project_id, numero, date_situation, statut })
+        .insert({
+          id, project_id, etat: 'Brouillon',
+          date_situation: new Date().toISOString().slice(0, 10),
+          ...row,
+        })
         .select().single();
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création de la situation N° ${numero}`, String(numero ?? ''), id, 'situation', 'Situations/DPGF');
+      logActivity(tenantId, req.user.id, userName, `Création de la situation N° ${row.numero_situation}`, String(row.numero_situation), id, 'situation', 'Situations/DPGF');
       res.status(201).json(data);
     } catch (e: any) {
       console.error('[POST /api/situations]', e);
@@ -59,11 +115,16 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
   app.put('/api/situations/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { numero, date_situation, statut } = req.body;
+      const { row, error: invalid } = pickSituation(req.body);
+      if (invalid) return res.status(400).json({ error: invalid });
+      if (row.marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', row.marche_id, tenantId))) {
+        return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
-        .update({ numero, date_situation, statut })
-        .eq('id', req.params.id).select().single();
+        .update({ ...row, updated_at: new Date().toISOString() })
+        .eq('id', req.params.id).select().maybeSingle();
       if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Situation introuvable.' });
       res.json(data);
     } catch (e: any) {
       console.error('[PUT /api/situations/:id]', e);
@@ -74,10 +135,10 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
   app.delete('/api/situations/:id', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { data: situation } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations').select('numero').eq('id', req.params.id).maybeSingle();
+      const { data: situation } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations').select('numero_situation').eq('id', req.params.id).maybeSingle();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations').delete().eq('id', req.params.id);
       if (error) throw error;
-      const numero = (situation as any)?.numero;
+      const numero = (situation as any)?.numero_situation;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Suppression de la situation N° ${numero}`, String(numero ?? ''), req.params.id, 'situation', 'Situations/DPGF');
       res.json({ success: true });

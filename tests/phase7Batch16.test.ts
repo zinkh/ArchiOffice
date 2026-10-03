@@ -154,8 +154,8 @@ describe('SuperPDP', () => {
   it('lists situations linked to Super PDP with their computed net amount', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId, 'admin');
-    fakeSupabaseAdmin.seed('situations', [{ id: 'sit4', tenant_id: tenantId, numero_situation: 4, superpdp_id: 42 }]);
-    fakeSupabaseAdmin.seed('detail_situations', [{ id: 'd2', tenant_id: tenantId, situation_id: 'sit4', montant_situation: 10000 }]);
+    // Le net vient du certificat de paiement : cumul admis de la situation.
+    fakeSupabaseAdmin.seed('situations', [{ id: 'sit4', tenant_id: tenantId, numero_situation: 4, superpdp_id: 42, montant_presente_ht: 10000 }]);
 
     const res = await request(app).get('/api/superpdp/situations').set(authHeader(token));
     expect(res.status).toBe(200);
