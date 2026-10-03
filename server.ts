@@ -20,6 +20,7 @@ import { registerSituationRoutes } from "./server/routes/situations";
 import { registerCustomReferenceRoutes } from "./server/routes/customReferences";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
+import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
 import { registerGlobalSearchRoutes } from "./server/routes/globalSearch";
 import { registerObservationRoutes } from "./server/routes/observations";
 import { registerMeetingRoutes } from "./server/routes/meetings";
@@ -1000,6 +1001,7 @@ export async function createApp() {
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerObservationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage });
   registerMeetingRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage });

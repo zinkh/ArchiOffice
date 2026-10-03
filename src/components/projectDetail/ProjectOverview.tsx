@@ -22,13 +22,14 @@ import { formatCurrency } from '../../lib/utils';
 import { useTasks } from '../../hooks/useTasks';
 import { getTaskStatus, taskDeadline } from '../tasks/taskDisplay';
 import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
+import type { PhaseNotesApi } from '../../hooks/usePhaseNotes';
+import { PhaseJournal } from './PhaseJournal';
 
 const PHASE_LABELS: Record<string, string> = {
   ESQ: 'Esquisse', APS: 'Avant-projet sommaire', APD: 'Avant-projet détaillé', PC: 'Permis de construire',
   PRO: 'Projet', DCE: 'Consultation entreprises', ACT: 'Assistance contrats travaux', VISA: 'Visa',
   DET: 'Direction exécution travaux', AOR: 'Assistance réception',
 };
-const CHANTIER_PHASES = new Set(['ACT', 'VISA', 'DET', 'AOR']);
 
 function formatMonthLabel(dateStr: string) {
   const label = new Date(dateStr).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
@@ -97,13 +98,16 @@ export interface ProjectOverviewProps {
    *  mutating the real mission phase. Falls back to the actual current
    *  phase when unset. */
   notePhase?: DocumentPhase;
+  /** Journal de l'opération (usePhaseNotes) et phases de la mission, dans l'ordre du stepper. */
+  phaseNotes: PhaseNotesApi;
+  journalPhases: string[];
 }
 
 export function ProjectOverview({
   project, setProject, phaseHistory, projectActivity, projectMembers, permits, milestones,
   onOpenFullEditor, onAddMilestone, onToggleMilestone,
   newMilestoneTitle, setNewMilestoneTitle, newMilestoneDate, setNewMilestoneDate,
-  isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase,
+  isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase, phaseNotes, journalPhases,
 }: ProjectOverviewProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -114,7 +118,6 @@ export function ProjectOverview({
   // The phase whose notes Column C displays/edits — may differ from the
   // above while the user is just browsing phase notes via the topbar pills.
   const viewedPhase: DocumentPhase = notePhase || currentPhase;
-  const isChantierPhase = CHANTIER_PHASES.has(viewedPhase);
   const pendingPermit = useMemo(() => permits.find(p => p.status === 'en_instruction'), [permits]);
   const nextMilestone = useMemo(() => {
     const upcoming = milestones.filter(m => !m.completed).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
@@ -148,7 +151,12 @@ export function ProjectOverview({
   }, [tasks]);
   const daysToDeadline = project.end_date ? Math.ceil((new Date(project.end_date).getTime() - Date.now()) / 86400000) : null;
 
-  const observationsField: 'etudes_notes' | 'chantier_notes' = isChantierPhase ? 'chantier_notes' : 'etudes_notes';
+  // Observations d'avant le journal, tant que la migration ne les a pas
+  // reprises (instance non migrée) : montrées en lecture, jamais perdues.
+  const legacyObservations = phaseNotes.loading || phaseNotes.notes.some(n => n.id.startsWith('legacy-'))
+    ? []
+    : ([['etudes', project.etudes_notes], ['chantier', project.chantier_notes]] as const)
+        .filter(([, text]) => text && text.trim());
 
   return (
     <div className="flex flex-col xl:h-full xl:flex-row overflow-visible xl:overflow-hidden" style={{ background: 'var(--tblr-bg)' }}>
@@ -287,9 +295,24 @@ export function ProjectOverview({
         className="w-full xl:flex-1 xl:min-w-[380px] border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4 xl:p-6"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
-        <div className="font-bold text-base mb-4" style={{ color: 'var(--tblr-text)' }}>
-          Note de phase — {PHASE_LABELS[viewedPhase] || viewedPhase}
-        </div>
+        <PhaseJournal
+          api={phaseNotes}
+          phases={journalPhases}
+          viewedPhase={viewedPhase}
+          phaseLabel={phase => PHASE_LABELS[phase] || phase}
+          defaultBudget={project.construction_cost ?? null}
+        />
+
+        {legacyObservations.map(([family, text]) => (
+          <div key={family} className="mb-5 p-3 rounded-lg border" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+            <div className="text-[0.6875rem] font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>{t(`phase_journal_legacy_${family}`)}</div>
+            <p className="text-[0.8125rem] leading-relaxed whitespace-pre-wrap break-words" style={{ color: 'var(--tblr-text)' }}>{text}</p>
+          </div>
+        ))}
+
+        <h2 className="font-bold text-base mb-3 pt-4 border-t" style={{ color: 'var(--tblr-text)', borderColor: 'var(--tblr-border)' }}>
+          {t('phase_journal_project_section')}
+        </h2>
 
         <div className="mb-4">
           <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--tblr-muted)' }}>Objet</label>
@@ -311,19 +334,6 @@ export function ProjectOverview({
             value={project.programme || ''}
             onChange={e => setProject(prev => prev ? ({ ...prev, programme: e.target.value }) : null)}
             placeholder="Contraintes du programme, secteur, servitudes…"
-          />
-        </div>
-
-        <div className="mb-5">
-          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1.5" style={{ color: 'var(--tblr-muted)' }}>
-            Observations {isChantierPhase ? 'de chantier' : 'de visite'}
-          </label>
-          <textarea
-            className="w-full border rounded-lg p-2.5 text-[0.8125rem] leading-relaxed outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)', minHeight: 60 }}
-            value={project[observationsField] || ''}
-            onChange={e => setProject(prev => prev ? ({ ...prev, [observationsField]: e.target.value }) : null)}
-            placeholder="Observations…"
           />
         </div>
 

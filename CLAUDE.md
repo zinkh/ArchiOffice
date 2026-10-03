@@ -474,9 +474,10 @@ retour depuis un autre écran. L'état initial est lu dans l'adresse dès le
 premier rendu (sinon l'écriture de l'onglet par défaut effacerait le
 paramètre avant sa lecture) ; un identifiant inconnu retombe sur INFOS. Les
 liens existants (`?tab=TACHES`, liens d'agent `?tab=&open=`) restent valides.
-Le stepper de phases de l'en-tête est nommé (« Phases de mission ») et chaque
-pastille dit ce qu'elle fait : afficher la note de phase, jamais changer la
-phase réelle.
+Le stepper de phases de l'en-tête est nommé (« Phases de mission ») : une
+pastille affiche le journal de sa phase (voir ci-dessous), le bouton « Passer
+en {phase suivante} » à sa droite fait avancer la phase réelle après
+confirmation.
 
 Finitions de la même fiche, à conserver : les fenêtres (VISA, accusé de
 réception d'OS, suppression de l'affaire) partagent le même voile
@@ -506,6 +507,34 @@ figés qui ignorent le thème sombre.
   RFI, visas, PV, réserves, documents DOE et plans, dont la suppression
   emporte souvent un fichier. La facture d'une note s'y confirme aussi, avec
   un récapitulatif HT, TVA et TTC.
+
+### Journal de l'opération (notes de phase)
+
+Les observations de la fiche étaient deux champs (`etudes_notes`,
+`chantier_notes`) partagés par toutes les phases : la note d'APS était écrasée
+par celle de l'APD. `project_phase_notes` (`supabase/migrate_project_phase_notes.sql`,
+hors `SYNC_TABLES`) porte une entrée datée par évènement : phase MOP, type
+(`observation`, `programme`, `budget`, `decision_moa`, `attention`), auteur,
+et pour un budget l'estimation des travaux avant ET après (écart en € et en %
+calculé, `budgetDelta`, `src/lib/phaseJournal.ts`, testé). Routes
+`server/routes/projectPhaseNotes.ts` (`GET/POST /api/projects/:id/phase-notes`,
+`PUT/DELETE /api/phase-notes/:noteId`, `tests/projectPhaseNotes.test.ts`) ;
+une instance sans la table lit un journal vide et refuse l'écriture en 503,
+sans casser la fiche.
+
+`PhaseJournal.tsx` remplace le champ Observations en tête de la colonne C de
+l'aperçu ; Objet et Programme restent des champs de l'affaire, sous le
+journal. Le stepper de l'en-tête porte un compteur par phase, rouge quand une
+note de la phase est un dépassement de budget ; une pastille ouvre le journal
+de sa phase, « Passer en … » (confirmé) appelle `POST /api/projects/:id/phase`.
+`missionPhases` (`ProjectDetail.tsx`) est la seule liste des phases de la
+mission, partagée par les deux steppers et le journal.
+
+La migration reprend les anciennes observations en entrées `legacy-etudes-<id>`
+/ `legacy-chantier-<id>` (identifiants déterministes, rejouable) sur la
+dernière phase connue de la famille ; les colonnes ne sont pas supprimées.
+Tant qu'aucune entrée `legacy-` n'est lue, l'aperçu montre ces anciennes
+observations en lecture seule : une instance non migrée ne les perd pas de vue.
 
 ### Ordre des lots : la liste des lots du projet fait foi
 

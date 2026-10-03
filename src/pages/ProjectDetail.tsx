@@ -64,6 +64,8 @@ import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from '../components/ui/Toast';
 import { useConfirmDialog } from '../components/ui/ConfirmDialog';
+import { usePhaseNotes } from '../hooks/usePhaseNotes';
+import { nextPhase } from '../lib/phaseJournal';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useProjectAutosave } from '../hooks/useProjectAutosave';
 import { AutosaveIndicator } from '../components/projectDetail/AutosaveIndicator';
@@ -247,6 +249,40 @@ export default function ProjectDetail() {
   const [avenantsMoe, setAvenantsMoe] = useState<AvenantMoe[]>([]);
   const [marchesTravaux, setMarchesTravaux] = useState<any[]>([]);
   const [linkedContratsMoe, setLinkedContratsMoe] = useState<any[]>([]);
+  const phaseNotes = usePhaseNotes(id, t('phase_journal_save_failed'));
+  // Phases de la mission : celles du contrat MOE principal (PC et DCE toujours),
+  // toutes à défaut de contrat. Partagées par le stepper, la fiche complète et
+  // le journal de l'opération.
+  const missionPhases = useMemo(() => {
+    const primaryContrat = linkedContratsMoe[0];
+    const includedPhases = primaryContrat
+      ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
+      : null;
+    return MISSION_PHASES.filter(phase => !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE');
+  }, [linkedContratsMoe]);
+  // Sans historique de phase, la fiche affiche déjà la première phase de la
+  // mission : c'est la phase en cours.
+  const actualCurrentPhase: DocumentPhase | undefined =
+    (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || missionPhases[0];
+  const upcomingPhase = actualCurrentPhase ? (nextPhase(missionPhases, actualCurrentPhase) ?? null) : null;
+  const phaseBadges = useMemo(() => Object.fromEntries(
+    Object.entries(phaseNotes.summary).map(([phase, { count, overrun }]) => [phase, {
+      count,
+      alert: overrun,
+      label: overrun ? t('phase_journal_badge_overrun', { count }) : t('phase_journal_badge', { count }),
+    }])
+  ), [phaseNotes.summary, t]);
+  const advancePhase = async () => {
+    if (!upcomingPhase || !actualCurrentPhase) return;
+    const ok = await confirmAction({
+      title: t('project_phase_advance_title', { phase: upcomingPhase }),
+      message: t('project_phase_advance_message', { from: actualCurrentPhase, to: upcomingPhase, label: PHASE_LABELS[upcomingPhase] || upcomingPhase }),
+      confirmLabel: t('project_phase_advance_confirm', { phase: upcomingPhase }),
+      cancelLabel: t('projectdetail_dialog_cancel'),
+      tone: 'primary',
+    });
+    if (ok) await handleSetPhase(upcomingPhase);
+  };
   const [notesHonoraires, setNotesHonoraires] = useState<any[]>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [editingNote, setEditingNote] = useState<any | null>(null);
@@ -1743,36 +1779,32 @@ export default function ProjectDetail() {
         </div>
 
         <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-center overflow-x-auto">
-          {(() => {
-            const primaryContrat = linkedContratsMoe[0];
-            const includedPhases = primaryContrat
-              ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
-              : null;
-            const filteredPhases = MISSION_PHASES.filter(phase =>
-              !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
-            );
-            // Sans historique de phase (affaire créée avant le suivi, ou jamais
-            // passée de phase), la fiche affiche déjà « Phase ESQ » — la première
-            // mission est donc la mission en cours, et le stepper doit la montrer
-            // comme telle plutôt que tous les jalons en attente.
-            const actualCurrentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || filteredPhases[0];
-            const displayedPhase = viewedPhase || actualCurrentPhase;
-            return (
-              <PhaseStepper
-                ariaLabel={t('project_phase_stepper_label')}
-                stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
-                size="compact"
-                steps={filteredPhases.map(phase => ({ id: phase, label: phase }))}
-                currentId={actualCurrentPhase}
-                activeId={displayedPhase}
-                // Pills only choose which phase's notes to view in the
-                // INFOS overview — they never change the project's real
-                // mission phase (that stays in "Modifier la fiche
-                // complète" ▸ Phase de mission actuelle).
-                onSelect={id => { setViewedPhase(id as DocumentPhase); setActiveTab('INFOS'); setShowFullEditor(false); }}
-              />
-            );
-          })()}
+          <div className="flex items-center gap-2 min-w-0">
+            <PhaseStepper
+              ariaLabel={t('project_phase_stepper_label')}
+              stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
+              size="compact"
+              steps={missionPhases.map(phase => ({ id: phase, label: phase }))}
+              currentId={actualCurrentPhase}
+              activeId={viewedPhase || actualCurrentPhase}
+              badges={phaseBadges}
+              // Une pastille montre le journal de sa phase ; la phase réelle
+              // n'avance que par « Passer en … », confirmé.
+              onSelect={phase => { setViewedPhase(phase as DocumentPhase); setActiveTab('INFOS'); setShowFullEditor(false); }}
+            />
+            {upcomingPhase && (
+              <button
+                type="button"
+                onClick={() => { void advancePhase(); }}
+                title={t('project_phase_advance_title', { phase: upcomingPhase })}
+                className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1 rounded-lg border text-[0.8125rem] font-semibold whitespace-nowrap transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+              >
+                {t('project_phase_advance', { phase: upcomingPhase })}
+                <IconChevronRight size={14} aria-hidden />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
@@ -1804,7 +1836,9 @@ export default function ProjectDetail() {
           <ProjectOverview
             project={project}
             setProject={setProject}
-            notePhase={viewedPhase || (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined)}
+            notePhase={viewedPhase || actualCurrentPhase}
+            phaseNotes={phaseNotes}
+            journalPhases={missionPhases}
             phaseHistory={phaseHistory}
             projectActivity={projectActivity}
             projectMembers={projectMembers}
@@ -3724,23 +3758,12 @@ export default function ProjectDetail() {
 
                     <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
-                      {(() => {
-                        const primaryContrat = linkedContratsMoe[0];
-                        const includedPhases = primaryContrat
-                          ? new Set((primaryContrat.missions_list || []).filter((m: any) => m.incluse).map((m: any) => MISSION_ID_TO_PHASE[m.id]).filter(Boolean))
-                          : null;
-                        const filteredPhases = MISSION_PHASES.filter(phase =>
-                          !includedPhases || includedPhases.has(phase) || phase === 'PC' || phase === 'DCE'
-                        );
-                        const currentPhase = (phaseHistory.find(p => !p.exited_at)?.phase as DocumentPhase | undefined) || filteredPhases[0];
-                        return (
-                          <PhaseStepper
-                            steps={filteredPhases.map(phase => ({ id: phase, label: phase, description: PHASE_LABELS[phase] }))}
-                            currentId={currentPhase}
-                            onSelect={id => handleSetPhase(id as DocumentPhase)}
-                          />
-                        );
-                      })()}
+                      <PhaseStepper
+                        steps={missionPhases.map(phase => ({ id: phase, label: phase, description: PHASE_LABELS[phase] }))}
+                        currentId={actualCurrentPhase}
+                        badges={phaseBadges}
+                        onSelect={phase => handleSetPhase(phase as DocumentPhase)}
+                      />
                       {phaseHistory.length > 0 && (
                         <div className="pt-3 border-t border-[var(--tblr-border)] space-y-1.5">
                           <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_history')}</p>
