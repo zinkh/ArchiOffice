@@ -576,6 +576,59 @@ laisse la liste intacte) : qualifications RGE, libellé NAF (`ref_naf`), fiche c
 SIREN, adresse) puis rejoue l'import RGE ; la consultation n'est modifiée que par « Ajouter à la
 consultation », avec un lot facultatif.
 
+### Tableaux de bord : un bloc opérationnel, deux périmètres
+
+`src/components/dashboard/OperationalKpis.tsx` (calcul pur dans
+`src/lib/dashboardOps.ts`, testé) porte les KPI de suivi : permis actifs,
+échéances à 30 jours, tâches en cours, réunions de la semaine, RFI en attente,
+réserves OPR et GPA. Chaque carte signale ses retards (« Aucun retard » sinon).
+Seul le **périmètre** diffère :
+
+- **Administrateur** (`Dashboard.tsx`) : `scopeProjectIds={null}`, toute
+  l'agence. Les cartes « Affaires en cours » et « Échéances » existent déjà dans
+  sa grille, donc `omit={['projects', 'deadlines']}`. Il est aussi le seul à
+  voir le commercial (devis en attente, appels d'offres).
+- **Manager** (`ManagerDashboard.tsx`) : les affaires de son équipe uniquement.
+  Sa finance tient en trois cartes (encaissé, reste à encaisser, factures en
+  retard) calculées avec les mêmes helpers que l'administrateur
+  (`dashboardMetrics.ts`) ; le budget estimé n'a plus de carte, il figure déjà
+  sur le graphique honoraires consommés vs prévus.
+
+Une date absente ou illisible n'est jamais comptée comme un retard.
+
+**Panneau d'accueil commun** (`RoleHero.tsx`, contenu pur dans
+`src/lib/dashboardHero.ts`, testé) : la même carte « Bonjour {prénom} » pour
+tous, mais un message par profil. L'administrateur lit l'encaissé du mois et
+les factures en retard de l'agence ; le manager les mêmes chiffres pour son
+équipe ; un collaborateur (`pm`, `user`) ce qui l'attend sur SES affaires
+(points en retard, affaires en cours, réunions de la semaine) et **jamais de
+chiffre de facturation**. Pour le manager et le collaborateur, le panneau
+attend les chiffres du suivi (`OperationalKpis` `onKpis`) : afficher « rien en
+retard » avant leur lecture serait faux. `ResponsibleDashboard` (collaborateur)
+utilise désormais le même `OperationalKpis`, limité à ses affaires.
+
+### Chef de projet (`pm`) : voit les montants de ses affaires, ne facture pas
+
+Le chef de projet voit les factures et les notes d'honoraires **des affaires
+dont il est membre** (`project_members`) et rien d'autre ; il prépare des notes
+d'honoraires mais **ne crée, ne modifie ni ne supprime aucune facture** ni ne
+génère la facture d'une note. L'administrateur et le manager facturent.
+`server/invoiceAccess.ts` porte la règle : `visibleProjectIds()` (lecture,
+`GET /api/invoices`, `GET /api/invoices/:id`, notes d'honoraires) et
+`ensureCanWriteInvoices()` (403 `INVOICE_WRITE_FORBIDDEN` sur `POST`/`PUT`/
+`DELETE /api/invoices`, `sync-retry`, `POST /api/notes_honoraires/:id/facture`).
+Le rôle `user` n'est **pas** restreint (c'est le rôle par défaut d'un membre : le restreindre casserait les cabinets existants). **Un rôle inconnu ou absent
+n'est jamais restreint** (instance non migrée, mode local) : on ne ferme un
+accès qu'à un rôle explicitement limité. Un rôle limité sans affaire voit une
+liste vide, jamais « tout ». `src/lib/invoicePermissions.ts` masque côté écran
+les boutons correspondants ; le serveur reste la barrière.
+
+Son tableau de bord (`ResponsibleDashboard`) porte une trésorerie « mes
+affaires » (`TreasuryKpis`, `computeTreasury`) et son panneau d'accueil parle
+des montants de ses affaires, avec un bouton vers ses affaires et non vers le
+traitement des retards. Les autres intégrations qui écrivent des factures
+(SuperPDP, Chorus Pro, Zoho) n'ont pas encore ce garde-fou.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes

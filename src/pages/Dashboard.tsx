@@ -23,6 +23,8 @@ import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
 import MyTasksWidget from '../components/dashboard/MyTasksWidget';
+import OperationalKpis from '../components/dashboard/OperationalKpis';
+import RoleHero from '../components/dashboard/RoleHero';
 import { ErrorState, StatCardSkeletonGrid, ListSkeleton } from '../components/DataState';
 import { useAgentChat } from '@zinkh/archioffice-agents/client';
 import {
@@ -47,7 +49,6 @@ import {
   SectionCard,
   QuickAction,
   StatCard,
-  HeroCard,
   RadialGauge,
   Sparkline,
   RankedBars,
@@ -82,7 +83,6 @@ export default function Dashboard() {
 function AdminDashboardView() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
-  const firstName = (currentUser?.name ?? '').trim().split(/\s+/)[0] ?? '';
   const navigate = useNavigate();
   const { openChat } = useAgentChat();
   const [projects,   setProjects]   = useState<Project[]>([]);
@@ -238,27 +238,18 @@ function AdminDashboardView() {
           puis trois cartes d'analyse ── */}
       <div className="grid grid-cols-12 gap-4">
         <div className="col-span-12 xl:col-span-8">
-          <HeroCard
-            title={firstName ? t('dashboard_hero_title', { name: firstName }) : t('dashboard_hero_title_anon')}
-            action={
-              <Link
-                to="/invoices"
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[0.75rem] font-semibold transition-colors"
-                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
-              >
-                {finance.overdueCount > 0 ? t('dashboard_hero_cta_overdue') : t('dashboard_hero_cta')}
-                <IconChevronRight size={14} />
-              </Link>
-            }
-          >
-            <p>
-              {t('dashboard_hero_paid_month', { amount: formatEur(paidThisMonth) })}{' '}
-              {finance.overdueCount > 0
-                ? <strong style={{ color: '#d63939' }}>{t('dashboard_kpi_overdue', { count: finance.overdueCount })}.</strong>
-                : t('dashboard_kpi_no_overdue') + '.'}
-            </p>
-            <p className="mt-1">{t('dashboard_hero_activity', { active: activeProjects, deadlines: upcomingDeadlines })}</p>
-          </HeroCard>
+          <RoleHero
+            role="admin"
+            name={currentUser?.name ?? ''}
+            stats={{
+              paidThisMonth,
+              overdueInvoices: finance.overdueCount,
+              activeProjects,
+              openDeadlines: upcomingDeadlines,
+              meetingsThisWeek: 0,
+              lateItems: 0,
+            }}
+          />
         </div>
 
         <div className="col-span-12 xl:col-span-4 grid grid-cols-2 gap-4">
@@ -503,6 +494,10 @@ function AdminDashboardView() {
           </SectionCard>
         </div>
       </div>
+
+      {/* ── Suivi opérationnel de toute l'agence. Affaires en cours et échéances
+          figurent déjà dans la grille ci-dessus : on ne les répète pas. ── */}
+      <OperationalKpis scopeProjectIds={null} projects={projects} omit={['projects', 'deadlines']} />
 
       {/* ── Quick actions (mobile-prominent) ── */}
       <div className="xl:hidden">
