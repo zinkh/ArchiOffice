@@ -1735,6 +1735,10 @@ export default {
       "kpi_group_site": "Suivi de chantier",
       "kpi_group_treasury": "Trésorerie",
       "kpi_team_receivable": "Reste à encaisser (équipe)",
+      "kpi_mine_revenue": "CA encaissé (mes affaires)",
+      "kpi_mine_receivable": "Reste à encaisser (mes affaires)",
+      "kpi_mine_overdue_invoices": "Factures en retard (mes affaires)",
+      "dashboard_hero_pm_paid": "Vos affaires ont encaissé {{amount}} ce mois-ci.",
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "Suggestions IA",

@@ -5,12 +5,13 @@
 // collaborateur ce qui l'attend sur SES affaires (jamais de chiffres de
 // facturation). Pur et sans rendu : le composant n'a plus qu'à traduire.
 
-export type HeroRole = 'admin' | 'manager' | 'member';
+export type HeroRole = 'admin' | 'manager' | 'pm' | 'member';
 
-/** `admin` et `manager` ont leur propre rôle, tout autre rôle est un collaborateur. */
+/** `admin`, `manager` et `pm` (chef de projet) ont leur propre message, tout autre rôle est un collaborateur. */
 export function heroRoleOf(systemRole: string | null | undefined): HeroRole {
   if (systemRole === 'admin') return 'admin';
   if (systemRole === 'manager') return 'manager';
+  if (systemRole === 'pm') return 'pm';
   return 'member';
 }
 
@@ -61,6 +62,21 @@ export function buildHeroContent(
         }],
       ],
       cta: { key: 'dashboard_hero_cta_tasks', to: '/kanban' },
+    };
+  }
+
+  // Chef de projet : les montants de SES affaires (il les voit), mais il ne
+  // facture pas : le bouton mène à ses affaires, jamais au traitement des retards.
+  if (role === 'pm') {
+    return {
+      lines: [
+        [{ key: 'dashboard_hero_pm_paid', params: { amount } }, overdue],
+        [{
+          key: 'dashboard_hero_member_activity',
+          params: { active: stats.activeProjects, meetings: stats.meetingsThisWeek },
+        }],
+      ],
+      cta: { key: 'dashboard_hero_cta_projects', to: '/projects' },
     };
   }
 

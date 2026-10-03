@@ -607,6 +607,28 @@ attend les chiffres du suivi (`OperationalKpis` `onKpis`) : afficher « rien en
 retard » avant leur lecture serait faux. `ResponsibleDashboard` (collaborateur)
 utilise désormais le même `OperationalKpis`, limité à ses affaires.
 
+### Chef de projet (`pm`) : voit les montants de ses affaires, ne facture pas
+
+Le chef de projet voit les factures et les notes d'honoraires **des affaires
+dont il est membre** (`project_members`) et rien d'autre ; il prépare des notes
+d'honoraires mais **ne crée, ne modifie ni ne supprime aucune facture** ni ne
+génère la facture d'une note. L'administrateur et le manager facturent.
+`server/invoiceAccess.ts` porte la règle : `visibleProjectIds()` (lecture,
+`GET /api/invoices`, `GET /api/invoices/:id`, notes d'honoraires) et
+`ensureCanWriteInvoices()` (403 `INVOICE_WRITE_FORBIDDEN` sur `POST`/`PUT`/
+`DELETE /api/invoices`, `sync-retry`, `POST /api/notes_honoraires/:id/facture`).
+Le rôle `user` n'est **pas** restreint (c'est le rôle par défaut d'un membre : le restreindre casserait les cabinets existants). **Un rôle inconnu ou absent
+n'est jamais restreint** (instance non migrée, mode local) : on ne ferme un
+accès qu'à un rôle explicitement limité. Un rôle limité sans affaire voit une
+liste vide, jamais « tout ». `src/lib/invoicePermissions.ts` masque côté écran
+les boutons correspondants ; le serveur reste la barrière.
+
+Son tableau de bord (`ResponsibleDashboard`) porte une trésorerie « mes
+affaires » (`TreasuryKpis`, `computeTreasury`) et son panneau d'accueil parle
+des montants de ses affaires, avec un bouton vers ses affaires et non vers le
+traitement des retards. Les autres intégrations qui écrivent des factures
+(SuperPDP, Chorus Pro, Zoho) n'ont pas encore ce garde-fou.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes

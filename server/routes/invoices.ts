@@ -13,6 +13,7 @@ import { getActiveAccountingProvider, syncInvoiceToAccounting } from '../invoice
 import { loadInvoiceClientContact, resolveInvoiceClientId } from '../invoiceClientContact';
 import { computeInvoiceDueDate, resolveInvoicePaymentTermsDays } from '../invoiceDueDate';
 import { dispatchWebhookEvent } from '../webhookDispatch';
+import { ensureCanWriteInvoices, getCallerRole, visibleProjectIds } from '../invoiceAccess';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -44,6 +45,13 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const limit = req.query.limit ? Math.min(Math.max(parseInt(String(req.query.limit), 10) || 0, 1), 500) : undefined;
       let query = supabaseAdmin.from('invoices').select('*, projects(name)').eq('tenant_id', tenantId).order('created_at', { ascending: false });
+      // Chef de projet / utilisateur : les factures de leurs affaires seulement.
+      const role = await getCallerRole(supabaseAdmin, tenantId, req.user.id);
+      const visible = await visibleProjectIds(supabaseAdmin, tenantId, req.user.id, role);
+      if (visible) {
+        if (visible.size === 0) return res.json(req.query.limit ? { data: [], nextCursor: null } : []);
+        query = query.in('project_id', [...visible]);
+      }
       if (req.query.cursor) {
         const cursorCreatedAt = Buffer.from(String(req.query.cursor), 'base64url').toString('utf8');
         query = query.lt('created_at', cursorCreatedAt);
@@ -77,6 +85,11 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       const { data: inv, error } = await supabaseAdmin.from('invoices').select('*, invoice_items(*), projects(name)')
         .eq('id', req.params.id).eq('tenant_id', tenantId).single();
       if (error || !inv) return res.status(404).json({ error: 'Invoice not found' });
+      const role = await getCallerRole(supabaseAdmin, tenantId, req.user.id);
+      const visible = await visibleProjectIds(supabaseAdmin, tenantId, req.user.id, role);
+      if (visible && (!(inv as any).project_id || !visible.has((inv as any).project_id))) {
+        return res.status(404).json({ error: 'Invoice not found' });
+      }
       const { projects: p, invoice_items, ...rest } = inv as any;
       // Fan-out kept to this single-item route only (never the list above) —
       // see CLAUDE.md's "Pagination et fan-out sur les listes" for why.
@@ -91,6 +104,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
   app.post("/api/invoices", validateBody(invoiceSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const {
         project_id, client_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
@@ -240,6 +254,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
     let tenantId: string | undefined;
     try {
       tenantId = await getTenantId(req.user.id);
+      if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const { id } = req.params;
       const {
         project_id, client_id, amount, description, status, due_date,
@@ -399,6 +414,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
   app.delete("/api/invoices/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const { id } = req.params;
       const { data: invoice } = await supabaseAdmin.from('invoices')
         .select('status, invoice_number').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
@@ -447,6 +463,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
   app.post("/api/invoices/:id/sync-retry", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const { id } = req.params;
       const provider = await getActiveAccountingProvider(supabaseAdmin, tenantId);
       if (provider === 'none') {

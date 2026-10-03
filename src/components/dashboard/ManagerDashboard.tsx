@@ -2,11 +2,6 @@ import * as React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconCurrencyEuro,
-  IconHourglass,
-  IconReceiptOff,
-} from '@tabler/icons-react';
-import {
   ResponsiveContainer,
   BarChart as RechartsBarChart,
   Bar,
@@ -20,12 +15,13 @@ import { useUser } from '../../UserContext';
 import { ErrorState, StatCardSkeletonGrid } from '../DataState';
 import MyTasksWidget from './MyTasksWidget';
 import OperationalKpis from './OperationalKpis';
+import TreasuryKpis from './TreasuryKpis';
+import { computeTreasury } from '../../lib/dashboardTreasury';
 import RoleHero from './RoleHero';
 import type { OpsKpis } from '../../lib/dashboardOps';
-import { invoiceTotal, isIssued, isOverdue, isPaid, monthlyRevenue } from '../../lib/dashboardMetrics';
+import { invoiceTotal, isPaid } from '../../lib/dashboardMetrics';
 import type { Project, TeamMember } from '../../types';
 import {
-  StatCard,
   SectionCard,
   TblrTooltip,
   formatEur,
@@ -80,25 +76,7 @@ export default function ManagerDashboard() {
   const teamProjects = useMemo(() => projects.filter(p => teamProjectIds.has(p.id)), [projects, teamProjectIds]);
 
   const teamInvoices = useMemo(() => invoices.filter(inv => teamProjectIds.has(inv.project_id)), [invoices, teamProjectIds]);
-  // Même lecture que le tableau de bord administrateur : dernier mois de la série.
-  const paidThisMonth = useMemo(() => {
-    const series = monthlyRevenue(teamInvoices);
-    return series[series.length - 1]?.paid ?? 0;
-  }, [teamInvoices]);
-
-  const finance = useMemo(() => {
-    const issued = teamInvoices.filter(isIssued);
-    const paid = issued.filter(isPaid).reduce((sum, inv) => sum + invoiceTotal(inv), 0);
-    const invoiced = issued.reduce((sum, inv) => sum + invoiceTotal(inv), 0);
-    const overdue = issued.filter(isOverdue);
-    return {
-      paid,
-      receivable: invoiced - paid,
-      unpaidCount: issued.filter(inv => !isPaid(inv)).length,
-      overdueCount: overdue.length,
-      overdueAmount: overdue.reduce((sum, inv) => sum + invoiceTotal(inv), 0),
-    };
-  }, [teamInvoices]);
+  const treasury = useMemo(() => computeTreasury(teamInvoices), [teamInvoices]);
 
   const budgetByProject = useMemo(() => {
     const paidByProjectId: Record<string, number> = {};
@@ -147,8 +125,8 @@ export default function ManagerDashboard() {
           role="manager"
           name={currentUser?.name ?? ''}
           stats={{
-            paidThisMonth,
-            overdueInvoices: finance.overdueCount,
+            paidThisMonth: treasury.paidThisMonth,
+            overdueInvoices: treasury.overdueCount,
             activeProjects: ops?.activeProjects ?? 0,
             openDeadlines: ops?.upcomingDeadlines ?? 0,
             meetingsThisWeek: ops?.meetingsThisWeek ?? 0,
@@ -157,37 +135,9 @@ export default function ManagerDashboard() {
         />
       )}
 
-      {/* Trésorerie, limitée aux affaires de l'équipe. Le budget estimé n'a plus sa carte :
-          il figure déjà sur le graphique « honoraires consommés vs prévus » plus bas. */}
-      <div>
-        <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--tblr-muted)' }}>
-          {t('kpi_group_treasury')}
-        </p>
-        <div className="grid grid-cols-2 xl:grid-cols-3 gap-3">
-          <StatCard label={t('kpi_team_revenue')} value={formatEur(finance.paid)} icon={IconCurrencyEuro} accent="#206bc4" accentBg="#e8f0fb" cardBg="#eef3fb" to="/invoices" />
-          <StatCard
-            label={t('kpi_team_receivable')}
-            value={formatEur(finance.receivable)}
-            icon={IconHourglass}
-            accent="#e67700"
-            accentBg="#ffec99"
-            cardBg="#fff9db"
-            trend={t('dashboard_unpaid_count', { count: finance.unpaidCount })}
-            to="/invoices"
-          />
-          <StatCard
-            label={t('kpi_team_overdue_invoices')}
-            value={finance.overdueCount}
-            icon={IconReceiptOff}
-            accent="#d63939"
-            accentBg="#ffe3e3"
-            cardBg="#fef2f2"
-            trend={finance.overdueCount > 0 ? formatEur(finance.overdueAmount) : t('dashboard_kpi_no_overdue')}
-            trendUp={finance.overdueCount === 0}
-            to="/invoices"
-          />
-        </div>
-      </div>
+      {/* Le budget estimé n'a plus sa carte : il figure déjà sur le graphique
+          « honoraires consommés vs prévus » plus bas. */}
+      <TreasuryKpis treasury={treasury} scope="team" />
 
       {/* Suivi des affaires et du chantier, sur les affaires de l'équipe */}
       <OperationalKpis scopeProjectIds={teamProjectIds} projects={projects} onKpis={setOps} />

@@ -18,6 +18,8 @@ import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { isClientContact } from '../lib/contactCategories';
+import { canWriteInvoices } from '../lib/invoicePermissions';
+import { useUser } from '../UserContext';
 
 // Une facture sans échéance (avant que le délai de paiement par défaut du
 // cabinet ne s'applique systématiquement côté serveur, voir server/
@@ -225,6 +227,8 @@ export default function Invoices() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [currency, setCurrency] = useState('EUR');
+  const { currentUser } = useUser();
+  const canWrite = canWriteInvoices(currentUser?.system_role);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -691,14 +695,16 @@ export default function Invoices() {
               {t('zoho_sync_btn')}
             </button>
           )}
-          <button
-            onClick={() => { setNewInvoice(inv => ({ ...inv, due_date: defaultDueDate(paymentTermsDays) })); setIsModalOpen(true); }}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
-            style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-          >
-            <IconPlus size={20} />
-            {t('invoices_create_btn')}
-          </button>
+          {canWrite && (
+            <button
+              onClick={() => { setNewInvoice(inv => ({ ...inv, due_date: defaultDueDate(paymentTermsDays) })); setIsModalOpen(true); }}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold press"
+              style={{ background: 'var(--tblr-primary)', color: '#fff' }}
+            >
+              <IconPlus size={20} />
+              {t('invoices_create_btn')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -793,7 +799,7 @@ export default function Invoices() {
               <div className="flex gap-2">
                 <button onClick={() => handleOpenGenerator(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconEye size={15} /></button>
                 {inv.status !== 'Paid' && <button onClick={() => handleUpdateStatus(inv, 'Paid')} className="p-1.5 rounded-lg" style={{ color: '#2f9e44', background: '#d3f9d8' }}><IconCircleCheck size={15} /></button>}
-                {inv.status === 'Draft' && <button onClick={() => handleDeleteInvoice(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-danger)', background: '#ffe0e0' }} title="Supprimer"><IconTrash size={15} /></button>}
+                {canWrite && inv.status === 'Draft' && <button onClick={() => handleDeleteInvoice(inv)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-danger)', background: '#ffe0e0' }} title="Supprimer"><IconTrash size={15} /></button>}
               </div>
             )}
           />
@@ -936,7 +942,7 @@ export default function Invoices() {
                             >
                               <IconEdit size={18} />
                             </button>
-                            {invoice.status === 'Draft' && (
+                            {canWrite && invoice.status === 'Draft' && (
                               <button
                                 onClick={() => handleDeleteInvoice(invoice)}
                                 className="p-1.5 rounded-lg transition-colors"
@@ -1081,7 +1087,7 @@ export default function Invoices() {
                         >
                           <IconEdit size={18} />
                         </button>
-                        {invoice.status === 'Draft' && (
+                        {canWrite && invoice.status === 'Draft' && (
                           <button
                             onClick={() => handleDeleteInvoice(invoice)}
                             className="p-1.5 rounded-lg transition-colors"

@@ -10,7 +10,7 @@ describe('heroRoleOf', () => {
   it('distingue administrateur, manager et collaborateur', () => {
     expect(heroRoleOf('admin')).toBe('admin');
     expect(heroRoleOf('manager')).toBe('manager');
-    expect(heroRoleOf('pm')).toBe('member');
+    expect(heroRoleOf('pm')).toBe('pm');
     expect(heroRoleOf('user')).toBe('member');
     expect(heroRoleOf(undefined)).toBe('member');
   });
@@ -28,6 +28,13 @@ describe('buildHeroContent', () => {
     const c = buildHeroContent('manager', { ...stats, overdueInvoices: 0 }, fmt);
     expect(c.lines[0][0].key).toBe('dashboard_hero_team_paid');
     expect(c.lines[0][1]).toEqual({ key: 'dashboard_kpi_no_overdue' });
+    expect(c.cta).toEqual({ key: 'dashboard_hero_cta_projects', to: '/projects' });
+  });
+
+  it('chef de projet : montants de ses affaires, mais jamais de lien pour traiter les factures', () => {
+    const c = buildHeroContent('pm', stats, fmt);
+    expect(c.lines[0][0]).toEqual({ key: 'dashboard_hero_pm_paid', params: { amount: '1200 €' } });
+    expect(c.lines[0][1]).toMatchObject({ key: 'dashboard_kpi_overdue', alert: true });
     expect(c.cta).toEqual({ key: 'dashboard_hero_cta_projects', to: '/projects' });
   });
 

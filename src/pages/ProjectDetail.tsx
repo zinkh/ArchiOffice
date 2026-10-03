@@ -61,6 +61,7 @@ import { db } from '../db';
 import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
+import { canWriteInvoices } from '../lib/invoicePermissions';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
@@ -3005,11 +3006,13 @@ export default function ProjectDetail() {
                                   </div>
                                   <div className="flex items-center gap-1 flex-shrink-0">
                                     <button title="Exporter en PDF" onClick={() => exportNotePdf(note)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                    <button title={note.invoice_id ? 'Facture brouillon déjà créée' : 'Créer une facture brouillon (agence uniquement)'} disabled={!!note.invoice_id}
-                                      onClick={() => createFactureFromNote(note)}
-                                      className={cn('p-1 transition-colors', note.invoice_id ? 'text-green-500 cursor-default' : 'text-zinc-300 hover:text-blue-500')}>
-                                      <IconFileInvoice size={14} />
-                                    </button>
+                                    {canWriteInvoices(currentUser?.system_role) && (
+                                      <button title={note.invoice_id ? 'Facture brouillon déjà créée' : 'Créer une facture brouillon (agence uniquement)'} disabled={!!note.invoice_id}
+                                        onClick={() => createFactureFromNote(note)}
+                                        className={cn('p-1 transition-colors', note.invoice_id ? 'text-green-500 cursor-default' : 'text-zinc-300 hover:text-blue-500')}>
+                                        <IconFileInvoice size={14} />
+                                      </button>
+                                    )}
                                     <button onClick={() => {
                                       setEditingNote(note);
                                       setNoteForm(noteFormFromSaved(note));

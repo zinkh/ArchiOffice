@@ -16,6 +16,9 @@ import { ErrorState, StatCardSkeletonGrid } from '../DataState';
 import MyTasksWidget from './MyTasksWidget';
 import OperationalKpis from './OperationalKpis';
 import RoleHero from './RoleHero';
+import TreasuryKpis from './TreasuryKpis';
+import { computeTreasury } from '../../lib/dashboardTreasury';
+import { heroRoleOf } from '../../lib/dashboardHero';
 import type { OpsKpis } from '../../lib/dashboardOps';
 import type { Project } from '../../types';
 import {
@@ -62,6 +65,15 @@ export default function ResponsibleDashboard() {
   }, [currentUser?.id]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  const heroRole = heroRoleOf(currentUser?.system_role);
+  // Un chef de projet voit les montants de ses affaires ; le serveur ne lui
+  // renvoie d'ailleurs que les factures de celles dont il est membre.
+  const isProjectManager = heroRole === 'pm';
+  const treasury = useMemo(
+    () => computeTreasury(invoices.filter(inv => inv.project_id && myProjectIds.has(inv.project_id))),
+    [invoices, myProjectIds],
+  );
 
   const myProjects = useMemo(() => projects.filter(p => myProjectIds.has(p.id)), [projects, myProjectIds]);
 
@@ -127,6 +139,8 @@ export default function ResponsibleDashboard() {
           }}
         />
       )}
+
+      {isProjectManager && <TreasuryKpis treasury={treasury} scope="mine" />}
 
       <OperationalKpis scopeProjectIds={myProjectIds} projects={projects} onKpis={setOps} />
 

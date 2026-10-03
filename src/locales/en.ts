@@ -1579,6 +1579,10 @@ export default {
       "kpi_group_site": "Site follow-up",
       "kpi_group_treasury": "Cash flow",
       "kpi_team_receivable": "Outstanding (team)",
+      "kpi_mine_revenue": "Revenue collected (my projects)",
+      "kpi_mine_receivable": "Outstanding (my projects)",
+      "kpi_mine_overdue_invoices": "Overdue invoices (my projects)",
+      "dashboard_hero_pm_paid": "Your projects collected {{amount}} this month.",
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "AI Suggestions",
