@@ -72,6 +72,21 @@ describe('Proposals', () => {
     expect(fakeSupabaseAdmin.getTable('proposals').find(pr => pr.id === 'p-reparent')?.client_id).not.toBe('contact-other-2');
   });
 
+  it('enregistre une proposition dont la description et le taux de TVA sont vides (NULL) en base', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('proposals', [{ id: 'p-nulls', tenant_id: tenantId, title: 'ESPOIR 54', status: 'Draft', description: null, vat_rate: null }]);
+
+    // Le formulaire renvoie la proposition telle que lue en base, NULL compris.
+    const res = await request(app).put('/api/proposals/p-nulls').set(authHeader(token)).send({
+      title: 'ESPOIR 54', status: 'Draft', description: null, vat_rate: null, client_id: null, amount: 0,
+      ref_cadastrale: 'AB 0123, AB 0124', surface_parcelle: '818',
+    });
+
+    expect(res.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('proposals').find(pr => pr.id === 'p-nulls')?.surface_parcelle).toBe('818');
+  });
+
   it('creates a project (and copies specialties to cotraitants) when a proposal is accepted', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

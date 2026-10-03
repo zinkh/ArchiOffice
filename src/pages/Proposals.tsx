@@ -274,7 +274,11 @@ export default function Proposals() {
         setCostMode('manual');
       } else {
         const errBody = await res.json().catch(() => ({ error: `Erreur HTTP ${res.status}` }));
-        setSubmitError(errBody.error || `Erreur HTTP ${res.status}`);
+        // Nommer le champ refusé : « Validation error » seul ne dit pas quoi corriger.
+        const champs = Array.isArray(errBody.details)
+          ? errBody.details.map((d: { path?: string }) => d.path).filter(Boolean).join(', ')
+          : '';
+        setSubmitError(champs ? `${errBody.error} (${champs})` : (errBody.error || `Erreur HTTP ${res.status}`));
       }
     } catch (err: any) {
       console.error(err);
