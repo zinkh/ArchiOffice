@@ -8,6 +8,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { montantDepuisLignes, validerAvancementLignes } from '../../src/lib/situationDetaillee';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -41,7 +42,9 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
     'numero_situation', 'date_situation', 'etat', 'marche_id', 'date_reception_situation',
     'reference_entreprise', 'montant_presente_ht', 'montant_admis_ht', 'date_certificat',
     'revision_coeff', 'penalites_ht', 'penalites_notes', 'avance_remboursement', 'notes_moe',
+    'mode_saisie',
   ] as const;
+  const MODES_SAISIE = ['simple', 'detaille'];
   const SITUATION_ETATS = ['Brouillon', 'Validée', 'Payée'];
   const AMOUNT_FIELDS = new Set(['montant_presente_ht', 'montant_admis_ht', 'revision_coeff', 'penalites_ht', 'avance_remboursement']);
   const DATE_FIELDS = new Set(['date_reception_situation', 'date_certificat']);
@@ -70,9 +73,30 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
         if (!Number.isInteger(n) || n < 1) return { row, error: 'Numéro de situation invalide.' };
         value = n;
       }
+      if (key === 'mode_saisie' && value !== null && !MODES_SAISIE.includes(value)) {
+        return { row, error: 'Mode de saisie inconnu.' };
+      }
       row[key] = value;
     }
+    if (row.mode_saisie === null) delete row.mode_saisie;
+    // Mode détaillé : l'avancement ligne par ligne du DPGF, figé dans la situation.
+    if (body && 'avancement_lignes' in body) {
+      const { lignes, error } = validerAvancementLignes(body.avancement_lignes);
+      if (error) return { row, error };
+      row.avancement_lignes = lignes ?? null;
+    }
     return { row };
+  }
+
+  /**
+   * En mode détaillé, le cumul présenté se DÉDUIT des lignes : c'est le serveur
+   * qui fait la somme, jamais un montant envoyé à côté des lignes.
+   */
+  function deduireCumul(row: Record<string, any>, modeActuel: string | null) {
+    const mode = row.mode_saisie ?? modeActuel ?? 'simple';
+    if (mode === 'detaille' && Array.isArray(row.avancement_lignes)) {
+      row.montant_presente_ht = montantDepuisLignes(row.avancement_lignes);
+    }
   }
 
   app.post('/api/situations', async (req: any, res: any) => {
@@ -87,6 +111,7 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
       if (row.marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', row.marche_id, tenantId))) {
         return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
       }
+      deduireCumul(row, null);
       // Numérotée par marché : la première situation d'une entreprise est la n°1.
       if (!row.numero_situation) {
         let query = tenantScopedFrom(supabaseAdmin, tenantId, 'situations').select('numero_situation').eq('project_id', project_id);
@@ -120,6 +145,13 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
       if (row.marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', row.marche_id, tenantId))) {
         return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
       }
+      let modeActuel: string | null = null;
+      if ('avancement_lignes' in row && !('mode_saisie' in row)) {
+        const { data: actuelle } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
+          .select('mode_saisie').eq('id', req.params.id).maybeSingle();
+        modeActuel = (actuelle as any)?.mode_saisie ?? null;
+      }
+      deduireCumul(row, modeActuel);
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
         .update({ ...row, updated_at: new Date().toISOString() })
         .eq('id', req.params.id).select().maybeSingle();

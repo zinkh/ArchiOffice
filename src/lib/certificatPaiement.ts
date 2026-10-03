@@ -10,6 +10,7 @@
 // celui de la situation antérieure du même marché, jamais d'un autre lot.
 // Module pur, partagé par l'écran, l'export PDF et le serveur (pièce jointe
 // Chorus Pro / Super PDP), pour que les trois donnent les mêmes chiffres.
+import type { AvancementLigne, ModeSaisie } from './situationDetaillee';
 
 export interface MarcheTravaux {
   id: string;
@@ -47,6 +48,9 @@ export interface SituationTravaux {
   notes_moe?: string | null;
   date_certificat?: string | null;
   etat: EtatSituation | string;
+  /** Simple : cumul saisi directement. Détaillé : déduit de l'avancement des lignes du DPGF. */
+  mode_saisie?: ModeSaisie | string | null;
+  avancement_lignes?: AvancementLigne[] | null;
 }
 
 export interface Certificat {

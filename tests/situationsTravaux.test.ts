@@ -78,4 +78,34 @@ describe('Situations de travaux', () => {
     expect(put.status).toBe(404);
     expect(fakeSupabaseAdmin.getTable('situations').find((s: any) => s.id === 'st-s5')?.etat).toBe('Brouillon');
   });
+
+  it('en mode détaillé, déduit le cumul présenté des lignes sans croire un montant envoyé', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    seed(tenantId, 'st-p6', 'st-m6');
+    const lignes = [
+      { ligneId: 'a', numero: '2.1.1', designation: 'Semelles', unite: 'm3', quantite: 10, prixUnitaire: 100, montantHt: 1, avancementPct: 50 },
+      { ligneId: 'b', numero: '2.1.2', designation: 'Voiles', unite: 'm2', quantite: 20, prixUnitaire: 50, avancementPct: 25 },
+    ];
+    const created = await request(app).post('/api/situations').set(authHeader(token)).send({
+      project_id: 'st-p6', marche_id: 'st-m6', mode_saisie: 'detaille', avancement_lignes: lignes, montant_presente_ht: 999999,
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.montant_presente_ht).toBe(750);
+    expect(created.body.avancement_lignes[0].montantHt).toBe(1000);
+
+    // Mise à jour des seules lignes : le mode enregistré reste détaillé.
+    const put = await request(app).put(`/api/situations/${created.body.id}`).set(authHeader(token))
+      .send({ avancement_lignes: lignes.map((l) => ({ ...l, avancementPct: 100 })) });
+    expect(put.body.montant_presente_ht).toBe(2000);
+
+    // Le PDF porte l'annexe ligne à ligne sans erreur.
+    const pdf = await request(app).get(`/api/situations/${created.body.id}/etat-acompte-pdf`).set(authHeader(token));
+    expect(pdf.status).toBe(200);
+
+    const bad = await request(app).put(`/api/situations/${created.body.id}`).set(authHeader(token))
+      .send({ avancement_lignes: [{ ...lignes[0], avancementPct: 140 }] });
+    expect(bad.status).toBe(400);
+    expect((await request(app).put(`/api/situations/${created.body.id}`).set(authHeader(token)).send({ mode_saisie: 'libre' })).status).toBe(400);
+  });
 });

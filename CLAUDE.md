@@ -575,9 +575,26 @@ entreprises et les certificats de paiement établis à partir d'elles
   (les colonnes Chorus Pro / Super PDP restent à leurs routes) et valident
   montants, dates et état. L'ancien `POST` écrivait `numero`/`statut`, colonnes
   inexistantes : aucune situation n'avait jamais pu être créée.
+- **Deux modes de saisie cohabitent** (`situations.mode_saisie`,
+  `supabase/migrate_situations_mode_detaille.sql`) : `simple`, le cumul HT se
+  saisit directement ; `detaille`, un avancement CUMULÉ (%) se saisit sur
+  chaque ligne du DPGF structuré du lot (`/api/projects/:id/dpgf`, jamais
+  l'ancienne table `dpgf_items`) et le cumul en découle
+  (`src/lib/situationDetaillee.ts`, testé ; `AvancementLignesTable.tsx`). Le
+  lot du DPGF se retrouve par numéro (« 2 » = « 02 »), à défaut par intitulé ;
+  le prix est celui de l'offre importée de l'entreprise (même nom, non
+  écartée), à défaut celui du DPGF. Les lignes sont FIGÉES dans
+  `situations.avancement_lignes` (désignation, quantité, prix, %) : un DPGF
+  modifié après coup ne change pas une situation déjà saisie, et une ligne
+  retirée du DPGF reste comptée. Une nouvelle situation repart de
+  l'avancement de la précédente du même marché. **Le serveur recalcule
+  `montant_presente_ht` à partir des lignes** (et `montantHt` = quantité × prix)
+  sans croire un montant envoyé. Le certificat se calcule ensuite de la même
+  façon dans les deux modes ; en mode détaillé, son PDF porte une annexe ligne
+  à ligne (précédent, cumul, période).
 - Les lignes `detail_situations` (avancement par poste de l'ancienne table
-  `dpgf_items`) ne servent plus au calcul ; `src/pages/Situations.tsx`, qui
-  les saisissait, est supprimé.
+  `dpgf_items`) ne servent plus ; `src/pages/Situations.tsx`, qui les
+  saisissait, est supprimé.
 
 ### Journal de l'opération (notes de phase)
 

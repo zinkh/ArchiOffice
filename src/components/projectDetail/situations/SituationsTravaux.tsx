@@ -18,6 +18,7 @@ import { MarcheDialog, marcheDepuisLot, montantLot } from './MarcheDialog';
 import { SituationDialog } from './SituationDialog';
 import { EtatSituationBadge } from './EtatSituationBadge';
 import type { Plateforme, SituationLiee } from './FactureEntrepriseLink';
+import type { DPGF, OffreDocument } from '../../../types/dpgf';
 
 type Marche = MarcheTravaux & { project_id?: string };
 
@@ -45,6 +46,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   const [marcheEdite, setMarcheEdite] = useState<Marche | null | 'new'>(null);
   const [ouverte, setOuverte] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
+  const [dpgf, setDpgf] = useState<DPGF | null>(null);
+  const [offres, setOffres] = useState<OffreDocument[]>([]);
   const [plateformes, setPlateformes] = useState<{ chorus_pro: boolean; superpdp: boolean }>({ chorus_pro: false, superpdp: false });
 
   const charger = useCallback(async () => {
@@ -64,6 +67,21 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   }, [projectId, t]);
 
   useEffect(() => { charger(); }, [charger]);
+
+  // DPGF et offres importées : la saisie détaillée en tire ses lignes et ses
+  // prix. Une affaire sans DPGF garde la saisie simple, rien ne casse.
+  useEffect(() => {
+    let vivant = true;
+    Promise.all([
+      apiFetch<DPGF>(`/api/projects/${projectId}/dpgf`).catch(() => null),
+      apiFetch<OffreDocument[]>(`/api/projects/${projectId}/dpgf/offres`).catch(() => []),
+    ]).then(([d, o]) => {
+      if (!vivant) return;
+      setDpgf(d && Array.isArray(d.lots) ? d : null);
+      setOffres(Array.isArray(o) ? o : []);
+    });
+    return () => { vivant = false; };
+  }, [projectId]);
 
   useEffect(() => {
     let vivant = true;
@@ -382,6 +400,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         situations={situations}
         plateforme={plateforme}
         clientSiret={clientSiret}
+        dpgf={dpgf}
+        offres={offres}
         onClose={() => setOuverte(null)}
         onSave={enregistrerSituation}
         onDownload={telechargerCertificat}

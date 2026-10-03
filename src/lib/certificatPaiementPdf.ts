@@ -199,7 +199,47 @@ export function rendreCertificatPaiement(
   if (situation.notes_moe) y = paragraphe(r, y, "Observations de l'architecte", situation.notes_moe);
 
   blocSignature(r, y + 2, dateCertificat);
+  if (situation.mode_saisie === 'detaille' && situation.avancement_lignes?.length) {
+    annexeAvancement(r, situation, liste);
+  }
   drawAgencyFooters(r.pdf, r.settings, options);
+}
+
+/** Annexe d'une situation détaillée : l'avancement ligne par ligne du DPGF. */
+function annexeAvancement(r: RenduPdf, situation: SituationTravaux, liste: SituationTravaux[]): void {
+  const precedente = liste
+    .filter((s) => s.numero_situation < situation.numero_situation)
+    .sort((a, b) => b.numero_situation - a.numero_situation)[0];
+  const avant = new Map((precedente?.avancement_lignes ?? []).map((l) => [l.ligneId, Number(l.avancementPct) || 0]));
+  const lignes = situation.avancement_lignes ?? [];
+  const pct = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} %`;
+  let totalMarche = 0; let totalCumul = 0; let totalPeriode = 0;
+  const body = lignes.map((l) => {
+    const p = Number(l.avancementPct) || 0;
+    const p0 = avant.get(l.ligneId) ?? 0;
+    const cumul = l.montantHt * p / 100;
+    const periode = cumul - l.montantHt * p0 / 100;
+    totalMarche += l.montantHt; totalCumul += cumul; totalPeriode += periode;
+    return [l.numero, l.designation, l.unite, l.quantite.toLocaleString('fr-FR'), euros(l.prixUnitaire), euros(l.montantHt), pct(p0), pct(p), euros(cumul), signe(Math.round(periode * 100) / 100)];
+  });
+  r.pdf.addPage();
+  const pdf = r.pdf;
+  pdf.setFont('helvetica', 'bold'); pdf.setFontSize(11); pdf.setTextColor(17, 24, 39);
+  pdf.text(`Annexe : avancement de la situation n° ${situation.numero_situation}, ligne par ligne`, MARGE, 18);
+  r.autoTable(pdf, {
+    ...tableauGris(MARGE),
+    startY: 23,
+    head: [['N°', 'Désignation', 'U', 'Qté', 'P.U. HT', 'Montant HT', 'Préc.', 'Cumul', 'Cumul HT', 'Période HT']],
+    body,
+    foot: [['', 'Total', '', '', '', euros(totalMarche), '', totalMarche ? pct(Math.round(totalCumul / totalMarche * 10000) / 100) : '', euros(totalCumul), signe(Math.round(totalPeriode * 100) / 100)]],
+    styles: { ...tableauGris(MARGE).styles, fontSize: 6.5, cellPadding: 1.2 },
+    columnStyles: {
+      0: { cellWidth: 11 }, 2: { cellWidth: 8 }, 3: { halign: 'right', cellWidth: 11 },
+      4: { halign: 'right', cellWidth: 17 }, 5: { halign: 'right', cellWidth: 19 }, 6: { halign: 'right', cellWidth: 12 },
+      7: { halign: 'right', cellWidth: 12 }, 8: { halign: 'right', cellWidth: 19 }, 9: { halign: 'right', cellWidth: 19 },
+    },
+    showFoot: 'lastPage',
+  });
 }
 
 /** Décompte de clôture d'un marché : total HT, toutes les situations, TVA, reste à payer TTC. */

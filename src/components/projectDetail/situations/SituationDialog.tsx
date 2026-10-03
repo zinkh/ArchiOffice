@@ -8,6 +8,11 @@ import {
 import { DialogShell, Champ, inputClass, boutonPrincipal, boutonSecondaire, formatEuros } from './DialogShell';
 import { FactureEntrepriseLink, type Plateforme, type SituationLiee } from './FactureEntrepriseLink';
 import { EtatSituationBadge } from './EtatSituationBadge';
+import { AvancementLignesTable } from './AvancementLignesTable';
+import type { DPGF, OffreDocument } from '../../../types/dpgf';
+import {
+  figer, lignesASaisir, lignesDuMarche, montantDepuisLignes, type LigneSaisie, type ModeSaisie,
+} from '../../../lib/situationDetaillee';
 
 interface Form {
   reference_entreprise: string;
@@ -21,6 +26,7 @@ interface Form {
   penalites_notes: string;
   notes_moe: string;
   date_certificat: string;
+  mode_saisie: ModeSaisie;
 }
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -39,12 +45,20 @@ function formDepuis(sit: SituationTravaux): Form {
     penalites_notes: s(sit.penalites_notes),
     notes_moe: s(sit.notes_moe),
     date_certificat: s(sit.date_certificat) || today(),
+    mode_saisie: sit.mode_saisie === 'detaille' ? 'detaille' : 'simple',
   };
 }
 
-/** Corps envoyé à l'API : chaînes vides en null, montants en nombres côté serveur. */
-function corps(f: Form): Record<string, unknown> {
+/**
+ * Corps envoyé à l'API : chaînes vides en null, montants en nombres côté
+ * serveur. En mode détaillé, les lignes partent et le serveur en déduit le
+ * cumul présenté.
+ */
+function corps(f: Form, lignes: LigneSaisie[] | null): Record<string, unknown> {
+  const detaille = f.mode_saisie === 'detaille' && lignes;
   return {
+    mode_saisie: f.mode_saisie,
+    ...(detaille ? { avancement_lignes: figer(lignes) } : {}),
     reference_entreprise: f.reference_entreprise,
     date_situation: f.date_situation || null,
     date_reception_situation: f.date_reception_situation,
@@ -59,7 +73,7 @@ function corps(f: Form): Record<string, unknown> {
 }
 
 export function SituationDialog({
-  situation, marche, situations, plateforme, clientSiret,
+  situation, marche, situations, plateforme, clientSiret, dpgf, offres,
   onClose, onSave, onDownload, onDelete, onLinked,
 }: {
   situation: SituationLiee | null;
@@ -68,6 +82,9 @@ export function SituationDialog({
   situations: SituationTravaux[];
   plateforme: Plateforme | null;
   clientSiret?: string;
+  /** DPGF de l'affaire et offres importées : source de la saisie détaillée. */
+  dpgf: DPGF | null;
+  offres: OffreDocument[];
   onClose: () => void;
   onSave: (id: string, body: Record<string, unknown>) => Promise<SituationLiee>;
   onDownload: (s: SituationTravaux) => Promise<void>;
@@ -79,11 +96,38 @@ export function SituationDialog({
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [erreur, setErreur] = useState('');
+  const [lignes, setLignes] = useState<LigneSaisie[] | null>(null);
+
+  const anterieures = useMemo(
+    () => (marche ? situationsDuMarche(situations, marche.id) : []),
+    [situations, marche],
+  );
+  const reference = useMemo(
+    () => (marche ? lignesDuMarche(dpgf, offres, marche) : null),
+    [dpgf, offres, marche],
+  );
+  // Lignes de départ : celles déjà figées dans la situation, sinon celles du
+  // DPGF à l'avancement de la situation précédente du même marché.
+  const lignesInitiales = (sit: SituationTravaux): LigneSaisie[] => {
+    const precedente = anterieures
+      .filter((x) => x.numero_situation < sit.numero_situation)
+      .sort((a, b) => b.numero_situation - a.numero_situation)[0];
+    return lignesASaisir(reference?.lignes ?? [], sit.avancement_lignes, precedente?.avancement_lignes);
+  };
 
   useEffect(() => {
     setForm(situation ? formDepuis(situation) : null);
+    setLignes(situation && situation.mode_saisie === 'detaille' ? lignesInitiales(situation) : null);
     setErreur('');
   }, [situation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const changerMode = (mode: ModeSaisie) => {
+    if (!situation) return;
+    setForm((f) => (f ? { ...f, mode_saisie: mode } : f));
+    if (mode === 'detaille' && !lignes) setLignes(lignesInitiales(situation));
+  };
+  const detaille = form?.mode_saisie === 'detaille';
+  const cumulLignes = detaille && lignes ? montantDepuisLignes(lignes) : null;
 
   const verrouillee = !!situation && estCertifiee(situation);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
@@ -97,19 +141,17 @@ export function SituationDialog({
       ...form,
       revision_coeff: form.revision_coeff || 1,
       montant_admis_ht: form.montant_admis_ht,
+      montant_presente_ht: cumulLignes ?? form.montant_presente_ht,
     };
-  }, [situation, form]);
-  const anterieures = useMemo(
-    () => (marche ? situationsDuMarche(situations, marche.id) : []),
-    [situations, marche],
-  );
+  }, [situation, form, cumulLignes]);
   const certificat = brouillon ? calculerCertificat(brouillon, marche, anterieures) : null;
 
   if (!situation || !form || !certificat) return null;
 
   const montantMarche = num(marche?.montant_ht);
   const alertes: string[] = [];
-  if (form.montant_presente_ht === '') alertes.push(t('situations_travaux_alert_no_amount'));
+  if (!detaille && form.montant_presente_ht === '') alertes.push(t('situations_travaux_alert_no_amount'));
+  if (detaille && lignes && lignes.length === 0) alertes.push(t('situations_travaux_alert_no_lines'));
   if (certificat.periodeHt < 0) alertes.push(t('situations_travaux_alert_negative'));
   if (montantMarche > 0 && certificat.cumulAdmisHt > montantMarche) {
     alertes.push(t('situations_travaux_alert_over_contract', { amount: formatEuros(certificat.cumulAdmisHt - montantMarche) }));
@@ -120,9 +162,9 @@ export function SituationDialog({
     try { await travail(); } catch (e: any) { setErreur(e?.message || t('situations_travaux_save_failed')); } finally { setBusy(null); }
   };
 
-  const enregistrer = () => action('save', async () => { await onSave(situation.id, corps(form)); });
+  const enregistrer = () => action('save', async () => { await onSave(situation.id, corps(form, lignes)); });
   const etablir = () => action('certify', async () => {
-    const saved = await onSave(situation.id, { ...corps(form), etat: 'Validée', date_certificat: form.date_certificat || today() });
+    const saved = await onSave(situation.id, { ...corps(form, lignes), etat: 'Validée', date_certificat: form.date_certificat || today() });
     await onDownload(saved);
   });
   const changerEtat = (etat: 'Brouillon' | 'Payée') => action(etat, async () => { await onSave(situation.id, { etat }); });
@@ -179,7 +221,7 @@ export function SituationDialog({
               <button type="button" className={boutonSecondaire} onClick={enregistrer} disabled={!!busy}>
                 {busy === 'save' ? t('situations_travaux_saving') : t('situations_travaux_save')}
               </button>
-              <button type="button" className={boutonPrincipal} onClick={etablir} disabled={!!busy || form.montant_presente_ht === ''}>
+              <button type="button" className={boutonPrincipal} onClick={etablir} disabled={!!busy || (detaille ? !lignes?.length : form.montant_presente_ht === '')}>
                 <IconFileCertificate size={14} />
                 {busy === 'certify' ? t('situations_travaux_saving') : t('situations_travaux_issue_certificate')}
               </button>
@@ -208,8 +250,51 @@ export function SituationDialog({
                 <input id={id('recu')} type="date" disabled={verrouillee} className={inputClass} value={form.date_reception_situation} onChange={(e) => set('date_reception_situation', e.target.value)} />
               </Champ>
             </div>
+            <div role="radiogroup" aria-label={t('situations_travaux_mode_label')} className="inline-flex rounded-lg border border-[var(--tblr-border)] p-0.5 bg-[var(--tblr-surface-2)]">
+              {(['simple', 'detaille'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.mode_saisie === mode}
+                  disabled={verrouillee}
+                  onClick={() => changerMode(mode)}
+                  className={'px-3 py-1.5 rounded-md text-xs font-bold transition ' + (form.mode_saisie === mode
+                    ? 'bg-[var(--tblr-surface)] text-[var(--tblr-text)] shadow-sm'
+                    : 'text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]')}
+                >
+                  {t(mode === 'simple' ? 'situations_travaux_mode_simple' : 'situations_travaux_mode_detailed')}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-[var(--tblr-muted)]">
+              {t(detaille ? 'situations_travaux_mode_detailed_hint' : 'situations_travaux_mode_simple_hint')}
+            </p>
+            {detaille && reference && (
+              <p className="text-xs text-[var(--tblr-muted)]">
+                {reference.lignes.length === 0
+                  ? t('situations_travaux_lines_none_for_lot', { lot: marche?.lot_numero || marche?.lot_titre || '' })
+                  : reference.source === 'offre'
+                    ? t('situations_travaux_lines_source_offer', { company: reference.offreNom, total: formatEuros(reference.totalHt) })
+                    : t('situations_travaux_lines_source_dpgf', { total: formatEuros(reference.totalHt) })}
+                {reference.lignes.length > 0 && montantMarche > 0 && Math.abs(reference.totalHt - montantMarche) >= 1 && (
+                  <span className="block text-amber-700 dark:text-amber-400">
+                    {t('situations_travaux_lines_total_differs', { amount: formatEuros(montantMarche) })}
+                  </span>
+                )}
+              </p>
+            )}
+            {detaille && lignes && (
+              <AvancementLignesTable lignes={lignes} onChange={setLignes} disabled={verrouillee} />
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {montantInput('montant_presente_ht', t('situations_travaux_presented_ht'), t('situations_travaux_presented_ht_hint'))}
+              {detaille ? (
+                <div className="space-y-1">
+                  <p className="text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">{t('situations_travaux_presented_ht')}</p>
+                  <p className="text-sm font-bold tabular-nums text-[var(--tblr-text)] py-2">{formatEuros(cumulLignes ?? 0)}</p>
+                  <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('situations_travaux_presented_from_lines')}</p>
+                </div>
+              ) : montantInput('montant_presente_ht', t('situations_travaux_presented_ht'), t('situations_travaux_presented_ht_hint'))}
               {montantInput('montant_admis_ht', t('situations_travaux_admitted_ht'), t('situations_travaux_admitted_ht_hint'))}
             </div>
           </fieldset>
