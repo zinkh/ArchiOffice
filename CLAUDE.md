@@ -463,6 +463,17 @@ Le stepper de phases de l'en-tête est nommé (« Phases de mission ») et chaqu
 pastille dit ce qu'elle fait : afficher la note de phase, jamais changer la
 phase réelle.
 
+Finitions de la même fiche, à conserver : les fenêtres (VISA, accusé de
+réception d'OS, suppression de l'affaire) partagent le même voile
+`bg-black/50`, portent `role="dialog"` et se ferment à Échap
+(`useEscapeKey`, sauf pendant un enregistrement ou une suppression) ; les
+actions révélées au survol (`opacity-0 group-hover:opacity-100`) restent
+visibles au doigt (`pointer-coarse:`) et au clavier (`focus-within:`) ; les
+lignes de groupe VISA et DOE se déplient par un vrai bouton (`aria-expanded`) ;
+les jalons de l'aperçu sont des cases (`role="checkbox"`). Les couleurs de
+l'aperçu et du badge MAF passent par les jetons `--tblr-*`, jamais par des hex
+figés qui ignorent le thème sombre.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

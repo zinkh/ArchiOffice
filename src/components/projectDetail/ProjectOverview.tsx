@@ -16,6 +16,7 @@ import {
   IconEdit,
   IconBuilding,
   IconCalendarEvent,
+  IconCheck,
 } from '@tabler/icons-react';
 import { formatCurrency } from '../../lib/utils';
 import { useTasks } from '../../hooks/useTasks';
@@ -175,7 +176,7 @@ export function ProjectOverview({
             </div>
           )}
           <div className="min-w-0 pt-0.5">
-            <div className="font-bold text-[0.9375rem] leading-tight mb-0.5 truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</div>
+            <div className="font-bold text-base leading-tight mb-0.5 truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</div>
             <div className="text-[0.8125rem] mb-0.5 truncate" style={{ color: 'var(--tblr-muted)' }}>{project.client}</div>
             {project.address && <div className="font-mono text-[0.6875rem] truncate" style={{ color: 'var(--tblr-muted)' }}>{project.address}</div>}
           </div>
@@ -193,12 +194,20 @@ export function ProjectOverview({
         </div>
 
         {pendingPermit && (
-          <div className="flex gap-2 p-2.5 mb-4 rounded-lg border" style={{ background: '#fef3c7', borderColor: '#fde68a' }}>
-            <IconAlertTriangle size={16} className="shrink-0" style={{ color: '#92400e' }} />
-            <div className="text-xs leading-snug" style={{ color: '#92400e' }}>
+          <div
+            role="status"
+            className="flex gap-2 p-2.5 mb-4 rounded-lg border"
+            style={{
+              // Teinte d'avertissement tirée du jeton, pour suivre le thème sombre.
+              background: 'color-mix(in srgb, var(--tblr-warning) 10%, var(--tblr-surface))',
+              borderColor: 'color-mix(in srgb, var(--tblr-warning) 35%, var(--tblr-surface))',
+            }}
+          >
+            <IconAlertTriangle size={16} className="shrink-0" aria-hidden style={{ color: 'var(--tblr-warning)' }} />
+            <div className="text-xs leading-snug" style={{ color: 'var(--tblr-text)' }}>
               {pendingPermit.type === 'PC' ? 'Permis de construire' : pendingPermit.type} en instruction
               {pendingPermit.reference ? ` (${pendingPermit.reference})` : ''}.{' '}
-              <span className="underline cursor-pointer" onClick={() => navigate('/documents')}>Voir dans Documents</span>.
+              <button type="button" className="underline underline-offset-2 font-medium" onClick={() => navigate('/documents')}>Voir dans Documents</button>.
             </div>
           </div>
         )}
@@ -245,7 +254,7 @@ export function ProjectOverview({
         className="w-full xl:w-[320px] xl:shrink-0 border-b xl:border-b-0 xl:border-r overflow-visible xl:overflow-y-auto p-4"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
-        <div className="font-bold text-[0.9375rem] mb-3" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_history_title')}</div>
+        <div className="font-bold text-base mb-3" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_history_title')}</div>
         {activityGroups.length === 0 && (
           <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_history_empty')}</p>
         )}
@@ -260,7 +269,7 @@ export function ProjectOverview({
                     <Icon size={12} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[0.78125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{ev.action}</div>
+                    <div className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{ev.action}</div>
                     {ev.user_name && <div className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{ev.user_name}</div>}
                   </div>
                   <div className="font-mono text-[0.6875rem] whitespace-nowrap shrink-0" style={{ color: 'var(--tblr-muted)' }}>
@@ -323,27 +332,27 @@ export function ProjectOverview({
           <div>
             <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>Surface SDP</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-[0.9375rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.surface || '—'}</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.surface || '—'}</span>
               <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>m²</span>
             </div>
           </div>
           <div>
             <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>Budget travaux</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-[0.9375rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.construction_cost ? formatCurrency(Number(project.construction_cost)) : '—'}</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.construction_cost ? formatCurrency(Number(project.construction_cost)) : '—'}</span>
             </div>
           </div>
           <div>
             <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>Avancement</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-[0.9375rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.progression ?? 0}</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{project.progression ?? 0}</span>
               <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>%</span>
             </div>
           </div>
           <div>
             <div className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{daysToDeadline !== null && daysToDeadline < 0 ? 'Retard' : 'Échéance'}</div>
             <div className="flex items-baseline gap-1 border-b pb-1" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="font-mono text-[0.9375rem] font-semibold" style={{ color: 'var(--tblr-text)' }}>{daysToDeadline === null ? '—' : Math.abs(daysToDeadline)}</span>
+              <span className="font-mono text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>{daysToDeadline === null ? '—' : Math.abs(daysToDeadline)}</span>
               <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>jours</span>
             </div>
           </div>
@@ -352,7 +361,7 @@ export function ProjectOverview({
 
       {/* ── Column D — plan d'actions ──────────────────────────────── */}
       <div className="w-full xl:w-[260px] xl:shrink-0 overflow-visible xl:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
-        <div className="font-bold text-[0.9375rem] mb-3.5" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_plan')}</div>
+        <div className="font-bold text-base mb-3.5" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_plan')}</div>
         <div className="grid grid-cols-2 gap-2 mb-5">
           <button
             type="button"
@@ -434,25 +443,29 @@ export function ProjectOverview({
             <p className="text-xs italic py-2" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_no_tasks')}</p>
           )}
           {sortedMilestones.map(m => (
-            <div
+            <button
+              type="button"
               key={m.id}
+              role="checkbox"
+              aria-checked={!!m.completed}
               onClick={() => onToggleMilestone(m)}
-              className="flex items-start gap-2 py-1.5 border-t cursor-pointer"
+              className="w-full flex items-start gap-2 py-1.5 pointer-coarse:py-2.5 border-t text-left rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
               style={{ borderColor: 'var(--tblr-surface-2)' }}
             >
               <span
-                className="w-3.5 h-3.5 mt-0.5 shrink-0 flex items-center justify-center text-[0.625rem] text-white rounded-sm border"
+                aria-hidden
+                className="w-4 h-4 mt-0.5 shrink-0 flex items-center justify-center text-white rounded-sm border"
                 style={{ borderColor: m.completed ? 'var(--tblr-primary)' : 'var(--tblr-border)', background: m.completed ? 'var(--tblr-primary)' : 'transparent' }}
               >
-                {m.completed ? '✓' : ''}
+                {m.completed && <IconCheck size={12} stroke={3} />}
               </span>
               <span
-                className="text-[0.78125rem] leading-snug"
+                className="text-[0.8125rem] leading-snug"
                 style={{ color: m.completed ? 'var(--tblr-muted)' : 'var(--tblr-text)', textDecoration: m.completed ? 'line-through' : 'none' }}
               >
                 {m.title}
               </span>
-            </div>
+            </button>
           ))}
         </div>
 
@@ -481,9 +494,9 @@ export function ProjectOverview({
                 className="flex items-start justify-between gap-2 py-1.5 border-t cursor-pointer"
                 style={{ borderColor: 'var(--tblr-surface-2)' }}
               >
-                <span className="text-[0.78125rem] leading-snug" style={{ color: 'var(--tblr-text)' }}>{task.title}</span>
+                <span className="text-[0.8125rem] leading-snug" style={{ color: 'var(--tblr-text)' }}>{task.title}</span>
                 {deadline && (
-                  <span className="font-mono text-[0.6875rem] whitespace-nowrap shrink-0 mt-0.5" style={{ color: late ? '#dc2626' : 'var(--tblr-muted)' }}>
+                  <span className="font-mono text-[0.6875rem] whitespace-nowrap shrink-0 mt-0.5" style={{ color: late ? 'var(--tblr-danger)' : 'var(--tblr-muted)' }}>
                     {new Date(deadline).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })}
                   </span>
                 )}
