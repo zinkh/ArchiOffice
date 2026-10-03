@@ -64,6 +64,7 @@ import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
+import { summarizeParcels } from '../lib/cadastreSelection';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import ACTModule from '../components/ACTModule';
@@ -3202,23 +3203,17 @@ export default function ProjectDetail() {
                               <InfoPanelBoundary label="Cadastre">
                                 <GeoportailMap
                                   address={project.address}
-                                  onParcelSelect={(parcel: CadastreParcel) => {
-                                    const reference = [
-                                      parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
-                                      parcel.section,
-                                      parcel.numero,
-                                    ].filter(Boolean).join(' ');
+                                  onSelectionChange={(parcels: CadastreParcel[]) => {
+                                    if (parcels.length === 0) return;
+                                    const { reference, surface } = summarizeParcels(parcels);
                                     setProject(prev => prev ? ({
                                       ...prev,
                                       ref_cadastrale: reference || prev.ref_cadastrale,
-                                      surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                                      surface_parcelle: surface != null ? String(surface) : prev.surface_parcelle,
                                     }) : null);
                                   }}
                                 />
                               </InfoPanelBoundary>
-                              <div className="absolute top-4 left-4 px-3 py-1.5 bg-white/90 dark:bg-black/90 backdrop-blur-sm rounded-lg text-[0.6875rem] font-bold uppercase tracking-wider border border-[var(--tblr-border)] shadow-sm">
-                                Vue aérienne · Cadastre — cliquez une parcelle pour la renseigner
-                              </div>
                             </div>
                           </div>
                         </div>

@@ -10,7 +10,8 @@ import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone, MiqcpAssessment, ProjectTemplate } from '../types';
 import { OPERATION_LABELS, feeDistributionFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
-import { GeoportailMap, GeorisquesMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import { GeoportailMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import { summarizeParcels, selectionGeometry } from '../lib/cadastreSelection';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
@@ -968,35 +969,23 @@ export default function Proposals() {
 
                     <div className="space-y-4">
                       <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-64">
-                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <InfoPanelBoundary label="Cadastre">
-                            <GeoportailMap
-                              address={newProposal.adresse_terrain || ''}
-                              banId={newProposal.ban_id_terrain}
-                              onParcelSelect={(parcel: CadastreParcel) => {
-                                setSelectedParcelGeometry(parcel.geometry || null);
-                                const reference = [
-                                  parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
-                                  parcel.section,
-                                  parcel.numero,
-                                ].filter(Boolean).join(' ');
-                                setNewProposal(prev => ({
-                                  ...prev,
-                                  ref_cadastrale: reference || prev.ref_cadastrale,
-                                  surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
-                                }));
-                              }}
-                            />
-                          </InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">
-                            Vue aérienne · Cadastre
-                          </div>
-                        </div>
-                        <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm hover:shadow-md transition-shadow duration-300 group">
-                          <InfoPanelBoundary label="Géorisques"><GeorisquesMap address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                          <div className="absolute top-2 left-2 px-2 py-1 bg-white/90 dark:bg-black/90 backdrop-blur-md rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700 shadow-sm z-10">Géorisques</div>
-                        </div>
+                      <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm h-[28rem] md:h-[34rem]">
+                        <InfoPanelBoundary label="Cadastre">
+                          <GeoportailMap
+                            address={newProposal.adresse_terrain || ''}
+                            banId={newProposal.ban_id_terrain}
+                            onSelectionChange={(parcels: CadastreParcel[]) => {
+                              setSelectedParcelGeometry(selectionGeometry(parcels));
+                              if (parcels.length === 0) return;
+                              const { reference, surface } = summarizeParcels(parcels);
+                              setNewProposal(prev => ({
+                                ...prev,
+                                ref_cadastrale: reference || prev.ref_cadastrale,
+                                surface_parcelle: surface != null ? String(surface) : prev.surface_parcelle,
+                              }));
+                            }}
+                          />
+                        </InfoPanelBoundary>
                       </div>
                     </div>
                   </div>
