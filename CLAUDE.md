@@ -474,6 +474,24 @@ les jalons de l'aperçu sont des cases (`role="checkbox"`). Les couleurs de
 l'aperçu et du badge MAF passent par les jetons `--tblr-*`, jamais par des hex
 figés qui ignorent le thème sombre.
 
+**Plus aucun `window.confirm()` dans la fiche.** Deux régimes :
+
+- **Suppression annulable** (note d'honoraires, avenant, OS, permis) :
+  `deleteWithUndo()` retire l'élément tout de suite et affiche « Annuler »
+  pendant 6 s ; la requête `DELETE` ne part qu'ensuite
+  (`UndoableDeleteQueue`, `src/lib/undoableDelete.ts`, testée ;
+  `useUndoableDelete`). Une seule suppression en attente : en lancer une
+  autre envoie la première. Quitter l'écran ou fermer l'onglet (`pagehide`,
+  requête en `keepalive`) envoie la suppression en attente, jamais ne
+  l'oublie. Un refus du serveur remet l'élément à sa place, avec un message.
+- **Confirmation dans l'application** (`useConfirmDialog`,
+  `src/components/ui/ConfirmDialog.tsx`, `role="alertdialog"`, Échap, focus
+  tenu, focus initial sur « Annuler » pour une suppression) : jalons (que la
+  synchronisation avec le contrat recrée, d'où pas d'annulation différée),
+  RFI, visas, PV, réserves, documents DOE et plans, dont la suppression
+  emporte souvent un fichier. La facture d'une note s'y confirme aussi, avec
+  un récapitulatif HT, TVA et TTC.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

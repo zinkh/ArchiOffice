@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, ChangeEvent, useRef } from 'react';
+import React, { useState, useEffect, useMemo, ChangeEvent, useRef, type Dispatch, type SetStateAction } from 'react';
 import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
@@ -64,6 +64,8 @@ import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from '../components/ui/Toast';
+import { useConfirmDialog } from '../components/ui/ConfirmDialog';
+import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { summarizeParcels } from '../lib/cadastreSelection';
@@ -173,6 +175,44 @@ export default function ProjectDetail() {
   // enregistrer.
   const [savedProject, setSavedProject] = useState<Project | null>(null);
   const { toast, showToast } = useToastWithUndo();
+  const undoableDelete = useUndoableDelete(showToast);
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
+  // Suppression définitive (fichiers, visas, réserves...) : confirmée dans une
+  // fenêtre de l'application, jamais par la boîte du navigateur.
+  const confirmDelete = (titleKey: string) => confirmAction({
+    title: t(titleKey),
+    message: t('projectdetail_delete_is_final'),
+    confirmLabel: t('projectdetail_dialog_delete'),
+    cancelLabel: t('projectdetail_dialog_cancel'),
+    tone: 'danger',
+  });
+  // Suppression annulable : l'élément disparaît, « Annuler » le remet à sa
+  // place tant que la requête n'est pas partie (src/lib/undoableDelete.ts).
+  const deleteWithUndo = <T extends { id: string }>(
+    setList: Dispatch<SetStateAction<T[]>>, id: string, url: string, messageKey: string,
+  ) => {
+    let removed: { item: T; index: number } | null = null;
+    undoableDelete({
+      message: t(messageKey),
+      undoLabel: t('projectdetail_undo'),
+      undoneMessage: t('projectdetail_deletion_undone'),
+      failureMessage: t('projectdetail_delete_failed'),
+      remove: () => setList(prev => {
+        const index = prev.findIndex(x => x.id === id);
+        if (index === -1) return prev;
+        removed = { item: prev[index], index };
+        return prev.filter(x => x.id !== id);
+      }),
+      restore: () => setList(prev => {
+        const r = removed as { item: T; index: number } | null;
+        if (!r || prev.some(x => x.id === id)) return prev;
+        const next = [...prev];
+        next.splice(Math.min(r.index, next.length), 0, r.item);
+        return next;
+      }),
+      request: () => fetch(url, { method: 'DELETE', keepalive: true }),
+    });
+  };
   const { settings } = useSettings();
   const mafCost = useMafCost({ project, mafEnabled: !!(settings as any)?.maf_enabled, tauxContratPermil: parseFloat((settings as any)?.maf_taux_contrat_permil ?? 0) });
 
@@ -1346,12 +1386,8 @@ export default function ProjectDetail() {
     } catch (err) { console.error(err); }
   };
 
-  const handleDeleteAvenant = async (avenantId: string) => {
-    if (!confirm(t('projectdetail_confirm_delete_avenant'))) return;
-    try {
-      const res = await fetch(`/api/avenants_moe/${avenantId}`, { method: 'DELETE' });
-      if (res.ok) setAvenantsMoe(prev => prev.filter(a => a.id !== avenantId));
-    } catch (err) { console.error(err); }
+  const handleDeleteAvenant = (avenantId: string) => {
+    deleteWithUndo(setAvenantsMoe, avenantId, `/api/avenants_moe/${avenantId}`, 'projectdetail_deleted_avenant');
   };
 
   const generateOsPdf = async (os: OrdreDeService) => {
@@ -1549,16 +1585,8 @@ export default function ProjectDetail() {
     doc.save(`PV_${(rec.reference_pv || rec.id).replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}.pdf`);
   };
 
-  const handleDeleteOs = async (osId: string) => {
-    if (!confirm(t('projectdetail_confirm_delete_os'))) return;
-    try {
-      const res = await fetch(`/api/ordres_de_service/${osId}`, { method: 'DELETE' });
-      if (res.ok) {
-        setOrdresDeService(prev => prev.filter(os => os.id !== osId));
-      }
-    } catch (err) {
-      console.error(err);
-    }
+  const handleDeleteOs = (osId: string) => {
+    deleteWithUndo(setOrdresDeService, osId, `/api/ordres_de_service/${osId}`, 'projectdetail_deleted_os');
   };
 
   const osStatusBadge = (status: OrdreDeService['status']) => {
@@ -1711,6 +1739,7 @@ export default function ProjectDetail() {
   return (
     <div className="flex flex-col lg:h-full">
       <Toast toast={toast} />
+      {confirmDialog}
       {/* Compact topbar */}
       <div
         className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
@@ -2671,10 +2700,8 @@ export default function ProjectDetail() {
                     }
                   };
 
-                  const deleteNote = async (noteId: string) => {
-                    if (!confirm(t('projectdetail_confirm_delete_note_honoraires'))) return;
-                    await fetch(`/api/notes_honoraires/${noteId}`, { method: 'DELETE' });
-                    setNotesHonoraires(notesHonoraires.filter((n: any) => n.id !== noteId));
+                  const deleteNote = (noteId: string) => {
+                    deleteWithUndo(setNotesHonoraires, noteId, `/api/notes_honoraires/${noteId}`, 'projectdetail_deleted_note');
                   };
 
                   const exportNotePdf = async (note: any) => {
@@ -2693,11 +2720,29 @@ export default function ProjectDetail() {
                   const createFactureFromNote = async (note: any) => {
                     if (note.invoice_id || generatingInvoiceNoteId) return;
                     const eur = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
-                    if (!confirm(t('projectdetail_confirm_generate_invoice', {
-                      numero: note.numero || '',
-                      ht: eur.format(Number(note.montant_ht) || 0),
-                      ttc: eur.format(Number(note.montant_ttc) || 0),
-                    }))) return;
+                    const ht = Number(note.montant_ht) || 0;
+                    const ttc = Number(note.montant_ttc) || 0;
+                    const confirmed = await confirmAction({
+                      title: t('projectdetail_generate_invoice_title'),
+                      tone: 'primary',
+                      confirmLabel: t('projectdetail_generate_invoice'),
+                      cancelLabel: t('projectdetail_dialog_cancel'),
+                      message: (
+                        <>
+                          {note.numero && <p className="mb-2 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('projectdetail_generate_invoice_note', { numero: note.numero })}{note.objet ? ` · ${note.objet}` : ''}</p>}
+                          <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-1 py-3 my-3 border-y tabular-nums" style={{ borderColor: 'var(--tblr-border)' }}>
+                            <dt>{t('projectdetail_generate_invoice_ht')}</dt>
+                            <dd className="text-right font-medium" style={{ color: 'var(--tblr-text)' }}>{eur.format(ht)}</dd>
+                            <dt>{t('projectdetail_generate_invoice_tva')}</dt>
+                            <dd className="text-right" style={{ color: 'var(--tblr-text)' }}>{eur.format(ttc - ht)}</dd>
+                            <dt className="font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('projectdetail_generate_invoice_ttc')}</dt>
+                            <dd className="text-right font-bold" style={{ color: 'var(--tblr-text)' }}>{eur.format(ttc)}</dd>
+                          </dl>
+                          <p>{t('projectdetail_generate_invoice_explain')}</p>
+                        </>
+                      ),
+                    });
+                    if (!confirmed) return;
                     setGeneratingInvoiceNoteId(note.id);
                     try {
                       const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
@@ -3458,11 +3503,11 @@ export default function ProjectDetail() {
                                 </div>
                               </div>
                               <button title="Supprimer le jalon" aria-label="Supprimer le jalon" 
-                                onClick={() => {
-                                  if(confirm(t('projectdetail_confirm_delete_milestone'))) {
-                                    fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
-                                      .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
-                                  }
+                                onClick={async () => {
+                                  if (!(await confirmDelete('projectdetail_confirm_delete_milestone'))) return;
+                                  const res = await fetch(`/api/milestones/${m.id}`, { method: 'DELETE' });
+                                  if (res.ok) setMilestones(prev => prev.filter(x => x.id !== m.id));
+                                  else showToast(t('projectdetail_delete_failed'), 'error', { duration: 6000 });
                                 }}
                                 className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition"
                               >
@@ -3939,9 +3984,7 @@ export default function ProjectDetail() {
                                 </select>
                                 <button
                                   onClick={async () => {
-                                    if (!confirm(t('projectdetail_confirm_delete_permit'))) return;
-                                    const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
-                                    if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
+                                    deleteWithUndo(setPermits, p.id, `/api/permits/${p.id}`, 'projectdetail_deleted_permit');
                                   }}
                                   className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
                                   title="Supprimer"
@@ -4282,7 +4325,7 @@ export default function ProjectDetail() {
                               </select>
                               <button
                                 onClick={async () => {
-                                  if (!confirm(t('projectdetail_confirm_delete_rfi'))) return;
+                                  if (!(await confirmDelete('projectdetail_confirm_delete_rfi'))) return;
                                   const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
                                   if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
                                 }}
@@ -4788,7 +4831,7 @@ export default function ProjectDetail() {
                                 <button
                                   title="Supprimer"
                                   onClick={async () => {
-                                    if (!confirm(t('projectdetail_confirm_delete_visa'))) return;
+                                    if (!(await confirmDelete('projectdetail_confirm_delete_visa'))) return;
                                     try {
                                       const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
                                       if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
@@ -5137,7 +5180,7 @@ export default function ProjectDetail() {
                                   <button
                                     title="Supprimer"
                                     onClick={async () => {
-                                      if (!confirm(t('projectdetail_confirm_delete_pv_reception'))) return;
+                                      if (!(await confirmDelete('projectdetail_confirm_delete_pv_reception'))) return;
                                       try {
                                         const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
                                         if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
@@ -5226,9 +5269,10 @@ export default function ProjectDetail() {
                                               <td className="px-4 py-2 text-right">
                                                 <button title="Supprimer la réserve" aria-label="Supprimer la réserve"
                                                   onClick={async () => {
-                                                    if (!confirm(t('projectdetail_confirm_delete_reserve'))) return;
-                                                    await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
-                                                    setReserves(prev => prev.filter(rv => rv.id !== r.id));
+                                                    if (!(await confirmDelete('projectdetail_confirm_delete_reserve'))) return;
+                                                    const res = await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
+                                                    if (res.ok) setReserves(prev => prev.filter(rv => rv.id !== r.id));
+                                                    else showToast(t('projectdetail_delete_failed'), 'error', { duration: 6000 });
                                                   }}
                                                   className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors"
                                                 >
@@ -5467,7 +5511,7 @@ export default function ProjectDetail() {
                                           </button>
                                           <button
                                             onClick={async () => {
-                                              if (!confirm(t('projectdetail_confirm_delete_doe_document'))) return;
+                                              if (!(await confirmDelete('projectdetail_confirm_delete_doe_document'))) return;
                                               try {
                                                 const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
                                                 if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
@@ -5570,7 +5614,7 @@ export default function ProjectDetail() {
                                     </button>
                                     <button 
                                       onClick={async () => {
-                                        if (!confirm(t('projectdetail_confirm_delete_plan'))) return;
+                                        if (!(await confirmDelete('projectdetail_confirm_delete_plan'))) return;
                                         try {
                                           const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
                                           if (res.ok) setPlans(prev => prev.filter(p => p.id !== plan.id));
