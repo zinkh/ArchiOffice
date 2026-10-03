@@ -23,6 +23,7 @@ import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
 import MyTasksWidget from '../components/dashboard/MyTasksWidget';
+import OperationalKpis from '../components/dashboard/OperationalKpis';
 import { ErrorState, StatCardSkeletonGrid, ListSkeleton } from '../components/DataState';
 import { useAgentChat } from '@zinkh/archioffice-agents/client';
 import {
@@ -503,6 +504,10 @@ function AdminDashboardView() {
           </SectionCard>
         </div>
       </div>
+
+      {/* ── Suivi opérationnel de toute l'agence. Affaires en cours et échéances
+          figurent déjà dans la grille ci-dessus : on ne les répète pas. ── */}
+      <OperationalKpis scopeProjectIds={null} projects={projects} omit={['projects', 'deadlines']} />
 
       {/* ── Quick actions (mobile-prominent) ── */}
       <div className="xl:hidden">

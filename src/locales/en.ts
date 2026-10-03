@@ -1566,6 +1566,13 @@ export default {
       "kpi_late_count": "{{count}} overdue",
       "kpi_team_revenue": "Revenue collected (team)",
       "kpi_team_overdue_invoices": "Overdue invoices (team)",
+      "kpi_no_late": "Nothing overdue",
+      "kpi_permits_instruction": "{{count}} under review",
+      "kpi_tasks_open": "Open tasks",
+      "kpi_group_admin": "Project follow-up",
+      "kpi_group_site": "Site follow-up",
+      "kpi_group_treasury": "Cash flow",
+      "kpi_team_receivable": "Outstanding (team)",
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "AI Suggestions",

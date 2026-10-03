@@ -576,6 +576,26 @@ laisse la liste intacte) : qualifications RGE, libellé NAF (`ref_naf`), fiche c
 SIREN, adresse) puis rejoue l'import RGE ; la consultation n'est modifiée que par « Ajouter à la
 consultation », avec un lot facultatif.
 
+### Tableaux de bord : un bloc opérationnel, deux périmètres
+
+`src/components/dashboard/OperationalKpis.tsx` (calcul pur dans
+`src/lib/dashboardOps.ts`, testé) porte les KPI de suivi : permis actifs,
+échéances à 30 jours, tâches en cours, réunions de la semaine, RFI en attente,
+réserves OPR et GPA. Chaque carte signale ses retards (« Aucun retard » sinon).
+Seul le **périmètre** diffère :
+
+- **Administrateur** (`Dashboard.tsx`) : `scopeProjectIds={null}`, toute
+  l'agence. Les cartes « Affaires en cours » et « Échéances » existent déjà dans
+  sa grille, donc `omit={['projects', 'deadlines']}`. Il est aussi le seul à
+  voir le commercial (devis en attente, appels d'offres).
+- **Manager** (`ManagerDashboard.tsx`) : les affaires de son équipe uniquement.
+  Sa finance tient en trois cartes (encaissé, reste à encaisser, factures en
+  retard) calculées avec les mêmes helpers que l'administrateur
+  (`dashboardMetrics.ts`) ; le budget estimé n'a plus de carte, il figure déjà
+  sur le graphique honoraires consommés vs prévus.
+
+Une date absente ou illisible n'est jamais comptée comme un retard.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes

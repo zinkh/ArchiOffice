@@ -1722,6 +1722,13 @@ export default {
       "kpi_late_count": "{{count}} en retard",
       "kpi_team_revenue": "CA encaissé (équipe)",
       "kpi_team_overdue_invoices": "Factures en retard (équipe)",
+      "kpi_no_late": "Aucun retard",
+      "kpi_permits_instruction": "{{count}} en instruction",
+      "kpi_tasks_open": "Tâches en cours",
+      "kpi_group_admin": "Suivi des affaires",
+      "kpi_group_site": "Suivi de chantier",
+      "kpi_group_treasury": "Trésorerie",
+      "kpi_team_receivable": "Reste à encaisser (équipe)",
 
       // Dashboard — proactive AI suggestions
       "dashboard_ai_suggestions": "Suggestions IA",
