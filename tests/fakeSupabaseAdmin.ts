@@ -40,6 +40,8 @@ interface FakeUser {
   email: string;
 }
 
+const FAKE_MAX_ROWS = 1000;
+
 export class FakeSupabaseAdmin {
   private tables = new Map<string, Row[]>();
   private tokenToUser = new Map<string, FakeUser>();
@@ -405,11 +407,13 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
-  // No-op, like limit()/order() above: test datasets are always far under a
-  // single page, so returning every matching row still satisfies callers
-  // (e.g. server/tenantExport.ts's fetchAllRows) that loop until a
-  // short-of-a-full-page response tells them to stop.
-  range() {
+  // Réel, comme limit()/order() : la pagination par tranches (lecture de plus
+  // de 1 000 lignes, plafond PostgREST par défaut) doit pouvoir se tester.
+  private rangeFrom?: number;
+  private rangeTo?: number;
+  range(from: number, to: number) {
+    this.rangeFrom = from;
+    this.rangeTo = to;
     return this;
   }
 
@@ -512,7 +516,12 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
         return (a[col] < b[col] ? -1 : 1) * (ascending ? 1 : -1);
       });
     }
-    const page = this.limitN != null ? matched.slice(0, this.limitN) : matched;
+    const limited = this.limitN != null ? matched.slice(0, this.limitN) : matched;
+    const ranged = this.rangeFrom != null ? limited.slice(this.rangeFrom, (this.rangeTo ?? limited.length - 1) + 1) : limited;
+    // Comme PostgREST sur Supabase (`max-rows`, 1 000 par défaut) : une
+    // réponse ne dépasse jamais 1 000 lignes, sans erreur. Sans ce plafond,
+    // un select qui tronque en production passerait ici sans être vu.
+    const page = ranged.slice(0, FAKE_MAX_ROWS);
     return { data: clone(page), error: null, count: matched.length };
   }
 }

@@ -58,6 +58,20 @@ describe('Contacts', () => {
   // profiles.show_personal_contacts (migrate_contacts_personal_visibility.sql):
   // a "pro" contact stays shared tenant-wide, a personal one is visible only
   // to its owner — see CLAUDE.md.
+  it('liste tous les contacts au-delà du plafond de 1 000 lignes de Supabase', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('contacts', Array.from({ length: 1205 }, (_, i) => ({
+      id: `bulk-${String(i).padStart(5, '0')}`, tenant_id: tenantId, first_name: 'Contact', last_name: String(i),
+    })));
+    const created = await request(app).post('/api/contacts').set(authHeader(token)).send({ company_name: 'ESPOIR 54' });
+
+    const listed = await request(app).get('/api/contacts').set(authHeader(token));
+    expect(listed.status).toBe(200);
+    expect(listed.body).toHaveLength(1206);
+    expect(listed.body.some((c: any) => c.id === created.body.id)).toBe(true);
+  });
+
   describe('Personal contacts visibility', () => {
     it('a personal contact is owned by its creator and invisible to a colleague in the same tenant', async () => {
       const tenantId = makeTenant();

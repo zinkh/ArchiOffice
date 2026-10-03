@@ -67,10 +67,13 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
   layers: [
     { id: 'ortho-layer', type: 'raster', source: 'ortho' },
     {
+      // Masquée tant que les parcelles vectorielles se chargent : on ne
+      // l'affiche qu'en secours, si APICARTO ne renvoie rien.
       id: 'cadastre-raster-layer',
       type: 'raster',
       source: 'cadastreRaster',
       minzoom: CADASTRE_MIN_ZOOM,
+      layout: { visibility: 'none' },
       paint: { 'raster-opacity': 0.42 },
     },
     {
@@ -88,7 +91,7 @@ const MAP_STYLE = (lon: number, lat: number): any => ({
       type: 'line',
       source: 'parcelles',
       minzoom: CADASTRE_MIN_ZOOM,
-      paint: { 'line-color': '#18181b', 'line-width': 1, 'line-opacity': 0.85 },
+      paint: { 'line-color': '#18181b', 'line-width': 1.2, 'line-opacity': 0.9 },
     },
     {
       id: 'selection-fill',
@@ -167,6 +170,7 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
   const [parcelStatus, setParcelStatus] = useState<'idle' | 'loading' | 'ready' | 'empty' | 'error'>('idle');
   const hoveredId = useRef<number | string | null>(null);
   const [selection, setSelection] = useState<CadastreParcel[]>([]);
+  const [pointLookup, setPointLookup] = useState<'idle' | 'loading' | 'miss' | 'error'>('idle');
   const selectionRef = useRef<CadastreParcel[]>([]);
   const fetchAbort = useRef<AbortController | null>(null);
   const onSelectionChangeRef = useRef(onSelectionChange);
@@ -184,9 +188,53 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
     });
     onSelectionChangeRef.current?.(next);
   }, []);
+  // Les messages d'échec de la recherche par point s'effacent d'eux-mêmes.
+  useEffect(() => {
+    if (pointLookup !== 'miss' && pointLookup !== 'error') return;
+    const timer = setTimeout(() => setPointLookup('idle'), 3000);
+    return () => clearTimeout(timer);
+  }, [pointLookup]);
+  const applySelectionRef = useRef(applySelection);
+  applySelectionRef.current = applySelection;
   // N'ajuste le cadrage à la parcelle qu'une fois, au premier chargement —
   // sans ça, chaque déplacement de la carte (moveend) re-fitterait dessus.
   const fittedParcel = useRef(false);
+
+  const showRasterFallback = (instance: maplibregl.Map, visible: boolean) => {
+    if (instance.getLayer('cadastre-raster-layer')) {
+      instance.setLayoutProperty('cadastre-raster-layer', 'visibility', visible ? 'visible' : 'none');
+    }
+  };
+
+  // Sélection par la position touchée : interroge APICARTO sur ce seul point.
+  // C'est ce qui garde la sélection possible quand les parcelles de l'emprise
+  // affichée n'ont pas pu être chargées (seul le calque raster est alors
+  // visible, et il n'est pas cliquable).
+  const selectAtPoint = useCallback((lngLat: [number, number]) => {
+    setPointLookup('loading');
+    fetch(`/api/cadastre/parcel?lon=${lngLat[0]}&lat=${lngLat[1]}`)
+      .then(async (res) => {
+        if (res.ok) return res.json();
+        throw new Error(`Cadastre indisponible (${res.status})`);
+      })
+      .then((data) => {
+        const features: GeoJSON.Feature[] = data?.features ?? [];
+        const hit = features.find((f) => f.geometry && pointInGeometry(lngLat, f.geometry)) ?? features[0];
+        if (!hit?.properties?.id) {
+          setPointLookup('miss');
+          return;
+        }
+        setPointLookup('idle');
+        applySelectionRef.current(toggleParcel(selectionRef.current, {
+          ...(hit.properties as CadastreParcel),
+          geometry: hit.geometry,
+        }));
+      })
+      .catch((err) => {
+        console.warn('[MapLibreCadastre] point lookup failed', err);
+        setPointLookup('error');
+      });
+  }, []);
 
   const fetchParcelles = useCallback((instance: maplibregl.Map, center?: [number, number]) => {
     if (instance.getZoom() < CADASTRE_MIN_ZOOM) return;
@@ -211,6 +259,7 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
         if (!data?.features) throw new Error('Réponse cadastrale invalide');
         source.setData(data);
         setParcelStatus(data.features.length > 0 ? 'ready' : 'empty');
+        showRasterFallback(instance, data.features.length === 0);
         if (center && !fittedParcel.current) {
           fittedParcel.current = true;
           const containing = data.features.find((f: GeoJSON.Feature) => f.geometry && pointInGeometry(center, f.geometry));
@@ -227,6 +276,7 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
       .catch((err) => {
         if (err.name !== 'AbortError') {
           setParcelStatus('error');
+          showRasterFallback(instance, true);
           console.warn('[MapLibreCadastre] parcel fetch failed', err);
         }
       });
@@ -280,15 +330,24 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
       instance.getCanvas().style.cursor = '';
     });
 
-    instance.on('click', 'parcelles-fill', (e) => {
-      if (!onSelectionChangeRef.current || !e.features?.length) return;
-      const feature = e.features[0];
-      const parcel = {
-        ...(feature.properties as CadastreParcel),
-        geometry: feature.geometry as GeoJSON.Geometry,
-      };
-      if (!parcel.id) return;
-      applySelection(toggleParcel(selectionRef.current, parcel));
+    // Un seul gestionnaire de clic pour toute la carte (et pas seulement sur
+    // le calque des parcelles) : un appui hors d'une parcelle chargée bascule
+    // sur la recherche par point plutôt que de ne rien faire.
+    instance.on('click', (e) => {
+      if (!onSelectionChangeRef.current) return;
+      if (instance.getZoom() < CADASTRE_MIN_ZOOM) return;
+      const hits = instance.getLayer('parcelles-fill')
+        ? instance.queryRenderedFeatures(e.point, { layers: ['parcelles-fill'] })
+        : [];
+      const feature = hits[0];
+      if (feature?.properties?.id) {
+        applySelection(toggleParcel(selectionRef.current, {
+          ...(feature.properties as CadastreParcel),
+          geometry: feature.geometry as GeoJSON.Geometry,
+        }));
+        return;
+      }
+      selectAtPoint([e.lngLat.lng, e.lngLat.lat]);
     });
 
     // Without a listener, MapLibre's own fallback is to print any internal
@@ -318,7 +377,7 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
       el.style.margin = '12px';
     });
     map.current = instance;
-  }, [lat, lon, applySelection]);
+  }, [lat, lon, applySelection, selectAtPoint]);
 
   // Un seul effet crée la carte, au montage — la doubler avec un second
   // useEffect qui rappelait initMap() détruisait et recréait le contexte
@@ -410,34 +469,43 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
         </div>
       )}
       {zoom < CADASTRE_MIN_ZOOM && !contextLost && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap">
           <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
             Zoomez pour afficher le cadastre (niveau {CADASTRE_MIN_ZOOM}+)
           </div>
         </div>
       )}
       {zoom >= CADASTRE_MIN_ZOOM && parcelStatus === 'loading' && !contextLost && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap">
           <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
             Chargement du cadastre…
           </div>
         </div>
       )}
       {zoom >= CADASTRE_MIN_ZOOM && parcelStatus === 'error' && !contextLost && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 whitespace-nowrap">
           <button
             type="button"
             onClick={handleParcelRetry}
             className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md bg-amber-600 hover:bg-amber-700 text-white transition-colors"
           >
-            Cadastre indisponible — Réessayer
+            Cadastre vectoriel indisponible · Réessayer
           </button>
         </div>
       )}
       {zoom >= CADASTRE_MIN_ZOOM && parcelStatus === 'empty' && !contextLost && (
-        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 pointer-events-none">
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap">
           <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
-            Limites IGN affichées — sélection vectorielle indisponible ici
+            Limites IGN affichées · touchez une parcelle pour la sélectionner
+          </div>
+        </div>
+      )}
+      {pointLookup !== 'idle' && !contextLost && (
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 pointer-events-none whitespace-nowrap">
+          <div className="px-3 py-1.5 rounded-lg text-xs font-medium shadow-md" style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}>
+            {pointLookup === 'loading' ? 'Recherche de la parcelle…'
+              : pointLookup === 'miss' ? 'Aucune parcelle à cet endroit'
+              : 'Parcelle introuvable, réessayez'}
           </div>
         </div>
       )}

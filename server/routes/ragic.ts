@@ -14,6 +14,7 @@
 // auth middleware 401'd it before the handler's own secret check ever ran
 // — the webhook has likely never received a single real notification.
 import type { Express } from 'express';
+import { selectAllPages } from '../selectAllPages';
 import axios from 'axios';
 import crypto from 'crypto';
 
@@ -164,7 +165,7 @@ export function registerRagicRoutes(app: Express, { supabaseAdmin, getTenantId, 
 
       // ── Contacts ─────────────────────────────────────────────────────────────
       if (s.ragic_sheet_contacts) {
-        const { data: contacts } = await supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId);
+        const { data: contacts } = await selectAllPages(() => supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId));
         const toRagic = (c: any) => ({
           first_name: c.first_name ?? '',
           last_name: c.last_name ?? '',

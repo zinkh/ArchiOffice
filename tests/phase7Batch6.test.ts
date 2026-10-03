@@ -379,6 +379,39 @@ describe('Geo Proxy input validation', () => {
       expect(res.status).toBe(504);
     });
 
+    it('relaie sur le WFS IGN quand APICARTO échoue', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce({ ok: false, status: 504, headers: new Headers({ 'content-type': 'text/html' }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: new Headers({ 'content-type': 'application/json' }),
+          json: async () => ({
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [[[6.131, 48.731], [6.132, 48.731], [6.132, 48.732], [6.131, 48.731]]] },
+              properties: { idu: '54547000AB0123', section: 'AB', numero: '0123', code_insee: '54547', contenance: 412 },
+            }],
+          }),
+        }) as any;
+
+      const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.130002,48.730002,6.140002,48.740002' }).set(authHeader(token));
+      expect(res.status).toBe(200);
+      expect(res.body.features).toHaveLength(1);
+      expect(res.body.features[0].properties).toMatchObject({ section: 'AB', contenance: 412 });
+      expect(String((global.fetch as any).mock.calls[1][0])).toContain('data.geopf.fr/wfs');
+    });
+
+    it('rend 502 quand APICARTO et le WFS IGN échouent tous les deux', async () => {
+      const tenantId = makeTenant();
+      const { token } = makeUser(tenantId);
+      global.fetch = vi.fn(async () => ({ ok: false, status: 500, headers: new Headers() })) as any;
+      const res = await request(app).get('/api/cadastre/parcel').query({ bbox: '6.130003,48.730003,6.140003,48.740003' }).set(authHeader(token));
+      expect(res.status).toBe(502);
+    });
+
     it('falls back to a nearby bbox when the BAN point is on the street', async () => {
       const tenantId = makeTenant();
       const { token } = makeUser(tenantId);

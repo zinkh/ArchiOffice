@@ -15,8 +15,11 @@
 import type { Express } from 'express';
 import axios from 'axios';
 import { fetchWithTimeout } from '../fetchWithTimeout';
+import { fetchCadastreWfs, envelopeOf } from '../cadastreWfs';
 
-const CADASTRE_TIMEOUT_MS = 20_000;
+// Assez court pour laisser au relais WFS le temps de répondre avant
+// qu'un proxy amont ne coupe la requête.
+const CADASTRE_TIMEOUT_MS = 10_000;
 const CADASTRE_CACHE_TTL_MS = 5 * 60_000;
 const CADASTRE_CACHE_MAX_ENTRIES = 100;
 const CADASTRE_MAX_BBOX_SPAN_DEG = 0.2;
@@ -775,25 +778,33 @@ export function registerGeoProxyRoutes(app: Express) {
         }, CADASTRE_TIMEOUT_MS);
       };
 
-      let response = await fetchIgnCadastre(geom);
-
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'No response body');
-        console.error(`[Cadastre] IGN API Error: ${response.status} ${response.statusText}`);
-        return res.status(response.status).json({
-          error: `IGN API returned ${response.status}: ${response.statusText}`,
-          details: errorText
-        });
+      // APICARTO d'abord ; s'il échoue (expiration, 5xx, réponse non JSON),
+      // le WFS de la Géoplateforme prend le relais. Sans ce relais, la carte
+      // n'avait plus que le calque raster, qui n'est pas cliquable.
+      let data: any = null;
+      let apicartoError = '';
+      try {
+        const response = await fetchIgnCadastre(geom);
+        if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
+          data = await response.json();
+        } else {
+          apicartoError = `APICARTO ${response.status}`;
+        }
+      } catch (err: any) {
+        apicartoError = err?.name === 'AbortError' ? 'APICARTO timeout' : (err?.message || 'APICARTO error');
       }
-
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error(`Cadastre API returned non-JSON: ${text}`);
-        return res.status(502).json({ error: "Cadastre API returned invalid response format" });
+      if (!data) {
+        console.warn(`[Cadastre] ${apicartoError}, relais WFS IGN`);
+        try {
+          // Pour un point, une emprise d'une dizaine de mètres ; le client
+          // retient la parcelle qui contient réellement le point.
+          data = await fetchCadastreWfs(envelopeOf(geom, bbox ? 0 : 0.0001), CADASTRE_TIMEOUT_MS);
+        } catch (wfsErr: any) {
+          console.error(`[Cadastre] WFS IGN en échec : ${wfsErr?.message}`);
+          const bothTimedOut = apicartoError === 'APICARTO timeout' && wfsErr?.name === 'AbortError';
+          return res.status(bothTimedOut ? 504 : 502).json({ error: 'Cadastre indisponible', details: `${apicartoError} ; ${wfsErr?.message}` });
+        }
       }
-
-      let data = await response.json();
 
       // Le point BAN correspond souvent à l'entrée du bâtiment, à une limite
       // cadastrale ou même à la chaussée. Dans ce cas l'intersection stricte
@@ -814,9 +825,13 @@ export function registerGeoProxyRoutes(app: Express) {
             [longitude - deltaLon, latitude - deltaLat],
           ]],
         };
-        response = await fetchIgnCadastre(nearbyGeom);
-        if (response.ok && response.headers.get('content-type')?.includes('application/json')) {
-          data = await response.json();
+        try {
+          const nearby = await fetchIgnCadastre(nearbyGeom);
+          if (nearby.ok && nearby.headers.get('content-type')?.includes('application/json')) {
+            data = await nearby.json();
+          }
+        } catch {
+          // Meilleur effort : on garde la réponse vide déjà obtenue.
         }
       }
 
