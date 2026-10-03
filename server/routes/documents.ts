@@ -12,6 +12,7 @@
 // où le fichier irait.
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { safeSegment } from '../storageKey';
 import { handleDocumentUpload } from '../documentUpload';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
@@ -156,7 +157,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
 
       const phaseVal = phase || null;
       const id = crypto.randomUUID();
-      const phaseSegment = phaseVal ? `${phaseVal}/` : '';
+      const phaseSegment = phaseVal ? `${safeSegment(phaseVal)}/` : '';
       const stored = await storeBusinessFile({
         tenantId,
         bucket: 'documents',
@@ -228,7 +229,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         const nextIndice = String.fromCharCode(currentIndice.charCodeAt(0) + 1);
         const existingPhase = phaseVal || (doc as any)?.phase || null;
         const projectId = (doc as any)?.project_id || 'general';
-        const phaseSegment = existingPhase ? `${existingPhase}/` : '';
+        const phaseSegment = existingPhase ? `${safeSegment(existingPhase)}/` : '';
         // Une nouvelle version rejoint le dossier de sa phase, à côté des
         // précédentes — le « v2- » du chemin Supabase n'a pas d'équivalent ici :
         // les fournisseurs versionnent eux-mêmes un fichier de même nom.

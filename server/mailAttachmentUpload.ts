@@ -12,5 +12,8 @@ export const ATTACHMENT_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export const mailAttachmentUpload = multer({
   storage: multer.memoryStorage(),
+  // Les navigateurs envoient le nom de fichier en UTF-8 ; le défaut latin1
+  // de multer changerait « Général » en « GÃ©nÃ©ral ».
+  defParamCharset: 'utf8',
   limits: { fileSize: ATTACHMENT_MAX_FILE_BYTES, files: 10 },
 }).array('attachments');
