@@ -5,11 +5,11 @@ import { cn } from '../lib/utils';
 export const GeoportailMap = ({
   address,
   banId,
-  onParcelSelect,
+  onSelectionChange,
 }: {
   address: string;
   banId?: string;
-  onParcelSelect?: (parcel: CadastreParcel) => void;
+  onSelectionChange?: (parcels: CadastreParcel[]) => void;
 }) => {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -60,7 +60,7 @@ export const GeoportailMap = ({
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address to see the map</div>;
 
-  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onParcelSelect={onParcelSelect} />;
+  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onSelectionChange={onSelectionChange} />;
 };
 
 export const GoogleMap = ({ address }: { address: string }) => {
@@ -103,99 +103,6 @@ export const GoogleMap = ({ address }: { address: string }) => {
       title="OpenStreetMap"
       loading="lazy"
     />
-  );
-};
-
-export const GeorisquesMap = ({ address, banId }: { address: string; banId?: string }) => {
-  const [addressDetails, setAddressDetails] = useState<{ 
-    lat: number; 
-    lon: number; 
-    city: string; 
-    codeInsee: string; 
-    adresse: string; 
-    commune: string; 
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if ((!address || address.length < 5) && !banId) return;
-    
-    const fetchCoords = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const queryParams = new URLSearchParams();
-        if (banId) queryParams.append('banId', banId);
-        if (address) queryParams.append('q', address);
-        queryParams.append('limit', '1');
-
-        const res = await fetch(`/api/address-search?${queryParams.toString()}`);
-        if (res.ok) {
-          const contentType = res.headers.get('content-type');
-          if (contentType && contentType.includes('application/json')) {
-            const data = await res.json();
-            if (data.features && data.features.length > 0) {
-              const feature = data.features[0];
-              const [lon, lat] = feature.geometry.coordinates;
-              setAddressDetails({ 
-                lat, 
-                lon,
-                city: feature.properties.city,
-                codeInsee: feature.properties.citycode,
-                adresse: feature.properties.label,
-                commune: feature.properties.city || feature.properties.name
-              });
-            } else {
-              setError('Address not found');
-            }
-          } else {
-            setError('Invalid response from geocoder');
-          }
-        }
-      } catch (err) {
-        console.error(err);
-        setError('Error fetching coordinates');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const timer = setTimeout(fetchCoords, 1000);
-    return () => clearTimeout(timer);
-  }, [address, banId]);
-
-  if (loading) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading risks...</div>;
-  if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
-  if (!addressDetails) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address</div>;
-
-  const georisquesUrl = `https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2?form-adresse=true&isCadastre=false&city=${encodeURIComponent(addressDetails.city)}&type=adresse&typeForm=adresse&codeInsee=${addressDetails.codeInsee}&lon=${addressDetails.lon}&lat=${addressDetails.lat}&go_back=/&propertiesType=housenumber&adresse=${encodeURIComponent(addressDetails.adresse)}&longitude=${addressDetails.lon}&latitude=${addressDetails.lat}&commune=${encodeURIComponent(addressDetails.commune)}`;
-
-  // Georisques blocks iframing of their site for security reasons.
-  // Instead of an iframe, we provide a clear link to open the report in a new window.
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border-2 border-dashed border-zinc-200 dark:border-zinc-800">
-      <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4">
-        <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-      </div>
-      <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mb-2">Georisques Report</h3>
-      <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center mb-6 max-w-xs">
-        For security reasons, Georisques does not allow its report to be embedded. Click below to view the full natural risk analysis for this address.
-      </p>
-      <a
-        href={georisquesUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-red-500/20"
-      >
-        Open Georisques Report
-        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-        </svg>
-      </a>
-    </div>
   );
 };
 
@@ -262,7 +169,16 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
 
   if (!address || address.length < 10) return null;
   if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Fetching risk data...</div>;
-  if (error) return <div className="text-xs text-red-500">{error}</div>;
+  // Le service public Géorisques expire régulièrement (504) : un code
+  // d'erreur brut n'apprend rien à l'architecte, un lien vers le site oui.
+  if (error) return (
+    <div className="text-xs text-zinc-500 dark:text-zinc-400">
+      Service Géorisques momentanément indisponible.{' '}
+      <a href="https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi" target="_blank" rel="noopener noreferrer" className="underline hover:text-zinc-800 dark:hover:text-zinc-200">
+        Consulter georisques.gouv.fr
+      </a>
+    </div>
+  );
   if (!risks) return null;
 
   return (

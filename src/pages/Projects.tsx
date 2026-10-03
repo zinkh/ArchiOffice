@@ -13,6 +13,7 @@ import { queuedJsonRequest } from '../lib/offlineQueue';
 import { refreshOfflineProjects } from '../lib/offlinePrefetch';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
+import { summarizeParcels } from '../lib/cadastreSelection';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -1619,21 +1620,17 @@ export default function Projects() {
                       <InfoPanelBoundary label="Cadastre">
                         <GeoportailMap
                           address={isEditing ? editForm?.address || '' : selectedProject.address || ''}
-                          onParcelSelect={isEditing ? (parcel: CadastreParcel) => {
-                            const reference = [
-                              parcel.prefixe && parcel.prefixe !== '000' ? parcel.prefixe : '',
-                              parcel.section,
-                              parcel.numero,
-                            ].filter(Boolean).join(' ');
+                          onSelectionChange={isEditing ? (parcels: CadastreParcel[]) => {
+                            if (parcels.length === 0) return;
+                            const { reference, surface } = summarizeParcels(parcels);
                             setEditForm(prev => prev ? ({
                               ...prev,
                               ref_cadastrale: reference || prev.ref_cadastrale,
-                              surface_parcelle: parcel.contenance != null ? String(parcel.contenance) : prev.surface_parcelle,
+                              surface_parcelle: surface != null ? String(surface) : prev.surface_parcelle,
                             }) : null);
                           } : undefined}
                         />
                       </InfoPanelBoundary>
-                      <div className="absolute top-2 left-2 px-2 py-1 bg-white/80 dark:bg-black/80 backdrop-blur-sm rounded text-[0.6875rem] font-bold uppercase tracking-wider border border-zinc-200 dark:border-zinc-700">{t('projects_cadastre_label')}</div>
                     </div>
                   </div>
                 )}
