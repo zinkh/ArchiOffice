@@ -25,6 +25,7 @@ import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
+import LinkedMeetings from '../components/LinkedMeetings';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { ProposalExportModal } from '../components/ProposalExportModal';
@@ -102,6 +103,9 @@ export default function Proposals() {
   // Correspondance repliée par défaut : sur téléphone, dépliée, elle occupait
   // toute la hauteur de la fenêtre et repoussait le bouton d'enregistrement
   // hors de l'écran. Le choix est mémorisé sur le poste.
+  // Réunions liées à la proposition ouverte (visites, rendez-vous client).
+  const [meetingsOpen, setMeetingsOpen] = useState(true);
+  const [meetingsCount, setMeetingsCount] = useState(0);
   const [correspondenceOpen, setCorrespondenceOpen] = useState<boolean>(() => {
     try { return localStorage.getItem('proposals.correspondenceOpen') === '1'; } catch { return false; }
   });
@@ -1314,6 +1318,25 @@ export default function Proposals() {
                   </div>
                 )}
               </form>
+
+              {editingProposal && (
+                <div className={`px-6 shrink-0 ${meetingsOpen ? 'pb-4 max-h-[40dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setMeetingsOpen(open => !open)}
+                    aria-expanded={meetingsOpen}
+                    className="w-full flex items-center justify-between py-3 text-sm font-bold uppercase tracking-widest"
+                    style={{ color: 'var(--tblr-text)' }}
+                  >
+                    {t('linked_meetings_title')}{meetingsCount ? ` (${meetingsCount})` : ''}
+                    <IconChevronDown size={18} className={`transition-transform ${meetingsOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--tblr-muted)' }} />
+                  </button>
+                  {/* Monté même replié pour afficher le nombre de réunions dans l'en-tête. */}
+                  <div className={meetingsOpen ? '' : 'hidden'}>
+                    <LinkedMeetings kind="proposal" parentId={editingProposal.id} title={null} onCount={setMeetingsCount} />
+                  </div>
+                </div>
+              )}
 
               {editingProposal && (
                 <div className={`px-6 shrink-0 ${correspondenceOpen ? 'pb-6 max-h-[45dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>

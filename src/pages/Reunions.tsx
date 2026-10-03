@@ -343,6 +343,10 @@ export default function Reunions() {
   const [mobileView, setMobileView] = useState<MobileView>('projects');
 
   const [projects, setProjects] = useState<Project[]>([]);
+  // Liste complète, affaires terminées comprises : la colonne de gauche les
+  // masque, mais un lien direct (?parent=project:<id>, depuis la fiche d'une
+  // affaire) doit pouvoir ouvrir leurs réunions.
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [tenders, setTenders] = useState<Tender[]>([]);
 
@@ -420,7 +424,10 @@ export default function Reunions() {
           db.proposals.toArray(),
           db.tenders.toArray(),
         ]);
-        if (localProjects.length > 0) setProjects(localProjects.filter(p => p.status !== 'Completed'));
+        if (localProjects.length > 0) {
+          setAllProjects(localProjects);
+          setProjects(localProjects.filter(p => p.status !== 'Completed'));
+        }
         if (localProposals.length > 0) setProposals(localProposals);
         if (localTenders.length > 0) setTenders(localTenders);
       } catch {
@@ -430,6 +437,7 @@ export default function Reunions() {
     })();
 
     apiFetch<Project[]>('/api/projects').then(data => {
+      setAllProjects(data);
       setProjects(data.filter(p => p.status !== 'Completed'));
       db.projects.clear().then(() => db.projects.bulkPut(data)).catch(() => {});
     }).catch(() => {});
@@ -571,8 +579,8 @@ export default function Reunions() {
     const parent = searchParams.get('parent');
     if (!parent) return;
     const [kind, parentId] = parent.split(':');
-    if (kind === 'project' && projects.length > 0) {
-      const project = projects.find(p => p.id === parentId);
+    if (kind === 'project' && allProjects.length > 0) {
+      const project = allProjects.find(p => p.id === parentId);
       if (project) selectProject(project);
     } else if (kind === 'proposal' && proposals.length > 0) {
       const proposal = proposals.find(p => p.id === parentId);
@@ -590,7 +598,7 @@ export default function Reunions() {
     if (openNewForm) setShowNewMeeting(true);
     setSearchParams(prev => { prev.delete('parent'); prev.delete('new'); return prev; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects, proposals, tenders, searchParams]);
+  }, [allProjects, proposals, tenders, searchParams]);
 
   useEffect(() => {
     const openId = searchParams.get('open');

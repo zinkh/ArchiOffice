@@ -19,6 +19,7 @@ import {
 } from '@tabler/icons-react';
 import { formatCurrency } from '../../lib/utils';
 import { useTasks } from '../../hooks/useTasks';
+import LinkedMeetings from '../LinkedMeetings';
 import { getTaskStatus, taskDeadline } from '../tasks/taskDisplay';
 import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
 
@@ -490,6 +491,10 @@ export function ProjectOverview({
               </div>
             );
           })}
+        </div>
+
+        <div className="mt-5">
+          <LinkedMeetings kind="project" parentId={project.id} />
         </div>
       </div>
     </div>
