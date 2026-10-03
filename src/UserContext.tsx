@@ -254,7 +254,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       const snapshot = getValidOfflineAuthSnapshot(expectedUserId);
       if (!snapshot) return false;
       setCurrentUser({ ...snapshot.profile, tenants: snapshot.tenants });
-      applyProfileTenants({ ...snapshot.profile, tenants: snapshot.tenants });
+      setTenants(snapshot.tenants);
+      setActiveTenantIdState(snapshot.activeTenantId);
+      setActiveTenantId(snapshot.tenants.length > 1 ? snapshot.activeTenantId : null);
       setTenantPlan(snapshot.billing.plan);
       setTrialEndsAt(snapshot.billing.trialEndsAt);
       setIsTrialExpired(snapshot.billing.isTrialExpired);
@@ -466,9 +468,15 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     clearOfflineAuthSnapshot(sessionRef.current?.user.id ?? currentUser?.id ?? null);
-    await supabase.auth.signOut();
-    sessionRef.current = null;
-    setCurrentUser(null);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      // Signing out locally must succeed even if the cloud is unreachable.
+      // The offline grant was already removed above, so a reload cannot
+      // silently reopen the workspace.
+      sessionRef.current = null;
+      setCurrentUser(null);
+    }
   };
 
   const switchTenant = React.useCallback(async (tenantId: string) => {
