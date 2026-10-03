@@ -2258,6 +2258,16 @@ les 5 premières tâches non terminées, échéance la plus proche d'abord (sans
 échéance en dernier), en rouge si dépassée ; un clic mène à `?tab=TACHES`. Ce sont
 bien des TÂCHES (`tasks`), distinctes des jalons (`milestones`) au-dessus.
 
+**Réunions liées** (`src/components/LinkedMeetings.tsx`, logique pure dans
+`src/lib/linkedMeetings.ts`, testée) : la même rubrique sur la fiche d'une affaire (volet
+Plan d'actions), d'une proposition (rubrique repliable de la modale) et d'un appel d'offres
+(onglet « Réunions »). Elle lit `GET /api/meetings?<parent>_id=` (à venir d'abord, puis les
+passées) et ouvre une réunion par `/reunions?parent=<kind>:<id>&open=<id>`. Le parent du lien
+se déduit de la RÉUNION et non de la fiche (`meetingParent`) : une visite de proposition
+rattachée aussi à l'affaire n'est listée par `/reunions` que sous la proposition. `/reunions`
+résout `?parent=project:` sur toutes les affaires, terminées comprises (`allProjects`),
+même si sa colonne de gauche masque ces dernières.
+
 **Brouillons modifiables** (`CorrespondenceTab.tsx`, `MailDraftEditModal.tsx`,
 `server/mailDraft.ts`, `server/routes/mailDrafts.ts`). Un brouillon vit dans la
 boîte du fournisseur et n'est **jamais copié en base** : `GET /api/mail/drafts?
