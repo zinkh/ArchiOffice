@@ -420,6 +420,27 @@ attendre qu'ils soient chargés recrée le bug.
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
 
+### Fiche affaire : modifications non enregistrées et facture d'une note
+
+La fiche (aperçu, fiche complète, champs HONOS) ne s'écrit en base qu'au bouton
+Enregistrer de l'en-tête, alors que notes, avenants et jalons s'enregistrent
+seuls. `isProjectDirty()` (`src/lib/projectDirty.ts`, testé) compare la fiche
+affichée à la dernière version chargée ou enregistrée (`savedProject`) :
+« Modifications non enregistrées » s'affiche près du bouton (pastille sur
+téléphone), Ctrl+S enregistre, et `useUnsavedChangesGuard`
+(`src/hooks/useUnsavedChangesGuard.ts`) prévient avant de quitter
+(`beforeunload`, liens internes interceptés en phase de capture, boutons Retour
+et Annuler). Sous `BrowserRouter`, `useBlocker` n'existe pas : un `navigate()`
+programmatique doit passer par `confirmDiscard()`. Les montants repris du
+contrat lié (`remuneration`, `construction_cost`) ne comptent pas comme une
+saisie, sinon la fiche paraîtrait modifiée dès l'ouverture.
+
+Générer la facture brouillon d'une note se confirme montant HT et TTC sous les
+yeux, et se conclut par un toast « Ouvrir la facture » (`/invoices?open=<id>`)
+; « Facture créée » est un lien. `saveNote` garde le formulaire ouvert tant que
+le serveur n'a pas confirmé. Les `alert()` de la fiche sont des toasts
+(`useToastWithUndo`).
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

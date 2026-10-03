@@ -62,6 +62,10 @@ import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, Aven
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
+import { isProjectDirty } from '../lib/projectDirty';
+import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
+import { useToastWithUndo } from '../hooks/useToastWithUndo';
+import { Toast } from '../components/ui/Toast';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { summarizeParcels } from '../lib/cadastreSelection';
@@ -167,6 +171,11 @@ export default function ProjectDetail() {
   const { t } = useTranslation();
   
   const [project, setProject] = useState<Project | null>(null);
+  // La fiche telle qu'elle est en base (dernier chargement ou dernier
+  // enregistrement réussi) : c'est elle qui dit s'il reste des saisies à
+  // enregistrer.
+  const [savedProject, setSavedProject] = useState<Project | null>(null);
+  const { toast, showToast } = useToastWithUndo();
   const { settings } = useSettings();
   const mafCost = useMafCost({ project, mafEnabled: !!(settings as any)?.maf_enabled, tauxContratPermil: parseFloat((settings as any)?.maf_taux_contrat_permil ?? 0) });
 
@@ -266,6 +275,8 @@ export default function ProjectDetail() {
     description: ''
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [generatingInvoiceNoteId, setGeneratingInvoiceNoteId] = useState<string | null>(null);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [isAddingPermit, setIsAddingPermit] = useState(false);
   const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
@@ -468,6 +479,16 @@ export default function ProjectDetail() {
     [linkedContratsMoe],
   );
 
+  // Seule la fiche (aperçu, fiche complète, champs HONOS) attend le bouton
+  // Enregistrer : notes, avenants, jalons et documents s'écrivent seuls. Les
+  // montants repris du contrat lié ne comptent pas comme une saisie.
+  const isDirty = useMemo(
+    () => isProjectDirty(savedProject as any, project as any, { contractLinked: !!contratHonoraires }),
+    [savedProject, project, contratHonoraires],
+  );
+  const { confirmDiscard } = useUnsavedChangesGuard(isDirty, t('projectdetail_confirm_leave_unsaved'));
+  const leaveToProjects = () => { if (confirmDiscard()) navigate('/projects'); };
+
   // Onglets de phase chantier gouvernés par une mission du contrat MOE : le
   // contrat fait foi (même principe que HONOS ci-dessus), donc un onglet
   // sans mission incluse est masqué — sauf s'il porte déjà des données,
@@ -641,20 +662,22 @@ export default function ProjectDetail() {
         setViewedPhase(null); // resync the overview's note column to the new actual phase
       } else {
         const err = await res.json().catch(() => null);
-        alert(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }));
+        showToast(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error('Failed to update project phase:', err);
-      alert(t('projectdetail_phase_change_failed'));
+      showToast(t('projectdetail_phase_change_failed'), 'error', { duration: 6000 });
     }
   };
 
   const applyFullProjectData = (data: any) => {
-    setProject({
+    const loaded = {
       ...data.project,
       is_complete_mission: isFlagTrue(data.project.is_complete_mission),
       is_chantier: isFlagTrue(data.project.is_chantier),
-    });
+    };
+    setProject(loaded);
+    setSavedProject(loaded);
     setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
     setMilestonesLoaded(true);
     setInvoices(data.invoices);
@@ -911,7 +934,7 @@ export default function ProjectDetail() {
       setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
       setIsAddingMarche(false);
     } else {
-      alert(t('projectdetail_marche_create_failed'));
+      showToast(t('projectdetail_marche_create_failed'), 'error', { duration: 6000 });
     }
   };
 
@@ -947,14 +970,18 @@ export default function ProjectDetail() {
   const handleSave = async () => {
     if (!project || isSaving) return;
     setIsSaving(true);
+    // L'instantané envoyé, pas `project` relu après coup : une frappe arrivée
+    // pendant l'enregistrement doit rester signalée comme non enregistrée.
+    const sent = project;
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
+      const res = await fetch(`/api/projects/${sent.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(project)
+        body: JSON.stringify(sent)
       });
       if (res.ok) {
-        alert(t('projectdetail_project_saved_successfully'));
+        setSavedProject(sent);
+        showToast(t('projectdetail_project_saved_successfully'));
       } else {
         // Un échec passait jusqu'ici totalement inaperçu : ni alerte ni
         // console.error, seule l'absence du message de succès habituel — un
@@ -962,15 +989,30 @@ export default function ProjectDetail() {
         // enregistré sans que rien ne le signale, et la prochaine ouverture
         // de la fiche le perdait silencieusement.
         const err = await res.json().catch(() => null);
-        alert(err?.error || 'Échec de l\'enregistrement du projet.');
+        showToast(err?.error || t('projectdetail_project_save_failed'), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error(err);
-      alert((err as any)?.message || 'Échec de l\'enregistrement du projet.');
+      showToast(t('projectdetail_project_save_failed'), 'error', { duration: 6000 });
     } finally {
       setIsSaving(false);
     }
   };
+
+  // Ctrl+S (Cmd+S sur Mac) enregistre la fiche au lieu d'ouvrir la boîte
+  // « Enregistrer la page » du navigateur.
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; });
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleDelete = async () => {
     if (!project) return;
@@ -1059,7 +1101,7 @@ export default function ProjectDetail() {
         setIsAddingOs(false);
       } else {
         const err = await res.json().catch(() => null);
-        alert(err?.error || t('projectdetail_os_create_failed'));
+        showToast(err?.error || t('projectdetail_os_create_failed'), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error(err);
@@ -1097,7 +1139,7 @@ export default function ProjectDetail() {
         setIsAddingOsMoe(false);
       } else {
         const err = await res.json().catch(() => null);
-        alert(err?.error || t('projectdetail_avenant_create_failed'));
+        showToast(err?.error || t('projectdetail_avenant_create_failed'), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error(err);
@@ -1610,7 +1652,7 @@ export default function ProjectDetail() {
           setUpdatingPlanId(null);
         } else {
           const err = await res.json().catch(() => null);
-          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
+          showToast(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
         }
       } else {
         // Create a new plan
@@ -1625,12 +1667,12 @@ export default function ProjectDetail() {
           setPlans(prev => [...prev, data]);
         } else {
           const err = await res.json().catch(() => null);
-          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
+          showToast(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
         }
       }
     } catch (err) {
       console.error(err);
-      alert(t('projectdetail_plan_upload_failed'));
+      showToast(t('projectdetail_plan_upload_failed'), 'error', { duration: 6000 });
     } finally {
       setPlanUploading(false);
       if (planInputRef.current) planInputRef.current.value = '';
@@ -1641,16 +1683,19 @@ export default function ProjectDetail() {
 
   return (
     <div className="flex flex-col lg:h-full">
+      <Toast toast={toast} />
       {/* Compact topbar */}
       <div
         className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <button
-          onClick={() => navigate('/projects')}
+          type="button"
+          onClick={leaveToProjects}
           className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors hover:bg-[var(--tblr-surface-2)] shrink-0"
           style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-          title={`${t('view_all')} ${t('projects')}`}
+          title={t('projectdetail_back_to_projects')}
+          aria-label={t('projectdetail_back_to_projects')}
         >
           <IconArrowLeft size={18} />
         </button>
@@ -1708,18 +1753,32 @@ export default function ProjectDetail() {
               <IconTrash size={18} />
             </button>
           )}
+          {isDirty && (
+            <span
+              role="status"
+              className="hidden md:inline-flex items-center gap-1.5 text-[0.6875rem] font-medium whitespace-nowrap"
+              style={{ color: 'var(--tblr-text)' }}
+            >
+              <span aria-hidden className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'var(--tblr-warning)' }} />
+              {t('projectdetail_unsaved_changes')}
+            </span>
+          )}
           <button
-            onClick={() => navigate('/projects')}
+            type="button"
+            onClick={leaveToProjects}
             className="h-8 px-3 rounded-lg text-[0.8125rem] font-medium border transition-colors hover:bg-[var(--tblr-surface-2)]"
             style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
           >
             Annuler
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
+            className="relative h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
             style={{ background: 'var(--tblr-primary)' }}
+            title={t('projectdetail_save_shortcut_hint')}
+            aria-label={isDirty ? `${t('commit_changes')} (${t('projectdetail_unsaved_changes')})` : t('commit_changes')}
           >
             {isSaving ? (
               <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1727,6 +1786,15 @@ export default function ProjectDetail() {
               <IconDeviceFloppy size={16} />
             )}
             <span className="hidden sm:inline">{t('commit_changes')}</span>
+            {isDirty && (
+              // Sur téléphone, le libellé « Modifications non enregistrées »
+              // n'a pas la place : une pastille sur le bouton le remplace.
+              <span
+                aria-hidden
+                className="md:hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2"
+                style={{ background: 'var(--tblr-warning)', borderColor: 'var(--tblr-surface)' }}
+              />
+            )}
           </button>
         </div>
       </div>
@@ -2564,16 +2632,33 @@ export default function ProjectDetail() {
                       ...noteForm, project_id: id, contrat_id: contratId, montant_ht, montant_tva, montant_ttc,
                       montant_cumule_precedent_ht, montant_cumule_ht, pct_facturation_cumule,
                     };
-                    if (editingNote?.id) {
-                      await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    } else {
-                      await fetch('/api/notes_honoraires', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    // Un échec fermait jusqu'ici le formulaire comme une réussite :
+                    // la ventilation saisie était perdue sans un mot. Le formulaire
+                    // reste désormais ouvert, saisie intacte, tant que le serveur
+                    // n'a pas confirmé.
+                    if (isSavingNote) return;
+                    setIsSavingNote(true);
+                    try {
+                      const res = editingNote?.id
+                        ? await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                        : await fetch('/api/notes_honoraires', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => null);
+                        showToast(t('projectdetail_note_save_failed', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
+                        return;
+                      }
+                      setIsAddingNote(false);
+                      setEditingNote(null);
+                      setNoteForm(null);
+                      showToast(t('projectdetail_note_saved'));
+                      const listRes = await fetch(`/api/notes_honoraires?project_id=${id}`);
+                      if (listRes.ok) setNotesHonoraires((await listRes.json()) || []);
+                    } catch (err) {
+                      console.error('Failed to save fee note:', err);
+                      showToast(t('projectdetail_note_save_failed', { error: (err as Error)?.message || '' }), 'error', { duration: 6000 });
+                    } finally {
+                      setIsSavingNote(false);
                     }
-                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
-                    setNotesHonoraires(data || []);
-                    setIsAddingNote(false);
-                    setEditingNote(null);
-                    setNoteForm(null);
                   };
 
                   const deleteNote = async (noteId: string) => {
@@ -2591,12 +2676,40 @@ export default function ProjectDetail() {
                     );
                   };
 
+                  // L'acte le plus engageant de la fiche (numérotation, envoi au
+                  // connecteur comptable) : il se confirme, montant sous les yeux,
+                  // et se conclut par un lien vers la facture plutôt que par un
+                  // simple changement de couleur d'icône.
                   const createFactureFromNote = async (note: any) => {
-                    if (note.invoice_id) return;
-                    const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
-                    if (!res.ok) { alert(t('projectdetail_draft_invoice_create_failed')); return; }
-                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
-                    setNotesHonoraires(data || []);
+                    if (note.invoice_id || generatingInvoiceNoteId) return;
+                    const eur = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
+                    if (!confirm(t('projectdetail_confirm_generate_invoice', {
+                      numero: note.numero || '',
+                      ht: eur.format(Number(note.montant_ht) || 0),
+                      ttc: eur.format(Number(note.montant_ttc) || 0),
+                    }))) return;
+                    setGeneratingInvoiceNoteId(note.id);
+                    try {
+                      const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => null);
+                        showToast(err?.error || t('projectdetail_draft_invoice_create_failed'), 'error', { duration: 6000 });
+                        return;
+                      }
+                      const created = await res.json().catch(() => null);
+                      const invoiceId: string | undefined = created?.invoice?.id;
+                      showToast(t('projectdetail_draft_invoice_created'), 'success', {
+                        duration: 8000,
+                        action: invoiceId ? { label: t('projectdetail_open_invoice'), onClick: () => { if (confirmDiscard()) navigate(`/invoices?open=${invoiceId}`); } } : undefined,
+                      });
+                      const listRes = await fetch(`/api/notes_honoraires?project_id=${id}`);
+                      if (listRes.ok) setNotesHonoraires((await listRes.json()) || []);
+                    } catch (err) {
+                      console.error('Failed to create draft invoice:', err);
+                      showToast(t('projectdetail_draft_invoice_create_failed'), 'error', { duration: 6000 });
+                    } finally {
+                      setGeneratingInvoiceNoteId(null);
+                    }
                   };
 
                   const STATUS_NOTE_COLORS: Record<string, string> = {
@@ -2956,7 +3069,8 @@ export default function ProjectDetail() {
 
                           <div className="flex gap-2 justify-end pt-2 border-t border-[var(--tblr-border)]">
                             <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">
+                            <button type="button" onClick={saveNote} disabled={isSavingNote} aria-busy={isSavingNote} className="px-4 py-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition disabled:opacity-60 disabled:cursor-wait">
+                              {isSavingNote && <span aria-hidden className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                               {editingNote ? 'Mettre à jour' : 'Créer la note'}
                             </button>
                           </div>
@@ -3002,24 +3116,38 @@ export default function ProjectDetail() {
                                           {note.pct_facturation_cumule.toFixed(1)} % cumulé
                                         </span>
                                       )}
-                                      {note.invoice_id && <span className="text-green-600 font-bold">Facture créée</span>}
+                                      {note.invoice_id && (
+                                        <Link to={`/invoices?open=${note.invoice_id}`} className="text-green-700 dark:text-green-400 font-bold underline underline-offset-2 hover:no-underline">
+                                          {t('projectdetail_invoice_created_link')}
+                                        </Link>
+                                      )}
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-1 flex-shrink-0">
-                                    <button title="Exporter en PDF" onClick={() => exportNotePdf(note)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                    {canWriteInvoices(currentUser?.system_role) && (
-                                      <button title={note.invoice_id ? 'Facture brouillon déjà créée' : 'Créer une facture brouillon (agence uniquement)'} disabled={!!note.invoice_id}
+                                    {canWriteInvoices(currentUser?.system_role) && !note.invoice_id && (
+                                      <button
+                                        type="button"
+                                        title={t('projectdetail_generate_invoice_hint')}
                                         onClick={() => createFactureFromNote(note)}
-                                        className={cn('p-1 transition-colors', note.invoice_id ? 'text-green-500 cursor-default' : 'text-zinc-300 hover:text-blue-500')}>
-                                        <IconFileInvoice size={14} />
+                                        disabled={generatingInvoiceNoteId === note.id}
+                                        aria-busy={generatingInvoiceNoteId === note.id}
+                                        className="mr-1 h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-primary-lt)] disabled:opacity-60 disabled:cursor-wait"
+                                        style={{ borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }}
+                                      >
+                                        {generatingInvoiceNoteId === note.id
+                                          ? <span aria-hidden className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                          : <IconFileInvoice size={16} aria-hidden />}
+                                        <span className="hidden sm:inline">{t('projectdetail_generate_invoice')}</span>
+                                        <span className="sm:hidden">{t('projectdetail_generate_invoice_short')}</span>
                                       </button>
                                     )}
-                                    <button onClick={() => {
+                                    <button type="button" title="Exporter en PDF" aria-label="Exporter en PDF" onClick={() => exportNotePdf(note)} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconFileDownload size={16} /></button>
+                                    <button type="button" title={t('projectdetail_edit_note')} aria-label={t('projectdetail_edit_note')} onClick={() => {
                                       setEditingNote(note);
                                       setNoteForm(noteFormFromSaved(note));
                                       setIsAddingNote(true);
-                                    }} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconEdit size={14} /></button>
-                                    <button onClick={() => deleteNote(note.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                    }} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconEdit size={16} /></button>
+                                    <button type="button" title={t('projectdetail_delete_note')} aria-label={t('projectdetail_delete_note')} onClick={() => deleteNote(note.id)} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-danger)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconTrash size={16} /></button>
                                   </div>
                                 </div>
                               </div>
@@ -4488,7 +4616,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => prev.map(v => v.id === editingVisa.id ? updated : v));
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
+                                  showToast(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
                                 }
                               } else {
                                 const res = await fetch('/api/visas', { method: 'POST', body: form });
@@ -4497,7 +4625,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => [...prev, data]);
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
+                                  showToast(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
                                 }
                               }
                               setIsVisaModalOpen(false);
@@ -4506,7 +4634,7 @@ export default function ProjectDetail() {
                               setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                             } catch (err) {
                               console.error(err);
-                              alert(t('projectdetail_visa_save_failed'));
+                              showToast(t('projectdetail_visa_save_failed'), 'error', { duration: 6000 });
                             } finally {
                               setVisaSaving(false);
                             }
@@ -5193,11 +5321,11 @@ export default function ProjectDetail() {
                               await fetchDoeDocuments();
                             } else {
                               const err = await res.json().catch(() => null);
-                              alert(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }));
+                              showToast(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
                             }
                           } catch (err) {
                             console.error(err);
-                            alert(t('projectdetail_doe_upload_failed'));
+                            showToast(t('projectdetail_doe_upload_failed'), 'error', { duration: 6000 });
                           } finally {
                             setDoeUploading(false);
                             if (doeInputRef.current) doeInputRef.current.value = '';
