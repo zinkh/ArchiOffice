@@ -159,7 +159,7 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
             {balances.map(b => (
               <div key={b.leave_type} className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-4">
                 <h4 className="font-semibold text-sm mb-1">{LEAVE_TYPE_LABELS[b.leave_type]} — {b.year}</h4>
-                <div className="flex gap-4 text-sm">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                   <span>{t('leave_allocated')}: <strong>{b.allocated_days}</strong></span>
                   <span>{t('leave_used')}: <strong>{b.used_days}</strong></span>
                   <span className="text-blue-600 dark:text-blue-400">{t('leave_remaining')}: <strong>{b.remaining_days}</strong></span>

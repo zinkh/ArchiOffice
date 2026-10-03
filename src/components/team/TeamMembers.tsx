@@ -109,8 +109,8 @@ function Row({ member, team, isAdmin, highlightId, currentUserId, memberRefs, on
       >
         <Avatar member={member} size={36} />
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2 font-semibold text-[var(--tblr-text)]">
-            <span className="truncate">{member.name}</span>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-semibold text-[var(--tblr-text)]">
+            <span className="min-w-0 break-words">{member.name}</span>
             {member.id === currentUserId && <YouBadge />}
           </span>
           <span className="block truncate text-[0.8125rem] text-[var(--tblr-muted)]">{member.role || t('team_no_function')}</span>

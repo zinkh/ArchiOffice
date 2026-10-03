@@ -16,7 +16,7 @@ interface TeamHeaderProps {
 function Stat({ label, hint, value, tone }: { label: string; hint: string; value: number; tone?: string }) {
   return (
     <div className="stat-card min-w-0 !px-3 !py-3 sm:!px-5 sm:!py-4">
-      <dt className={MONO_LABEL}>{label}</dt>
+      <dt className={cn(MONO_LABEL, 'truncate')} title={label}>{label}</dt>
       <dd className="mt-1 text-xl font-semibold leading-tight tabular-nums text-[var(--tblr-text)] sm:text-2xl" style={tone ? { color: tone } : undefined}>
         {value}
       </dd>
