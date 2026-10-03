@@ -1,13 +1,15 @@
 import * as React from 'react';
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { lazy, Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useSearchParams } from 'react-router-dom';
+import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
 import { JOIN_REQUESTS_CHANGED } from '../components/Sidebar';
 import { useUser } from '../UserContext';
 import TeamHeader from '../components/team/TeamHeader';
+import TeamTabs, { TAB_PARAM, tabFromParam, type TeamTab } from '../components/team/TeamTabs';
 import TeamToolbar, { type RoleFilter, type TeamSort, type TeamView } from '../components/team/TeamToolbar';
 import JoinRequestQueue from '../components/team/JoinRequestQueue';
 import TeamMembers from '../components/team/TeamMembers';
@@ -16,6 +18,9 @@ import TeamNotice, { type TeamNoticeData } from '../components/team/TeamNotice';
 import AddMemberModal from '../components/team/AddMemberModal';
 import { EmptyTeam, LoadError, NoResults, TeamSkeleton } from '../components/team/TeamStates';
 import { ROLE_RANK } from '../components/team/teamShared';
+
+const Leave = lazy(() => import('./Leave'));
+const TimeTracking = lazy(() => import('./TimeTracking'));
 
 function sortMembers(list: UserProfile[], sort: TeamSort): UserProfile[] {
   const byName = (a: UserProfile, b: UserProfile) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
@@ -32,7 +37,7 @@ function sortMembers(list: UserProfile[], sort: TeamSort): UserProfile[] {
 export default function Team() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const highlightId = searchParams.get('member');
   const memberRefs = useRef<Record<string, HTMLElement | null>>({});
   const [team, setTeam] = useState<UserProfile[]>([]);
@@ -48,6 +53,18 @@ export default function Team() {
   const [notice, setNotice] = useState<TeamNoticeData | null>(null);
   const [view, setView] = useState<TeamView>('list');
 
+  const [pendingLeave, setPendingLeave] = useState(0);
+  // Un lien vers un membre (`?member=`) ouvre toujours l'onglet Équipe.
+  const tab: TeamTab = highlightId ? 'team' : tabFromParam(searchParams.get('tab'));
+
+  const changeTab = (next: TeamTab) => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('member');
+    const value = TAB_PARAM[next];
+    if (value) params.set('tab', value); else params.delete('tab');
+    setSearchParams(params, { replace: true });
+  };
+
   const isAdmin = currentUser?.system_role === 'admin';
 
   const loadTeam = useCallback(() => {
@@ -60,6 +77,13 @@ export default function Team() {
   }, []);
 
   useEffect(() => { loadTeam(); }, [loadTeam]);
+
+  // Demandes de congés à valider : l'API ne répond que pour les responsables et les administrateurs.
+  useEffect(() => {
+    apiFetch<{ status: string }[]>('/api/leave_requests?scope=team')
+      .then((rows) => setPendingLeave(rows.filter((r) => r.status === 'pending').length))
+      .catch(() => setPendingLeave(0));
+  }, [tab]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -187,26 +211,39 @@ export default function Team() {
         admins={team.filter((m) => m.system_role === 'admin').length}
         pending={isAdmin ? joinRequests.length : 0}
         isAdmin={isAdmin}
+        showTeamTools={tab === 'team'}
         onAdd={() => setIsModalOpen(true)}
       />
 
-      {isAdmin && <JoinRequestQueue requests={joinRequests} decidingId={decidingId} onDecide={handleDecideJoinRequest} />}
+      <TeamTabs tab={tab} onTab={changeTab} pendingLeave={pendingLeave} />
 
-      {!loading && !loadFailed && team.length > 0 && (
-        <TeamToolbar
-          team={team}
-          query={query}
-          onQuery={setQuery}
-          roleFilter={roleFilter}
-          onRoleFilter={setRoleFilter}
-          sort={sort}
-          onSort={setSort}
-          view={view}
-          onView={setView}
-        />
+      {tab === 'team' && (
+        <>
+          {isAdmin && <JoinRequestQueue requests={joinRequests} decidingId={decidingId} onDecide={handleDecideJoinRequest} />}
+
+          {!loading && !loadFailed && team.length > 0 && (
+            <TeamToolbar
+              team={team}
+              query={query}
+              onQuery={setQuery}
+              roleFilter={roleFilter}
+              onRoleFilter={setRoleFilter}
+              sort={sort}
+              onSort={setSort}
+              view={view}
+              onView={setView}
+            />
+          )}
+
+          {body}
+        </>
       )}
 
-      {body}
+      {tab !== 'team' && (
+        <Suspense fallback={<TeamSkeleton />}>
+          {tab === 'leave' ? <Leave embedded /> : <TimeTracking embedded />}
+        </Suspense>
+      )}
 
       <AnimatePresence>
         {notice && <TeamNotice key={notice.text} notice={notice} onClose={closeNotice} />}

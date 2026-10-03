@@ -30,8 +30,6 @@ import {
   IconCloudUpload,
   IconBuildingBank,
   IconFileDescription,
-  IconClockHour4,
-  IconPlaneDeparture,
   IconMessageCircle,
   IconMail,
 } from '@tabler/icons-react';
@@ -56,7 +54,7 @@ export const NAV_ITEMS = [
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'reunions',       path: '/reunions',        icon: IconMessages },
   { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
-  { name: 'team',           path: '/team',           icon: IconUsers },
+  { name: 'team_hr',        path: '/team',           icon: IconUsers },
   { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
   { name: 'mailbox',        path: '/mailbox',        icon: IconMail },
   { name: 'templates',      path: '/templates',      icon: IconFileSpreadsheet },
@@ -65,8 +63,6 @@ export const NAV_ITEMS = [
   { name: 'contrats',       path: '/contrats',       icon: IconContract },
   { name: 'maf_declaration', path: '/maf-declaration', icon: IconShieldCheck },
   { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
-  { name: 'time_tracking',  path: '/temps',          icon: IconClockHour4 },
-  { name: 'leave',          path: '/conges',         icon: IconPlaneDeparture },
   { name: 'support',        path: '/support',        icon: IconMessageCircle },
 ];
 
@@ -76,6 +72,7 @@ export const NAV_SECTIONS = [
     label: 'Gestion',
     items: [
       { name: 'dashboard',  path: '/',          icon: IconLayoutDashboard },
+      { name: 'team_hr',    path: '/team',      icon: IconUsers },
     ],
   },
   {
@@ -111,15 +108,6 @@ export const NAV_SECTIONS = [
       { name: 'document_templates', path: '/document_templates', icon: IconFileDescription },
       { name: 'references',     path: '/references',     icon: IconArchive },
       { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
-    ],
-  },
-  {
-    key: 'rh',
-    label: 'RH',
-    items: [
-      { name: 'time_tracking', path: '/temps',  icon: IconClockHour4 },
-      { name: 'leave',         path: '/conges', icon: IconPlaneDeparture },
-      { name: 'team',          path: '/team',   icon: IconUsers },
     ],
   },
   {
