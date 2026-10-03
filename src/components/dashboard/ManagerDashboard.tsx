@@ -20,7 +20,9 @@ import { useUser } from '../../UserContext';
 import { ErrorState, StatCardSkeletonGrid } from '../DataState';
 import MyTasksWidget from './MyTasksWidget';
 import OperationalKpis from './OperationalKpis';
-import { invoiceTotal, isIssued, isOverdue, isPaid } from '../../lib/dashboardMetrics';
+import RoleHero from './RoleHero';
+import type { OpsKpis } from '../../lib/dashboardOps';
+import { invoiceTotal, isIssued, isOverdue, isPaid, monthlyRevenue } from '../../lib/dashboardMetrics';
 import type { Project, TeamMember } from '../../types';
 import {
   StatCard,
@@ -43,6 +45,7 @@ export default function ManagerDashboard() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [teamProjectIds, setTeamProjectIds] = useState<Set<string>>(new Set());
   const [invoices, setInvoices] = useState<any[]>([]);
+  const [ops, setOps] = useState<OpsKpis | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -77,6 +80,12 @@ export default function ManagerDashboard() {
   const teamProjects = useMemo(() => projects.filter(p => teamProjectIds.has(p.id)), [projects, teamProjectIds]);
 
   const teamInvoices = useMemo(() => invoices.filter(inv => teamProjectIds.has(inv.project_id)), [invoices, teamProjectIds]);
+  // Même lecture que le tableau de bord administrateur : dernier mois de la série.
+  const paidThisMonth = useMemo(() => {
+    const series = monthlyRevenue(teamInvoices);
+    return series[series.length - 1]?.paid ?? 0;
+  }, [teamInvoices]);
+
   const finance = useMemo(() => {
     const issued = teamInvoices.filter(isIssued);
     const paid = issued.filter(isPaid).reduce((sum, inv) => sum + invoiceTotal(inv), 0);
@@ -132,6 +141,22 @@ export default function ManagerDashboard() {
 
       {loadError && <ErrorState compact message={loadError} onRetry={loadAll} />}
 
+      {/* Rien tant que le suivi n'est pas lu : « rien en retard » serait faux. */}
+      {ops && (
+        <RoleHero
+          role="manager"
+          name={currentUser?.name ?? ''}
+          stats={{
+            paidThisMonth,
+            overdueInvoices: finance.overdueCount,
+            activeProjects: ops?.activeProjects ?? 0,
+            openDeadlines: ops?.upcomingDeadlines ?? 0,
+            meetingsThisWeek: ops?.meetingsThisWeek ?? 0,
+            lateItems: 0,
+          }}
+        />
+      )}
+
       {/* Trésorerie, limitée aux affaires de l'équipe. Le budget estimé n'a plus sa carte :
           il figure déjà sur le graphique « honoraires consommés vs prévus » plus bas. */}
       <div>
@@ -165,7 +190,7 @@ export default function ManagerDashboard() {
       </div>
 
       {/* Suivi des affaires et du chantier, sur les affaires de l'équipe */}
-      <OperationalKpis scopeProjectIds={teamProjectIds} projects={projects} />
+      <OperationalKpis scopeProjectIds={teamProjectIds} projects={projects} onKpis={setOps} />
 
       <SectionCard title={t('kpi_budget_vs_fees')}>
         {budgetByProject.length === 0 ? (

@@ -12,7 +12,7 @@ import {
   IconChecklist,
 } from '@tabler/icons-react';
 import { fetchJson } from '../../lib/api';
-import { computeOpsKpis, type OpsInput, type ProjectScope } from '../../lib/dashboardOps';
+import { computeOpsKpis, type OpsInput, type OpsKpis, type ProjectScope } from '../../lib/dashboardOps';
 import { ErrorState, StatCardSkeletonGrid } from '../DataState';
 import { StatCard } from './DashboardWidgets';
 
@@ -24,6 +24,8 @@ interface OperationalKpisProps {
   projects: OpsInput['projects'];
   /** Cartes déjà présentes ailleurs sur la page, à ne pas répéter. */
   omit?: OmittableKpi[];
+  /** Rend les chiffres calculés à la page (ex. pour son panneau d'accueil). */
+  onKpis?: (kpis: OpsKpis) => void;
 }
 
 const EMPTY_DATA: Omit<OpsInput, 'projects'> = {
@@ -45,7 +47,7 @@ function GroupTitle({ children }: { children: React.ReactNode }) {
  * réunions, RFI, réserves OPR et GPA, tâches. Les mêmes pour l'administrateur
  * (toute l'agence) et le manager (son équipe), seul le périmètre diffère.
  */
-export default function OperationalKpis({ scopeProjectIds, projects, omit = [] }: OperationalKpisProps) {
+export default function OperationalKpis({ scopeProjectIds, projects, omit = [], onKpis }: OperationalKpisProps) {
   const { t } = useTranslation();
   const [data, setData] = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
@@ -87,6 +89,10 @@ export default function OperationalKpis({ scopeProjectIds, projects, omit = [] }
     () => computeOpsKpis({ projects, ...data }, scopeProjectIds),
     [projects, data, scopeProjectIds],
   );
+
+  useEffect(() => {
+    if (!loading && !loadError) onKpis?.(kpis);
+  }, [kpis, loading, loadError, onKpis]);
 
   if (loading) return <StatCardSkeletonGrid count={6} />;
   if (loadError) return <ErrorState compact message={loadError} onRetry={load} />;

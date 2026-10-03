@@ -596,6 +596,17 @@ Seul le **périmètre** diffère :
 
 Une date absente ou illisible n'est jamais comptée comme un retard.
 
+**Panneau d'accueil commun** (`RoleHero.tsx`, contenu pur dans
+`src/lib/dashboardHero.ts`, testé) : la même carte « Bonjour {prénom} » pour
+tous, mais un message par profil. L'administrateur lit l'encaissé du mois et
+les factures en retard de l'agence ; le manager les mêmes chiffres pour son
+équipe ; un collaborateur (`pm`, `user`) ce qui l'attend sur SES affaires
+(points en retard, affaires en cours, réunions de la semaine) et **jamais de
+chiffre de facturation**. Pour le manager et le collaborateur, le panneau
+attend les chiffres du suivi (`OperationalKpis` `onKpis`) : afficher « rien en
+retard » avant leur lecture serait faux. `ResponsibleDashboard` (collaborateur)
+utilise désormais le même `OperationalKpis`, limité à ses affaires.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes
