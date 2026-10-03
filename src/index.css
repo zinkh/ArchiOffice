@@ -192,6 +192,11 @@ select:-webkit-autofill {
     transform: scale(0.97);
     transition-duration: 0.05s;
   }
+  /* Anneau de focus au clavier : le même voile bleu que les champs. */
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--tblr-primary), 0 0 0 4px var(--tblr-primary-lt);
+  }
   .btn-primary  { background: var(--tblr-primary); color: #fff; border-color: var(--tblr-primary); }
   .btn-secondary { background: var(--tblr-surface); color: var(--tblr-text); border-color: var(--tblr-border); }
   .btn-ghost { background: transparent; color: var(--tblr-muted); border-color: transparent; }

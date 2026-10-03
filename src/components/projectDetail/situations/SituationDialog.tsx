@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconAlertTriangle, IconDownload, IconFileCertificate, IconCash, IconArrowBackUp, IconTrash } from '@tabler/icons-react';
 import {
@@ -74,7 +74,7 @@ function corps(f: Form, lignes: LigneSaisie[] | null): Record<string, unknown> {
 
 export function SituationDialog({
   situation, marche, situations, plateforme, clientSiret, dpgf, offres,
-  onClose, onSave, onDownload, onDelete, onLinked,
+  onClose, onSave, onDownload, onDelete, onLinked, confirmDiscard,
 }: {
   situation: SituationLiee | null;
   marche: MarcheTravaux | null;
@@ -90,6 +90,8 @@ export function SituationDialog({
   onDownload: (s: SituationTravaux) => Promise<void>;
   onDelete: (s: SituationTravaux) => Promise<boolean>;
   onLinked: (s: SituationLiee) => void;
+  /** Fermer avec des modifications non enregistrées : demande confirmation. */
+  confirmDiscard: () => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -115,11 +117,25 @@ export function SituationDialog({
     return lignesASaisir(reference?.lignes ?? [], sit.avancement_lignes, precedente?.avancement_lignes);
   };
 
+  // Ce qui a été lu ou enregistré en dernier : fermer avec autre chose à
+  // l'écran demande confirmation au lieu de perdre la saisie sans un mot.
+  const enregistre = useRef('');
+  const signature = (f: Form | null, l: LigneSaisie[] | null) => (f ? JSON.stringify(corps(f, l)) : '');
+
   useEffect(() => {
-    setForm(situation ? formDepuis(situation) : null);
-    setLignes(situation && situation.mode_saisie === 'detaille' ? lignesInitiales(situation) : null);
+    const f = situation ? formDepuis(situation) : null;
+    const l = situation && situation.mode_saisie === 'detaille' ? lignesInitiales(situation) : null;
+    setForm(f);
+    setLignes(l);
+    enregistre.current = signature(f, l);
     setErreur('');
   }, [situation?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const fermer = async () => {
+    const modifiee = !!situation && !estCertifiee(situation) && signature(form, lignes) !== enregistre.current;
+    if (modifiee && !(await confirmDiscard())) return;
+    onClose();
+  };
 
   const changerMode = (mode: ModeSaisie) => {
     if (!situation) return;
@@ -162,19 +178,23 @@ export function SituationDialog({
     try { await travail(); } catch (e: any) { setErreur(e?.message || t('situations_travaux_save_failed')); } finally { setBusy(null); }
   };
 
-  const enregistrer = () => action('save', async () => { await onSave(situation.id, corps(form, lignes)); });
+  const enregistrer = () => action('save', async () => {
+    await onSave(situation.id, corps(form, lignes));
+    enregistre.current = signature(form, lignes);
+  });
   const etablir = () => action('certify', async () => {
     const saved = await onSave(situation.id, { ...corps(form, lignes), etat: 'Validée', date_certificat: form.date_certificat || today() });
+    enregistre.current = signature(form, lignes);
     await onDownload(saved);
   });
   const changerEtat = (etat: 'Brouillon' | 'Payée') => action(etat, async () => { await onSave(situation.id, { etat }); });
   const supprimer = () => action('delete', async () => { if (await onDelete(situation)) onClose(); });
 
   const id = (k: string) => `${uid}-${k}`;
-  const montantInput = (k: keyof Form, label: string, hint?: string) => (
+  const montantInput = (k: keyof Form, label: string, hint?: string, placeholder?: string) => (
     <Champ label={label} htmlFor={id(k)} hint={hint}>
       <input
-        id={id(k)} type="number" step="any" inputMode="decimal" disabled={verrouillee}
+        id={id(k)} type="number" step="any" inputMode="decimal" disabled={verrouillee} placeholder={placeholder}
         className={inputClass + ' tabular-nums'} value={form[k]} onChange={(e) => set(k, e.target.value)}
       />
     </Champ>
@@ -194,14 +214,14 @@ export function SituationDialog({
       open
       wide
       busy={!!busy}
-      onClose={onClose}
+      onClose={() => { void fermer(); }}
       title={t('situations_travaux_situation_title', { n: situation.numero_situation })}
       subtitle={[marche?.lot_numero ? t('situations_travaux_lot_short', { n: marche.lot_numero }) : '', marche?.lot_titre, marche?.entreprise_nom].filter(Boolean).join(' · ')}
       footer={(
         <>
           <button
             type="button" onClick={supprimer} disabled={!!busy || verrouillee}
-            className={boutonSecondaire + ' mr-auto text-red-600 px-2.5 sm:px-3'}
+            className={boutonSecondaire + ' mr-auto text-[var(--tblr-danger)] px-2.5 sm:px-3'}
             aria-label={t('situations_travaux_delete')}
           >
             <IconTrash size={14} aria-hidden /> <span className="hidden sm:inline">{t('situations_travaux_delete')}</span>
@@ -282,7 +302,7 @@ export function SituationDialog({
                     ? t('situations_travaux_lines_source_offer', { company: reference.offreNom, total: formatEuros(reference.totalHt) })
                     : t('situations_travaux_lines_source_dpgf', { total: formatEuros(reference.totalHt) })}
                 {reference.lignes.length > 0 && montantMarche > 0 && Math.abs(reference.totalHt - montantMarche) >= 1 && (
-                  <span className="block text-amber-700 dark:text-amber-400">
+                  <span className="block text-[var(--tblr-warning)]">
                     {t('situations_travaux_lines_total_differs', { amount: formatEuros(montantMarche) })}
                   </span>
                 )}
@@ -305,8 +325,10 @@ export function SituationDialog({
 
           <fieldset className="space-y-3">
             <legend className="text-sm font-bold text-[var(--tblr-text)] mb-2">{t('situations_travaux_section_adjustments')}</legend>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {marche?.revision_active && montantInput('revision_coeff', t('situations_travaux_revision_coeff'), t('situations_travaux_revision_coeff_hint'))}
+            {/* Champs alignés sur leur bas : un libellé sur deux lignes ne décale
+                plus son champ par rapport aux voisins. */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+              {marche?.revision_active && montantInput('revision_coeff', t('situations_travaux_revision_coeff'), undefined, '1')}
               {montantInput('avance_remboursement', t('situations_travaux_advance_repayment'))}
               {montantInput('penalites_ht', t('situations_travaux_penalties'))}
             </div>
@@ -328,7 +350,7 @@ export function SituationDialog({
           {plateforme && verrouillee && marche && (
             <FactureEntrepriseLink plateforme={plateforme} situation={situation} marche={marche} clientSiret={clientSiret} onUpdated={onLinked} />
           )}
-          {erreur && <p role="alert" className="text-sm text-red-600">{erreur}</p>}
+          {erreur && <p role="alert" className="text-sm text-[var(--tblr-danger)]">{erreur}</p>}
         </div>
 
         <aside aria-label={t('situations_travaux_certificate_preview')} className="rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] p-4 text-sm self-start lg:sticky lg:top-0">
@@ -336,7 +358,7 @@ export function SituationDialog({
           {alertes.length > 0 && (
             <ul className="mb-3 space-y-1">
               {alertes.map((a) => (
-                <li key={a} className="flex gap-1.5 text-xs text-amber-700 dark:text-amber-400">
+                <li key={a} className="flex gap-1.5 text-xs text-[var(--tblr-warning)]">
                   <IconAlertTriangle size={14} className="shrink-0 mt-px" aria-hidden /> {a}
                 </li>
               ))}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconEdit, IconTrash, IconFileInvoice, IconListCheck, IconChevronRight, IconLoader2,
@@ -46,6 +46,9 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   const [marcheEdite, setMarcheEdite] = useState<Marche | null | 'new'>(null);
   const [ouverte, setOuverte] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
+  // Situation créée par « Nouvelle situation » et jamais enregistrée depuis :
+  // refermée vide, elle est retirée au lieu de laisser un numéro fantôme.
+  const nouvelleId = useRef<string | null>(null);
   const [dpgf, setDpgf] = useState<DPGF | null>(null);
   const [offres, setOffres] = useState<OffreDocument[]>([]);
   const [plateformes, setPlateformes] = useState<{ chorus_pro: boolean; superpdp: boolean }>({ chorus_pro: false, superpdp: false });
@@ -174,6 +177,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         }),
       });
       setSituations((prev) => [...prev, cree]);
+      nouvelleId.current = cree.id;
       setOuverte(cree.id);
     } catch (e: any) {
       showToast(e?.message || t('situations_travaux_save_failed'), 'error');
@@ -185,8 +189,33 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   const enregistrerSituation = async (id: string, body: Record<string, unknown>) => {
     const maj = await apiFetch<SituationLiee>(`/api/situations/${id}`, { method: 'PUT', body: JSON.stringify(body) });
     setSituations((prev) => prev.map((s) => (s.id === id ? { ...s, ...maj } : s)));
+    if (id === nouvelleId.current) nouvelleId.current = null;
+    const etat = body.etat;
+    showToast(t(
+      etat === 'Validée' ? 'situations_travaux_toast_certified'
+        : etat === 'Payée' ? 'situations_travaux_toast_paid'
+          : etat === 'Brouillon' && Object.keys(body).length === 1 ? 'situations_travaux_toast_reopened'
+            : 'situations_travaux_toast_saved',
+    ));
     return maj;
   };
+
+  const fermerSituation = () => {
+    const id = ouverte;
+    setOuverte(null);
+    if (!id || id !== nouvelleId.current) return;
+    nouvelleId.current = null;
+    setSituations((prev) => prev.filter((s) => s.id !== id));
+    apiFetch(`/api/situations/${id}`, { method: 'DELETE' }).catch(() => { charger(); });
+  };
+
+  const confirmerAbandon = () => confirm({
+    title: t('situations_travaux_discard_title'),
+    message: t('situations_travaux_discard_message'),
+    confirmLabel: t('situations_travaux_discard_confirm'),
+    cancelLabel: t('situations_travaux_discard_cancel'),
+    tone: 'danger',
+  });
 
   const marcheDe = (s: SituationTravaux) => marches.find((m) => m.id === s.marche_id) ?? null;
 
@@ -213,6 +242,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
     if (!ok) return false;
     await apiFetch(`/api/situations/${s.id}`, { method: 'DELETE' });
     setSituations((prev) => prev.filter((x) => x.id !== s.id));
+    if (s.id === nouvelleId.current) nouvelleId.current = null;
     return true;
   };
 
@@ -253,7 +283,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
           </p>
         ) : loadError ? (
           <div className="px-6 py-8 text-center space-y-3" role="alert">
-            <p className="text-sm text-red-600">{loadError}</p>
+            <p className="text-sm text-[var(--tblr-danger)]">{loadError}</p>
             <button type="button" className={boutonSecondaire} onClick={charger}>{t('situations_travaux_retry')}</button>
           </div>
         ) : marches.length === 0 ? (
@@ -272,7 +302,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
             <Kpi label={t('situations_travaux_kpi_certified')} value={formatEuros(totaux.certifie)} />
             <Kpi
               label={t('situations_travaux_kpi_to_check')}
-              value={<span className={totaux.aVerifier ? 'text-amber-700 dark:text-amber-400' : undefined}>{totaux.aVerifier}</span>}
+              value={<span className={totaux.aVerifier ? 'text-[var(--tblr-warning)]' : undefined}>{totaux.aVerifier}</span>}
             />
           </div>
         )}
@@ -305,7 +335,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                       role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.min(100, pct)}
                       aria-label={t('situations_travaux_progress_label', { company: m.entreprise_nom })}
                     >
-                      <div className={pct > 100 ? 'h-full bg-red-600' : 'h-full bg-zinc-700 dark:bg-zinc-300'} style={{ width: `${Math.min(100, pct)}%` }} />
+                      <div className={pct > 100 ? 'h-full bg-[var(--tblr-danger)]' : 'h-full bg-[var(--tblr-text)]'} style={{ width: `${Math.min(100, pct)}%` }} />
                     </div>
                     <span className="text-xs tabular-nums text-[var(--tblr-muted)]">{pct.toLocaleString('fr-FR')} %</span>
                   </div>
@@ -436,7 +466,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         clientSiret={clientSiret}
         dpgf={dpgf}
         offres={offres}
-        onClose={() => setOuverte(null)}
+        onClose={fermerSituation}
+        confirmDiscard={confirmerAbandon}
         onSave={enregistrerSituation}
         onDownload={telechargerCertificat}
         onDelete={supprimerSituation}

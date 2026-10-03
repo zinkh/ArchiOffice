@@ -36,7 +36,7 @@ export function DialogShell({
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          'flex flex-col w-full bg-[var(--tblr-surface)] sm:rounded-xl shadow-xl max-h-dvh sm:max-h-[92dvh]',
+          'flex flex-col w-full bg-[var(--tblr-surface)] sm:rounded-lg shadow-xl max-h-dvh sm:max-h-[92dvh]',
           wide ? 'sm:max-w-5xl' : 'sm:max-w-xl',
         )}
         style={{ border: '1px solid var(--tblr-border)' }}
@@ -51,7 +51,7 @@ export function DialogShell({
             onClick={onClose}
             disabled={busy}
             aria-label={t('situations_travaux_close')}
-            className="p-1.5 -m-1 rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+            className="btn btn-ghost p-1.5 -m-1 disabled:opacity-40"
           >
             <IconX size={18} />
           </button>
@@ -59,7 +59,7 @@ export function DialogShell({
         <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 py-4">{children}</div>
         {footer && (
           <div
-            className="flex flex-wrap items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] sm:rounded-b-xl"
+            className="flex flex-wrap items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] sm:rounded-b-lg"
             style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
           >
             {footer}
@@ -82,14 +82,13 @@ export function Champ({ label, htmlFor, hint, children, className }: {
   );
 }
 
-export const inputClass =
-  'w-full bg-[var(--tblr-surface)] border border-[var(--tblr-border)] rounded-lg px-2.5 py-2 text-sm text-[var(--tblr-text)] outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60';
+// Classes du système (src/index.css) : un seul bleu d'action, contrôles à
+// rayon court, anneau de focus bleu pâle. Pas de bouton noir maison.
+export const inputClass = 'tblr-input disabled:opacity-60';
 
-export const boutonPrincipal =
-  'inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold text-white bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white disabled:opacity-50 transition';
+export const boutonPrincipal = 'btn btn-primary justify-center font-semibold disabled:opacity-50 disabled:cursor-not-allowed';
 
-export const boutonSecondaire =
-  'inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold text-[var(--tblr-text)] bg-[var(--tblr-surface)] border border-[var(--tblr-border)] hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 transition';
+export const boutonSecondaire = 'btn btn-secondary justify-center disabled:opacity-50 disabled:cursor-not-allowed';
 
 export const formatEuros = (n: number): string =>
   n.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });

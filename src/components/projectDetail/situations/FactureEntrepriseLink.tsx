@@ -115,7 +115,7 @@ export function FactureEntrepriseLink({
       ) : (
         <>
           <p className="text-xs text-[var(--tblr-muted)]">{t('situations_travaux_platform_desc', { platform: info.label })}</p>
-          {!marche.entreprise_siret && <p className="text-xs text-red-600">{t('situations_travaux_platform_no_siret')}</p>}
+          {!marche.entreprise_siret && <p className="text-xs text-[var(--tblr-danger)]">{t('situations_travaux_platform_no_siret')}</p>}
           <div className="flex flex-wrap items-end gap-2">
             <div className="space-y-1 flex-1 min-w-[12rem]">
               <label htmlFor={`${uid}-siret`} className="block text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">{t('situations_travaux_platform_buyer_siret')}</label>
@@ -148,7 +148,7 @@ export function FactureEntrepriseLink({
           ))}
         </>
       )}
-      {message && <p role="status" className={message.ok ? 'text-xs text-green-700 dark:text-green-400' : 'text-xs text-red-600'}>{message.texte}</p>}
+      {message && <p role="status" className={message.ok ? 'text-xs text-[var(--tblr-success)]' : 'text-xs text-[var(--tblr-danger)]'}>{message.texte}</p>}
     </section>
   );
 }

@@ -197,7 +197,7 @@ export function MarcheDialog({
             <span>{t('situations_travaux_revisable')}</span>
           </label>
         </div>
-        {erreur && <p role="alert" className="text-sm text-red-600">{erreur}</p>}
+        {erreur && <p role="alert" className="text-sm text-[var(--tblr-danger)]">{erreur}</p>}
       </div>
     </DialogShell>
   );

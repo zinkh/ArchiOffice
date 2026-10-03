@@ -110,7 +110,7 @@ export function AvancementLignesTable({
                           id={inputId}
                           type="text" inputMode="decimal" disabled={disabled}
                           aria-invalid={recul || undefined}
-                          className={inputClass + ' w-[4.5rem] py-1 text-right tabular-nums' + (recul ? ' border-amber-500' : '')}
+                          className={inputClass + ' w-[4.5rem] py-1 text-right tabular-nums' + (recul ? ' border-[var(--tblr-warning)]' : '')}
                           value={brouillons[l.ligneId] ?? String(l.avancementPct).replace('.', ',')}
                           onChange={(e) => setBrouillons((b) => ({ ...b, [l.ligneId]: e.target.value }))}
                           onBlur={(e) => {
@@ -122,7 +122,7 @@ export function AvancementLignesTable({
                         <span className="text-[var(--tblr-muted)]" aria-hidden>%</span>
                       </div>
                     </td>
-                    <td className={'px-2 py-1.5 text-right tabular-nums align-top ' + (recul ? 'text-amber-700 dark:text-amber-400' : 'text-[var(--tblr-text)]')}>
+                    <td className={'px-2 py-1.5 text-right tabular-nums align-top ' + (recul ? 'text-[var(--tblr-warning)]' : 'text-[var(--tblr-text)]')}>
                       {formatEuros(Math.round(periode * 100) / 100)}
                     </td>
                   </tr>
