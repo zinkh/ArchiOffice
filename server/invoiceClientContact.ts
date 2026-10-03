@@ -7,6 +7,7 @@
 // that makes that possible, resolved here from either the invoice itself or
 // its project, since a general invoice (no project_id) still needs a buyer.
 import { CONTACT_CATEGORY_CLIENT } from '../src/lib/contactCategories';
+import { selectAllPages } from './selectAllPages';
 
 export interface ClientContactInfo {
   name: string;
@@ -94,8 +95,8 @@ export async function resolveOrCreateContactFromExternal(
     if ((data as any)?.id) return (data as any).id;
   }
   if (name) {
-    const { data } = await supabaseAdmin.from('contacts')
-      .select('id, company_name, first_name, last_name').eq('tenant_id', tenantId);
+    const { data } = await selectAllPages(() => supabaseAdmin.from('contacts')
+      .select('id, company_name, first_name, last_name').eq('tenant_id', tenantId));
     const match = (data || []).find((c: any) => contactDisplayName(c).toLowerCase() === name.toLowerCase());
     if (match) return (match as any).id;
   }

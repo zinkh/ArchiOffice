@@ -6,6 +6,7 @@
 // `.eq('tenant_id', tenantId)` chains kept as-is rather than
 // tenantScopedFrom, matching zohoInvoice.ts/zohoBooks.ts/ragic.ts.
 import type { Express } from 'express';
+import { selectAllPages } from '../selectAllPages';
 import axios from 'axios';
 import { assertPublicHttpUrl } from '../ssrfGuard';
 import { resolveInvoiceClientId } from '../invoiceClientContact';
@@ -199,7 +200,7 @@ export function registerOdooRoutes(app: Express, { supabaseAdmin, getTenantId, g
         const out = { pushed: 0, pulled: 0, errors: [] as string[] };
 
         // Push: ArchiOffice → Odoo res.partner
-        const { data: contacts } = await supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId);
+        const { data: contacts } = await selectAllPages(() => supabaseAdmin.from('contacts').select('*').eq('tenant_id', tenantId));
         for (const c of (contacts ?? [])) {
           try {
             const vals = buildOdooPartnerVals(c);

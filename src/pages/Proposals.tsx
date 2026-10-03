@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract } from '@tabler/icons-react';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
@@ -99,6 +99,19 @@ export default function Proposals() {
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [templateId, setTemplateId] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Correspondance repliée par défaut : sur téléphone, dépliée, elle occupait
+  // toute la hauteur de la fenêtre et repoussait le bouton d'enregistrement
+  // hors de l'écran. Le choix est mémorisé sur le poste.
+  const [correspondenceOpen, setCorrespondenceOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('proposals.correspondenceOpen') === '1'; } catch { return false; }
+  });
+  const toggleCorrespondence = () => {
+    setCorrespondenceOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem('proposals.correspondenceOpen', next ? '1' : '0'); } catch { /* stockage indisponible */ }
+      return next;
+    });
+  };
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
@@ -707,7 +720,7 @@ export default function Proposals() {
               className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90dvh]"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <div className="p-6 flex items-center justify-between" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+              <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                 <div>
                   <h2 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>
                     {editingProposal ? t('proposals_edit_title') : t('proposals_new_title')}
@@ -721,7 +734,7 @@ export default function Proposals() {
                 </button>
               </div>
               
-              <form id="proposal-form" onSubmit={handleSubmitProposal} className="flex-1 overflow-y-auto p-6 pb-64 space-y-8 no-scrollbar">
+              <form id="proposal-form" onSubmit={handleSubmitProposal} className="flex-1 min-h-0 overflow-y-auto p-6 pb-64 space-y-8 no-scrollbar">
                 {/* Section 1: General Info */}
                 <div className="space-y-4">
                   <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
@@ -1299,18 +1312,29 @@ export default function Proposals() {
               </form>
 
               {editingProposal && (
-                <div className="px-6 pb-6">
-                  <h4 className="text-sm font-bold uppercase tracking-widest pb-2 mb-4" style={{ color: 'var(--tblr-primary)', borderBottom: '1px solid var(--tblr-border)' }}>{t('correspondence_title')}</h4>
-                  <CorrespondenceTab localType="proposal" localId={editingProposal.id} contactEmail={editingProposal.email_client} />
+                <div className={`px-6 shrink-0 ${correspondenceOpen ? 'pb-6 max-h-[45dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <button
+                    type="button"
+                    onClick={toggleCorrespondence}
+                    aria-expanded={correspondenceOpen}
+                    className="w-full flex items-center justify-between py-3 text-sm font-bold uppercase tracking-widest"
+                    style={{ color: 'var(--tblr-text)' }}
+                  >
+                    {t('correspondence_title')}
+                    <IconChevronDown size={18} className={`transition-transform ${correspondenceOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--tblr-muted)' }} />
+                  </button>
+                  {correspondenceOpen && (
+                    <CorrespondenceTab localType="proposal" localId={editingProposal.id} contactEmail={editingProposal.email_client} />
+                  )}
                 </div>
               )}
 
               {submitError && (
-                <div className="px-6 py-3 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
+                <div className="px-6 py-3 shrink-0 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
                   <p className="text-xs text-red-600 dark:text-red-400 font-medium">⚠ {submitError}</p>
                 </div>
               )}
-              <div className="p-6 flex gap-3" style={{ borderTop: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+              <div className="p-4 sm:p-6 flex gap-3 shrink-0" style={{ borderTop: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}

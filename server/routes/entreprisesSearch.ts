@@ -17,6 +17,7 @@ import type { Express } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { fetchWithTimeout } from '../fetchWithTimeout';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { selectAllPages } from '../selectAllPages';
 import { qualificationsRgeParSiret, type RgeQualification } from '../rgeLookup';
 import { normaliserSiret } from '../../src/lib/qualifications';
 
@@ -138,7 +139,7 @@ export function registerEntrepriseSearchRoutes(app: Express, { supabaseAdmin, ge
           return new Map<string, string>((data || []).map((n: any) => [n.code, n.libelle]));
         })().catch(() => new Map<string, string>()),
         (async () => {
-          const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('id, siret');
+          const { data } = await selectAllPages(() => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('id, siret'));
           const parSiret = new Map<string, string>();
           for (const c of data || []) {
             const s = normaliserSiret((c as any).siret);
