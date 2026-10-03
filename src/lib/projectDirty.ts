@@ -1,9 +1,8 @@
-// Détecte si la fiche affaire porte des modifications non enregistrées.
+// Détecte si la fiche affaire porte des modifications pas encore enregistrées.
 //
-// La fiche (aperçu, fiche complète, champs HONOS) n'est écrite en base que par
-// le bouton Enregistrer de l'en-tête, alors que notes, avenants et jalons
-// s'enregistrent seuls : sans ce repère, une observation saisie dans l'aperçu
-// disparaissait au premier changement de page sans que rien ne le signale.
+// La fiche (aperçu, fiche complète, champs HONOS) s'enregistre seule
+// (useProjectAutosave) : ce repère dit s'il reste quelque chose à envoyer, et
+// la garde de sortie s'appuie dessus quand l'enregistrement a échoué.
 
 /**
  * Champs que la fiche reprend du contrat MOE lié (synchronisation
@@ -51,4 +50,24 @@ export function isProjectDirty(
 ): boolean {
   if (!saved || !current) return false;
   return projectSignature(saved, opts) !== projectSignature(current, opts);
+}
+
+/**
+ * Listes rattachées que la fiche affaire n'édite pas (les lots se gèrent dans
+ * l'onglet PRO, par leurs propres routes). Les renvoyer à chaque
+ * enregistrement automatique réécrirait ces tables pour rien : le serveur ne
+ * les touche que si le corps de la requête les porte.
+ */
+const LIST_FIELDS = ['lots_list', 'cotraitants_list', 'stakeholders_list', 'categories_list'] as const;
+
+/** Corps envoyé par l'enregistrement automatique de la fiche. */
+export function projectSavePayload<T extends Record<string, unknown>>(project: T): Partial<T> {
+  const payload: Record<string, unknown> = { ...project };
+  for (const field of LIST_FIELDS) delete payload[field];
+  return payload as Partial<T>;
+}
+
+/** Une fiche sans nom ne peut pas être enregistrée (le serveur la refuse). */
+export function canAutosaveProject(project: { name?: unknown } | null | undefined): boolean {
+  return !!project && typeof project.name === 'string' && project.name.trim().length > 0;
 }

@@ -3,7 +3,6 @@ import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
   IconArrowLeft, 
-  IconDeviceFloppy, 
   IconTrash, 
   IconPlus, 
   IconCircleCheck, 
@@ -66,6 +65,8 @@ import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from '../components/ui/Toast';
 import { useConfirmDialog } from '../components/ui/ConfirmDialog';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
+import { useProjectAutosave } from '../hooks/useProjectAutosave';
+import { AutosaveIndicator } from '../components/projectDetail/AutosaveIndicator';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { summarizeParcels } from '../lib/cadastreSelection';
@@ -311,7 +312,6 @@ export default function ProjectDetail() {
     amount: 0,
     description: ''
   });
-  const [isSaving, setIsSaving] = useState(false);
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [generatingInvoiceNoteId, setGeneratingInvoiceNoteId] = useState<string | null>(null);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
@@ -542,7 +542,15 @@ export default function ProjectDetail() {
     () => isProjectDirty(savedProject as any, project as any, { contractLinked: !!contratHonoraires }),
     [savedProject, project, contratHonoraires],
   );
-  const { confirmDiscard } = useUnsavedChangesGuard(isDirty, t('projectdetail_confirm_leave_unsaved'));
+  // La fiche s'enregistre seule (plus de bouton Enregistrer) : la garde de
+  // sortie ne se déclenche plus que si l'enregistrement a échoué ou ne peut
+  // pas se faire. Une modification encore en attente part au départ de
+  // l'écran (useProjectAutosave).
+  const { status: autosaveStatus, saveNow } = useProjectAutosave(project, isDirty, sent => setSavedProject(sent));
+  const { confirmDiscard } = useUnsavedChangesGuard(
+    isDirty && (autosaveStatus === 'error' || autosaveStatus === 'invalid'),
+    t('projectdetail_confirm_leave_unsaved'),
+  );
   const leaveToProjects = () => { if (confirmDiscard()) navigate('/projects'); };
 
   // Échap referme les fenêtres de la fiche, sauf pendant un enregistrement
@@ -1029,52 +1037,18 @@ export default function ProjectDetail() {
     }
   };
 
-  const handleSave = async () => {
-    if (!project || isSaving) return;
-    setIsSaving(true);
-    // L'instantané envoyé, pas `project` relu après coup : une frappe arrivée
-    // pendant l'enregistrement doit rester signalée comme non enregistrée.
-    const sent = project;
-    try {
-      const res = await fetch(`/api/projects/${sent.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sent)
-      });
-      if (res.ok) {
-        setSavedProject(sent);
-        showToast(t('projectdetail_project_saved_successfully'));
-      } else {
-        // Un échec passait jusqu'ici totalement inaperçu : ni alerte ni
-        // console.error, seule l'absence du message de succès habituel — un
-        // changement (le client du projet, par exemple) restait alors non
-        // enregistré sans que rien ne le signale, et la prochaine ouverture
-        // de la fiche le perdait silencieusement.
-        const err = await res.json().catch(() => null);
-        showToast(err?.error || t('projectdetail_project_save_failed'), 'error', { duration: 6000 });
-      }
-    } catch (err) {
-      console.error(err);
-      showToast(t('projectdetail_project_save_failed'), 'error', { duration: 6000 });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Ctrl+S (Cmd+S sur Mac) enregistre la fiche au lieu d'ouvrir la boîte
-  // « Enregistrer la page » du navigateur.
-  const handleSaveRef = useRef(handleSave);
-  useEffect(() => { handleSaveRef.current = handleSave; });
+  // Ctrl+S (Cmd+S sur Mac) envoie tout de suite l'enregistrement en attente,
+  // au lieu d'ouvrir la boîte « Enregistrer la page » du navigateur.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        handleSaveRef.current();
+        void saveNow();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [saveNow]);
 
   const handleDelete = async () => {
     if (!project) return;
@@ -1811,49 +1785,7 @@ export default function ProjectDetail() {
               <IconTrash size={18} />
             </button>
           )}
-          {isDirty && (
-            <span
-              role="status"
-              className="hidden md:inline-flex items-center gap-1.5 text-[0.6875rem] font-medium whitespace-nowrap"
-              style={{ color: 'var(--tblr-text)' }}
-            >
-              <span aria-hidden className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'var(--tblr-warning)' }} />
-              {t('projectdetail_unsaved_changes')}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={leaveToProjects}
-            className="h-8 px-3 rounded-lg text-[0.8125rem] font-medium border transition-colors hover:bg-[var(--tblr-surface-2)]"
-            style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
-          >
-            Annuler
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isSaving}
-            className="relative h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
-            style={{ background: 'var(--tblr-primary)' }}
-            title={t('projectdetail_save_shortcut_hint')}
-            aria-label={isDirty ? `${t('commit_changes')} (${t('projectdetail_unsaved_changes')})` : t('commit_changes')}
-          >
-            {isSaving ? (
-              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <IconDeviceFloppy size={16} />
-            )}
-            <span className="hidden sm:inline">{t('commit_changes')}</span>
-            {isDirty && (
-              // Sur téléphone, le libellé « Modifications non enregistrées »
-              // n'a pas la place : une pastille sur le bouton le remplace.
-              <span
-                aria-hidden
-                className="md:hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2"
-                style={{ background: 'var(--tblr-warning)', borderColor: 'var(--tblr-surface)' }}
-              />
-            )}
-          </button>
+          <AutosaveIndicator status={autosaveStatus} onRetry={() => { void saveNow(); }} />
         </div>
       </div>
 

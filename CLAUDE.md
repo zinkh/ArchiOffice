@@ -420,20 +420,35 @@ attendre qu'ils soient chargés recrée le bug.
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
 
-### Fiche affaire : modifications non enregistrées et facture d'une note
+### Fiche affaire : enregistrement automatique et facture d'une note
 
-La fiche (aperçu, fiche complète, champs HONOS) ne s'écrit en base qu'au bouton
-Enregistrer de l'en-tête, alors que notes, avenants et jalons s'enregistrent
-seuls. `isProjectDirty()` (`src/lib/projectDirty.ts`, testé) compare la fiche
-affichée à la dernière version chargée ou enregistrée (`savedProject`) :
-« Modifications non enregistrées » s'affiche près du bouton (pastille sur
-téléphone), Ctrl+S enregistre, et `useUnsavedChangesGuard`
-(`src/hooks/useUnsavedChangesGuard.ts`) prévient avant de quitter
-(`beforeunload`, liens internes interceptés en phase de capture, boutons Retour
-et Annuler). Sous `BrowserRouter`, `useBlocker` n'existe pas : un `navigate()`
-programmatique doit passer par `confirmDiscard()`. Les montants repris du
-contrat lié (`remuneration`, `construction_cost`) ne comptent pas comme une
-saisie, sinon la fiche paraîtrait modifiée dès l'ouverture.
+**Plus de bouton Enregistrer.** La fiche (aperçu, fiche complète, champs
+HONOS) s'enregistre seule, comme les notes, avenants, jalons et la
+consultation ACT : `useProjectAutosave` (`src/hooks/useProjectAutosave.ts`)
+envoie la fiche 1,2 s après la dernière frappe, chaîne les écritures (c'est la
+fiche du moment de l'envoi qui part, une frappe pendant un envoi en déclenche
+un autre), réessaie 5 s après un échec et envoie la fiche en attente au départ
+de l'écran ou à la fermeture de l'onglet (`pagehide`, `keepalive` sous 64 Ko).
+`isProjectDirty()` (`src/lib/projectDirty.ts`, testé) compare la fiche
+affichée à la dernière version chargée ou enregistrée (`savedProject`) ; rien
+ne part avant la lecture de la fiche. L'en-tête montre « Enregistrement… » puis
+« Enregistré », ou « Échec de l'enregistrement » avec « Réessayer »
+(`AutosaveIndicator.tsx`). Une fiche dont le nom a été vidé n'est pas envoyée
+(`canAutosaveProject`). Ctrl+S envoie tout de suite. `useUnsavedChangesGuard`
+ne prévient plus avant de quitter qu'en cas d'échec ou de nom manquant. Sous
+`BrowserRouter`, `useBlocker` n'existe pas : un `navigate()` programmatique
+doit passer par `confirmDiscard()`. Les montants repris du contrat lié
+(`remuneration`, `construction_cost`) ne comptent pas comme une saisie.
+
+**L'enregistrement n'envoie jamais les listes rattachées**
+(`projectSavePayload` retire `lots_list`, `cotraitants_list`,
+`stakeholders_list`, `categories_list`), et `PUT /api/projects/:id` ne
+remplace une liste que si le corps la porte (`replaceList`,
+`server/routes/projects.ts`, `tests/projectUpdateLists.test.ts`). Une ligne
+déjà existante y garde son identifiant et ses autres colonnes. Avant ce
+correctif, chaque enregistrement de la fiche recréait les lots avec un nouvel
+identifiant et sans leurs montants (`base_amount`...), ce qui détachait les
+visas (`lot_id`), les marchés et le DPGF (`projectLotId`).
 
 Générer la facture brouillon d'une note se confirme montant HT et TTC sous les
 yeux, et se conclut par un toast « Ouvrir la facture » (`/invoices?open=<id>`)

@@ -294,22 +294,32 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
-      // Update related lists (delete + reinsert)
-      await supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (cotraitants_list?.length) {
-        await supabaseAdmin.from('project_cotraitants').insert(cotraitants_list.map((c: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, specialty: c.specialty, contact_id: c.contact_id || null })));
-      }
-      await supabaseAdmin.from('project_lots').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (lots_list?.length) {
-        await supabaseAdmin.from('project_lots').insert(lots_list.map((l: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null })));
-      }
-      await supabaseAdmin.from('project_stakeholders').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (stakeholders_list?.length) {
-        await supabaseAdmin.from('project_stakeholders').insert(stakeholders_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, name: s.name, role: s.role, contact_id: s.contact_id || null })));
-      }
-      await supabaseAdmin.from('project_categories_junction').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (categories_list?.length) {
-        await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
+      // Listes rattachées : remplacées SEULEMENT si le corps de la requête les
+      // porte. Une mise à jour qui ne les envoie pas (la fiche affaire, qui
+      // s'enregistre seule et n'édite pas ces listes) les laissait jusqu'ici
+      // vidées, puis recréées. Et une ligne qui existait déjà garde son
+      // identifiant et ses autres colonnes : les lots étaient réinsérés avec un
+      // nouvel id et sans leurs montants (base_amount...), ce qui détachait les
+      // visas, les marchés et le DPGF (projectLotId) qui les référencent.
+      const replaceList = async (table: string, items: any[] | undefined, pick: (item: any) => Record<string, unknown>) => {
+        if (items === undefined) return;
+        const { data: existingRows } = await supabaseAdmin.from(table).select('*').eq('project_id', id).eq('tenant_id', tenantId);
+        const existingById = new Map<string, any>((existingRows || []).map((r: any) => [r.id, r]));
+        await supabaseAdmin.from(table).delete().eq('project_id', id).eq('tenant_id', tenantId);
+        if (!items?.length) return;
+        await supabaseAdmin.from(table).insert(items.map((item: any) => {
+          const previous = item?.id ? existingById.get(item.id) : undefined;
+          return { ...(previous || {}), ...pick(item), id: previous ? previous.id : crypto.randomUUID(), tenant_id: tenantId, project_id: id };
+        }));
+      };
+      await replaceList('project_cotraitants', cotraitants_list, (c: any) => ({ specialty: c.specialty, contact_id: c.contact_id || null }));
+      await replaceList('project_lots', lots_list, (l: any) => ({ lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null }));
+      await replaceList('project_stakeholders', stakeholders_list, (s: any) => ({ name: s.name, role: s.role, contact_id: s.contact_id || null }));
+      if (categories_list !== undefined) {
+        await supabaseAdmin.from('project_categories_junction').delete().eq('project_id', id).eq('tenant_id', tenantId);
+        if (categories_list?.length) {
+          await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
+        }
       }
       res.json({ success: true });
     } catch (error: any) {
