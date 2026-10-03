@@ -17,7 +17,7 @@ export function RoleSelect({ member, onChange }: { member: UserProfile; onChange
         onChange={(e) => onChange(member.id, e.target.value as SystemRole)}
         className={cn(FIELD, 'pl-8', FOCUS_FIELD)}
       >
-        {ROLES.slice().reverse().map((r) => (
+        {ROLES.map((r) => (
           <option key={r} value={r}>{t(`team_role_short_${r}`)}</option>
         ))}
       </select>

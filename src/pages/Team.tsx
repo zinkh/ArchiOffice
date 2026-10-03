@@ -10,13 +10,12 @@ import { useUser } from '../UserContext';
 import TeamHeader from '../components/team/TeamHeader';
 import TeamToolbar, { type RoleFilter, type TeamSort, type TeamView } from '../components/team/TeamToolbar';
 import JoinRequestQueue from '../components/team/JoinRequestQueue';
-import TeamRegistry from '../components/team/TeamRegistry';
-import TeamCards from '../components/team/TeamCards';
+import TeamMembers from '../components/team/TeamMembers';
 import TeamOrgChart from '../components/team/TeamOrgChart';
 import TeamNotice, { type TeamNoticeData } from '../components/team/TeamNotice';
 import AddMemberModal from '../components/team/AddMemberModal';
 import { EmptyTeam, LoadError, NoResults, TeamSkeleton } from '../components/team/TeamStates';
-import { ROLE_RANK, useMediaQuery } from '../components/team/teamShared';
+import { ROLE_RANK } from '../components/team/teamShared';
 
 function sortMembers(list: UserProfile[], sort: TeamSort): UserProfile[] {
   const byName = (a: UserProfile, b: UserProfile) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
@@ -47,12 +46,9 @@ export default function Team() {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [sort, setSort] = useState<TeamSort>('name');
   const [notice, setNotice] = useState<TeamNoticeData | null>(null);
-  const [view, setView] = useState<TeamView>('registry');
+  const [view, setView] = useState<TeamView>('list');
 
   const isAdmin = currentUser?.system_role === 'admin';
-  const isDesktop = useMediaQuery('(min-width: 1024px)');
-  // Le registre dense exige de la largeur : sous un téléphone il retombe sur les fiches.
-  const activeView: TeamView = view === 'registry' && !isDesktop ? 'cards' : view;
 
   const loadTeam = useCallback(() => {
     setLoading(true);
@@ -74,7 +70,7 @@ export default function Team() {
   useEffect(() => {
     if (!highlightId || team.length === 0) return;
     memberRefs.current[highlightId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [highlightId, team, activeView]);
+  }, [highlightId, team, view]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -180,12 +176,12 @@ export default function Team() {
   if (loading) body = <TeamSkeleton />;
   else if (loadFailed) body = <LoadError onRetry={loadTeam} />;
   else if (team.length === 0) body = <EmptyTeam isAdmin={isAdmin} onAdd={() => setIsModalOpen(true)} />;
-  else if (activeView === 'org') body = <TeamOrgChart team={team} highlightId={highlightId} memberRefs={memberRefs} />;
+  else if (view === 'org') body = <TeamOrgChart team={team} highlightId={highlightId} memberRefs={memberRefs} />;
   else if (visible.length === 0) body = <NoResults onReset={resetFilters} />;
-  else body = activeView === 'registry' ? <TeamRegistry {...viewProps} /> : <TeamCards {...viewProps} />;
+  else body = <TeamMembers {...viewProps} />;
 
   return (
-    <div className={cn('mx-auto max-w-[88rem] space-y-8', notice ? 'pb-28' : 'pb-10')}>
+    <div className={cn('mx-auto max-w-[88rem] space-y-5', notice ? 'pb-28' : 'pb-10')}>
       <TeamHeader
         headcount={team.length}
         admins={team.filter((m) => m.system_role === 'admin').length}
@@ -205,9 +201,8 @@ export default function Team() {
           onRoleFilter={setRoleFilter}
           sort={sort}
           onSort={setSort}
-          view={activeView}
+          view={view}
           onView={setView}
-          registryAvailable={isDesktop}
         />
       )}
 

@@ -93,7 +93,7 @@ export default function TeamOrgChart({ team, highlightId, memberRefs }: Pick<Mem
         ))}
       </div>
       {alone.length > 0 && (
-        <div className="mt-10 border-t border-dashed border-[var(--tblr-border)] pt-4">
+        <div className="mt-10 border-t border-[var(--tblr-border)] pt-4">
           <p className={cn(MONO_LABEL, 'mb-3')}>{t('team_org_unassigned')}</p>
           <ul className="flex flex-wrap gap-x-4">
             {alone.map((b) => (
