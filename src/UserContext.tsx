@@ -7,6 +7,7 @@ import { rawFetch } from './lib/authInterceptor';
 import { getActiveTenantId, setActiveTenantId } from './lib/activeTenant';
 import { apiFetch } from './lib/api';
 import { clearOfflineCache } from './lib/offline';
+import { clearOfflineAuthSnapshot, getValidOfflineAuthSnapshot, requestPersistentOfflineStorage, saveOfflineAuthSnapshot } from './lib/offlineAuth';
 import type { TenantMembership } from './types';
 
 // Structurally compatible with both a real Supabase Session/User and our
@@ -70,6 +71,38 @@ interface UserContextType {
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
+
+const AUTH_BOOTSTRAP_NETWORK_TIMEOUT_MS = 3_000;
+
+async function withBootstrapTimeout<T>(promise: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('auth-bootstrap-timeout')), AUTH_BOOTSTRAP_NETWORK_TIMEOUT_MS);
+    promise.then(
+      value => { clearTimeout(timer); resolve(value); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+async function isBackendReachable(): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AUTH_BOOTSTRAP_NETWORK_TIMEOUT_MS);
+  try {
+    // rawFetch deliberately bypasses authInterceptor: /api/health is public,
+    // and a connectivity probe must never wait on the Supabase auth lock.
+    const response = await rawFetch('/api/health', {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** L'en-tête de cabinet, pour les appels qui n'empruntent pas l'intercepteur. */
 function tenantHeader(): Record<string, string> {
@@ -217,12 +250,58 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     // profile we already have.
     let loadedUserId: string | null = null;
 
+    const restoreOfflineSnapshot = (expectedUserId?: string | null): boolean => {
+      const snapshot = getValidOfflineAuthSnapshot(expectedUserId);
+      if (!snapshot) return false;
+      setCurrentUser({ ...snapshot.profile, tenants: snapshot.tenants });
+      applyProfileTenants({ ...snapshot.profile, tenants: snapshot.tenants });
+      setTenantPlan(snapshot.billing.plan);
+      setTrialEndsAt(snapshot.billing.trialEndsAt);
+      setIsTrialExpired(snapshot.billing.isTrialExpired);
+      setMfaRequired(false);
+      return true;
+    };
+
+    // iPadOS can relaunch an installed PWA with no network at all. In that
+    // situation Supabase cannot refresh an expired access token, so waiting
+    // for INITIAL_SESSION/MFA would wrongly send an already-authorized user to
+    // /login. Restore the last fully-validated identity immediately; cloud
+    // validation takes over again on the next online event.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false && restoreOfflineSnapshot()) {
+      setIsLoading(false);
+    }
+
     const applySession = async (session: MinimalSession | null) => {
       if (cancelled) return;
+      const previousUserId = sessionRef.current?.user.id ?? null;
       sessionRef.current = session;
       clearTimeout(bootstrapTimer);
+
       if (!session) {
         loadedUserId = null;
+        const reachable = await isBackendReachable();
+        if (cancelled) return;
+        if (!reachable && restoreOfflineSnapshot(previousUserId)) {
+          setIsLoading(false);
+          return;
+        }
+        if (previousUserId) clearOfflineAuthSnapshot(previousUserId);
+        setCurrentUser(null);
+        applyProfileTenants(null);
+        setMfaRequired(false);
+        setIsLoading(false);
+        return;
+      }
+
+      // navigator.onLine is only a hint. Probe our own API before any network
+      // auth call so a captive/isolated Wi-Fi on iPad does not stall startup.
+      const reachable = await isBackendReachable();
+      if (cancelled) return;
+      if (!reachable) {
+        if (restoreOfflineSnapshot(session.user.id)) {
+          setIsLoading(false);
+          return;
+        }
         setCurrentUser(null);
         applyProfileTenants(null);
         setMfaRequired(false);
@@ -231,17 +310,34 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Gate on the second factor before treating this session as "logged
-      // in" — see mfaRequired's doc comment above. Passing the access_token
-      // explicitly (already in hand from `session`) makes this decode the
-      // JWT and call getUser(jwt) directly instead of going through
-      // getSession()'s own lock acquisition — the same reason loadFullProfile
-      // above uses rawFetch with this token instead of an ambient session
-      // lookup: see this effect's SIGNED_IN comment on why anything that
-      // touches the Navigator LockManager lock from in here is dangerous.
-      const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel(session.access_token);
+      // in". This call still needs Supabase, so it has a short bootstrap
+      // timeout and falls back to the previously validated offline identity
+      // instead of trapping the PWA on the login screen when connectivity
+      // disappears between the health probe and the auth request.
+      let aal: any = null;
+      try {
+        const result = await withBootstrapTimeout(
+          supabase.auth.mfa.getAuthenticatorAssuranceLevel(session.access_token),
+        );
+        aal = result.data;
+      } catch {
+        if (restoreOfflineSnapshot(session.user.id)) {
+          setIsLoading(false);
+          return;
+        }
+        setCurrentUser(null);
+        applyProfileTenants(null);
+        setMfaRequired(false);
+        setIsLoading(false);
+        return;
+      }
       if (cancelled) return;
+
       if (aal && aal.nextLevel === 'aal2' && aal.nextLevel !== aal.currentLevel) {
-        loadedUserId = null; // not "loaded" until the challenge clears — see below
+        // Never let a previous offline grant bypass a newly-required MFA
+        // challenge. A fresh snapshot will be issued after the challenge.
+        clearOfflineAuthSnapshot(session.user.id);
+        loadedUserId = null;
         setCurrentUser(null);
         setMfaRequired(true);
         setIsLoading(false);
@@ -253,14 +349,39 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         setIsLoading(false);
         return;
       }
+
       loadedUserId = session.user.id;
       const [user, billing] = await Promise.all([loadFullProfile(session), loadBillingStatus(session)]);
       if (cancelled) return;
+
+      // /api/me marks tenantId as defined (string or null). If it could not be
+      // reached after the auth check, keep the richer last-known local profile
+      // instead of replacing it with the bare JWT-derived fallback.
+      if (user.tenantId === undefined && restoreOfflineSnapshot(session.user.id)) {
+        loadedUserId = null;
+        setIsLoading(false);
+        return;
+      }
+
       setCurrentUser(user);
       applyProfileTenants(user);
       setTenantPlan(billing.plan);
       setTrialEndsAt(billing.trial_ends_at);
       setIsTrialExpired(billing.is_expired);
+
+      if (user.tenantId !== undefined) {
+        saveOfflineAuthSnapshot({
+          user,
+          aal: aal?.currentLevel === 'aal2' ? 'aal2' : 'aal1',
+          billing: {
+            plan: billing.plan,
+            trialEndsAt: billing.trial_ends_at,
+            isTrialExpired: billing.is_expired,
+          },
+        });
+        void requestPersistentOfflineStorage();
+      }
+
       setIsLoading(false);
     };
 
@@ -303,12 +424,31 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     // timeout says nothing about whether the session is still valid, and the
     // listener above still applies the session if it arrives late.
     bootstrapTimer = setTimeout(() => {
+      // If Supabase itself is wedged during bootstrap, prefer a still-valid
+      // local grant to a false logout. This does not extend the grant: expiry
+      // is checked inside getValidOfflineAuthSnapshot().
+      restoreOfflineSnapshot();
       setIsLoading(false);
     }, AUTH_TIMEOUT_MS);
+
+    const onOnline = () => {
+      // Re-establish cloud authority as soon as connectivity returns. Do not
+      // await inside an auth listener; this handler runs independently.
+      if (sessionRef.current) {
+        loadedUserId = null;
+        void applySession(sessionRef.current);
+        return;
+      }
+      void supabase.auth.getSession()
+        .then(({ data }) => applySession(data.session as MinimalSession | null))
+        .catch(() => {});
+    };
+    window.addEventListener('online', onOnline);
 
     return () => {
       cancelled = true;
       clearTimeout(bootstrapTimer);
+      window.removeEventListener('online', onOnline);
       subscription.unsubscribe();
     };
   }, []);
@@ -325,7 +465,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       setCurrentUser(null);
       return;
     }
+    clearOfflineAuthSnapshot(sessionRef.current?.user.id ?? currentUser?.id ?? null);
     await supabase.auth.signOut();
+    sessionRef.current = null;
     setCurrentUser(null);
   };
 
