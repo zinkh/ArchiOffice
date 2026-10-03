@@ -4,6 +4,14 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 // site below unchanged.
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+// MapLibre 6 cherche son worker à côté de son propre module
+// (`./maplibre-gl-worker.mjs`), fichier que Vite n'émet jamais dans le build :
+// en production la carte échouait avec « Worker failed to load » puis
+// « WebGL context was lost ». `?worker&url` fait compiler le worker par Vite,
+// avec sa dépendance `maplibre-gl-shared.mjs`, et rend son adresse finale.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 import { IconX } from '@tabler/icons-react';
 import { toggleParcel, summarizeParcels, formatSurface } from '../lib/cadastreSelection';
 
