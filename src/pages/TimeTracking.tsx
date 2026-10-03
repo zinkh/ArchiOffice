@@ -34,7 +34,8 @@ function formatHours(h: number): string {
 
 const DAY_LABELS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
-export default function TimeTracking() {
+/** `embedded` : affichée dans l'onglet Suivi du temps de la page Équipe, qui porte déjà le titre. */
+export default function TimeTracking({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const { settings } = useSettings();
@@ -156,8 +157,8 @@ export default function TimeTracking() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('time_tracking_title')}</h2>
+      <div className={`flex items-center flex-wrap gap-3 ${embedded ? 'justify-end' : 'justify-between'}`}>
+        {!embedded && <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('time_tracking_title')}</h2>}
         <div className="flex items-center gap-3">
           <select className="p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700" value={clockProjectId} onChange={e => setClockProjectId(e.target.value)} disabled={!!current}>
             <option value="">{t('time_tracking_no_project')}</option>

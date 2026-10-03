@@ -58,7 +58,8 @@ function businessDaysBetween(startStr: string, endStr: string): number {
   return count;
 }
 
-export default function Leave() {
+/** `embedded` : affichée dans l'onglet Congés de la page Équipe, qui porte déjà le titre. */
+export default function Leave({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const { settings } = useSettings();
@@ -140,7 +141,7 @@ export default function Leave() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('leave_title')}</h2>
+      {!embedded && <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('leave_title')}</h2>}
 
       <div className="flex gap-2 flex-wrap">
         <button onClick={() => setTab('mine')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'mine' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('leave_tab_mine')}</button>

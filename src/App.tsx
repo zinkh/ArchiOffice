@@ -84,8 +84,6 @@ const MafDeclaration = lazy(() => import('./pages/MafDeclaration'));
 const SuperPDPPortal = lazy(() => import('./pages/SuperPDPPortal'));
 const ChorusProPortal = lazy(() => import('./pages/ChorusProPortal'));
 const DocumentTemplates = lazy(() => import('./pages/DocumentTemplates'));
-const TimeTracking = lazy(() => import('./pages/TimeTracking'));
-const Leave = lazy(() => import('./pages/Leave'));
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
 import { AgentChatProvider, Agents, AgentConfig, AgentAlerts, AgentLearning, AgentChatPage } from '@zinkh/archioffice-agents/client';
 
@@ -842,8 +840,8 @@ export default function App() {
               <Route path="/ordres-de-service" element={<OrdresDeService />} />
               <Route path="/contrats" element={<Contrats />} />
               <Route path="/document_templates" element={<DocumentTemplates />} />
-              <Route path="/temps" element={<TimeTracking />} />
-              <Route path="/conges" element={<Leave />} />
+              <Route path="/temps" element={<Navigate to="/team?tab=temps" replace />} />
+              <Route path="/conges" element={<Navigate to="/team?tab=conges" replace />} />
               <Route path="/agents" element={<Agents />} />
               <Route path="/agents/:id/chat" element={<AgentChatPage />} />
               <Route path="/agents/:id/edit" element={<AgentConfig />} />
