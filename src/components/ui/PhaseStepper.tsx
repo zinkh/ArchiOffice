@@ -18,16 +18,20 @@ interface PhaseStepperProps {
   /** 'compact' fits a header toolbar; 'default' suits a standalone card. */
   size?: 'default' | 'compact';
   className?: string;
+  /** Nom du groupe de phases, annoncé par un lecteur d'écran. */
+  ariaLabel?: string;
+  /** Infobulle de chaque phase : dit ce que fait l'appui (le stepper ne change pas la phase réelle). */
+  stepTitle?: (step: PhaseStepperItem) => string;
 }
 
-export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'default', className }: PhaseStepperProps) {
+export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'default', className, ariaLabel, stepTitle }: PhaseStepperProps) {
   const currentIndex = steps.findIndex(s => s.id === currentId);
   const highlightId = activeId ?? currentId;
   const compact = size === 'compact';
   const nodeSize = compact ? 'w-7 h-7' : 'w-9 h-9';
 
   return (
-    <div className={cn('flex items-start overflow-x-auto pb-1', className)}>
+    <div role="group" aria-label={ariaLabel} className={cn('flex items-start overflow-x-auto pb-1', className)}>
       {steps.map((step, i) => {
         const status: 'done' | 'current' | 'upcoming' =
           currentIndex === -1 ? 'upcoming' : i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'upcoming';
@@ -45,6 +49,9 @@ export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'def
               type="button"
               onClick={() => onSelect?.(step.id)}
               disabled={!onSelect}
+              title={stepTitle?.(step)}
+              aria-current={status === 'current' ? 'step' : undefined}
+              aria-pressed={onSelect ? isActive : undefined}
               className={cn(
                 'flex flex-col items-center rounded-xl shrink-0 transition-colors',
                 compact ? 'gap-1 px-1.5 py-1.5' : 'gap-1.5 px-2.5 py-2',

@@ -420,6 +420,60 @@ attendre qu'ils soient chargés recrée le bug.
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
 
+### Fiche affaire : modifications non enregistrées et facture d'une note
+
+La fiche (aperçu, fiche complète, champs HONOS) ne s'écrit en base qu'au bouton
+Enregistrer de l'en-tête, alors que notes, avenants et jalons s'enregistrent
+seuls. `isProjectDirty()` (`src/lib/projectDirty.ts`, testé) compare la fiche
+affichée à la dernière version chargée ou enregistrée (`savedProject`) :
+« Modifications non enregistrées » s'affiche près du bouton (pastille sur
+téléphone), Ctrl+S enregistre, et `useUnsavedChangesGuard`
+(`src/hooks/useUnsavedChangesGuard.ts`) prévient avant de quitter
+(`beforeunload`, liens internes interceptés en phase de capture, boutons Retour
+et Annuler). Sous `BrowserRouter`, `useBlocker` n'existe pas : un `navigate()`
+programmatique doit passer par `confirmDiscard()`. Les montants repris du
+contrat lié (`remuneration`, `construction_cost`) ne comptent pas comme une
+saisie, sinon la fiche paraîtrait modifiée dès l'ouverture.
+
+Générer la facture brouillon d'une note se confirme montant HT et TTC sous les
+yeux, et se conclut par un toast « Ouvrir la facture » (`/invoices?open=<id>`)
+; « Facture créée » est un lien. `saveNote` garde le formulaire ouvert tant que
+le serveur n'a pas confirmé. Les `alert()` de la fiche sont des toasts
+(`useToastWithUndo`).
+
+### Fiche affaire : onglets regroupés et onglet dans l'adresse
+
+Les dix onglets de la fiche (INFOS, TACHES, HONOS, PRO, ACT, VISA, DET, RDT,
+AOR, CORRESPONDANCE) gardent leurs identifiants et leur contenu, mais la barre
+(`ProjectTabBar.tsx`, logique pure dans `src/lib/projectTabs.ts`, testée) les
+présente en sept familles au plus : Infos, Tâches, Honoraires, Études (PRO),
+Consultation (ACT), Chantier, Correspondance. Les quatre missions de chantier
+passent en second niveau sous « Chantier », sigle MOP et nom complet ; revenir
+sur une famille rouvre la mission qu'on y consultait. Une famille sans onglet
+visible disparaît (hors mission chantier, cinq entrées). `PillTabs` porte
+désormais les rôles ARIA d'onglets et la navigation aux flèches.
+
+L'onglet ouvert vit dans `?tab=` (sauf INFOS, le défaut), écrit en
+`replace` pour ne pas empiler l'historique : il survit au rechargement et au
+retour depuis un autre écran. L'état initial est lu dans l'adresse dès le
+premier rendu (sinon l'écriture de l'onglet par défaut effacerait le
+paramètre avant sa lecture) ; un identifiant inconnu retombe sur INFOS. Les
+liens existants (`?tab=TACHES`, liens d'agent `?tab=&open=`) restent valides.
+Le stepper de phases de l'en-tête est nommé (« Phases de mission ») et chaque
+pastille dit ce qu'elle fait : afficher la note de phase, jamais changer la
+phase réelle.
+
+Finitions de la même fiche, à conserver : les fenêtres (VISA, accusé de
+réception d'OS, suppression de l'affaire) partagent le même voile
+`bg-black/50`, portent `role="dialog"` et se ferment à Échap
+(`useEscapeKey`, sauf pendant un enregistrement ou une suppression) ; les
+actions révélées au survol (`opacity-0 group-hover:opacity-100`) restent
+visibles au doigt (`pointer-coarse:`) et au clavier (`focus-within:`) ; les
+lignes de groupe VISA et DOE se déplient par un vrai bouton (`aria-expanded`) ;
+les jalons de l'aperçu sont des cases (`role="checkbox"`). Les couleurs de
+l'aperçu et du badge MAF passent par les jetons `--tblr-*`, jamais par des hex
+figés qui ignorent le thème sombre.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

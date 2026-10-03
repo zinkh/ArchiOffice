@@ -36,17 +36,12 @@ import {
   IconCurrencyEuro,
   IconReceipt,
   IconEdit,
-  IconInfoCircle,
-  IconChecklist,
-  IconReceipt2,
-  IconFileDescription,
   IconUsersGroup,
   IconRubberStamp,
   IconTools,
   IconReportMoney,
   IconClipboardCheck,
-  IconMail,
-} from '@tabler/icons-react';
+  } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
@@ -62,6 +57,13 @@ import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, Aven
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
+import { isProjectDirty } from '../lib/projectDirty';
+import { CHANTIER_ONLY_TABS, DEFAULT_PROJECT_TAB, isProjectTab } from '../lib/projectTabs';
+import { ProjectTabBar } from '../components/projectDetail/ProjectTabBar';
+import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
+import { useEscapeKey } from '../hooks/useEscapeKey';
+import { useToastWithUndo } from '../hooks/useToastWithUndo';
+import { Toast } from '../components/ui/Toast';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { summarizeParcels } from '../lib/cadastreSelection';
@@ -85,7 +87,6 @@ import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
 import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
-import { PillTabs, PillTabItem } from '../components/ui/PillTabs';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
@@ -167,6 +168,11 @@ export default function ProjectDetail() {
   const { t } = useTranslation();
   
   const [project, setProject] = useState<Project | null>(null);
+  // La fiche telle qu'elle est en base (dernier chargement ou dernier
+  // enregistrement réussi) : c'est elle qui dit s'il reste des saisies à
+  // enregistrer.
+  const [savedProject, setSavedProject] = useState<Project | null>(null);
+  const { toast, showToast } = useToastWithUndo();
   const { settings } = useSettings();
   const mafCost = useMafCost({ project, mafEnabled: !!(settings as any)?.maf_enabled, tauxContratPermil: parseFloat((settings as any)?.maf_taux_contrat_permil ?? 0) });
 
@@ -266,6 +272,8 @@ export default function ProjectDetail() {
     description: ''
   });
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingNote, setIsSavingNote] = useState(false);
+  const [generatingInvoiceNoteId, setGeneratingInvoiceNoteId] = useState<string | null>(null);
   const [isAddingMilestone, setIsAddingMilestone] = useState(false);
   const [isAddingPermit, setIsAddingPermit] = useState(false);
   const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
@@ -274,7 +282,13 @@ export default function ProjectDetail() {
   const [newRfi, setNewRfi] = useState({ question: '', asked_by: '', due_date: '' });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
   const [newMilestoneDate, setNewMilestoneDate] = useState('');
-  const [activeTab, setActiveTab] = useState('INFOS');
+  // L'onglet ouvert vit dans l'adresse (?tab=) : il survit au rechargement et
+  // au retour arrière depuis un autre écran, et se partage par lien.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const tab = searchParams.get('tab');
+    return isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
+  });
   const [showFullEditor, setShowFullEditor] = useState(false);
   // Which phase's notes are shown in the overview's "Note de phase" column.
   // Distinct from the project's actual current phase (phaseHistory) — the
@@ -347,7 +361,7 @@ export default function ProjectDetail() {
   const [editDoeComments, setEditDoeComments] = useState('');
 
   useEffect(() => {
-    if (project && !project.is_chantier && ['ACT', 'DET', 'RDT', 'VISA', 'AOR'].includes(activeTab)) {
+    if (project && !project.is_chantier && (CHANTIER_ONLY_TABS as readonly string[]).includes(activeTab)) {
       setActiveTab('INFOS');
     }
   }, [project?.is_chantier, activeTab]);
@@ -358,17 +372,30 @@ export default function ProjectDetail() {
   // sont calculés au rendu (pas dans un effet) pour rester disponibles dès
   // le premier rendu du prop `initialOpenReserveId` de ReserveTracker plus
   // bas, qui gère lui-même 'reserves'.
-  const [searchParams, setSearchParams] = useSearchParams();
   const openParam = searchParams.get('open') || '';
   const [openResourceKey, openRecordId] = openParam.split(':');
 
+  // Adresse -> onglet : un lien (agent, aperçu « Prochaines tâches ») qui
+  // change `?tab=` sans quitter la fiche.
   useEffect(() => {
     const tab = searchParams.get('tab');
-    if (!tab || !project) return;
-    setActiveTab(tab);
-    setSearchParams(prev => { prev.delete('tab'); return prev; }, { replace: true });
+    const wanted = isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
+    setActiveTab(prev => (prev === wanted ? prev : wanted));
+  }, [searchParams]);
+
+  // Onglet -> adresse, en remplaçant l'entrée d'historique : changer d'onglet
+  // ne doit pas obliger à remonter dix fois le bouton Retour pour quitter la
+  // fiche. L'onglet par défaut n'apparaît pas dans l'adresse.
+  useEffect(() => {
+    const wanted = activeTab === DEFAULT_PROJECT_TAB ? null : activeTab;
+    if (searchParams.get('tab') === wanted) return;
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      if (wanted) next.set('tab', wanted); else next.delete('tab');
+      return next;
+    }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, searchParams]);
+  }, [activeTab]);
 
   useEffect(() => {
     if (!openParam) return;
@@ -467,6 +494,22 @@ export default function ProjectDetail() {
     () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
     [linkedContratsMoe],
   );
+
+  // Seule la fiche (aperçu, fiche complète, champs HONOS) attend le bouton
+  // Enregistrer : notes, avenants, jalons et documents s'écrivent seuls. Les
+  // montants repris du contrat lié ne comptent pas comme une saisie.
+  const isDirty = useMemo(
+    () => isProjectDirty(savedProject as any, project as any, { contractLinked: !!contratHonoraires }),
+    [savedProject, project, contratHonoraires],
+  );
+  const { confirmDiscard } = useUnsavedChangesGuard(isDirty, t('projectdetail_confirm_leave_unsaved'));
+  const leaveToProjects = () => { if (confirmDiscard()) navigate('/projects'); };
+
+  // Échap referme les fenêtres de la fiche, sauf pendant un enregistrement
+  // ou une suppression en cours.
+  useEscapeKey(isVisaModalOpen, () => setIsVisaModalOpen(false));
+  useEscapeKey(!!arOsTarget, () => { if (!arSaving) setArOsTarget(null); });
+  useEscapeKey(showDeleteProjectConfirm, () => { if (!isDeletingProject) setShowDeleteProjectConfirm(false); });
 
   // Onglets de phase chantier gouvernés par une mission du contrat MOE : le
   // contrat fait foi (même principe que HONOS ci-dessus), donc un onglet
@@ -641,20 +684,22 @@ export default function ProjectDetail() {
         setViewedPhase(null); // resync the overview's note column to the new actual phase
       } else {
         const err = await res.json().catch(() => null);
-        alert(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }));
+        showToast(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error('Failed to update project phase:', err);
-      alert(t('projectdetail_phase_change_failed'));
+      showToast(t('projectdetail_phase_change_failed'), 'error', { duration: 6000 });
     }
   };
 
   const applyFullProjectData = (data: any) => {
-    setProject({
+    const loaded = {
       ...data.project,
       is_complete_mission: isFlagTrue(data.project.is_complete_mission),
       is_chantier: isFlagTrue(data.project.is_chantier),
-    });
+    };
+    setProject(loaded);
+    setSavedProject(loaded);
     setMilestones(data.milestones.map((m: any) => ({ ...m, completed: !!m.completed })));
     setMilestonesLoaded(true);
     setInvoices(data.invoices);
@@ -911,7 +956,7 @@ export default function ProjectDetail() {
       setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
       setIsAddingMarche(false);
     } else {
-      alert(t('projectdetail_marche_create_failed'));
+      showToast(t('projectdetail_marche_create_failed'), 'error', { duration: 6000 });
     }
   };
 
@@ -947,14 +992,18 @@ export default function ProjectDetail() {
   const handleSave = async () => {
     if (!project || isSaving) return;
     setIsSaving(true);
+    // L'instantané envoyé, pas `project` relu après coup : une frappe arrivée
+    // pendant l'enregistrement doit rester signalée comme non enregistrée.
+    const sent = project;
     try {
-      const res = await fetch(`/api/projects/${project.id}`, {
+      const res = await fetch(`/api/projects/${sent.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(project)
+        body: JSON.stringify(sent)
       });
       if (res.ok) {
-        alert(t('projectdetail_project_saved_successfully'));
+        setSavedProject(sent);
+        showToast(t('projectdetail_project_saved_successfully'));
       } else {
         // Un échec passait jusqu'ici totalement inaperçu : ni alerte ni
         // console.error, seule l'absence du message de succès habituel — un
@@ -962,15 +1011,30 @@ export default function ProjectDetail() {
         // enregistré sans que rien ne le signale, et la prochaine ouverture
         // de la fiche le perdait silencieusement.
         const err = await res.json().catch(() => null);
-        alert(err?.error || 'Échec de l\'enregistrement du projet.');
+        showToast(err?.error || t('projectdetail_project_save_failed'), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error(err);
-      alert((err as any)?.message || 'Échec de l\'enregistrement du projet.');
+      showToast(t('projectdetail_project_save_failed'), 'error', { duration: 6000 });
     } finally {
       setIsSaving(false);
     }
   };
+
+  // Ctrl+S (Cmd+S sur Mac) enregistre la fiche au lieu d'ouvrir la boîte
+  // « Enregistrer la page » du navigateur.
+  const handleSaveRef = useRef(handleSave);
+  useEffect(() => { handleSaveRef.current = handleSave; });
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const handleDelete = async () => {
     if (!project) return;
@@ -1059,7 +1123,7 @@ export default function ProjectDetail() {
         setIsAddingOs(false);
       } else {
         const err = await res.json().catch(() => null);
-        alert(err?.error || t('projectdetail_os_create_failed'));
+        showToast(err?.error || t('projectdetail_os_create_failed'), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error(err);
@@ -1097,7 +1161,7 @@ export default function ProjectDetail() {
         setIsAddingOsMoe(false);
       } else {
         const err = await res.json().catch(() => null);
-        alert(err?.error || t('projectdetail_avenant_create_failed'));
+        showToast(err?.error || t('projectdetail_avenant_create_failed'), 'error', { duration: 6000 });
       }
     } catch (err) {
       console.error(err);
@@ -1610,7 +1674,7 @@ export default function ProjectDetail() {
           setUpdatingPlanId(null);
         } else {
           const err = await res.json().catch(() => null);
-          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
+          showToast(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
         }
       } else {
         // Create a new plan
@@ -1625,37 +1689,45 @@ export default function ProjectDetail() {
           setPlans(prev => [...prev, data]);
         } else {
           const err = await res.json().catch(() => null);
-          alert(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }));
+          showToast(t('projectdetail_plan_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
         }
       }
     } catch (err) {
       console.error(err);
-      alert(t('projectdetail_plan_upload_failed'));
+      showToast(t('projectdetail_plan_upload_failed'), 'error', { duration: 6000 });
     } finally {
       setPlanUploading(false);
       if (planInputRef.current) planInputRef.current.value = '';
     }
   };
 
-  if (!project) return <div className="p-8 text-center">Loading project...</div>;
+  if (!project) return (
+    <div role="status" className="p-8 flex items-center justify-center gap-2 text-sm" style={{ color: 'var(--tblr-muted)' }}>
+      <span aria-hidden className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+      {t('loading')}
+    </div>
+  );
 
   return (
     <div className="flex flex-col lg:h-full">
+      <Toast toast={toast} />
       {/* Compact topbar */}
       <div
         className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <button
-          onClick={() => navigate('/projects')}
+          type="button"
+          onClick={leaveToProjects}
           className="w-8 h-8 flex items-center justify-center rounded-lg border transition-colors hover:bg-[var(--tblr-surface-2)] shrink-0"
           style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-          title={`${t('view_all')} ${t('projects')}`}
+          title={t('projectdetail_back_to_projects')}
+          aria-label={t('projectdetail_back_to_projects')}
         >
           <IconArrowLeft size={18} />
         </button>
         <div className="flex items-baseline gap-2.5 min-w-0">
-          <span className="font-bold text-[0.9375rem] truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</span>
+          <h1 className="font-bold text-base truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</h1>
           {(project.project_code || project.reference) && (
             <span className="font-mono text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || project.reference}</span>
           )}
@@ -1684,6 +1756,8 @@ export default function ProjectDetail() {
             const displayedPhase = viewedPhase || actualCurrentPhase;
             return (
               <PhaseStepper
+                ariaLabel={t('project_phase_stepper_label')}
+                stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
                 size="compact"
                 steps={filteredPhases.map(phase => ({ id: phase, label: phase }))}
                 currentId={actualCurrentPhase}
@@ -1708,18 +1782,32 @@ export default function ProjectDetail() {
               <IconTrash size={18} />
             </button>
           )}
+          {isDirty && (
+            <span
+              role="status"
+              className="hidden md:inline-flex items-center gap-1.5 text-[0.6875rem] font-medium whitespace-nowrap"
+              style={{ color: 'var(--tblr-text)' }}
+            >
+              <span aria-hidden className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: 'var(--tblr-warning)' }} />
+              {t('projectdetail_unsaved_changes')}
+            </span>
+          )}
           <button
-            onClick={() => navigate('/projects')}
+            type="button"
+            onClick={leaveToProjects}
             className="h-8 px-3 rounded-lg text-[0.8125rem] font-medium border transition-colors hover:bg-[var(--tblr-surface-2)]"
             style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
           >
             Annuler
           </button>
           <button
+            type="button"
             onClick={handleSave}
             disabled={isSaving}
-            className="h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
+            className="relative h-8 px-3 flex items-center gap-1.5 rounded-lg text-[0.8125rem] font-semibold text-white transition disabled:opacity-50"
             style={{ background: 'var(--tblr-primary)' }}
+            title={t('projectdetail_save_shortcut_hint')}
+            aria-label={isDirty ? `${t('commit_changes')} (${t('projectdetail_unsaved_changes')})` : t('commit_changes')}
           >
             {isSaving ? (
               <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -1727,36 +1815,26 @@ export default function ProjectDetail() {
               <IconDeviceFloppy size={16} />
             )}
             <span className="hidden sm:inline">{t('commit_changes')}</span>
+            {isDirty && (
+              // Sur téléphone, le libellé « Modifications non enregistrées »
+              // n'a pas la place : une pastille sur le bouton le remplace.
+              <span
+                aria-hidden
+                className="md:hidden absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2"
+                style={{ background: 'var(--tblr-warning)', borderColor: 'var(--tblr-surface)' }}
+              />
+            )}
           </button>
         </div>
       </div>
 
       {/* Tab bar */}
       <div className="shrink-0 px-4 pt-3">
-        <PillTabs
-          activeId={activeTab}
+        <ProjectTabBar
+          activeTab={activeTab}
           onChange={setActiveTab}
-          tabs={([
-            { id: 'INFOS', label: 'INFOS', icon: IconInfoCircle },
-            // Volontairement hors du filtre is_chantier ci-dessous : des
-            // tâches existent dès la phase études.
-            { id: 'TACHES', label: t('project_tasks_tab') as string, icon: IconChecklist },
-            { id: 'HONOS', label: 'HONOS', icon: IconReceipt2 },
-            { id: 'PRO', label: 'PRO', icon: IconFileDescription },
-            { id: 'ACT', label: 'ACT', icon: IconUsersGroup },
-            { id: 'VISA', label: 'VISA', icon: IconRubberStamp },
-            { id: 'DET', label: 'DET', icon: IconTools },
-            { id: 'RDT', label: 'RDT', icon: IconReportMoney },
-            { id: 'AOR', label: 'AOR', icon: IconClipboardCheck },
-            { id: 'CORRESPONDANCE', label: t('correspondence_title') as string, icon: IconMail },
-          ] as PillTabItem[])
-            .map(tab =>
-              chantierTabState[tab.id]?.horsMission ? { ...tab, badge: 'hors mission' } : tab
-            )
-            .filter(tab =>
-              !(['ACT', 'VISA', 'DET', 'RDT', 'AOR'].includes(tab.id) &&
-                (!project.is_chantier || chantierTabState[tab.id]?.visible === false))
-            )}
+          isChantier={!!project.is_chantier}
+          chantierTabState={chantierTabState}
         />
       </div>
 
@@ -1806,16 +1884,16 @@ export default function ProjectDetail() {
                     title="Contrat de Maîtrise d'Œuvre"
                     description="Contrat(s) associés à ce projet depuis la boîte à outils MOE"
                     action={
-                      <a href="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
+                      <Link to="/contrats" className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} />
                         Gérer les contrats
-                      </a>
+                      </Link>
                     }
                   />
                   {linkedContratsMoe.length === 0 ? (
                     <div className="p-8 text-center text-[var(--tblr-muted)] italic text-sm">
                       Aucun contrat MOE lié à ce projet.{' '}
-                      <a href="/contrats" className="text-blue-500 hover:underline">Créer un contrat</a> et associez-le à ce projet.
+                      <Link to="/contrats" className="text-blue-500 hover:underline">Créer un contrat</Link> et associez-le à ce projet.
                     </div>
                   ) : (
                     <div className="divide-y divide-[var(--tblr-border)]">
@@ -1899,7 +1977,7 @@ export default function ProjectDetail() {
                         contrat n'est lié à l'affaire. */}
                     {(() => {
                       const verrouille = !!contratHonoraires;
-                      const readOnlyCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default';
+                      const readOnlyCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500 text-[var(--tblr-text)] font-bold opacity-70 cursor-default';
                       const editCls = 'w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold';
                       const origine = verrouille
                         ? `Issu du contrat ${contratHonoraires.numero || 'MOE'}`
@@ -1932,7 +2010,7 @@ export default function ProjectDetail() {
                               <div className="relative">
                                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">%</span>
                                 <input type="number" readOnly
-                                  className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default"
+                                  className="w-full pl-4 pr-8 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none text-[var(--tblr-text)] font-bold opacity-70 cursor-default focus-visible:ring-2 focus-visible:ring-blue-500"
                                   value={project.construction_cost && project.remuneration
                                     ? Number(((project.remuneration / project.construction_cost) * 100).toFixed(10))
                                     : '—'} />
@@ -2158,12 +2236,12 @@ export default function ProjectDetail() {
                               <td className="px-4 py-3 text-right font-bold whitespace-nowrap">
                                 {os.status === 'approved'
                                   ? <span className={cn(Number(os.montant_devis_accepte ?? os.montant_devis_presente) >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600')}>{formatCurrency(Number(os.montant_devis_accepte ?? os.montant_devis_presente ?? 0))}</span>
-                                  : <span className="text-zinc-300">—</span>}
+                                  : <span className="text-[var(--tblr-muted)]">—</span>}
                               </td>
                               <td className="px-4 py-3 text-center">
                                 {os.incidences_delais_type === 'oui'
                                   ? <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-orange-50 text-orange-600">{os.delai_execution ? `+${os.delai_execution}j` : 'Oui'}</span>
-                                  : <span className="text-zinc-300 text-[0.6875rem]">—</span>}
+                                  : <span className="text-[var(--tblr-muted)] text-[0.6875rem]">—</span>}
                               </td>
                               <td className="px-4 py-3 text-center">{osStatusBadge(os.status)}</td>
                               <td className="px-4 py-3 text-center">
@@ -2177,9 +2255,9 @@ export default function ProjectDetail() {
                                 </div>
                               </td>
                               <td className="px-4 py-3 text-right">
-                                <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button title="Exporter PDF avenant" onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                  <button onClick={() => handleDeleteAvenant(os.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
+                                  <button title="Exporter PDF avenant" onClick={() => generateAvenantPdf(os, project.name, honorairesInitiaux, cumulTotal)} className="p-1 text-[var(--tblr-muted)] hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
+                                  <button title="Supprimer l'avenant" aria-label="Supprimer l'avenant" onClick={() => handleDeleteAvenant(os.id)} className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
                                 </div>
                               </td>
                             </tr>
@@ -2564,16 +2642,33 @@ export default function ProjectDetail() {
                       ...noteForm, project_id: id, contrat_id: contratId, montant_ht, montant_tva, montant_ttc,
                       montant_cumule_precedent_ht, montant_cumule_ht, pct_facturation_cumule,
                     };
-                    if (editingNote?.id) {
-                      await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                    } else {
-                      await fetch('/api/notes_honoraires', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    // Un échec fermait jusqu'ici le formulaire comme une réussite :
+                    // la ventilation saisie était perdue sans un mot. Le formulaire
+                    // reste désormais ouvert, saisie intacte, tant que le serveur
+                    // n'a pas confirmé.
+                    if (isSavingNote) return;
+                    setIsSavingNote(true);
+                    try {
+                      const res = editingNote?.id
+                        ? await fetch(`/api/notes_honoraires/${editingNote.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+                        : await fetch('/api/notes_honoraires', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => null);
+                        showToast(t('projectdetail_note_save_failed', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
+                        return;
+                      }
+                      setIsAddingNote(false);
+                      setEditingNote(null);
+                      setNoteForm(null);
+                      showToast(t('projectdetail_note_saved'));
+                      const listRes = await fetch(`/api/notes_honoraires?project_id=${id}`);
+                      if (listRes.ok) setNotesHonoraires((await listRes.json()) || []);
+                    } catch (err) {
+                      console.error('Failed to save fee note:', err);
+                      showToast(t('projectdetail_note_save_failed', { error: (err as Error)?.message || '' }), 'error', { duration: 6000 });
+                    } finally {
+                      setIsSavingNote(false);
                     }
-                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
-                    setNotesHonoraires(data || []);
-                    setIsAddingNote(false);
-                    setEditingNote(null);
-                    setNoteForm(null);
                   };
 
                   const deleteNote = async (noteId: string) => {
@@ -2591,12 +2686,40 @@ export default function ProjectDetail() {
                     );
                   };
 
+                  // L'acte le plus engageant de la fiche (numérotation, envoi au
+                  // connecteur comptable) : il se confirme, montant sous les yeux,
+                  // et se conclut par un lien vers la facture plutôt que par un
+                  // simple changement de couleur d'icône.
                   const createFactureFromNote = async (note: any) => {
-                    if (note.invoice_id) return;
-                    const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
-                    if (!res.ok) { alert(t('projectdetail_draft_invoice_create_failed')); return; }
-                    const data = await (await fetch(`/api/notes_honoraires?project_id=${id}`)).json();
-                    setNotesHonoraires(data || []);
+                    if (note.invoice_id || generatingInvoiceNoteId) return;
+                    const eur = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
+                    if (!confirm(t('projectdetail_confirm_generate_invoice', {
+                      numero: note.numero || '',
+                      ht: eur.format(Number(note.montant_ht) || 0),
+                      ttc: eur.format(Number(note.montant_ttc) || 0),
+                    }))) return;
+                    setGeneratingInvoiceNoteId(note.id);
+                    try {
+                      const res = await fetch(`/api/notes_honoraires/${note.id}/facture`, { method: 'POST' });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => null);
+                        showToast(err?.error || t('projectdetail_draft_invoice_create_failed'), 'error', { duration: 6000 });
+                        return;
+                      }
+                      const created = await res.json().catch(() => null);
+                      const invoiceId: string | undefined = created?.invoice?.id;
+                      showToast(t('projectdetail_draft_invoice_created'), 'success', {
+                        duration: 8000,
+                        action: invoiceId ? { label: t('projectdetail_open_invoice'), onClick: () => { if (confirmDiscard()) navigate(`/invoices?open=${invoiceId}`); } } : undefined,
+                      });
+                      const listRes = await fetch(`/api/notes_honoraires?project_id=${id}`);
+                      if (listRes.ok) setNotesHonoraires((await listRes.json()) || []);
+                    } catch (err) {
+                      console.error('Failed to create draft invoice:', err);
+                      showToast(t('projectdetail_draft_invoice_create_failed'), 'error', { duration: 6000 });
+                    } finally {
+                      setGeneratingInvoiceNoteId(null);
+                    }
                   };
 
                   const STATUS_NOTE_COLORS: Record<string, string> = {
@@ -2956,7 +3079,8 @@ export default function ProjectDetail() {
 
                           <div className="flex gap-2 justify-end pt-2 border-t border-[var(--tblr-border)]">
                             <button onClick={() => { setIsAddingNote(false); setNoteForm(null); setEditingNote(null); }} className="px-4 py-2 text-sm font-bold text-[var(--tblr-muted)] hover:text-zinc-900 dark:hover:text-white transition-colors">Annuler</button>
-                            <button onClick={saveNote} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition">
+                            <button type="button" onClick={saveNote} disabled={isSavingNote} aria-busy={isSavingNote} className="px-4 py-2 flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition disabled:opacity-60 disabled:cursor-wait">
+                              {isSavingNote && <span aria-hidden className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                               {editingNote ? 'Mettre à jour' : 'Créer la note'}
                             </button>
                           </div>
@@ -3002,24 +3126,38 @@ export default function ProjectDetail() {
                                           {note.pct_facturation_cumule.toFixed(1)} % cumulé
                                         </span>
                                       )}
-                                      {note.invoice_id && <span className="text-green-600 font-bold">Facture créée</span>}
+                                      {note.invoice_id && (
+                                        <Link to={`/invoices?open=${note.invoice_id}`} className="text-green-700 dark:text-green-400 font-bold underline underline-offset-2 hover:no-underline">
+                                          {t('projectdetail_invoice_created_link')}
+                                        </Link>
+                                      )}
                                     </div>
                                   </div>
                                   <div className="flex items-center gap-1 flex-shrink-0">
-                                    <button title="Exporter en PDF" onClick={() => exportNotePdf(note)} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconFileDownload size={14} /></button>
-                                    {canWriteInvoices(currentUser?.system_role) && (
-                                      <button title={note.invoice_id ? 'Facture brouillon déjà créée' : 'Créer une facture brouillon (agence uniquement)'} disabled={!!note.invoice_id}
+                                    {canWriteInvoices(currentUser?.system_role) && !note.invoice_id && (
+                                      <button
+                                        type="button"
+                                        title={t('projectdetail_generate_invoice_hint')}
                                         onClick={() => createFactureFromNote(note)}
-                                        className={cn('p-1 transition-colors', note.invoice_id ? 'text-green-500 cursor-default' : 'text-zinc-300 hover:text-blue-500')}>
-                                        <IconFileInvoice size={14} />
+                                        disabled={generatingInvoiceNoteId === note.id}
+                                        aria-busy={generatingInvoiceNoteId === note.id}
+                                        className="mr-1 h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-primary-lt)] disabled:opacity-60 disabled:cursor-wait"
+                                        style={{ borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }}
+                                      >
+                                        {generatingInvoiceNoteId === note.id
+                                          ? <span aria-hidden className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                                          : <IconFileInvoice size={16} aria-hidden />}
+                                        <span className="hidden sm:inline">{t('projectdetail_generate_invoice')}</span>
+                                        <span className="sm:hidden">{t('projectdetail_generate_invoice_short')}</span>
                                       </button>
                                     )}
-                                    <button onClick={() => {
+                                    <button type="button" title="Exporter en PDF" aria-label="Exporter en PDF" onClick={() => exportNotePdf(note)} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconFileDownload size={16} /></button>
+                                    <button type="button" title={t('projectdetail_edit_note')} aria-label={t('projectdetail_edit_note')} onClick={() => {
                                       setEditingNote(note);
                                       setNoteForm(noteFormFromSaved(note));
                                       setIsAddingNote(true);
-                                    }} className="p-1 text-zinc-300 hover:text-blue-500 transition-colors"><IconEdit size={14} /></button>
-                                    <button onClick={() => deleteNote(note.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={14} /></button>
+                                    }} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-primary)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconEdit size={16} /></button>
+                                    <button type="button" title={t('projectdetail_delete_note')} aria-label={t('projectdetail_delete_note')} onClick={() => deleteNote(note.id)} className="w-9 h-9 inline-flex items-center justify-center rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-danger)] hover:bg-[var(--tblr-surface-2)] transition-colors"><IconTrash size={16} /></button>
                                   </div>
                                 </div>
                               </div>
@@ -3222,7 +3360,7 @@ export default function ProjectDetail() {
                       {/* Milestones section moved into INFOS tab */}
                       <div className="p-6 rounded-lg space-y-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                         <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>Milestones</h3>
+                          <h3 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{t('projects_milestones_title')}</h3>
                           <button 
                             onClick={() => setIsAddingMilestone(!isAddingMilestone)}
                             className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition"
@@ -3304,7 +3442,7 @@ export default function ProjectDetail() {
                                   onClick={() => handleToggleMilestone(m)}
                                   className={cn(
                                     "transition-colors",
-                                    m.completed ? "text-green-500" : "text-zinc-300 hover:text-[var(--tblr-muted)]"
+                                    m.completed ? "text-green-500" : "text-[var(--tblr-muted)] hover:text-[var(--tblr-muted)]"
                                   )}
                                 >
                                   {m.completed ? <IconCircleCheck size={20} /> : <IconCircle size={20} />}
@@ -3319,14 +3457,14 @@ export default function ProjectDetail() {
                                   </div>
                                 </div>
                               </div>
-                              <button 
+                              <button title="Supprimer le jalon" aria-label="Supprimer le jalon" 
                                 onClick={() => {
                                   if(confirm(t('projectdetail_confirm_delete_milestone'))) {
                                     fetch(`/api/milestones/${m.id}`, { method: 'DELETE' })
                                       .then(() => setMilestones(prev => prev.filter(x => x.id !== m.id)));
                                   }
                                 }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"
+                                className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition"
                               >
                                 <IconTrash size={14} />
                               </button>
@@ -3656,7 +3794,7 @@ export default function ProjectDetail() {
                     action={
                     <div className="flex items-center gap-2">
                       <select
-                        className="px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 focus:outline-none"
+                        className="px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         defaultValue=""
                         onChange={async e => {
                           const userId = e.target.value;
@@ -3698,7 +3836,7 @@ export default function ProjectDetail() {
                                   if (res.ok) setProjectMembers(prev => prev.filter(pm => (pm.user_id || pm.id) !== userId));
                                 } catch (err) { console.error(err); }
                               }}
-                              className="ml-1 p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
+                              className="ml-1 p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
                               title="Retirer du projet"
                             >✕</button>
                           </div>
@@ -3731,14 +3869,14 @@ export default function ProjectDetail() {
                   {isAddingPermit && (
                     <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
                       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.type} onChange={e => setNewPermit(prev => ({ ...prev, type: e.target.value as any }))}>
+                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.type} onChange={e => setNewPermit(prev => ({ ...prev, type: e.target.value as any }))}>
                           <option value="PC">PC</option>
                           <option value="DP">DP</option>
                           <option value="AT">AT</option>
                         </select>
-                        <input type="text" placeholder="Référence" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.reference} onChange={e => setNewPermit(prev => ({ ...prev, reference: e.target.value }))} />
-                        <input type="date" placeholder="Date de dépôt" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.submission_date} onChange={e => setNewPermit(prev => ({ ...prev, submission_date: e.target.value }))} />
-                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newPermit.status} onChange={e => setNewPermit(prev => ({ ...prev, status: e.target.value as any }))}>
+                        <input type="text" placeholder="Référence" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.reference} onChange={e => setNewPermit(prev => ({ ...prev, reference: e.target.value }))} />
+                        <input type="date" placeholder="Date de dépôt" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.submission_date} onChange={e => setNewPermit(prev => ({ ...prev, submission_date: e.target.value }))} />
+                        <select className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newPermit.status} onChange={e => setNewPermit(prev => ({ ...prev, status: e.target.value as any }))}>
                           <option value="en_instruction">En instruction</option>
                           <option value="accorde">Accordé</option>
                           <option value="refuse">Refusé</option>
@@ -3786,7 +3924,7 @@ export default function ProjectDetail() {
                               </button>
                               <div className="flex items-center gap-2 shrink-0">
                                 <select
-                                  className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)]"
+                                  className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)] focus-visible:ring-2 focus-visible:ring-blue-500"
                                   value={p.status}
                                   onChange={async (e) => {
                                     const status = e.target.value;
@@ -3805,7 +3943,7 @@ export default function ProjectDetail() {
                                     const res = await fetch(`/api/permits/${p.id}`, { method: 'DELETE' });
                                     if (res.ok) setPermits(prev => prev.filter(x => x.id !== p.id));
                                   }}
-                                  className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
+                                  className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
                                   title="Supprimer"
                                 >
                                   <IconTrash size={14} />
@@ -4043,11 +4181,11 @@ export default function ProjectDetail() {
                                   </button>
                                 )}
                                 <button onClick={() => generateOsPdf(os)} title="Exporter PDF"
-                                  className="p-1 text-zinc-300 hover:text-blue-500 transition-colors">
+                                  className="p-1 text-[var(--tblr-muted)] hover:text-blue-500 transition-colors">
                                   <IconFileDownload size={13} />
                                 </button>
-                                <button onClick={() => handleDeleteOs(os.id)}
-                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors">
+                                <button title="Supprimer l'OS" aria-label="Supprimer l'OS" onClick={() => handleDeleteOs(os.id)}
+                                  className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors">
                                   <IconTrash size={13} />
                                 </button>
                               </div>
@@ -4089,10 +4227,10 @@ export default function ProjectDetail() {
                   />
                   {isAddingRfi && (
                     <div className="p-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] space-y-3">
-                      <textarea rows={2} placeholder="Question posée" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
+                      <textarea rows={2} placeholder="Question posée" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none resize-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.question} onChange={e => setNewRfi(prev => ({ ...prev, question: e.target.value }))} />
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        <input type="text" placeholder="Demandeur" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
-                        <input type="date" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
+                        <input type="text" placeholder="Demandeur" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.asked_by} onChange={e => setNewRfi(prev => ({ ...prev, asked_by: e.target.value }))} />
+                        <input type="date" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={newRfi.due_date} onChange={e => setNewRfi(prev => ({ ...prev, due_date: e.target.value }))} />
                       </div>
                       <div className="flex justify-end">
                         <button
@@ -4129,7 +4267,7 @@ export default function ProjectDetail() {
                             <div className="flex items-center gap-2 shrink-0">
                               <select
                                 className={cn(
-                                  "text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none cursor-pointer",
+                                  "text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-0 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer",
                                   r.status === 'repondu' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                 )}
                                 value={r.status}
@@ -4148,7 +4286,7 @@ export default function ProjectDetail() {
                                   const res = await fetch(`/api/rfis/${r.id}`, { method: 'DELETE' });
                                   if (res.ok) setRfis(prev => prev.filter(x => x.id !== r.id));
                                 }}
-                                className="p-1 text-zinc-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition rounded"
+                                className="p-1 text-[var(--tblr-muted)] hover:text-red-500 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition rounded"
                                 title="Supprimer"
                               >
                                 <IconTrash size={14} />
@@ -4322,7 +4460,7 @@ export default function ProjectDetail() {
                             <td className="px-6 py-4">
                               <select 
                                 className={cn(
-                                  "bg-transparent font-bold text-[0.6875rem] uppercase tracking-wider outline-none cursor-pointer",
+                                  "bg-transparent font-bold text-[0.6875rem] uppercase tracking-wider outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer",
                                   inv.status === 'Paid' ? "text-green-600" :
                                   inv.status === 'Overdue' ? "text-red-600" :
                                   "text-[var(--tblr-muted)]"
@@ -4384,11 +4522,11 @@ export default function ProjectDetail() {
               <div className="space-y-8">
                 {/* VISA Modal */}
                 {isVisaModalOpen && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setIsVisaModalOpen(false)}>
-                    <div className="rounded-lg shadow-2xl w-full max-w-md mx-4 p-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
+                  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setIsVisaModalOpen(false)}>
+                    <div role="dialog" aria-modal="true" aria-labelledby="visa-modal-title" className="rounded-lg shadow-2xl w-full max-w-md mx-4 p-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
                       <div className="flex items-center justify-between mb-4">
-                        <h4 className="text-base font-bold text-[var(--tblr-text)]">{editingVisa ? 'Modifier le visa' : 'Nouveau visa'}</h4>
-                        <button onClick={() => setIsVisaModalOpen(false)} className="p-1 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
+                        <h4 id="visa-modal-title" className="text-base font-bold text-[var(--tblr-text)]">{editingVisa ? 'Modifier le visa' : 'Nouveau visa'}</h4>
+                        <button title="Fermer" aria-label="Fermer" onClick={() => setIsVisaModalOpen(false)} className="p-1 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
                           <IconX size={18} />
                         </button>
                       </div>
@@ -4488,7 +4626,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => prev.map(v => v.id === editingVisa.id ? updated : v));
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
+                                  showToast(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
                                 }
                               } else {
                                 const res = await fetch('/api/visas', { method: 'POST', body: form });
@@ -4497,7 +4635,7 @@ export default function ProjectDetail() {
                                   setVisas(prev => [...prev, data]);
                                 } else {
                                   const err = await res.json().catch(() => null);
-                                  alert(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }));
+                                  showToast(t('projectdetail_visa_save_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
                                 }
                               }
                               setIsVisaModalOpen(false);
@@ -4506,7 +4644,7 @@ export default function ProjectDetail() {
                               setVisaForm({ title: '', date: new Date().toISOString().split('T')[0], status: 'pending', comments: '', lot_id: '' });
                             } catch (err) {
                               console.error(err);
-                              alert(t('projectdetail_visa_save_failed'));
+                              showToast(t('projectdetail_visa_save_failed'), 'error', { duration: 6000 });
                             } finally {
                               setVisaSaving(false);
                             }
@@ -4565,15 +4703,13 @@ export default function ProjectDetail() {
                         }, {} as Record<string, Visa[]>)).map(([groupKey, groupVisas]) => (
                         <React.Fragment key={groupKey}>
                           <tr
-                            className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
-                            onClick={() => setVisaExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))}
-                          >
-                            <td colSpan={5} className="px-6 py-3">
-                              <div className="flex items-center gap-2">
+                            className="bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors">
+                            <td colSpan={5} className="p-0">
+                              <button type="button" aria-expanded={!!visaExpandedGroups[groupKey]} onClick={() => setVisaExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="w-full flex items-center gap-2 px-6 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
                                 {visaExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                                 <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
                                 <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupVisas.length} visa{groupVisas.length > 1 ? 's' : ''})</span>
-                              </div>
+                              </button>
                             </td>
                           </tr>
                           {visaExpandedGroups[groupKey] && groupVisas.map((visa) => (
@@ -4604,7 +4740,7 @@ export default function ProjectDetail() {
                               <span className="truncate block max-w-48" title={visa.comments}>{visa.comments || <span className="italic text-[var(--tblr-muted)]">—</span>}</span>
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
                                 {/* Quick validate */}
                                 {visa.status !== 'approved' && (
                                   <button
@@ -4790,7 +4926,7 @@ export default function ProjectDetail() {
                         {pvForm.reserves_list.map((r, idx) => (
                           <div key={r.id} className="rounded-lg border border-amber-200 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-900/10 p-3 space-y-2">
                             <div className="flex items-center gap-2">
-                              <span className="text-[0.625rem] font-black text-amber-600 w-5 shrink-0">#{idx + 1}</span>
+                              <span className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] w-6 shrink-0 tabular-nums">#{idx + 1}</span>
                               <input
                                 type="text"
                                 placeholder="Intitulé de la réserve *"
@@ -4798,7 +4934,7 @@ export default function ProjectDetail() {
                                 value={r.title}
                                 onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, title: e.target.value } : x) }))}
                               />
-                              <button
+                              <button title="Retirer la réserve" aria-label="Retirer la réserve"
                                 type="button"
                                 onClick={() => setPvForm(prev => ({
                                   ...prev,
@@ -4811,17 +4947,17 @@ export default function ProjectDetail() {
                               </button>
                             </div>
                             <div className="grid grid-cols-2 gap-2 pl-7">
-                              <input type="text" placeholder="Bâtiment" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.batiment} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, batiment: e.target.value } : x) }))} />
-                              <input type="text" placeholder="Local / Zone" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.local} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, local: e.target.value } : x) }))} />
-                              <input type="text" placeholder="Lot(s) concerné(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
-                              <input type="text" placeholder="Entreprise(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Bâtiment" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.batiment} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, batiment: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Local / Zone" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.local} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, local: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Lot(s) concerné(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.lots} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, lots: e.target.value } : x) }))} />
+                              <input type="text" placeholder="Entreprise(s)" className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.entreprises} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, entreprises: e.target.value } : x) }))} />
                               <div className="space-y-0.5">
                                 <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Date limite</label>
-                                <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
+                                <input type="date" className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.due_date} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, due_date: e.target.value } : x) }))} />
                               </div>
                               <div className="space-y-0.5">
                                 <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">Statut</label>
-                                <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
+                                <select className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-blue-500" value={r.status} onChange={e => setPvForm(prev => ({ ...prev, reserves_list: prev.reserves_list.map((x, i) => i === idx ? { ...x, status: e.target.value } : x) }))}>
                                   <option value="A faire">À faire</option>
                                   <option value="En cours">En cours</option>
                                   <option value="Levée">Levée</option>
@@ -4847,7 +4983,7 @@ export default function ProjectDetail() {
                           <div key={idx} className="flex gap-2 items-center">
                             <input type="text" placeholder="Nom" className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.nom} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, nom: e.target.value } : s) }))} />
                             <input type="text" placeholder="Rôle (ex: MOE, MOA)" className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500" value={sig.role} onChange={e => setPvForm(prev => ({ ...prev, signataires: prev.signataires.map((s, i) => i === idx ? { ...s, role: e.target.value } : s) }))} />
-                            <button type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: prev.signataires.filter((_, i) => i !== idx) }))} className="p-2 text-red-400 hover:text-red-600 transition-colors"><IconX size={14} /></button>
+                            <button title="Retirer le signataire" aria-label="Retirer le signataire" type="button" onClick={() => setPvForm(prev => ({ ...prev, signataires: prev.signataires.filter((_, i) => i !== idx) }))} className="p-2 text-red-400 hover:text-red-600 transition-colors"><IconX size={14} /></button>
                           </div>
                         ))}
                       </div>
@@ -4977,7 +5113,7 @@ export default function ProjectDetail() {
                                 </span>
                               </td>
                               <td className="px-6 py-4 text-right">
-                                <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
                                   {/* PDF export */}
                                   <button
                                     title="Exporter PDF"
@@ -5077,7 +5213,7 @@ export default function ProjectDetail() {
                                                     await fetch(`/api/reserves/${r.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...r, status: newStatus }) });
                                                     setReserves(prev => prev.map(rv => rv.id === r.id ? { ...rv, status: newStatus as Reserve['status'] } : rv));
                                                   }}
-                                                  className={cn("text-[0.6875rem] font-bold px-2 py-0.5 rounded-full border-0 outline-none cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
+                                                  className={cn("text-[0.6875rem] font-bold px-2 py-0.5 rounded-full border-0 outline-none focus-visible:ring-2 focus-visible:ring-blue-500 cursor-pointer", statusColors[r.status] || 'bg-zinc-100 text-zinc-600')}
                                                 >
                                                   <option value="A faire">À faire</option>
                                                   <option value="En cours">En cours</option>
@@ -5088,13 +5224,13 @@ export default function ProjectDetail() {
                                                 </select>
                                               </td>
                                               <td className="px-4 py-2 text-right">
-                                                <button
+                                                <button title="Supprimer la réserve" aria-label="Supprimer la réserve"
                                                   onClick={async () => {
                                                     if (!confirm(t('projectdetail_confirm_delete_reserve'))) return;
                                                     await fetch(`/api/reserves/${r.id}`, { method: 'DELETE' });
                                                     setReserves(prev => prev.filter(rv => rv.id !== r.id));
                                                   }}
-                                                  className="p-1 text-zinc-300 hover:text-red-500 transition-colors"
+                                                  className="p-1 text-[var(--tblr-muted)] hover:text-red-500 transition-colors"
                                                 >
                                                   <IconTrash size={12} />
                                                 </button>
@@ -5165,7 +5301,7 @@ export default function ProjectDetail() {
                         <select
                           value={doeContactId}
                           onChange={e => setDoeContactId(e.target.value)}
-                          className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none"
+                          className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                         >
                           <option value="">Entreprise (non assigné)</option>
                           {doeEntreprises.map(c => (
@@ -5193,11 +5329,11 @@ export default function ProjectDetail() {
                               await fetchDoeDocuments();
                             } else {
                               const err = await res.json().catch(() => null);
-                              alert(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }));
+                              showToast(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
                             }
                           } catch (err) {
                             console.error(err);
-                            alert(t('projectdetail_doe_upload_failed'));
+                            showToast(t('projectdetail_doe_upload_failed'), 'error', { duration: 6000 });
                           } finally {
                             setDoeUploading(false);
                             if (doeInputRef.current) doeInputRef.current.value = '';
@@ -5229,15 +5365,13 @@ export default function ProjectDetail() {
                           {Object.entries(doeGroups).map(([groupKey, groupDocs]) => (
                             <React.Fragment key={groupKey}>
                               <tr
-                                className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
-                                onClick={() => setDoeExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))}
-                              >
-                                <td colSpan={5} className="px-6 py-3">
-                                  <div className="flex items-center gap-2">
+                                className="bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors">
+                                <td colSpan={5} className="p-0">
+                                  <button type="button" aria-expanded={!!doeExpandedGroups[groupKey]} onClick={() => setDoeExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="w-full flex items-center gap-2 px-6 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
                                     {doeExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                                     <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
                                     <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupDocs.length} document{groupDocs.length > 1 ? 's' : ''})</span>
-                                  </div>
+                                  </button>
                                 </td>
                               </tr>
                               {doeExpandedGroups[groupKey] && groupDocs.map((doc) => (
@@ -5269,7 +5403,7 @@ export default function ProjectDetail() {
                                   </td>
                                   <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(doc.uploaded_at).toLocaleDateString('fr-FR')}</td>
                                   <td className="px-6 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
                                       {editingDoeId === doc.id ? (
                                         <>
                                           <select
@@ -5431,7 +5565,7 @@ export default function ProjectDetail() {
                                     >
                                       <IconRefresh size={16} />
                                     </button>
-                                    <button type="button" onClick={() => openSignedUrl(plan.file_url)} className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors">
+                                    <button title="Ouvrir le plan" aria-label="Ouvrir le plan" type="button" onClick={() => openSignedUrl(plan.file_url)} className="p-2 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors">
                                       <IconExternalLink size={16} />
                                     </button>
                                     <button 
@@ -5475,14 +5609,15 @@ export default function ProjectDetail() {
       {/* AR Modal */}
       <AnimatePresence>
         {arOsTarget && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
             <motion.div
               ref={launchOriginRef}
+              role="dialog" aria-modal="true" aria-labelledby="ar-modal-title"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md rounded-lg shadow-2xl p-6"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <h3 className="text-sm font-bold text-[var(--tblr-text)] mb-4">
+              <h3 id="ar-modal-title" className="text-sm font-bold text-[var(--tblr-text)] mb-4">
                 Accusé de réception — OS N° {arOsTarget.os_number}
               </h3>
               <div className="space-y-3">
@@ -5520,14 +5655,15 @@ export default function ProjectDetail() {
       {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
       <AnimatePresence>
         {showDeleteProjectConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
             <motion.div
               ref={launchOriginRef}
+              role="dialog" aria-modal="true" aria-labelledby="delete-project-modal-title"
               initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-md rounded-lg shadow-2xl p-6"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
-              <h3 className="text-sm font-bold text-[var(--tblr-text)] mb-2">{t('projects_delete_confirm_title')}</h3>
+              <h3 id="delete-project-modal-title" className="text-sm font-bold text-[var(--tblr-text)] mb-2">{t('projects_delete_confirm_title')}</h3>
               <p className="text-sm text-[var(--tblr-muted)] mb-2">
                 {t('projects_delete_confirm_body', { name: project?.name })}
               </p>

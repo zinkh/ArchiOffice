@@ -15,14 +15,16 @@ export function MafCostBadge({ result, showDetails = false }: MafCostBadgeProps)
   return (
     <div
       className="rounded-lg border p-3 text-sm"
-      style={{ background: '#fff4e6', borderColor: '#ffd8a8', color: '#c05500' }}
+      // Une estimation, pas une alerte : surface neutre, en jetons pour suivre
+      // le thème sombre.
+      style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
     >
       <div className="flex items-center gap-2 font-semibold">
-        <IconShieldCheck size={16} />
+        <IconShieldCheck size={16} aria-hidden style={{ color: 'var(--tblr-primary)' }} />
         Coût assurance MAF estimé : {fmt(result.cotisationEstimee)} €
       </div>
       {showDetails && (
-        <div className="mt-2 text-xs space-y-0.5" style={{ color: '#a85d00' }}>
+        <div className="mt-2 text-xs space-y-0.5" style={{ color: 'var(--tblr-muted)' }}>
           <div className="flex items-center gap-1">
             <IconInfoCircle size={12} />
             Assiette : M × T × P = {fmt(result.montantM)} × {result.tauxPermil !== undefined ? '' : ''}{fmt(result.assiette)} € HT
