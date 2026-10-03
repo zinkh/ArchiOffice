@@ -41,7 +41,7 @@ export function DialogShell({
         )}
         style={{ border: '1px solid var(--tblr-border)' }}
       >
-        <div className="flex items-start justify-between gap-4 px-5 py-4 border-b border-[var(--tblr-border)]" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+        <div className="flex items-start justify-between gap-4 px-4 sm:px-5 py-4 border-b border-[var(--tblr-border)]" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
           <div className="min-w-0">
             <h2 id={titleId} className="text-base font-bold text-[var(--tblr-text)]">{title}</h2>
             {subtitle && <p className="text-xs text-[var(--tblr-muted)] mt-0.5 truncate">{subtitle}</p>}
@@ -56,10 +56,10 @@ export function DialogShell({
             <IconX size={18} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 py-4">{children}</div>
         {footer && (
           <div
-            className="flex flex-wrap items-center justify-end gap-2 px-5 py-3 border-t border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] sm:rounded-b-xl"
+            className="flex flex-wrap items-center justify-end gap-2 px-4 sm:px-5 py-3 border-t border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] sm:rounded-b-xl"
             style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
           >
             {footer}

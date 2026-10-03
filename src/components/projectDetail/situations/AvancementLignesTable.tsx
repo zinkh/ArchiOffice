@@ -63,7 +63,9 @@ export function AvancementLignesTable({
         )}
       </div>
 
-      <div className="overflow-auto max-h-[50dvh] rounded-lg border border-[var(--tblr-border)]">
+      {/* Au bureau, la liste défile dans son cadre ; sur un téléphone, c'est la
+          fenêtre entière qui défile (pas de défilement dans le défilement). */}
+      <div className="overflow-x-auto lg:overflow-auto lg:max-h-[50dvh] rounded-lg border border-[var(--tblr-border)]">
         <table className="min-w-full text-xs">
           <thead className="sticky top-0 z-10 bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] text-[0.6875rem] font-bold uppercase">
             <tr>

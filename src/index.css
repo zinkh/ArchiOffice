@@ -580,3 +580,32 @@ button, [role="button"], [role="tab"], .btn {
 @media (prefers-reduced-motion: reduce) {
   .collapsible-panel { transition: none; }
 }
+
+/* Barre défilante horizontale (onglets, étapes de mission) : le bord s'estompe
+   tant qu'il reste du contenu caché de ce côté (useHorizontalScrollHints). Sur
+   un téléphone, c'est ce qui dit qu'une famille d'onglets existe plus loin. */
+.scroll-fade-x {
+  --fade: 28px;
+  scrollbar-width: none;
+}
+.scroll-fade-x::-webkit-scrollbar { display: none; }
+.scroll-fade-x[data-fade-end]:not([data-fade-start]) {
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent);
+}
+.scroll-fade-x[data-fade-start]:not([data-fade-end]) {
+  mask-image: linear-gradient(to left, #000 calc(100% - var(--fade)), transparent);
+}
+.scroll-fade-x[data-fade-start][data-fade-end] {
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+}
+
+/* Message « aucun élément » d'un tableau plus large que l'écran : il reste
+   calé sur la partie visible du cadre défilant au lieu d'être centré sur toute
+   la largeur du tableau, donc coupé, sur un téléphone. */
+.table-empty-message {
+  position: sticky;
+  left: 1.5rem;
+  display: inline-block;
+  max-width: min(36rem, calc(100vw - 6rem));
+  white-space: normal;
+}

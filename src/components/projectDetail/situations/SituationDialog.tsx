@@ -199,8 +199,12 @@ export function SituationDialog({
       subtitle={[marche?.lot_numero ? t('situations_travaux_lot_short', { n: marche.lot_numero }) : '', marche?.lot_titre, marche?.entreprise_nom].filter(Boolean).join(' · ')}
       footer={(
         <>
-          <button type="button" onClick={supprimer} disabled={!!busy || verrouillee} className={boutonSecondaire + ' mr-auto text-red-600'}>
-            <IconTrash size={14} /> {t('situations_travaux_delete')}
+          <button
+            type="button" onClick={supprimer} disabled={!!busy || verrouillee}
+            className={boutonSecondaire + ' mr-auto text-red-600 px-2.5 sm:px-3'}
+            aria-label={t('situations_travaux_delete')}
+          >
+            <IconTrash size={14} aria-hidden /> <span className="hidden sm:inline">{t('situations_travaux_delete')}</span>
           </button>
           {verrouillee ? (
             <>
@@ -250,7 +254,7 @@ export function SituationDialog({
                 <input id={id('recu')} type="date" disabled={verrouillee} className={inputClass} value={form.date_reception_situation} onChange={(e) => set('date_reception_situation', e.target.value)} />
               </Champ>
             </div>
-            <div role="radiogroup" aria-label={t('situations_travaux_mode_label')} className="inline-flex rounded-lg border border-[var(--tblr-border)] p-0.5 bg-[var(--tblr-surface-2)]">
+            <div role="radiogroup" aria-label={t('situations_travaux_mode_label')} className="grid grid-cols-2 w-full sm:inline-grid sm:w-auto rounded-lg border border-[var(--tblr-border)] p-0.5 bg-[var(--tblr-surface-2)]">
               {(['simple', 'detaille'] as const).map((mode) => (
                 <button
                   key={mode}

@@ -2303,6 +2303,8 @@ export default {
       "situations_travaux_retention": "Retenue de garantie {{rate}} %",
       "situations_travaux_net_to_pay": "Net à payer TTC",
       "situations_travaux_progress": "Avancement du marché : {{pct}} %",
+      "situations_travaux_progress_overall": "Avancement global : {{pct}} %",
+      "situations_travaux_period_short": "période {{amount}} HT",
       "situations_travaux_progress_label": "Avancement du marché de {{company}}",
       "situations_travaux_alert_no_amount": "Saisissez le cumul présenté par l'entreprise.",
       "situations_travaux_alert_negative": "Le cumul admis est inférieur au précédent : la période est négative.",

@@ -125,14 +125,14 @@ export function PhaseJournal({ api, phases, viewedPhase, phaseLabel, defaultBudg
     <section aria-labelledby={`${formId}-title`} className="mb-6">
       {dialog}
       <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 id={`${formId}-title`} className="font-bold text-base" style={{ color: 'var(--tblr-text)' }}>
+        <h2 id={`${formId}-title`} className="font-bold text-base min-w-0" style={{ color: 'var(--tblr-text)' }}>
           {t('phase_journal_title')}
         </h2>
         {!form && (
           <button
             type="button"
             onClick={openNew}
-            className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="shrink-0 whitespace-nowrap h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-primary)' }}
           >
             <IconPlus size={15} aria-hidden /> {t('phase_journal_add')}

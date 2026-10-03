@@ -1733,8 +1733,10 @@ export default function ProjectDetail() {
         >
           <IconArrowLeft size={18} />
         </button>
-        <div className="flex items-baseline gap-2.5 min-w-0">
-          <h1 className="font-bold text-base truncate" style={{ color: 'var(--tblr-text)' }}>{project.name}</h1>
+        {/* Sur un téléphone, titre, retour et actions tiennent sur une ligne : le
+            titre cède sa largeur (tronqué) plutôt que de repousser les actions. */}
+        <div className="flex items-baseline gap-2.5 min-w-0 flex-1 lg:flex-none">
+          <h1 className="font-bold text-base truncate min-w-0" style={{ color: 'var(--tblr-text)' }} title={project.name}>{project.name}</h1>
           {(project.project_code || project.reference) && (
             <span className="font-mono text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{project.project_code || project.reference}</span>
           )}
@@ -1750,9 +1752,10 @@ export default function ProjectDetail() {
           </span>
         </div>
 
-        <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-center overflow-x-auto">
-          <div className="flex items-center gap-2 min-w-0">
+        <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-center min-w-0">
+          <div className="flex items-center gap-2 min-w-0 w-full lg:w-auto">
             <PhaseStepper
+              className="min-w-0 flex-1 lg:flex-none"
               ariaLabel={t('project_phase_stepper_label')}
               stepTitle={step => t('project_phase_stepper_view', { phase: step.label })}
               size="compact"
@@ -1779,7 +1782,7 @@ export default function ProjectDetail() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0 ml-auto lg:ml-0">
+        <div className="flex items-center gap-1 sm:gap-2 shrink-0 lg:ml-0 lg:order-none">
           {currentUser?.system_role === 'admin' && (
             <button
               type="button"
@@ -2232,7 +2235,7 @@ export default function ProjectDetail() {
                           ));
                         })()}
                         {moeAvenants.length === 0 && (
-                          <tr><td colSpan={10} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_amendments_empty')}</td></tr>
+                          <tr><td colSpan={10} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_amendments_empty')}</span></td></tr>
                         )}
                       </tbody>
                     </table>
@@ -4227,7 +4230,7 @@ export default function ProjectDetail() {
                         ))}
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).length === 0 && (
                           <tr>
-                            <td colSpan={9} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_os_empty')}</td>
+                            <td colSpan={9} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_os_empty')}</span></td>
                           </tr>
                         )}
                       </tbody>
@@ -4702,7 +4705,7 @@ export default function ProjectDetail() {
                         ))}
                         {visas.length === 0 && (
                           <tr>
-                            <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_visas_empty')}</td>
+                            <td colSpan={5} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_visas_empty')}</span></td>
                           </tr>
                         )}
                       </tbody>
@@ -5150,7 +5153,7 @@ export default function ProjectDetail() {
                         })}
                         {receptions.length === 0 && (
                           <tr>
-                            <td colSpan={8} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_pv_empty')}</td>
+                            <td colSpan={8} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_pv_empty')}</span></td>
                           </tr>
                         )}
                       </tbody>
@@ -5402,7 +5405,7 @@ export default function ProjectDetail() {
                           ))}
                           {doeDocuments.length === 0 && (
                             <tr>
-                              <td colSpan={5} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_doe_empty')}</td>
+                              <td colSpan={5} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_doe_empty')}</span></td>
                             </tr>
                           )}
                         </tbody>
@@ -5509,7 +5512,7 @@ export default function ProjectDetail() {
                             ))}
                             {aorPlans.length === 0 && (
                               <tr>
-                                <td colSpan={4} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">{t('projectdetail_plans_empty')}</td>
+                                <td colSpan={4} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_plans_empty')}</span></td>
                               </tr>
                             )}
                           </tbody>

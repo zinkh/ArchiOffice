@@ -6,6 +6,7 @@ import {
 } from '@tabler/icons-react';
 import { PillTabs, type PillTabItem } from '../ui/PillTabs';
 import { cn } from '../../lib/utils';
+import { useHorizontalScrollHints } from '../../hooks/useHorizontalScrollHints';
 import {
   CHANTIER_ONLY_TABS, groupOfTab, tabForGroup, visibleTabGroups,
   type ProjectTabGroupId, type ProjectTabId,
@@ -42,6 +43,7 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
   // Dernier onglet consulté dans chaque famille : revenir au chantier rouvre
   // la mission qu'on venait de quitter plutôt que la première.
   const lastTabByGroup = useRef<Partial<Record<ProjectTabGroupId, ProjectTabId>>>({});
+  const subTabsRef = useHorizontalScrollHints<HTMLDivElement>('[aria-selected="true"]', activeTab);
 
   const isVisible = (tab: ProjectTabId) =>
     !(CHANTIER_ONLY_TABS.includes(tab) && (!isChantier || chantierTabState[tab]?.visible === false));
@@ -83,9 +85,10 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
       />
       {activeVisibleGroup && activeVisibleGroup.tabs.length > 1 && (
         <div
+          ref={subTabsRef}
           role="tablist"
           aria-label={t(`project_tab_group_${activeVisibleGroup.id.toLowerCase()}`)}
-          className="flex items-center gap-1 overflow-x-auto max-w-full border-b"
+          className="scroll-fade-x flex items-center gap-1 overflow-x-auto max-w-full border-b"
           style={{ borderColor: 'var(--tblr-border)' }}
         >
           {activeVisibleGroup.tabs.map(tab => {

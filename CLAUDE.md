@@ -535,6 +535,31 @@ traduites. Quatre règles à garder :
   certificats de paiement ». Les montants de l'aperçu et de la fiche complète
   sont en lecture seule dès qu'un contrat est rattaché, comme dans HONOS.
 
+### Fiche affaire sur téléphone et tablette
+
+Vérifiée en 390, 820 et 1366 px. Règles à garder :
+
+- **En-tête** : retour, titre (tronqué), supprimer et état d'enregistrement
+  sur une seule ligne ; le stepper de phases prend toute la ligne suivante.
+- **Barres défilantes** (familles d'onglets, missions de chantier, stepper) :
+  `useHorizontalScrollHints` ramène l'élément actif dans le champ (en réglant
+  `scrollLeft`, jamais `scrollIntoView`, qui ferait défiler la page) et pose
+  `data-fade-start`/`data-fade-end` ; la classe `.scroll-fade-x` estompe le bord
+  où du contenu est caché. Sans cela, la famille « Chantier » ouverte restait
+  hors de l'écran.
+- **`CardHeader`** passe l'action sous le titre quand la largeur manque (le
+  titre garde 14rem) au lieu de tronquer le titre à trois lettres.
+- **`StatTile`** : montant en `text-lg` sous 640 px, pour qu'un « 48 000,00 € »
+  tienne dans une demi-largeur de téléphone.
+- **Message vide d'un tableau plus large que l'écran** : `.table-empty-message`
+  (collant à gauche) au lieu d'un texte centré sur toute la largeur, donc coupé.
+- **RDT** : liste de situations touchable sous 768 px, tableau au-delà (référence
+  et cumul admis à partir de 1024 px) ; la saisie ligne à ligne ne défile dans son
+  cadre qu'au bureau (pas de défilement dans le défilement sur téléphone).
+- **`<html lang>`** suit la langue de l'interface (`src/i18n.ts`) : il valait
+  `en` en permanence, d'où une lecture d'écran et une césure anglaises.
+- Un jalon sans date n'est plus pris pour la prochaine échéance (« Invalid Date »).
+
 ### Situations de travaux et certificats de paiement (onglet RDT)
 
 L'onglet RDT listait les factures de l'AGENCE et en déduisait un « reste à

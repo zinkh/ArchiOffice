@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconCheck } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
+import { useHorizontalScrollHints } from '../../hooks/useHorizontalScrollHints';
 
 export interface PhaseStepperItem {
   id: string;
@@ -31,9 +32,12 @@ export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'def
   const highlightId = activeId ?? currentId;
   const compact = size === 'compact';
   const nodeSize = compact ? 'w-7 h-7' : 'w-9 h-9';
+  // Une mission complète compte une douzaine de phases : sur un téléphone, la
+  // phase consultée (à défaut la phase en cours) est ramenée dans le champ.
+  const scrollRef = useHorizontalScrollHints<HTMLDivElement>('[data-step-active]', highlightId);
 
   return (
-    <div role="group" aria-label={ariaLabel} className={cn('flex items-start overflow-x-auto pb-1', className)}>
+    <div ref={scrollRef} role="group" aria-label={ariaLabel} className={cn('scroll-fade-x flex items-start overflow-x-auto pb-1', className)}>
       {steps.map((step, i) => {
         const status: 'done' | 'current' | 'upcoming' =
           currentIndex === -1 ? 'upcoming' : i < currentIndex ? 'done' : i === currentIndex ? 'current' : 'upcoming';
@@ -55,6 +59,7 @@ export function PhaseStepper({ steps, currentId, activeId, onSelect, size = 'def
               title={[stepTitle?.(step), badge?.label].filter(Boolean).join(' · ') || undefined}
               aria-current={status === 'current' ? 'step' : undefined}
               aria-pressed={onSelect ? isActive : undefined}
+              data-step-active={isActive || undefined}
               className={cn(
                 'flex flex-col items-center rounded-xl shrink-0 transition-colors',
                 compact ? 'gap-1 px-1.5 py-1.5' : 'gap-1.5 px-2.5 py-2',

@@ -42,7 +42,13 @@ export const i18nReady: Promise<void> = localeLoaders[initialLang]().then(({ def
         escapeValue: false
       }
     })
-    .then(() => {})
+    .then(() => {
+      // La langue de la page suit celle de l'interface : lecteurs d'écran et
+      // césure (hyphens: auto) prononcent et coupent alors le français en français.
+      const syncLang = (lng: string) => { document.documentElement.lang = lng.slice(0, 2); };
+      syncLang(i18n.language || initialLang);
+      i18n.on('languageChanged', syncLang);
+    })
 );
 
 /** Switches the active language, lazily fetching its bundle the first time it's needed. */

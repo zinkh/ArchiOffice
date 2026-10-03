@@ -267,7 +267,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
             <Kpi
               label={t('situations_travaux_kpi_admitted')}
               value={formatEuros(totaux.admisHt)}
-              sub={totaux.avancement === null ? undefined : t('situations_travaux_progress', { pct: totaux.avancement.toLocaleString('fr-FR') })}
+              sub={totaux.avancement === null ? undefined : t('situations_travaux_progress_overall', { pct: totaux.avancement.toLocaleString('fr-FR') })}
             />
             <Kpi label={t('situations_travaux_kpi_certified')} value={formatEuros(totaux.certifie)} />
             <Kpi
@@ -290,8 +290,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
             className="rounded-lg overflow-hidden"
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
           >
-            <div className="px-5 py-4 flex flex-wrap items-start gap-x-6 gap-y-3">
-              <div className="min-w-0 flex-1">
+            <div className="px-4 sm:px-5 py-4 flex flex-wrap items-start gap-x-6 gap-y-3">
+              <div className="min-w-0 flex-1 basis-72">
                 <h3 id={`marche-${m.id}`} className="text-sm font-bold text-[var(--tblr-text)]">
                   {[m.lot_numero ? t('situations_travaux_lot_short', { n: m.lot_numero }) : '', m.lot_titre].filter(Boolean).join(' · ') || m.entreprise_nom}
                 </h3>
@@ -311,8 +311,8 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button type="button" className={boutonPrincipal} onClick={() => nouvelleSituation(m)} disabled={creating === m.id}>
+              <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                <button type="button" className={boutonPrincipal + ' flex-1 md:flex-none justify-center'} onClick={() => nouvelleSituation(m)} disabled={creating === m.id}>
                   {creating === m.id ? <IconLoader2 size={14} className="animate-spin" /> : <IconPlus size={14} />}
                   {t('situations_travaux_situation_add')}
                 </button>
@@ -340,14 +340,47 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
             {liste.length === 0 ? (
               <p className="px-5 pb-4 text-sm text-[var(--tblr-muted)]">{t('situations_travaux_no_situation')}</p>
             ) : (
-              <div className="overflow-x-auto border-t border-[var(--tblr-border)]">
+              <>
+              {/* Téléphone : une ligne par situation, touchable sur toute sa largeur. */}
+              <ul className="md:hidden border-t border-[var(--tblr-border)] divide-y divide-[var(--tblr-border)]">
+                {liste.map((s, i) => {
+                  const c = certificats[i];
+                  const date = s.date_reception_situation || s.date_situation;
+                  return (
+                    <li key={s.id}>
+                      <button
+                        type="button"
+                        onClick={() => setOuverte(s.id)}
+                        aria-label={t('situations_travaux_open_named', { n: s.numero_situation, company: m.entreprise_nom })}
+                        className="w-full min-h-14 px-4 py-3 flex items-center gap-3 text-left active:bg-[var(--tblr-surface-2)] focus-visible:outline-2 focus-visible:outline-blue-500"
+                      >
+                        <span className="flex-1 min-w-0">
+                          <span className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-[var(--tblr-text)]">{t('situations_travaux_number', { n: s.numero_situation })}</span>
+                            <EtatSituationBadge etat={s.etat} />
+                          </span>
+                          <span className="block text-xs text-[var(--tblr-muted)] mt-0.5 truncate">
+                            {[s.reference_entreprise, date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR') : ''].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        <span className="text-right shrink-0">
+                          <span className={'block text-sm tabular-nums ' + (estCertifiee(s) ? 'font-bold text-[var(--tblr-text)]' : 'text-[var(--tblr-muted)]')}>{formatEuros(c.netAPayer)}</span>
+                          <span className="block text-[0.6875rem] text-[var(--tblr-muted)] tabular-nums">{t('situations_travaux_period_short', { amount: formatEuros(c.periodeHt) })}</span>
+                        </span>
+                        <IconChevronRight size={16} className="text-[var(--tblr-muted)] shrink-0" aria-hidden />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="hidden md:block overflow-x-auto border-t border-[var(--tblr-border)]">
                 <table className="min-w-full text-sm">
                   <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] text-[0.6875rem] font-bold uppercase">
                     <tr>
                       <th scope="col" className="px-5 py-2 text-left">{t('situations_travaux_col_number')}</th>
-                      <th scope="col" className="px-3 py-2 text-left hidden md:table-cell">{t('situations_travaux_company_ref')}</th>
-                      <th scope="col" className="px-3 py-2 text-left hidden sm:table-cell">{t('situations_travaux_received_on')}</th>
-                      <th scope="col" className="px-3 py-2 text-right hidden md:table-cell">{t('situations_travaux_admitted_ht')}</th>
+                      <th scope="col" className="px-3 py-2 text-left hidden lg:table-cell">{t('situations_travaux_company_ref')}</th>
+                      <th scope="col" className="px-3 py-2 text-left">{t('situations_travaux_received_on')}</th>
+                      <th scope="col" className="px-3 py-2 text-right hidden lg:table-cell">{t('situations_travaux_admitted_ht')}</th>
                       <th scope="col" className="px-3 py-2 text-right">{t('situations_travaux_period_ht')}</th>
                       <th scope="col" className="px-3 py-2 text-right">{t('situations_travaux_net_to_pay')}</th>
                       <th scope="col" className="px-5 py-2 text-left">{t('situations_travaux_col_state')}</th>
@@ -370,9 +403,9 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                               <IconChevronRight size={14} className="text-[var(--tblr-muted)]" aria-hidden />
                             </button>
                           </td>
-                          <td className="px-3 py-2.5 text-[var(--tblr-muted)] hidden md:table-cell">{s.reference_entreprise || '—'}</td>
-                          <td className="px-3 py-2.5 text-[var(--tblr-muted)] hidden sm:table-cell tabular-nums">{date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR') : '—'}</td>
-                          <td className="px-3 py-2.5 text-right tabular-nums hidden md:table-cell">{s.montant_presente_ht === null || s.montant_presente_ht === undefined ? '—' : formatEuros(c.cumulAdmisHt)}</td>
+                          <td className="px-3 py-2.5 text-[var(--tblr-muted)] hidden lg:table-cell">{s.reference_entreprise || '—'}</td>
+                          <td className="px-3 py-2.5 text-[var(--tblr-muted)] tabular-nums whitespace-nowrap">{date ? new Date(`${String(date).slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR') : '—'}</td>
+                          <td className="px-3 py-2.5 text-right tabular-nums hidden lg:table-cell whitespace-nowrap">{s.montant_presente_ht === null || s.montant_presente_ht === undefined ? '—' : formatEuros(c.cumulAdmisHt)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums">{formatEuros(c.periodeHt)}</td>
                           <td className="px-3 py-2.5 text-right tabular-nums font-bold text-[var(--tblr-text)]">{estCertifiee(s) ? formatEuros(c.netAPayer) : <span className="font-normal text-[var(--tblr-muted)]">{formatEuros(c.netAPayer)}</span>}</td>
                           <td className="px-5 py-2.5"><EtatSituationBadge etat={s.etat} /></td>
@@ -382,6 +415,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                   </tbody>
                 </table>
               </div>
+              </>
             )}
           </section>
         );

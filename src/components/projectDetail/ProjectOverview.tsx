@@ -121,7 +121,10 @@ export function ProjectOverview({
   const viewedPhase: DocumentPhase = notePhase || currentPhase;
   const pendingPermit = useMemo(() => permits.find(p => p.status === 'en_instruction'), [permits]);
   const nextMilestone = useMemo(() => {
-    const upcoming = milestones.filter(m => !m.completed).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
+    // Un jalon sans date (ou à date illisible) n'est pas une échéance : il
+    // afficherait « Invalid Date ».
+    const hasDate = (m: Milestone) => !!m.due_date && !Number.isNaN(new Date(m.due_date).getTime());
+    const upcoming = milestones.filter(m => !m.completed && hasDate(m)).sort((a, b) => new Date(a.due_date).getTime() - new Date(b.due_date).getTime());
     return upcoming[0];
   }, [milestones]);
   const sortedMilestones = useMemo(

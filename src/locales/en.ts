@@ -2147,6 +2147,8 @@ export default {
       "situations_travaux_retention": "Retention {{rate}}%",
       "situations_travaux_net_to_pay": "Net payable (incl. VAT)",
       "situations_travaux_progress": "Contract progress: {{pct}}%",
+      "situations_travaux_progress_overall": "Overall progress: {{pct}}%",
+      "situations_travaux_period_short": "period {{amount}} excl. VAT",
       "situations_travaux_progress_label": "Progress of {{company}}'s contract",
       "situations_travaux_alert_no_amount": "Enter the cumulative amount claimed by the contractor.",
       "situations_travaux_alert_negative": "The admitted total is below the previous one: this period is negative.",

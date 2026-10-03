@@ -1,5 +1,6 @@
 import React from 'react';
 import { cn } from '../../lib/utils';
+import { useHorizontalScrollHints } from '../../hooks/useHorizontalScrollHints';
 
 export interface PillTabItem {
   id: string;
@@ -23,6 +24,7 @@ interface PillTabsProps {
 }
 
 export function PillTabs({ tabs, activeId, onChange, className, ariaLabel }: PillTabsProps) {
+  const scrollRef = useHorizontalScrollHints<HTMLDivElement>('[aria-selected="true"]', activeId);
   // Flèches gauche/droite, Début et Fin entre les onglets (motif ARIA « tabs »,
   // activation automatique) : seul l'onglet actif est dans l'ordre de tabulation.
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -42,10 +44,11 @@ export function PillTabs({ tabs, activeId, onChange, className, ariaLabel }: Pil
 
   return (
     <div
+      ref={scrollRef}
       role="tablist"
       aria-label={ariaLabel}
       onKeyDown={onKeyDown}
-      className={cn('inline-flex items-center gap-1 p-1 rounded-lg overflow-x-auto max-w-full', className)}
+      className={cn('scroll-fade-x inline-flex items-center gap-1 p-1 rounded-lg overflow-x-auto max-w-full', className)}
       style={{ background: 'var(--tblr-surface-2)' }}
     >
       {tabs.map(tab => {
