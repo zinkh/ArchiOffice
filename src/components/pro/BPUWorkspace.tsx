@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
+import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard, IconDeviceFloppy,
@@ -538,9 +538,11 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   // ── Ruban ───────────────────────────────────────────────────────────────────
   const selectionCount = selectedRowKeys.size;
   const hierarchySelection = selectedRowKeys.size === 1 ? parseRowKey([...selectedRowKeys][0]) : null;
-  const changeHierarchy = (direction?: -1 | 1 | 'duplicate') => {
+  const changeHierarchy = (direction?: -1 | 1 | 'duplicate' | 'demote') => {
     if (!hierarchySelection) return;
-    const result = direction === 'duplicate'
+    const result = direction === 'demote'
+      ? demoteHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
+      : direction === 'duplicate'
       ? duplicateHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
       : direction === undefined
       ? promoteHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
@@ -553,6 +555,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       setSelectedChap({ lotIdx: selected.lotIdx, chapIdx: selected.chapIdx });
     }
     setExpandedLots(new Set(result.lots.map(l => l.id)));
+    const expanded = new Set(expandedLignes);
+    result.lots.forEach(lot => lot.chapitres.forEach(chap => collectLigneIdsWithChildren(chap.lignes, expanded)));
+    setExpandedLignes(expanded);
     setExpandedChaps(new Set(result.lots.flatMap(l => l.chapitres.map(c => c.id))));
   };
 
@@ -574,6 +579,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => changeHierarchy(1), disabled: !canMove(bpu.lots, hierarchySelection, 1) },
             { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => changeHierarchy('duplicate'), disabled: !hierarchySelection },
             { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(), disabled: hierarchySelection?.kind !== 'ligne' },
+            { id: 'demote', label: t('pro_demote'), icon: <IconArrowDown size={20} />, onClick: () => changeHierarchy('demote'), disabled: !canDemote(bpu.lots, hierarchySelection) },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {

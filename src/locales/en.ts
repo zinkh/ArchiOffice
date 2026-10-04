@@ -1,4 +1,5 @@
 export default {
+  "pro_demote": "Demote one level",
   "pro_duplicate": "Duplicate",
   "pro_promote": "Promote one level",
   "pro_add_child": "Sub-article",
