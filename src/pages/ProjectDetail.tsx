@@ -322,6 +322,7 @@ export default function ProjectDetail() {
   });
 
   const [isAddingOs, setIsAddingOs] = useState(false);
+  const [isCreatingOs, setIsCreatingOs] = useState(false);
   const [isAddingOsMoe, setIsAddingOsMoe] = useState(false);
 
   // VISA modal state
@@ -1126,7 +1127,8 @@ export default function ProjectDetail() {
   };
 
   const handleCreateOs = async () => {
-    if (!id || !newOs.title || !newOs.os_number || !newOs.marche_id) return;
+    if (!id || !newOs.title || !newOs.os_number || !newOs.marche_id || isCreatingOs) return;
+    setIsCreatingOs(true);
     try {
       const res = await fetch('/api/ordres_de_service', {
         method: 'POST',
@@ -1161,6 +1163,9 @@ export default function ProjectDetail() {
       }
     } catch (err) {
       console.error(err);
+      showToast(t('projectdetail_os_create_failed'), 'error', { duration: 6000 });
+    } finally {
+      setIsCreatingOs(false);
     }
   };
 
@@ -4138,10 +4143,10 @@ export default function ProjectDetail() {
                           </div>
                         </div>
                         <div className="md:col-span-2 flex items-end">
-                          <button type="button" onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title}
+                          <button type="button" onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title || isCreatingOs}
                             title={!newOs.marche_id || !newOs.title ? t('projectdetail_os_create_disabled') : undefined}
                             className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
-                            {t('projectdetail_os_create')}
+                            {isCreatingOs ? 'Création…' : t('projectdetail_os_create')}
                           </button>
                         </div>
                       </div>
