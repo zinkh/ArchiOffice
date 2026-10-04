@@ -420,6 +420,235 @@ attendre qu'ils soient chargés recrée le bug.
 l'en-tête (et celui de la fiche complète) prend la première phase affichée
 comme phase en cours plutôt que de ne rien marquer.
 
+### Fiche affaire : enregistrement automatique et facture d'une note
+
+**Plus de bouton Enregistrer.** La fiche (aperçu, fiche complète, champs
+HONOS) s'enregistre seule, comme les notes, avenants, jalons et la
+consultation ACT : `useProjectAutosave` (`src/hooks/useProjectAutosave.ts`)
+envoie la fiche 1,2 s après la dernière frappe, chaîne les écritures (c'est la
+fiche du moment de l'envoi qui part, une frappe pendant un envoi en déclenche
+un autre), réessaie 5 s après un échec et envoie la fiche en attente au départ
+de l'écran ou à la fermeture de l'onglet (`pagehide`, `keepalive` sous 64 Ko).
+`isProjectDirty()` (`src/lib/projectDirty.ts`, testé) compare la fiche
+affichée à la dernière version chargée ou enregistrée (`savedProject`) ; rien
+ne part avant la lecture de la fiche. L'en-tête montre « Enregistrement… » puis
+« Enregistré », ou « Échec de l'enregistrement » avec « Réessayer »
+(`AutosaveIndicator.tsx`). Une fiche dont le nom a été vidé n'est pas envoyée
+(`canAutosaveProject`). Ctrl+S envoie tout de suite. `useUnsavedChangesGuard`
+ne prévient plus avant de quitter qu'en cas d'échec ou de nom manquant. Sous
+`BrowserRouter`, `useBlocker` n'existe pas : un `navigate()` programmatique
+doit passer par `confirmDiscard()`. Les montants repris du contrat lié
+(`remuneration`, `construction_cost`) ne comptent pas comme une saisie.
+
+**L'enregistrement n'envoie jamais les listes rattachées**
+(`projectSavePayload` retire `lots_list`, `cotraitants_list`,
+`stakeholders_list`, `categories_list`), et `PUT /api/projects/:id` ne
+remplace une liste que si le corps la porte (`replaceList`,
+`server/routes/projects.ts`, `tests/projectUpdateLists.test.ts`). Une ligne
+déjà existante y garde son identifiant et ses autres colonnes. Avant ce
+correctif, chaque enregistrement de la fiche recréait les lots avec un nouvel
+identifiant et sans leurs montants (`base_amount`...), ce qui détachait les
+visas (`lot_id`), les marchés et le DPGF (`projectLotId`).
+
+Générer la facture brouillon d'une note se confirme montant HT et TTC sous les
+yeux, et se conclut par un toast « Ouvrir la facture » (`/invoices?open=<id>`)
+; « Facture créée » est un lien. `saveNote` garde le formulaire ouvert tant que
+le serveur n'a pas confirmé. Les `alert()` de la fiche sont des toasts
+(`useToastWithUndo`).
+
+### Fiche affaire : onglets regroupés et onglet dans l'adresse
+
+Les dix onglets de la fiche (INFOS, TACHES, HONOS, PRO, ACT, VISA, DET, RDT,
+AOR, CORRESPONDANCE) gardent leurs identifiants et leur contenu, mais la barre
+(`ProjectTabBar.tsx`, logique pure dans `src/lib/projectTabs.ts`, testée) les
+présente en sept familles au plus : Infos, Tâches, Honoraires, Études (PRO),
+Consultation (ACT), Chantier, Correspondance. Les quatre missions de chantier
+passent en second niveau sous « Chantier », sigle MOP et nom complet ; revenir
+sur une famille rouvre la mission qu'on y consultait. Une famille sans onglet
+visible disparaît (hors mission chantier, cinq entrées). `PillTabs` porte
+désormais les rôles ARIA d'onglets et la navigation aux flèches.
+
+L'onglet ouvert vit dans `?tab=` (sauf INFOS, le défaut), écrit en
+`replace` pour ne pas empiler l'historique : il survit au rechargement et au
+retour depuis un autre écran. L'état initial est lu dans l'adresse dès le
+premier rendu (sinon l'écriture de l'onglet par défaut effacerait le
+paramètre avant sa lecture) ; un identifiant inconnu retombe sur INFOS. Les
+liens existants (`?tab=TACHES`, liens d'agent `?tab=&open=`) restent valides.
+Le stepper de phases de l'en-tête est nommé (« Phases de mission ») : une
+pastille affiche le journal de sa phase (voir ci-dessous), le bouton « Passer
+en {phase suivante} » à sa droite fait avancer la phase réelle après
+confirmation.
+
+Finitions de la même fiche, à conserver : les fenêtres (VISA, accusé de
+réception d'OS, suppression de l'affaire) partagent le même voile
+`bg-black/50`, portent `role="dialog"` et se ferment à Échap
+(`useEscapeKey`, sauf pendant un enregistrement ou une suppression) ; les
+actions révélées au survol (`opacity-0 group-hover:opacity-100`) restent
+visibles au doigt (`pointer-coarse:`) et au clavier (`focus-within:`) ; les
+lignes de groupe VISA et DOE se déplient par un vrai bouton (`aria-expanded`) ;
+les jalons de l'aperçu sont des cases (`role="checkbox"`). Les couleurs de
+l'aperçu et du badge MAF passent par les jetons `--tblr-*`, jamais par des hex
+figés qui ignorent le thème sombre.
+
+**Plus aucun `window.confirm()` dans la fiche.** Deux régimes :
+
+- **Suppression annulable** (note d'honoraires, avenant, OS, permis) :
+  `deleteWithUndo()` retire l'élément tout de suite et affiche « Annuler »
+  pendant 6 s ; la requête `DELETE` ne part qu'ensuite
+  (`UndoableDeleteQueue`, `src/lib/undoableDelete.ts`, testée ;
+  `useUndoableDelete`). Une seule suppression en attente : en lancer une
+  autre envoie la première. Quitter l'écran ou fermer l'onglet (`pagehide`,
+  requête en `keepalive`) envoie la suppression en attente, jamais ne
+  l'oublie. Un refus du serveur remet l'élément à sa place, avec un message.
+- **Confirmation dans l'application** (`useConfirmDialog`,
+  `src/components/ui/ConfirmDialog.tsx`, `role="alertdialog"`, Échap, focus
+  tenu, focus initial sur « Annuler » pour une suppression) : jalons (que la
+  synchronisation avec le contrat recrée, d'où pas d'annulation différée),
+  RFI, visas, PV, réserves, documents DOE et plans, dont la suppression
+  emporte souvent un fichier. La facture d'une note s'y confirme aussi, avec
+  un récapitulatif HT, TVA et TTC.
+
+### Fiche affaire : textes et libellés
+
+Tous les textes de la fiche (`ProjectDetail.tsx`, `ProjectOverview.tsx`)
+passent par i18next (`projectdetail_*`, `project_overview_*`), sauf le contenu
+des PDF générés (OS, avenant, PV de réception) : ce sont des pièces
+contractuelles françaises remises au maître d'ouvrage, volontairement non
+traduites. Quatre règles à garder :
+
+- **Une valeur stockée en français reste stockée telle quelle**, seul son
+  affichage se traduit : statuts de note (`NOTE_STATUS_KEYS`), de réserve
+  (`reserveStatusKey`, `src/components/pro/reserveShared.tsx`), d'affaire
+  (`projects_status_*`), d'autorisation d'urbanisme (`project_permit_status_*`).
+  Les noms de phase de la mission ont une seule source (`mission_phase_<CODE>`,
+  vocabulaire de la loi MOP : APD = avant-projet définitif).
+- **Un même cycle de statuts n'a pas les mêmes mots partout** :
+  `osStatusBadge(status, 'os' | 'avenant')`, un OS approuvé a son accusé de
+  réception, un avenant est accepté. Visas et DOE disent l'avis du maître
+  d'œuvre (favorable, avec observations, défavorable), jamais « validé ».
+- **Chaque champ a un libellé relié** (`htmlFor`/`id`, `FormField` le fait
+  seul avec `useId`), chaque bouton icône un `aria-label` qui nomme son objet.
+- **« Honoraires » dans le plan d'actions de l'aperçu mène à l'onglet HONOS**
+  (notes d'honoraires de l'agence), toujours actif. Il menait aux « factures
+  entreprises » de RDT et n'était actif qu'en mission chantier. RDT ne porte
+  plus aucune facture de l'agence : voir « Situations de travaux et
+  certificats de paiement ». Les montants de l'aperçu et de la fiche complète
+  sont en lecture seule dès qu'un contrat est rattaché, comme dans HONOS.
+
+### Fiche affaire sur téléphone et tablette
+
+Vérifiée en 390, 820 et 1366 px. Règles à garder :
+
+- **En-tête** : retour, titre (tronqué), supprimer et état d'enregistrement
+  sur une seule ligne ; le stepper de phases prend toute la ligne suivante.
+- **Barres défilantes** (familles d'onglets, missions de chantier, stepper) :
+  `useHorizontalScrollHints` ramène l'élément actif dans le champ (en réglant
+  `scrollLeft`, jamais `scrollIntoView`, qui ferait défiler la page) et pose
+  `data-fade-start`/`data-fade-end` ; la classe `.scroll-fade-x` estompe le bord
+  où du contenu est caché. Sans cela, la famille « Chantier » ouverte restait
+  hors de l'écran.
+- **`CardHeader`** passe l'action sous le titre quand la largeur manque (le
+  titre garde 14rem) au lieu de tronquer le titre à trois lettres.
+- **`StatTile`** : montant en `text-lg` sous 640 px, pour qu'un « 48 000,00 € »
+  tienne dans une demi-largeur de téléphone.
+- **Message vide d'un tableau plus large que l'écran** : `.table-empty-message`
+  (collant à gauche) au lieu d'un texte centré sur toute la largeur, donc coupé.
+- **RDT** : liste de situations touchable sous 768 px, tableau au-delà (référence
+  et cumul admis à partir de 1024 px) ; la saisie ligne à ligne ne défile dans son
+  cadre qu'au bureau (pas de défilement dans le défilement sur téléphone).
+- **`<html lang>`** suit la langue de l'interface (`src/i18n.ts`) : il valait
+  `en` en permanence, d'où une lecture d'écran et une césure anglaises.
+- Un jalon sans date n'est plus pris pour la prochaine échéance (« Invalid Date »).
+
+### Situations de travaux et certificats de paiement (onglet RDT)
+
+L'onglet RDT listait les factures de l'AGENCE et en déduisait un « reste à
+payer » qui mélangeait marchés de travaux et honoraires. Il porte désormais ce
+que le maître d'œuvre traite en DET/RDT : les situations de travaux des
+entreprises et les certificats de paiement établis à partir d'elles
+(`src/components/projectDetail/situations/`), sans condition `is_chantier`.
+
+- **Un bloc par marché** (`marches_entreprises` : une entreprise, un lot).
+  « Reprendre les lots du projet » crée un marché par lot de `lots_list` qui a
+  une entreprise (`contact_name`, montant base + options + avenants), sans
+  doublon par numéro de lot.
+- **Une situation porte le cumul HT** des travaux depuis le début du marché :
+  `montant_presente_ht` (ce que facture l'entreprise) et `montant_admis_ht`
+  (ce que l'architecte retient ; vide = le présenté est admis), plus
+  `reference_entreprise` et `date_certificat`
+  (`supabase/migrate_situations_certificats.sql`). Numérotée PAR MARCHÉ.
+- **Le certificat se calcule en cumul** (`src/lib/certificatPaiement.ts`,
+  testé) : période = cumul admis − cumul admis de la situation précédente DU
+  MÊME MARCHÉ ; révision (si prix révisables), TVA, retenue de garantie (sur le
+  TTC, nulle sous caution bancaire ou sur une période négative), remboursement
+  d'avance, pénalités, net à payer. **Décompte de clôture** : total HT, liste
+  des situations, TVA, TTC, puis reste à payer TTC = TTC − pénalités − avance
+  versée − nets des certificats établis − retenue (libérable à la fin du délai
+  de garantie, annoncée à part).
+- **États stockés inchangés** (`Brouillon`, `Validée`, `Payée`), affichés « À
+  vérifier », « Certificat établi », « Payée ». « Établir le certificat »
+  enregistre `Validée` + `date_certificat` et télécharge le PDF ; les montants
+  sont alors verrouillés jusqu'à « Rouvrir la vérification ».
+- **Un seul rendu PDF** (`src/lib/certificatPaiementPdf.ts`), appelé par le
+  navigateur (`certificatPaiementExport.ts`) ET par le serveur
+  (`server/etatAcompte.ts`, logo via `loadAgencyIdentity`) pour la pièce jointe
+  déposée sur la facture de l'entreprise chez Chorus Pro (public) ou Super PDP
+  (privé) : le maître d'ouvrage reçoit le même document par les deux chemins.
+  Charte du cabinet, nuances de gris, « P1|2 », date du certificat en en-tête.
+- `POST/PUT /api/situations` (`server/routes/situations.ts`,
+  `tests/situationsTravaux.test.ts`) passent par une liste blanche de champs
+  (les colonnes Chorus Pro / Super PDP restent à leurs routes) et valident
+  montants, dates et état. L'ancien `POST` écrivait `numero`/`statut`, colonnes
+  inexistantes : aucune situation n'avait jamais pu être créée.
+- **Deux modes de saisie cohabitent** (`situations.mode_saisie`,
+  `supabase/migrate_situations_mode_detaille.sql`) : `simple`, le cumul HT se
+  saisit directement ; `detaille`, un avancement CUMULÉ (%) se saisit sur
+  chaque ligne du DPGF structuré du lot (`/api/projects/:id/dpgf`, jamais
+  l'ancienne table `dpgf_items`) et le cumul en découle
+  (`src/lib/situationDetaillee.ts`, testé ; `AvancementLignesTable.tsx`). Le
+  lot du DPGF se retrouve par numéro (« 2 » = « 02 »), à défaut par intitulé ;
+  le prix est celui de l'offre importée de l'entreprise (même nom, non
+  écartée), à défaut celui du DPGF. Les lignes sont FIGÉES dans
+  `situations.avancement_lignes` (désignation, quantité, prix, %) : un DPGF
+  modifié après coup ne change pas une situation déjà saisie, et une ligne
+  retirée du DPGF reste comptée. Une nouvelle situation repart de
+  l'avancement de la précédente du même marché. **Le serveur recalcule
+  `montant_presente_ht` à partir des lignes** (et `montantHt` = quantité × prix)
+  sans croire un montant envoyé. Le certificat se calcule ensuite de la même
+  façon dans les deux modes ; en mode détaillé, son PDF porte une annexe ligne
+  à ligne (précédent, cumul, période).
+- Les lignes `detail_situations` (avancement par poste de l'ancienne table
+  `dpgf_items`) ne servent plus ; `src/pages/Situations.tsx`, qui les
+  saisissait, est supprimé.
+
+### Journal de l'opération (notes de phase)
+
+Les observations de la fiche étaient deux champs (`etudes_notes`,
+`chantier_notes`) partagés par toutes les phases : la note d'APS était écrasée
+par celle de l'APD. `project_phase_notes` (`supabase/migrate_project_phase_notes.sql`,
+hors `SYNC_TABLES`) porte une entrée datée par évènement : phase MOP, type
+(`observation`, `programme`, `budget`, `decision_moa`, `attention`), auteur,
+et pour un budget l'estimation des travaux avant ET après (écart en € et en %
+calculé, `budgetDelta`, `src/lib/phaseJournal.ts`, testé). Routes
+`server/routes/projectPhaseNotes.ts` (`GET/POST /api/projects/:id/phase-notes`,
+`PUT/DELETE /api/phase-notes/:noteId`, `tests/projectPhaseNotes.test.ts`) ;
+une instance sans la table lit un journal vide et refuse l'écriture en 503,
+sans casser la fiche.
+
+`PhaseJournal.tsx` remplace le champ Observations en tête de la colonne C de
+l'aperçu ; Objet et Programme restent des champs de l'affaire, sous le
+journal. Le stepper de l'en-tête porte un compteur par phase, rouge quand une
+note de la phase est un dépassement de budget ; une pastille ouvre le journal
+de sa phase, « Passer en … » (confirmé) appelle `POST /api/projects/:id/phase`.
+`missionPhases` (`ProjectDetail.tsx`) est la seule liste des phases de la
+mission, partagée par les deux steppers et le journal.
+
+La migration reprend les anciennes observations en entrées `legacy-etudes-<id>`
+/ `legacy-chantier-<id>` (identifiants déterministes, rejouable) sur la
+dernière phase connue de la famille ; les colonnes ne sont pas supprimées.
+Tant qu'aucune entrée `legacy-` n'est lue, l'aperçu montre ces anciennes
+observations en lecture seule : une instance non migrée ne les perd pas de vue.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

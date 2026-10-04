@@ -425,7 +425,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               })}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucune réserve.</td>
+                  <td colSpan={8} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">Aucune réserve.</span></td>
                 </tr>
               )}
             </tbody>

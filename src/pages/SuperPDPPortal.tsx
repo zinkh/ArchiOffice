@@ -275,7 +275,7 @@ export default function SuperPDPPortal() {
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <IconBuildingBank size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune facture entreprise liée sur Super PDP pour l'instant.</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Rechercher sur Super PDP</strong> depuis l'onglet Situations d'un projet à marché privé pour retrouver la facture déposée par l'entreprise, puis y joindre l'état d'acompte.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Depuis l'onglet RDT d'une affaire à marché privé, ouvrez une situation au certificat établi et utilisez <strong>Rechercher sur Super PDP</strong> pour retrouver la facture déposée par l'entreprise, puis y joindre le certificat de paiement.</p>
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
