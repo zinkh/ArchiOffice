@@ -4,6 +4,7 @@ import { IconTrash, IconPlus, IconRefresh, IconGripVertical } from '@tabler/icon
 import { apiFetch } from '../../lib/api';
 import { startPressDrag } from '../../lib/pressDrag';
 import { comparerNumerosDeLot, type LotProjet } from '../../lib/lotsOrder';
+import { useConfirmDialog } from '../ui/ConfirmDialog';
 
 interface Lot {
   id: string;
@@ -26,6 +27,7 @@ interface LotsManagerProps {
 export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, onRename }) => {
   const [lots, setLots] = useState<Lot[]>([]);
   const [error, setError] = useState('');
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
   const rename = async (id: string, title: string) => {
     setError('');
     try {
@@ -121,7 +123,15 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
   };
 
   const handleDeleteLot = async (id: string) => {
-    if (!confirm('Supprimer ce lot ?')) return;
+    const lot = lots.find(l => l.id === id);
+    const confirmed = await confirmAction({
+      title: 'Supprimer ce lot ?',
+      message: lot ? `Le lot « ${lot.lot_number} ${lot.lot_title} » sera définitivement supprimé.` : undefined,
+      confirmLabel: 'Supprimer',
+      cancelLabel: 'Annuler',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
     try {
       await apiFetch(`/api/lots/${id}`, { method: 'DELETE' });
       notifier(await fetchLots());
@@ -256,6 +266,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
         </table>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 };

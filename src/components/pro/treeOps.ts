@@ -337,3 +337,32 @@ export function parseRowKey(key: string): ParsedRowKey {
   }
   return null;
 }
+
+// ── Collecte des IDs d'articles ──────────────────────────────────────────────
+// Factorisé depuis ProTab.editDpgf / editBpu où la même traversée était
+// dupliquée mot pour mot en deux lambdas « any » inline.
+
+/** Collecte récursivement tous les identifiants de lignes dans un arbre DPGF/BPU. */
+export function collectLigneIds(doc: { lots?: { chapitres?: { lignes?: any[] }[] }[] } | null | undefined, out: Set<string>): void {
+  if (!doc?.lots) return;
+  const walk = (xs: any[]) => xs?.forEach((x: any) => { if (x.id) out.add(x.id); walk(x.children ?? []); });
+  doc.lots.forEach((l: any) => l.chapitres?.forEach((c: any) => walk(c.lignes ?? [])));
+}
+
+/**
+ * Retourne les lignes de `next` dont l'id n'est pas dans `beforeIds` et qui ont
+ * une désignation — ce sont les articles nouvellement ajoutés à envoyer à la
+ * bibliothèque de prix du cabinet.
+ */
+export function collectNouvellesLignes(
+  next: { lots?: { chapitres?: { lignes?: any[] }[] }[] } | null | undefined,
+  beforeIds: Set<string>,
+): Array<{ id: string; numero?: string; designation: string; unite?: string; prixUnitaire?: number }> {
+  const added: Array<{ id: string; numero?: string; designation: string; unite?: string; prixUnitaire?: number }> = [];
+  const walk = (xs: any[]) => xs?.forEach((x: any) => {
+    if (x.id && !beforeIds.has(x.id) && x.designation) added.push(x);
+    walk(x.children ?? []);
+  });
+  next?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => walk(c.lignes ?? [])));
+  return added;
+}
