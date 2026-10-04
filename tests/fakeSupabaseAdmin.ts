@@ -91,6 +91,22 @@ export class FakeSupabaseAdmin {
   // as Postgres would under a row lock, so the atomicity these functions
   // exist for isn't something this in-memory fake can fail to reproduce.
   async rpc(fnName: string, params: Record<string, any>) {
+    if (fnName === 'commit_phase_transition') {
+      const p = params;
+      const project = this.getTable('projects').find(r => r.id === p.p_project_id && r.tenant_id === p.p_tenant_id);
+      const history = this.getTable('project_phase_history');
+      const current = history.find(r => r.project_id === p.p_project_id && r.tenant_id === p.p_tenant_id && !r.exited_at);
+      if (!project || (current?.id ?? null) !== p.p_expected_id || JSON.stringify(project.phase_control_config ?? null) !== JSON.stringify(p.p_expected_config)) {
+        return { data: null, error: { code: '40001', message: 'Project changed' } };
+      }
+      const now = new Date().toISOString();
+      if (current) current.exited_at = now;
+      const created = { id: p.p_id, tenant_id: p.p_tenant_id, project_id: p.p_project_id, phase: p.p_phase,
+        entered_at: now, exited_at: null, control_audit: { ...p.p_audit, task_ids: p.p_tasks.map((t: any) => t.id) } };
+      this.seed('project_phase_history', [created]);
+      this.seed('tasks', p.p_tasks.map((task: any) => ({ ...task, tenant_id: p.p_tenant_id, phase_transition_id: p.p_id })));
+      return { data: structuredClone(created), error: null };
+    }
     const tenants = this.tables.get('tenants') || [];
     const tenant = tenants.find(t => t.id === params.p_tenant_id);
     if (fnName === 'increment_ai_credits' || fnName === 'deduct_ai_credits') {

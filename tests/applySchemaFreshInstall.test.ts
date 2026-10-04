@@ -50,6 +50,25 @@ describe.skipIf(!hasPostgres)('applyLocalSchema — installation neuve contre un
         // de CI pour savoir laquelle a échoué.
         throw new Error(`${err.message}\n${logLines.join('\n')}`);
       }
+      // Test réel de la transaction : une erreur de tâche doit annuler aussi
+      // la fermeture de phase et l'audit. Le faux Supabase ne prouve pas cela.
+      const tenantId = '00000000-0000-4000-8000-000000000001';
+      await client.query('INSERT INTO tenants(id,slug,name) VALUES ($1,$2,$3)', [tenantId, 'phase-test', 'Test']);
+      await client.query("INSERT INTO projects(id,tenant_id,name,client,status) VALUES ('phase-project',$1,'Villa','MOA','Planning')", [tenantId]);
+      await client.query("INSERT INTO project_phase_history(id,tenant_id,project_id,phase,entered_at) VALUES ('esq',$1,'phase-project','ESQ','2026-01-01')", [tenantId]);
+      const call = 'SELECT commit_phase_transition($1,$2,$3,$4,$5,$6,$7,$8) AS result';
+      const audit = JSON.stringify({ controls: [] });
+      const task = { id: 'phase-task', title: 'Étude de sol', start_date: '2026-01-01', end_date: '2026-01-01', due_date: '2026-01-01', priority: 'high', phase_control_id: 'soil' };
+      await expect(client.query(call, [tenantId, 'phase-project', 'esq', null, 'APS', 'aps-failed', audit, JSON.stringify([{ ...task, title: null }])])).rejects.toThrow();
+      expect((await client.query("SELECT exited_at FROM project_phase_history WHERE id='esq'")).rows[0].exited_at).toBeNull();
+      expect((await client.query("SELECT id FROM project_phase_history WHERE id='aps-failed'")).rows).toHaveLength(0);
+      await client.query(call, [tenantId, 'phase-project', 'esq', null, 'APS', 'aps', audit, JSON.stringify([task])]);
+      expect((await client.query("SELECT phase_transition_id FROM tasks WHERE id='phase-task'")).rows[0].phase_transition_id).toBe('aps');
+      await expect(client.query(call, [tenantId, 'phase-project', 'esq', null, 'APD', 'stale', audit, '[]'])).rejects.toMatchObject({ code: '40001' });
+      expect((await client.query("SELECT id FROM project_phase_history WHERE project_id='phase-project' AND exited_at IS NULL")).rows).toEqual([{ id: 'aps' }]);
+      // Aucun rôle client ne reçoit l'EXECUTE par l'intermédiaire de PUBLIC.
+      const acl = await client.query("SELECT proacl::text AS acl FROM pg_proc WHERE proname='commit_phase_transition'");
+      expect(acl.rows[0].acl).not.toMatch(/(?:\{|,)=X/);
     } finally {
       await client.end();
     }

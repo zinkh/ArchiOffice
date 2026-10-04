@@ -1,0 +1,558 @@
+{
+  "version": 1,
+  "context": {},
+  "phaseDeadlines": {},
+  "rules": [
+    {
+      "id": "releve-existant",
+      "title": "Relevé de l’existant",
+      "from": "DIAG",
+      "to": "ESQ",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "existing"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "relevé"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "diagnostics",
+      "title": "Diagnostics avant travaux",
+      "from": "DIAG",
+      "to": "ESQ",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "existing"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "diagnostic"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "abf",
+      "title": "Contraintes patrimoine / ABF",
+      "from": "DIAG",
+      "to": "ESQ",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "abf"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "ABF"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "geotechnique",
+      "title": "Étude géotechnique disponible ou commandée",
+      "from": "ESQ",
+      "to": "APS",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "géotechnique",
+        "étude de sol"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "topographie",
+      "title": "Relevé topographique",
+      "from": "ESQ",
+      "to": "APS",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "topographique",
+        "topo"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "estimation-esq",
+      "title": "Estimation ESQ",
+      "from": "ESQ",
+      "to": "APS",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "estimation"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "validation-esq",
+      "title": "Validation ESQ par la MOA",
+      "from": "ESQ",
+      "to": "APS",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "validation MOA"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "notice",
+      "title": "Notice sommaire",
+      "from": "APS",
+      "to": "APD",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "notice sommaire"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "estimation-aps",
+      "title": "Estimation APS",
+      "from": "APS",
+      "to": "APD",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "estimation"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "bet",
+      "title": "Principes techniques BET",
+      "from": "APS",
+      "to": "APD",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "BET",
+        "principes techniques"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "structure",
+      "title": "Faisabilité structure",
+      "from": "APS",
+      "to": "APD",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "structure"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "structure"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "securite",
+      "title": "Sécurité incendie et accessibilité ERP",
+      "from": "APS",
+      "to": "APD",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "erp"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "sécurité",
+        "accessibilité"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "ct",
+      "title": "Préparation / transmission des pièces au CT",
+      "from": "APD",
+      "to": "PC",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "ct"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "contrôle technique",
+        "CT"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "sps",
+      "title": "Préparation / transmission des pièces au SPS",
+      "from": "APD",
+      "to": "PC",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "sps"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "SPS",
+        "PGC"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "pc",
+      "title": "Pièces réglementaires du permis",
+      "from": "APD",
+      "to": "PC",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "CERFA",
+        "notice",
+        "insertion"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "abf-pc",
+      "title": "Consultation ABF / UDAP",
+      "from": "APD",
+      "to": "PC",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "abf"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "ABF",
+        "UDAP"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "cctp",
+      "title": "CCTP complet",
+      "from": "PRO",
+      "to": "DCE",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "CCTP"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "dpgf",
+      "title": "DPGF établie",
+      "from": "PRO",
+      "to": "DCE",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "DPGF"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "plans",
+      "title": "Plans de consultation",
+      "from": "PRO",
+      "to": "DCE",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "plan"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "estimation-pro",
+      "title": "Estimation PRO actualisée",
+      "from": "PRO",
+      "to": "DCE",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "estimation"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "planning-dce",
+      "title": "Planning prévisionnel de travaux",
+      "from": "PRO",
+      "to": "DCE",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "planning"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "analyse",
+      "title": "Analyse des offres",
+      "from": "ACT",
+      "to": "VISA",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "analyse des offres",
+        "RAO"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "assurances",
+      "title": "Assurances des entreprises vérifiées",
+      "from": "ACT",
+      "to": "VISA",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "assurance"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "attribution",
+      "title": "Attribution et marchés signés",
+      "from": "ACT",
+      "to": "VISA",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "marché",
+        "attribution"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "os",
+      "title": "Ordre de service de démarrage",
+      "from": "VISA",
+      "to": "DET",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "OS",
+        "ordre de service"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "planning-det",
+      "title": "Planning d’exécution validé",
+      "from": "VISA",
+      "to": "DET",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "planning"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "exe",
+      "title": "Documents EXE et VISA",
+      "from": "VISA",
+      "to": "DET",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "EXE",
+        "VISA"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "ct-det",
+      "title": "Avis CT pris en compte",
+      "from": "VISA",
+      "to": "DET",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "ct"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "CT",
+        "contrôle technique"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "sps-det",
+      "title": "Coordination SPS organisée",
+      "from": "VISA",
+      "to": "DET",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "sps"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "SPS",
+        "PGC",
+        "PPSPS"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "opr",
+      "title": "OPR réalisées avant réception",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "OPR"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "essais",
+      "title": "Essais et vérifications",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "essais"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "doe",
+      "title": "DOE remis et vérifié",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "DOE"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "diuo",
+      "title": "DIUO remis",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "when": {
+        "all": [
+          "sps"
+        ],
+        "any": []
+      },
+      "evidenceTerms": [
+        "DIUO"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "pv",
+      "title": "PV de réception établi",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "PV",
+        "procès verbal"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "reserves",
+      "title": "Réserves recensées et suivi organisé",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "réserve"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "dgd",
+      "title": "DGD préparé / vérifié",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "DGD"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    }
+  ]
+}
