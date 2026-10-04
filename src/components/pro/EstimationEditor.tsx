@@ -4,11 +4,11 @@ import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconLayoutColumns, IconRefresh, IconX, IconDeviceFloppy,
-  IconMapPin,
+  IconMapPin, IconArrowUp, IconArrowDown,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot } from '../../types/dpgf';
-import { evalFormula, mutateLigneAtPath, deleteLigneAtPath } from './treeOps';
+import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling } from './treeOps';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
 import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
@@ -42,6 +42,10 @@ function flattenLignes(lignes: import('../../types/dpgf').Ligne[], prefix: numbe
   ]);
 }
 
+function destAppend(doc: DPGF, lotIdx: number, chapIdx: number, ligne: import('../../types/dpgf').Ligne) {
+  const chap = doc.lots[lotIdx].chapitres[chapIdx];
+  chap.lignes = renumeroterLignes([...chap.lignes, ligne], String(chap.numero || chapIdx + 1));
+}
 function recomputeDPGF(dpgf: DPGF): DPGF {
   const newLots = dpgf.lots.map(lot => {
     const sousTotal = lot.chapitres.reduce(
@@ -72,6 +76,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const [editCell, setEditCell] = useState<{ rowId: string; field: string; value: string } | null>(null);
   const [tvaDraft, setTvaDraft] = useState(String(dpgf.TVA));
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [breakdown, setBreakdown] = useState<{ lotIdx: number; chapIdx: number; ligneIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
@@ -132,21 +138,47 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   };
 
   // ── Drag & drop ───────────────────────────────────────────────────────────────
-  const handleDragStart = (e: React.DragEvent, ligne: import('../../types/dpgf').Ligne) => {
-    e.dataTransfer.effectAllowed = 'copy';
+  const handleDragStart = (e: React.DragEvent, ligne: import('../../types/dpgf').Ligne, lotIdx?: number, chapIdx?: number, path?: number[]) => {
+    e.dataTransfer.effectAllowed = 'move';
+    if (lotIdx !== undefined && chapIdx !== undefined && path) {
+      const source = { lotIdx, chapIdx, path };
+      e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(source));
+      setDragSource(source);
+    }
     e.dataTransfer.setData('application/json', JSON.stringify(ligne));
     onDragStart?.(ligne);
   };
 
-  const handleDrop = (e: React.DragEvent, lotIdx: number, chapIdx: number) => {
+  const handleDrop = (e: React.DragEvent, lotIdx: number, chapIdx: number, targetPath: number[] = []) => {
     e.preventDefault();
     setDropTarget(null);
     const raw = e.dataTransfer.getData('application/json');
     if (!raw) return;
-    const ligne = { ...JSON.parse(raw) as import('../../types/dpgf').Ligne, id: uid() };
+    const internal = e.dataTransfer.getData('application/x-archioffice-row');
     const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
-    newDpgf.lots[lotIdx].chapitres[chapIdx].lignes.push(ligne);
+    if (internal && dragSource) {
+      const source = newDpgf.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx];
+      const dest = newDpgf.lots[lotIdx].chapitres[chapIdx];
+      const taken = takeLigneAtPath(source.lignes, dragSource.path);
+      if (!taken.ligne) return;
+      source.lignes = taken.lignes;
+      dest.lignes = insertLigneAtPath(dest.lignes, targetPath.length ? targetPath.slice(0, -1) : [], targetPath.length ? targetPath[targetPath.length - 1] : dest.lignes.length, taken.ligne);
+      source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1));
+      if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || chapIdx + 1));
+    } else {
+      const ligne = { ...JSON.parse(raw) as import('../../types/dpgf').Ligne, id: uid() };
+      destAppend(newDpgf, lotIdx, chapIdx, ligne);
+    }
     onChange(recomputeDPGF(newDpgf));
+    setDragSource(null);
+  };
+
+  const moveSelected = (direction: -1 | 1) => {
+    if (!selectedRow) return;
+    const next = JSON.parse(JSON.stringify(dpgf)) as DPGF;
+    const chap = next.lots[selectedRow.lotIdx].chapitres[selectedRow.chapIdx];
+    chap.lignes = renumeroterLignes(moveLigneSibling(chap.lignes, selectedRow.path, direction), String(chap.numero || selectedRow.chapIdx + 1));
+    onChange(recomputeDPGF(next));
   };
 
   // ── Ribbon ────────────────────────────────────────────────────────────────────
@@ -158,6 +190,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         {
           label: 'Colonnes',
           actions: [
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRow },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRow },
             { id: 'colSynthese', label: 'Synthèse', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('synthese'), active: colSet === 'synthese' },
             { id: 'colDetail', label: 'Détail', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('detail'), active: colSet === 'detail' },
             { id: 'colMarge', label: '+ Marge', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('marge'), active: colSet === 'marge' },
@@ -370,8 +404,11 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                         return (
                           <tr
                             key={ligne.id}
+                            onClick={() => setSelectedRow({ lotIdx: li, chapIdx: ci, path })}
                             draggable
-                            onDragStart={e => { e.dataTransfer.setData('application/json', JSON.stringify(ligne)); onDragStart?.(ligne); }}
+                            onDragStart={e => handleDragStart(e, ligne, li, ci, path)}
+                            onDragOver={e => { e.preventDefault(); setDropTarget(rowId); }}
+                            onDrop={e => handleDrop(e, li, ci, path)}
                             className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-[#f0f6ff] dark:hover:bg-zinc-800/60 cursor-grab
                               ${ligne.type === 'titre' ? 'bg-zinc-50 italic text-zinc-500' : ''}
                               ${ligne.type === 'commentaire' ? 'text-zinc-400' : ''}

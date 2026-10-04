@@ -6,6 +6,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
   IconLayoutColumns, IconBuildingStore, IconFileImport, IconFileExport,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
+  IconArrowUp, IconArrowDown,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
@@ -13,6 +14,8 @@ import { natureEffective, trancheEffective } from '../../types/bpu';
 import {
   evalFormula, MAX_ARTICLE_DEPTH,
   mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
+  takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
+  moveLigneSibling,
   collectLigneIdsWithChildren, sumLigne, recomputeLot,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey, forEachLigne,
   type FlatRow,
@@ -129,6 +132,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   const [editingCell, setEditingCell] = useState<{ rowKey: string; field: string; value: string } | null>(null);
   const [clipboard, setClipboard] = useState<BPULigne | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showMarche, setShowMarche] = useState(false);
   const [showTranches, setShowTranches] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -424,8 +428,13 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   };
 
   // ── Glisser-déposer ─────────────────────────────────────────────────────────
-  const handleDragStart = (e: React.DragEvent, ligne: BPULigne) => {
-    e.dataTransfer.effectAllowed = 'copy';
+  const handleDragStart = (e: React.DragEvent, ligne: BPULigne, row?: FlatRow<BPULot, BPUChapitre, BPULigne>) => {
+    e.dataTransfer.effectAllowed = 'move';
+    if (row?.chapIdx !== undefined && row.lignePath) {
+      const source = { lotIdx: row.lotIdx, chapIdx: row.chapIdx, path: row.lignePath };
+      e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(source));
+      setDragSource(source);
+    }
     e.dataTransfer.setData('application/json', JSON.stringify(ligne));
     onDragStart?.(ligne);
   };
@@ -434,7 +443,27 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     e.preventDefault();
     setDropTarget(null);
     const raw = e.dataTransfer.getData('application/json');
-    if (!raw || row.kind !== 'chapitre' || row.chapIdx === undefined) return;
+    if (!raw || row.chapIdx === undefined || (row.kind !== 'chapitre' && row.kind !== 'ligne')) return;
+    const internal = e.dataTransfer.getData('application/x-archioffice-row');
+    if (internal && dragSource) {
+      const targetPath = row.kind === 'ligne' ? (row.lignePath || []) : [];
+      mutateLots(lots => {
+        const next = lots.map(l => ({ ...l, chapitres: l.chapitres.map(c => ({ ...c, lignes: [...c.lignes] })) }));
+        const source = next[dragSource.lotIdx]?.chapitres[dragSource.chapIdx];
+        const dest = next[row.lotIdx]?.chapitres[row.chapIdx!];
+        if (!source || !dest) return lots;
+        const taken = takeLigneAtPath(source.lignes, dragSource.path);
+        if (!taken.ligne) return lots;
+        source.lignes = taken.lignes;
+        const index = row.kind === 'ligne' ? targetPath[targetPath.length - 1] : dest.lignes.length;
+        dest.lignes = insertLigneAtPath(dest.lignes, row.kind === 'ligne' ? targetPath.slice(0, -1) : [], index, taken.ligne);
+        source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1));
+        if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || row.chapIdx! + 1));
+        return next.map(l => recomputeLot(l));
+      });
+      setDragSource(null);
+      return;
+    }
     let ligne: BPULigne;
     try { ligne = JSON.parse(raw) as BPULigne; } catch { return; }
     // Une insertion par programme pendant une édition validerait dans le
@@ -506,6 +535,18 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
   // ── Ruban ───────────────────────────────────────────────────────────────────
   const selectionCount = selectedRowKeys.size;
+  const moveSelected = (direction: -1 | 1) => {
+    const key = [...selectedRowKeys][0];
+    const parsed = key ? parseRowKey(key) : null;
+    if (!parsed || parsed.kind !== 'ligne') return;
+    mutateLots(lots => lots.map((lot, li) => li !== parsed.lotIdx ? lot : {
+      ...lot,
+      chapitres: lot.chapitres.map((chap, ci) => ci !== parsed.chapIdx ? chap : {
+        ...chap,
+        lignes: renumeroterLignes(moveLigneSibling(chap.lignes, parsed.lignePath, direction), String(chap.numero || ci + 1)),
+      }),
+    }).map(recomputeLot));
+  };
 
   const ribbonTabs: RibbonTabDef[] = [
     {
@@ -521,6 +562,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         {
           label: 'Structure',
           actions: [
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: selectionCount === 0 },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: selectionCount === 0 },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {
@@ -887,7 +930,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 cursor-pointer
                           ${isDropTarget ? 'ring-1 ring-blue-400' : ''}
                           ${showLibrary && selectedChap?.lotIdx === row.lotIdx && selectedChap?.chapIdx === row.chapIdx ? 'ring-1 ring-blue-500' : ''}`}
-                        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDropTarget(rKey); }}
+                        onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = dragSource ? 'move' : 'copy'; setDropTarget(rKey); }}
                         onDragLeave={() => setDropTarget(null)}
                         onDrop={e => handleDrop(e, row)}>
                       <td className="px-2 py-1 pl-6">
@@ -935,7 +978,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 return (
                   <tr key={rKey}
                       draggable={!hasChildren}
-                      onDragStart={e => handleDragStart(e, l)}
+                      onDragStart={e => handleDragStart(e, l, row)}
+                      onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = dragSource ? 'move' : 'copy'; setDropTarget(rKey); }}
+                      onDragLeave={() => setDropTarget(null)}
+                      onDrop={e => handleDrop(e, row)}
                       onClick={e => toggleSelect(rKey, e.ctrlKey || e.metaKey)}
                       className={`border-b border-zinc-100 dark:border-zinc-800 cursor-pointer
                         ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-[#f0f6ff] dark:hover:bg-zinc-800/60'}

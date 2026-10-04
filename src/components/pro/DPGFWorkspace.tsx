@@ -5,6 +5,7 @@ import {
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush,
   IconX, IconBuildingStore, IconFileImport, IconScale, IconBuildingCommunity,
+  IconArrowUp, IconArrowDown,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
@@ -21,6 +22,8 @@ import type { ArticleBibliotheque } from '../../types/library';
 import {
   uid, evalFormula, MAX_ARTICLE_DEPTH,
   mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
+  takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
+  moveLigneSibling,
   collectLigneIdsWithChildren, sumLigne, recomputeLot as recomputeLotOp,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey,
   type FlatRow,
@@ -96,6 +99,7 @@ interface DragState {
   ligne: Ligne;
   sourceLotIdx: number;
   sourceChapIdx: number;
+  sourcePath: number[];
 }
 
 interface DPGFWorkspaceProps {
@@ -140,6 +144,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
   const [selectedChapId, setSelectedChapId] = useState('');
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const targets = dpgf.lots.flatMap((lot, lotIdx) => lot.chapitres.filter(c => !c.cctpOnly).map(chap => ({
     id: chap.id, lotIdx, chapIdx: lot.chapitres.findIndex(c => c.id === chap.id), label: `${lot.numero} ${lot.titre} / ${chap.numero} ${chap.titre}`,
   })));
@@ -497,37 +502,74 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // ── Drag & drop ───────────────────────────────────────────────────────────────
   const handleDragStart = (e: React.DragEvent, row: FlatRow) => {
     if (row.kind !== 'ligne' || !row.ligne) return;
-    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify({ rowKey: rowKey(row) }));
     e.dataTransfer.setData('application/json', JSON.stringify(row.ligne));
-    setDragState({ rowKey: rowKey(row), ligne: row.ligne, sourceLotIdx: row.lotIdx, sourceChapIdx: row.chapIdx! });
+    setDragState({ rowKey: rowKey(row), ligne: row.ligne, sourceLotIdx: row.lotIdx, sourceChapIdx: row.chapIdx!, sourcePath: row.lignePath || [] });
     onDragStart?.(row.ligne);
   };
 
   const handleDragOver = (e: React.DragEvent, targetKey: string) => {
     e.preventDefault();
-    e.dataTransfer.dropEffect = 'copy';
+    e.dataTransfer.dropEffect = dragState ? 'move' : 'copy';
     setDropTarget(targetKey);
   };
 
   const handleDrop = (e: React.DragEvent, targetRow: FlatRow) => {
     e.preventDefault();
     setDropTarget(null);
+    const internal = e.dataTransfer.getData('application/x-archioffice-row');
     const raw = e.dataTransfer.getData('application/json');
     if (!raw) return;
-    const ligne: Ligne = JSON.parse(raw);
-    if (targetRow.kind === 'chapitre' && targetRow.chapIdx !== undefined) {
+    if (internal && dragState && targetRow.chapIdx !== undefined && targetRow.kind !== 'lot') {
+      const targetPath = targetRow.kind === 'ligne' ? (targetRow.lignePath || []) : [];
+      if (dragState.sourceLotIdx === targetRow.lotIdx && dragState.sourceChapIdx === targetRow.chapIdx &&
+          (targetPath.length === dragState.sourcePath.length && targetPath.every((n, i) => n === dragState.sourcePath[i]))) {
+        setDragState(null); return;
+      }
+      mutateLots(lots => {
+        const next = lots.map(l => ({ ...l, chapitres: l.chapitres.map(c => ({ ...c, lignes: [...c.lignes] })) }));
+        const source = next[dragState.sourceLotIdx]?.chapitres[dragState.sourceChapIdx];
+        if (!source) return lots;
+        const taken = takeLigneAtPath(source.lignes, dragState.sourcePath);
+        if (!taken.ligne) return lots;
+        source.lignes = taken.lignes;
+        const dest = next[targetRow.lotIdx]?.chapitres[targetRow.chapIdx!];
+        if (!dest) return lots;
+        const insertIndex = targetRow.kind === 'ligne' ? targetPath[targetPath.length - 1] : dest.lignes.length;
+        const parentPath = targetRow.kind === 'ligne' ? targetPath.slice(0, -1) : [];
+        dest.lignes = insertLigneAtPath(dest.lignes, parentPath, insertIndex, taken.ligne);
+        source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragState.sourceChapIdx + 1));
+        if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || targetRow.chapIdx! + 1));
+        return next.map(l => recomputeLot(l));
+      });
+    } else if (targetRow.chapIdx !== undefined) {
+      const ligne: Ligne = JSON.parse(raw);
       mutateLots(lots => {
         const newLots = [...lots];
         const lot = { ...newLots[targetRow.lotIdx] };
         const chap = { ...lot.chapitres[targetRow.chapIdx!] };
-        chap.lignes = [...chap.lignes, { ...ligne, id: uid(), children: [] }];
+        chap.lignes = renumeroterLignes([...chap.lignes, { ...ligne, id: uid(), children: [] }], String(chap.numero || targetRow.chapIdx! + 1));
         lot.chapitres = [...lot.chapitres.slice(0, targetRow.chapIdx!), chap, ...lot.chapitres.slice(targetRow.chapIdx! + 1)];
         newLots[targetRow.lotIdx] = recomputeLot(lot);
         return newLots;
       });
+      onDropExternal?.(ligne);
     }
     setDragState(null);
-    onDropExternal?.(ligne);
+  };
+
+  const moveSelected = (direction: -1 | 1) => {
+    if (!selectedRowKey) return;
+    const parsed = parseRowKey(selectedRowKey);
+    if (!parsed || parsed.kind !== 'ligne') return;
+    mutateLots(lots => lots.map((lot, li) => li !== parsed.lotIdx ? lot : {
+      ...lot,
+      chapitres: lot.chapitres.map((chap, ci) => ci !== parsed.chapIdx ? chap : {
+        ...chap,
+        lignes: renumeroterLignes(moveLigneSibling(chap.lignes, parsed.lignePath, direction), String(chap.numero || ci + 1)),
+      }),
+    }).map(recomputeLot));
   };
 
   // ── Ribbon definition ─────────────────────────────────────────────────────────
@@ -546,6 +588,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Structure',
           actions: [
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRowKey },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRowKey },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {
@@ -835,6 +879,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 return (
                   <tr
                     key={rKey}
+                    onClick={() => setSelectedRowKey(rKey)}
                     draggable={!hasChildren}
                     onDragStart={e => handleDragStart(e, row)}
                     className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-[#f0f6ff] dark:hover:bg-zinc-800/60

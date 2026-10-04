@@ -10,7 +10,10 @@ import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { CctpGenerateDialog } from './CctpGenerateDialog';
+import { ProRibbon, type RibbonTabDef } from './ProRibbon';
+import { IconArrowUp, IconArrowDown, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
 import { lotsDepuisGeneration, type CctpGenerationEngine, type GeneratedLot } from '../../lib/cctpGeneration';
+import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling } from './treeOps';
 
 interface CCTPEditorProps {
   dpgf: DPGF;
@@ -44,6 +47,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const [selection, setSelection] = useState<Selection | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
+  const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showGenerate, setShowGenerate] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
@@ -249,9 +254,29 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const selData = getSelectedData();
   const isSelCctpOnly = selData?.cctpOnly ?? false;
 
+  const moveSelected = (direction: -1 | 1) => {
+    if (!selectedRow) return;
+    mutateDPGF(next => {
+      const chap = next.lots[selectedRow.lotIdx].chapitres[selectedRow.chapIdx];
+      chap.lignes = renumeroterLignes(moveLigneSibling(chap.lignes, selectedRow.path, direction), String(chap.numero || selectedRow.chapIdx + 1));
+    });
+  };
+  const ribbonTabs: RibbonTabDef[] = [{ id: 'accueil', label: 'Accueil', groups: [
+    { label: 'Hiérarchie', actions: [
+      { id: 'up', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRow },
+      { id: 'down', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRow },
+      { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
+      { id: 'expand', label: 'Développer', icon: <IconArrowsMaximize size={20} />, onClick: () => setExpandedChaps(new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))) },
+      { id: 'collapse', label: 'Réduire', icon: <IconArrowsMinimize size={20} />, onClick: () => setExpandedChaps(new Set()) },
+    ] },
+    { label: 'Document', actions: [{ id: 'save', label: 'Enregistrer', icon: <IconDeviceFloppy size={20} />, onClick: onSave }] },
+  ] }];
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
+
+      <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
 
       {/* Header bar */}
       <div className="flex items-center gap-2 px-3 py-2 bg-[#edf1f7] dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700 shrink-0">
@@ -371,6 +396,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                         {/* Chapitre row */}
                         <div
                           onClick={() => setSelection({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
+                          onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                          onDrop={e => { e.preventDefault(); if (!dragSource) return; const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = renumeroterLignes([...dest.lignes, taken.ligne], String(dest.numero || ci + 1)); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); onChange(next); } setDragSource(null); }}
                           className={`flex items-center gap-1 pl-6 pr-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
                             selection?.kind === 'chapitre' && selection.lotIdx === li && selection.chapIdx === ci
                               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
@@ -406,7 +433,11 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                             {flattenCctpLignes(chap.lignes).map(({ ligne, path, depth }) => (
                               <div
                                 key={ligne.id}
-                                onClick={() => setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}
+                                draggable={!ligne.children?.length}
+                                onDragStart={e => { const s = { lotIdx: li, chapIdx: ci, path }; setDragSource(s); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(s)); e.dataTransfer.setData('application/json', JSON.stringify(ligne)); }}
+                                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
+                                onDrop={e => { e.preventDefault(); if (!dragSource) return; const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = insertLigneAtPath(dest.lignes, path.slice(0, -1), path[path.length - 1], taken.ligne); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || ci + 1)); onChange(next); } setDragSource(null); }}
+                                onClick={() => { setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: path[0] }); setSelectedRow({ lotIdx: li, chapIdx: ci, path }); }}
                                 style={{ paddingLeft: `${3 + depth * 1.1}rem` }}
                                 className={`flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
                                   selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.ligneIdx === path[0]

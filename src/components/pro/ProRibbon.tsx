@@ -61,13 +61,13 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
       {/* Ribbon content */}
       {currentTab && (
         <div
-          className="flex items-stretch gap-0 px-2 py-1 min-h-[72px]"
+          className="flex items-stretch gap-0 px-2 py-1 min-h-[72px] overflow-x-auto overflow-y-hidden"
           style={{ background: 'linear-gradient(to bottom, #f5f8fc, #edf1f7)' }}
         >
           {currentTab.groups.map((group, gi) => (
             <React.Fragment key={gi}>
-              <div className="flex flex-col min-w-0">
-                <div className="flex items-start gap-0.5 flex-1 pt-1 pb-1">
+              <div className="flex flex-col min-w-max shrink-0">
+                <div className="flex items-start gap-0.5 flex-1 pt-1 pb-1 flex-wrap">
                   {group.actions.map(action => (
                     <button
                       key={action.id}
@@ -76,7 +76,7 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
                       title={action.label}
                       className={`
                         flex flex-col items-center justify-start gap-0.5
-                        px-1.5 py-1 rounded min-w-[44px] max-w-[60px] h-[52px]
+                        px-1.5 py-1 rounded min-w-[52px] max-w-[76px] min-h-[52px] h-auto
                         text-[0.6875rem] border transition leading-tight
                         ${action.active
                           ? 'bg-[#cce0f5] dark:bg-blue-900/40 border-blue-400 text-blue-800 dark:text-blue-200'
@@ -91,7 +91,7 @@ export const ProRibbon: React.FC<ProRibbonProps> = ({ tabs, defaultTab }) => {
                           <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-1 ring-white dark:ring-zinc-800" />
                         )}
                       </span>
-                      <span className="text-center break-words leading-tight text-[0.6875rem] w-full px-0.5">
+                      <span className="text-center break-words whitespace-normal leading-tight text-[0.6875rem] w-full px-0.5 min-h-[1.6rem]">
                         {action.label}
                       </span>
                     </button>
