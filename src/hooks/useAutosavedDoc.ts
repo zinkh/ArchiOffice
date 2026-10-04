@@ -129,8 +129,11 @@ export function useAutosavedDoc<T>({
       lastSavedJson.current = JSON.stringify(current);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
+    } catch (e) {
       setSaveStatus('error');
+      // On rel\u00e8ve l'exception pour que les appelants (validerInstantane, etc.)
+      // puissent la d\u00e9tecter sans interroger l'\u00e9tat React de fa\u00e7on asynchrone.
+      throw e;
     }
   }, [key, save]);
 

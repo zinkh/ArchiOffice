@@ -27,6 +27,11 @@ import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
 import { apiFetch } from '../../lib/api';
 import { validateProDocument } from '../../lib/proValidation';
+import { useConfirmDialog } from '../ui/ConfirmDialog';
+import { useToastWithUndo } from '../../hooks/useToastWithUndo';
+import { Toast } from '../ui/Toast';
+import { collectLigneIds, collectNouvellesLignes } from './treeOps';
+import { VersionsDialog } from './VersionsDialog';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -84,6 +89,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
   const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
+  const { toast, showToast } = useToastWithUndo();
+
+  // ── État du formulaire de création d'instantané (remplace window.prompt) ──
+  const [snapForm, setSnapForm] = useState<{ label: string; phase: string } | null>(null);
 
   // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
   const dpgfDoc = useAutosavedDoc<DPGF>({
@@ -91,28 +101,53 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   });
   const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
 
+  // ── État du rapport de contrôle (remplace window.alert) ──────────────────
+  const [controleReport, setControleReport] = useState<{ errors: number; warnings: number; lines: string[] } | null>(null);
+
   const controlerDossier = useCallback(() => {
     if (!dpgf) return;
     const issues = validateProDocument(dpgf);
-    if (!issues.length) return window.alert('Contrôle terminé : aucune anomalie détectée.');
+    if (!issues.length) {
+      showToast('Contrôle terminé : aucune anomalie détectée.', 'success');
+      return;
+    }
     const errors = issues.filter(i => i.severity === 'error');
     const warnings = issues.filter(i => i.severity === 'warning');
-    window.alert([
-      `Contrôle PRO/DCE : ${errors.length} erreur(s), ${warnings.length} vigilance(s).`, '',
-      ...issues.slice(0, 40).map(i => `${i.severity === 'error' ? '⛔' : '⚠'} ${i.message}`),
-      ...(issues.length > 40 ? [`… et ${issues.length - 40} autre(s).`] : []),
-    ].join('\n'));
-  }, [dpgf]);
+    setControleReport({
+      errors: errors.length,
+      warnings: warnings.length,
+      lines: [
+        ...issues.slice(0, 40).map(i => `${i.severity === 'error' ? '⛔' : '⚠'} ${i.message}`),
+        ...(issues.length > 40 ? [`… et ${issues.length - 40} autre(s).`] : []),
+      ],
+    });
+  }, [dpgf, showToast]);
 
   const creerInstantane = useCallback(async () => {
     if (!dpgf) return;
-    await handleSave();
-    const label = window.prompt('Libellé de la version (ex. APD validé, DCE indice A) :', `${dpgf.version || '1.0'} — ${dpgf.titre}`)?.trim();
-    if (!label) return;
-    const phase = window.prompt('Phase associée (APS, APD, PRO, DCE…) :', '')?.trim() || null;
-    await apiFetch(`/api/projects/${projectId}/dpgf/versions`, { method: 'POST', body: JSON.stringify({ label, phase, version: dpgf.version }) });
-    window.alert(`Version « ${label} » figée.`);
-  }, [dpgf, handleSave, projectId]);
+    // Ouvre le formulaire inline (remplace les deux window.prompt)
+    setSnapForm({ label: `${dpgf.version || '1.0'} — ${dpgf.titre}`, phase: '' });
+  }, [dpgf]);
+
+  const validerInstantane = useCallback(async (label: string, phase: string) => {
+    if (!label.trim() || !dpgf) return;
+    setSnapForm(null);
+    try {
+      // Flush avant de figer : si la sauvegarde échoue, on abandonne.
+      await handleSave();
+      if (saveStatus === 'error') {
+        showToast('Enregistrement échoué — la version n\'a pas été figée.', 'error');
+        return;
+      }
+      await apiFetch(`/api/projects/${projectId}/dpgf/versions`, {
+        method: 'POST',
+        body: JSON.stringify({ label: label.trim(), phase: phase.trim() || null, version: dpgf.version }),
+      });
+      showToast(`Version « ${label.trim()} » figée.`, 'success');
+    } catch (e: any) {
+      showToast(`Impossible de figer la version : ${e?.message ?? 'erreur réseau'}`, 'error');
+    }
+  }, [dpgf, handleSave, saveStatus, projectId, showToast]);
 
   const ouvrirVersions = useCallback(async () => {
     setVersions(await apiFetch<DpgfVersion[]>(`/api/projects/${projectId}/dpgf/versions`));
@@ -227,11 +262,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   };
   const editDpgf = (next: DPGF) => {
     const beforeIds = new Set<string>();
-    const collect = (doc: any, out: Set<string>) => doc?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id) out.add(x.id); walk(x.children || []); }); walk(c.lignes || []); }));
-    collect(dpgf, beforeIds);
-    const added: any[] = []; const collectAdded = (doc: any) => doc?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id && !beforeIds.has(x.id) && x.designation) added.push(x); walk(x.children || []); }); walk(c.lignes || []); }));
-    collectAdded(next);
-    if (added.length) void apiFetch('/api/price-library/bulk', { method: 'POST', body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }) }).catch(() => {});
+    collectLigneIds(dpgf, beforeIds);
+    const added = collectNouvellesLignes(next, beforeIds);
+    if (added.length) void apiFetch('/api/price-library/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
+    }).catch(() => {});
     const changes = dpgf ? titresModifies(dpgf, next) : [];
     setDpgf(next);
     if (!changes.length) return;
@@ -239,10 +275,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   };
   const editBpu = (next: BPU) => {
     const beforeIds = new Set<string>();
-    const collect = (doc: any, out: Set<string>) => doc?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id) out.add(x.id); walk(x.children || []); }); walk(c.lignes || []); }));
-    collect(bpu, beforeIds);
-    const added: any[] = []; next?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id && !beforeIds.has(x.id) && x.designation) added.push(x); walk(x.children || []); }); walk(c.lignes || []); }));
-    if (added.length) void apiFetch('/api/price-library/bulk', { method: 'POST', body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }) }).catch(() => {});
+    collectLigneIds(bpu, beforeIds);
+    const added = collectNouvellesLignes(next, beforeIds);
+    if (added.length) void apiFetch('/api/price-library/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
+    }).catch(() => {});
     const changes = bpu ? titresModifies(bpu, next) : [];
     setBpu(next);
     if (!changes.length) return;
@@ -300,22 +338,30 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       setLotsVersion(v => v + 1);
       onLotsChanged?.();
     } catch (e: any) {
-      window.alert(`Import des lots impossible : ${e?.message ?? e}`);
+      showToast(`Import des lots impossible : ${e?.message ?? String(e)}`, 'error');
     }
-  }, [dpgf, projectLots, projectId, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
+  }, [dpgf, projectLots, projectId, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged, showToast]);
 
   /** Sens liste → document : le document reprend exactement la liste (lots hors liste retirés après confirmation). */
-  const alignerDocumentSurListe = useCallback(() => {
+  const alignerDocumentSurListe = useCallback(async () => {
     if (!dpgf) return;
     const apres = appliquerOrdreLots(dpgf, projectLots, { rapprocher: true, retirerHorsProjet: true });
     const perdus = dpgf.lots.length - apres.lots.filter(l => dpgf.lots.some(x => x.id === l.id)).length;
     const avecContenu = dpgf.lots.filter(l => !apres.lots.some(x => x.id === l.id) && (l.chapitres ?? []).some(c => c.lignes?.length || (c.cctpDescription ?? '').trim()));
-    const msg = `Aligner le CCTP/DPGF sur la liste des lots ?\n${perdus} lot(s) absent(s) de la liste seront retirés`
-      + (avecContenu.length ? `, dont ${avecContenu.length} avec du contenu (${avecContenu.map(l => `${l.numero} ${l.titre}`).slice(0, 5).join(' ; ')}).` : '.');
-    if (!window.confirm(msg)) return;
+    const detail = avecContenu.length
+      ? `, dont ${avecContenu.length} avec du contenu (${avecContenu.map(l => `${l.numero} ${l.titre}`).slice(0, 5).join(' ; ')}).`
+      : '.';
+    const confirmed = await confirmAction({
+      title: 'Aligner le CCTP/DPGF sur la liste des lots ?',
+      message: `${perdus} lot(s) absent(s) de la liste seront retirés${detail}`,
+      confirmLabel: 'Aligner',
+      cancelLabel: 'Annuler',
+      tone: perdus > 0 ? 'danger' : 'primary',
+    });
+    if (!confirmed) return;
     setDpgf(apres);
     if (bpuTouched && bpu) setBpu(appliquerOrdreLots(bpu, projectLots, { rapprocher: true, retirerHorsProjet: true }));
-  }, [dpgf, projectLots, setDpgf, bpuTouched, bpu, setBpu]);
+  }, [dpgf, projectLots, setDpgf, bpuTouched, bpu, setBpu, confirmAction]);
 
   // Le bordereau, chargé plus tard, est aligné de la même façon à son ouverture.
   const bpuAligne = useRef<string | null>(null);
@@ -336,21 +382,29 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   }, [dpgf, bpu, setBpu]);
 
   // Reverser un DQE dans le DPGF écrase des prix : on montre les écarts avant.
-  const pushBpuToDpgf = useCallback(() => {
+  const pushBpuToDpgf = useCallback(async () => {
     if (!bpu || !dpgf) return;
     const { dpgf: next, diff } = bpuToDpgf(bpu, dpgf);
-    const lignes = [
+    const messageLines = [
       t('pro_tab_bpu_revert_modified_count', { count: diff.modifies.length }),
       diff.nonChiffres.length ? t('pro_tab_bpu_revert_not_priced_count', { count: diff.nonChiffres.length }) : '',
       diff.absentsDuDpgf.length ? t('pro_tab_bpu_revert_absent_count', { count: diff.absentsDuDpgf.length }) : '',
-      '',
-      ...diff.modifies.slice(0, 12).map(m => `  ${m.numero} ${m.designation} : ${m.ancien} → ${m.nouveau} €`),
+      ...diff.modifies.slice(0, 12).map(m => `${m.numero} ${m.designation} : ${m.ancien} → ${m.nouveau} €`),
       diff.modifies.length > 12 ? t('pro_tab_bpu_revert_more_count', { count: diff.modifies.length - 12 }) : '',
-      '',
-      t('pro_tab_bpu_revert_confirm'),
-    ].filter(Boolean).join('\n');
-    if (window.confirm(lignes)) setDpgf(next);
-  }, [bpu, dpgf, setDpgf, t]);
+    ].filter(Boolean);
+    const confirmed = await confirmAction({
+      title: t('pro_tab_bpu_revert_confirm'),
+      message: (
+        <ul className="mt-1 space-y-0.5 text-xs font-mono">
+          {messageLines.map((l, i) => <li key={i}>{l}</li>)}
+        </ul>
+      ),
+      confirmLabel: 'Reverser dans le DPGF',
+      cancelLabel: 'Annuler',
+      tone: 'danger',
+    });
+    if (confirmed) setDpgf(next);
+  }, [bpu, dpgf, setDpgf, t, confirmAction]);
 
   // Les exports portent la charte du cabinet : en-tête avec logo et
   // coordonnées, pied de page adresse et SIRET, pagination « P1|2 ».
@@ -389,11 +443,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       const historique = res.prixRemontes
         ? t('pro_tab_library_history_suffix', { count: res.prixRemontes })
         : '';
-      window.alert(t('pro_tab_library_updated', { created: res.created, updated: res.updated, historique }));
+      showToast(t('pro_tab_library_updated', { created: res.created, updated: res.updated, historique }), 'success');
     } catch (e: any) {
-      window.alert(t('pro_tab_library_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }));
+      showToast(t('pro_tab_library_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }), 'error');
     }
-  }, [projectId, t]);
+  }, [projectId, t, showToast]);
 
   // ── Offres reçues des entreprises ───────────────────────────────────────────
   // Un seul dialogue sert les deux documents (OffreImportDialog) ; ce
@@ -415,11 +469,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     // pour les articles qui en viennent. On le dit, sinon l'enrichissement se
     // fait dans le dos de l'architecte et il ne pensera pas à aller le lire.
     if (saved.prixRemontes) {
-      window.alert(
-        t('pro_tab_offer_prices_added', { count: saved.prixRemontes }),
-      );
+      showToast(t('pro_tab_offer_prices_added', { count: saved.prixRemontes }), 'success');
     }
-  }, [projectId, t]);
+  }, [projectId, t, showToast]);
 
   /** Même chose côté DPGF, sur sa propre route et son propre état d'offres. */
   const enregistrerOffreDpgf = useCallback(async (offre: any) => {
@@ -429,11 +481,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     );
     setDpgfOffres(prev => [...prev, saved]);
     if (saved.prixRemontes) {
-      window.alert(
-        t('pro_tab_offer_prices_added', { count: saved.prixRemontes }),
-      );
+      showToast(t('pro_tab_offer_prices_added', { count: saved.prixRemontes }), 'success');
     }
-  }, [projectId, t]);
+  }, [projectId, t, showToast]);
 
   /**
    * Verse un résultat de versComparatif (DPGF ou BPU) dans le comparatif
@@ -447,13 +497,24 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   ) => {
     const { comparatif, lotsNonRattaches } = resultat;
     if (lotsNonRattaches.length) {
-      const liste = lotsNonRattaches.map(l => `  ${l.numero} ${l.titre}`).join('\n');
-      if (!window.confirm(
-        t('pro_tab_lots_not_linked_confirm', { docLabel, liste }),
-      )) return;
+      const confirmed = await confirmAction({
+        title: `Lots non rattachés dans le ${docLabel}`,
+        message: (
+          <>
+            <p>{t('pro_tab_lots_not_linked_confirm', { docLabel, liste: '' })}</p>
+            <ul className="mt-2 space-y-0.5 text-xs font-mono">
+              {lotsNonRattaches.map(l => <li key={l.numero}>{l.numero} {l.titre}</li>)}
+            </ul>
+          </>
+        ),
+        confirmLabel: 'Continuer quand même',
+        cancelLabel: 'Annuler',
+        tone: 'primary',
+      });
+      if (!confirmed) return;
     }
     if (!comparatif.length) {
-      window.alert(t('pro_tab_no_lots_linked', { docLabel }));
+      showToast(t('pro_tab_no_lots_linked', { docLabel }), 'error');
       return;
     }
     try {
@@ -463,11 +524,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         method: 'PUT',
         body: JSON.stringify({ ...(act ?? {}), consultation }),
       });
-      window.alert(t('pro_tab_comparatif_updated', { count: comparatif.length }));
+      showToast(t('pro_tab_comparatif_updated', { count: comparatif.length }), 'success');
     } catch (e: any) {
-      window.alert(t('pro_tab_comparatif_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }));
+      showToast(t('pro_tab_comparatif_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }), 'error');
     }
-  }, [projectId, t]);
+  }, [projectId, t, confirmAction, showToast]);
 
   const verserAuComparatifAct = useCallback(async () => {
     if (!bpu) return;
@@ -479,8 +540,24 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     await verserComparatif(dpgfVersComparatif(dpgf, dpgfOffres), 'DPGF');
   }, [dpgf, dpgfOffres, verserComparatif]);
 
-  // Cross-panel DnD
+  // Cross-panel DnD : la ligne draguée depuis le panneau droit est déposée dans
+  // le panneau gauche (DPGFWorkspace) via onDropExternal.
   const [draggedLigne, setDraggedLigne] = useState<Ligne | null>(null);
+  const handleDropExternal = useCallback((ligne: Ligne) => {
+    setDraggedLigne(null);
+    if (!dpgf) return;
+    const lots = dpgf.lots;
+    if (!lots.length) return;
+    const lastLot = lots[lots.length - 1];
+    const chaps = lastLot.chapitres;
+    if (!chaps.length) return;
+    const lastChap = chaps[chaps.length - 1];
+    const newLigne = { ...ligne, id: `ext_${Date.now()}` };
+    const nextChap = { ...lastChap, lignes: [...(lastChap.lignes ?? []), newLigne] };
+    const nextLot = { ...lastLot, chapitres: chaps.map((c: any, i: number) => i === chaps.length - 1 ? nextChap : c) };
+    editDpgf({ ...dpgf, lots: lots.map((l: any, i: number) => i === lots.length - 1 ? nextLot : l) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dpgf]);
 
   // Shared tree panel state for DPGF / ESTIMATION
   const [showTree, setShowTree] = useState(true);
@@ -603,12 +680,100 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       {renaming > 0 && <p role="status" className="px-3 text-sm">Synchronisation des titres de lots…</p>}
       {titleError && <p role="alert" className="px-3 text-sm text-red-600">{titleError} Le titre n’a pas été enregistré ; réessayez le renommage.</p>}
       {!isBpuTab && dpgf && <ArticleBuildingPanel dpgf={dpgf} onChange={editDpgf} projectName={projectName} />}
-      {versions && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) setVersions(null); }}>
-        <div className="w-full max-w-2xl max-h-[75dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
-          <div className="flex items-center justify-between px-4 py-3 border-b"><div><h3 className="font-semibold">Versions figées du dossier PRO</h3><p className="text-xs text-zinc-500">CCTP, DPGF et estimation au même instant</p></div><button onClick={() => setVersions(null)}><IconX size={18} /></button></div>
-          <div className="divide-y">{versions.length ? versions.map(v => <div key={v.id} className="flex items-center justify-between gap-3 px-4 py-3"><div><div className="font-medium text-sm">{v.label}</div><div className="text-xs text-zinc-500">{v.phase || 'Sans phase'} · v{v.version || '—'} · {new Date(v.created_at).toLocaleString('fr-FR')}</div></div><button className="px-3 py-1.5 text-xs border rounded text-amber-700" onClick={async () => { if (!window.confirm(`Restaurer « ${v.label} » ? L'état courant doit être figé au préalable si vous souhaitez le conserver.`)) return; const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' }); setDpgf(restored); setVersions(null); }}>Restaurer</button></div>) : <div className="p-6 text-sm text-zinc-500">Aucune version figée.</div>}</div>
+      <VersionsDialog
+        versions={versions}
+        onClose={() => setVersions(null)}
+        confirmAction={confirmAction}
+        onRestore={async (v) => {
+          const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' });
+          setDpgf(restored);
+          setVersions(null);
+          showToast(`Version « ${v.label} » restaurée.`, 'success');
+        }}
+      />
+
+      {/* ── Formulaire de création d'instantané (remplace window.prompt) ─── */}
+      {snapForm && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onMouseDown={e => { if (e.target === e.currentTarget) setSnapForm(null); }}
+        >
+          <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 shadow-2xl p-6">
+            <h3 className="font-semibold mb-4">Figer une version</h3>
+            <label className="block text-sm font-medium mb-1">Libellé</label>
+            <input
+              className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
+              style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+              value={snapForm.label}
+              onChange={e => setSnapForm(f => f && ({ ...f, label: e.target.value }))}
+              placeholder="ex. APD validé, DCE indice A"
+              autoFocus
+            />
+            <label className="block text-sm font-medium mb-1">Phase</label>
+            <input
+              className="w-full border rounded-lg px-3 py-2 text-sm mb-5"
+              style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
+              value={snapForm.phase}
+              onChange={e => setSnapForm(f => f && ({ ...f, phase: e.target.value }))}
+              placeholder="ex. APS, APD, PRO, DCE…"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setSnapForm(null)}
+                className="h-9 px-4 rounded-lg text-sm border"
+                style={{ borderColor: 'var(--tblr-border)' }}
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => void validerInstantane(snapForm.label, snapForm.phase)}
+                disabled={!snapForm.label.trim()}
+                className="h-9 px-4 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
+                style={{ background: 'var(--tblr-primary)' }}
+              >
+                Figer
+              </button>
+            </div>
+          </div>
         </div>
-      </div>}
+      )}
+
+      {/* ── Rapport de contrôle (remplace window.alert) ─────────────────── */}
+      {controleReport && (
+        <div
+          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+          onMouseDown={e => { if (e.target === e.currentTarget) setControleReport(null); }}
+        >
+          <div className="w-full max-w-2xl max-h-[80dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-3 border-b">
+              <div>
+                <h3 className="font-semibold">Rapport de contrôle</h3>
+                <p className="text-xs text-zinc-500">
+                  {controleReport.errors > 0 && <span className="text-red-600 mr-2">⛔ {controleReport.errors} erreur(s)</span>}
+                  {controleReport.warnings > 0 && <span className="text-amber-600">⚠ {controleReport.warnings} avertissement(s)</span>}
+                </p>
+              </div>
+              <button
+                onClick={() => setControleReport(null)}
+                aria-label="Fermer"
+                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <IconX size={18} />
+              </button>
+            </div>
+            <ul className="divide-y">
+              {controleReport.lines.map((line, i) => (
+                <li key={i} className="px-4 py-2 text-sm font-mono">{line}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* ── Toast global ────────────────────────────────────────────────── */}
+      <Toast toast={toast} />
+      {/* ── Confirm dialog global ───────────────────────────────────────── */}
+      {confirmDialog}
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
       {divergence && !isBpuTab && (
@@ -619,7 +784,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
           <button type="button" className="btn btn-sm" onClick={() => void importerLotsDuDocument()}>
             Remplir la liste des lots depuis le CCTP
           </button>
-          <button type="button" className="btn btn-sm" onClick={alignerDocumentSurListe}>
+          <button type="button" className="btn btn-sm" onClick={() => void alignerDocumentSurListe()}>
             Aligner le CCTP sur la liste
           </button>
         </div>
@@ -674,6 +839,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                   onPushToAct={dpgf.lots.length > 0 ? verserAuComparatifActDpgf : undefined}
                   offres={dpgfOffres}
                   onDragStart={ligne => setDraggedLigne(ligne)}
+                  onDropExternal={draggedLigne ? handleDropExternal : undefined}
                 />
               ) : null}
             </div>
