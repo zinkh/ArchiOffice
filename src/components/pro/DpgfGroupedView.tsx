@@ -47,7 +47,7 @@ export const DpgfGroupedView: React.FC<{ dpgf: DPGF; groupement: Exclude<Groupem
                 </td>
               </tr>
               {g.articles.map(a => (
-                <tr key={a.ligne.id} className="border-b border-zinc-100 dark:border-zinc-800">
+                <tr key={`${a.ligne.id}-${a.batimentId ?? ""}`} className="border-b border-zinc-100 dark:border-zinc-800">
                   <td className="px-2 py-0.5 text-xs text-zinc-400">{a.ligne.numero}</td>
                   <td className="px-2 py-0.5">{a.ligne.designation}</td>
                   <td className="px-2 py-0.5 text-xs text-zinc-500 truncate">{a.lot.numero} {a.lot.titre}</td>

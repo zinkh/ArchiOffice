@@ -512,7 +512,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                   )}
                 </div>
 
-                {isSelCctpOnly && selection && selection.kind !== 'lot' ? (
+                {selection && selection.kind !== 'lot' ? (
                   <input
                     type="text"
                     value={
@@ -559,7 +559,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                       <div className="flex items-center gap-1.5">
                         <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">Bâtiment / phase :</span>
                         <SelecteursDecoupage
-                          doc={dpgf}
+                          doc={selData.ligne?.quantitesBatiments !== undefined ? { ...dpgf, multiBatiments: false } : dpgf}
                           batimentId={selData.batimentId}
                           phaseId={selData.phaseId}
                           onBatimentChange={v => updateBatimentPhase('batimentId', v)}

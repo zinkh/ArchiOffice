@@ -21,6 +21,14 @@ export function aplatirDpgf(dpgf: DPGF): ArticleAplati[] {
   const descendre = (lignes: Ligne[], lot: Lot, chapitre: Chapitre) => {
     for (const l of lignes) {
       if (l.children?.length) { descendre(l.children, lot, chapitre); continue; }
+      if (l.cctpOnly || chapitre.cctpOnly) continue;
+      if (l.quantitesBatiments !== undefined) {
+        for (const [batimentId, quantite] of Object.entries(l.quantitesBatiments)) out.push({
+          ligne: { ...l, quantite, prixTotal: quantite * l.prixUnitaire }, lot, chapitre, batimentId,
+          phaseId: phaseEffective(lot, chapitre, l),
+        });
+        continue;
+      }
       out.push({
         ligne: l, lot, chapitre,
         batimentId: batimentEffectif(lot, chapitre, l),

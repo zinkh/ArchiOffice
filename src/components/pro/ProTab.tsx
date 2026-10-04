@@ -1,3 +1,4 @@
+import { ArticleBuildingPanel } from './ArticleBuildingPanel';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
@@ -536,6 +537,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         </div>
       </div>
 
+      {!isBpuTab && dpgf && <ArticleBuildingPanel dpgf={dpgf} onChange={setDpgf} projectName={projectName} />}
       {versions && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) setVersions(null); }}>
         <div className="w-full max-w-2xl max-h-[75dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
           <div className="flex items-center justify-between px-4 py-3 border-b"><div><h3 className="font-semibold">Versions figées du dossier PRO</h3><p className="text-xs text-zinc-500">CCTP, DPGF et estimation au même instant</p></div><button onClick={() => setVersions(null)}><IconX size={18} /></button></div>

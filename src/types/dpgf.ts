@@ -61,6 +61,8 @@ export interface QuantiteDetail {
 }
 
 export interface Ligne extends DecoupageNoeud {
+  /** Quantités propres à chaque bâtiment ; une table vide signifie sans affectation. */
+  quantitesBatiments?: Record<string, number>;
   id: string;
   numero: string;
   designation: string;
