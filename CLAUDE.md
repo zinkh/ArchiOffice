@@ -649,6 +649,49 @@ dernière phase connue de la famille ; les colonnes ne sont pas supprimées.
 Tant qu'aucune entrée `legacy-` n'est lue, l'aperçu montre ces anciennes
 observations en lecture seule : une instance non migrée ne les perd pas de vue.
 
+### Onglet PRO : une barre au lieu du ruban
+
+Le ruban (`ProRibbon`, supprimé) et les boutons Enregistrer ont disparu. La
+ligne des sous-onglets de `ProTab` porte tout : les sous-onglets en casse
+normale, l'état d'enregistrement (`AutosaveIndicator`, Ctrl+S enregistre tout
+de suite), les actions du document affiché, puis un menu « ⋯ » pour le dossier
+(contrôle, figer, historique, comparaison avec une autre affaire, structure,
+impression).
+
+- **Chaque atelier déclare ses actions** par `useProToolbar(items)`
+  (`src/components/pro/toolbar/proToolbar.ts`) : boutons, menus déroulants,
+  sélecteurs. ProTab ne se re-rend que si leur apparence change
+  (`toolbarSignature`) et exécute toujours la DERNIÈRE version d'une action
+  (`invokeToolbarAction`) : une fermeture périmée exporterait un document
+  périmé. Sur téléphone, seules les entrées `mobile` restent dans la ligne, le
+  reste passe dans « ⋯ » (`foldForMobile`).
+- **Menus** (`ToolbarMenu.tsx`) : motif ARIA « menu button », posés en position
+  fixe dans `<body>` pour qu'un tableau à défilement ne les coupe pas.
+- **Barre de sélection** (`SelectionBar.tsx`) : n'existe que tant que quelque
+  chose est sélectionné ; flotte au bas du tableau au bureau, se fixe au bas de
+  l'écran sur téléphone. Le DPGF et le BPU/DQE ont une vraie sélection multiple
+  (cases à cocher, Ctrl+clic, Maj+clic) ; monter, descendre, changer de niveau
+  et dupliquer restent à une ligne à la fois. Chaque ligne du DPGF a aussi son
+  menu « ⋯ » avec les mêmes actions.
+- **Raccourcis du DPGF** (tableau focalisé) : Alt+↑/↓, Tab/Maj+Tab (seulement
+  depuis le tableau lui-même, Échap désélectionne et rend Tab à la
+  navigation), Ctrl+D, Ctrl+C, Ctrl+V, Suppr.
+- **Suppression annulable** : « Annuler » dans le toast pendant 6 s, refusé si
+  le document a changé depuis (on écraserait la saisie faite entre-temps).
+- **Opérations sur la sélection** (`selectionOps.ts`, testé) : les clés de
+  ligne sont positionnelles, d'où une suppression du dernier élément vers le
+  premier ; un article collé sous un article trop profond remonte au premier
+  niveau du chapitre.
+- **Totaux recalculés depuis les articles** (`totauxDocument`) dans le DPGF,
+  l'estimation et le DQE, jamais lus tels qu'enregistrés. L'estimation
+  comptait les parents à plat et ignorait les sous-articles.
+- **Téléphone** : le DPGF devient une liste de cartes (`DpgfMobileList.tsx`),
+  un appui modifie désignation, quantité ou prix ; la bibliothèque passe en
+  plein écran.
+- Tableaux à la charte : en-têtes et lignes de lot sur `--tblr-surface-2`,
+  plus aucun bandeau bleu figé. L'encre atténuée claire passe à `#5f6d84`
+  (contraste 4,5:1 sur blanc, cf. DESIGN.md).
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

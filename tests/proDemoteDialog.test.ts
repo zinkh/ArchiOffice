@@ -26,23 +26,24 @@ it('descend un chapitre puis son article avec sélection et description conserv�
   };
   function Harness() {
     const [doc, setDoc] = useState(current);
-    return React.createElement(CCTPEditor, { dpgf: doc, onSave: vi.fn(), onChange: next => { current = next; setDoc(next); } });
+    return React.createElement(CCTPEditor, { dpgf: doc, onChange: next => { current = next; setDoc(next); } });
   }
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(React.createElement(Harness)));
-  const button = () => container.querySelector<HTMLButtonElement>('button[title="pro_demote"]')!;
+  // L'action vit dans la barre de sélection, qui n'existe qu'avec une sélection.
+  const button = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(b => b.getAttribute('aria-label') === 'pro_demote');
   const select = async (label: string) => {
     const span = [...container.querySelectorAll('span')].find(el => el.textContent === label)!;
     await act(async () => span.dispatchEvent(new MouseEvent('click', { bubbles: true })));
   };
-  expect(button().disabled).toBe(true);
-  await select('Premier chapitre'); expect(button().disabled).toBe(true);
-  await select('Second chapitre'); expect(button().disabled).toBe(false);
-  await act(async () => button().click());
+  expect(button()).toBeUndefined();
+  await select('Premier chapitre'); expect(button()!.disabled).toBe(true);
+  await select('Second chapitre'); expect(button()!.disabled).toBe(false);
+  await act(async () => button()!.click());
   expect(current.lots[0].chapitres).toHaveLength(1);
   expect(container.querySelector('textarea')?.value).toBe('Texte du chapitre');
   await select('Gamma');
-  await act(async () => button().click());
+  await act(async () => button()!.click());
   expect(container.querySelector('textarea')?.value).toBe('Description Gamma');
   const group = current.lots[0].chapitres[0].lignes[1].children![0];
   expect(group.children?.map(l => l.id)).toEqual(['Beta', 'Gamma']);

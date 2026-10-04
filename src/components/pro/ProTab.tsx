@@ -1,7 +1,7 @@
 import { ProReadOnlyPanel } from './ProReadOnlyPanel';
 import { appliquerTitresLots, titresModifies } from '../../lib/lotTitles';
 import { ArticleBuildingPanel } from './ArticleBuildingPanel';
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
@@ -20,10 +20,15 @@ import { bpuVersComparatif, dpgfVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
-  IconFileDescription, IconTable, IconCalculator, IconListNumbers, IconSum,
-  IconChecklist, IconCamera, IconHistory, IconClipboardList,
+  IconChecklist, IconCamera, IconHistory,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
+import { AutosaveIndicator } from '../projectDetail/AutosaveIndicator';
+import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
+import { ProToolbar } from './toolbar/ProToolbar';
+import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, type ToolbarRegistry } from './toolbar/proToolbar';
+import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
 import { apiFetch } from '../../lib/api';
 import { validateProDocument } from '../../lib/proValidation';
@@ -91,6 +96,16 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
   const { toast, showToast } = useToastWithUndo();
+  const isMobile = useMediaQuery('(max-width: 767px)');
+
+  // Les actions du document affiché, déclarées par l'atelier (useProToolbar).
+  const [toolbar, setToolbar] = useState<ToolbarRegistration | null>(null);
+  const toolbarRegistry = useMemo<ToolbarRegistry>(() => ({ register: setToolbar }), []);
+  const notify = useCallback<ProNotify>((message, opts) => {
+    showToast(message, opts?.type ?? 'success', opts?.action ? { action: opts.action, duration: 6000 } : undefined);
+  // showToast change d'identité à chaque rendu mais ne lit que des refs et setState.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── État du formulaire de création d'instantané (remplace window.prompt) ──
   const [snapForm, setSnapForm] = useState<{ label: string; phase: string } | null>(null);
@@ -576,19 +591,54 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   }, []);
 
   // ── Tab labels ───────────────────────────────────────────────────────────────
+  // Casse normale ; les sigles gardent leurs capitales et leur nom complet en infobulle.
   const TABS: PillTabItem[] = [
-    { id: 'LOTS', label: 'LOTS', icon: IconClipboardList },
-    { id: 'CCTP', label: 'CCTP', icon: IconFileDescription },
-    { id: 'DPGF', label: 'DPGF', icon: IconTable },
-    { id: 'ESTIMATION', label: 'ESTIMATION', icon: IconCalculator },
-    { id: 'BPU', label: 'BPU', icon: IconListNumbers },
-    { id: 'DQE', label: 'DQE', icon: IconSum },
+    { id: 'LOTS', label: t('pro_tab_lots') },
+    { id: 'CCTP', label: 'CCTP', title: t('pro_tab_cctp_title') },
+    { id: 'DPGF', label: 'DPGF', title: t('pro_tab_dpgf_title') },
+    { id: 'ESTIMATION', label: t('pro_tab_estimation') },
+    { id: 'BPU', label: 'BPU', title: t('pro_tab_bpu_title') },
+    { id: 'DQE', label: 'DQE', title: t('pro_tab_dqe_title') },
   ];
 
   const canSplit = activeSubTab === 'CCTP' || activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
 
-  // Un seul indicateur, toujours celui du document à l'écran.
+  // Un seul indicateur, toujours celui du document à l'écran. Le hook revient
+  // à « idle » deux secondes après un enregistrement : un document chargé et
+  // sans modification en attente est enregistré, on le dit.
   const activeSaveStatus = isBpuTab ? bpuSaveStatus : saveStatus;
+  const activeLoaded = isBpuTab ? !bpuLoading && !!bpu : !dpgfLoading && !!dpgf;
+  const indicatorStatus: AutosaveStatus = activeSubTab === 'LOTS' || !activeLoaded ? 'idle'
+    : activeSaveStatus === 'idle' ? 'saved' : activeSaveStatus;
+  const saveActive = isBpuTab ? handleBpuSave : handleSave;
+
+  // Ctrl+S (⌘+S) enregistre tout de suite le document à l'écran.
+  const saveActiveRef = useRef<(() => Promise<void>) | null>(null);
+  saveActiveRef.current = activeSubTab === 'LOTS' ? null : saveActive;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 's') return;
+      if (!saveActiveRef.current) return;
+      e.preventDefault();
+      void saveActiveRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Menu « ⋯ » : ce qui concerne le dossier PRO plutôt que le document.
+  const hasTree = activeSubTab !== 'LOTS';
+  const dossierEntries: ToolbarMenuEntry[] = [
+    ...(!isBpuTab && activeSubTab !== 'LOTS' ? [
+      { id: 'pro-check', label: t('pro_dossier_check'), icon: <IconChecklist size={16} />, onClick: controlerDossier, disabled: !dpgf },
+      { id: 'pro-freeze', label: t('pro_dossier_freeze'), icon: <IconCamera size={16} />, onClick: () => { void creerInstantane(); }, disabled: !dpgf },
+      { id: 'pro-history', label: t('pro_dossier_history'), icon: <IconHistory size={16} />, onClick: () => { void ouvrirVersions(); } },
+    ] : []),
+    ...(canSplit ? [{ id: 'pro-compare', label: t('pro_dossier_compare'), icon: <IconLayoutColumns size={16} />, onClick: () => setSplitView(v => !v), checked: splitView }] : []),
+    ...(hasTree && !isMobile ? [{ id: 'pro-tree', label: t('pro_dossier_show_structure'), icon: <IconLayoutSidebar size={16} />, onClick: toggleTree, checked: showTree }] : []),
+    { id: 'pro-print-sep', separator: true as const },
+    { id: 'pro-print', label: t('pro_dossier_print'), icon: <IconPrinter size={16} />, onClick: handlePrint },
+  ];
   const activeVersion = (isBpuTab ? bpu?.version : dpgf?.version) ?? '1.0';
 
   const PRINT_TITLES: Record<SubTab, string> = {
@@ -601,6 +651,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   };
 
   return (
+    <ProToolbarContext.Provider value={toolbarRegistry}>
     <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100dvh - 200px)', minHeight: 500 }}>
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
@@ -613,67 +664,21 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         />
       )}
 
-      {/* ── Sub-tab navigation ──────────────────────────────────────────────── */}
+      {/* ── Sous-onglets, état d'enregistrement, actions du document ─────────── */}
       <div
-        className="no-print flex items-center gap-3 border-b p-2 shrink-0"
+        className="no-print flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-3 py-2 shrink-0"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
-        <PillTabs tabs={TABS} activeId={activeSubTab} onChange={id => setActiveSubTab(id as SubTab)} />
-
-        {/* Volet arbre — DPGF, ESTIMATION, BPU et DQE */}
-        {(activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION' || isBpuTab) && (
-          <button
-            onClick={toggleTree}
-            title={showTree ? "Masquer l'arbre" : "Afficher l'arbre"}
-            className="p-1.5 rounded-lg transition-colors border"
-            style={
-              showTree
-                ? { background: 'var(--tblr-primary-lt)', borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }
-                : { background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }
-            }
-          >
-            <IconLayoutSidebar size={16} />
-          </button>
-        )}
-
-        {/* Save status + print + split — always visible on the right */}
-        <div className="ml-auto flex items-center gap-2 px-3 no-print">
-          {!isBpuTab && dpgf && <>
-            <button onClick={controlerDossier} title="Contrôler la cohérence CCTP–DPGF–estimation" className="flex items-center gap-1 px-2 py-1.5 text-xs border rounded"><IconChecklist size={14} /> Contrôler</button>
-            <button onClick={() => void creerInstantane()} title="Figer l'état courant" className="flex items-center gap-1 px-2 py-1.5 text-xs border rounded"><IconCamera size={14} /> Figer</button>
-            <button onClick={() => void ouvrirVersions()} title="Historique des versions" className="p-1.5 border rounded"><IconHistory size={14} /></button>
-          </>}
-          {activeSaveStatus === 'saving' && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistrement…</span>}
-          {activeSaveStatus === 'saved'  && <span className="text-xs text-green-600">✓ Enregistré</span>}
-          {activeSaveStatus === 'error'  && <span className="text-xs text-red-500">Erreur d'enregistrement</span>}
-
-          {/* Print button */}
-          <button
-            onClick={handlePrint}
-            title="Imprimer"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors hover:text-[var(--tblr-primary)]"
-            style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
-          >
-            <IconPrinter size={14} />
-            Imprimer
-          </button>
-
-          {/* Split view toggle — only for DPGF / ESTIMATION */}
-          {canSplit && (
-            <button
-              onClick={() => setSplitView(v => !v)}
-              title={splitView ? 'Vue simple' : 'Vue divisée (deux projets)'}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
-              style={
-                splitView
-                  ? { background: 'var(--tblr-primary-lt)', borderColor: 'var(--tblr-primary)', color: 'var(--tblr-primary)' }
-                  : { background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }
-              }
-            >
-              <IconLayoutColumns size={15} />
-              {splitView ? 'Vue divisée' : 'Diviser'}
-            </button>
-          )}
+        <PillTabs tabs={TABS} activeId={activeSubTab} onChange={id => setActiveSubTab(id as SubTab)} ariaLabel={t('pro_tabs_label')} className="max-md:w-full" />
+        <AutosaveIndicator status={indicatorStatus} onRetry={() => { void saveActive(); }} />
+        <div className="ml-auto min-w-0">
+          <ProToolbar
+            items={activeSubTab === 'LOTS' ? [] : toolbar?.source.current ?? []}
+            resolve={() => toolbar?.source.current ?? []}
+            dossierEntries={dossierEntries}
+            dossierLabel={t('pro_dossier_menu')}
+            isMobile={isMobile}
+          />
         </div>
       </div>
 
@@ -808,7 +813,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor dpgf={dpgf} onChange={editDpgf} onSave={handleSave} />
+              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} />
             ) : null}
           </div>
           {splitView && (
@@ -831,7 +836,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 <DPGFWorkspace
                   dpgf={dpgf}
                   onChange={editDpgf}
-                  onSave={handleSave}
+                  notify={notify}
                   projectName={projectName}
                   showTree={showTree}
                   onToggleTree={toggleTree}
@@ -874,7 +879,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 <EstimationEditor
                   dpgf={dpgf}
                   onChange={editDpgf}
-                  onSave={handleSave}
                   projectName={projectName}
                   showTree={showTree}
                   onToggleTree={toggleTree}
@@ -915,7 +919,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
               <BPUWorkspace
                 bpu={bpu}
                 onChange={editBpu}
-                onSave={handleBpuSave}
+                notify={notify}
                 mode={activeSubTab === 'BPU' ? 'bpu' : 'dqe'}
                 projectName={projectName}
                 offres={offres}
@@ -954,6 +958,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         />
       )}
     </div>
+    </ProToolbarContext.Provider>
   );
 };
 

@@ -3,24 +3,29 @@ import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy,
 import { LotTitleInput } from './LotTitleInput';
 import React, { useState } from 'react';
 import {
-  IconPlus, IconTrash, IconChevronRight, IconChevronDown,
-  IconLayoutSidebar, IconDeviceFloppy, IconTag, IconBuildingStore,
-  IconBuildingCommunity, IconSparkles,
+  IconPlus, IconTrash, IconChevronRight, IconChevronDown, IconTag, IconBuildingStore,
+  IconBuildingCommunity, IconSparkles, IconCopy, IconStackPush, IconRowInsertBottom,
+  IconSubtask, IconArrowBarToLeft, IconArrowBarToRight, IconArrowsMaximize, IconArrowsMinimize,
+  IconLayoutSidebarLeftCollapse,
 } from '@tabler/icons-react';
+import { useProToolbar } from './toolbar/proToolbar';
+import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { DPGF, Chapitre, Ligne } from '../../types/dpgf';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { CctpGenerateDialog } from './CctpGenerateDialog';
-import { ProRibbon, type RibbonTabDef } from './ProRibbon';
-import { IconArrowUp, IconArrowDown, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
+import { IconArrowUp, IconArrowDown } from '@tabler/icons-react';
 import { lotsDepuisGeneration, type CctpGenerationEngine, type GeneratedLot } from '../../lib/cctpGeneration';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
   dpgf: DPGF;
   onChange: (dpgf: DPGF) => void;
-  onSave: () => void;
+  /** Volet de structure, piloté par le menu « ⋯ » de ProTab. */
+  showTree?: boolean;
+  onToggleTree?: () => void;
 }
 
 let _uid = 0;
@@ -35,9 +40,12 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree }) => {
   const { t } = useTranslation();
-  const [showTree, setShowTree] = useState(true);
+  const isMobile = useMediaQuery('(max-width: 767px)');
+  const [localShowTree, setLocalShowTree] = useState(true);
+  const showTree = showTreeProp ?? localShowTree;
+  const toggleTree = onToggleTree ?? (() => setLocalShowTree(v => !v));
   const [expandedLots, setExpandedLots] = useState<Set<string>>(
     new Set(dpgf.lots.map(l => l.id))
   );
@@ -276,91 +284,39 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const promoteSelected = () => {
     if (selection) applyHierarchy(promoteHierarchy(dpgf.lots, selection, uid));
   };
-  const ribbonTabs: RibbonTabDef[] = [{ id: 'accueil', label: 'Accueil', groups: [
-    { label: 'Hiérarchie', actions: [
-      { id: 'up', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !canMove(dpgf.lots, selection, -1) },
-      { id: 'down', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !canMove(dpgf.lots, selection, 1) },
-      { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
-            { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: promoteSelected, disabled: selection?.kind !== 'ligne' },
-      { id: 'demote', label: t('pro_demote'), icon: <IconArrowDown size={20} />, onClick: () => selection && applyHierarchy(demoteHierarchy(dpgf.lots, selection, uid)), disabled: !canDemote(dpgf.lots, selection) },
-      { id: 'child', label: t('pro_add_child'), icon: <IconPlus size={20} />, onClick: addSelectedChild, disabled: selection?.kind !== 'ligne' || 1 + selection.lignePath.length >= MAX_ARTICLE_DEPTH },
-      { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
-      { id: 'expand', label: 'Développer', icon: <IconArrowsMaximize size={20} />, onClick: () => setExpandedChaps(new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))) },
-      { id: 'collapse', label: 'Réduire', icon: <IconArrowsMinimize size={20} />, onClick: () => setExpandedChaps(new Set()) },
-    ] },
-    { label: 'Document', actions: [{ id: 'save', label: 'Enregistrer', icon: <IconDeviceFloppy size={20} />, onClick: onSave }] },
-  ] }];
+  // ── Barre d'outils et barre de sélection ──────────────────────────────────
+  const selectedLot = selection ? dpgf.lots[selection.lotIdx] : null;
+  const canDeleteSelection = !!selection && selection.kind !== 'lot' && isSelCctpOnly;
+  const deleteSelected = () => {
+    if (!selection || selection.kind === 'lot') return;
+    if (selection.kind === 'chapitre') deleteCCTPChapitre(selection.lotIdx, selection.chapIdx);
+    else deleteCCTPLigne(selection.lotIdx, selection.chapIdx, selection.lignePath);
+  };
+  useProToolbar([
+    {
+      kind: 'menu', id: 'cctp-add', label: t('pro_add'), icon: <IconPlus size={16} />, accent: true, mobile: true,
+      entries: [
+        { id: 'cctp-add-chap', label: t('pro_add_chapter'), icon: <IconStackPush size={16} />, onClick: () => selection && addCCTPChapitre(selection.lotIdx), disabled: !selectedLot, hint: selectedLot ? undefined : t('pro_cctp_select_lot_first') },
+        { id: 'cctp-add-art', label: t('pro_add_article'), icon: <IconRowInsertBottom size={16} />, onClick: () => chapitreVise && addCCTPLigne(chapitreVise.lotIdx, chapitreVise.chapIdx), disabled: !chapitreVise, hint: chapitreVise ? undefined : t('pro_cctp_select_chapter_first') },
+        { id: 'cctp-add-sub', label: t('pro_add_sub_article'), icon: <IconSubtask size={16} />, onClick: addSelectedChild, disabled: selection?.kind !== 'ligne' || 1 + selection.lignePath.length >= MAX_ARTICLE_DEPTH, hint: t('pro_add_sub_article_hint') },
+      ],
+    },
+    { kind: 'button', id: 'cctp-generate', label: t('pro_cctp_generate'), icon: <IconSparkles size={16} />, hint: t('pro_cctp_generate_hint'), onClick: () => setShowGenerate(true) },
+    { kind: 'button', id: 'cctp-library', label: t('pro_library'), icon: <IconBuildingStore size={16} />, pressed: showLibrary, onClick: () => setShowLibrary(v => !v) },
+    { kind: 'button', id: 'cctp-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v) },
+  ]);
+  const selectionActions: SelectionAction[] = [
+    { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: !canMove(dpgf.lots, selection, -1) },
+    { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => moveSelected(1), disabled: !canMove(dpgf.lots, selection, 1) },
+    { id: 'promote', label: t('pro_promote'), icon: <IconArrowBarToLeft size={16} />, iconOnly: true, onClick: promoteSelected, disabled: selection?.kind !== 'ligne' },
+    { id: 'demote', label: t('pro_demote'), icon: <IconArrowBarToRight size={16} />, iconOnly: true, onClick: () => selection && applyHierarchy(demoteHierarchy(dpgf.lots, selection, uid)), disabled: !canDemote(dpgf.lots, selection) },
+    { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, mobile: true, groupStart: true, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
+    { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !canDeleteSelection, hint: canDeleteSelection ? undefined : t('pro_cctp_delete_hint') },
+  ];
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
-
-      <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
-
-      {/* Header bar */}
-      <div className="flex items-center gap-2 px-3 py-2 bg-[#edf1f7] dark:bg-zinc-800/50 border-b border-zinc-200 dark:border-zinc-700 shrink-0">
-        <button
-          onClick={() => setShowTree(v => !v)}
-          title={showTree ? "Masquer l'arbre" : "Afficher l'arbre"}
-          className={`p-1.5 rounded border transition-colors ${
-            showTree
-              ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
-              : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
-          }`}
-        >
-          <IconLayoutSidebar size={16} />
-        </button>
-        <span className="text-xs font-semibold text-zinc-600 dark:text-zinc-300 uppercase tracking-wide">
-          CCTP — Cahier des Clauses Techniques Particulières
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={() => setShowDecoupage(v => !v)}
-            title="Bâtiments / phases"
-            className={`relative flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
-              showDecoupage
-                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
-                : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
-            }`}
-          >
-            <IconBuildingCommunity size={14} />
-            Bâtiments / phases
-            {/* Un DPGF qui a déjà des bâtiments/phases définis doit rester
-                repérable même une fois le panneau refermé — même raison que
-                le badge du ruban DPGF/BPU (ProRibbon). */}
-            {(dpgf.multiBatiments || dpgf.multiPhases) && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 ring-1 ring-white dark:ring-zinc-800" />
-            )}
-          </button>
-          <button
-            onClick={() => setShowGenerate(true)}
-            title="Générer le CCTP à partir des plans et pièces de l’affaire"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300"
-          >
-            <IconSparkles size={14} />
-            Générer
-          </button>
-          <button
-            onClick={() => setShowLibrary(v => !v)}
-            title="Bibliothèque d’ouvrages"
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-semibold transition-colors ${
-              showLibrary
-                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 text-blue-700 dark:text-blue-300'
-                : 'bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-600 text-zinc-500 hover:border-blue-300'
-            }`}
-          >
-            <IconBuildingStore size={14} />
-            Bibliothèque
-          </button>
-          <button
-            onClick={onSave}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-semibold transition-colors"
-          >
-            <IconDeviceFloppy size={14} />
-            Enregistrer
-          </button>
-        </div>
-      </div>
 
       {showGenerate && (
         <CctpGenerateDialog
@@ -383,8 +339,19 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
         {/* ── Left tree panel ────────────────────────────────────────────── */}
         {showTree && (
           <div className="w-72 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm select-none">
-            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
-              Structure
+            <div className="flex items-center gap-0.5 pl-3 pr-1 py-1.5 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span className="flex-1 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('pro_structure')}</span>
+              {[
+                { label: t('pro_expand_all'), icon: <IconArrowsMaximize size={14} />, onClick: () => { setExpandedLots(new Set(dpgf.lots.map(l => l.id))); setExpandedChaps(new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))); } },
+                { label: t('pro_collapse_all'), icon: <IconArrowsMinimize size={14} />, onClick: () => { setExpandedLots(new Set()); setExpandedChaps(new Set()); } },
+                { label: t('pro_hide_structure'), icon: <IconLayoutSidebarLeftCollapse size={14} />, onClick: toggleTree },
+              ].map(b => (
+                <button key={b.label} type="button" onClick={b.onClick} aria-label={b.label} title={b.label}
+                  className="w-7 h-7 inline-flex items-center justify-center rounded hover:bg-[var(--tblr-surface)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                  style={{ color: 'var(--tblr-muted)' }}>
+                  {b.icon}
+                </button>
+              ))}
             </div>
 
             {dpgf.lots.map((lot, li) => (
@@ -532,7 +499,16 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
         )}
 
         {/* ── Right content panel ─────────────────────────────────────────── */}
-        <div className="flex-1 overflow-y-auto">
+        <div className="relative flex-1 min-w-0 flex flex-col">
+        {selection && selData && (
+          <SelectionBar
+            label={`${selData.label} ${selData.name.split(' — ')[0]}`}
+            actions={selectionActions}
+            onClear={() => setSelection(null)}
+            isMobile={isMobile}
+          />
+        )}
+        <div className={`flex-1 overflow-y-auto ${selection ? 'pb-20' : ''}`}>
           {!selection || !selData ? (
             <div className="flex flex-col items-center justify-center h-full gap-3 text-zinc-400 dark:text-zinc-500">
               <span className="text-5xl">📋</span>
@@ -663,6 +639,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
               </div>
             </div>
           )}
+        </div>
+
         </div>
 
         {/* ── Bibliothèque d'ouvrages du cabinet ────────────────────────────── */}
