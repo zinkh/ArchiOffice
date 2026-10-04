@@ -20,8 +20,10 @@ export interface ToolbarAction {
   danger?: boolean;
   /** Infobulle, ex. la raison pour laquelle l'entrée est grisée. */
   hint?: string;
-  /** Case cochée dans un menu (panneau ouvert, option active). */
-  checked?: boolean;
+  /** Case cochée dans un menu (panneau ouvert, option active) ; « mixed » : cochée pour une partie de la sélection. */
+  checked?: boolean | 'mixed';
+  /** Le menu reste ouvert après le choix, pour cocher plusieurs cases d'affilée. */
+  keepOpen?: boolean;
 }
 
 export type ToolbarMenuEntry =

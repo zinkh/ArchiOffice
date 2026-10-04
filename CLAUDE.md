@@ -2248,6 +2248,35 @@ bâtiment ou sans phase identifiés tombe dans un groupe « sans affectation »,
 volontairement affiché en dernier — une exception à régulariser, pas le
 premier chiffre qu'on veut voir.
 
+**Un article peut concerner un ou plusieurs bâtiments**
+(`src/lib/batimentsArticles.ts`, testé dans `tests/batimentsArticles.test.ts`) :
+un bardage vertical pour le préau ET le bâtiment A, un bardage horizontal pour
+le seul bâtiment A. L'article porte alors `quantitesBatiments` (une quantité
+par bâtiment coché) ; sa quantité DPGF en est la somme et son montant la somme
+× P.U. Sans `quantitesBatiments`, l'ancien régime vaut toujours : un seul
+bâtiment par `batimentId`, hérité du chapitre puis du lot ; `batimentId: ''`
+veut dire « aucun bâtiment », sans héritage.
+
+- **Saisie** : dans le DPGF, une colonne « Bâtiments » (liste à cases à cocher,
+  `ToolbarMenu` avec `keepOpen` et l'état « mixed ») puis une colonne de
+  quantité par bâtiment et la quantité totale. Sur une ligne de lot, de
+  chapitre ou d'article à sous-articles, la liste coche ou décoche le bâtiment
+  sur tous les articles qu'elle contient. La barre de sélection a la même liste
+  pour plusieurs articles à la fois (`basculerBatimentEnMasse`). Le CCTP
+  l'offre aussi dans la fiche de l'élément sélectionné.
+- **Cocher** garde les quantités déjà saisies ; un nouveau bâtiment part à 0,
+  sauf si l'article n'en avait aucun : sa quantité va alors au premier coché.
+  Tout décocher rend une quantité simple, sans bâtiment.
+- **Export du CCTP** (`src/lib/cctpExport.ts`, menu Exporter de l'onglet CCTP,
+  PDF et Word à la charte, **jamais de quantité ni de prix**) : l'opération
+  complète, où chaque article dit « Bâtiments concernés : … », ou un CCTP par
+  bâtiment (`cctpPourBatiment`) qui ne garde que ses articles. Dans ce dernier,
+  un chapitre sans article (généralités) et un texte propre au CCTP sans
+  bâtiment valent pour tous ; un article chiffrable sans bâtiment n'entre dans
+  aucun, et l'export par bâtiment le signale.
+- Le DPGF par bâtiment (PDF, Excel) est dans le menu Exporter du DPGF ; le
+  volet « Articles et bâtiments » qui le portait est supprimé.
+
 **Le DPGF verse maintenant lui aussi ses offres au comparatif ACT.** L'ACT
 récupère les offres des entreprises sur la base du DPGF ou du BPU selon le
 document utilisé pour consulter — jusqu'ici seul le BPU avait cette notion.
