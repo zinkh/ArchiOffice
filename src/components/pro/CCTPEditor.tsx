@@ -26,6 +26,8 @@ interface CCTPEditorProps {
   /** Volet de structure, piloté par le menu « ⋯ » de ProTab. */
   showTree?: boolean;
   onToggleTree?: () => void;
+  /** Drop cross-panel : appelé quand une ligne est déposée depuis le panneau droit. */
+  onDropExternal?: (ligne: Ligne) => void;
 }
 
 let _uid = 0;
@@ -40,7 +42,7 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal }) => {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
@@ -383,7 +385,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                         <div
                           onClick={() => setSelection({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
                           onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                          onDrop={e => { e.preventDefault(); if (!dragSource) return; const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = renumeroterLignes([...dest.lignes, taken.ligne], String(dest.numero || ci + 1)); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); onChange(next); } setDragSource(null); }}
+                          onDrop={e => { e.preventDefault(); if (!dragSource) { const raw = e.dataTransfer.getData('application/json'); if (raw && onDropExternal) { try { onDropExternal(JSON.parse(raw) as Ligne); } catch {} } return; } const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = renumeroterLignes([...dest.lignes, taken.ligne], String(dest.numero || ci + 1)); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); onChange(next); } setDragSource(null); }}
                           className={`flex items-center gap-1 pl-6 pr-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
                             selection?.kind === 'chapitre' && selection.lotIdx === li && selection.chapIdx === ci
                               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
@@ -422,7 +424,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                                 draggable={!ligne.children?.length}
                                 onDragStart={e => { const s = { lotIdx: li, chapIdx: ci, path }; setDragSource(s); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(s)); e.dataTransfer.setData('application/json', JSON.stringify(ligne)); }}
                                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
-                                onDrop={e => { e.preventDefault(); if (!dragSource) return; const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = insertLigneAtPath(dest.lignes, path.slice(0, -1), path[path.length - 1], taken.ligne); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || ci + 1)); onChange(next); } setDragSource(null); }}
+                                onDrop={e => { e.preventDefault(); if (!dragSource) { const raw = e.dataTransfer.getData('application/json'); if (raw && onDropExternal) { try { onDropExternal(JSON.parse(raw) as Ligne); } catch {} } return; } const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = insertLigneAtPath(dest.lignes, path.slice(0, -1), path[path.length - 1], taken.ligne); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || ci + 1)); onChange(next); } setDragSource(null); }}
                                 onClick={() => { setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, lignePath: path }); }}
                                 style={{ paddingLeft: `${3 + depth * 1.1}rem` }}
                                 className={`flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${

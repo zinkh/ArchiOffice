@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useToastWithUndo } from '../hooks/useToastWithUndo';
+import { Toast } from './ui/Toast';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconTrash, IconCamera,
@@ -67,6 +69,7 @@ function isBadWeather(meteo?: string) {
 }
 
 export default function ChantierModule({ project, lots_list, ordresDeService, osSituationsContent, contacts, settings }: ChantierModuleProps) {
+  const { toast, showToast } = useToastWithUndo();
   const [activeTab, setActiveTab] = useState<ChantierTab>('comptes-rendus');
 
   const [reports, setReports] = useState<SiteReport[]>([]);
@@ -253,7 +256,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
       setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
     } else {
       const err = await res.json().catch(() => ({}));
-      alert(err.error || 'Impossible de modifier le numéro.');
+      showToast(err.error || 'Impossible de modifier le numéro.', 'error');
       setNumberDraft(String(selectedReport.report_number ?? ''));
     }
   };
@@ -294,7 +297,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     }
   };
 
-  const updateReportField = async (field: keyof SiteReport, value: any) => {
+  const updateReportField = async (field: keyof SiteReport, value: SiteReport[keyof SiteReport]) => {
     if (!selectedReport) return;
     const updated = { ...selectedReport, [field]: value };
     setReports(prev => prev.map(r => (r.id === selectedReport.id ? updated : r)));
@@ -374,13 +377,17 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
     setReportNotes(prev => [...prev, created]);
   };
 
-  const saveNoteField = async (noteId: string, field: keyof SiteReportNote, value: any) => {
+  const saveNoteField = async (noteId: string, field: keyof SiteReportNote, value: SiteReportNote[keyof SiteReportNote]) => {
     setReportNotes(prev => prev.map(n => (n.id === noteId ? { ...n, [field]: value } : n)));
-    await fetch(`/api/notes/${noteId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ [field]: value }),
-    });
+    try {
+      await fetch(`/api/notes/${noteId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [field]: value }),
+      });
+    } catch (err) {
+      console.error('saveNoteField failed:', err);
+    }
   };
 
   const deleteNote = async (noteId: string) => {
@@ -487,7 +494,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
 
   const generatePdf = async () => {
     if (!selectedReport) return;
-    if (!settings) { alert("Réglages du cabinet non chargés, réessayez dans un instant."); return; }
+    if (!settings) { showToast('Réglages du cabinet non chargés, réessayez dans un instant.', 'error'); return; }
     setIsGeneratingPdf(true);
     try {
       const { exportSiteReportToPDF } = await import('../lib/siteReportExport');
@@ -518,7 +525,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
   const intemperies = reports.filter(r => isBadWeather(r.meteo)).length;
   const dernierCrDiffuse = [...reports].filter(r => r.statut === 'diffuse').sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
 
-  const tabs: { id: ChantierTab; label: string; icon: any }[] = [
+  const tabs: { id: ChantierTab; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
     { id: 'comptes-rendus', label: 'Comptes-rendus', icon: IconClipboardList },
     { id: 'reserves', label: 'Réserves', icon: IconAlertTriangle },
     { id: 'entreprises', label: 'Entreprises', icon: IconBuilding },
@@ -652,15 +659,15 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         ><IconChevronRight size={18} /></button>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={generatePdf} disabled={isGeneratingPdf}
+                        <button type="button" onClick={generatePdf} disabled={isGeneratingPdf}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                           <IconFileDownload size={14} /> PDF
                         </button>
-                        <button onClick={() => handleCreateReport(selectedReport)}
+                        <button type="button" onClick={() => handleCreateReport(selectedReport)}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                           <IconCopy size={14} /> Dupliquer
                         </button>
-                        <button onClick={() => updateReportField('statut', 'diffuse')}
+                        <button type="button" onClick={() => updateReportField('statut', 'diffuse')}
                           disabled={selectedReport.statut === 'diffuse'}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition">
                           <IconSend size={14} /> Diffuser
@@ -844,7 +851,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                           onChange={e => setNewRubriqueName(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') addRubrique(); }}
                         />
-                        <button onClick={addRubrique}
+                        <button type="button" onClick={addRubrique}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
                           <IconPlus size={14} /> Ajouter
                         </button>
@@ -859,7 +866,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                         <div key={category}>
                           <div className="flex items-center justify-between gap-2 mb-2">
                             <span className="text-sm font-bold uppercase tracking-wide text-[var(--tblr-text)]">{category}</span>
-                            <button onClick={() => addRubriqueEntry(category)}
+                            <button type="button" onClick={() => addRubriqueEntry(category)}
                               className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">
                               + Entrée
                             </button>
@@ -878,7 +885,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                                   <option value="open">Ouvert</option>
                                   <option value="done">Soldé</option>
                                 </select>
-                                <button onClick={() => deleteNote(n.id)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
+                                <button type="button" onClick={() => deleteNote(n.id)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
                               </div>
                             ))}
                           </div>
@@ -892,7 +899,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                     title="Observations par lot"
                     icon={IconClipboardList}
                     action={
-                      <button onClick={() => addObservation('observation')}
+                      <button type="button" onClick={() => addObservation('observation')}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} /> Ajouter une observation
                       </button>
@@ -932,7 +939,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                   <Section
                     title="Décisions de la maîtrise d'œuvre"
                     action={
-                      <button onClick={addDecision}
+                      <button type="button" onClick={addDecision}
                         className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} /> Ajouter
                       </button>
@@ -952,7 +959,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                             <option value="technique">Technique</option>
                             <option value="financier">Financier</option>
                           </select>
-                          <button onClick={() => removeDecision(i)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
+                          <button type="button" onClick={() => removeDecision(i)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
                         </div>
                       ))}
                     </div>
@@ -1058,6 +1065,8 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
         </div>
       </div>
 
+      <Toast toast={toast} />
+
       {/* New CR modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setIsModalOpen(false)}>
@@ -1072,7 +1081,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <button onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-semibold dark:text-zinc-300">Annuler</button>
+              <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-sm font-semibold dark:text-zinc-300">Annuler</button>
               <button
                 onClick={() => handleCreateReport()}
                 disabled={weatherLoading}
@@ -1107,7 +1116,7 @@ function MiniStat({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Section({ title, icon: Icon, action, children }: { title: string; icon?: any; action?: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, icon: Icon, action, children }: { title: string; icon?: React.ComponentType<{ size?: number }>; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-xl p-4 sm:p-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
       <div className="flex items-center justify-between gap-2 mb-3">
@@ -1155,7 +1164,7 @@ function ObservationRow({ obs, onSave, onUploadPhoto }: { obs: Observation; onSa
       </select>
       <input type="date" className="shrink-0 text-xs bg-transparent border-none outline-none w-28"
         defaultValue={obs.due_date || ''} onBlur={e => onSave(obs.id, 'due_date', e.target.value)} />
-      <button onClick={() => fileInputRef.current?.click()} className="shrink-0 p-1 text-zinc-400 hover:text-blue-500" title="Ajouter une photo">
+      <button type="button" onClick={() => fileInputRef.current?.click()} className="shrink-0 p-1 text-zinc-400 hover:text-blue-500" title="Ajouter une photo">
         <IconCamera size={16} />
       </button>
       <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
