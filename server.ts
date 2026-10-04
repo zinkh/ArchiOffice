@@ -138,6 +138,9 @@ import { PLAN_LIMITS } from "./src/lib/billing";
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
 const upload = multer({
   storage: multer.memoryStorage(),
+  // Les navigateurs envoient le nom de fichier en UTF-8 ; le défaut latin1
+  // de multer changerait « Général » en « GÃ©nÃ©ral ».
+  defParamCharset: 'utf8',
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max
 });
 

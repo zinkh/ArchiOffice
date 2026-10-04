@@ -1,17 +1,17 @@
 // Assainissement des noms de dossiers et de fichiers créés sur l'espace de
 // stockage du cabinet.
 //
-// Volontairement DISTINCT de server/sanitizeFilename.ts, qu'il ne faut surtout
-// pas réutiliser ici : sa règle `[^a-zA-Z0-9._-] → _` transforme « Général » en
-// « G_n_ral » et « Villa Martin » en « Villa_Martin ». C'est acceptable pour un
+// Volontairement DISTINCT de server/storageKey.ts (et de sanitizeFilename, qui
+// s'y appuie), qu'il ne faut surtout pas réutiliser ici : sa règle ASCII
+// transforme « Général » en « General » et « Villa Martin » en « Villa-Martin ». C'est acceptable pour un
 // chemin d'objet Supabase, que personne ne regarde jamais ; ça ne l'est pas
 // pour une arborescence que l'architecte ouvre dans son propre Drive. Les
 // accents, les espaces et les tirets sont donc conservés, et seuls les
 // caractères que les trois fournisseurs (et Windows, côté client de
 // synchronisation) refusent réellement sont retirés.
 //
-// sanitizeFilename reste utilisé pour construire le chemin Supabase de repli :
-// les chemins d'objets existants ne changent pas d'un caractère.
+// storageKey.ts reste utilisé pour construire le chemin Supabase de repli, que
+// Supabase exige en ASCII. Les objets déjà déposés gardent leur chemin.
 
 // Union des interdits de Windows et de WebDAV, plus les caractères de contrôle.
 // Google Drive et Dropbox sont plus permissifs, mais un cabinet qui synchronise

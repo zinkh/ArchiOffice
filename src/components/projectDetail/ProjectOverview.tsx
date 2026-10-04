@@ -20,6 +20,7 @@ import {
 } from '@tabler/icons-react';
 import { formatCurrency } from '../../lib/utils';
 import { useTasks } from '../../hooks/useTasks';
+import LinkedMeetings from '../LinkedMeetings';
 import { getTaskStatus, taskDeadline } from '../tasks/taskDisplay';
 import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
 import type { PhaseNotesApi } from '../../hooks/usePhaseNotes';
@@ -522,6 +523,10 @@ export function ProjectOverview({
               </button>
             );
           })}
+        </div>
+
+        <div className="mt-5">
+          <LinkedMeetings kind="project" parentId={project.id} />
         </div>
       </div>
     </div>

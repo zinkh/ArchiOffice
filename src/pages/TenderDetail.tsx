@@ -28,8 +28,10 @@ import { toRefItem, customToRefItem, type RefItem, type CustomRef } from '../lib
 import { useUser } from '../UserContext';
 import { formatCurrency, cn } from '../lib/utils';
 import { statusLabel } from '../lib/statusLabel';
+import LinkedMeetings from '../components/LinkedMeetings';
+import { linkedMeetingsUrl } from '../lib/linkedMeetings';
 
-type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie' | 'honoraires';
+type TabId = 'apercu' | 'documents' | 'partenaires' | 'organigramme' | 'references' | 'methodologie' | 'honoraires' | 'reunions';
 
 const SECTION_LABELS: Record<TenderPieceRequise['section'], string> = {
   candidature: 'Candidature',
@@ -72,6 +74,16 @@ export default function TenderDetail() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>('apercu');
+  const [meetingsCount, setMeetingsCount] = useState(0);
+  // Nombre affiché sur l'onglet avant même de l'ouvrir ; l'onglet relit la liste lui-même.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    apiFetch<unknown[]>(linkedMeetingsUrl('tender', id))
+      .then(data => { if (!cancelled) setMeetingsCount(Array.isArray(data) ? data.length : 0); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [id]);
 
   // ── Aperçu : description, évaluation, concurrents, notes de suivi ──
   const [descriptionDraft, setDescriptionDraft] = useState('');
@@ -626,6 +638,7 @@ export default function TenderDetail() {
     { id: 'organigramme', label: t('tender_detail_tab_organigramme') },
     { id: 'references', label: t('tender_detail_tab_references'), count: referencesLoaded ? references.length : undefined },
     { id: 'methodologie', label: t('tender_detail_tab_methodologie') },
+    { id: 'reunions', label: t('tender_detail_tab_reunions'), count: meetingsCount || undefined },
   ];
 
   return (
@@ -1277,6 +1290,13 @@ export default function TenderDetail() {
             ))}
             {references.length === 0 && <p className="text-xs italic col-span-2" style={{ color: 'var(--tblr-muted)' }}>{t('tender_detail_no_references')}</p>}
           </div>
+        </div>
+      )}
+
+      {/* Réunions liées (visite de site, réunion de groupement...) */}
+      {activeTab === 'reunions' && (
+        <div className="rounded-xl border p-4" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+          <LinkedMeetings kind="tender" parentId={tender.id} onCount={setMeetingsCount} />
         </div>
       )}
 

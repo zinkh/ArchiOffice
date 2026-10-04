@@ -156,6 +156,9 @@ export class FakeSupabaseAdmin {
     updateBucket: async (name: string, _opts?: any) => ({ data: { name }, error: null }),
     from: (bucket: string) => ({
       upload: async (path: string, buffer: Buffer, _opts?: any) => {
+        // Comme le vrai Supabase Storage : une clé hors ASCII est refusée
+        // (« Invalid key »), voir server/storageKey.ts.
+        if (/[^\x20-\x7e]/.test(path)) return { data: null, error: { message: `Invalid key: ${path}` } };
         if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
         this.storageObjects.get(bucket)!.add(path);
         if (Buffer.isBuffer(buffer)) this.storageBytes.set(this.bytesKey(bucket, path), buffer);
