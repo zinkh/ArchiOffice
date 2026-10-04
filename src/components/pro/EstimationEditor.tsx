@@ -384,7 +384,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                               <td className="px-1 py-0.5">
                                 {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{ligne.quantite}</span> : (<div className="flex items-center gap-1">
                                   <div className="flex-1"><EditNum rowId={rowId} field="quantite" value={ligne.quantite} /></div>
-                                  <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: lgi })}><IconMapPin size={13} /></button>
+                                  <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
                                 </div>)}
                               </td>
                             )}
@@ -456,7 +456,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         const ligne = dpgf.lots[breakdown.lotIdx].chapitres[breakdown.chapIdx].lignes[breakdown.ligneIdx];
         return <QuantityBreakdownDialog document={dpgf} ligne={ligne} onClose={() => setBreakdown(null)} onSave={details => {
           const quantite = details.reduce((s, d) => s + Number(d.quantite || 0), 0);
-          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, breakdown.ligneIdx, { quantiteDetails: details, quantite });
+          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, [breakdown.ligneIdx], { quantiteDetails: details, quantite });
           setBreakdown(null);
         }} />;
       })()}

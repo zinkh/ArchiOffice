@@ -443,7 +443,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                 )}
                                 {ligne.cctpOnly && (
                                   <button
-                                    onClick={e => { e.stopPropagation(); deleteCCTPLigne(li, ci, lgi); }}
+                                    onClick={e => { e.stopPropagation(); deleteCCTPLigne(li, ci, path[0]); }}
                                     className="shrink-0 ml-1 text-zinc-300 hover:text-red-500 transition-colors"
                                     title="Supprimer"
                                   >
