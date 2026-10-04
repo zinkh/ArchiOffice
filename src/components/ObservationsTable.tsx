@@ -11,6 +11,7 @@ import {
   ColumnSizingState,
 } from '@tanstack/react-table';
 import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconLayoutRows } from '@tabler/icons-react';
+import { useConfirmDialog } from './ui/ConfirmDialog';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
@@ -190,12 +191,23 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     } catch (err) { console.error(err); }
   };
 
-  const deleteRow = useCallback((id: string) => {
-    if (!confirm(t('observations_table_confirm_delete'))) return;
-    queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'DELETE', url: `/api/observations/${id}` })
-      .then(() => setObservations(prev => prev.filter(o => o.id !== id)))
-      .catch(console.error);
-  }, []);
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
+
+  const deleteRow = useCallback(async (id: string) => {
+    const confirmed = await confirmAction({
+      title: t('observations_table_confirm_delete'),
+      confirmLabel: t('projectdetail_dialog_delete'),
+      cancelLabel: t('projectdetail_dialog_cancel'),
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      await queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'DELETE', url: `/api/observations/${id}` });
+      setObservations(prev => prev.filter(o => o.id !== id));
+    } catch (err) {
+      console.error(err);
+    }
+  }, [confirmAction, t]);
 
   // TanStack Table expects `data` and `columns` to be referentially stable
   // across renders (its docs call this out explicitly): recreating either
@@ -366,7 +378,8 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       size: 40,
       cell: info => (
         <button
-          onClick={() => deleteRow(info.row.original.id)}
+          type="button"
+          onClick={() => void deleteRow(info.row.original.id)}
           className="text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded opacity-0 group-hover/row:opacity-100 transition"
         >
           <IconTrash size={15} />
@@ -442,7 +455,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <IconLayoutRows size={15} /> Lot en en-tête
         </label>
         {Object.keys(columnSizing).length > 0 && (
-          <button onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
+          <button type="button" onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
         )}
         <div className="ml-auto relative" ref={columnMenuRef}>
           <button
@@ -560,6 +573,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           </tbody>
         </table>
         <button
+          type="button"
           onClick={addRow}
           className="w-full p-3 text-left text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200 transition flex items-center gap-2 text-sm border-t border-zinc-100 dark:border-zinc-700 group"
         >
@@ -567,6 +581,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           Nouvelle observation
         </button>
       </div>
+      {confirmDialog}
     </div>
   );
 }

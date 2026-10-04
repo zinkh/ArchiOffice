@@ -10,7 +10,7 @@ import { BPUWorkspace } from './BPUWorkspace';
 import { LotsManager } from './LotsManager';
 import { appliquerOrdreLots, comparerNumerosDeLot, lotsDivergent, planImportLots, type LotProjet } from '../../lib/lotsOrder';
 import { PrintPageDecorations } from '../PrintPageDecorations';
-import { DPGF, Ligne, type OffreDocument } from '../../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, type OffreDocument } from '../../types/dpgf';
 import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
 import { EMPTY_BPU } from '../../types/bpu';
 import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
@@ -123,7 +123,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     if (!dpgf) return;
     const issues = validateProDocument(dpgf);
     if (!issues.length) {
-      showToast('Contrôle terminé : aucune anomalie détectée.', 'success');
+      showToast(t('pro_control_toast_ok'), 'success');
       return;
     }
     const errors = issues.filter(i => i.severity === 'error');
@@ -151,16 +151,16 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
       // Flush avant de figer : si la sauvegarde échoue, on abandonne.
       await handleSave();
       if (saveStatus === 'error') {
-        showToast('Enregistrement échoué — la version n\'a pas été figée.', 'error');
+        showToast(t('pro_snap_toast_saved_error'), 'error');
         return;
       }
       await apiFetch(`/api/projects/${projectId}/dpgf/versions`, {
         method: 'POST',
         body: JSON.stringify({ label: label.trim(), phase: phase.trim() || null, version: dpgf.version }),
       });
-      showToast(`Version « ${label.trim()} » figée.`, 'success');
+      showToast(t('pro_snap_toast_frozen', { label: label.trim() }), 'success');
     } catch (e: any) {
-      showToast(`Impossible de figer la version : ${e?.message ?? 'erreur réseau'}`, 'error');
+      showToast(t('pro_snap_toast_error', { message: e?.message ?? t('pro_snap_toast_network_error') }), 'error');
     }
   }, [dpgf, handleSave, saveStatus, projectId, showToast]);
 
@@ -569,8 +569,26 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     const lastChap = chaps[chaps.length - 1];
     const newLigne = { ...ligne, id: `ext_${Date.now()}` };
     const nextChap = { ...lastChap, lignes: [...(lastChap.lignes ?? []), newLigne] };
-    const nextLot = { ...lastLot, chapitres: chaps.map((c: any, i: number) => i === chaps.length - 1 ? nextChap : c) };
-    editDpgf({ ...dpgf, lots: lots.map((l: any, i: number) => i === lots.length - 1 ? nextLot : l) });
+    const nextLot = { ...lastLot, chapitres: chaps.map((c: Chapitre, i: number) => i === chaps.length - 1 ? nextChap : c) };
+    editDpgf({ ...dpgf, lots: lots.map((l: Lot, i: number) => i === lots.length - 1 ? nextLot : l) });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dpgf]);
+
+  // Cross-panel DnD pour CCTPEditor : même logique que handleDropExternal mais
+  // la ligne est ajoutée au dernier chapitre du dernier lot du DPGF (CCTP).
+  const handleDropExternalCctp = useCallback((ligne: Ligne) => {
+    setDraggedLigne(null);
+    if (!dpgf) return;
+    const lots = dpgf.lots;
+    if (!lots.length) return;
+    const lastLot = lots[lots.length - 1];
+    const chaps = lastLot.chapitres;
+    if (!chaps.length) return;
+    const lastChap = chaps[chaps.length - 1];
+    const newLigne = { ...ligne, id: `ext_cctp_${Date.now()}` };
+    const nextChap = { ...lastChap, lignes: [...(lastChap.lignes ?? []), newLigne] };
+    const nextLot = { ...lastLot, chapitres: chaps.map((c: Chapitre, i: number) => i === chaps.length - 1 ? nextChap : c) };
+    editDpgf({ ...dpgf, lots: lots.map((l: Lot, i: number) => i === lots.length - 1 ? nextLot : l) });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dpgf]);
 
@@ -693,7 +711,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
           const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' });
           setDpgf(restored);
           setVersions(null);
-          showToast(`Version « ${v.label} » restaurée.`, 'success');
+          showToast(t('pro_versions_toast_restored', { label: v.label }), 'success');
         }}
       />
 
@@ -704,23 +722,23 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
           onMouseDown={e => { if (e.target === e.currentTarget) setSnapForm(null); }}
         >
           <div className="w-full max-w-md rounded-xl bg-white dark:bg-zinc-900 shadow-2xl p-6">
-            <h3 className="font-semibold mb-4">Figer une version</h3>
-            <label className="block text-sm font-medium mb-1">Libellé</label>
+            <h3 className="font-semibold mb-4">{t('pro_snap_title')}</h3>
+            <label className="block text-sm font-medium mb-1">{t('pro_snap_label')}</label>
             <input
               className="w-full border rounded-lg px-3 py-2 text-sm mb-3"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
               value={snapForm.label}
               onChange={e => setSnapForm(f => f && ({ ...f, label: e.target.value }))}
-              placeholder="ex. APD validé, DCE indice A"
+              placeholder={t('pro_snap_label_placeholder')}
               autoFocus
             />
-            <label className="block text-sm font-medium mb-1">Phase</label>
+            <label className="block text-sm font-medium mb-1">{t('pro_snap_phase')}</label>
             <input
               className="w-full border rounded-lg px-3 py-2 text-sm mb-5"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
               value={snapForm.phase}
               onChange={e => setSnapForm(f => f && ({ ...f, phase: e.target.value }))}
-              placeholder="ex. APS, APD, PRO, DCE…"
+              placeholder={t('pro_snap_phase_placeholder')}
             />
             <div className="flex justify-end gap-2">
               <button
@@ -728,7 +746,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 className="h-9 px-4 rounded-lg text-sm border"
                 style={{ borderColor: 'var(--tblr-border)' }}
               >
-                Annuler
+                {t('pro_snap_cancel')}
               </button>
               <button
                 onClick={() => void validerInstantane(snapForm.label, snapForm.phase)}
@@ -736,7 +754,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 className="h-9 px-4 rounded-lg text-sm font-semibold text-white disabled:opacity-40"
                 style={{ background: 'var(--tblr-primary)' }}
               >
-                Figer
+                {t('pro_snap_confirm')}
               </button>
             </div>
           </div>
@@ -752,15 +770,15 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
           <div className="w-full max-w-2xl max-h-[80dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
             <div className="flex items-center justify-between px-4 py-3 border-b">
               <div>
-                <h3 className="font-semibold">Rapport de contrôle</h3>
+                <h3 className="font-semibold">{t('pro_control_title')}</h3>
                 <p className="text-xs text-zinc-500">
-                  {controleReport.errors > 0 && <span className="text-red-600 mr-2">⛔ {controleReport.errors} erreur(s)</span>}
-                  {controleReport.warnings > 0 && <span className="text-amber-600">⚠ {controleReport.warnings} avertissement(s)</span>}
+                  {controleReport.errors > 0 && <span className="text-red-600 mr-2">⛔ {t('pro_control_errors', { count: controleReport.errors })}</span>}
+                  {controleReport.warnings > 0 && <span className="text-amber-600">⚠ {t('pro_control_warnings', { count: controleReport.warnings })}</span>}
                 </p>
               </div>
               <button
                 onClick={() => setControleReport(null)}
-                aria-label="Fermer"
+                aria-label={t('pro_control_close')}
                 className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
               >
                 <IconX size={18} />
@@ -813,7 +831,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} />
+              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} />
             ) : null}
           </div>
           {splitView && (

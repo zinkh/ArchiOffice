@@ -840,6 +840,25 @@ export default function ProjectDetail() {
     }
   };
 
+  const handleCreateRfi = async () => {
+    if (!id || !newRfi.question) return;
+    try {
+      const res = await fetch('/api/rfis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...newRfi, project_id: id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRfis(prev => [...prev, data]);
+        setIsAddingRfi(false);
+        setNewRfi({ question: '', asked_by: '', due_date: '' });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const fetchPlans = async () => {
     try {
       const res = await fetch(`/api/plans?project_id=${id}`);
@@ -4248,19 +4267,8 @@ export default function ProjectDetail() {
                       </div>
                       <div className="flex justify-end">
                         <button
-                          onClick={async () => {
-                            if (!id || !newRfi.question) return;
-                            try {
-                              const res = await fetch('/api/rfis', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...newRfi, project_id: id }) });
-                              if (res.ok) {
-                                const data = await res.json();
-                                setRfis(prev => [...prev, data]);
-                                setIsAddingRfi(false);
-                                setNewRfi({ question: '', asked_by: '', due_date: '' });
-                              }
-                            } catch (err) { console.error(err); }
-                          }}
                           type="button"
+                          onClick={() => void handleCreateRfi()}
                           disabled={!newRfi.question}
                           className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold transition"
                         >
