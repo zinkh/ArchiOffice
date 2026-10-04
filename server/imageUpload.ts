@@ -20,6 +20,9 @@ export const MEETING_PHOTO_MAX_DIMENSION = 1600; // site inspection photos benef
 // is sniffImageMime() below, run against the actual bytes once uploaded.
 export const imageUpload = multer({
   storage: multer.memoryStorage(),
+  // Les navigateurs envoient le nom de fichier en UTF-8 ; le défaut latin1
+  // de multer changerait « Général » en « GÃ©nÃ©ral ».
+  defParamCharset: 'utf8',
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB — matches the "logos" bucket's own limit
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {
@@ -36,6 +39,9 @@ export const imageUpload = multer({
 // larger cap rather than raising the one meant to keep avatars/logos small.
 export const sitePhotoUpload = multer({
   storage: multer.memoryStorage(),
+  // Les navigateurs envoient le nom de fichier en UTF-8 ; le défaut latin1
+  // de multer changerait « Général » en « GÃ©nÃ©ral ».
+  defParamCharset: 'utf8',
   limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB — covers an unedited phone camera photo
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_IMAGE_MIME.has(file.mimetype)) {

@@ -40,6 +40,14 @@ describe('proposalSchema', () => {
   it('accepts a valid status', () => {
     expect(proposalSchema.safeParse({ status: 'Accepted', amount: 5000 }).success).toBe(true);
   });
+
+  it('accepte les champs facultatifs vides (NULL) tels que lus en base', () => {
+    expect(proposalSchema.safeParse({ title: 'Devis', description: null, vat_rate: null, reference: null, amount: null }).success).toBe(true);
+  });
+
+  it('refuse toujours un taux de TVA hors bornes', () => {
+    expect(proposalSchema.safeParse({ vat_rate: 120 }).success).toBe(false);
+  });
 });
 
 describe('team schemas', () => {

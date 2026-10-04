@@ -113,7 +113,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold rounded uppercase tracking-wider">Cadastre Download</span>
+          <span className="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Cadastre Download</span>
         </div>
         {loading && <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>}
       </div>
@@ -139,11 +139,11 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
             <div>
               <p className="text-xs font-bold text-zinc-900 dark:text-white">Parcel {parcel.id}</p>
               <div className="flex items-center gap-2 mt-0.5">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Section {parcel.section} - N° {parcel.numero}</p>
+                <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider">Section {parcel.section} - N° {parcel.numero}</p>
                 {parcel.surface && (
                   <>
                     <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                    <p className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Surface: {parcel.surface} m²</p>
+                    <p className="text-[0.6875rem] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Surface: {parcel.surface} m²</p>
                   </>
                 )}
               </div>
@@ -206,8 +206,8 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               View on Geoportail
             </a>
           </div>
-          <p className="text-[10px] text-zinc-400 italic">Source: cadastre.data.gouv.fr (Bundler API)</p>
-          <p className="text-[9px] text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-100 dark:border-zinc-800">
+          <p className="text-[0.6875rem] text-zinc-400 italic">Source: cadastre.data.gouv.fr (Bundler API)</p>
+          <p className="text-[0.6875rem] text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-100 dark:border-zinc-800">
             Note: We are now using the official Bundler API. Vector data (DXF, SHP) and images (TIFF) are provided as ZIP archives for the commune or sheet.
           </p>
         </div>

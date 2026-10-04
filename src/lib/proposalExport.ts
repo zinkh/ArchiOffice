@@ -205,7 +205,8 @@ export function buildDefaultTemplate(detailLevel: 'court' | 'detaille' = 'detail
       appendixNotes: DEFAULT_APPENDIX_NOTES,
     },
     visual: {
-      primaryColor: '#2563eb',
+      // Gris foncé par défaut (charte sobre du cabinet) ; la couleur reste réglable dans l'éditeur.
+      primaryColor: '#111827',
       fontFamily: 'Helvetica',
       logoSize: 'medium',
       logoPosition: 'left',

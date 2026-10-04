@@ -5,7 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatCurrency(amount: number, currency: string = 'EUR') {
+// null/undefined veut dire "non renseigné" et s'affiche « — », jamais
+// « 0,00 € » : un budget ou un montant absent n'est pas un vrai zéro, et les
+// deux se confondaient partout à l'écran avant ce garde-fou. Un zéro
+// explicitement saisi (amount === 0) reste affiché normalement.
+export function formatCurrency(amount: number | null | undefined, currency: string = 'EUR') {
+  if (amount === null || amount === undefined || Number.isNaN(amount)) return '—';
   return new Intl.NumberFormat('fr-FR', {
     style: 'currency',
     currency: currency,

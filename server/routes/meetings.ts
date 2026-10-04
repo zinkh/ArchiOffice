@@ -9,6 +9,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -17,6 +18,16 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
   deleteFromStorage: (bucket: string, fileUrl: string) => Promise<void>;
+}
+
+// Les anciennes réunions liées à un devis ou un appel d'offres ont souvent
+// été stockées avec le type « projet ». Corriger leur lecture sans modifier
+// rétroactivement les lignes historiques ni perdre leur rattachement.
+function withContextualType(meeting: any) {
+  return {
+    ...meeting,
+    type: meeting.proposal_id ? 'visite_proposition' : meeting.tender_id ? 'visite_candidature' : meeting.type,
+  };
 }
 
 export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage, deleteFromStorage }: RouteDeps) {
@@ -31,7 +42,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       if (type) query = query.eq('type', type);
       const { data, error } = await query;
       if (error) throw error;
-      res.json(data || []);
+      res.json((data || []).map(withContextualType));
     } catch (e: any) {
       console.error("[GET /api/meetings]", e); res.status(500).json({ error: e.message }); }
   });
@@ -43,7 +54,7 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { data: meeting, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').select('*').eq('id', id).single();
       if (error) throw error;
       const { data: photos } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').select('*').eq('meeting_id', id).order('uploaded_at');
-      res.json({ ...meeting, photos: photos || [] });
+      res.json({ ...withContextualType(meeting), photos: photos || [] });
     } catch (e: any) {
       console.error("[GET /api/meetings/:id]", e); res.status(500).json({ error: e.message }); }
   });
@@ -51,7 +62,14 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
   app.post("/api/meetings", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { project_id, proposal_id, tender_id, type, title, date, notes } = req.body;
+      const { id: bodyId, project_id, proposal_id, tender_id, type, title, date, notes } = req.body;
+      // Id fourni par le client (file de synchro hors-ligne,
+      // src/lib/offlineQueue.ts) : rejouer la même création après une
+      // coupure réseau ne doit jamais créer deux réunions.
+      if (bodyId) {
+        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').select('*').eq('id', bodyId).maybeSingle();
+        if (existing) return res.status(200).json({ ...withContextualType(existing), photos: [] });
+      }
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
@@ -61,13 +79,17 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       if (tender_id && !(await assertTenantEntity(supabaseAdmin, 'tenders', tender_id, tenantId))) {
         return res.status(400).json({ error: "Appel d'offres introuvable pour ce cabinet." });
       }
-      const id = crypto.randomUUID();
+      // Le type suit le parent, même pour les clients/API qui omettent le
+      // champ ou envoient encore la valeur historique par défaut « projet ».
+      const meetingType = proposal_id ? 'visite_proposition' : tender_id ? 'visite_candidature' : type || 'projet';
+      const id = bodyId || crypto.randomUUID();
       const created_at = new Date().toISOString();
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').insert({ id, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: type || 'projet', title, date, notes: notes || null, created_at });
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meetings').insert({ id, project_id: project_id || null, proposal_id: proposal_id || null, tender_id: tender_id || null, type: meetingType, title, date, notes: notes || null, created_at });
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la réunion "${title}"`, title, id, 'meeting', 'Réunions');
-      res.status(201).json({ id, project_id, proposal_id, tender_id, type: type || 'projet', title, date, notes, created_at, photos: [] });
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'meeting.created', { id, project_id, title, date, type: meetingType });
+      res.status(201).json({ id, project_id, proposal_id, tender_id, type: meetingType, title, date, notes, created_at, photos: [] });
     } catch (e: any) {
       console.error("[POST /api/meetings]", e); res.status(500).json({ error: e.message }); }
   });
@@ -116,12 +138,20 @@ export function registerMeetingRoutes(app: Express, { supabaseAdmin, getTenantId
       const { caption } = req.body;
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
+      // Id fourni par le client (file de synchro hors-ligne) : un envoi
+      // rejoué après coupure réseau retrouve la photo déjà déposée au lieu
+      // de la reposer une seconde fois sur le stockage.
+      const clientPhotoId = typeof req.body?.id === 'string' && req.body.id ? req.body.id : null;
+      if (clientPhotoId) {
+        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_photos').select('*').eq('id', clientPhotoId).maybeSingle();
+        if (existing) return res.status(200).json(existing);
+      }
       const sniffedMime = sniffImageMime(file.buffer);
       if (!sniffedMime) {
         return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
       }
       const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
-      const photoId = crypto.randomUUID();
+      const photoId = clientPhotoId || crypto.randomUUID();
       const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname)}`;
       const file_url = await uploadToStorage('meeting-photos', storagePath, buffer, mimetype);
       const uploaded_at = new Date().toISOString();

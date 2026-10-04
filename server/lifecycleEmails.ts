@@ -40,6 +40,7 @@ async function checkTrialEndingSoon(supabaseAdmin: SupabaseClient): Promise<void
     .select('id, name')
     .eq('plan', 'trial')
     .is('deletion_requested_at', null)
+    .is('suspended_at', null)
     .is('trial_ending_email_sent_at', null)
     .not('trial_ends_at', 'is', null)
     .lte('trial_ends_at', soonCutoff)
@@ -70,6 +71,7 @@ async function checkTrialExpired(supabaseAdmin: SupabaseClient): Promise<void> {
     .select('id, name')
     .eq('plan', 'trial')
     .is('deletion_requested_at', null)
+    .is('suspended_at', null)
     .is('trial_expired_email_sent_at', null)
     .not('trial_ends_at', 'is', null)
     .lt('trial_ends_at', now);
@@ -111,7 +113,8 @@ async function checkInactiveTenants(supabaseAdmin: SupabaseClient): Promise<void
     .from('tenants')
     .select('id, name, created_at, inactivity_email_sent_at')
     .neq('plan', 'trial')
-    .is('deletion_requested_at', null);
+    .is('deletion_requested_at', null)
+    .is('suspended_at', null);
   if (error) {
     console.error('[lifecycleEmails] Failed to list tenants for inactivity check:', error.message);
     return;

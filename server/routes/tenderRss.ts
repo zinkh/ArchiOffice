@@ -192,6 +192,10 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
       const tenantId = await getTenantId(req.user.id);
       let query = tenantScopedFrom(supabaseAdmin, tenantId, 'tender_rss_matches').select('*, tender_rss_sources(name)').order('pub_date', { ascending: false, nullsFirst: false });
       if (req.query.status) query = query.eq('status', req.query.status as string);
+      // Retrouve l'annonce d'origine d'un appel d'offres converti — utilisé
+      // par l'onglet Aperçu (src/pages/TenderDetail.tsx) pour afficher le
+      // même panneau de détail que "Annonces surveillées".
+      if (req.query.tender_id) query = query.eq('tender_id', req.query.tender_id as string);
       const { data, error } = await query;
       if (error) throw error;
       res.json((data || []).map((m: any) => ({ ...m, source_name: m.tender_rss_sources?.name || null, tender_rss_sources: undefined })));
@@ -230,12 +234,12 @@ export function registerTenderRssRoutes(app: Express, { supabaseAdmin, getTenant
       if (me || !match) return res.status(404).json({ error: "Tender RSS match not found" });
 
       const tenderId = crypto.randomUUID();
-      const notes = [match.link, match.description].filter(Boolean).join('\n\n');
       const { error: te } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').insert({
         id: tenderId, title: match.title, client: match.pouvoir_adjudicateur || '',
         submission_deadline: match.date_limite_reponse || '', status: 'Draft', value: 0,
+        description: match.description || null, type: match.type_marche || null,
         construction_cost: match.montant_travaux || null, ville_execution: match.ville_execution || null,
-        notes, archived: false
+        notes: match.link || '', archived: false
       });
       if (te) throw te;
 

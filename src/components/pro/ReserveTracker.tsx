@@ -1,5 +1,7 @@
 import * as React from 'react';
-import { useState, useMemo } from 'react';
+import { AnimatePresence } from 'motion/react';
+import { useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   IconClipboardCheck,
   IconAlertTriangle,
@@ -21,6 +23,7 @@ import { CardHeader } from '../ui/Card';
 import { StatTile } from '../ui/StatTile';
 import { PlanAnnotator } from '../PlanAnnotator';
 import { SignedImage } from '../SignedImage';
+import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import type { Plan } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
@@ -38,6 +41,10 @@ interface ReserveTrackerProps {
   /** Pour l'export PDF : l'affaire et la charte du cabinet. */
   project?: ReservesExportProject | null;
   settings?: AgencySettings | null;
+  /** Ouvre directement cette réserve à l'arrivée sur l'onglet — lien direct
+   *  depuis un agent (?open=reserves:<id> sur /projects/:id, voir
+   *  recordLinks.ts côté serveur et ProjectDetail.tsx). */
+  initialOpenReserveId?: string | null;
 }
 
 type Filter = 'ouvertes' | 'retard' | 'levees' | 'toutes';
@@ -58,11 +65,18 @@ const FILTERS: { id: Filter; label: string }[] = [
  * avec la photo prise sur place. L'export PDF (lib/reservesExport.ts) sort
  * la liste filtrée à l'écran.
  */
-export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList, project, settings }: ReserveTrackerProps) {
+export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
+  const { t } = useTranslation();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [openReserveId, setOpenReserveId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialOpenReserveId || reserves.length === 0) return;
+    if (reserves.some(r => r.id === initialOpenReserveId)) setOpenReserveId(initialOpenReserveId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenReserveId, reserves]);
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>('toutes');
   const [search, setSearch] = useState('');
@@ -118,36 +132,46 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
 
   const mobileList = useMemo(() => [...visible].sort((a, b) => (b.number || 0) - (a.number || 0)), [visible]);
 
+  const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
+
+  // Lève le badge « en attente » d'une réserve dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity: syncedEntity } = (e as CustomEvent).detail || {};
+      if (syncedEntity !== entity) return;
+      setReserves(prev => prev.map(r => r.id === id ? { ...r, pendingSync: false } : r));
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, [entity, setReserves]);
+
   const changeStatus = async (res: ReserveLike, status: ReserveLike['status']) => {
     const updated = { ...res, status };
     try {
-      const response = await fetch(`${apiBase}/${res.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
-      if (response.ok) setReserves(prev => prev.map(r => r.id === res.id ? updated : r));
+      await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'PUT', url: `${apiBase}/${res.id}`, body: updated });
+      setReserves(prev => prev.map(r => r.id === res.id ? updated : r));
     } catch (err) { console.error(err); }
   };
 
   const deleteReserve = async (res: ReserveLike) => {
-    if (!confirm(`Supprimer la réserve N° ${res.number ?? ''} ?`)) return;
+    if (!confirm(t('reserve_tracker_confirm_delete', { number: res.number ?? '' }))) return;
     try {
-      const response = await fetch(`${apiBase}/${res.id}`, { method: 'DELETE' });
-      if (response.ok) setReserves(prev => prev.filter(r => r.id !== res.id));
+      await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${res.id}` });
+      setReserves(prev => prev.filter(r => r.id !== res.id));
     } catch (err) { console.error(err); }
   };
 
   const handleExport = async () => {
-    if (!project || !settings) { alert("Les réglages du cabinet ne sont pas encore chargés."); return; }
-    if (visible.length === 0) { alert('Aucune réserve à exporter avec ce filtre.'); return; }
+    if (!project || !settings) { alert(t('reserve_tracker_settings_not_loaded')); return; }
+    if (visible.length === 0) { alert(t('reserve_tracker_no_reserves_to_export')); return; }
     setExporting('Préparation…');
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
       await exportReservesToPDF(visible, plans, project, settings, { title, onProgress: setExporting });
     } catch (err) {
       console.error('[ReserveTracker] export', err);
-      alert("L'export PDF a échoué.");
+      alert(t('reserve_tracker_export_failed'));
     } finally {
       setExporting(null);
     }
@@ -166,9 +190,13 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
     }
     return (
       <div className={cn(className, 'relative')}>
-        <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" />
+        {first.pendingSync ? (
+          <img src={first.localPreviewUrl} alt="" className="w-full h-full object-cover rounded-lg opacity-90" />
+        ) : (
+          <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" />
+        )}
         {(r.photos?.length || 0) > 1 && (
-          <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[9px] font-bold">{r.photos!.length}</span>
+          <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[0.6875rem] font-bold">{r.photos!.length}</span>
         )}
       </div>
     );
@@ -202,7 +230,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               <button
                 onClick={handleExport}
                 disabled={!!exporting || reserves.length === 0}
-                className="flex items-center gap-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition-all disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
                 title="Exporter la liste de réserves en PDF"
               >
                 {exporting ? <IconLoader2 size={14} className="animate-spin" /> : <IconFileTypePdf size={14} />}
@@ -210,7 +238,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               </button>
               <button
                 onClick={openForCreation}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
               >
                 <IconPlus size={14} />
                 Créer une réserve
@@ -233,7 +261,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                 <span>Touchez le plan pour positionner une nouvelle réserve, ou un repère pour ouvrir sa fiche.</span>
               )}
             </div>
-            <div className="h-[60vh] sm:h-[500px]">
+            <div className="h-[60dvh] sm:h-[500px]">
               <PlanAnnotator
                 fileUrl={selectedPlan.file_url}
                 markers={planMarkers}
@@ -272,7 +300,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs bg-zinc-100 dark:bg-zinc-800 border-none outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
-          <span className="text-[10px] text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
+          <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
         </div>
 
         {/* Mobile : une carte par réserve */}
@@ -291,16 +319,19 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                 {renderThumb(res, 'w-16 h-16 shrink-0')}
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-start gap-2">
-                    <span className="font-mono text-[11px] font-bold text-[var(--tblr-muted)] pt-0.5">#{res.number ?? '-'}</span>
+                    <span className="font-mono text-[0.6875rem] font-bold text-[var(--tblr-muted)] pt-0.5">#{res.number ?? '-'}</span>
                     <span className="font-semibold text-sm text-[var(--tblr-text)] leading-snug line-clamp-2">{res.title}</span>
+                    {res.pendingSync && (
+                      <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
+                    )}
                   </div>
-                  <div className="text-[11px] text-[var(--tblr-muted)] truncate">
+                  <div className="text-[0.6875rem] text-[var(--tblr-muted)] truncate">
                     {[entreprises.join(', ') || lots.join(', '), [res.batiment, res.local].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || '—'}
                   </div>
                   <div className="flex items-center justify-between gap-2">
-                    <span className={cn('text-[11px] font-medium', retard > 0 ? 'text-red-600' : 'text-[var(--tblr-muted)]')}>
+                    <span className={cn('text-[0.6875rem] font-medium', retard > 0 ? 'text-red-600' : 'text-[var(--tblr-muted)]')}>
                       {res.due_date ? new Date(res.due_date).toLocaleDateString('fr-FR') : 'Sans échéance'}
-                      {retard > 0 && <span className="ml-1 px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 text-[9px] font-bold">+{retard}j</span>}
+                      {retard > 0 && <span className="ml-1 px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 text-[0.6875rem] font-bold">+{retard}j</span>}
                     </span>
                     <StatusSelect value={res.status} onChange={s => changeStatus(res, s)} />
                   </div>
@@ -315,8 +346,8 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
 
         {/* Bureau : tableau groupé par lot / entreprise */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[10px] tracking-wider">
+          <table className="min-w-full text-sm">
+            <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
               <tr>
                 <th className="px-4 py-3 text-left w-12">N°</th>
                 <th className="px-4 py-3 text-left w-16">Photo</th>
@@ -340,8 +371,8 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                       <td colSpan={8} className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                          <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[11px]">{groupKey}</span>
-                          <span className="text-[10px] text-[var(--tblr-muted)] font-normal">({groupReserves.length} réserve{groupReserves.length > 1 ? 's' : ''})</span>
+                          <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
+                          <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupReserves.length} réserve{groupReserves.length > 1 ? 's' : ''})</span>
                         </div>
                       </td>
                     </tr>
@@ -353,22 +384,27 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                           onClick={() => setOpenReserveId(res.id)}
                           className={cn('transition-colors group cursor-pointer', retard > 0 ? 'bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50' : 'hover:bg-[var(--tblr-surface-2)]')}
                         >
-                          <td className="px-4 py-3 font-mono text-[10px] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
+                          <td className="px-4 py-3 font-mono text-[0.6875rem] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
                           <td className="px-4 py-3">
-                            <div className="font-medium text-[var(--tblr-text)]">{res.title}</div>
-                            {res.description && <div className="text-[11px] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
+                            <div className="font-medium text-[var(--tblr-text)] flex items-center gap-1.5">
+                              {res.title}
+                              {res.pendingSync && (
+                                <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
+                              )}
+                            </div>
+                            {res.description && <div className="text-[0.6875rem] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
                           </td>
                           <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
                           <td className="px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} /></td>
-                          <td className="px-4 py-3 text-[10px] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
+                          <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
                           <td className="px-4 py-3">
                             <div className="space-y-0.5">
                               <div className={cn('text-xs font-medium', retard > 0 ? 'text-red-500' : 'text-zinc-600 dark:text-zinc-300')}>
                                 {res.due_date ? new Date(res.due_date).toLocaleDateString('fr-FR') : '—'}
                               </div>
                               {retard > 0 && (
-                                <span className="inline-block px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[9px] font-bold">+{retard}j</span>
+                                <span className="inline-block px-1.5 py-0.5 bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 rounded text-[0.6875rem] font-bold">+{retard}j</span>
                               )}
                             </div>
                           </td>
@@ -389,7 +425,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               })}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-center text-[var(--tblr-muted)] italic">Aucune réserve.</td>
+                  <td colSpan={8} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">Aucune réserve.</span></td>
                 </tr>
               )}
             </tbody>
@@ -397,8 +433,10 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
         </div>
       </div>
 
+      <AnimatePresence>
       {(creating || openReserve) && (
         <ReserveDetail
+          key={creating ? 'new' : openReserve!.id}
           apiBase={apiBase}
           projectId={projectId}
           reserve={creating ? null : openReserve}
@@ -413,6 +451,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
           onDeleted={id => setReserves(prev => prev.filter(r => r.id !== id))}
         />
       )}
+      </AnimatePresence>
     </>
   );
 }

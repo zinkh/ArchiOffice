@@ -167,9 +167,25 @@ export function registerAgentRoutes(
           web_fetch_enabled: false,
           mail_enabled: !!t.mail_enabled,
           mail_send_enabled: false,
+          // Jamais hérité non plus, comme mail_send_enabled : ouvrir une
+          // pièce jointe est un second palier, jamais implicite.
+          mail_attachments_enabled: false,
           geo_enabled: !!t.geo_enabled,
           docs_read_enabled: !!t.docs_read_enabled,
+          // Jamais hérité, comme mail_send_enabled : c'est une capacité
+          // d'écriture, jamais implicite, au cabinet de l'activer
+          // explicitement depuis /agents/:id après avoir créé l'agent.
+          docs_write_enabled: false,
           web_search_enabled: false,
+          // Jamais héritée d'un template, comme web_search_enabled : la
+          // bibliothèque de connaissances est vide à la création (aucun
+          // document n'y est encore rattaché) et son activation est un choix
+          // de l'architecte, pas un défaut de métier.
+          knowledge_enabled: false,
+          // Jamais hérité, comme knowledge_enabled : proposer une amélioration
+          // est un choix explicite du cabinet, pas un défaut de métier — et un
+          // agent tout juste activé n'a encore rien à retenir.
+          learning_enabled: false,
           is_active: true, is_system_template: false,
         };
       } else {
@@ -181,8 +197,9 @@ export function registerAgentRoutes(
           tone, directives,
           context_scopes: context_scopes || [],
           action_scopes: action_scopes || [],
-          web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false,
-          geo_enabled: false, docs_read_enabled: false, web_search_enabled: false,
+          web_fetch_enabled: false, mail_enabled: false, mail_send_enabled: false, mail_attachments_enabled: false,
+          geo_enabled: false, docs_read_enabled: false, docs_write_enabled: false, web_search_enabled: false,
+          knowledge_enabled: false, learning_enabled: false,
           system_prompt_override, is_active: true, is_system_template: false,
         };
       }
@@ -201,7 +218,8 @@ export function registerAgentRoutes(
       const {
         name, role_title, avatar_initials, avatar_color, tone, directives,
         context_scopes, action_scopes, web_fetch_enabled, mail_enabled,
-        mail_send_enabled, geo_enabled, docs_read_enabled, web_search_enabled,
+        mail_send_enabled, mail_attachments_enabled, geo_enabled, docs_read_enabled, docs_write_enabled, web_search_enabled,
+        knowledge_enabled, learning_enabled,
         system_prompt_override, is_active,
       } = req.body;
       const { data, error } = await supabaseAdmin.from('agents').update({
@@ -213,9 +231,17 @@ export function registerAgentRoutes(
         // que capabilitiesFromAgent, appliqué ici pour qu'il soit vrai en
         // base et pas seulement au moment de construire les outils.
         mail_send_enabled: !!mail_enabled && !!mail_send_enabled,
+        // Même invariant : ouvrir une pièce jointe suppose de pouvoir lire
+        // la messagerie dont elle vient.
+        mail_attachments_enabled: !!mail_enabled && !!mail_attachments_enabled,
         geo_enabled: !!geo_enabled,
         docs_read_enabled: !!docs_read_enabled,
+        // Même invariant : écrire un CCTP/DPGF sans pouvoir le lire n'a pas
+        // de sens (voir capabilitiesFromAgent).
+        docs_write_enabled: !!docs_read_enabled && !!docs_write_enabled,
         web_search_enabled: !!web_search_enabled,
+        knowledge_enabled: !!knowledge_enabled,
+        learning_enabled: !!learning_enabled,
         system_prompt_override, is_active,
       }).eq('id', id).eq('tenant_id', tenantId).select().single();
       if (error) throw error;
@@ -233,6 +259,83 @@ export function registerAgentRoutes(
       const { error } = await supabaseAdmin.from('agents').update({ is_active: false }).eq('id', id).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ ok: true });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // ── Apprentissage des agents (agent_learning_suggestions) ────────────────
+  // File d'attente de propositions déposées par suggerer_amelioration
+  // (learningTools.ts) : rien ne s'applique jamais tout seul, voir
+  // migrate_agent_learning.sql. GET liste pour l'écran de revue
+  // (/agents/learning), POST est appelé par l'outil de l'agent (as_agent_id),
+  // PUT approuve ou rejette.
+
+  // GET /api/agent-learning-suggestions?status=pending
+  app.get('/api/agent-learning-suggestions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      let query = supabaseAdmin.from('agent_learning_suggestions').select('*').eq('tenant_id', tenantId);
+      const status = String(req.query.status || '').trim();
+      if (status) query = query.eq('status', status);
+      const { data, error } = await query.order('created_at', { ascending: false }).limit(200);
+      if (error) throw error;
+      const rows = (data as any[]) || [];
+      const agentIds = [...new Set(rows.map(r => r.agent_id))];
+      const { data: agentsData } = agentIds.length > 0
+        ? await supabaseAdmin.from('agents').select('id, name, role_title').in('id', agentIds)
+        : { data: [] as any[] };
+      const agentsById = new Map(((agentsData as any[]) || []).map(a => [a.id, a]));
+      res.json(rows.map(r => ({ ...r, agent: agentsById.get(r.agent_id) || null })));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/agent-learning-suggestions — appelé par suggerer_amelioration
+  // via la boucle interne (as_agent_id), jamais directement par l'écran.
+  app.post('/api/agent-learning-suggestions', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { as_agent_id, kind, title, content, suggested_capability } = req.body;
+      if (!['correction', 'missing_capability', 'knowledge_note'].includes(kind)) {
+        return res.status(400).json({ error: "kind doit être 'correction', 'missing_capability' ou 'knowledge_note'." });
+      }
+      if (!String(title || '').trim() || !String(content || '').trim()) {
+        return res.status(400).json({ error: 'title et content sont requis.' });
+      }
+      // Revalidé ici plutôt que de faire confiance à un id envoyé tel quel —
+      // même principe que as_agent_id sur POST /api/feed/posts
+      // (server/routes/activityFeed.ts) : un agent inexistant, inactif, ou
+      // sans la capacité learning_enabled ne peut pas déposer de proposition.
+      const { data: agent } = await supabaseAdmin.from('agents').select('id, learning_enabled')
+        .eq('id', as_agent_id).eq('tenant_id', tenantId).eq('is_active', true).maybeSingle();
+      if (!agent || !(agent as any).learning_enabled) {
+        return res.status(400).json({ error: "Agent introuvable, inactif, ou capacité d'apprentissage non activée pour ce cabinet." });
+      }
+      const id = crypto.randomUUID();
+      const { error } = await supabaseAdmin.from('agent_learning_suggestions').insert({
+        id, tenant_id: tenantId, agent_id: (agent as any).id, kind,
+        title: String(title).trim().slice(0, 200), content: String(content).trim().slice(0, 4000),
+        suggested_capability: suggested_capability || null, status: 'pending',
+      });
+      if (error) throw error;
+      res.status(201).json({ id, status: 'pending' });
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  // PUT /api/agent-learning-suggestions/:id — { action: 'approve' | 'reject' }
+  app.put('/api/agent-learning-suggestions/:id', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const action = String(req.body?.action || '');
+      if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: "action doit être 'approve' ou 'reject'." });
+      const { data: existing } = await supabaseAdmin.from('agent_learning_suggestions').select('id, status').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Proposition introuvable.' });
+      if ((existing as any).status !== 'pending') return res.status(409).json({ error: 'Cette proposition a déjà été traitée.' });
+      const { data, error } = await supabaseAdmin.from('agent_learning_suggestions').update({
+        status: action === 'approve' ? 'approved' : 'rejected',
+        reviewed_by: req.user.id, reviewed_at: new Date().toISOString(),
+      }).eq('id', id).eq('tenant_id', tenantId).select().single();
+      if (error) throw error;
+      res.json(data);
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -284,6 +387,7 @@ export function registerAgentRoutes(
       const { data: conv } = await supabaseAdmin.from('agent_conversations').select('id').eq('agent_id', agentId).eq('user_id', req.user.id).eq('tenant_id', tenantId).single();
       if (conv) {
         await supabaseAdmin.from('agent_messages').delete().eq('conversation_id', (conv as any).id);
+        await supabaseAdmin.from('agent_conversations').update({ attached_document_ids: [] }).eq('id', (conv as any).id);
       }
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -471,7 +575,7 @@ export function registerAgentRoutes(
       const { id: agentId } = req.params;
       const { message, document_ids } = req.body;
       if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
-      const attachedDocumentIds: string[] = Array.isArray(document_ids) ? document_ids : [];
+      const requestDocumentIds: string[] = Array.isArray(document_ids) ? document_ids : [];
 
       const { plan } = await getTenantPlan(tenantId);
       if (plan !== 'enterprise') {
@@ -502,6 +606,24 @@ export function registerAgentRoutes(
       }
       const convId = (conv as any).id;
 
+      // Un document joint reste lisible par l'agent pour toute la suite de
+      // CETTE conversation, pas seulement le tour où il est envoyé : sans
+      // ça, buildAgentContext ci-dessous ne recevrait que `document_ids` de
+      // CE message, et l'extraction de texte/vision faite au tour précédent
+      // (coûteuse) serait relue pour rien — l'agent la perd dès le message
+      // suivant alors que le fichier est toujours affiché comme joint dans
+      // l'historique. Plafonné pour ne pas faire grossir indéfiniment le
+      // prompt d'une conversation ancienne ; au-delà, les plus anciens
+      // sortent en premier — « Nouvelle conversation » (DELETE ci-dessous)
+      // remet ce plafond à zéro plutôt que d'être la seule échappatoire.
+      const MAX_STICKY_DOCUMENTS = 8;
+      const stickyDocumentIds: string[] = Array.isArray((conv as any).attached_document_ids) ? (conv as any).attached_document_ids : [];
+      const mergedDocumentIds = [...stickyDocumentIds, ...requestDocumentIds.filter(id => !stickyDocumentIds.includes(id))];
+      const attachedDocumentIds = mergedDocumentIds.slice(-MAX_STICKY_DOCUMENTS);
+      if (attachedDocumentIds.length !== stickyDocumentIds.length || attachedDocumentIds.some((id, i) => id !== stickyDocumentIds[i])) {
+        await supabaseAdmin.from('agent_conversations').update({ attached_document_ids: attachedDocumentIds }).eq('id', convId);
+      }
+
       const { data: history } = await supabaseAdmin.from('agent_messages').select('role, content').eq('conversation_id', convId).order('created_at', { ascending: true }).limit(20);
 
       // Which provider/model this call runs on is decided in llm/: the
@@ -531,7 +653,7 @@ export function registerAgentRoutes(
       // chaque appel de timedChat() plus bas.
       const webSearchActive = caps.webSearch && !!provider.supportsWebSearch;
 
-      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision);
+      const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge, caps.learning);
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx, webSearchActive);
 

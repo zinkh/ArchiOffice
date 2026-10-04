@@ -6,6 +6,7 @@
 // deliberate deferral.
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -63,6 +64,7 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de l'ordre de service "${title || os_number}"`, title || os_number || '', id, 'ordre_de_service', 'Ordres de service');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'ordre_service.created', { id, project_id, title, os_number, entreprise });
       res.status(201).json(data);
     } catch (e: any) {
       console.error("Error creating OS:", e);

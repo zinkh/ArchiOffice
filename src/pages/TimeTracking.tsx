@@ -34,7 +34,8 @@ function formatHours(h: number): string {
 
 const DAY_LABELS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
-export default function TimeTracking() {
+/** `embedded` : affichée dans l'onglet Suivi du temps de la page Équipe, qui porte déjà le titre. */
+export default function TimeTracking({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const { settings } = useSettings();
@@ -156,19 +157,19 @@ export default function TimeTracking() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-3">
-        <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('time_tracking_title')}</h2>
-        <div className="flex items-center gap-3">
-          <select className="p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700" value={clockProjectId} onChange={e => setClockProjectId(e.target.value)} disabled={!!current}>
+      <div className={`flex items-center flex-wrap gap-3 ${embedded ? 'sm:justify-end' : 'justify-between'}`}>
+        {!embedded && <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('time_tracking_title')}</h2>}
+        <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
+          <select className="min-w-0 flex-1 p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700 sm:max-w-64 sm:flex-none" value={clockProjectId} onChange={e => setClockProjectId(e.target.value)} disabled={!!current}>
             <option value="">{t('time_tracking_no_project')}</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           {current ? (
-            <button onClick={handleClockOut} className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-md font-medium hover:bg-red-700 shadow-sm">
+            <button onClick={handleClockOut} className="flex shrink-0 items-center gap-2 whitespace-nowrap bg-red-600 text-white px-4 py-2 rounded-md font-medium hover:bg-red-700 shadow-sm">
               <IconPlayerStop size={18} /> {t('time_tracking_clock_out')} ({elapsedLabel})
             </button>
           ) : (
-            <button onClick={handleClockIn} className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-md font-medium hover:bg-green-700 shadow-sm">
+            <button onClick={handleClockIn} className="flex shrink-0 items-center gap-2 whitespace-nowrap bg-green-600 text-white px-4 py-2 rounded-md font-medium hover:bg-green-700 shadow-sm">
               <IconPlayerPlay size={18} /> {t('time_tracking_clock_in')}
             </button>
           )}
@@ -176,7 +177,7 @@ export default function TimeTracking() {
       </div>
 
       {(teamData && teamData.length > 0 || isAdmin) && (
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <button onClick={() => setTab('me')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'me' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('time_tracking_tab_me')}</button>
           {teamData && teamData.length > 0 && (
             <button onClick={() => setTab('team')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'team' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('time_tracking_tab_team')}</button>
@@ -187,23 +188,23 @@ export default function TimeTracking() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
         <div className="flex items-center gap-2">
-          <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 text-sm">←</button>
-          <span className="text-sm font-medium">{weekStartStr} → {weekEndStr}</span>
-          <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 text-sm">→</button>
+          <button onClick={() => setWeekStart(addDays(weekStart, -7))} className="shrink-0 px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 text-sm">←</button>
+          <span className="whitespace-nowrap text-sm font-medium tabular-nums">{weekStartStr} → {weekEndStr}</span>
+          <button onClick={() => setWeekStart(addDays(weekStart, 7))} className="shrink-0 px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 text-sm">→</button>
         </div>
         {tab === 'me' && summary && (
-          <div className="flex items-center gap-3">
-            <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('time_tracking_week_total')}: {formatHours(summary.total_hours)}</span>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="whitespace-nowrap text-sm font-semibold text-zinc-700 dark:text-zinc-300">{t('time_tracking_week_total')}: {formatHours(summary.total_hours)}</span>
             <button
               onClick={() => exportWeeklyTimesheetPdf({
                 userName: currentUser?.name || 'Utilisateur',
                 weekStartStr, weekEndStr, entries, projectName,
                 totalHours: summary.total_hours,
-                agencySettings: { agencyName: settings?.agencyName, address: settings?.address, phone: settings?.phone, email: settings?.email },
+                agencySettings: settings ?? {},
               })}
-              className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+              className="flex items-center gap-1 whitespace-nowrap text-sm px-3 py-1.5 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700"
             >
               <IconDownload size={15} /> {t('time_tracking_export_week_pdf')}
             </button>
@@ -250,7 +251,8 @@ export default function TimeTracking() {
         </div>
       ) : tab === 'team' ? (
         <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-900">
               <tr><th className="text-left p-3">{t('time_tracking_team_name')}</th><th className="text-left p-3">{t('time_tracking_team_hours')}</th></tr>
             </thead>
@@ -263,6 +265,7 @@ export default function TimeTracking() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ) : (
         <div className="space-y-6">
@@ -270,14 +273,14 @@ export default function TimeTracking() {
             <div className="flex justify-between items-center flex-wrap gap-2">
               <h3 className="font-bold">{t('time_tracking_matrix_title')}</h3>
               {matrix && (
-                <button onClick={() => exportAdminMatrixExcel(matrix, `${weekStartStr}_${weekEndStr}`)} className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
+                <button onClick={() => exportAdminMatrixExcel(matrix, `${weekStartStr}_${weekEndStr}`, settings ?? {})} className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700">
                   <IconFileSpreadsheet size={15} /> {t('time_tracking_export_excel')}
                 </button>
               )}
             </div>
             {matrix ? (
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="min-w-full text-sm">
                   <thead className="bg-zinc-50 dark:bg-zinc-900">
                     <tr>
                       <th className="text-left p-2">{t('time_tracking_team_name')}</th>
@@ -314,7 +317,7 @@ export default function TimeTracking() {
               <input type="month" className="p-2 border rounded text-sm dark:bg-zinc-900 dark:border-zinc-700" value={monthValue} onChange={e => setMonthValue(e.target.value)} />
               <button
                 disabled={!monthlyRows || monthlyLoading}
-                onClick={() => monthlyRows && exportMonthlySummaryExcel(monthValue, monthlyRows)}
+                onClick={() => monthlyRows && exportMonthlySummaryExcel(monthValue, monthlyRows, settings ?? {})}
                 className="flex items-center gap-1 text-sm px-3 py-1.5 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
               >
                 <IconFileSpreadsheet size={15} /> {t('time_tracking_export_excel')}

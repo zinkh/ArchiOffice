@@ -1,14 +1,10 @@
 // jsPDF/docx are only pulled in when an export actually runs (dynamic import
 // below) — same lazy-loading convention as meetingExport.ts.
 import type { DocumentTemplateVariable } from '../types';
+import type { AgencySettings as BaseAgencySettings } from './proposalExport';
+import { drawAgencyFooters } from './pdfLetterhead';
 
-export interface AgencySettings {
-  agencyName?: string;
-  logoUrl?: string;
-  address?: string;
-  phone?: string;
-  email?: string;
-}
+export type AgencySettings = BaseAgencySettings;
 
 function sanitizeFilename(name: string) {
   return name.replace(/[^a-zA-Z0-9_\-]/g, '_');
@@ -87,8 +83,8 @@ export async function exportTemplatePdf(
   if (settings.email) { pdf.text(settings.email, margin, infoY); infoY += 4; }
   y = infoY + 2;
 
-  pdf.setDrawColor(37, 99, 235);
-  pdf.setLineWidth(0.6);
+  pdf.setDrawColor(209, 213, 219);
+  pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
   y += 9;
 
@@ -106,7 +102,7 @@ export async function exportTemplatePdf(
       y += wrapped.length * 6.5 + 2;
     } else if (line.kind === 'h2') {
       ensureSpace(9);
-      applyFont('bold', 11, '#1e40af');
+      applyFont('bold', 11, '#111827');
       const wrapped = pdf.splitTextToSize(line.text, contentW) as string[];
       pdf.text(wrapped, margin, y);
       y += wrapped.length * 5.5 + 2;
@@ -127,16 +123,7 @@ export async function exportTemplatePdf(
     }
   }
 
-  const totalPages = (pdf as any).internal.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
-    pdf.setPage(p);
-    pdf.setDrawColor(209, 213, 219);
-    pdf.setLineWidth(0.25);
-    pdf.line(margin, pageH - 12, pageW - margin, pageH - 12);
-    applyFont('normal', 7, '#9ca3af');
-    pdf.text(`${settings.agencyName || ''}  ·  ${title}`, margin, pageH - 7);
-    pdf.text(`${p} / ${totalPages}`, pageW - margin, pageH - 7, { align: 'right' });
-  }
+  drawAgencyFooters(pdf, settings, { title, margin });
 
   return pdf.output('blob');
 }

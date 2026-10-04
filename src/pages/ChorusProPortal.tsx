@@ -33,7 +33,7 @@ const STATUS_LABELS: Record<string, { label: string; color: string; bg: string; 
 function StatusBadge({ code }: { code: string }) {
   const s = STATUS_LABELS[code] || { label: code, color: 'var(--tblr-muted)', bg: 'var(--tblr-surface-2)', border: 'var(--tblr-border)', icon: null };
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider"
       style={{ background: s.bg, color: s.color, border: `1px solid ${s.border}` }}>
       {s.icon}{s.label}
     </span>
@@ -143,7 +143,8 @@ export default function ChorusProPortal() {
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Facture</th>
@@ -164,7 +165,7 @@ export default function ChorusProPortal() {
                       </div>
                       <div>
                         <p className="font-bold text-xs" style={{ color: 'var(--tblr-text)' }}>{inv.invoice_number}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{inv.issue_date}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{inv.issue_date}</p>
                       </div>
                     </div>
                   </td>
@@ -193,6 +194,7 @@ export default function ChorusProPortal() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -201,11 +203,12 @@ export default function ChorusProPortal() {
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <IconBuildingBank size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune facture entreprise liée sur Chorus Pro pour l'instant.</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Rechercher sur Chorus Pro</strong> depuis l'onglet Situations d'un projet pour retrouver la facture déposée par l'entreprise, puis y joindre l'état d'acompte.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Depuis l'onglet RDT d'une affaire, ouvrez une situation au certificat établi et utilisez <strong>Rechercher sur Chorus Pro</strong> pour retrouver la facture déposée par l'entreprise, puis y joindre le certificat de paiement.</p>
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Situation</th>
@@ -227,7 +230,7 @@ export default function ChorusProPortal() {
                       </div>
                       <div>
                         <p className="font-bold text-xs" style={{ color: 'var(--tblr-text)' }}>Sit. n°{sit.numero_situation}</p>
-                        <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{new Date(sit.date_situation).toLocaleDateString('fr-FR')}</p>
+                        <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{new Date(sit.date_situation).toLocaleDateString('fr-FR')}</p>
                       </div>
                     </div>
                   </td>
@@ -243,7 +246,7 @@ export default function ChorusProPortal() {
                   </td>
                   <td className="px-5 py-4">
                     {sit.etat_acompte_joint_at
-                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}><IconCircleCheck size={12} /> Joint</span>
+                      ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider" style={{ background: '#d3f9d8', color: '#2f9e44', border: '1px solid #b2f2bb' }}><IconCircleCheck size={12} /> Joint</span>
                       : <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Non joint</span>}
                   </td>
                   <td className="px-5 py-4 text-right">
@@ -263,6 +266,7 @@ export default function ChorusProPortal() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

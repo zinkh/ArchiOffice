@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconEdit, IconCopy, IconFileText, IconDownload, IconStar, IconStarFilled,
@@ -18,6 +19,10 @@ const emptyForm = (): Partial<DocumentTemplate> => ({
 export default function DocumentTemplates() {
   const { t } = useTranslation();
   const { settings } = useSettings();
+  // ?project=<id> : lettre lancée depuis l'aperçu d'une opération, le document
+  // est rattaché d'office à cette affaire (sélecteur prérempli, dépôt coché).
+  const [searchParams] = useSearchParams();
+  const presetProjectId = searchParams.get('project') || '';
   const [templates, setTemplates] = useState<DocumentTemplate[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeCategory, setActiveCategory] = useState<string>('all');
@@ -105,8 +110,8 @@ export default function DocumentTemplates() {
     const defaults: Record<string, string> = {};
     for (const v of tpl.variables) if (v.default_value) defaults[v.key] = v.default_value;
     setGenValues(defaults);
-    setGenProjectId('');
-    setGenSaveToProject(false);
+    setGenProjectId(presetProjectId);
+    setGenSaveToProject(!!presetProjectId);
     setGenError(null);
   };
 
@@ -134,7 +139,7 @@ export default function DocumentTemplates() {
       const { filled_content } = await apiFetch<{ filled_content: string }>(`/api/document_templates/${generateFor.id}/generate`, {
         method: 'POST', body: JSON.stringify({ variable_values: genValues }),
       });
-      const agency = { agencyName: settings?.agencyName, logoUrl: settings?.logoUrl, address: settings?.address, phone: settings?.phone, email: settings?.email };
+      const agency = settings ?? {};
       const blob = format === 'pdf'
         ? await exportTemplatePdf(generateFor.name, filled_content, agency)
         : await exportTemplateDocx(generateFor.name, filled_content, agency);
@@ -249,7 +254,7 @@ export default function DocumentTemplates() {
       {/* Editor modal */}
       {editorOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-2xl shadow-xl max-h-[90dvh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4">{editingId ? t('document_templates_edit_title') : t('document_templates_new_title')}</h3>
             <div className="space-y-3">
               <input className="w-full p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700" placeholder={t('document_templates_name_placeholder')}
@@ -305,7 +310,7 @@ export default function DocumentTemplates() {
       {/* Generate modal */}
       {generateFor && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-4xl shadow-xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl w-full max-w-4xl shadow-xl max-h-[90dvh] overflow-y-auto">
             <h3 className="text-xl font-bold mb-4">{t('document_templates_generate_title', { name: generateFor.name })}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-3">

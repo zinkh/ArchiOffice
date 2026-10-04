@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { IconPlus, IconChecklist, IconProgress, IconAlertTriangle } from '@tabler/icons-react';
 import { parseISO, isPast } from 'date-fns';
@@ -51,8 +52,8 @@ export default function ProjectTasksTab({ projectId, projects }: ProjectTasksTab
 
   return (
     <div className="mt-4 space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="grid grid-cols-3 gap-3 flex-1 max-w-xl">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 w-full sm:w-auto sm:flex-1 max-w-xl">
           <StatTile label={t('project_tasks_todo')} value={stats.todo} icon={IconChecklist} color="blue" />
           <StatTile label={t('project_tasks_in_progress')} value={stats.inProgress} icon={IconProgress} color="amber" />
           <StatTile label={t('project_tasks_overdue')} value={stats.overdue} icon={IconAlertTriangle} color={stats.overdue > 0 ? 'red' : 'neutral'} />
@@ -60,7 +61,7 @@ export default function ProjectTasksTab({ projectId, projects }: ProjectTasksTab
         <button
           type="button"
           onClick={() => setModal({ project_id: projectId, start_date: today, end_date: today })}
-          className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors shrink-0"
+          className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors shrink-0 ml-auto"
         >
           <IconPlus size={16} /> {t('kanban_new_task')}
         </button>
@@ -83,18 +84,20 @@ export default function ProjectTasksTab({ projectId, projects }: ProjectTasksTab
         />
       )}
 
-      {modal && (
-        <TaskFormModal
-          initial={modal}
-          projects={projects}
-          team={team}
-          allTasks={tasks}
-          lockProject
-          onClose={() => setModal(null)}
-          onSaved={afterWrite}
-          onDeleted={afterWrite}
-        />
-      )}
+      <AnimatePresence>
+        {modal && (
+          <TaskFormModal key="task-form-modal"
+            initial={modal}
+            projects={projects}
+            team={team}
+            allTasks={tasks}
+            lockProject
+            onClose={() => setModal(null)}
+            onSaved={afterWrite}
+            onDeleted={afterWrite}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }

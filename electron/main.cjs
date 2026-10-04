@@ -1,4 +1,4 @@
-const { app, BrowserWindow, safeStorage, ipcMain, Notification, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 const { resolveDataLocation } = require('./dataLocation.cjs');
+const { createAppMenu } = require('./menu.cjs');
 
 // package.json's "name" is the npm workspace root ("react-example", a
 // leftover scaffold name) — Electron otherwise uses it verbatim for both the
@@ -383,7 +384,7 @@ async function showMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 860,
-    autoHideMenuBar: true,
+    autoHideMenuBar: false,
     title: 'ArchiOffice Client',
     show: false,
     webPreferences: {
@@ -417,6 +418,14 @@ app.whenReady().then(async () => {
   log('ArchiOffice démarre — journal :', logFilePath);
   registerNotificationIpc();
   registerDataLocationIpc();
+  // Construit avant la fenêtre principale : mainWindow/logFilePath n'existent
+  // pas encore, d'où les accesseurs plutôt que des valeurs figées. Sans effet
+  // sur splashWindow (frame: false, aucune barre de menu possible).
+  Menu.setApplicationMenu(createAppMenu({
+    getMainWindow: () => mainWindow,
+    getLogFilePath: () => logFilePath,
+    log,
+  }));
   await createSplashWindow();
 
   serverStartPromise = startServer()

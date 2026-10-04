@@ -1,12 +1,15 @@
 import { AGENT_RESOURCES, type AgentResourceDef, type AgentCapabilities } from '../types.js';
 import { fetchUrlSafely } from './webFetch.js';
 import { buildMailTools, executeMailTool, MAIL_TOOL_NAMES } from './mailTools.js';
+import { buildMailAttachmentTools, executeMailAttachmentTool, MAIL_ATTACHMENT_TOOL_NAMES } from './mailAttachmentTools.js';
 import { buildGeoTools, executeGeoTool, GEO_TOOL_NAMES } from './geoTools.js';
-import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES } from './projectDocTools.js';
+import { buildProjectDocTools, executeProjectDocTool, PROJECT_DOC_TOOL_NAMES, buildWriteProjectDocTools, executeWriteProjectDocTool, PROJECT_DOC_WRITE_TOOL_NAMES } from './projectDocTools.js';
 import { buildDelegateTools, executeDelegateTool, DELEGATE_TOOL_NAMES } from './delegateTools.js';
 import { buildNotifyTools, executeNotifyTool, NOTIFY_TOOL_NAMES } from './notifyTools.js';
+import { buildLearningTools, executeLearningTool, LEARNING_TOOL_NAMES } from './learningTools.js';
 import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
+import { buildRecordUrl } from './recordLinks.js';
 
 export type { FunctionDeclarationLike };
 
@@ -30,6 +33,36 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   const searchable = authorized.filter(r => r.list && (r.identityField || r.key === 'contacts')).map(r => r.key);
 
   const tools: FunctionDeclarationLike[] = [];
+
+  if (actionScopes.includes('projects')) {
+    tools.push({
+      name: 'create_site_report',
+      description: "Crée un compte-rendu de réunion ou visite de chantier dans l'onglet DET de l'opération. Utilise cet outil pour « réunion de chantier », « visite de chantier », « CR de chantier » ou « compte-rendu DET », jamais create_record avec resource meetings. Recherche d'abord l'opération pour obtenir son project_id. La création produit un brouillon et ne le diffuse pas.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          project_id: { type: 'string', description: "Identifiant de l'opération concernée" },
+          date: { type: 'string', description: 'Date de la réunion au format YYYY-MM-DD' },
+          confirm: { type: 'boolean', description: "Laisser vide au premier appel. Mettre true seulement après confirmation explicite de l'utilisateur de créer un second CR à la même date." },
+        },
+        required: ['project_id', 'date'],
+      },
+    });
+    tools.push({
+      name: 'add_site_report_observation',
+      description: "Ajoute une observation directement dans le brouillon du compte-rendu de chantier (onglet DET). Utilise cet outil quand l'utilisateur demande d'inscrire une remarque, un point à traiter ou une action d'entreprise dans un CR. Ne crée pas de tâche de substitution. Recherche l'opération, puis transmets project_id, le texte exact et, si connu, report_id ou le nom/numéro du lot. Sans report_id, l'outil choisit le seul brouillon disponible ou demande de préciser s'il y en a plusieurs.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          project_id: { type: 'string', description: "Identifiant de l'opération" },
+          texte: { type: 'string', description: "Observation complète à inscrire dans le CR, y compris le nom de l'entreprise si fourni" },
+          report_id: { type: 'string', description: 'Identifiant du brouillon DET, si connu' },
+          lot: { type: 'string', description: 'Numéro, intitulé ou entreprise du lot, si connu ; ne pas inventer' },
+        },
+        required: ['project_id', 'texte'],
+      },
+    });
+  }
 
   if (creatable.length > 0) {
     tools.push({
@@ -130,10 +163,13 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   }
 
   if (caps.mailRead) tools.push(...buildMailTools(caps.mailSend));
+  if (caps.mailAttachments) tools.push(...buildMailAttachmentTools());
   if (caps.geo) tools.push(...buildGeoTools());
   if (caps.docsRead) tools.push(...buildProjectDocTools());
+  if (caps.docsWrite) tools.push(...buildWriteProjectDocTools());
   if (caps.delegate) tools.push(...buildDelegateTools());
   if (caps.notifyUsers) tools.push(...buildNotifyTools());
+  if (caps.learning) tools.push(...buildLearningTools());
 
   return tools;
 }
@@ -167,6 +203,7 @@ export interface PreparedRecord {
   appliedDefaults: Record<string, unknown>;
   normalizedValues: Record<string, string>;
   missingRequired: string[];
+  aliasedFields: Record<string, string>;
 }
 
 function resolveDefault(value: string | number, now = new Date()): string | number {
@@ -176,6 +213,22 @@ function resolveDefault(value: string | number, now = new Date()): string | numb
   return date.toISOString().slice(0, 10);
 }
 
+// Un modèle qui connaît la ressource mais pas son schéma exact devine
+// souvent un nom de champ plausible pour « le nom de la chose » ou
+// « le client » (nom, titre, intitulé... au lieu de name/title/designation
+// selon la ressource) — vu en usage réel : un projet resoumis deux fois de
+// suite avec `nom` puis `title` au lieu de `name`, abandonné faute d'avoir
+// trouvé le bon champ. Plutôt que d'écarter silencieusement une valeur que
+// l'utilisateur a bien fournie, un synonyme plausible est redirigé vers le
+// champ "identité" réel de la ressource (resource.identityField) ou vers
+// `client` quand la ressource en a un — jamais vers un autre champ, pour ne
+// pas deviner au hasard au-delà de ces deux cas très fréquents.
+function normalizeAliasKey(key: string): string {
+  return key.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+const NAME_LIKE_ALIASES = new Set(['nom', 'titre', 'intitule', 'designation', 'appellation', 'libelle', 'name', 'title', 'objet']);
+const CLIENT_LIKE_ALIASES = new Set(['client', 'client_nom', 'nom_client', 'maitre_ouvrage', 'moa']);
+
 export function prepareRecord(
   resource: AgentResourceDef,
   input: Record<string, unknown>,
@@ -184,9 +237,25 @@ export function prepareRecord(
   const data: Record<string, unknown> = {};
   const ignoredFields: string[] = [];
   const normalizedValues: Record<string, string> = {};
+  const aliasedFields: Record<string, string> = {};
 
   for (const [key, value] of Object.entries(input || {})) {
-    if (!resource.knownFields.includes(key)) { ignoredFields.push(key); continue; }
+    if (!resource.knownFields.includes(key)) {
+      const normalizedKey = normalizeAliasKey(key);
+      const identityTarget = resource.identityField && resource.knownFields.includes(resource.identityField) ? resource.identityField : undefined;
+      if (identityTarget && key !== identityTarget && data[identityTarget] === undefined && NAME_LIKE_ALIASES.has(normalizedKey)) {
+        data[identityTarget] = value;
+        aliasedFields[key] = identityTarget;
+        continue;
+      }
+      if (resource.knownFields.includes('client') && key !== 'client' && data.client === undefined && CLIENT_LIKE_ALIASES.has(normalizedKey)) {
+        data.client = value;
+        aliasedFields[key] = 'client';
+        continue;
+      }
+      ignoredFields.push(key);
+      continue;
+    }
     const allowed = resource.enums?.[key];
     if (allowed && typeof value === 'string') {
       const canonical = allowed.find(v => v.toLowerCase() === value.toLowerCase().trim());
@@ -217,7 +286,7 @@ export function prepareRecord(
     ? (resource.required || []).filter(f => data[f] === undefined || data[f] === null || String(data[f]).trim() === '')
     : [];
 
-  return { data, ignoredFields, appliedDefaults, normalizedValues, missingRequired };
+  return { data, ignoredFields, appliedDefaults, normalizedValues, missingRequired, aliasedFields };
 }
 
 export interface AgentActionCall {
@@ -292,6 +361,76 @@ export async function executeAgentAction(
   const args = call.args || {};
   const actionScopes = caps.actionScopes;
 
+  if (name === 'add_site_report_observation') {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    const projectId = String(args.project_id || '').trim();
+    const texte = String(args.texte || '').trim();
+    if (!projectId || !texte) return { response: { error: 'project_id et texte sont requis.' } };
+    try {
+      const request = async (path: string, method = 'GET', body?: Record<string, unknown>) => {
+        const res = await fetch(baseUrl + path, { method, headers: internalHeaders(auth, body ? { 'Content-Type': 'application/json' } : undefined), body: body ? JSON.stringify(body) : undefined });
+        const json: any = await res.json().catch(() => null);
+        return { res, json };
+      };
+      const reportsPath = `/api/projects/${encodeURIComponent(projectId)}/reports`;
+      const { res: reportsRes, json: reports } = await request(reportsPath);
+      if (!reportsRes.ok || !Array.isArray(reports)) return { response: { error: reports?.error || `Lecture des comptes-rendus impossible (HTTP ${reportsRes.status}).` } };
+      const drafts = reports.filter((r: any) => r.statut === 'brouillon' || !r.statut);
+      const requestedId = String(args.report_id || '').trim();
+      const report = requestedId ? reports.find((r: any) => String(r.id) === requestedId) : drafts.length === 1 ? drafts[0] : null;
+      if (!report) return { response: { error: requestedId ? 'Ce compte-rendu ne fait pas partie de cette opération.' : drafts.length ? 'Plusieurs brouillons DET : précise le compte-rendu à modifier.' : 'Aucun brouillon DET trouvé pour cette opération.', brouillons: drafts.map((r: any) => ({ id: r.id, numero: r.report_number, date: r.date })) } };
+      if (report.statut && report.statut !== 'brouillon') return { response: { error: 'Ce compte-rendu a déjà été diffusé : indique un brouillon à modifier.' } };
+
+      const observationsPath = `/api/reports/${encodeURIComponent(String(report.id))}/observations`;
+      const { res: obsRes, json: observations } = await request(observationsPath);
+      if (!obsRes.ok || !Array.isArray(observations)) return { response: { error: observations?.error || 'Lecture des observations impossible.' } };
+      const duplicate = observations.find((o: any) => String(o.texte || '').trim().toLocaleLowerCase() === texte.toLocaleLowerCase());
+      if (duplicate) return { response: { success: true, already_exists: true, id: duplicate.id, report_id: report.id, report_number: report.report_number, record_url: buildRecordUrl('site_reports', { id: report.id, project_id: projectId }) } };
+
+      let lotId: string | undefined;
+      const lot = String(args.lot || '').trim().toLocaleLowerCase();
+      if (lot) {
+        const { res: lotsRes, json: lots } = await request(`/api/projects/${encodeURIComponent(projectId)}/lots`);
+        if (!lotsRes.ok || !Array.isArray(lots)) return { response: { error: 'Lecture des lots impossible.' } };
+        const matches = lots.filter((l: any) => [l.id, l.lot_number, l.lot_title, l.contact_name].some(v => String(v || '').trim().toLocaleLowerCase() === lot));
+        if (matches.length !== 1) return { response: { error: matches.length ? 'Plusieurs lots correspondent : précise le numéro.' : `Lot « ${args.lot} » introuvable dans cette opération.`, lots_possibles: lots.map((l: any) => ({ id: l.id, numero: l.lot_number, titre: l.lot_title, entreprise: l.contact_name })) } };
+        lotId = String(matches[0].id);
+      }
+
+      const { res, json } = await request(`/api/projects/${encodeURIComponent(projectId)}/observations`, 'POST', { texte, statut: 'À faire', type: 'observation', created_report_id: report.id, ...(lotId ? { lot_id: lotId } : {}) });
+      if (!res.ok) return { response: { error: json?.error || `Ajout de l'observation impossible (HTTP ${res.status}).` } };
+      return { response: { success: true, id: json.id, number: json.number, texte, report_id: report.id, report_number: report.report_number, project_id: projectId, record_url: buildRecordUrl('site_reports', { id: report.id, project_id: projectId }) }, summary: `Observation ajoutée au CR de chantier n° ${report.report_number}` };
+    } catch (e: any) {
+      return { response: { error: e?.message || "Ajout de l'observation impossible." } };
+    }
+  }
+
+  if (name === 'create_site_report') {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    const projectId = String(args.project_id || '').trim();
+    const date = String(args.date || '').trim();
+    if (!projectId || !/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00Z`))) {
+      return { response: { error: 'project_id et date (YYYY-MM-DD) valides sont requis.' } };
+    }
+    try {
+      const path = `/api/projects/${encodeURIComponent(projectId)}/reports`;
+      const existing = await fetch(baseUrl + path, { headers: internalHeaders(auth) });
+      const reports: any = await existing.json().catch(() => null);
+      if (!existing.ok || !Array.isArray(reports)) return { response: { error: reports?.error || `Lecture des comptes-rendus impossible (HTTP ${existing.status}).` } };
+      const duplicates = reports.filter((r: any) => r.date === date);
+      if (duplicates.length && args.confirm !== true) return { response: { needs_confirmation: true, existing_matches: duplicates.map((r: any) => ({ id: r.id, report_number: r.report_number, date: r.date })), instruction: 'Un compte-rendu existe déjà pour cette opération à cette date. Demande à l’utilisateur s’il veut réutiliser ce brouillon ou en créer un second. Ne rappelle create_site_report avec confirm: true qu’après son accord explicite.' } };
+      const response = await fetch(baseUrl + path, { method: 'POST', headers: internalHeaders(auth, { 'Content-Type': 'application/json' }), body: JSON.stringify({ date }) });
+      const result: any = await response.json().catch(() => ({}));
+      if (!response.ok) return { response: { error: result.error || `Création impossible (HTTP ${response.status}).` } };
+      const recordUrl = buildRecordUrl('site_reports', { id: result.id, project_id: projectId });
+      return { response: { success: true, id: result.id, report_number: result.report_number, date, project_id: projectId, statut: 'brouillon', record_url: recordUrl }, summary: `Compte-rendu de chantier n° ${result.report_number} créé dans DET` };
+    } catch (e: any) {
+      return { response: { error: e?.message || 'Création du compte-rendu impossible.' } };
+    }
+  }
+
   // fetch_url isn't a CRUD resource — dispatch it separately, before the
   // resource-lookup logic below, and re-check the flag here even though
   // buildAgentTools already omits the tool when disabled (defense in depth:
@@ -321,6 +460,12 @@ export async function executeAgentAction(
     return executeMailTool(baseUrl, auth, name, args, caps.mailSend);
   }
 
+  if (name && MAIL_ATTACHMENT_TOOL_NAMES.includes(name)) {
+    if (!caps.mailAttachments) return { response: { error: "L'ouverture des pièces jointes de messagerie n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — accès à la messagerie impossible.' } };
+    return executeMailAttachmentTool(baseUrl, auth, name, args);
+  }
+
   if (name && GEO_TOOL_NAMES.includes(name)) {
     if (!caps.geo) return { response: { error: "L'accès aux modules cartographiques n'est pas activé pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
@@ -331,6 +476,12 @@ export async function executeAgentAction(
     if (!caps.docsRead) return { response: { error: "La lecture du CCTP et du DPGF n'est pas activée pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return executeProjectDocTool(baseUrl, auth, name, args);
+  }
+
+  if (name && PROJECT_DOC_WRITE_TOOL_NAMES.includes(name)) {
+    if (!caps.docsWrite) return { response: { error: "L'écriture du CCTP et du DPGF n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeWriteProjectDocTool(baseUrl, auth, name, args);
   }
 
   if (name && DELEGATE_TOOL_NAMES.includes(name)) {
@@ -344,6 +495,13 @@ export async function executeAgentAction(
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     if (!selfAgent) return { response: { error: 'Identité agent manquante — action impossible.' } };
     return executeNotifyTool(baseUrl, auth, name, args, selfAgent.id);
+  }
+
+  if (name && LEARNING_TOOL_NAMES.includes(name)) {
+    if (!caps.learning) return { response: { error: "La proposition d'améliorations n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    if (!selfAgent) return { response: { error: 'Identité agent manquante — action impossible.' } };
+    return executeLearningTool(baseUrl, auth, name, args, selfAgent.id);
   }
 
   const resourceKey = String(args.resource || '');
@@ -503,11 +661,21 @@ export async function executeAgentAction(
       dateWarning = checkSuspiciousDate(resourceKey, savedRecord || body || {});
     }
 
+    // Le lien de la fiche créée/modifiée, à redonner à l'utilisateur pour
+    // qu'il y accède sans repasser par la recherche — voir recordLinks.ts.
+    // savedRecord (relu en base) porte le project_id le plus fiable ; body/
+    // json servent de repli pour delete_record (jamais de lien après coup)
+    // ou une ressource sans `list` (ex. marches_entreprises, absent d'ici).
+    const recordUrl = name !== 'delete_record'
+      ? buildRecordUrl(resourceKey, savedRecord || { ...body, id: json?.id })
+      : null;
+
     return {
       response: {
         success: true,
         ...json,
         ...(savedRecord ? { saved_record: savedRecord } : {}),
+        ...(recordUrl ? { record_url: recordUrl } : {}),
         // Ce que la couche outil a corrigé d'elle-même. Le modèle doit le
         // répercuter à l'utilisateur : un champ écarté est une information
         // qu'il croyait avoir enregistrée.
@@ -517,6 +685,14 @@ export async function executeAgentAction(
               champs_ignores_note:
                 `Ces champs n'existent pas sur « ${resource.label} » et n'ont pas été enregistrés. Dis-le à l'utilisateur en une phrase, ` +
                 `et propose de mettre l'information dans un champ existant (description ou notes) si elle compte.`,
+            }
+          : {}),
+        ...(prepared && Object.keys(prepared.aliasedFields).length
+          ? {
+              champs_renommes: prepared.aliasedFields,
+              champs_renommes_note:
+                `Ces champs n'existent pas tels quels mais ont été reconnus et enregistrés sous le bon nom (clé : nom envoyé, valeur : champ réel). ` +
+                `Utilise directement le champ réel la prochaine fois.`,
             }
           : {}),
         ...(prepared && Object.keys(prepared.appliedDefaults).length

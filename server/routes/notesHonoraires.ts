@@ -5,6 +5,8 @@
 // invoices/auth/billing per the Phase 7 plan).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { computeInvoiceDueDate } from '../invoiceDueDate';
+import { ensureCanWriteInvoices, getCallerRole, visibleProjectIds } from '../invoiceAccess';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -17,12 +19,29 @@ export interface RouteDeps {
 }
 
 export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, getTenantId, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber, getUserName, logActivity }: RouteDeps) {
+  // Chef de projet / utilisateur : les notes d'honoraires de leurs affaires
+  // seulement (`null` = pas de restriction). Ils en préparent, mais ne
+  // facturent pas : voir `ensureCanWriteInvoices` sur la route /facture.
+  const visibleProjects = async (tenantId: string, userId: string) =>
+    visibleProjectIds(supabaseAdmin, tenantId, userId, await getCallerRole(supabaseAdmin, tenantId, userId));
+
+  const noteIsVisible = async (tenantId: string, noteId: string, visible: Set<string> | null) => {
+    if (!visible) return true;
+    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').select('project_id').eq('id', noteId).maybeSingle();
+    return !!data && !!(data as any).project_id && visible.has((data as any).project_id);
+  };
+
   app.get("/api/notes_honoraires", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const projectId = req.query.project_id as string | undefined;
       let query = tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').select('*').order('created_at', { ascending: false });
       if (projectId) query = query.eq('project_id', projectId);
+      const visible = await visibleProjects(tenantId, req.user.id);
+      if (visible) {
+        if (visible.size === 0) return res.json([]);
+        query = query.in('project_id', [...visible]);
+      }
       const { data, error } = await query;
       if (error) throw error;
       res.json(data || []);
@@ -33,6 +52,10 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
     try {
       const tenantId = await getTenantId(req.user.id);
       const body = req.body;
+      const visible = await visibleProjects(tenantId, req.user.id);
+      if (visible && (!body.project_id || !visible.has(body.project_id))) {
+        return res.status(403).json({ error: 'Cette affaire ne fait pas partie de vos affaires.' });
+      }
       const id = body.id || crypto.randomUUID();
       const { id: _id, tenant_id: _tid, created_at: _ca, updated_at: _ua, ...insertData } = body;
       // Auto-generate numero if not provided
@@ -51,6 +74,10 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
     try {
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      const visible = await visibleProjects(tenantId, req.user.id);
+      if (!(await noteIsVisible(tenantId, id, visible)) || (visible && req.body.project_id && !visible.has(req.body.project_id))) {
+        return res.status(404).json({ error: 'Note honoraires introuvable' });
+      }
       const { id: _id, tenant_id: _tid, created_at: _ca, ...updateData } = req.body;
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').update({ ...updateData, updated_at: new Date().toISOString() }).eq('id', id);
       if (error) throw error;
@@ -62,6 +89,9 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
   app.delete("/api/notes_honoraires/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (!(await noteIsVisible(tenantId, req.params.id, await visibleProjects(tenantId, req.user.id)))) {
+        return res.status(404).json({ error: 'Note honoraires introuvable' });
+      }
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').delete().eq('id', req.params.id);
       if (error) throw error;
       res.json({ success: true });
@@ -79,6 +109,7 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
     let tenantId: string | undefined;
     try {
       tenantId = await getTenantId(req.user.id);
+      if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const { id } = req.params;
       const { data: note } = await tenantScopedFrom(supabaseAdmin, tenantId, 'notes_honoraires').select('*').eq('id', id).maybeSingle();
       if (!note) return res.status(404).json({ error: 'Note honoraires introuvable' });
@@ -89,18 +120,20 @@ export function registerNotesHonorairesRoutes(app: Express, { supabaseAdmin, get
         // La facture référencée a disparu (suppression manuelle) : on en régénère une.
       }
 
-      const { data: settings } = await supabaseAdmin.from('settings').select('agencyName, address, siret, vatNumber').eq('tenant_id', tenantId).single();
+      const { data: settings } = await supabaseAdmin.from('settings').select('agencyName, address, siret, vatNumber, invoice_payment_terms_days').eq('tenant_id', tenantId).single();
 
       const invoiceId = crypto.randomUUID();
       const created_at = new Date().toISOString();
       const invoiceNumber = await getNextDocNumber(tenantId, 'num_prefix_facture', 'invoices', 'FAC');
       const affaireInvoiceNumber = (note as any).project_id ? await getNextAffaireInvoiceNumber(tenantId, (note as any).project_id) : null;
       const description = `Note d'honoraires ${(note as any).numero || ''}${(note as any).objet ? ' — ' + (note as any).objet : ''}`.trim();
+      const issueDate = (note as any).date || created_at.split('T')[0];
+      const dueDate = computeInvoiceDueDate(issueDate, (settings as any)?.invoice_payment_terms_days);
 
       const { error: insErr } = await supabaseAdmin.from('invoices').insert({
         id: invoiceId, tenant_id: tenantId, invoice_number: invoiceNumber, project_id: (note as any).project_id,
         amount: (note as any).montant_ht || 0, tax_amount: (note as any).montant_tva || 0, total_amount: (note as any).montant_ttc || 0,
-        status: 'Draft', due_date: null, issue_date: (note as any).date || created_at.split('T')[0],
+        status: 'Draft', due_date: dueDate, issue_date: issueDate,
         description, created_at,
         seller_name: (settings as any)?.agencyName || null, seller_address: (settings as any)?.address || null,
         seller_siret: (settings as any)?.siret || null, seller_vat_number: (settings as any)?.vatNumber || null,

@@ -40,6 +40,8 @@ interface FakeUser {
   email: string;
 }
 
+const FAKE_MAX_ROWS = 1000;
+
 export class FakeSupabaseAdmin {
   private tables = new Map<string, Row[]>();
   private tokenToUser = new Map<string, FakeUser>();
@@ -89,6 +91,22 @@ export class FakeSupabaseAdmin {
   // as Postgres would under a row lock, so the atomicity these functions
   // exist for isn't something this in-memory fake can fail to reproduce.
   async rpc(fnName: string, params: Record<string, any>) {
+    if (fnName === 'commit_phase_transition') {
+      const p = params;
+      const project = this.getTable('projects').find(r => r.id === p.p_project_id && r.tenant_id === p.p_tenant_id);
+      const history = this.getTable('project_phase_history');
+      const current = history.find(r => r.project_id === p.p_project_id && r.tenant_id === p.p_tenant_id && !r.exited_at);
+      if (!project || (current?.id ?? null) !== p.p_expected_id || JSON.stringify(project.phase_control_config ?? null) !== JSON.stringify(p.p_expected_config)) {
+        return { data: null, error: { code: '40001', message: 'Project changed' } };
+      }
+      const now = new Date().toISOString();
+      if (current) current.exited_at = now;
+      const created = { id: p.p_id, tenant_id: p.p_tenant_id, project_id: p.p_project_id, phase: p.p_phase,
+        entered_at: now, exited_at: null, control_audit: { ...p.p_audit, task_ids: p.p_tasks.map((t: any) => t.id) } };
+      this.seed('project_phase_history', [created]);
+      this.seed('tasks', p.p_tasks.map((task: any) => ({ ...task, tenant_id: p.p_tenant_id, phase_transition_id: p.p_id })));
+      return { data: structuredClone(created), error: null };
+    }
     const tenants = this.tables.get('tenants') || [];
     const tenant = tenants.find(t => t.id === params.p_tenant_id);
     if (fnName === 'increment_ai_credits' || fnName === 'deduct_ai_credits') {
@@ -130,15 +148,48 @@ export class FakeSupabaseAdmin {
   // the returned public URL back around — so a Set of "uploaded" paths per
   // bucket is enough to make delete/remove/list/download meaningful.
   private storageObjects = new Map<string, Set<string>>();
+  // Octets réellement déposés (clé `bucket\0chemin`), pour les tests qui relisent
+  // ce qu'ils ont écrit — sauvegarde et restauration d'un cabinet. Un objet sans
+  // entrée ici (déposé avant ce suivi, ou seedé) garde l'ancien contenu factice.
+  private storageBytes = new Map<string, Buffer>();
+  private bytesKey(bucket: string, path: string) { return `${bucket}\0${path}`; }
+  /** Test setup : dépose un objet avec un contenu précis. */
+  putObject(bucket: string, path: string, content: string | Buffer) {
+    if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
+    this.storageObjects.get(bucket)!.add(path);
+    this.storageBytes.set(this.bytesKey(bucket, path), Buffer.from(content));
+  }
+  /** Test assertions : l'objet existe-t-il ? */
+  hasObject(bucket: string, path: string): boolean {
+    return !!this.storageObjects.get(bucket)?.has(path);
+  }
+  readObject(bucket: string, path: string): Buffer | undefined {
+    return this.storageBytes.get(this.bytesKey(bucket, path));
+  }
   storage = {
     getBucket: async (name: string) => ({ data: this.buckets.has(name) ? { name } : null, error: null }),
     createBucket: async (name: string, _opts?: any) => { this.buckets.add(name); return { data: { name }, error: null }; },
     updateBucket: async (name: string, _opts?: any) => ({ data: { name }, error: null }),
     from: (bucket: string) => ({
-      upload: async (path: string, _buffer: Buffer, _opts?: any) => {
+      upload: async (path: string, buffer: Buffer, _opts?: any) => {
+        // Comme le vrai Supabase Storage : une clé hors ASCII est refusée
+        // (« Invalid key »), voir server/storageKey.ts.
+        if (/[^\x20-\x7e]/.test(path)) return { data: null, error: { message: `Invalid key: ${path}` } };
         if (!this.storageObjects.has(bucket)) this.storageObjects.set(bucket, new Set());
         this.storageObjects.get(bucket)!.add(path);
+        if (Buffer.isBuffer(buffer)) this.storageBytes.set(this.bytesKey(bucket, path), buffer);
         return { data: { path }, error: null };
+      },
+      // Copie côté « serveur », éventuellement vers un autre bucket, comme
+      // l'API réelle (options.destinationBucket).
+      copy: async (from: string, to: string, opts?: { destinationBucket?: string }) => {
+        if (!this.storageObjects.get(bucket)?.has(from)) return { data: null, error: { message: 'Object not found' } };
+        const dest = opts?.destinationBucket ?? bucket;
+        if (!this.storageObjects.has(dest)) this.storageObjects.set(dest, new Set());
+        this.storageObjects.get(dest)!.add(to);
+        const bytes = this.storageBytes.get(this.bytesKey(bucket, from));
+        if (bytes) this.storageBytes.set(this.bytesKey(dest, to), bytes);
+        return { data: { path: to }, error: null };
       },
       getPublicUrl: (path: string) => ({ data: { publicUrl: `https://fake.supabase.test/storage/v1/object/public/${bucket}/${path}` } }),
       // Mirrors the real API closely enough for server/routes/storageAccess.ts's
@@ -163,17 +214,23 @@ export class FakeSupabaseAdmin {
           if (!first) continue;
           seen.set(first, seen.get(first) || more.length > 0);
         }
-        const entries = [...seen.entries()].map(([name, isFolder]) => ({ name, id: isFolder ? null : 'fake-object-id' }));
+        const entries = [...seen.entries()].map(([name, isFolder]) => ({
+          name,
+          id: isFolder ? null : 'fake-object-id',
+          metadata: isFolder ? null : { size: this.storageBytes.get(this.bytesKey(bucket, `${prefix}/${name}`))?.length ?? 0 },
+        }));
         return { data: entries, error: null };
       },
       download: async (path: string) => {
         const set = this.storageObjects.get(bucket);
         if (!set?.has(path)) return { data: null, error: { message: 'Object not found' } };
-        return { data: { arrayBuffer: async () => new TextEncoder().encode('fake-file-content').buffer }, error: null };
+        const bytes = this.storageBytes.get(this.bytesKey(bucket, path));
+        const content = bytes ? new Uint8Array(bytes) : new TextEncoder().encode('fake-file-content');
+        return { data: { arrayBuffer: async () => content.buffer.slice(content.byteOffset, content.byteOffset + content.byteLength) }, error: null };
       },
       remove: async (paths: string[]) => {
         const set = this.storageObjects.get(bucket);
-        if (set) paths.forEach(p => set.delete(p));
+        if (set) paths.forEach(p => { set.delete(p); this.storageBytes.delete(this.bytesKey(bucket, p)); });
         return { data: null, error: null };
       },
     }),
@@ -369,11 +426,13 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     return this;
   }
 
-  // No-op, like limit()/order() above: test datasets are always far under a
-  // single page, so returning every matching row still satisfies callers
-  // (e.g. server/tenantExport.ts's fetchAllRows) that loop until a
-  // short-of-a-full-page response tells them to stop.
-  range() {
+  // Réel, comme limit()/order() : la pagination par tranches (lecture de plus
+  // de 1 000 lignes, plafond PostgREST par défaut) doit pouvoir se tester.
+  private rangeFrom?: number;
+  private rangeTo?: number;
+  range(from: number, to: number) {
+    this.rangeFrom = from;
+    this.rangeTo = to;
     return this;
   }
 
@@ -476,7 +535,12 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
         return (a[col] < b[col] ? -1 : 1) * (ascending ? 1 : -1);
       });
     }
-    const page = this.limitN != null ? matched.slice(0, this.limitN) : matched;
+    const limited = this.limitN != null ? matched.slice(0, this.limitN) : matched;
+    const ranged = this.rangeFrom != null ? limited.slice(this.rangeFrom, (this.rangeTo ?? limited.length - 1) + 1) : limited;
+    // Comme PostgREST sur Supabase (`max-rows`, 1 000 par défaut) : une
+    // réponse ne dépasse jamais 1 000 lignes, sans erreur. Sans ce plafond,
+    // un select qui tronque en production passerait ici sans être vu.
+    const page = ranged.slice(0, FAKE_MAX_ROWS);
     return { data: clone(page), error: null, count: matched.length };
   }
 }

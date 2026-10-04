@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconCamera, IconPencil, IconCheck, IconX, IconPlus, IconTrash, IconSchool,
   IconBuilding, IconFileText, IconDownload, IconUpload, IconBriefcase,
@@ -76,6 +77,7 @@ function SectionCard({ title, icon: Icon, action, children }: { title: string; i
 }
 
 export default function Profile() {
+  const { t } = useTranslation();
   const { userId: paramUserId } = useParams();
   const { currentUser, setCurrentUser, signOut } = useUser();
   const navigate = useNavigate();
@@ -229,17 +231,14 @@ export default function Profile() {
       URL.revokeObjectURL(url);
     } catch (err) {
       console.error(err);
-      alert("Échec de l'export des données. Veuillez réessayer.");
+      alert(t('profile_export_data_failed'));
     } finally {
       setIsExportingData(false);
     }
   };
 
   const handleDeleteAccount = async () => {
-    if (!window.confirm(
-      "Supprimer définitivement votre compte et vos données personnelles (profil, CV, avatar, formations, expériences) ? " +
-      "Cette action est irréversible. Vous serez déconnecté immédiatement."
-    )) return;
+    if (!window.confirm(t('profile_confirm_delete_account'))) return;
     setIsDeletingAccount(true);
     try {
       await apiFetch('/api/profile/me', { method: 'DELETE' });
@@ -247,7 +246,7 @@ export default function Profile() {
       navigate('/login');
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || "Échec de la suppression du compte. Veuillez réessayer.");
+      alert(err?.message || t('profile_delete_account_failed'));
       setIsDeletingAccount(false);
     }
   };
@@ -392,7 +391,7 @@ export default function Profile() {
                   {proj.role && <p className="text-xs text-zinc-400">{proj.role}</p>}
                 </div>
                 {proj.status && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shrink-0">
+                  <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shrink-0">
                     {proj.status}
                   </span>
                 )}
@@ -441,7 +440,7 @@ export default function Profile() {
                   {exp.description && <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{exp.description}</p>}
                 </div>
                 {isViewingSelf && (
-                  <button onClick={() => deleteExperience(exp.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all shrink-0">
+                  <button onClick={() => deleteExperience(exp.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition shrink-0">
                     <IconTrash size={14} />
                   </button>
                 )}
@@ -491,7 +490,7 @@ export default function Profile() {
                   </p>
                 </div>
                 {isViewingSelf && (
-                  <button onClick={() => deleteEducation(edu.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-all shrink-0">
+                  <button onClick={() => deleteEducation(edu.id)} className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition shrink-0">
                     <IconTrash size={14} />
                   </button>
                 )}

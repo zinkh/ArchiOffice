@@ -1,7 +1,7 @@
 // Regression tests for Phase 4: DELETE /api/projects/:id used to trust a
 // client-supplied `x-user-role` header instead of a database-verified role —
 // any authenticated caller could delete another project in their own tenant
-// (cascading to project_team/milestones/specifications/project_cotraitants)
+// (cascading to project_team/milestones/project_cotraitants)
 // by simply adding that header. It's now gated by the requireRole('admin')
 // middleware, which only ever reads profiles.system_role. Also covers a
 // route already protected by the pre-existing requireTenantAdmin() helper,

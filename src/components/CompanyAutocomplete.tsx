@@ -89,7 +89,7 @@ export function CompanyAutocomplete({ label, value, onChange, placeholder, requi
   return (
     <div className="relative" ref={wrapperRef}>
       {label && (
-        <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
+        <label className="block text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
           {label}
         </label>
       )}

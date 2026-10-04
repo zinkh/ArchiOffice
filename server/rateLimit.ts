@@ -40,6 +40,19 @@ export const aiGenerationLimiter = rateLimit({
   message: { error: 'Trop de requêtes IA. Veuillez patienter avant de réessayer.' },
 });
 
+// Relais de tuiles IGN de l'étude de faisabilité (/api/feasibility/map-tile) :
+// un extrait de carte en demande une cinquantaine (fond + parcellaire), et
+// chaque réglage changé le recompose. Le plafond laisse une composition
+// confortable tout en empêchant d'utiliser le relais comme aspirateur de tuiles.
+export const mapTileLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de tuiles demandées. Patientez quelques instants.' },
+});
+
 // Outbound mail relays a tenant's own SMTP credentials — still worth capping
 // so a compromised/misused account can't be turned into a spam cannon.
 export const sendEmailLimiter = rateLimit({
@@ -49,6 +62,33 @@ export const sendEmailLimiter = rateLimit({
   legacyHeaders: false,
   keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
   message: { error: 'Trop d\'emails envoyés. Veuillez réessayer plus tard.' },
+});
+
+// Serveur d'autorisation OAuth du lien MCP (Gemini Spark) — non authentifié
+// par nature (Gemini ne détient pas encore de jeton au moment où il appelle
+// /oauth/mcp/register et /token), donc capé par IP comme le webhook de
+// paiement ci-dessous plutôt que par utilisateur.
+export const mcpOAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de tentatives. Veuillez réessayer plus tard.' },
+});
+
+// L'endpoint MCP lui-même (/mcp) : authentifié par un jeton d'accès propre à
+// la liaison (voir mcp/store.ts), pas par le middleware /api habituel, donc
+// hors de portée d'aiGenerationLimiter. Keyé sur le jeton présenté plutôt que
+// sur l'IP : plusieurs cabinets peuvent partager la même IP sortante côté
+// infrastructure Google, un plafond par IP les pénaliserait tous ensemble.
+export const mcpToolLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.headers.authorization || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de requêtes. Veuillez patienter avant de réessayer.' },
 });
 
 // The Stancer payment webhook is unauthenticated by necessity (it's called by

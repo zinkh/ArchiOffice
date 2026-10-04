@@ -1,5 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import "tailwindcss";
+@import "./pages/landing.css";
 
 /* ──────────────────────────────────────────────────
    Tabler.io Design Tokens
@@ -22,6 +23,25 @@
   --tblr-success:       #2fb344;
   --tblr-warning:       #f76707;
   --tblr-danger:        #d63939;
+  --ease-out:           cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Native controls (checkboxes, radios, scrollbars) follow the app theme set by
+   ThemeProvider on <html>, not the OS setting: index.html declares
+   color-scheme "light dark", so an OS in dark mode drew dark checkboxes on
+   light pages. */
+:root { color-scheme: light; }
+:root.dark { color-scheme: dark; }
+
+/* Autofilled fields keep their own background and text colour instead of the
+   browser's autofill tint (olive/yellow in dark scheme, blue in light). The
+   UA rule is !important, so it is held off with a very long transition. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  transition: background-color 600000s 0s, color 600000s 0s;
 }
 
 .dark {
@@ -47,6 +67,10 @@
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  /* Petites capitales Tabler conservées, mais moins espacées (0,05 em par
+     défaut) : à 11 px, un espacement large disperse le mot plus qu'il ne
+     l'aère. */
+  --tracking-wider: 0.03em;
 }
 
 /* ──────────────────────────────────────────────────
@@ -57,9 +81,16 @@
     @apply font-sans antialiased;
     background-color: var(--tblr-bg);
     color: var(--tblr-text);
-    font-size: 14px;
+    /* En rem, pas en px : le texte suit la taille choisie par l'utilisateur
+       dans son navigateur (14 px au réglage par défaut). */
+    font-size: 0.875rem;
     line-height: 1.5715;
   }
+  /* Les grands titres se resserrent légèrement : l'espacement d'une police
+     dessinée pour le texte courant paraît trop lâche en grande taille. Une
+     classe tracking-* posée sur le titre reste prioritaire. */
+  h1 { letter-spacing: -0.02em; }
+  h2 { letter-spacing: -0.01em; }
   *, *::before, *::after { box-sizing: border-box; }
 }
 
@@ -81,7 +112,7 @@
     font-size: 0.6875rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.04em;
     color: var(--tblr-muted);
   }
 
@@ -137,18 +168,48 @@
     border-radius: var(--tblr-radius);
     border: 1px solid transparent;
     cursor: pointer;
-    transition: background 0.12s, filter 0.12s;
+    transition: background 0.12s, filter 0.12s, transform 0.16s ease-out;
     white-space: nowrap;
     line-height: 1.4;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Retour visuel dès l'appui, pas au relâché : le bouton s'enfonce
+     immédiatement (50 ms), puis revient en douceur. */
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+    filter: brightness(0.94);
+    transition-duration: 0.05s;
+  }
+  /* Même retour à l'appui que .btn, pour les éléments qui gardent leur propre
+     padding et leurs couleurs. Enfoncement immédiat, retour en douceur. */
+  .press {
+    transition: background-color 0.12s, color 0.12s, border-color 0.12s,
+                box-shadow 0.12s, filter 0.12s, opacity 0.12s,
+                transform 0.16s var(--ease-out);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .press:active:not(:disabled) {
+    transform: scale(0.97);
+    transition-duration: 0.05s;
+  }
+  /* Anneau de focus au clavier : le même voile bleu que les champs. */
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 1px var(--tblr-primary), 0 0 0 4px var(--tblr-primary-lt);
   }
   .btn-primary  { background: var(--tblr-primary); color: #fff; border-color: var(--tblr-primary); }
-  .btn-primary:hover { filter: brightness(1.08); }
   .btn-secondary { background: var(--tblr-surface); color: var(--tblr-text); border-color: var(--tblr-border); }
-  .btn-secondary:hover { background: var(--tblr-surface-2); }
   .btn-ghost { background: transparent; color: var(--tblr-muted); border-color: transparent; }
-  .btn-ghost:hover { background: var(--tblr-surface-2); color: var(--tblr-text); }
   .btn-danger { background: var(--tblr-danger); color: #fff; border-color: var(--tblr-danger); }
-  .btn-danger:hover { filter: brightness(1.08); }
+  /* Survol réservé aux appareils qui ont un vrai pointeur : sur tablette, un
+     :hover resterait affiché après l'appui (même règle que la variante
+     `hover:` de Tailwind 4). */
+  @media (hover: hover) {
+    .btn-primary:hover { filter: brightness(1.08); }
+    .btn-secondary:hover { background: var(--tblr-surface-2); }
+    .btn-ghost:hover { background: var(--tblr-surface-2); color: var(--tblr-text); }
+    .btn-danger:hover { filter: brightness(1.08); }
+  }
 
   /* Tabler table */
   .tblr-table {
@@ -175,7 +236,9 @@
     vertical-align: middle;
   }
   .tblr-table tbody tr:last-child td { border-bottom: none; }
-  .tblr-table tbody tr:hover { background: var(--tblr-surface-2); }
+  @media (hover: hover) and (pointer: fine) {
+    .tblr-table tbody tr:hover { background: var(--tblr-surface-2); }
+  }
 }
 
 /* ──────────────────────────────────────────────────
@@ -419,3 +482,135 @@
 .org-tree-node:first-child::before, .org-tree-node:last-child::after { border: 0 none !important; }
 .org-tree-node:last-child::before { border-right: 2px solid var(--tblr-border) !important; border-radius: 0 10px 0 0 !important; }
 .org-tree-node:first-child::after { border-radius: 10px 0 0 0 !important; }
+
+/* ──────────────────────────────────────────────────
+   Téléphone et tablette : ce qui distingue une application installée d'un
+   site ouvert dans un navigateur. Hors @layer à dessein : ces règles doivent
+   l'emporter sur les utilitaires Tailwind (text-sm sur un champ, etc.).
+────────────────────────────────────────────────── */
+html {
+  /* Pas de voile gris/bleu au toucher : chaque contrôle a son propre :active. */
+  -webkit-tap-highlight-color: transparent;
+  /* Pas de grossissement automatique du texte en paysage sur iOS. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  /* viewport-fit=cover (index.html) : en paysage, le contenu ne passe pas
+     sous l'encoche. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+/* Clic immédiat (sans le délai du double-tap) sur tout ce qui se touche. */
+button, a, [role="button"], [role="tab"], label, summary, select {
+  touch-action: manipulation;
+}
+/* Un appui long sur un contrôle ne sélectionne pas son libellé. Le texte de
+   contenu, lui, reste sélectionnable. */
+button, [role="button"], [role="tab"], .btn {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* iOS zoome sur tout champ dont le texte fait moins de 16 px, et ne dézoome
+   pas en sortant. On corrige la cause au lieu de bloquer le zoom. */
+@media (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px;
+  }
+}
+
+/* Éléments déplaçables au pointeur (useDragToZone, useBarDrag) : un appui
+   long sert à les soulever, il ne doit ni sélectionner le texte ni ouvrir le
+   menu contextuel d'iOS. */
+[data-drag-id] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ──────────────────────────────────────────────────
+   Préférences d'accessibilité du système
+   Réduire les animations ne supprime pas le retour visuel : on remplace le
+   mouvement (déplacement, échelle, pulsation) par un simple changement d'état.
+   Les indicateurs de chargement (animate-spin) restent : ce sont des
+   informations, pas de la décoration.
+────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto !important; }
+  .animate-pulse { animation: none !important; }
+  .btn:active:not(:disabled) { transform: none; }
+  .press:active:not(:disabled) { transform: none; }
+}
+
+/* Réduire la transparence : les voiles floutés deviennent opaques. */
+@media (prefers-reduced-transparency: reduce) {
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+}
+
+/* Contraste renforcé : bordures et textes secondaires plus marqués. */
+@media (prefers-contrast: more) {
+  :root {
+    --tblr-border: #9aa5b4;
+    --tblr-muted:  #475264;
+  }
+  .dark {
+    --tblr-border: #5b7190;
+    --tblr-muted:  #a9b6c8;
+  }
+}
+
+/* Colonnes de liste repliables (CollapsiblePanel) : largeur animée en 200 ms,
+   poignée de 16 px à la souris, 44 px au doigt. */
+@media (min-width: 1024px) {
+  .collapsible-panel {
+    --panel-w: 18rem;
+    width: var(--panel-w);
+    flex-shrink: 0;
+    transition: width 200ms ease-out;
+  }
+  .collapsible-panel[data-collapsed="true"] {
+    width: 1rem;
+  }
+  @media (pointer: coarse) {
+    .collapsible-panel[data-collapsed="true"] { width: 2.75rem; }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .collapsible-panel { transition: none; }
+}
+
+/* Barre défilante horizontale (onglets, étapes de mission) : le bord s'estompe
+   tant qu'il reste du contenu caché de ce côté (useHorizontalScrollHints). Sur
+   un téléphone, c'est ce qui dit qu'une famille d'onglets existe plus loin. */
+.scroll-fade-x {
+  --fade: 28px;
+  scrollbar-width: none;
+}
+.scroll-fade-x::-webkit-scrollbar { display: none; }
+.scroll-fade-x[data-fade-end]:not([data-fade-start]) {
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent);
+}
+.scroll-fade-x[data-fade-start]:not([data-fade-end]) {
+  mask-image: linear-gradient(to left, #000 calc(100% - var(--fade)), transparent);
+}
+.scroll-fade-x[data-fade-start][data-fade-end] {
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+}
+
+/* Message « aucun élément » d'un tableau plus large que l'écran : il reste
+   calé sur la partie visible du cadre défilant au lieu d'être centré sur toute
+   la largeur du tableau, donc coupé, sur un téléphone. */
+.table-empty-message {
+  position: sticky;
+  left: 1.5rem;
+  display: inline-block;
+  max-width: min(36rem, calc(100vw - 6rem));
+  white-space: normal;
+}

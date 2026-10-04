@@ -6,12 +6,13 @@
 // login:password). Explicit `.eq('tenant_id', tenantId)` chains kept as-is
 // rather than tenantScopedFrom, matching the other integration modules.
 import type { Express } from 'express';
-import { computeEtatAcompte, buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { certificatSituation, buildCertificatPdfBuffer } from '../etatAcompte';
 import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
@@ -95,7 +96,7 @@ function chorusProCfgComplete(cfg: any): boolean {
   return !!(cfg?.chorus_pro_piste_client_id && cfg?.chorus_pro_piste_client_secret && cfg?.chorus_pro_technical_login && cfg?.chorus_pro_technical_password);
 }
 
-export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin }: RouteDeps) {
   // GET /api/chorus-pro/status
   app.get('/api/chorus-pro/status', async (req: any, res: any) => {
     try {
@@ -112,7 +113,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
   // DELETE /api/chorus-pro/disconnect
   app.delete('/api/chorus-pro/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({
         chorus_pro_piste_client_id: null, chorus_pro_piste_client_secret: null,
         chorus_pro_technical_login: null, chorus_pro_technical_password: null,
@@ -121,7 +122,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       logActivity(tenantId, req.user.id, userName, 'Déconnexion de Chorus Pro', '', tenantId, 'integration', 'Intégrations');
       res.json({ success: true });
     } catch (e: any) {
-      console.error("[DELETE /api/chorus-pro/disconnect]", e); res.status(500).json({ error: e.message }); }
+      console.error("[DELETE /api/chorus-pro/disconnect]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // POST /api/chorus-pro/test — verify both credential layers: the PISTE OAuth2
@@ -129,7 +130,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
   // header), by looking up the tenant's own SIRET in the structures directory.
   app.post('/api/chorus-pro/test', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: s } = await supabaseAdmin.from('settings')
         .select('siret,chorus_pro_piste_client_id,chorus_pro_piste_client_secret,chorus_pro_technical_login,chorus_pro_technical_password,chorus_pro_sandbox')
         .eq('tenant_id', tenantId).single();
@@ -146,7 +147,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       }
       res.json({ connected: true, sandbox });
     } catch (e: any) {
-      console.error("[POST /api/chorus-pro/test]", e); res.status(400).json({ connected: false, error: e.message }); }
+      console.error("[POST /api/chorus-pro/test]", e); res.status(e.status || 400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/chorus-pro/send/:invoiceId — submit one invoice to Chorus Pro
@@ -288,12 +289,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       .single();
     if (!sit) return null;
     const marche = (sit as any).marche as any;
-    const { data: detailsRaw } = await supabaseAdmin
-      .from('detail_situations')
-      .select('*, dpgf_item:dpgf_items(designation, prix_unitaire_ht, quantite_prevue, unite)')
-      .eq('tenant_id', tenantId)
-      .eq('situation_id', situationId);
-    return { sit, marche, details: detailsRaw ?? [] };
+    return { sit, marche };
   }
 
   // POST /api/chorus-pro/search-situation-facture/:situationId — find the
@@ -377,10 +373,10 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
       const cfg = settingsRes.data as any;
       if (!chorusProCfgComplete(cfg)) return res.status(400).json({ error: 'Chorus Pro non configuré' });
       if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
-      const { sit, marche, details } = loaded;
+      const { sit, marche } = loaded;
       if (!sit.chorus_pro_id) return res.status(400).json({ error: "Recherchez et liez d'abord la facture de l'entreprise avant de joindre l'état d'acompte" });
 
-      const pdfBuf = await buildEtatAcomptePdfBuffer(sit, marche, details, cfg.agency_name || '');
+      const pdfBuf = await buildCertificatPdfBuffer(supabaseAdmin, tenantId, sit, marche);
       const sandbox = cfg.chorus_pro_sandbox ?? true;
       const token = await chorusProToken(cfg.chorus_pro_piste_client_id, cfg.chorus_pro_piste_client_secret, sandbox);
       await chorusProFetch(
@@ -444,17 +440,16 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data, error } = await supabaseAdmin.from('situations')
-        .select('*, marche:marches_entreprises(entreprise_nom,entreprise_siret,lot_numero,lot_titre,tva_rate,revision_active), projects(name)')
+        .select('*, marche:marches_entreprises(*), projects(name)')
         .eq('tenant_id', tenantId)
         .not('chorus_pro_id', 'is', null)
         .order('date_situation', { ascending: false });
       if (error) throw error;
       const result = await Promise.all((data || []).map(async (s: any) => {
-        const { data: details } = await supabaseAdmin.from('detail_situations').select('*').eq('tenant_id', tenantId).eq('situation_id', s.id);
-        const net = computeEtatAcompte(s, s.marche, details ?? []);
+        const net = await certificatSituation(supabaseAdmin, tenantId, s, s.marche);
         const project_name = s.projects?.name || null;
         const { projects: _p, ...rest } = s;
-        return { ...rest, project_name, montant_ttc: net.net };
+        return { ...rest, project_name, montant_ttc: net.netAPayer };
       }));
       res.json(result);
     } catch (e: any) {

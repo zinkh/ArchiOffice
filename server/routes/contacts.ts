@@ -6,6 +6,7 @@
 // GET now that Invoices itself is extracted too.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { selectAllPages } from '../selectAllPages';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -60,7 +61,9 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       // le réglage ne doit jamais masquer des contacts déjà visibles avant son
       // introduction.
       const showPersonal = (profileRow as any)?.show_personal_contacts ?? true;
-      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('*');
+      // Lecture par tranches : au-delà de 1 000 contacts, un select unique
+      // tronquait la liste sans erreur (plafond PostgREST).
+      const { data, error } = await selectAllPages(() => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('*'));
       if (error) throw error;
       const visible = (data || []).filter((c: any) => {
         if (!c.is_personal) return true;

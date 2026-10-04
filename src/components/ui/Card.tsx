@@ -23,11 +23,13 @@ interface CardHeaderProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'ti
 export function CardHeader({ className, icon: Icon, title, description, action, ...rest }: CardHeaderProps) {
   return (
     <div
-      className={cn('p-6 border-b flex items-center justify-between gap-3', className)}
+      // Sur un téléphone, l'action passe sous le titre plutôt que de le tronquer
+      // à trois lettres : le titre garde au moins 14rem avant de céder la ligne.
+      className={cn('p-4 sm:p-6 border-b flex flex-wrap items-center justify-between gap-x-3 gap-y-3', className)}
       style={{ borderColor: 'var(--tblr-border)' }}
       {...rest}
     >
-      <div className="flex items-center gap-3 min-w-0">
+      <div className="flex items-center gap-3 min-w-0 flex-1 basis-56">
         {Icon && (
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
@@ -39,11 +41,11 @@ export function CardHeader({ className, icon: Icon, title, description, action, 
         <div className="min-w-0">
           <h3 className="text-base font-bold truncate" style={{ color: 'var(--tblr-text)' }}>{title}</h3>
           {description && (
-            <p className="text-sm truncate" style={{ color: 'var(--tblr-muted)' }}>{description}</p>
+            <p className="text-sm line-clamp-2 sm:line-clamp-none sm:truncate" style={{ color: 'var(--tblr-muted)' }}>{description}</p>
           )}
         </div>
       </div>
-      {action && <div className="shrink-0">{action}</div>}
+      {action && <div className="shrink-0 max-w-full">{action}</div>}
     </div>
   );
 }

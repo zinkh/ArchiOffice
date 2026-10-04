@@ -9,6 +9,7 @@ import {
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
 import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
+import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
@@ -30,6 +31,65 @@ interface EditingCell {
   field: string;
   value: string;
 }
+
+// Déclarés au niveau module : redéfinis à l'intérieur de DPGFWorkspace, ces
+// composants changeaient d'identité à chaque rendu du parent, ce que React
+// traite comme un composant entièrement différent — il démontait puis
+// remontait l'input à chaque frappe, réinitialisant son état local `v` à la
+// valeur d'origine. D'où le texte qui s'effaçait sauf à taper plus vite que
+// le cycle de rendu, et l'édition qui ne se commitait jamais vraiment.
+const CellInput = ({
+  value, onCommit, onCancel, className = '',
+}: { value: string; onCommit: (v: string) => void; onCancel: () => void; className?: string }) => {
+  const [v, setV] = useState(value);
+  return (
+    <input
+      autoFocus
+      value={v}
+      onChange={e => setV(e.target.value)}
+      onFocus={e => e.target.select()}
+      onBlur={() => onCommit(v)}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { onCommit(v); e.currentTarget.blur(); }
+        if (e.key === 'Escape') { onCancel(); }
+      }}
+      className={`w-full px-1 py-0 bg-[#fffde7] border border-blue-400 rounded outline-none text-sm font-mono ${className}`}
+    />
+  );
+};
+
+const EditableCell = ({
+  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '',
+}: {
+  rKey: string; field: string; value: string | number; editingCell: EditingCell | null;
+  onStartEdit: (rKey: string, field: string, value: string | number) => void;
+  onCommit: (v: string) => void; onCancel: () => void; numeric?: boolean; className?: string;
+}) => {
+  const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
+  const display = numeric && typeof value === 'number' && value > 0
+    ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+    : String(value || '');
+
+  if (isEditing) {
+    return (
+      <CellInput
+        value={editingCell.value}
+        onCommit={onCommit}
+        onCancel={onCancel}
+        className={className}
+      />
+    );
+  }
+  return (
+    <div
+      onDoubleClick={() => onStartEdit(rKey, field, value)}
+      className={`px-1 py-0.5 cursor-text hover:bg-blue-50 rounded min-h-[22px] ${numeric ? 'text-right font-mono' : ''} ${className}`}
+      title="Double-clic pour éditer"
+    >
+      {display}
+    </div>
+  );
+};
 
 interface DragState {
   rowKey: string;
@@ -59,6 +119,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   dpgf, onChange, onSave, projectName, onDropExternal, onDragStart,
   showTree: showTreeProp, onToggleTree, onImportOffre, onPushToAct, offres = [],
 }) => {
+  const { settings } = useSettings();
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
@@ -499,6 +560,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {
               id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
               onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
+              badge: !!(dpgf.multiBatiments || dpgf.multiPhases),
             },
           ],
         },
@@ -543,8 +605,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Formats',
           actions: [
-            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportDPGFtoPDF(dpgf, projectName) },
-            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportDPGFtoExcel(dpgf, projectName) },
+            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}) },
+            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement, settings ?? {}) },
           ],
         },
       ],
@@ -552,54 +614,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   ];
 
   // ── Render ───────────────────────────────────────────────────────────────────
-  const CellInput = ({ value, onCommit, className = '' }: { value: string; onCommit: (v: string) => void; className?: string }) => {
-    const [v, setV] = useState(value);
-    return (
-      <input
-        autoFocus
-        value={v}
-        onChange={e => setV(e.target.value)}
-        onFocus={e => e.target.select()}
-        onBlur={() => onCommit(v)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { onCommit(v); e.currentTarget.blur(); }
-          if (e.key === 'Escape') { cancelEdit(); }
-        }}
-        className={`w-full px-1 py-0 bg-[#fffde7] border border-blue-400 rounded outline-none text-sm font-mono ${className}`}
-      />
-    );
-  };
-
-  const EditableCell = ({
-    rKey, field, value, numeric = false, className = '',
-  }: {
-    rKey: string; field: string; value: string | number; numeric?: boolean; className?: string;
-  }) => {
-    const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
-    const display = numeric && typeof value === 'number' && value > 0
-      ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
-      : String(value || '');
-
-    if (isEditing) {
-      return (
-        <CellInput
-          value={editingCell.value}
-          onCommit={v => commitEdit(v)}
-          className={className}
-        />
-      );
-    }
-    return (
-      <div
-        onDoubleClick={() => startEdit(rKey, field, value)}
-        className={`px-1 py-0.5 cursor-text hover:bg-blue-50 rounded min-h-[22px] ${numeric ? 'text-right font-mono' : ''} ${className}`}
-        title="Double-clic pour éditer"
-      >
-        {display}
-      </div>
-    );
-  };
-
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
@@ -616,7 +630,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           réordonnent les mêmes articles pour la lecture, sans les dupliquer. */}
       {(dpgf.multiBatiments || dpgf.multiPhases) && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/30">
-          <label className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Classement</label>
+          <label className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500">Classement</label>
           <select
             className="px-2 py-1 text-xs border border-zinc-300 rounded outline-none focus:ring-1 focus:ring-blue-400"
             value={groupement}
@@ -628,7 +642,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {dpgf.multiBatiments && dpgf.multiPhases && <option value="batiment-phase">Par bâtiment et phase</option>}
           </select>
           {groupement !== 'lot' && (
-            <span className="text-[11px] text-zinc-400">Lecture seule — repassez « Par lot » pour éditer.</span>
+            <span className="text-[0.6875rem] text-zinc-400">
+              Lecture seule — repassez « Par lot » pour éditer. Les exports PDF/Excel suivent ce classement.
+            </span>
           )}
         </div>
       )}
@@ -642,7 +658,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {/* ── Left tree panel ─────────────────────────────────────────────── */}
         {showTree && (
           <div className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm">
-            <div className="px-3 py-2 text-[11px] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
+            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
               Structure
             </div>
             {dpgf.lots.map((lot, li) => (
@@ -721,10 +737,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         </button>
                       </td>
                       <td className="px-2 py-1 font-bold text-xs text-zinc-600">
-                        <EditableCell rKey={rKey} field="numero" value={row.lot.numero} />
+                        <EditableCell rKey={rKey} field="numero" value={row.lot.numero}  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                       </td>
                       <td className="px-2 py-1 font-bold text-sm" colSpan={4}>
-                        <EditableCell rKey={rKey} field="titre" value={row.lot.titre} />
+                        <EditableCell rKey={rKey} field="titre" value={row.lot.titre}  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                       </td>
                       <td className="px-2 py-1 text-right font-bold text-sm font-mono text-[#1e5090]">
                         {formatCurrency(row.lot.sousTotal)}
@@ -768,10 +784,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         </button>
                       </td>
                       <td className="px-2 py-1 text-xs text-zinc-500">
-                        <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} />
+                        <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero}  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                       </td>
                       <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={5}>
-                        <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} />
+                        <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre}  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                       </td>
                       {(dpgf.multiBatiments || dpgf.multiPhases) && (
                         <td className="px-1 py-1" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)}>
@@ -824,12 +840,12 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       )}
                     </td>
                     <td className="px-2 py-0.5 text-xs text-zinc-400">
-                      <EditableCell rKey={rKey} field="numero" value={l.numero} className="text-xs" />
+                      <EditableCell rKey={rKey} field="numero" value={l.numero} className="text-xs"  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                     </td>
                     <td className="px-2 py-0.5">
                       <div className="flex items-center gap-1.5">
                         <div className="flex-1 min-w-0">
-                          <EditableCell rKey={rKey} field="designation" value={l.designation} />
+                          <EditableCell rKey={rKey} field="designation" value={l.designation}  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                         </div>
                         {/* Repère de provenance : cet article vient de la
                             bibliothèque du cabinet, c'est aussi lui qui permettra
@@ -837,7 +853,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         {l.articleTypeId && (
                           <span
                             title="Article issu de la bibliothèque d’ouvrages"
-                            className="shrink-0 text-[9px] font-bold px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
+                            className="shrink-0 text-[0.6875rem] font-bold px-1 py-px rounded bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300"
                           >
                             BIB
                           </span>
@@ -845,13 +861,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       </div>
                     </td>
                     <td className="px-2 py-0.5 text-center">
-                      <EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center" />
+                      <EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center"  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                     </td>
                     <td className="px-2 py-0.5">
-                      {l.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{l.quantite}</span> : <EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric />}
+                      {l.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{l.quantite}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />)}
                     </td>
                     <td className="px-2 py-0.5">
-                      <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric />
+                      <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                     </td>
                     <td className="px-2 py-0.5 text-right font-mono text-[#1e5090] font-medium">
                       {hasChildren ? (
@@ -859,7 +875,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           {formatCurrency(sumLigne(l))}
                         </span>
                       ) : (
-                        <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric />
+                        <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                       )}
                     </td>
                     {(dpgf.multiBatiments || dpgf.multiPhases) && (
@@ -874,7 +890,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       </td>
                     )}
                     <td className="px-2 py-0.5 text-xs text-zinc-500">
-                      <EditableCell rKey={rKey} field="localisation" value={l.localisation || ''} className="text-xs" />
+                      <EditableCell rKey={rKey} field="localisation" value={l.localisation || ''} className="text-xs"  editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit} />
                     </td>
                     <td className="px-1 py-0.5 flex gap-0.5 items-center justify-end">
                       {canAddChild && (

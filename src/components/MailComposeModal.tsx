@@ -12,7 +12,9 @@ import { useTranslation } from 'react-i18next';
 import { IconX, IconPaperclip, IconLoader2, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
+import { fileToEmailAttachment } from '../lib/emailAttachments';
 import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
+import { useUser } from '../UserContext';
 
 export interface MailReplyContext {
   accountId: string;
@@ -24,9 +26,17 @@ export interface MailReplyContext {
   fromAddress: string; // becomes the "to" field
 }
 
+/** Valeurs de départ d'un nouveau message (ex. envoi du DCE depuis le module ACT). */
+export interface MailComposeInitial {
+  to?: string;
+  subject?: string;
+  body?: string;
+}
+
 interface MailComposeModalProps {
   accounts: MailAccount[];
   replyTo?: MailReplyContext | null;
+  initial?: MailComposeInitial;
   onClose: () => void;
   onSent?: () => void;
 }
@@ -49,8 +59,9 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
   return data;
 }
 
-export default function MailComposeModal({ accounts, replyTo, onClose, onSent }: MailComposeModalProps) {
+export default function MailComposeModal({ accounts, replyTo, initial, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
   const sendable = accounts.filter(canSendNatively);
   const noSendableAccount = sendable.length === 0;
 
@@ -58,11 +69,13 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
     replyTo ? replyTo.accountId : sendable.find(a => a.isDefault)?.id || sendable[0]?.id || null
   );
   const account = sendable.find(a => a.id === accountId) || null;
-  const [to, setTo] = useState(replyTo?.fromAddress || '');
+  const [to, setTo] = useState(replyTo?.fromAddress || initial?.to || '');
   const [subject, setSubject] = useState(
-    replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : ''
+    replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : initial?.subject || ''
   );
-  const [body, setBody] = useState('');
+  // La signature personnelle (Réglages → Mon profil) est posée d'office sous
+  // le corps, modifiable ou supprimable avant l'envoi.
+  const [body, setBody] = useState(`${initial?.body || ''}${currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : ''}`);
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,10 +92,13 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
         // Aucun compte ne peut envoyer nativement (IMAP sans SMTP propre,
         // ou aucun compte connecté du tout) : POST /api/send-email retombe
         // sur le SMTP du cabinet (server/routes/sendEmail.ts), exactement
-        // comme avant le support multi-comptes.
+        // comme avant le support multi-comptes. Les pièces jointes voyagent
+        // en base64 dans le même appel (nodemailer les relaie telles
+        // quelles) — jusqu'ici silencieusement perdues sur ce chemin.
+        const attachments = files.length > 0 ? await Promise.all(files.map(fileToEmailAttachment)) : undefined;
         await apiFetch('/api/send-email', {
           method: 'POST',
-          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>` }),
+          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, attachments }),
         });
       } else if (account.provider === 'google') {
         const fd = new FormData();
@@ -114,9 +130,10 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
       } else {
         // Compte IMAP avec son propre SMTP configuré (Réglages → Mes boîtes
         // mail) : /api/send-email sait aiguiller vers ce compte précis.
+        const attachments = files.length > 0 ? await Promise.all(files.map(fileToEmailAttachment)) : undefined;
         await apiFetch('/api/send-email', {
           method: 'POST',
-          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, accountId: account.id }),
+          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, accountId: account.id, attachments }),
         });
       }
       onSent?.();
@@ -132,7 +149,7 @@ export default function MailComposeModal({ accounts, replyTo, onClose, onSent }:
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <form
         onSubmit={send}
-        className="rounded-xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col"
+        className="rounded-xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
         onClick={e => e.stopPropagation()}
       >

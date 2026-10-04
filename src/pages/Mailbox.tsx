@@ -496,7 +496,7 @@ export default function Mailbox() {
               >
                 <div className="min-w-0">
                   <div className="font-medium truncate">{m.subject || '(Sans objet)'}</div>
-                  <div className="truncate text-xs" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString() : ''}</div>
+                  <div className="truncate text-xs" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString('fr-FR') : ''}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <button
@@ -602,7 +602,7 @@ function AttachPicker({ message, projects, proposals, tenders, onAttach, onClose
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="rounded-xl shadow-xl w-full max-w-md max-h-[80vh] flex flex-col" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
+      <div className="rounded-xl shadow-xl w-full max-w-md max-h-[80dvh] flex flex-col" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }} onClick={e => e.stopPropagation()}>
         <div className="p-4 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
           <div className="min-w-0">
             <h3 className="text-sm font-bold truncate" style={{ color: 'var(--tblr-text)' }}>{t('correspondence_link')}</h3>

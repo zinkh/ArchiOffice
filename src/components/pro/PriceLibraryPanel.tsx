@@ -112,7 +112,7 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
   return (
     <div className="w-80 shrink-0 border-l border-zinc-200 dark:border-zinc-700 bg-[#f9fafb] dark:bg-zinc-800/30 flex flex-col overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Bibliothèque d’ouvrages</h3>
+        <h3 className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500">Bibliothèque d’ouvrages</h3>
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><IconX size={14} /></button>
       </div>
 
@@ -163,7 +163,7 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
               <input type="checkbox" className="mt-0.5" checked={coches.has(a.id)} readOnly />
               <div className="flex-1 min-w-0">
                 <div className="truncate font-medium text-zinc-700 dark:text-zinc-300">{a.designation}</div>
-                <div className="flex items-center gap-2 text-[10px] text-zinc-400">
+                <div className="flex items-center gap-2 text-[0.6875rem] text-zinc-400">
                   <span>{a.unite}</span>
                   <span className="font-mono text-[#1e5090]">{formatCurrency(Number(a.prix_unitaire) || 0)}</span>
                   {a.dtu_code && <span className="truncate">{a.dtu_code}</span>}

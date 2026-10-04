@@ -1,7 +1,9 @@
 import * as React from 'react';
 import { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconX, IconEye, IconEdit, IconDownload, IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { motion } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import type { Invoice, Project, InvoiceItem, InvoicePhase } from '../types';
@@ -26,6 +28,7 @@ interface InvoiceGeneratorProps {
 }
 
 export function InvoiceGenerator({ onClose, onSave, initialData, project }: InvoiceGeneratorProps) {
+  const { t } = useTranslation();
   const isAcompte = initialData?.invoice_type === 'acompte';
   const [data, setData] = useState<Partial<Invoice>>({
     invoice_number: `${isAcompte ? 'A' : 'F'}${new Date().getFullYear()}-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
@@ -59,7 +62,14 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             seller_vat_number: settings.vatNumber || prev.seller_vat_number,
             seller_iban: settings.seller_iban || prev.seller_iban,
             seller_bic: settings.seller_bic || prev.seller_bic,
-            currency: settings.currency || prev.currency
+            currency: settings.currency || prev.currency,
+            // Le délai de paiement par défaut du cabinet (settings.invoicePaymentTermsDays,
+            // réglable depuis /settings → Cabinet) ne doit remplacer l'échéance
+            // pré-remplie que pour une facture NOUVELLE — une facture existante
+            // rouverte pour édition (initialData.due_date déjà posé) garde la sienne.
+            due_date: !initialData?.due_date && Number.isFinite(settings.invoicePaymentTermsDays) && settings.invoicePaymentTermsDays >= 0
+              ? new Date(Date.now() + settings.invoicePaymentTermsDays * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+              : prev.due_date
           }));
           if (settings.logoUrl) setLogoUrl(settings.logoUrl);
         }
@@ -145,10 +155,10 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
         body: JSON.stringify(payload)
       });
       onSave?.(updated);
-      alert('Facture enregistrée avec succès.');
+      alert(t('invoice_generator_save_success'));
     } catch (err: any) {
       console.error(err);
-      alert(err?.message || 'Erreur lors de l\'enregistrement.');
+      alert(err?.message || t('invoice_generator_save_failed'));
     } finally {
       setIsSaving(false);
     }
@@ -207,7 +217,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      alert('Erreur lors de la génération de la facture.');
+      alert(t('invoice_generator_pdf_generation_failed'));
     } finally {
       // Restore icons
       icons.forEach(icon => icon.style.display = '');
@@ -238,11 +248,13 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
       <motion.div 
-        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        ref={launchOriginRef}
+        initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
+        exit={{ opacity: 0, scale: 0.9, y: 20 }}
+        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90dvh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
       >
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
@@ -251,14 +263,14 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             <div className="flex bg-zinc-200 dark:bg-zinc-800 p-1 rounded-lg">
               <button 
                 onClick={() => setView('edit')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${view === 'edit' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${view === 'edit' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
               >
                 <IconEdit size={16} />
                 Édition
               </button>
               <button 
                 onClick={() => setView('preview')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${view === 'preview' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${view === 'preview' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
               >
                 <IconEye size={16} />
                 Aperçu
@@ -269,7 +281,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             <button 
               onClick={handleSave}
               disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 transition-all active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 press"
             >
               {isSaving ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -281,7 +293,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
             <button 
               onClick={exportPDF}
               disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 transition-all active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 press"
             >
               {isGenerating ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -410,14 +422,16 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <span className="text-zinc-500">BIC :</span>
                     <span className="font-mono">{data.seller_bic}</span>
                     <span className="text-zinc-500">Échéance :</span>
-                    <span className="font-bold">{new Date(data.due_date || '').toLocaleDateString('fr-FR')}</span>
+                    <span className="font-bold">{data.due_date ? new Date(data.due_date).toLocaleDateString('fr-FR') : '---'}</span>
                   </div>
                 </div>
 
                 {/* Legal Footer */}
                 <div className="mt-auto pt-8 border-t border-zinc-200 text-[7pt] text-center text-zinc-400">
                   <p>Facture conforme à la norme NF EN 16931 (Factur-X Ready)</p>
-                  <p>{data.seller_name} - SIRET {data.seller_siret}</p>
+                  <p>{[data.seller_name, data.seller_address, data.seller_siret ? `SIRET ${data.seller_siret}` : '', data.seller_vat_number ? `TVA ${data.seller_vat_number}` : ''].filter(Boolean).join('  ·  ')}</p>
+                  {/* Pagination du cabinet : P1|2, en bas à droite */}
+                  <p className="text-right font-bold text-zinc-700">P1|1</p>
                 </div>
               </div>
             </div>
@@ -532,7 +546,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Détails Émetteur</h3>
                     <div className="space-y-3">
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Nom / Agence</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">Nom / Agence</label>
                         <input 
                           type="text" 
                           value={data.seller_name || ''}
@@ -541,7 +555,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">Adresse</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">Adresse</label>
                         <textarea 
                           value={data.seller_address || ''}
                           onChange={e => setData({...data, seller_address: e.target.value})}
@@ -549,7 +563,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">SIRET</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">SIRET</label>
                         <input 
                           type="text" 
                           value={data.seller_siret || ''}
@@ -558,7 +572,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">N° TVA</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">N° TVA</label>
                         <input 
                           type="text" 
                           value={data.seller_vat_number || ''}
@@ -567,7 +581,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">IBAN</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">IBAN</label>
                         <input 
                           type="text" 
                           value={data.seller_iban || ''}
@@ -576,7 +590,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-zinc-500 uppercase">BIC</label>
+                        <label className="text-[0.6875rem] font-bold text-zinc-500 uppercase">BIC</label>
                         <input 
                           type="text" 
                           value={data.seller_bic || ''}
@@ -611,6 +625,6 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
           )}
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }

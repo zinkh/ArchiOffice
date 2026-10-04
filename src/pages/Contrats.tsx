@@ -6,9 +6,10 @@ import {
   IconAlertTriangle, IconFileImport,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
-import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project } from '../types';
+import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project, ProjectTemplate } from '../types';
+import { contratDefaultsFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -16,6 +17,7 @@ import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_ENTREPRISE, CONTACT_CATEGORY_
 import { cn } from '../lib/utils';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -84,9 +86,9 @@ const PRESETS = [
   { label: 'Base avec Exé', cats: ['base', 'exe'] as const },
 ];
 
-const inputCls = 'w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm';
+const inputCls = 'w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm';
 const inputStyle: React.CSSProperties = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
-const labelCls = 'block text-[10px] font-bold uppercase tracking-wider mb-1';
+const labelCls = 'block text-[0.6875rem] font-bold uppercase tracking-wider mb-1';
 const labelStyle: React.CSSProperties = { color: 'var(--tblr-muted)' };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -108,7 +110,7 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.Brouillon;
   const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
       <Icon size={11} />
       {cfg.label}
     </span>
@@ -125,36 +127,33 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210;
   const margin = 20;
+  const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
+  const GRIS_DOUX: [number, number, number] = [107, 114, 128];
+  const GRIS_FOND: [number, number, number] = [243, 244, 246];
 
-  // Header
-  doc.setFillColor(32, 107, 196);
-  doc.rect(0, 0, W, 30, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(17);
-  doc.setFont('helvetica', 'bold');
-  doc.text('CONTRAT DE MAÎTRISE D\'ŒUVRE', margin, 13);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'normal');
-  if (contrat.numero) doc.text(`Réf. : ${contrat.numero}`, margin, 21);
-  doc.text(`Date : ${new Date().toLocaleDateString('fr-FR')}`, W - margin, 21, { align: 'right' });
-
-  // Type badge
-  doc.setFillColor(245, 247, 251);
-  doc.rect(0, 30, W, 12, 'F');
-  doc.setTextColor(100, 120, 150);
+  // En-tête et pied du cabinet, comme les autres documents.
+  const settings = await fetchAgencySettings();
+  const logo = await loadLogoDataUrl(settings.logoUrl);
+  const letterhead = {
+    title: "Contrat de maîtrise d'œuvre",
+    subtitle: TYPE_CONTRAT_LABELS[contrat.type_contrat] ?? contrat.type_contrat,
+    reference: contrat.numero ? `Réf. : ${contrat.numero}` : undefined,
+    margin, logo,
+  };
+  const headerEnd = drawAgencyHeader(doc, settings, letterhead);
+  doc.setTextColor(...GRIS_DOUX);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.text(TYPE_CONTRAT_LABELS[contrat.type_contrat] ?? contrat.type_contrat, margin, 38);
-  doc.text(TYPE_MOA_LABELS[contrat.type_moa] ?? contrat.type_moa, W / 2, 38, { align: 'center' });
+  doc.text(TYPE_MOA_LABELS[contrat.type_moa] ?? contrat.type_moa, margin, headerEnd + 1);
 
-  let y = 50;
+  let y = headerEnd + 9;
 
   const sectionTitle = (title: string) => {
-    doc.setFillColor(240, 245, 255);
+    doc.setFillColor(...GRIS_FOND);
     doc.rect(margin, y, W - 2 * margin, 7, 'F');
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(32, 107, 196);
+    doc.setTextColor(...GRIS_TEXTE);
     doc.text(title, margin + 3, y + 5);
     y += 10;
   };
@@ -162,10 +161,10 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   const field = (label: string, value: string, x: number, colW: number) => {
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(120, 130, 150);
+    doc.setTextColor(...GRIS_DOUX);
     doc.text(label.toUpperCase(), x, y);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(30, 30, 40);
+    doc.setTextColor(...GRIS_TEXTE);
     doc.text(value || '—', x, y + 5);
     return y + 10;
   };
@@ -199,8 +198,8 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
       head: [['Mission', 'Part honoraires (%)']],
       body: missionsIncluses.map(m => [m.name, m.pct != null && m.pct > 0 ? `${m.pct} %` : '—']),
       styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
-      alternateRowStyles: { fillColor: [248, 250, 255] },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255 },
+      alternateRowStyles: { fillColor: GRIS_FOND },
     });
     y = (doc as any).lastAutoTable.finalY + 8;
   }
@@ -244,7 +243,7 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
       head: [['Clause', 'Contenu']],
       body: clauses,
       styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255 },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255 },
       columnStyles: { 0: { cellWidth: 35, fontStyle: 'bold' } },
     });
     y = (doc as any).lastAutoTable.finalY + 8;
@@ -262,11 +261,11 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   // Signatures
   if (y > 240) { doc.addPage(); y = 20; }
   y += 10;
-  doc.setFillColor(245, 247, 251);
+  doc.setFillColor(...GRIS_FOND);
   doc.rect(margin, y, W - 2 * margin, 35, 'F');
   doc.setFontSize(9);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(60, 70, 90);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.text('Fait en deux exemplaires originaux', W / 2, y + 6, { align: 'center' });
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -275,14 +274,7 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   doc.text('Signature et cachet :', margin + 5, y + 25);
   doc.text('Signature et cachet :', margin + colW + 10, y + 25);
 
-  // Footer
-  const pageCount = (doc as any).internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(7);
-    doc.setTextColor(160, 170, 185);
-    doc.text(`Contrat MOE — ${contrat.numero || 'Brouillon'} — Page ${i}/${pageCount}`, W / 2, 292, { align: 'center' });
-  }
+  drawAgencyFooters(doc, settings, letterhead);
 
   doc.save(`Contrat_MOE_${contrat.numero || contrat.intitule_projet || 'nouveau'}.pdf`);
 }
@@ -304,6 +296,7 @@ function ContratModal({
   contrat,
   contacts,
   projects,
+  templates,
   onSave,
   onClose,
   onContactCreated,
@@ -311,6 +304,7 @@ function ContratModal({
   contrat: Partial<ContratMOE> | null;
   contacts: Contact[];
   projects: Project[];
+  templates: ProjectTemplate[];
   onSave: (c: Partial<ContratMOE>) => Promise<void>;
   onClose: () => void;
   onContactCreated: (c: Contact) => void;
@@ -335,6 +329,7 @@ function ContratModal({
   const [showContactModal, setShowContactModal] = useState(false);
   const [pendingContactTarget, setPendingContactTarget] = useState<{ type: 'cotraitant' | 'sous_traitant'; id: string } | null>(null);
   const [tab, setTab] = useState<'general' | 'missions' | 'honoraires' | 'equipe' | 'clauses'>('general');
+  const [templateId, setTemplateId] = useState('');
 
   const set = (key: keyof ContratMOE, val: any) => setForm(f => ({ ...f, [key]: val }));
 
@@ -373,6 +368,15 @@ function ContratModal({
       category,
     };
     setForm((f: Partial<ContratMOE>) => ({ ...f, missions_list: [...(f.missions_list || DEFAULT_MISSIONS), mission] }));
+  };
+
+  // Un modèle de projet fixe d'un geste le type de contrat, le type de maître
+  // d'ouvrage et la répartition des missions (un modèle sans missions ne touche
+  // pas à celles du formulaire).
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const template = templates.find(t => t.id === id);
+    if (template) setForm(f => ({ ...f, ...contratDefaultsFromTemplate(template) }));
   };
 
   const applyPreset = (cats: readonly ContratMissionCategory[]) => {
@@ -499,11 +503,28 @@ function ContratModal({
           </div>
 
           <form onSubmit={handleSubmit}>
-            <div className="px-6 py-5 space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-4 max-h-[60dvh] overflow-y-auto">
 
               {/* TAB: Général */}
               {tab === 'general' && (
                 <div className="space-y-4">
+                  {!contrat?.id && templates.length > 0 && (
+                    <Field label="Modèle de projet">
+                      <select className={inputCls} style={inputStyle} value={templateId} onChange={e => applyTemplate(e.target.value)}>
+                        <option value="">— Aucun —</option>
+                        {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                      {(() => {
+                        const chosen = templates.find(t => t.id === templateId);
+                        const summary = chosen ? summarizeTemplate({ default_missions: chosen.default_missions }) : '';
+                        return summary ? (
+                          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                            Type de contrat, maître d'ouvrage et répartition des missions repris du modèle ({summary}).
+                          </p>
+                        ) : null;
+                      })()}
+                    </Field>
+                  )}
                   <div className="grid grid-cols-2 gap-4">
                     <Field label="N° de contrat">
                       <input className={inputCls} style={inputStyle} value={form.numero || ''} onChange={e => set('numero', e.target.value)} placeholder="ex : MOE-2026-001" />
@@ -599,7 +620,7 @@ function ContratModal({
                   </p>
 
                   <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
-                    <table className="w-full text-xs">
+                    <table className="min-w-full text-xs">
                       <thead>
                         <tr style={{ background: 'var(--tblr-surface-2)' }}>
                           <th className="text-center px-2 py-2 font-semibold w-8" style={{ color: 'var(--tblr-muted)' }} title="Mission incluse au contrat">✓</th>
@@ -618,9 +639,9 @@ function ContratModal({
                               <tr style={{ background: 'var(--tblr-surface-2)', borderTop: '1px solid var(--tblr-border)' }}>
                                 <td colSpan={5} className="px-3 py-1.5">
                                   <div className="flex items-center justify-between">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{cat.label}</span>
+                                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-text)' }}>{cat.label}</span>
                                     <button type="button" onClick={() => addMission(cat.id)}
-                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                      className="flex items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
                                       style={{ color: 'var(--tblr-primary)' }}>
                                       <IconPlus size={11} /> {cat.addLabel}
                                     </button>
@@ -629,7 +650,7 @@ function ContratModal({
                               </tr>
                               {catMissions.length === 0 ? (
                                 <tr style={{ borderTop: '1px solid var(--tblr-border)' }}>
-                                  <td colSpan={5} className="px-3 py-2 text-center text-[11px] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune mission</td>
+                                  <td colSpan={5} className="px-3 py-2 text-center text-[0.6875rem] italic" style={{ color: 'var(--tblr-muted)' }}>Aucune mission</td>
                                 </tr>
                               ) : catMissions.map(mission => (
                                 <tr key={mission.id} style={{ borderTop: '1px solid var(--tblr-border)' }}>
@@ -710,7 +731,7 @@ function ContratModal({
                           key={mode}
                           type="button"
                           onClick={() => set('mode_honoraires', mode)}
-                          className={cn('p-3 rounded-lg border text-sm font-medium text-left transition-all', form.mode_honoraires === mode
+                          className={cn('p-3 rounded-lg border text-sm font-medium text-left transition', form.mode_honoraires === mode
                             ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
                             : 'hover:border-gray-400'
                           )}
@@ -783,7 +804,7 @@ function ContratModal({
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun cotraitant</p>
                     ) : (
                       <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
-                        <table className="w-full text-xs">
+                        <table className="min-w-full text-xs">
                           <thead>
                             <tr style={{ background: 'var(--tblr-surface-2)' }}>
                               <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '26%' }}>Contact</th>
@@ -874,7 +895,7 @@ function ContratModal({
                       <p className="text-xs italic py-3 text-center" style={{ color: 'var(--tblr-muted)' }}>Aucun sous-traitant</p>
                     ) : (
                       <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--tblr-border)' }}>
-                        <table className="w-full text-xs">
+                        <table className="min-w-full text-xs">
                           <thead>
                             <tr style={{ background: 'var(--tblr-surface-2)' }}>
                               <th className="text-left px-3 py-2 font-semibold" style={{ color: 'var(--tblr-muted)', width: '22%' }}>Contact</th>
@@ -1080,6 +1101,7 @@ export default function Contrats() {
   const [contrats, setContrats] = useState<ContratMOE[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContrat, setEditingContrat] = useState<ContratMOE | null>(null);
@@ -1090,14 +1112,17 @@ export default function Contrats() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, contacts, projects] = await Promise.all([
+      const [c, contacts, projects, templates] = await Promise.all([
         fetchJson<ContratMOE[]>('/api/contrats_moe'),
         fetchJson<Contact[]>('/api/contacts'),
         fetchJson<Project[]>('/api/projects'),
+        // Les modèles sont un confort : leur absence n'empêche pas d'ouvrir les contrats.
+        fetchJson<ProjectTemplate[]>('/api/project-templates').catch(() => [] as ProjectTemplate[]),
       ]);
       setContrats(c);
       setContacts(contacts);
       setProjects(projects);
+      setTemplates(templates);
     } catch (e) {
       console.error(e);
     } finally {
@@ -1120,6 +1145,18 @@ export default function Contrats() {
   const openEdit = (c: ContratMOE) => { setEditingContrat(c); setIsModalOpen(true); };
   const closeModal = () => { setIsModalOpen(false); setEditingContrat(null); };
 
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || contrats.length === 0) return;
+    const contrat = contrats.find(c => c.id === openId);
+    if (contrat) openEdit(contrat);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contrats, searchParams]);
+
   const handleSave = async (data: Partial<ContratMOE>) => {
     if (editingContrat?.id) {
       await apiFetch(`/api/contrats_moe/${editingContrat.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -1131,7 +1168,7 @@ export default function Contrats() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Supprimer ce contrat ?')) return;
+    if (!confirm(t('contrats_confirm_delete'))) return;
     await apiFetch(`/api/contrats_moe/${id}`, { method: 'DELETE' });
     load();
   };
@@ -1185,7 +1222,7 @@ export default function Contrats() {
               <s.icon size={20} style={{ color: s.color }} />
               <div>
                 <p className="text-lg font-bold leading-none" style={{ color: 'var(--tblr-text)' }}>{s.value}</p>
-                <p className="text-[10px] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{s.label}</p>
+                <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{s.label}</p>
               </div>
             </div>
           ))}
@@ -1315,7 +1352,7 @@ export default function Contrats() {
                   {contrat.missions_list && contrat.missions_list.filter(m => m.incluse).length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
                       {contrat.missions_list.filter(m => m.incluse).map(m => (
-                        <span key={m.id} className="text-[10px] px-2 py-0.5 rounded font-medium" style={{ background: '#e8f0fb', color: '#206bc4' }}>
+                        <span key={m.id} className="text-[0.6875rem] px-2 py-0.5 rounded font-medium" style={{ background: '#e8f0fb', color: '#206bc4' }}>
                           {m.name.replace(/\s*\(.*?\)\s*/g, ' ').trim()}
                         </span>
                       ))}
@@ -1344,6 +1381,7 @@ export default function Contrats() {
             contrat={editingContrat}
             contacts={contacts}
             projects={projects}
+            templates={templates}
             onSave={handleSave}
             onClose={closeModal}
             onContactCreated={(c) => setContacts(prev => [...prev, c])}

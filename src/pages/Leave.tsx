@@ -5,6 +5,7 @@ import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
 import { exportLeaveBalancesTablePdf, exportLeaveBalanceFichePdf } from '../lib/hrExport';
+import { formatDate } from '../lib/date';
 import type { LeaveRequest, LeaveBalance, LeaveBalanceAllEntry, LeaveType, TeamMember } from '../types';
 
 export const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
@@ -57,13 +58,14 @@ function businessDaysBetween(startStr: string, endStr: string): number {
   return count;
 }
 
-export default function Leave() {
+/** `embedded` : affichée dans l'onglet Congés de la page Équipe, qui porte déjà le titre. */
+export default function Leave({ embedded = false }: { embedded?: boolean }) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const { settings } = useSettings();
   const isAdmin = currentUser?.system_role === 'admin';
   const currentYear = new Date().getFullYear();
-  const agencySettings = { agencyName: settings?.agencyName, address: settings?.address, phone: settings?.phone, email: settings?.email };
+  const agencySettings = settings ?? {};
 
   const [tab, setTab] = useState<'mine' | 'validations' | 'balances'>('mine');
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
@@ -139,7 +141,7 @@ export default function Leave() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('leave_title')}</h2>
+      {!embedded && <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('leave_title')}</h2>}
 
       <div className="flex gap-2 flex-wrap">
         <button onClick={() => setTab('mine')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'mine' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('leave_tab_mine')}</button>
@@ -157,7 +159,7 @@ export default function Leave() {
             {balances.map(b => (
               <div key={b.leave_type} className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-4">
                 <h4 className="font-semibold text-sm mb-1">{LEAVE_TYPE_LABELS[b.leave_type]} — {b.year}</h4>
-                <div className="flex gap-4 text-sm">
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                   <span>{t('leave_allocated')}: <strong>{b.allocated_days}</strong></span>
                   <span>{t('leave_used')}: <strong>{b.used_days}</strong></span>
                   <span className="text-blue-600 dark:text-blue-400">{t('leave_remaining')}: <strong>{b.remaining_days}</strong></span>
@@ -191,7 +193,8 @@ export default function Leave() {
           </div>
 
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
                 <tr>
                   <th className="text-left p-3">{t('leave_col_type')}</th>
@@ -205,7 +208,7 @@ export default function Leave() {
                 {myRequests.map(r => (
                   <tr key={r.id} className="border-t border-zinc-100 dark:border-zinc-700">
                     <td className="p-3">{LEAVE_TYPE_LABELS[r.leave_type]}{r.motif && ` (${MOTIF_OPTIONS.find(m => m.value === r.motif)?.label || r.motif})`}</td>
-                    <td className="p-3">{r.start_date} → {r.end_date}</td>
+                    <td className="p-3">{formatDate(r.start_date)} → {formatDate(r.end_date)}</td>
                     <td className="p-3">{r.business_days}</td>
                     <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span></td>
                     <td className="p-3">
@@ -217,13 +220,15 @@ export default function Leave() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </div>
       )}
 
       {tab === 'validations' && teamRequests !== null && (
         <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
             <thead className="bg-zinc-50 dark:bg-zinc-900">
               <tr>
                 <th className="text-left p-3">{t('leave_col_employee')}</th>
@@ -239,7 +244,7 @@ export default function Leave() {
                 <tr key={r.id} className="border-t border-zinc-100 dark:border-zinc-700">
                   <td className="p-3">{nameById[r.user_id] || r.user_id}</td>
                   <td className="p-3">{LEAVE_TYPE_LABELS[r.leave_type]}</td>
-                  <td className="p-3">{r.start_date} → {r.end_date}</td>
+                  <td className="p-3">{formatDate(r.start_date)} → {formatDate(r.end_date)}</td>
                   <td className="p-3">{r.business_days}</td>
                   <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-xs ${STATUS_COLORS[r.status]}`}>{STATUS_LABELS[r.status]}</span></td>
                   <td className="p-3">
@@ -256,6 +261,7 @@ export default function Leave() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -276,7 +282,8 @@ export default function Leave() {
             </button>
           </div>
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 dark:bg-zinc-900">
                 <tr>
                   <th className="text-left p-3">{t('leave_col_employee')}</th>
@@ -318,6 +325,7 @@ export default function Leave() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
           <p className="text-xs text-zinc-400">{t('leave_balances_hint')}</p>
         </div>

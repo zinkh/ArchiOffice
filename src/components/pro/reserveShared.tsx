@@ -13,6 +13,18 @@ export const RESERVE_STATUSES: ReserveStatus[] = [
   'A faire', 'En cours', 'Levée', "Refusée par l'entreprise", 'Quitus Transmis', 'Levée refusée par le MOE',
 ];
 
+/** Clé i18n d'un statut : la valeur reste stockée en français, seul l'affichage se traduit. */
+const RESERVE_STATUS_KEYS: Record<ReserveStatus, string> = {
+  'A faire': 'reserve_status_todo',
+  'En cours': 'reserve_status_in_progress',
+  'Levée': 'reserve_status_lifted',
+  "Refusée par l'entreprise": 'reserve_status_refused_company',
+  'Quitus Transmis': 'reserve_status_discharge_sent',
+  'Levée refusée par le MOE': 'reserve_status_lift_refused',
+};
+export const reserveStatusKey = (status: string): string | null =>
+  RESERVE_STATUS_KEYS[status as ReserveStatus] ?? null;
+
 export const isReserveClosed = (r: Pick<ReserveLike, 'status'>) => r.status === 'Levée' || r.status === 'Quitus Transmis';
 
 /** Jours de retard (0 si à l'heure ou levée). */
@@ -26,7 +38,7 @@ export function reserveOverdueDays(r: Pick<ReserveLike, 'status' | 'due_date'>):
 
 export function statusPillClass(status: ReserveStatus): string {
   return cn(
-    'border-none rounded-full text-[10px] font-bold uppercase tracking-wider px-2 py-1 outline-none cursor-pointer',
+    'border-none rounded-full text-[0.6875rem] font-bold uppercase tracking-wider px-2 py-1 outline-none cursor-pointer',
     status === 'Levée' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
     status === 'Quitus Transmis' ? 'bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400' :
     status === 'En cours' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :

@@ -1,14 +1,30 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconTrash, IconCheck, IconChevronRight, IconChevronLeft,
   IconFileText, IconBuilding, IconUsers, IconScale, IconTrophy,
   IconDownload, IconMessageDots, IconMail, IconAlertTriangle,
   IconClipboardList, IconCurrencyEuro, IconPercentage, IconStar,
-  IconX, IconEdit, IconEye, IconSend, IconCircleCheck,
+  IconX, IconEdit, IconEye, IconSend, IconCircleCheck, IconSearch,
 } from '@tabler/icons-react';
-import { apiFetch } from '../lib/api';
+import { apiFetch, fetchJson } from '../lib/api';
 import { cn } from '../lib/utils';
 import type { Contact, ProjectLot } from '../types';
+import type { Referentiels, CorpsEtat } from '../types/library';
+import { useSettings } from '../hooks/useSettings';
+import { generateRAO, generateComparatifExcel } from '../lib/actAnalysisExport';
+import {
+  exportEntreprisesConsulteesToExcel, exportEntreprisesConsulteesToPDF, groupByLot,
+  exportLotsToExcel, exportLotsToPDF,
+} from '../lib/actExport';
+import { EntrepriseAutocomplete } from './EntrepriseAutocomplete';
+import ACTEntreprisesTable from './ACTEntreprisesTable';
+import { EntrepriseSearchDialog, type EntrepriseChoisie } from './EntrepriseSearchDialog';
+import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm';
+import { useQualifications } from '../hooks/useQualifications';
+import { ContactModal } from './ContactModal';
+import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -27,6 +43,12 @@ interface EntrepriseConsultee {
   email?: string;
   lots_ids: string[];
   envoyer_dce: boolean;
+  /** Codes de la nomenclature FFB (ref_corps_etat, Bibliothèque d'ouvrages) — une entreprise en couvre souvent plusieurs. */
+  corps_etat_codes?: string[];
+  dce_transmis_le?: string;
+  relance_le?: string;
+  offre_recue_le?: string;
+  ne_repond_pas?: boolean;
 }
 
 interface CritereNotation {
@@ -116,6 +138,13 @@ const TYPE_DOC_LABELS: Record<string, string> = {
   Autre: 'Autre document',
 };
 
+/** Identifiant de « ligne » donné à la création d'une fiche lancée depuis le formulaire d'ajout. */
+const NOUVELLE_LIGNE = '__nouvelle__';
+
+/** Délai entre la dernière modification et l'enregistrement automatique. */
+const AUTOSAVE_DELAY_MS = 1200;
+const AUTOSAVE_RETRY_MS = 5000;
+
 const EMPTY_CONSULTATION: Consultation = {
   dce_documents: [],
   entreprises: [],
@@ -141,227 +170,6 @@ function fmt(n?: number) {
   return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
 }
 
-// ── RAO PDF ───────────────────────────────────────────────────────────────────
-
-async function generateRAO(
-  lots: ProjectLot[],
-  consultation: Consultation,
-  projectName: string,
-  lotId?: string
-) {
-  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
-    import('jspdf'),
-    import('jspdf-autotable'),
-  ]);
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const W = 297;
-  const margin = 14;
-
-  const lotsToAnalyse = lotId
-    ? lots.filter(l => l.id === lotId)
-    : lots.filter(l => consultation.offres.some(o => o.lot_id === l.id));
-
-  let pageAdded = false;
-
-  lotsToAnalyse.forEach((lot, idx) => {
-    if (idx > 0) { doc.addPage(); pageAdded = true; }
-
-    // Header
-    doc.setFillColor(32, 107, 196);
-    doc.rect(0, 0, W, 20, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(13);
-    doc.setFont('helvetica', 'bold');
-    doc.text('RAPPORT D\'ANALYSE DES OFFRES', margin, 13);
-    doc.setFontSize(9);
-    doc.text(`${projectName} — Lot ${lot.lot_number} : ${lot.lot_title}`, W - margin, 13, { align: 'right' });
-
-    const offresLot = consultation.offres.filter(o => o.lot_id === lot.id);
-    if (offresLot.length === 0) {
-      doc.setTextColor(120, 120, 120);
-      doc.setFontSize(10);
-      doc.text('Aucune offre saisie pour ce lot.', W / 2, 60, { align: 'center' });
-      return;
-    }
-
-    // Montants
-    const montantsConformes = offresLot.filter(o => o.conforme).map(o => o.montant_base);
-    const minMontant = Math.min(...montantsConformes);
-
-    // Tableau
-    const head = [['Entreprise', 'Montant HT', '% / moins-disant', 'Conformité', 'Note prix', 'Note tech.', ...consultation.criteres.map(c => `${c.nom}\n(${c.poids}%)`), 'NOTE GLOBALE', 'Rang']];
-    const body = offresLot.map(offre => {
-      const entreprise = consultation.entreprises.find(e => e.id === offre.entreprise_id);
-      const nomEntreprise = entreprise?.nom || '—';
-      const pctMinDisant = minMontant > 0 ? ((offre.montant_base - minMontant) / minMontant * 100).toFixed(1) + '%' : '—';
-      const notePrix = offre.conforme && offre.montant_base > 0 ? (minMontant / offre.montant_base * 100).toFixed(1) : '—';
-      const poidsPrix = consultation.criteres.find(c => c.id === 'prix')?.poids ?? 60;
-      const poidsTech = consultation.criteres.find(c => c.id === 'tech')?.poids ?? 40;
-      const noteGlobale = offre.conforme
-        ? ((parseFloat(notePrix) || 0) * poidsPrix / 100 + (offre.note_technique || 0) * poidsTech / 100).toFixed(1)
-        : 'NC';
-      const extraCriteres = consultation.criteres.filter(c => c.id !== 'prix' && c.id !== 'tech').map(() => '—');
-      return [
-        nomEntreprise,
-        fmt(offre.montant_base),
-        offre.conforme ? `+${pctMinDisant}` : 'NC',
-        offre.conforme ? '✓ Conforme' : `✗ ${offre.motif_nc || 'Non conforme'}`,
-        notePrix,
-        String(offre.note_technique || '—'),
-        ...extraCriteres,
-        noteGlobale,
-        '—',
-      ];
-    });
-
-    // Trier par note globale
-    body.sort((a, b) => {
-      const nA = parseFloat(a[a.length - 2]) || -1;
-      const nB = parseFloat(b[b.length - 2]) || -1;
-      return nB - nA;
-    });
-    body.forEach((row, i) => { row[row.length - 1] = String(i + 1); });
-
-    autoTable(doc, {
-      startY: 28,
-      margin: { left: margin, right: margin },
-      head,
-      body,
-      styles: { fontSize: 7.5, cellPadding: 2 },
-      headStyles: { fillColor: [32, 107, 196], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 250, 255] },
-      columnStyles: { 0: { cellWidth: 40 } },
-    });
-
-    // Attribution
-    const attribution = consultation.attributions.find(a => a.lot_id === lot.id);
-    if (attribution) {
-      const entreprise = consultation.entreprises.find(e => e.id === attribution.entreprise_id);
-      const finalY = (doc as any).lastAutoTable.finalY + 6;
-      doc.setFillColor(212, 237, 218);
-      doc.rect(margin, finalY, W - 2 * margin, 10, 'F');
-      doc.setTextColor(47, 133, 90);
-      doc.setFontSize(9);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`▶  LOT ATTRIBUÉ À : ${entreprise?.nom || '—'} — ${fmt(attribution.montant)} HT`, margin + 3, finalY + 6.5);
-    }
-  });
-
-  if (!pageAdded && lotsToAnalyse.length === 0) {
-    doc.setTextColor(120, 120, 120);
-    doc.setFontSize(11);
-    doc.text('Aucun lot avec des offres à analyser.', W / 2, 60, { align: 'center' });
-  }
-
-  const pages = (doc as any).internal.getNumberOfPages();
-  for (let i = 1; i <= pages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(7);
-    doc.setTextColor(160, 160, 170);
-    doc.text(`RAO — ${projectName} — Page ${i}/${pages}`, W / 2, 206, { align: 'center' });
-  }
-  doc.save(`RAO_${projectName.replace(/\s+/g, '_')}_${lotId ? `Lot${lotId}` : 'Global'}.pdf`);
-}
-
-// ── Excel Comparatif ──────────────────────────────────────────────────────────
-
-async function generateComparatifExcel(lots: ProjectLot[], consultation: Consultation, projectName: string) {
-  const XLSX = await import('xlsx');
-  const wb = XLSX.utils.book_new();
-  const rows: (string | number | undefined)[][] = [];
-  const styles: { row: number; col: number; style: string }[] = [];
-
-  const entreprises = consultation.entreprises;
-
-  rows.push([projectName]);
-  rows.push([`Date : ${new Date().toLocaleDateString('fr-FR')}`]);
-  rows.push([]);
-  const headerRow: (string | number | undefined)[] = ['Code', 'Titre', 'Estimatif HT (€)', ...entreprises.map(e => e.nom)];
-  rows.push(headerRow);
-
-  for (const lot of lots) {
-    const cl = (consultation.comparatif || []).find(c => c.lot_id === lot.id);
-    const lotRow: (string | number | undefined)[] = [`Lot ${lot.lot_number} - ${lot.lot_title}`, '', '', ...entreprises.map(() => undefined)];
-    rows.push(lotRow);
-
-    if (cl && cl.articles.length > 0) {
-      for (const article of cl.articles) {
-        if (article.is_section_header) {
-          rows.push([article.code || '', article.titre, '', ...entreprises.map(() => undefined)]);
-        } else if (article.is_subtotal) {
-          const subtotalRow: (string | number | undefined)[] = ['', article.titre, ''];
-          for (const e of entreprises) {
-            const val = article.prix[e.id];
-            subtotalRow.push(val != null ? val : undefined);
-          }
-          rows.push(subtotalRow);
-        } else {
-          const articleRow: (string | number | undefined)[] = [
-            article.code || '',
-            article.titre,
-            article.estimatif != null ? article.estimatif : undefined,
-          ];
-          for (const e of entreprises) {
-            const val = article.prix[e.id];
-            articleRow.push(val != null ? val : undefined);
-          }
-          rows.push(articleRow);
-        }
-      }
-    }
-
-    // Sous-total lot depuis offres
-    const lotOffresRow: (string | number | undefined)[] = ['', 'Sous-total du lot HT', ''];
-    for (const e of entreprises) {
-      const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
-      lotOffresRow.push(offre && offre.montant_base ? offre.montant_base : undefined);
-    }
-    rows.push(lotOffresRow);
-    rows.push([]);
-  }
-
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-
-  // Column widths
-  ws['!cols'] = [
-    { wch: 12 }, { wch: 45 }, { wch: 16 },
-    ...entreprises.map(() => ({ wch: 18 })),
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Comparaison');
-
-  // Per-company sheets
-  for (const e of entreprises) {
-    const eRows: (string | number | undefined)[][] = [];
-    eRows.push([e.nom]);
-    eRows.push([]);
-    eRows.push(['Code', 'Désignation', 'Estimatif HT', 'Offre HT']);
-
-    for (const lot of lots) {
-      const cl = (consultation.comparatif || []).find(c => c.lot_id === lot.id);
-      eRows.push([`Lot ${lot.lot_number} - ${lot.lot_title}`, '', '', '']);
-      if (cl) {
-        for (const article of cl.articles) {
-          if (!article.is_section_header && !article.is_subtotal) {
-            const val = article.prix[e.id];
-            eRows.push([article.code || '', article.titre, article.estimatif ?? '', val ?? '']);
-          }
-        }
-      }
-      const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
-      eRows.push(['', 'Total lot HT', '', offre?.montant_base ?? '']);
-      eRows.push([]);
-    }
-
-    const ews = XLSX.utils.aoa_to_sheet(eRows);
-    ews['!cols'] = [{ wch: 12 }, { wch: 45 }, { wch: 16 }, { wch: 18 }];
-    const sheetName = e.nom.substring(0, 31).replace(/[\\/:*?[\]]/g, '_');
-    XLSX.utils.book_append_sheet(wb, ews, sheetName);
-  }
-
-  XLSX.writeFile(wb, `Comparatif_${projectName.replace(/\s+/g, '_')}.xlsx`);
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────────
 
 interface ACTModuleProps {
@@ -369,18 +177,77 @@ interface ACTModuleProps {
   projectName: string;
   lots: ProjectLot[];
   contacts: Contact[];
-  onLotsChange: (lots: ProjectLot[]) => void;
 }
 
-export default function ACTModule({ projectId, projectName, lots, contacts, onLotsChange }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, lots, contacts }: ACTModuleProps) {
+  const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('preparation');
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  // Enregistrement automatique : rien n'est écrit avant la fin de la lecture
+  // (une saisie arrivée trop tôt écraserait la consultation enregistrée par
+  // une consultation vide), et un échec relance une tentative plus tard.
+  const [loaded, setLoaded] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
+  const editVersion = useRef(0);
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const { settings } = useSettings();
+  const [corpsEtat, setCorpsEtat] = useState<CorpsEtat[]>([]);
 
-  // Lot form
-  const [showLotForm, setShowLotForm] = useState(false);
-  const [lotForm, setLotForm] = useState({ lot_number: '', lot_title: '' });
+  useEffect(() => {
+    fetchJson<Referentiels>('/api/referentiels')
+      .then(r => setCorpsEtat(r.corpsEtat || []))
+      .catch(() => { /* le classement par corps d'état reste facultatif */ });
+  }, []);
+
+  // Contacts créés ou modifiés (corps d'état) depuis ce module : superposés à
+  // la liste reçue du parent, qui ne se resynchronise pas toute seule tant que
+  // la fiche projet n'est pas rechargée.
+  const [extraContacts, setExtraContacts] = useState<Contact[]>([]);
+  const allContacts = useMemo(() => {
+    const byId = new Map(contacts.map(c => [c.id, c]));
+    for (const c of extraContacts) byId.set(c.id, c);
+    return [...byId.values()];
+  }, [contacts, extraContacts]);
+  const entrepriseContacts = useMemo(() => allContacts.filter(isEntrepriseContact), [allContacts]);
+
+  const { parContactId: qualificationsParContact, reload: rechargerQualifications } = useQualifications();
+  const [rechercheOuverte, setRechercheOuverte] = useState(false);
+  // Formulaire d'ajout au-dessus du tableau, et ligne à mettre en avant une fois classée.
+  const [ajoutOuvert, setAjoutOuvert] = useState(false);
+  const [ficheCreee, setFicheCreee] = useState<Contact | null>(null);
+  const [miseEnAvant, setMiseEnAvant] = useState<{ id: string; n: number } | null>(null);
+
+  // Nouvelle fiche entreprise à créer depuis la saisie de la consultation.
+  const [contactModalFor, setContactModalFor] = useState<{ rowId: string; name: string } | null>(null);
+
+  /** Codes FFB déjà déclarés sur la fiche contact, pour préremplir la consultation à la sélection. */
+  const corpsEtatCodesFromContact = useCallback((contact: Contact): string[] => {
+    const libelles = new Set((contact.corps_etat || []).map(l => l.trim().toLowerCase()));
+    return corpsEtat.filter(ce => libelles.has(ce.libelle.trim().toLowerCase())).map(ce => ce.code);
+  }, [corpsEtat]);
+
+  /**
+   * Répercute la sélection de corps d'état de cette consultation sur la fiche
+   * contact — sans jamais toucher aux étiquettes qui ne viennent pas de la
+   * nomenclature FFB (des tags libres saisis ailleurs sur ce même champ).
+   */
+  const syncCorpsEtatToContact = useCallback(async (contactId: string, codes: string[]) => {
+    const contact = allContacts.find(c => c.id === contactId);
+    if (!contact) return;
+    const ffbLibelles = new Set(corpsEtat.map(ce => ce.libelle));
+    const autresTags = (contact.corps_etat || []).filter(tag => !ffbLibelles.has(tag));
+    const selectedLibelles = codes.map(code => corpsEtat.find(ce => ce.code === code)?.libelle).filter((l): l is string => !!l);
+    const next = [...autresTags, ...selectedLibelles];
+    const unchanged = next.length === (contact.corps_etat || []).length && next.every(l => (contact.corps_etat || []).includes(l));
+    if (unchanged) return;
+    try {
+      await apiFetch(`/api/contacts/${contactId}`, { method: 'PUT', body: JSON.stringify({ corps_etat: next }) });
+      setExtraContacts(prev => [...prev.filter(c => c.id !== contactId), { ...contact, corps_etat: next }]);
+    } catch (err) { console.error('Échec de la synchronisation du corps d\'état vers le contact:', err); }
+  }, [allContacts, corpsEtat]);
 
   // Q&R form
   const [showQRForm, setShowQRForm] = useState(false);
@@ -397,56 +264,153 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
     try {
       const data = await apiFetch<any>(`/api/projects/${projectId}/act`);
       if (data?.consultation && Object.keys(data.consultation).length > 0) {
-        setConsultation({ ...EMPTY_CONSULTATION, ...data.consultation });
+        // Une consultation enregistrée avant le passage à plusieurs corps
+        // d'état par entreprise ne porte que l'ancien champ singulier — migré
+        // à la lecture plutôt que perdu, jamais réécrit tant que rien d'autre
+        // ne change (l'enregistrement suivant l'actera).
+        const entreprises = (data.consultation.entreprises || []).map((e: any) =>
+          e.corps_etat_codes ? e : { ...e, corps_etat_codes: e.corps_etat_code ? [e.corps_etat_code] : [] }
+        );
+        setConsultation({ ...EMPTY_CONSULTATION, ...data.consultation, entreprises });
       }
       if (data?.act_phase) setPhase(data.act_phase as Phase);
     } catch { /* first load */ }
+    finally { setLoaded(true); }
   }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const save = useCallback(async (c: Consultation, p: Phase) => {
-    setSaving(true);
-    try {
-      await apiFetch(`/api/projects/${projectId}/act`, {
-        method: 'PUT',
-        body: JSON.stringify({ consultation: c, act_phase: p }),
-      });
-      setDirty(false);
-    } catch (e) { console.error(e); }
-    finally { setSaving(false); }
+  const save = useCallback((c: Consultation, p: Phase): Promise<void> => {
+    // Les écritures partent l'une après l'autre : deux requêtes en vol
+    // pourraient sinon se doubler, et la plus ancienne gagner.
+    const version = editVersion.current;
+    const run = async () => {
+      setSaving(true);
+      try {
+        await apiFetch(`/api/projects/${projectId}/act`, {
+          method: 'PUT',
+          body: JSON.stringify({ consultation: c, act_phase: p }),
+        });
+        setSaveError(false);
+        // Une modification faite pendant l'écriture reste à enregistrer.
+        if (editVersion.current === version) setDirty(false);
+      } catch (e) {
+        console.error(e);
+        setSaveError(true);
+        setTimeout(() => setRetryTick(t => t + 1), AUTOSAVE_RETRY_MS);
+      } finally { setSaving(false); }
+    };
+    saveChain.current = saveChain.current.then(run, run);
+    return saveChain.current;
   }, [projectId]);
 
   const update = (c: Consultation) => {
+    editVersion.current += 1;
     setConsultation(c);
     setDirty(true);
   };
 
-  // ── Lot helpers ───────────────────────────────────────────────────────────
+  // Enregistrement automatique, quelques instants après la dernière modification :
+  // ajouter une entreprise ou changer un lot n'exige plus d'appuyer sur « Sauvegarder ».
+  useEffect(() => {
+    if (!dirty || !loaded) return;
+    const timer = setTimeout(() => { void save(consultation, phase); }, AUTOSAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [consultation, phase, dirty, loaded, retryTick, save]);
 
-  const addLot = () => {
-    if (!lotForm.lot_title.trim()) return;
-    const newLot: ProjectLot = {
-      id: crypto.randomUUID(),
-      project_id: projectId,
-      lot_number: lotForm.lot_number || String(lots.length + 1),
-      lot_title: lotForm.lot_title,
-    };
-    onLotsChange([...lots, newLot]);
-    setLotForm({ lot_number: '', lot_title: '' });
-    setShowLotForm(false);
+  // Quitter l'onglet avant l'échéance du délai ne perd pas la dernière saisie.
+  const latest = useRef({ consultation, phase, dirty, loaded, save });
+  latest.current = { consultation, phase, dirty, loaded, save };
+  useEffect(() => () => {
+    const { consultation: c, phase: p, dirty: d, loaded: l, save: doSave } = latest.current;
+    if (d && l) void doSave(c, p);
+  }, []);
+
+  const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
+    update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
   };
 
-  const removeLot = (id: string) => {
-    if (!confirm('Supprimer ce lot ?')) return;
-    onLotsChange(lots.filter(l => l.id !== id));
+  const changeCorpsEtat = (e: EntrepriseConsultee, next: string[]) => {
+    updateEntreprise(e.id, { corps_etat_codes: next });
+    if (e.contact_id) void syncCorpsEtatToContact(e.contact_id, next);
   };
+
+  /**
+   * Ajoute l'entreprise du formulaire. Une fiche déjà consultée n'est pas
+   * dupliquée : les lots choisis s'ajoutent à sa ligne. La ligne se classe
+   * d'elle-même sous son lot (le tableau est regroupé par lot), et on la met en
+   * avant pour qu'on la voie arriver.
+   */
+  const enregistrerNouvelleEntreprise = (v: NouvelleEntreprise, continuer: boolean) => {
+    const existante = consultation.entreprises.find(e => e.contact_id === v.contact_id);
+    const id = existante?.id ?? crypto.randomUUID();
+    const union = (a: string[] = [], b: string[] = []) => [...new Set([...a, ...b])];
+    const codes = union(existante?.corps_etat_codes, v.corps_etat_codes);
+    const ligne: EntrepriseConsultee = existante
+      ? {
+          ...existante,
+          email: existante.email || v.email,
+          lots_ids: union(existante.lots_ids, v.lots_ids),
+          corps_etat_codes: codes,
+          dce_transmis_le: existante.dce_transmis_le || v.dce_transmis_le,
+          relance_le: existante.relance_le || v.relance_le,
+          offre_recue_le: existante.offre_recue_le || v.offre_recue_le,
+        }
+      : {
+          id, contact_id: v.contact_id, nom: v.nom, email: v.email, lots_ids: v.lots_ids,
+          envoyer_dce: v.envoyer_dce, corps_etat_codes: v.corps_etat_codes,
+          dce_transmis_le: v.dce_transmis_le, relance_le: v.relance_le, offre_recue_le: v.offre_recue_le,
+        };
+    update({
+      ...consultation,
+      entreprises: existante
+        ? consultation.entreprises.map(e => (e.id === id ? ligne : e))
+        : [...consultation.entreprises, ligne],
+    });
+    if (v.corps_etat_codes.length > 0) void syncCorpsEtatToContact(v.contact_id, codes);
+    setMiseEnAvant({ id, n: Date.now() });
+    if (!continuer) setAjoutOuvert(false);
+  };
+
+  /** Une entreprise choisie dans la recherche rejoint la consultation, éventuellement sur un lot. */
+  const ajouterDepuisRecherche = (choix: EntrepriseChoisie) => {
+    if (consultation.entreprises.some(e => e.contact_id === choix.contactId)) return;
+    const fiche = {
+      id: choix.contactId, first_name: '', last_name: '', company_name: choix.nom,
+      category: CONTACT_CATEGORY_ENTREPRISE, siret: choix.siret,
+    } as unknown as Contact;
+    setExtraContacts(prev => [...prev.filter(c => c.id !== choix.contactId), fiche]);
+    update({
+      ...consultation,
+      entreprises: [...consultation.entreprises, {
+        id: crypto.randomUUID(), contact_id: choix.contactId, nom: choix.nom, email: choix.email,
+        lots_ids: choix.lotId ? [choix.lotId] : [], envoyer_dce: true, corps_etat_codes: [],
+      }],
+    });
+  };
+
+  const corpsEtatOptions = useMemo(
+    () => corpsEtat.map(ce => ({ value: ce.code, label: ce.libelle })),
+    [corpsEtat],
+  );
+  const lotOptions = useMemo(
+    () => lots.map(l => ({ value: l.id, label: `Lot ${l.lot_number} — ${l.lot_title}`, shortLabel: `Lot ${l.lot_number}` })),
+    [lots],
+  );
+
+  const dcePieces = useMemo(
+    () => consultation.dce_documents.map(d => ({
+      libelle: d.nom || TYPE_DOC_LABELS[d.type_doc] || d.type_doc,
+      tous_lots: d.tous_lots,
+      lots_ids: d.lots_ids,
+    })),
+    [consultation.dce_documents],
+  );
 
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
   const goPhase = (p: Phase) => {
-    if (dirty) save(consultation, p);
-    else save(consultation, p);
+    void save(consultation, p);
     setPhase(p);
   };
 
@@ -469,7 +433,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <button
                   onClick={() => goPhase(p.id)}
                   className={cn(
-                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex-shrink-0',
+                    'flex items-center gap-2 px-4 py-2.5 rounded-lg text-xs font-bold transition flex-shrink-0',
                     active ? 'bg-blue-600 text-white shadow-sm' :
                     done ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 hover:bg-green-100' :
                     'text-[var(--tblr-muted)] hover:bg-zinc-100 dark:hover:bg-zinc-800'
@@ -486,10 +450,20 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
             );
           })}
           <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+            <span
+              role="status" aria-live="polite"
+              className={cn('hidden sm:inline text-[0.6875rem] font-bold', saveError ? 'text-red-600' : 'text-[var(--tblr-muted)]')}
+            >
+              {saveError
+                ? "Échec de l'enregistrement, nouvel essai…"
+                : saving ? 'Enregistrement…'
+                : dirty ? 'Modifications en attente'
+                : 'Enregistré'}
+            </span>
             <button
               onClick={() => save(consultation, phase)}
               disabled={saving}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 transition"
             >
               <IconCheck size={12} />
               {saving ? 'Enregistrement…' : 'Sauvegarder'}
@@ -504,33 +478,37 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
 
           {/* Lots */}
           <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
-              <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
-                <IconClipboardList size={15} /> Lots de travaux
-              </h3>
-              <button onClick={() => setShowLotForm(!showLotForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
-                <IconPlus size={13} /> Ajouter un lot
-              </button>
-            </div>
-            {showLotForm && (
-              <div className="px-5 py-4 bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)] flex gap-3">
-                <input className="w-20 px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="N°" value={lotForm.lot_number} onChange={e => setLotForm({ ...lotForm, lot_number: e.target.value })} />
-                <input className="flex-1 px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Désignation du lot (ex : Gros œuvre)" value={lotForm.lot_title} onChange={e => setLotForm({ ...lotForm, lot_title: e.target.value })}
-                  onKeyDown={e => e.key === 'Enter' && addLot()} />
-                <button onClick={addLot} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700">Ajouter</button>
-                <button onClick={() => setShowLotForm(false)} className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700"><IconX size={14} /></button>
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
+                  <IconClipboardList size={15} /> Lots de travaux
+                </h3>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Repris de l'onglet PRO — créez ou modifiez les lots depuis PRO / DPGF</p>
               </div>
-            )}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => settings && exportLotsToExcel(lots, settings, projectName)}
+                  disabled={!settings || lots.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
+                >
+                  <IconDownload size={13} /> Excel
+                </button>
+                <button
+                  onClick={() => settings && exportLotsToPDF(lots, settings, projectName)}
+                  disabled={!settings || lots.length === 0}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
+                >
+                  <IconDownload size={13} /> PDF
+                </button>
+              </div>
+            </div>
             <table className="w-full text-sm">
               <thead className="bg-[var(--tblr-surface-2)]">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)] w-16">N°</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Désignation</th>
-                  <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise attribuée</th>
-                  <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT</th>
-                  <th className="w-10"></th>
+                  <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] w-16">N°</th>
+                  <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Désignation</th>
+                  <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise attribuée</th>
+                  <th className="px-4 py-2.5 text-right text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -545,14 +523,11 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                       <td className="px-4 py-3 text-right font-bold text-zinc-700 dark:text-zinc-300">
                         {attr?.montant ? fmt(attr.montant) : fmt((lot.base_amount || 0) + (lot.options_amount || 0))}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <button onClick={() => removeLot(lot.id)} className="p-1 text-zinc-300 hover:text-red-500 transition-colors"><IconTrash size={13} /></button>
-                      </td>
                     </tr>
                   );
                 })}
                 {lots.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucun lot défini. Ajoutez les lots de travaux.</td></tr>
+                  <tr><td colSpan={4} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucun lot défini. Créez les lots de travaux dans l'onglet PRO.</td></tr>
                 )}
               </tbody>
             </table>
@@ -565,12 +540,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconFileText size={15} /> Dossier de Consultation des Entreprises (DCE)
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Listez les documents du DCE et précisez leur disponibilité par lot</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Listez les documents du DCE et précisez leur disponibilité par lot</p>
               </div>
               <button onClick={() => {
                 const newDoc: DCEDocument = { id: crypto.randomUUID(), nom: '', type_doc: 'RC', tous_lots: true, lots_ids: [] };
                 update({ ...consultation, dce_documents: [...consultation.dce_documents, newDoc] });
-              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
+              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition">
                 <IconPlus size={13} /> Ajouter
               </button>
             </div>
@@ -636,105 +611,95 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
 
           {/* Entreprises consultées */}
           <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
+            <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconBuilding size={15} /> Entreprises consultées
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Sélectionnez les entreprises et affectez-leur les lots</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Sélectionnez les entreprises, affectez-leur les lots et leur corps d'état (nomenclature FFB)</p>
               </div>
-              <button onClick={() => {
-                const newE: EntrepriseConsultee = { id: crypto.randomUUID(), nom: '', lots_ids: [], envoyer_dce: true };
-                update({ ...consultation, entreprises: [...consultation.entreprises, newE] });
-              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all">
-                <IconPlus size={13} /> Ajouter
-              </button>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[600px]">
-                <thead className="bg-[var(--tblr-surface-2)]">
-                  <tr>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Email</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Lots assignés</th>
-                    <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Envoyer DCE</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[var(--tblr-border)]">
-                  {consultation.entreprises.map((e, idx) => (
-                    <tr key={e.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
-                      <td className="px-4 py-3">
-                        <select
-                          className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                          value={e.contact_id || ''}
-                          onChange={ev => {
-                            const contact = contacts.find(c => c.id === ev.target.value);
-                            const nom = contact ? (contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim()) : '';
-                            const email = contact?.email_work || contact?.email || '';
-                            const newE = [...consultation.entreprises];
-                            newE[idx] = { ...e, contact_id: ev.target.value, nom, email };
-                            update({ ...consultation, entreprises: newE });
-                          }}
-                        >
-                          <option value="">— Sélectionner —</option>
-                          {contacts.map(c => (
-                            <option key={c.id} value={c.id}>{c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim()}</option>
-                          ))}
-                        </select>
-                        {!e.contact_id && (
-                          <input className="mt-1 w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                            placeholder="Ou saisir un nom" value={e.nom}
-                            onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, nom: ev.target.value }; update({ ...consultation, entreprises: es }); }} />
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <input className="w-full text-xs border border-[var(--tblr-border)] rounded-lg px-2 py-1.5 bg-white dark:bg-zinc-900 outline-none"
-                          placeholder="email@entreprise.fr" value={e.email || ''}
-                          onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, email: ev.target.value }; update({ ...consultation, entreprises: es }); }} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1.5">
-                          {lots.map(lot => (
-                            <label key={lot.id} className={cn(
-                              'flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold cursor-pointer transition-colors',
-                              e.lots_ids.includes(lot.id)
-                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                                : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-zinc-200'
-                            )}>
-                              <input type="checkbox" className="hidden"
-                                checked={e.lots_ids.includes(lot.id)}
-                                onChange={ev => {
-                                  const es = [...consultation.entreprises];
-                                  const ids = ev.target.checked ? [...e.lots_ids, lot.id] : e.lots_ids.filter(i => i !== lot.id);
-                                  es[idx] = { ...e, lots_ids: ids };
-                                  update({ ...consultation, entreprises: es });
-                                }}
-                              />
-                              {e.lots_ids.includes(lot.id) && <IconCheck size={9} />}
-                              Lot {lot.lot_number}
-                            </label>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <input type="checkbox" checked={!!e.envoyer_dce}
-                          onChange={ev => { const es = [...consultation.entreprises]; es[idx] = { ...e, envoyer_dce: ev.target.checked }; update({ ...consultation, entreprises: es }); }}
-                          className="w-4 h-4 rounded accent-blue-600" />
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button onClick={() => update({ ...consultation, entreprises: consultation.entreprises.filter(en => en.id !== e.id) })} className="p-1 text-zinc-300 hover:text-red-500"><IconTrash size={13} /></button>
-                      </td>
-                    </tr>
-                  ))}
-                  {consultation.entreprises.length === 0 && (
-                    <tr><td colSpan={5} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise consultée.</td></tr>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => settings && exportEntreprisesConsulteesToExcel(consultation.entreprises, lots, settings, projectName)}
+                  disabled={!settings}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition"
+                >
+                  <IconDownload size={13} /> Excel
+                </button>
+                <button
+                  onClick={() => settings && exportEntreprisesConsulteesToPDF(consultation.entreprises, lots, settings, projectName)}
+                  disabled={!settings}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-700 text-white hover:bg-zinc-800 disabled:opacity-50 transition"
+                >
+                  <IconDownload size={13} /> PDF
+                </button>
+                <button
+                  onClick={() => setRechercheOuverte(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                >
+                  <IconSearch size={13} /> Rechercher
+                </button>
+                <button
+                  onClick={() => setAjoutOuvert(o => !o)}
+                  aria-expanded={ajoutOuvert}
+                  className={cn(
+                    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition',
+                    ajoutOuvert
+                      ? 'bg-blue-600 text-white hover:bg-blue-700'
+                      : 'bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700',
                   )}
-                </tbody>
-              </table>
+                >
+                  <IconPlus size={13} /> Ajouter
+                </button>
+              </div>
             </div>
+            {ajoutOuvert && (
+              <EntrepriseAddForm
+                contacts={entrepriseContacts}
+                lots={lots}
+                corpsEtatOptions={corpsEtatOptions}
+                lotOptions={lotOptions}
+                corpsEtatCodesFromContact={corpsEtatCodesFromContact}
+                libellesDeCodes={codes => codes.map(c => corpsEtat.find(ce => ce.code === c)?.libelle).filter((l): l is string => !!l)}
+                ficheCreee={ficheCreee}
+                onFicheConsommee={() => setFicheCreee(null)}
+                onCreateContact={name => setContactModalFor({ rowId: NOUVELLE_LIGNE, name })}
+                onSave={enregistrerNouvelleEntreprise}
+                onCancel={() => setAjoutOuvert(false)}
+              />
+            )}
+            <ACTEntreprisesTable
+              miseEnAvant={miseEnAvant}
+              projectName={projectName}
+              lots={lots}
+              entreprises={consultation.entreprises}
+              onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
+              dcePieces={dcePieces}
+              entrepriseContacts={entrepriseContacts}
+              corpsEtatOptions={corpsEtatOptions}
+              lotOptions={lotOptions}
+              onChangeCorpsEtat={changeCorpsEtat}
+              corpsEtatCodesFromContact={corpsEtatCodesFromContact}
+              qualifications={qualificationsParContact}
+              onSelectContact={(rowId, c) => {
+                const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+                const email = c.email_work || c.email || '';
+                updateEntreprise(rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
+              }}
+              onCreateContact={(rowId, name) => setContactModalFor({ rowId, name })}
+            />
           </div>
         </div>
+      )}
+
+      {rechercheOuverte && (
+        <EntrepriseSearchDialog
+          lots={lots}
+          dejaConsultes={new Set(consultation.entreprises.map(e => e.contact_id).filter((x): x is string => !!x))}
+          onClose={() => setRechercheOuverte(false)}
+          onAddToConsultation={ajouterDepuisRecherche}
+          onContactReady={() => void rechargerQualifications()}
+        />
       )}
 
       {/* ── Phase 2 : Critères ────────────────────────────────────────── */}
@@ -748,7 +713,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconPercentage size={15} /> Critères de notation
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Total : {consultation.criteres.reduce((s, c) => s + c.poids, 0)} % (doit être 100 %)</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Total : {consultation.criteres.reduce((s, c) => s + c.poids, 0)} % (doit être 100 %)</p>
               </div>
               <button onClick={() => {
                 const nc: CritereNotation = { id: crypto.randomUUID(), nom: '', poids: 0 };
@@ -793,7 +758,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconClipboardList size={15} /> Pièces administratives obligatoires
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Documents requis pour la conformité de l'offre</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Documents requis pour la conformité de l'offre</p>
               </div>
               <button onClick={() => {
                 const np: PieceAdmin = { id: crypto.randomUUID(), nom: '' };
@@ -834,7 +799,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                   <IconFileText size={16} className="text-blue-500 flex-shrink-0 mt-0.5" />
                   <div className="min-w-0">
                     <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{doc.nom || TYPE_DOC_LABELS[doc.type_doc]}</p>
-                    <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">
+                    <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">
                       {doc.tous_lots ? 'Tous les lots' : `Lots : ${doc.lots_ids.map(lid => lots.find(l => l.id === lid)?.lot_number).filter(Boolean).join(', ')}`}
                     </p>
                   </div>
@@ -851,7 +816,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconMessageDots size={15} /> Questions / Réponses
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Centralisez les questions des entreprises et les réponses publiques</p>
               </div>
               <button onClick={() => setShowQRForm(!showQRForm)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700">
                 <IconPlus size={13} /> Nouvelle question
@@ -908,8 +873,8 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{q.entreprise_nom}</span>
-                        <span className="text-[10px] text-[var(--tblr-muted)]">{new Date(q.date_question).toLocaleDateString('fr-FR')}</span>
-                        {q.publique && <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">Publique</span>}
+                        <span className="text-[0.6875rem] text-[var(--tblr-muted)]">{new Date(q.date_question).toLocaleDateString('fr-FR')}</span>
+                        {q.publique && <span className="text-[0.6875rem] px-1.5 py-0.5 rounded-full bg-blue-100 text-blue-700 font-bold">Publique</span>}
                       </div>
                       <p className="text-sm text-zinc-700 dark:text-zinc-300 bg-[var(--tblr-surface-2)] rounded-lg px-3 py-2">{q.question}</p>
                       {q.reponse ? (
@@ -965,20 +930,20 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
               <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                 <div className="p-5 border-b border-[var(--tblr-border)]">
                   <h3 className="text-sm font-bold text-[var(--tblr-text)] flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-black">Lot {lot.lot_number}</span>
+                    <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[0.6875rem] font-black">Lot {lot.lot_number}</span>
                     {lot.lot_title}
                   </h3>
-                  <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">{entreprisesLot.length} entreprise(s) consultée(s) sur ce lot</p>
+                  <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">{entreprisesLot.length} entreprise(s) consultée(s) sur ce lot</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[600px]">
                     <thead className="bg-[var(--tblr-surface-2)]">
                       <tr>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT (€)</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Motif NC</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
+                        <th className="px-4 py-2.5 text-right text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT (€)</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Motif NC</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -1046,7 +1011,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
                   <IconScale size={15} /> Comparatif détaillé des offres
                 </h3>
-                <p className="text-[10px] text-[var(--tblr-muted)] mt-0.5">Tableau article par article — saisie manuelle ou auto-rempli depuis les offres</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Tableau article par article — saisie manuelle ou auto-rempli depuis les offres</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1071,19 +1036,19 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                     });
                     update({ ...consultation, comparatif: comp });
                   }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
                 >
                   <IconCheck size={13} /> Auto-remplir totaux
                 </button>
                 <button
-                  onClick={() => generateComparatifExcel(lots, consultation, projectName)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition-all"
+                  onClick={() => generateComparatifExcel(lots, consultation, projectName, settings ?? {})}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition"
                 >
                   <IconDownload size={13} /> Export Excel
                 </button>
                 <button
                   onClick={() => setShowComparatif(!showComparatif)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition-all"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 transition"
                 >
                   {showComparatif ? <IconX size={13} /> : <IconEye size={13} />}
                   {showComparatif ? 'Masquer' : 'Afficher'}
@@ -1150,12 +1115,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                           {isExpanded ? <IconChevronRight size={14} className="rotate-90 transition-transform" /> : <IconChevronRight size={14} className="transition-transform" />}
                           <span className="text-xs font-black text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30">Lot {lot.lot_number}</span>
                           <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200">{lot.lot_title}</span>
-                          <span className="text-[10px] text-[var(--tblr-muted)]">({cl.articles.length} lignes)</span>
+                          <span className="text-[0.6875rem] text-[var(--tblr-muted)]">({cl.articles.length} lignes)</span>
                         </div>
                         <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                          <button onClick={addSection} className="px-2 py-1 text-[10px] font-bold rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-300">+ Section</button>
-                          <button onClick={addArticle} className="px-2 py-1 text-[10px] font-bold rounded bg-blue-100 text-blue-700 hover:bg-blue-200">+ Article</button>
-                          <button onClick={addSubtotal} className="px-2 py-1 text-[10px] font-bold rounded bg-amber-100 text-amber-700 hover:bg-amber-200">+ Sous-total</button>
+                          <button onClick={addSection} className="px-2 py-1 text-[0.6875rem] font-bold rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-300">+ Section</button>
+                          <button onClick={addArticle} className="px-2 py-1 text-[0.6875rem] font-bold rounded bg-blue-100 text-blue-700 hover:bg-blue-200">+ Article</button>
+                          <button onClick={addSubtotal} className="px-2 py-1 text-[0.6875rem] font-bold rounded bg-amber-100 text-amber-700 hover:bg-amber-200">+ Sous-total</button>
                         </div>
                       </div>
 
@@ -1179,7 +1144,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                   return (
                                     <tr key={article.id} className="bg-blue-50 dark:bg-blue-900/10">
                                       <td className="px-3 py-2">
-                                        <input className="w-full bg-transparent text-[10px] font-bold text-blue-600 outline-none border-b border-blue-200 dark:border-blue-800"
+                                        <input className="w-full bg-transparent text-[0.6875rem] font-bold text-blue-600 outline-none border-b border-blue-200 dark:border-blue-800"
                                           value={article.code} onChange={e => updateArticle(idx, { code: e.target.value })} placeholder="Réf." />
                                       </td>
                                       <td colSpan={2 + entreprisesLot.length} className="px-3 py-2">
@@ -1195,7 +1160,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                 if (article.is_subtotal) {
                                   return (
                                     <tr key={article.id} className="bg-amber-50 dark:bg-amber-900/10 font-bold">
-                                      <td className="px-3 py-2 text-[var(--tblr-muted)] text-[10px]">{article.code !== '__lot_total__' ? article.code : ''}</td>
+                                      <td className="px-3 py-2 text-[var(--tblr-muted)] text-[0.6875rem]">{article.code !== '__lot_total__' ? article.code : ''}</td>
                                       <td className="px-3 py-2">
                                         <input className="w-full bg-transparent text-xs font-bold text-amber-700 dark:text-amber-400 outline-none"
                                           value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} readOnly={article.code === '__lot_total__'} />
@@ -1221,7 +1186,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                 return (
                                   <tr key={article.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
                                     <td className="px-3 py-2">
-                                      <input className="w-full text-[10px] px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
+                                      <input className="w-full text-[0.6875rem] px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
                                         value={article.code} onChange={e => updateArticle(idx, { code: e.target.value })} placeholder="1.3.1" />
                                     </td>
                                     <td className="px-3 py-2">
@@ -1277,11 +1242,11 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
           <div className="flex items-center justify-between rounded-lg p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
             <div>
               <p className="text-sm font-bold text-[var(--tblr-text)]">Rapport d'Analyse des Offres (RAO)</p>
-              <p className="text-[10px] text-[var(--tblr-muted)]">Génère un PDF comparatif pour tous les lots ou par lot</p>
+              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">Génère un PDF comparatif pour tous les lots ou par lot</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => generateRAO(lots, consultation, projectName)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition-all">
+              <button onClick={() => generateRAO(lots, consultation, projectName, settings ?? {})}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition">
                 <IconDownload size={14} /> RAO Global
               </button>
             </div>
@@ -1309,16 +1274,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
               <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                 <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
                   <h3 className="text-sm font-bold text-[var(--tblr-text)] flex items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-black">Lot {lot.lot_number}</span>
+                    <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[0.6875rem] font-black">Lot {lot.lot_number}</span>
                     {lot.lot_title}
                     {attribution && (
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold">
+                      <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-bold">
                         ✓ Attribué à {consultation.entreprises.find(e => e.id === attribution.entreprise_id)?.nom}
                       </span>
                     )}
                   </h3>
-                  <button onClick={() => generateRAO(lots, consultation, projectName, lot.id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition-all">
+                  <button onClick={() => generateRAO(lots, consultation, projectName, settings ?? {}, lot.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition">
                     <IconDownload size={13} /> RAO Lot
                   </button>
                 </div>
@@ -1326,14 +1291,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                   <table className="w-full text-sm min-w-[700px]">
                     <thead className="bg-[var(--tblr-surface-2)]">
                       <tr>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Rang</th>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Entreprise</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Montant HT</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-bold uppercase text-[var(--tblr-muted)]">% / moins-disant</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Note prix ({poidsPrix}%)</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Note tech. ({poidsTech}%)</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">NOTE GLOBALE</th>
-                        <th className="px-4 py-2.5 text-center text-[10px] font-bold uppercase text-[var(--tblr-muted)]">Attribuer</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">Rang</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">Entreprise</th>
+                        <th className="px-4 py-2.5 text-right text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">Montant HT</th>
+                        <th className="px-4 py-2.5 text-right text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">% / moins-disant</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">Note prix ({poidsPrix}%)</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">Note tech. ({poidsTech}%)</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">NOTE GLOBALE</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">Attribuer</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -1379,7 +1344,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
                                   }
                                   update({ ...consultation, attributions: newAttrs });
                                 }} className={cn(
-                                  'px-3 py-1 rounded-lg text-xs font-bold transition-all',
+                                  'px-3 py-1 rounded-lg text-xs font-bold transition',
                                   isAttribue
                                     ? 'bg-green-600 text-white hover:bg-red-100 hover:text-red-600'
                                     : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:bg-green-100 hover:text-green-700'
@@ -1406,18 +1371,40 @@ export default function ACTModule({ projectId, projectName, lots, contacts, onLo
         <button
           onClick={() => phaseIdx > 0 && goPhase(PHASES[phaseIdx - 1].id)}
           disabled={phaseIdx === 0}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-30 transition"
         >
           <IconChevronLeft size={14} /> Phase précédente
         </button>
         <button
           onClick={() => phaseIdx < PHASES.length - 1 && goPhase(PHASES[phaseIdx + 1].id)}
           disabled={phaseIdx === PHASES.length - 1}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition-all"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-30 transition"
         >
           Phase suivante <IconChevronRight size={14} />
         </button>
       </div>
+
+      {contactModalFor && (
+        <ContactModal
+          isOpen
+          initialCategory={CONTACT_CATEGORY_ENTREPRISE}
+          initialData={{ company_name: contactModalFor.name }}
+          onClose={() => setContactModalFor(null)}
+          onSuccess={c => {
+            setExtraContacts(prev => [...prev, c]);
+            if (contactModalFor.rowId === NOUVELLE_LIGNE) {
+              // Création lancée depuis le formulaire d'ajout : la fiche y est sélectionnée.
+              setFicheCreee(c);
+              setContactModalFor(null);
+              return;
+            }
+            const nom = c.company_name || `${c.first_name || ''} ${c.last_name || ''}`.trim();
+            const email = c.email_work || c.email || '';
+            updateEntreprise(contactModalFor.rowId, { contact_id: c.id, nom, email, corps_etat_codes: corpsEtatCodesFromContact(c) });
+            setContactModalFor(null);
+          }}
+        />
+      )}
     </div>
   );
 }

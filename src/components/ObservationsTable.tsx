@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useReactTable,
   getCoreRowModel,
@@ -7,10 +8,14 @@ import {
   createColumnHelper,
   ColumnFiltersState,
   VisibilityState,
+  ColumnSizingState,
 } from '@tanstack/react-table';
-import { IconPlus, IconTrash, IconColumns, IconChevronDown } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconLayoutRows } from '@tabler/icons-react';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
+import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { cachedListFirst } from '../lib/offlineReadCache';
+import { db } from '../db';
 
 interface Props {
   projectId: string;
@@ -41,6 +46,37 @@ const urgenceColors: Record<string, string> = {
 
 const columnHelper = createColumnHelper<Observation>();
 
+/** Zone de texte qui s'agrandit avec son contenu (retours à la ligne conservés). */
+function AutoTextarea({ value, onCommit, className, placeholder }: { value: string; onCommit: (v: string) => void; className?: string; placeholder?: string }) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const fit = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  }, []);
+  // Recalcule aussi quand la colonne est redimensionnée (largeur du parent).
+  useEffect(() => {
+    fit();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(fit);
+    if (el.parentElement) ro.observe(el.parentElement);
+    return () => ro.disconnect();
+  }, [fit, value]);
+  return (
+    <textarea
+      ref={ref}
+      rows={1}
+      className={className}
+      defaultValue={value}
+      placeholder={placeholder}
+      onInput={fit}
+      onBlur={e => onCommit(e.target.value)}
+    />
+  );
+}
+
 const COLUMN_LABELS: Record<string, string> = {
   number: 'N°',
   lot: 'Lot',
@@ -55,6 +91,7 @@ const COLUMN_LABELS: Record<string, string> = {
 };
 
 export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter }: Props) {
+  const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
   const [saveError, setSaveError] = useState(false);
@@ -65,6 +102,16 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
   const [openOnly, setOpenOnly] = useState(false);
+  const storeKey = `obsTable:${typeFilter || 'all'}`;
+  const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
+    try { return JSON.parse(localStorage.getItem(`${storeKey}:sizes`) || '{}'); } catch { return {}; }
+  });
+  // Lot en en-tête : libère la colonne Lot au profit de l'observation.
+  const [groupByLot, setGroupByLot] = useState<boolean>(() => {
+    try { return localStorage.getItem(`${storeKey}:groupByLot`) !== '0'; } catch { return true; }
+  });
+  useEffect(() => { try { localStorage.setItem(`${storeKey}:sizes`, JSON.stringify(columnSizing)); } catch {} }, [columnSizing, storeKey]);
+  useEffect(() => { try { localStorage.setItem(`${storeKey}:groupByLot`, groupByLot ? '1' : '0'); } catch {} }, [groupByLot, storeKey]);
   const debounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const columnMenuRef = useRef<HTMLDivElement>(null);
 
@@ -72,19 +119,20 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     ? `/api/reports/${reportId}/observations`
     : `/api/projects/${projectId}/observations`;
 
+  // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les
+  // observations déjà consultées pour cette affaire/ce compte rendu restent
+  // affichées plutôt que de disparaître.
+  const scopeFilter = useCallback(
+    (o: Observation) => (reportId ? (o.report_ids || []).includes(reportId) : o.project_id === projectId),
+    [reportId, projectId],
+  );
+
   const fetchObservations = useCallback(() => {
     setLoadError(false);
-    fetch(endpoint)
-      .then(r => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then(data => {
-        if (Array.isArray(data)) setObservations(data);
-        else throw new Error('Unexpected response shape');
-      })
+    cachedListFirst(db.observationsCache, scopeFilter, endpoint, setObservations)
+      .then(({ hadLocalData, synced }) => { if (!hadLocalData && !synced) setLoadError(true); })
       .catch(err => { console.error(err); setLoadError(true); });
-  }, [endpoint]);
+  }, [endpoint, scopeFilter]);
 
   useEffect(() => { fetchObservations(); }, [fetchObservations]);
 
@@ -101,17 +149,15 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const saveField = useCallback((id: string, field: string, value: string) => {
     clearTimeout(debounceRef.current[id + field]);
     debounceRef.current[id + field] = setTimeout(() => {
-      fetch(`/api/observations/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value }),
-      })
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); setSaveError(false); })
+      queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${id}`, body: { [field]: value } })
+        .then(() => setSaveError(false))
         // The optimistic update already landed in local state regardless of
         // outcome — a failed PUT here means the UI can be showing an edit
         // the server never persisted, silently, with nothing to tell the
         // user their change didn't stick (see 2026-09-08 incident: writes
         // occasionally 500 transiently with no corresponding DB error).
+        // Hors-ligne, la modification est mise en file (src/lib/offlineQueue.ts)
+        // plutôt que rejetée : ce n'est donc plus un échec ici.
         .catch(err => { console.error(err); setSaveError(true); });
     }, 300);
   }, []);
@@ -120,20 +166,33 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     setObservations(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
   }, []);
 
-  const addRow = () => {
-    fetch(`/api/projects/${projectId}/observations`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ texte: '', statut: 'À faire', type: typeFilter || 'observation', created_report_id: currentReportId || null }),
-    })
-      .then(r => r.json())
-      .then(newObs => setObservations(prev => [...prev, newObs]))
-      .catch(console.error);
+  // Lève le badge « en attente » d'une observation dès que sa création a
+  // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity } = (e as CustomEvent).detail || {};
+      if (entity !== 'observation') return;
+      setObservations(prev => prev.map(o => o.id === id ? { ...o, pendingSync: false } : o));
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, []);
+
+  const addRow = async () => {
+    // Id généré côté client : une création rejouée après coupure réseau
+    // (file de synchro hors-ligne) ne crée jamais deux observations.
+    const id = crypto.randomUUID();
+    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || 'observation', created_report_id: currentReportId || undefined };
+    try {
+      const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${projectId}/observations`, body });
+      const newObs: Observation = queued ? { ...body, project_id: projectId, pendingSync: true } : data!;
+      setObservations(prev => [...prev, newObs]);
+    } catch (err) { console.error(err); }
   };
 
   const deleteRow = useCallback((id: string) => {
-    if (!confirm('Supprimer cette observation ?')) return;
-    fetch(`/api/observations/${id}`, { method: 'DELETE' })
+    if (!confirm(t('observations_table_confirm_delete'))) return;
+    queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'DELETE', url: `/api/observations/${id}` })
       .then(() => setObservations(prev => prev.filter(o => o.id !== id)))
       .catch(console.error);
   }, []);
@@ -193,19 +252,25 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     }),
     columnHelper.accessor('texte', {
       header: 'Observation',
+      size: 520,
+      minSize: 200,
       cell: info => {
         const row = info.row.original;
         return (
-          <input
-            type="text"
-            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white"
-            defaultValue={info.getValue() || ''}
-            placeholder="Saisir une observation..."
-            onBlur={e => {
-              updateLocal(row.id, { texte: e.target.value });
-              saveField(row.id, 'texte', e.target.value);
-            }}
-          />
+          <div className="flex items-start gap-1.5">
+            <AutoTextarea
+              className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white resize-none overflow-hidden whitespace-pre-wrap break-words leading-snug"
+              value={info.getValue() || ''}
+              placeholder="Saisir une observation..."
+              onCommit={v => {
+                updateLocal(row.id, { texte: v });
+                saveField(row.id, 'texte', v);
+              }}
+            />
+            {row.pendingSync && (
+              <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
+            )}
+          </div>
         );
       },
     }),
@@ -217,7 +282,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         const val = info.getValue() || 'À faire';
         return (
           <select
-            className={`w-full p-1 rounded text-[10px] font-bold uppercase tracking-wider border-none cursor-pointer ${statutColors[val] || ''}`}
+            className={`w-full p-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider border-none cursor-pointer ${statutColors[val] || ''}`}
             value={val}
             onChange={e => {
               updateLocal(row.id, { statut: e.target.value as Observation['statut'] });
@@ -237,7 +302,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         const val = info.getValue() || 'normal';
         return (
           <select
-            className={`w-full p-1 rounded text-[10px] font-bold uppercase tracking-wider border-none cursor-pointer ${urgenceColors[val] || ''}`}
+            className={`w-full p-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider border-none cursor-pointer ${urgenceColors[val] || ''}`}
             value={val}
             onChange={e => {
               updateLocal(row.id, { urgence: e.target.value as Observation['urgence'] });
@@ -302,7 +367,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       cell: info => (
         <button
           onClick={() => deleteRow(info.row.original.id)}
-          className="text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded opacity-0 group-hover/row:opacity-100 transition-all"
+          className="text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded opacity-0 group-hover/row:opacity-100 transition"
         >
           <IconTrash size={15} />
         </button>
@@ -313,12 +378,29 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const table = useReactTable({
     data: filtered,
     columns,
-    state: { columnFilters, columnVisibility },
+    state: { columnFilters, columnVisibility: groupByLot ? { ...columnVisibility, lot: false } : columnVisibility, columnSizing },
+    onColumnSizingChange: setColumnSizing,
+    enableColumnResizing: true,
+    columnResizeMode: 'onChange',
+    defaultColumn: { minSize: 40 },
     onColumnFiltersChange: setColumnFilters,
     onColumnVisibilityChange: setColumnVisibility,
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
   });
+
+  const lotGroups = useMemo(() => {
+    const rows = table.getRowModel().rows;
+    const groups: { key: string; label: string; rows: typeof rows }[] = [];
+    lots.forEach(l => {
+      const r = rows.filter(x => x.original.lot_id === l.id);
+      if (r.length) groups.push({ key: l.id, label: `${l.lot_number} · ${l.lot_title}`, rows: r });
+    });
+    const orphans = rows.filter(x => !x.original.lot_id || !lots.some(l => l.id === x.original.lot_id));
+    if (orphans.length) groups.push({ key: 'none', label: 'Sans lot', rows: orphans });
+    return groups;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [table.getRowModel().rows, lots]);
 
   const allColumnIds = columns
     .map(c => ('accessorKey' in c ? String(c.accessorKey) : (c as any).id))
@@ -355,6 +437,13 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <input type="checkbox" checked={openOnly} onChange={e => setOpenOnly(e.target.checked)} className="rounded" />
           Ouverts seulement
         </label>
+        <label className="flex items-center gap-1.5 text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer select-none" title="Affiche le lot en titre de groupe plutôt qu'en colonne">
+          <input type="checkbox" checked={groupByLot} onChange={e => setGroupByLot(e.target.checked)} className="rounded" />
+          <IconLayoutRows size={15} /> Lot en en-tête
+        </label>
+        {Object.keys(columnSizing).length > 0 && (
+          <button onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
+        )}
         <div className="ml-auto relative" ref={columnMenuRef}>
           <button
             onClick={() => setShowColumnMenu(v => !v)}
@@ -366,7 +455,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           </button>
           {showColumnMenu && (
             <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg p-3 min-w-[160px] space-y-1.5">
-              {allColumnIds.map(colId => {
+              {allColumnIds.filter(id => !(groupByLot && id === 'lot')).map(colId => {
                 const col = table.getColumn(colId);
                 if (!col) return null;
                 return (
@@ -391,7 +480,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <span>Impossible de charger les observations (session expirée ou connexion interrompue).</span>
           <button
             onClick={fetchObservations}
-            className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition"
           >
             Réessayer
           </button>
@@ -402,7 +491,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <span>Une modification n'a pas pu être enregistrée (connexion interrompue). Rafraîchissez pour vérifier l'état réel avant de reprendre votre saisie.</span>
           <button
             onClick={() => { setSaveError(false); fetchObservations(); }}
-            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all"
+            className="shrink-0 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition"
           >
             Rafraîchir
           </button>
@@ -411,7 +500,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
 
       {/* Table */}
       <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-xl">
-        <table className="w-full text-sm border-collapse">
+        <table className="text-sm border-collapse" style={{ tableLayout: 'fixed', width: table.getTotalSize(), minWidth: '100%' }}>
           <thead>
             {table.getHeaderGroups().map(hg => (
               <tr key={hg.id} className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
@@ -419,9 +508,18 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
                   <th
                     key={header.id}
                     style={{ width: header.getSize() }}
-                    className="p-2 text-left text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
+                    className="relative p-2 text-left text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400"
                   >
                     {flexRender(header.column.columnDef.header, header.getContext())}
+                    {header.column.getCanResize() && (
+                      <div
+                        onMouseDown={header.getResizeHandler()}
+                        onTouchStart={header.getResizeHandler()}
+                        onDoubleClick={() => header.column.resetSize()}
+                        title="Glisser pour régler la largeur (double clic : réinitialiser)"
+                        className={`absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none touch-none hover:bg-blue-400 ${header.column.getIsResizing() ? 'bg-blue-500' : ''}`}
+                      />
+                    )}
                   </th>
                 ))}
               </tr>
@@ -429,14 +527,28 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map(row => (
-                <tr key={row.id} className="group/row hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors">
-                  {row.getVisibleCells().map(cell => (
-                    <td key={cell.id} className="p-1">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
+              (groupByLot
+                ? lotGroups
+                : [{ key: 'all', label: '', rows: table.getRowModel().rows }]
+              ).map(group => (
+                <Fragment key={group.key}>
+                  {groupByLot && (
+                    <tr className="bg-zinc-50 dark:bg-zinc-800/60">
+                      <td colSpan={table.getVisibleLeafColumns().length} className="px-3 py-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-200">
+                        {group.label} <span className="font-normal text-zinc-400">· {group.rows.length}</span>
+                      </td>
+                    </tr>
+                  )}
+                  {group.rows.map(row => (
+                    <tr key={row.id} className="group/row hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors align-top">
+                      {row.getVisibleCells().map(cell => (
+                        <td key={cell.id} className="p-1" style={{ width: cell.column.getSize() }}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </td>
+                      ))}
+                    </tr>
                   ))}
-                </tr>
+                </Fragment>
               ))
             ) : (
               <tr>
@@ -449,7 +561,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         </table>
         <button
           onClick={addRow}
-          className="w-full p-3 text-left text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200 transition-all flex items-center gap-2 text-sm border-t border-zinc-100 dark:border-zinc-700 group"
+          className="w-full p-3 text-left text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200 transition flex items-center gap-2 text-sm border-t border-zinc-100 dark:border-zinc-700 group"
         >
           <IconPlus size={15} className="text-zinc-400 group-hover:text-blue-500 transition-colors" />
           Nouvelle observation

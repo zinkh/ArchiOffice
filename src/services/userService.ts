@@ -20,7 +20,10 @@ export const updateUserRole = async (id: string, role: 'admin' | 'manager' | 'pm
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role }),
   });
-  if (!res.ok) throw new Error('Failed to update role');
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error || 'Failed to update role');
+  }
 };
 
 export const updateUserManager = async (id: string, managerId: string | null): Promise<void> => {

@@ -5,7 +5,6 @@ import { cn, formatCurrency } from '../lib/utils';
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
 import { saveAs } from 'file-saver';
-import { loadImageAsDataUrl } from '../lib/imageUtils';
 
 interface Company {
   id: string;
@@ -141,32 +140,24 @@ export default function ACT({ projectId }: { projectId: string }) {
   };
 
   const exportToPDF = async () => {
-    const { jsPDF } = await import('jspdf');
-    const doc = new jsPDF();
-    let textY = 18;
-
-    try {
-      const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null);
-      if (s?.logoUrl) {
-        try {
-          const dataUrl = await loadImageAsDataUrl(s.logoUrl);
-          doc.addImage(dataUrl, 'PNG', 10, 6, 28, 10);
-        } catch { /* skip */ }
-      }
-      const label = s?.agencyName ? `${s.agencyName} — ` : '';
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'bold');
-      doc.text(`${label}Analyse des Appels d'Offres (ACT)`, s?.logoUrl ? 42 : 10, textY);
-    } catch {
-      doc.text('Analyse des Appels d\'Offres (ACT)', 10, textY);
-    }
-
-    textY += 10;
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    data.companies.forEach((c, i) => {
-      doc.text(`${c.name}: Total ${formatCurrency(calculateTotal(c))} - Score ${calculateTechnicalScore(c).toFixed(2)}`, 10, textY + i * 8);
+    const [{ jsPDF }, { default: autoTable }, { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings, tableauGris }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+      import('../lib/pdfLetterhead'),
+    ]);
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const settings = await fetchAgencySettings();
+    const logo = await loadLogoDataUrl(settings.logoUrl);
+    const letterhead = { title: "Analyse des appels d'offres (ACT)", margin: 14, logo };
+    const startY = drawAgencyHeader(doc, settings, letterhead);
+    autoTable(doc, {
+      ...tableauGris(),
+      startY,
+      head: [['Entreprise', 'Total HT', 'Score technique']],
+      body: data.companies.map(c => [c.name, formatCurrency(calculateTotal(c)), calculateTechnicalScore(c).toFixed(2)]),
+      columnStyles: { 1: { halign: 'right' }, 2: { halign: 'right' } },
     });
+    drawAgencyFooters(doc, settings, letterhead);
     doc.save('analyse_act.pdf');
   };
 
@@ -237,7 +228,7 @@ export default function ACT({ projectId }: { projectId: string }) {
 
       {activeTab === 'comparatif' && (
         <div className="bg-white dark:bg-zinc-800 p-6 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="min-w-full text-sm">
             <thead>
               <tr>
                 <th>Lot</th>
@@ -254,7 +245,7 @@ export default function ACT({ projectId }: { projectId: string }) {
                     const diff = minAmount !== Infinity ? (((c.amounts[lot.id] || 0) - minAmount) / minAmount * 100).toFixed(1) : '0';
                     return (
                       <td key={c.id} className={cn("p-2", isMin && "bg-green-100")}>
-                        {formatCurrency(c.amounts[lot.id] || 0)} {isMin ? '' : `(+${diff}%)`}
+                        {c.amounts[lot.id] != null ? formatCurrency(c.amounts[lot.id]) : '—'} {isMin ? '' : `(+${diff}%)`}
                       </td>
                     );
                   })}

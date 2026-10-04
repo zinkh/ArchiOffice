@@ -104,9 +104,8 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET /api/situations/:projectId/avec-marche`.
 - `GET/POST/PUT/DELETE /api/marches-entreprises(/:id)`.
 
-### Specifications / CCTP
-- `GET/POST/PUT/DELETE /api/specifications(/:id)`.
-- `GET/POST /api/projects/:projectId/cctp`, `PUT/DELETE /api/cctps/:id` — newer, parallel CCTP model (see roadmap note above).
+### CCTP
+CCTP is not a separate resource — it's the `cctpDescription`/`cctpOnly` fields carried by the same lot/chapitre/article tree as the DPGF. See `GET/POST /api/projects/:projectId/dpgf` above. The former `/api/specifications` route (an older, no-longer-displayed CCTP model) and its table were removed.
 
 ### Site supervision
 - `GET/POST/PUT/DELETE /api/ordres_de_service(/:id)`, `PATCH /api/ordres_de_service/:id/status`, `GET /api/ordres_de_service/next-number`.
@@ -142,6 +141,8 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET/POST/PUT/DELETE /api/contacts(/:id)`.
 - `GET/POST/DELETE /api/contact-categories(/:id)`.
 - `POST /api/sync/google-contacts`, `POST /api/sync/carddav`.
+- `GET /api/qualifications` (all the cabinet's company qualifications; `?contact_id=` for one company), `POST /api/contacts/:contactId/qualifications`, `PUT/DELETE /api/qualifications/:id`, `POST /api/qualifications/:id/verify` (`{ verified: false }` withdraws it), `POST /api/contacts/:contactId/qualifications/rge-sync` (imports the RGE qualifications for the contact's SIRET from the ADEME open data; never overwrites a hand-entered row).
+- `GET /api/entreprises/search?q=&departement=&batiment=1&rge=1&page=` — company search (SIRENE directory), each result enriched with its RGE qualifications, the NAF label and the matching contact id if the cabinet already has the SIRET. Rate-limited to 30 requests a minute per user.
 
 ### Meetings
 - `GET/POST/PUT/DELETE /api/meetings(/:id)`.
@@ -153,6 +154,14 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET /api/notifications/unread-count`, `POST /api/notifications/mark-read`.
 - `GET/POST /api/conversations`, `GET/POST /api/conversations/:id/messages` (file upload), `POST /api/conversations/:id/read`, `GET /api/messages/unread-count`, `POST/DELETE /api/conversations/:id/participants(/:userId)`.
 - `POST /api/send-email` — outbound email via the tenant's configured SMTP.
+
+### Mail: drafts and linking to a record
+- `GET /api/mail/drafts?account_id=` — the 20 most recent drafts of one connected mailbox (`[{ id, to, subject, snippet, date }]`). Read live from the provider, never stored.
+- `GET /api/mail/drafts/:id?account_id=` — one draft's `{ id, to, cc, subject, text }`.
+- `PUT /api/mail/drafts/:id` — body `{ account_id, to, cc?, subject, text }`. Rewrites the draft in place; never sends. On IMAP the draft is re-appended and the old one deleted, so the returned `id` may be `null` and the uid changes.
+- `POST /api/mail/drafts` — create a draft (`{ to, cc?, subject, text, account_id? }`).
+- `POST /api/mail/links` — attach an email to a `project`, `contact`, `tender` or `proposal`. For a **project** with a `connection_id`, the message is also filed in its origin mailbox (Gmail label / Outlook or IMAP folder `ArchiOffice/<code> - <name>`, created on demand); pass `file_in_mailbox: false` to skip. The response carries the stored `external_message_id` (Outlook and IMAP renumber a moved message) and `filing: { status: 'filed' | 'failed' | 'skipped', folder?, error? }`. A filing failure never fails the link.
+- `PUT /api/team/:id` and `GET /api/me` also carry `mailSignature` (personal email signature, ≤ 2000 characters).
 
 ### Push notifications
 - `GET /api/push/config` — `{ configured, publicKey }`. The VAPID public key the browser needs to subscribe; `configured: false` on an instance with no VAPID keys, in which case Web Push is off and nothing else here fails.
@@ -174,6 +183,8 @@ Writes on `/api/external-storage/*` require a tenant admin.
 - `GET /api/billing/status`, `POST /api/billing/checkout`, `POST /api/billing/webhook` (Stancer, no auth), `GET /api/billing/history`, `GET /api/billing/credits/packs`, `POST /api/billing/credits/checkout`.
 
 ### External integrations
+Connection status endpoints are available to every tenant member. Tenant-wide administration (`auth`/connect, `disconnect`, `sync`, credential `test`, and configuration through `PUT /api/settings`) is restricted to users whose tenant role is `admin`. Operational invoice submission and status lookup keep their domain-specific permissions.
+
 Each of these follows roughly the same shape (`status`, `disconnect`, and OAuth `auth`/`callback` where the provider uses OAuth):
 - **Zoho CRM**: `GET /api/zoho/status`, `GET /api/zoho/callback-url`, `GET /api/zoho/auth`, `GET /api/zoho/callback`, `DELETE /api/zoho/disconnect`, `POST /api/zoho/sync`.
 - **Zoho Books**: `GET /api/zoho-books/status`, `GET /api/zoho-books/auth`, `GET /api/zoho-books/callback`, `DELETE /api/zoho-books/disconnect`, `POST /api/zoho-books/sync`.

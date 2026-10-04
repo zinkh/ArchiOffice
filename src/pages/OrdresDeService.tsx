@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   IconPlus, IconX, IconCheck, IconClock, IconAlertTriangle,
   IconChevronRight, IconFilter, IconTrash, IconPencil,
@@ -8,11 +9,14 @@ import {
   IconDownload,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import type { OrdreDeService, Project } from '../types';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { formatCurrency } from '../lib/utils';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 
 // ── Status config
 const STATUS_CONFIG = {
@@ -29,24 +33,20 @@ const ORIGINE_LABELS: Record<string, string> = {
   autres:           'Autres',
 };
 
-const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all text-sm";
+const inputCls = "w-full p-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition text-sm";
 const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' } as React.CSSProperties;
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.draft;
   const Icon = cfg.icon;
   return (
-    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-bold" style={{ background: cfg.bg, color: cfg.color }}>
       <Icon size={11} />
       {cfg.label}
     </span>
   );
 }
 
-function formatCurrency(n?: number) {
-  if (n === undefined || n === null) return '—';
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
-}
 
 // ── PDF generation
 async function generateOsPdf(os: OrdreDeService, project?: Project) {
@@ -56,42 +56,41 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210, margin = 20;
+  const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
+  const GRIS_DOUX: [number, number, number] = [107, 114, 128];
+  const GRIS_FOND: [number, number, number] = [243, 244, 246];
 
-  // Header band
-  doc.setFillColor(32, 107, 196);
-  doc.rect(0, 0, W, 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
-  doc.text('ORDRE DE SERVICE', margin, 12);
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`N° OS : ${os.os_number}`, margin, 20);
-  if (os.date) doc.text(`Date : ${new Date(os.date).toLocaleDateString('fr-FR')}`, W - margin, 20, { align: 'right' });
-
-  // Status badge area
+  // En-tête et pied du cabinet, comme les autres documents.
+  const settings = await fetchAgencySettings();
+  const logo = await loadLogoDataUrl(settings.logoUrl);
   const statusCfg = STATUS_CONFIG[os.status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.draft;
-  doc.setFillColor(245, 247, 251);
-  doc.rect(0, 28, W, 12, 'F');
-  doc.setTextColor(100, 120, 150);
-  doc.setFontSize(9);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`STATUT : ${statusCfg.label.toUpperCase()}`, margin, 36);
-  if (project) doc.text(`AFFAIRE : ${project.name}`, W / 2, 36, { align: 'center' });
+  const letterhead = {
+    title: 'Ordre de service',
+    subtitle: `N° OS : ${os.os_number}${os.date ? ` · ${new Date(os.date).toLocaleDateString('fr-FR')}` : ''}`,
+    reference: `Statut : ${statusCfg.label}`,
+    margin, logo,
+  };
+  const headerEnd = drawAgencyHeader(doc, settings, letterhead);
+  if (project) {
+    doc.setTextColor(...GRIS_DOUX);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`AFFAIRE : ${project.name}`, margin, headerEnd + 1);
+  }
 
-  let y = 48;
+  let y = headerEnd + 8;
 
   // Parties
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(...GRIS_FOND);
   doc.rect(margin, y, (W - 2 * margin) / 2 - 3, 28, 'F');
   doc.rect(W / 2 + 3, y, (W - 2 * margin) / 2 - 3, 28, 'F');
 
-  doc.setTextColor(100, 120, 150);
+  doc.setTextColor(...GRIS_DOUX);
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
   doc.text("MAÎTRISE D'ŒUVRE", margin + 3, y + 5);
   doc.text('ENTREPRISE', W / 2 + 6, y + 5);
-  doc.setTextColor(30, 40, 60);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   const moeLines = doc.splitTextToSize(os.maitrise_oeuvre_adresse || os.emetteur_os || '—', 70);
@@ -104,11 +103,11 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
   // Objet
   doc.setFontSize(10);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(32, 107, 196);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.text("OBJET DE L'ORDRE DE SERVICE", margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(30, 40, 60);
+  doc.setTextColor(...GRIS_TEXTE);
   doc.setFontSize(9);
   const objetLines = doc.splitTextToSize(os.objet || os.description || '—', W - 2 * margin);
   doc.text(objetLines, margin, y);
@@ -131,9 +130,9 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
       ['Montant devis présenté HT', formatCurrency(os.montant_devis_presente)],
       ['Montant devis accepté HT', formatCurrency(os.montant_devis_accepte)],
     ],
-    headStyles: { fillColor: [32, 107, 196], textColor: 255, fontSize: 8, fontStyle: 'bold' },
-    bodyStyles: { fontSize: 8, textColor: [30, 40, 60] },
-    alternateRowStyles: { fillColor: [248, 250, 252] },
+    headStyles: { fillColor: [60, 60, 60], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+    bodyStyles: { fontSize: 8, textColor: GRIS_TEXTE },
+    alternateRowStyles: { fillColor: GRIS_FOND },
     columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
   });
 
@@ -141,18 +140,18 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
 
   // Signature block
   const sigY = Math.min(finalY, 230);
-  doc.setFillColor(248, 250, 252);
+  doc.setFillColor(...GRIS_FOND);
   doc.rect(margin, sigY, (W - 2 * margin) / 2 - 4, 38, 'F');
   doc.rect(W / 2 + 4, sigY, (W - 2 * margin) / 2 - 4, 38, 'F');
 
   doc.setFontSize(8);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 120, 150);
+  doc.setTextColor(...GRIS_DOUX);
   doc.text("SIGNATURE MAÎTRISE D'ŒUVRE", margin + 3, sigY + 6);
   doc.text('SIGNATURE ENTREPRISE', W / 2 + 7, sigY + 6);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
-  doc.setTextColor(150, 160, 175);
+  doc.setTextColor(...GRIS_DOUX);
   doc.text('Date : ______________________', margin + 3, sigY + 30);
   doc.text('Date : ______________________', W / 2 + 7, sigY + 30);
 
@@ -161,17 +160,12 @@ async function generateOsPdf(os: OrdreDeService, project?: Project) {
     const arY = sigY + 44;
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(47, 158, 68);
+    doc.setTextColor(...GRIS_TEXTE);
     if (os.date_ar) doc.text(`Accusé de réception : ${new Date(os.date_ar).toLocaleDateString('fr-FR')}`, margin, arY);
     if (os.date_execution) doc.text(`Date d'exécution : ${new Date(os.date_execution).toLocaleDateString('fr-FR')}`, W / 2, arY);
   }
 
-  // Footer
-  doc.setFontSize(7);
-  doc.setTextColor(180, 190, 200);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`ArchiOffice · OS N°${os.os_number} · Généré le ${new Date().toLocaleDateString('fr-FR')}`, W / 2, 290, { align: 'center' });
-
+  drawAgencyFooters(doc, settings, letterhead);
   doc.save(`OS-${os.os_number}-${(os.title || 'document').replace(/[^a-z0-9]/gi, '_')}.pdf`);
 }
 
@@ -196,6 +190,7 @@ interface MarcheTravaux {
 }
 
 export default function OrdresDeService() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { currentUser } = useUser();
   const [osList, setOsList] = useState<OrdreDeService[]>([]);
@@ -277,6 +272,18 @@ export default function OrdresDeService() {
     setIsFormOpen(true);
   };
 
+  // Lien direct depuis un agent (?open=<id>, voir recordLinks.ts côté
+  // serveur) : ouvre la même modale qu'un clic sur la ligne.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const openId = searchParams.get('open');
+    if (!openId || osList.length === 0) return;
+    const os = osList.find(o => o.id === openId);
+    if (os) openEdit(os);
+    setSearchParams(prev => { prev.delete('open'); return prev; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [osList, searchParams]);
+
   const handleSave = async () => {
     if (!form.title || !form.os_number || !form.marche_id) return;
     setSaving(true);
@@ -296,7 +303,7 @@ export default function OrdresDeService() {
       }
       await refresh();
       setIsFormOpen(false);
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
     finally { setSaving(false); }
   };
 
@@ -315,7 +322,7 @@ export default function OrdresDeService() {
         body: JSON.stringify({ status: newStatus }),
       });
       await refresh();
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
   };
 
   const handleArConfirm = async () => {
@@ -328,7 +335,7 @@ export default function OrdresDeService() {
       });
       await refresh();
       setArModal(null);
-    } catch (e) { alert('Erreur: ' + e); }
+    } catch (e) { alert(t('ordres_de_service_error', { error: String(e) })); }
   };
 
   const handleDelete = async () => {
@@ -390,7 +397,7 @@ export default function OrdresDeService() {
             <div className="absolute -bottom-2 -right-2 opacity-10" style={{ color: s.color }}><s.icon size={56} /></div>
             <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ background: s.color + '22', color: s.color }}><s.icon size={18} /></div>
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: s.color }}>{s.label}</p>
+              <p className="text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: s.color }}>{s.label}</p>
               <p className="text-2xl font-bold leading-none" style={{ color: s.color }}>{s.value}</p>
             </div>
           </div>
@@ -446,9 +453,9 @@ export default function OrdresDeService() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="min-w-full text-left border-collapse">
               <thead>
-                <tr className="text-[10px] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
+                <tr className="text-[0.6875rem] font-bold uppercase tracking-widest" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderBottom: '1px solid var(--tblr-border)' }}>
                   <th className="px-4 py-3">N° OS</th>
                   <th className="px-4 py-3">Objet</th>
                   <th className="px-4 py-3">Affaire / Entreprise</th>
@@ -472,11 +479,11 @@ export default function OrdresDeService() {
                       </td>
                       <td className="px-4 py-3 max-w-[200px]">
                         <p className="text-sm font-semibold truncate" style={{ color: 'var(--tblr-text)' }} title={os.title}>{os.title}</p>
-                        {os.lot && <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>Lot : {os.lot}</p>}
+                        {os.lot && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Lot : {os.lot}</p>}
                       </td>
                       <td className="px-4 py-3">
                         {project && <p className="text-xs font-medium truncate max-w-[150px]" style={{ color: 'var(--tblr-text)' }}>{project.name}</p>}
-                        {os.entreprise && <p className="text-[11px] flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}><IconBuildingFactory2 size={10} />{os.entreprise}</p>}
+                        {os.entreprise && <p className="text-[0.6875rem] flex items-center gap-1" style={{ color: 'var(--tblr-muted)' }}><IconBuildingFactory2 size={10} />{os.entreprise}</p>}
                       </td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                         {os.date_emission
@@ -492,7 +499,7 @@ export default function OrdresDeService() {
                             {os.status === 'draft' && (
                               <button
                                 onClick={() => handleStatusChange(os, 'submitted')}
-                                className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
+                                className="text-[0.6875rem] px-2 py-0.5 rounded font-bold transition"
                                 style={{ background: '#e8f0fb', color: '#206bc4' }}
                                 title="Émettre l'OS"
                               >
@@ -503,7 +510,7 @@ export default function OrdresDeService() {
                               <>
                                 <button
                                   onClick={() => handleStatusChange(os, 'approved')}
-                                  className="text-[9px] px-2 py-0.5 rounded font-bold"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded font-bold"
                                   style={{ background: '#d3f9d8', color: '#2f9e44' }}
                                   title="Enregistrer l'accusé de réception"
                                 >
@@ -511,7 +518,7 @@ export default function OrdresDeService() {
                                 </button>
                                 <button
                                   onClick={() => handleStatusChange(os, 'rejected')}
-                                  className="text-[9px] px-2 py-0.5 rounded font-bold"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded font-bold"
                                   style={{ background: '#ffe3e3', color: '#d63939' }}
                                   title="Annuler"
                                 >
@@ -526,7 +533,7 @@ export default function OrdresDeService() {
                         {os.date_ar ? (
                           <div>
                             <p className="text-xs font-medium" style={{ color: '#2f9e44' }}>AR : {new Date(os.date_ar).toLocaleDateString('fr-FR')}</p>
-                            {os.date_execution && <p className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>Exec. : {new Date(os.date_execution).toLocaleDateString('fr-FR')}</p>}
+                            {os.date_execution && <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>Exec. : {new Date(os.date_execution).toLocaleDateString('fr-FR')}</p>}
                           </div>
                         ) : (
                           <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>—</span>
@@ -593,9 +600,10 @@ export default function OrdresDeService() {
         {isFormOpen && (
           <div className="fixed inset-0 bg-black/50 flex items-start justify-center z-50 p-4 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="my-4 w-full max-w-2xl rounded-2xl shadow-2xl"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -613,7 +621,7 @@ export default function OrdresDeService() {
               <div className="p-6 space-y-5">
                 {/* Identifiants */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Identification</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>N° OS *</label>
@@ -628,7 +636,7 @@ export default function OrdresDeService() {
 
                 {/* Objet */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Objet</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Objet</p>
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Titre *</label>
@@ -650,7 +658,7 @@ export default function OrdresDeService() {
 
                 {/* Parties */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Parties</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Parties</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Affaire</label>
@@ -725,7 +733,7 @@ export default function OrdresDeService() {
 
                 {/* Délais & Coûts */}
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Délais & Coûts</p>
+                  <p className="text-[0.6875rem] font-bold uppercase tracking-wider mb-3" style={{ color: 'var(--tblr-muted)' }}>Délais & Coûts</p>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--tblr-muted)' }}>Délai d'exécution</label>
@@ -829,7 +837,7 @@ export default function OrdresDeService() {
         {/* AR modal */}
         {arModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-4"
               style={{ background: 'var(--tblr-surface)' }}
             >
@@ -866,7 +874,7 @@ export default function OrdresDeService() {
         {/* Delete confirm */}
         {osToDelete && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+            <motion.div ref={launchOriginRef} initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
               className="w-full max-w-sm rounded-2xl shadow-2xl p-6 space-y-5 text-center"
               style={{ background: 'var(--tblr-surface)' }}
             >

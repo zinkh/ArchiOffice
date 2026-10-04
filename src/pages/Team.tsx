@@ -1,37 +1,89 @@
 import * as React from 'react';
-import { useState, useEffect, useRef } from 'react';
-import { IconMail, IconPlus, IconUsers, IconSearch, IconShield, IconUserPlus, IconArrowUpRight, IconX, IconCheck, IconClock } from '@tabler/icons-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { lazy, Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { AnimatePresence } from 'motion/react';
+import { useSearchParams } from 'react-router-dom';
+import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
 import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
 import { JOIN_REQUESTS_CHANGED } from '../components/Sidebar';
 import { useUser } from '../UserContext';
+import TeamHeader from '../components/team/TeamHeader';
+import TeamTabs, { TAB_PARAM, tabFromParam, type TeamTab } from '../components/team/TeamTabs';
+import TeamToolbar, { type RoleFilter, type TeamSort, type TeamView } from '../components/team/TeamToolbar';
+import JoinRequestQueue from '../components/team/JoinRequestQueue';
+import TeamMembers from '../components/team/TeamMembers';
+import TeamOrgChart from '../components/team/TeamOrgChart';
+import TeamNotice, { type TeamNoticeData } from '../components/team/TeamNotice';
+import AddMemberModal from '../components/team/AddMemberModal';
+import { EmptyTeam, LoadError, NoResults, TeamSkeleton } from '../components/team/TeamStates';
+import { ROLE_RANK } from '../components/team/teamShared';
+
+const Leave = lazy(() => import('./Leave'));
+const TimeTracking = lazy(() => import('./TimeTracking'));
+
+function sortMembers(list: UserProfile[], sort: TeamSort): UserProfile[] {
+  const byName = (a: UserProfile, b: UserProfile) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' });
+  return [...list].sort((a, b) => {
+    if (sort === 'access') return ROLE_RANK[a.system_role] - ROLE_RANK[b.system_role] || byName(a, b);
+    if (sort === 'role') {
+      if (!a.role !== !b.role) return a.role ? -1 : 1;
+      return (a.role || '').localeCompare(b.role || '', 'fr', { sensitivity: 'base' }) || byName(a, b);
+    }
+    return byName(a, b);
+  });
+}
 
 export default function Team() {
   const { t } = useTranslation();
   const { currentUser } = useUser();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const highlightId = searchParams.get('member');
-  const memberRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const memberRefs = useRef<Record<string, HTMLElement | null>>({});
   const [team, setTeam] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [newUser, setNewUser] = useState<Omit<UserProfile, 'id'>>({
-    name: '',
-    email: '',
-    system_role: 'user',
-    role: 'Member'
-  });
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [decidingId, setDecidingId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+  const [sort, setSort] = useState<TeamSort>('name');
+  const [notice, setNotice] = useState<TeamNoticeData | null>(null);
+  const [view, setView] = useState<TeamView>('list');
+
+  const [pendingLeave, setPendingLeave] = useState(0);
+  // Un lien vers un membre (`?member=`) ouvre toujours l'onglet Équipe.
+  const tab: TeamTab = highlightId ? 'team' : tabFromParam(searchParams.get('tab'));
+
+  const changeTab = (next: TeamTab) => {
+    const params = new URLSearchParams(searchParams);
+    params.delete('member');
+    const value = TAB_PARAM[next];
+    if (value) params.set('tab', value); else params.delete('tab');
+    setSearchParams(params, { replace: true });
+  };
 
   const isAdmin = currentUser?.system_role === 'admin';
 
-  useEffect(() => {
-    getAllUsers().then(setTeam).catch(console.error);
+  const loadTeam = useCallback(() => {
+    setLoading(true);
+    setLoadFailed(false);
+    getAllUsers()
+      .then(setTeam)
+      .catch((err) => { console.error(err); setLoadFailed(true); })
+      .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => { loadTeam(); }, [loadTeam]);
+
+  // Demandes de congés à valider : l'API ne répond que pour les responsables et les administrateurs.
+  useEffect(() => {
+    apiFetch<{ status: string }[]>('/api/leave_requests?scope=team')
+      .then((rows) => setPendingLeave(rows.filter((r) => r.status === 'pending').length))
+      .catch(() => setPendingLeave(0));
+  }, [tab]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -42,31 +94,60 @@ export default function Team() {
   useEffect(() => {
     if (!highlightId || team.length === 0) return;
     memberRefs.current[highlightId]?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [highlightId, team]);
+  }, [highlightId, team, view]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = team.filter((m) =>
+      (roleFilter === 'all' || m.system_role === roleFilter) &&
+      (!q || [m.name, m.email, m.role].some((v) => (v || '').toLowerCase().includes(q))));
+    return sortMembers(filtered, sort);
+  }, [team, query, roleFilter, sort]);
 
   const handleDecideJoinRequest = async (id: string, decision: 'approve' | 'reject') => {
     setDecidingId(id);
     try {
       await decideJoinRequest(id, decision);
+      const decided = joinRequests.find(r => r.id === id);
       setJoinRequests(prev => prev.filter(r => r.id !== id));
+      setNotice({
+        kind: 'success',
+        text: t(decision === 'approve' ? 'team_request_approved' : 'team_request_rejected', { name: decided?.name || decided?.email || '' }),
+      });
       // Fait retomber le compteur du menu latéral, qui vit dans un autre
       // composant sans état partagé avec celui-ci.
       window.dispatchEvent(new Event(JOIN_REQUESTS_CHANGED));
       if (decision === 'approve') getAllUsers().then(setTeam).catch(console.error);
     } catch (err: any) {
-      alert(err.message || 'Erreur lors du traitement de la demande.');
+      setNotice({ kind: 'error', text: err.message || t('team_join_request_process_failed') });
     } finally {
       setDecidingId(null);
     }
   };
 
   const handleRoleChange = async (id: string, newRole: 'admin' | 'manager' | 'pm' | 'user') => {
+    const target = team.find(member => member.id === id);
+    if (target?.system_role === 'admin' && newRole !== 'admin') {
+      // Un cabinet ne doit jamais se retrouver sans administrateur : le
+      // serveur refuse aussi, mais autant l'expliquer avant l'appel.
+      if (team.filter(member => member.system_role === 'admin').length <= 1) {
+        setNotice({ kind: 'error', text: t('team_last_admin_blocked') });
+        return;
+      }
+      // Seul un administrateur peut rendre ce rôle : rétrogradé, plus personne
+      // ne peut défaire le geste depuis ce compte.
+      const confirmed = window.confirm(t(
+        id === currentUser?.id ? 'team_confirm_demote_self' : 'team_confirm_demote_admin',
+        { name: target.name },
+      ));
+      if (!confirmed) return;
+    }
     try {
       await updateUserRole(id, newRole);
       setTeam(team.map(member => member.id === id ? { ...member, system_role: newRole } : member));
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Failed to update role.');
+      setNotice({ kind: 'error', text: err?.message && err.message !== 'Failed to update role' ? err.message : t('team_update_role_failed') });
     }
   };
 
@@ -76,244 +157,101 @@ export default function Team() {
       setTeam(team.map(member => member.id === id ? { ...member, manager_id: managerId || null } : member));
     } catch (err) {
       console.error(err);
-      alert('Failed to update manager.');
+      setNotice({ kind: 'error', text: t('team_update_manager_failed') });
     }
   };
 
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleAddUser = async (newUser: Omit<UserProfile, 'id'>) => {
     setIsSubmitting(true);
     try {
       const result = await createUser(newUser) as any;
       setTeam([...team, result]);
       setIsModalOpen(false);
-      setNewUser({ name: '', email: '', system_role: 'user', role: 'Member' });
-      
+
       if (result.emailSent) {
-        alert('User created successfully. Credentials have been sent by email.');
+        setNotice({ kind: 'info', text: t('team_user_created_email_sent') });
       } else {
-        alert(`User created successfully, but email could not be sent: ${result.emailError || 'Unknown error'}. Please provide the credentials manually.`);
+        setNotice({ kind: 'error', text: t('team_user_created_email_failed', { error: result.emailError || t('team_unknown_error') }) });
       }
     } catch (err: any) {
       console.error(err);
-      alert(err.message || 'Failed to create user.');
+      setNotice({ kind: 'error', text: err.message || t('team_create_user_failed') });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('personnel_directory')}</h2>
-          <p className="text-zinc-500 dark:text-zinc-400">{t('team_subtitle')}</p>
-        </div>
-        {isAdmin && (
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold transition-all shadow-lg shadow-blue-500/20"
-          >
-            <IconUserPlus size={18} />
-            {t('team_add_member_btn')}
-          </button>
-        )}
-      </div>
+  const closeNotice = useCallback(() => setNotice(null), []);
+  const closeModal = useCallback(() => setIsModalOpen(false), []);
+  const resetFilters = () => { setQuery(''); setRoleFilter('all'); };
 
-      {isAdmin && joinRequests.length > 0 && (
-        <div className="bg-white dark:bg-zinc-800 rounded-xl border border-amber-300 dark:border-amber-700/50 p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <IconClock size={18} className="text-amber-600 dark:text-amber-400" />
-            <h3 className="font-bold text-zinc-900 dark:text-white">{t('team_join_requests_title')}</h3>
-          </div>
-          <div className="space-y-3">
-            {joinRequests.map(request => (
-              <div key={request.id} className="flex items-center justify-between gap-3 p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg">
-                <div className="min-w-0">
-                  <p className="font-medium text-zinc-900 dark:text-white truncate">{request.name || request.email}</p>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">{request.email}</p>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => handleDecideJoinRequest(request.id, 'reject')}
-                    disabled={decidingId === request.id}
-                    className="p-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
-                    title={t('team_join_request_reject') as string}
-                  >
-                    <IconX size={16} />
-                  </button>
-                  <button
-                    onClick={() => handleDecideJoinRequest(request.id, 'approve')}
-                    disabled={decidingId === request.id}
-                    className="p-2 rounded-lg text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 disabled:opacity-50"
-                    title={t('team_join_request_approve') as string}
-                  >
-                    <IconCheck size={16} />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+  const viewProps = {
+    members: visible,
+    team,
+    isAdmin,
+    highlightId,
+    currentUserId: currentUser?.id,
+    memberRefs,
+    onRoleChange: handleRoleChange,
+    onManagerChange: handleManagerChange,
+  };
+
+  let body: React.ReactNode;
+  if (loading) body = <TeamSkeleton />;
+  else if (loadFailed) body = <LoadError onRetry={loadTeam} />;
+  else if (team.length === 0) body = <EmptyTeam isAdmin={isAdmin} onAdd={() => setIsModalOpen(true)} />;
+  else if (view === 'org') body = <TeamOrgChart team={team} highlightId={highlightId} memberRefs={memberRefs} />;
+  else if (visible.length === 0) body = <NoResults onReset={resetFilters} />;
+  else body = <TeamMembers {...viewProps} />;
+
+  return (
+    <div className={cn('mx-auto max-w-[88rem] space-y-5', notice ? 'pb-28' : 'pb-10')}>
+      <TeamHeader
+        headcount={team.length}
+        admins={team.filter((m) => m.system_role === 'admin').length}
+        pending={isAdmin ? joinRequests.length : 0}
+        isAdmin={isAdmin}
+        showTeamTools={tab === 'team'}
+        onAdd={() => setIsModalOpen(true)}
+      />
+
+      <TeamTabs tab={tab} onTab={changeTab} pendingLeave={pendingLeave} />
+
+      {tab === 'team' && (
+        <>
+          {isAdmin && <JoinRequestQueue requests={joinRequests} decidingId={decidingId} onDecide={handleDecideJoinRequest} />}
+
+          {!loading && !loadFailed && team.length > 0 && (
+            <TeamToolbar
+              team={team}
+              query={query}
+              onQuery={setQuery}
+              roleFilter={roleFilter}
+              onRoleFilter={setRoleFilter}
+              sort={sort}
+              onSort={setSort}
+              view={view}
+              onView={setView}
+            />
+          )}
+
+          {body}
+        </>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {team.map((member, i) => (
-          <motion.div
-            key={member.id}
-            ref={el => { memberRefs.current[member.id] = el; }}
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: i * 0.05 }}
-            className={cn(
-              "bg-white dark:bg-zinc-800 rounded-xl border p-6 flex flex-col items-center text-center shadow-sm hover:shadow-md transition-shadow group relative overflow-hidden",
-              member.id === highlightId ? "border-blue-500 ring-2 ring-blue-400/60" : "border-zinc-200 dark:border-zinc-700"
-            )}
-          >
-            <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-700 flex items-center justify-center text-zinc-400 mb-4">
-              {member.avatar ? (
-                <img src={member.avatar} alt={member.name} className="w-full h-full rounded-full object-cover" />
-              ) : (
-                <IconUsers size={32} />
-              )}
-            </div>
-            <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-1">{member.name}</h3>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-1">{member.role}</p>
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">{member.email}</p>
-            <Link
-              to={`/profile/${member.id}`}
-              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline mb-1"
-            >
-              Voir le profil
-            </Link>
-
-            <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-              <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_system_access')}</label>
-              {isAdmin ? (
-                <select
-                  value={member.system_role}
-                  onChange={(e) => handleRoleChange(member.id, e.target.value as any)}
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white text-sm"
-                >
-                  <option value="user">{t('team_role_user')}</option>
-                  <option value="pm">{t('team_role_pm')}</option>
-                  <option value="manager">{t('team_role_manager')}</option>
-                  <option value="admin">{t('team_role_admin')}</option>
-                </select>
-              ) : (
-                <div className="px-3 py-1.5 rounded-lg bg-zinc-50 dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 text-xs font-medium border border-zinc-100 dark:border-zinc-800">
-                  {member.system_role.toUpperCase()}
-                </div>
-              )}
-            </div>
-
-            {isAdmin && (
-              <div className="w-full pt-4 border-t border-zinc-100 dark:border-zinc-700">
-                <label className="block text-[10px] font-bold text-zinc-400 uppercase tracking-wider mb-2">{t('team_manager_label')}</label>
-                <select
-                  value={member.manager_id || ''}
-                  onChange={(e) => handleManagerChange(member.id, e.target.value)}
-                  className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white text-sm"
-                >
-                  <option value="">{t('team_no_manager')}</option>
-                  {team.filter(m => m.id !== member.id && (m.system_role === 'manager' || m.system_role === 'admin')).map(m => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </motion.div>
-        ))}
-      </div>
+      {tab !== 'team' && (
+        <Suspense fallback={<TeamSkeleton />}>
+          {tab === 'leave' ? <Leave embedded /> : <TimeTracking embedded />}
+        </Suspense>
+      )}
 
       <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-md overflow-hidden"
-            >
-              <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('team_add_member_title')}</h3>
-                <button onClick={() => setIsModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
-                  <IconX size={20} />
-                </button>
-              </div>
-              <form onSubmit={handleAddUser} className="p-6 space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_full_name_label')}</label>
-                  <input
-                    type="text"
-                    required
-                    value={newUser.name}
-                    onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                    placeholder={t('team_full_name_placeholder')}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_email_label')}</label>
-                  <input
-                    type="email"
-                    required
-                    value={newUser.email}
-                    onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
-                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                    placeholder={t('team_email_placeholder')}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_job_title_label')}</label>
-                  <input
-                    type="text"
-                    value={newUser.role}
-                    onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
-                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                    placeholder={t('team_job_title_placeholder')}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">{t('team_system_access_level')}</label>
-                  <select
-                    value={newUser.system_role}
-                    onChange={(e) => setNewUser({ ...newUser, system_role: e.target.value as any })}
-                    className="w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
-                  >
-                    <option value="user">{t('team_role_user')}</option>
-                    <option value="pm">{t('team_role_pm')}</option>
-                    <option value="manager">{t('team_role_manager')}</option>
-                    <option value="admin">{t('team_role_admin')}</option>
-                  </select>
-                </div>
-                <div className="pt-4 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setIsModalOpen(false)}
-                    className="flex-1 px-4 py-2 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 font-bold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-                  >
-                    {t('btn_cancel')}
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isSubmitting}
-                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition-all shadow-lg shadow-blue-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
-                  >
-                    {isSubmitting ? (
-                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    ) : (
-                      <IconCheck size={18} />
-                    )}
-                    {t('team_create_user_btn')}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </div>
-        )}
+        {notice && <TeamNotice key={notice.text} notice={notice} onClose={closeNotice} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isModalOpen && <AddMemberModal isSubmitting={isSubmitting} onClose={closeModal} onSubmit={handleAddUser} />}
       </AnimatePresence>
     </div>
   );
 }
-

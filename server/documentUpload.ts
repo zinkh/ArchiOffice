@@ -35,6 +35,9 @@ const DANGEROUS_MIME_TYPES = new Set([
 
 export const documentUpload = multer({
   storage: multer.memoryStorage(),
+  // Les navigateurs envoient le nom de fichier en UTF-8 ; le défaut latin1
+  // de multer changerait « Général » en « GÃ©nÃ©ral ».
+  defParamCharset: 'utf8',
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const ext = (file.originalname.split('.').pop() || '').toLowerCase();

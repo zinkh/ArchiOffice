@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconPlus, IconTrash, IconDeviceFloppy } from '@tabler/icons-react';
 import { LigneOuvrage, ArticleType, DonneeChiffree } from '../types';
 import { fetchJson } from '../lib/api';
@@ -9,6 +10,7 @@ interface Props {
 }
 
 export default function LigneOuvrageEditor({ lotId, projectId }: Props) {
+  const { t } = useTranslation();
   const [lignes, setLignes] = useState<LigneOuvrage[]>([]);
   const [articles, setArticles] = useState<ArticleType[]>([]);
 
@@ -36,7 +38,7 @@ export default function LigneOuvrageEditor({ lotId, projectId }: Props) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(lignes)
     });
-    alert('Saved');
+    alert(t('ligne_ouvrage_editor_saved'));
   };
 
   return (

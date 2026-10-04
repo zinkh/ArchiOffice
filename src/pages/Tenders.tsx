@@ -1,9 +1,11 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark } from '@tabler/icons-react';
+import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark, IconSearch } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
+import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -51,6 +53,7 @@ export default function Tenders() {
   const [newTender, setNewTender] = useState<Partial<Tender>>(initialTenderState);
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterType, setFilterType] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState('');
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
   const [activeTab, setActiveTab] = useState<'list' | 'selected' | 'watch'>('list');
   const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
@@ -215,10 +218,25 @@ export default function Tenders() {
     }
   };
 
+  const normalizedSearch = searchQuery.trim().toLowerCase();
+
   const filteredTenders = tenders.filter(t => {
     const statusMatch = filterStatus === 'All' || t.status === filterStatus;
     const typeMatch = filterType === 'All' || t.type === filterType;
-    return statusMatch && typeMatch;
+    if (!statusMatch || !typeMatch) return false;
+    if (!normalizedSearch) return true;
+    const haystack = [
+      t.title,
+      t.client,
+      t.ville_execution,
+      t.mandataire_name,
+      t.type,
+      ...(t.specialties_list || []).map(s => s.specialty_name),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return haystack.includes(normalizedSearch);
   });
 
   const sortedTenders = [...filteredTenders].sort((a, b) => {
@@ -243,31 +261,34 @@ export default function Tenders() {
   };
 
   const handleExportXLSX = async () => {
-    let agencyName = '';
-    try { const s = await fetch('/api/settings').then(r => r.ok ? r.json() : null); agencyName = s?.agencyName || ''; } catch { /* */ }
-    const XLSX = await import('xlsx');
-    const rows = filteredTenders.map(t => ({
-      'Titre': t.title,
-      'Ville d\'exécution': t.ville_execution || '',
-      'Client': t.client || '',
-      'Statut': t.status || '',
-      'Type': t.type || '',
-      'Date de rendu': t.submission_deadline || '',
-      'Valeur estimée': t.value || 0,
-      'Honoraires (%)': t.honoraires_percent || 0,
-      'Surface': t.surface || 0,
-      'Coût travaux': t.construction_cost || 0,
-    }));
-    const worksheet = XLSX.utils.json_to_sheet([]);
-    if (agencyName) {
-      XLSX.utils.sheet_add_aoa(worksheet, [[agencyName], ['Appels d\'offres']], { origin: 'A1' });
-      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A4' });
-    } else {
-      XLSX.utils.sheet_add_json(worksheet, rows, { origin: 'A1' });
-    }
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Appels d\'offres');
-    XLSX.writeFile(workbook, 'appels-offres.xlsx');
+    const { exporterListe, FORMAT_EURO } = await import('../lib/xlsxLetterhead');
+    let settings: any = {};
+    try { settings = (await fetch('/api/settings').then(r => r.ok ? r.json() : null)) ?? {}; } catch { /* */ }
+    await exporterListe({
+      fichier: 'appels-offres.xlsx',
+      nom: "Appels d'offres",
+      title: "Appels d'offres",
+      subtitle: `${filteredTenders.length} dossier${filteredTenders.length > 1 ? 's' : ''}`,
+      settings,
+      colonnes: [
+        { cle: 'titre', header: 'Titre', width: 38 },
+        { cle: 'ville', header: "Ville d'exécution", width: 22 },
+        { cle: 'client', header: 'Client', width: 26 },
+        { cle: 'statut', header: 'Statut', width: 14 },
+        { cle: 'type', header: 'Type', width: 14 },
+        { cle: 'rendu', header: 'Date de rendu', width: 16, align: 'center' },
+        { cle: 'valeur', header: 'Valeur estimée', width: 18, align: 'right', numFmt: FORMAT_EURO },
+        { cle: 'honoraires', header: 'Honoraires (%)', width: 14, align: 'right', numFmt: '0.##' },
+        { cle: 'surface', header: 'Surface (m²)', width: 14, align: 'right', numFmt: '#,##0.##' },
+        { cle: 'travaux', header: 'Coût travaux', width: 18, align: 'right', numFmt: FORMAT_EURO },
+      ],
+      lignes: filteredTenders.map(t => ({
+        titre: t.title, ville: t.ville_execution || '', client: t.client || '',
+        statut: t.status || '', type: t.type || '', rendu: t.submission_deadline || '',
+        valeur: t.value || '', honoraires: t.honoraires_percent || '',
+        surface: t.surface || '', travaux: t.construction_cost || '',
+      })),
+    });
   };
 
   const getStatusIcon = (status: Tender['status']) => {
@@ -346,6 +367,17 @@ export default function Tenders() {
         className="flex flex-col md:flex-row gap-4 items-center justify-between p-4 rounded-lg shadow-sm"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
       >
+        <div className="relative w-full md:w-72">
+          <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+          <input
+            type="text"
+            placeholder={t('tenders_search_placeholder')}
+            className="w-full pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+            style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+        </div>
         <div className="flex flex-wrap items-center gap-4 w-full md:w-auto">
           <div className="flex items-center gap-2">
             <IconFilter size={18} style={{ color: 'var(--tblr-muted)' }} />
@@ -356,10 +388,10 @@ export default function Tenders() {
               style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
             >
               <option value="All">{t('tenders_all_statuses')}</option>
-              <option value="Draft">Draft</option>
-              <option value="Submitted">Submitted</option>
-              <option value="Won">Won</option>
-              <option value="Lost">Lost</option>
+              <option value="Draft">{statusLabel('Draft')}</option>
+              <option value="Submitted">{statusLabel('Submitted')}</option>
+              <option value="Won">{statusLabel('Won')}</option>
+              <option value="Lost">{statusLabel('Lost')}</option>
             </select>
           </div>
           <div className="flex items-center gap-2">
@@ -405,12 +437,12 @@ export default function Tenders() {
           <MobileAccordionTable
             data={activePagination.pageItems}
             keyField="id"
-            emptyText={t('tenders_no_active')}
+            emptyText={normalizedSearch ? t('tenders_no_search_results') : t('tenders_no_active')}
             columns={[
               { label: t('description'), primary: true, render: t => (
                 <div>
                   <p className="font-medium text-sm">{t.title}</p>
-                  <p className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>{t.mandataire_name || '---'}</p>
+                  <p className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t.mandataire_name || '---'}</p>
                 </div>
               )},
               { label: t('client'), render: td => td.client_name || '---' },
@@ -418,11 +450,11 @@ export default function Tenders() {
               { label: t('deadline'), render: td => td.deadline ? new Date(td.deadline).toLocaleDateString('fr-FR') : '---' },
               { label: t('valuation'), render: td => td.valuation ? `${td.valuation.toLocaleString('fr-FR')} €` : '---' },
               { label: t('status'), render: td => (
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{
+                <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-bold uppercase" style={{
                   background: td.status === 'Won' ? 'rgba(47,179,135,0.1)' : td.status === 'Lost' ? 'rgba(214,57,57,0.1)' : 'var(--tblr-primary-lt)',
                   color: td.status === 'Won' ? 'var(--tblr-success)' : td.status === 'Lost' ? 'var(--tblr-danger)' : 'var(--tblr-primary)',
                   border: '1px solid currentColor',
-                }}>{td.status}</span>
+                }}>{statusLabel(td.status)}</span>
               )},
             ]}
             actions={td => (
@@ -436,7 +468,7 @@ export default function Tenders() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-left text-sm">
+          <table className="min-w-full text-left text-sm">
             <thead>
               <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                 <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</th>
@@ -469,13 +501,13 @@ export default function Tenders() {
                       >
                         {tender.title}
                       </Link>
-                      <span className="text-[10px] uppercase tracking-tight" style={{ color: 'var(--tblr-muted)' }}>{tender.mandataire_name || 'No representative'}</span>
+                      <span className="text-[0.6875rem] uppercase tracking-tight" style={{ color: 'var(--tblr-muted)' }}>{tender.mandataire_name || 'No representative'}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{tender.client}</td>
                   <td className="px-6 py-4">
                     <span
-                      className="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
+                      className="px-2 py-0.5 rounded text-[0.6875rem] font-bold uppercase"
                       style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
                     >
                       {tender.type || 'N/A'}
@@ -490,8 +522,8 @@ export default function Tenders() {
                             className="flex flex-col rounded px-1.5 py-0.5"
                             style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}
                           >
-                            <span className="text-[9px] font-bold uppercase leading-tight" style={{ color: 'var(--tblr-muted)' }}>{spec.specialty_name}</span>
-                            <span className="text-[10px] leading-tight" style={{ color: 'var(--tblr-text)' }}>{spec.contact_name || 'TBD'}</span>
+                            <span className="text-[0.6875rem] font-bold uppercase leading-tight" style={{ color: 'var(--tblr-muted)' }}>{spec.specialty_name}</span>
+                            <span className="text-[0.6875rem] leading-tight" style={{ color: 'var(--tblr-text)' }}>{spec.contact_name || 'TBD'}</span>
                           </div>
                         ))
                       ) : (
@@ -503,7 +535,7 @@ export default function Tenders() {
                     <div className="flex flex-col">
                       <span>{tender.submission_deadline ? new Date(tender.submission_deadline).toLocaleDateString() : '---'}</span>
                       {tender.withdrawal_deadline && (
-                        <span className="text-[10px]" style={{ color: 'var(--tblr-danger)' }}>{t('tenders_withdrawal_label')} {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
+                        <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-danger)' }}>{t('tenders_withdrawal_label')} {new Date(tender.withdrawal_deadline).toLocaleDateString()}</span>
                       )}
                     </div>
                   </td>
@@ -511,7 +543,7 @@ export default function Tenders() {
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
                       {getStatusIcon(tender.status)}
-                      <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{tender.status}</span>
+                      <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{statusLabel(tender.status)}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4 text-right">
@@ -563,7 +595,7 @@ export default function Tenders() {
                   <td colSpan={8} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconFileText size={32} className="opacity-20" />
-                      <p>{t('tenders_no_active')}</p>
+                      <p>{normalizedSearch ? t('tenders_no_search_results') : t('tenders_no_active')}</p>
                     </div>
                   </td>
                 </tr>
@@ -593,7 +625,7 @@ export default function Tenders() {
             style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}
           >
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
                     <th className="px-6 py-3 font-medium uppercase tracking-wider text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('description')}</th>
@@ -624,13 +656,13 @@ export default function Tenders() {
                           >
                             {tender.title}
                           </Link>
-                          <span className="text-[10px] uppercase tracking-tight" style={{ color: 'var(--tblr-muted)' }}>{tender.mandataire_name || t('tenders_no_representative')}</span>
+                          <span className="text-[0.6875rem] uppercase tracking-tight" style={{ color: 'var(--tblr-muted)' }}>{tender.mandataire_name || t('tenders_no_representative')}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4" style={{ color: 'var(--tblr-text)' }}>{tender.client}</td>
                       <td className="px-6 py-4">
                         <span
-                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase"
+                          className="px-2 py-0.5 rounded text-[0.6875rem] font-bold uppercase"
                           style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}
                         >
                           {tender.type || 'N/A'}
@@ -642,7 +674,7 @@ export default function Tenders() {
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-2">
                           {getStatusIcon(tender.status)}
-                          <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{tender.status}</span>
+                          <span className="font-medium" style={{ color: 'var(--tblr-text)' }}>{statusLabel(tender.status)}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -699,9 +731,10 @@ export default function Tenders() {
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
+              ref={launchOriginRef}
+              initial={{ opacity: 0, scale: 0.9 }}
               animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
+              exit={{ opacity: 0, scale: 0.9 }}
               className="rounded-lg shadow-xl w-full max-w-xl overflow-hidden"
               style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
             >
@@ -719,7 +752,7 @@ export default function Tenders() {
                   <IconX size={20} />
                 </button>
               </div>
-              <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85vh] overflow-y-auto">
+              <form onSubmit={handleCreateBid} className="p-6 pb-64 space-y-4 max-h-[85dvh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('tenders_project_title_label')}</label>
@@ -820,12 +853,12 @@ export default function Tenders() {
                     <button
                       type="button"
                       onClick={() => setIsMiqcpWizardOpen(true)}
-                      className="text-[10px] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                      className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
                     >
                       {t('miqcp_wizard_open_btn')}
                     </button>
                     {tenderMiqcpAssessment && (
-                      <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                      <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
                         {t('miqcp_wizard_summary', {
                           cc: tenderMiqcpAssessment.coefficientComplexite.toFixed(2),
                           taux: tenderMiqcpAssessment.tauxReference.toFixed(2),
@@ -864,7 +897,7 @@ export default function Tenders() {
                           checked={newTender.mandatory_visit || false}
                           onChange={e => setNewTender({...newTender, mandatory_visit: e.target.checked})}
                         />
-                        <div className="w-10 h-5 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"
+                        <div className="w-10 h-5 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition peer-checked:bg-blue-600"
                           style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)' }}
                         ></div>
                       </div>
@@ -881,7 +914,7 @@ export default function Tenders() {
                         <button
                           type="button"
                           onClick={addMilestoneRow}
-                          className="text-[10px] flex items-center gap-1 font-bold uppercase"
+                          className="text-[0.6875rem] flex items-center gap-1 font-bold uppercase"
                           style={{ color: 'var(--tblr-primary)' }}
                         >
                           <IconPlus size={12} /> {t('tenders_add_date')}
@@ -918,7 +951,7 @@ export default function Tenders() {
                           </div>
                         ))}
                         {formMilestones.length === 0 && (
-                          <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_milestones')}</p>
+                          <p className="text-[0.6875rem] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_milestones')}</p>
                         )}
                       </div>
 
@@ -941,7 +974,7 @@ export default function Tenders() {
                       <button
                         type="button"
                         onClick={addSpecialtyRow}
-                        className="text-[10px] flex items-center gap-1 font-bold uppercase"
+                        className="text-[0.6875rem] flex items-center gap-1 font-bold uppercase"
                         style={{ color: 'var(--tblr-primary)' }}
                       >
                         <IconPlus size={12} /> {t('tenders_add_specialty_btn')}
@@ -978,7 +1011,7 @@ export default function Tenders() {
                         </div>
                       ))}
                       {formSpecialties.length === 0 && (
-                        <p className="text-[10px] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_specialties_yet')}</p>
+                        <p className="text-[0.6875rem] italic" style={{ color: 'var(--tblr-muted)' }}>{t('tenders_no_specialties_yet')}</p>
                       )}
                     </div>
                   </div>
@@ -1003,10 +1036,10 @@ export default function Tenders() {
                         value={newTender.status || ''}
                         onChange={e => setNewTender({...newTender, status: e.target.value as any})}
                       >
-                        <option value="Draft">Draft</option>
-                        <option value="Submitted">Submitted</option>
-                        <option value="Won">Won</option>
-                        <option value="Lost">Lost</option>
+                        <option value="Draft">{statusLabel('Draft')}</option>
+                        <option value="Submitted">{statusLabel('Submitted')}</option>
+                        <option value="Won">{statusLabel('Won')}</option>
+                        <option value="Lost">{statusLabel('Lost')}</option>
                       </select>
                     </div>
                   )}
@@ -1014,7 +1047,7 @@ export default function Tenders() {
                 <button
                   type="submit"
                   disabled={isSaving || showSuccess}
-                  className="w-full py-2 rounded-lg font-medium transition-all mt-4 flex items-center justify-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed"
+                  className="w-full py-2 rounded-lg font-medium transition mt-4 flex items-center justify-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed"
                   style={showSuccess
                     ? { background: 'var(--tblr-success)', color: '#fff' }
                     : { background: 'var(--tblr-primary)', color: '#fff' }

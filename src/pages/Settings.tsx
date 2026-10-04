@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { useTranslation } from 'react-i18next';
 import { useUser } from '../UserContext';
+import { supabase } from '../lib/supabase';
 import {
   IconCircleCheck, IconLoader2, IconPlugConnected, IconPlugConnectedX,
   IconExternalLink, IconPuzzle, IconCamera, IconChevronDown, IconChevronUp,
@@ -15,12 +16,20 @@ import { cn } from '../lib/utils';
 import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
-import { checkCloudLinkStatus, upgradeToCloud } from '../lib/cloudSync';
+import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
 import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
+import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
+import { McpConnectionsCard } from '../components/McpConnectionsCard';
+import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
+import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
+import { AgentMailReviewCard } from '../components/AgentMailReviewCard';
+import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
+import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
+import { SwapText } from '../components/ui/SwapText';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
 
@@ -324,6 +333,7 @@ export default function Settings() {
     numAffaireSepPrefix: true,
     numAffaireSepSeq: true,
     numAffaireDigits: 3,
+    invoicePaymentTermsDays: 30,
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -417,6 +427,23 @@ export default function Settings() {
 
   // Client Electron "compte local" — bascule vers un compte cloud existant
   const [cloudLinked, setCloudLinked] = useState<boolean | null>(null);
+  // Un import initial qui a échoué (voir server/initialImport.ts) laisse ce
+  // poste "lié" pour toujours sans jamais activer la synchro (server.ts ne
+  // la démarre que si importCompleted) — d'où ce champ distinct de
+  // cloudLinked, pour offrir une relance plutôt qu'un poste bloqué sans
+  // aucune donnée ni aucun moyen de le savoir depuis l'écran Projets.
+  const [cloudImportCompleted, setCloudImportCompleted] = useState<boolean | null>(null);
+  const [cloudLinkedEmail, setCloudLinkedEmail] = useState<string | null>(null);
+  const [isRetryingCloudImport, setIsRetryingCloudImport] = useState(false);
+  const [retryCloudImportError, setRetryCloudImportError] = useState<string | null>(null);
+  // Le message d'erreur de /cloud-link-retry-import invite déjà à se
+  // reconnecter quand le jeton stocké n'est plus valide — ce formulaire est
+  // le recours que ce message promettait sans qu'aucune route ne
+  // l'implémente jusqu'ici (voir server/cloudLinkRoutes.ts).
+  const [showCloudReconnectForm, setShowCloudReconnectForm] = useState(false);
+  const [cloudReconnectPassword, setCloudReconnectPassword] = useState('');
+  const [isReconnectingCloud, setIsReconnectingCloud] = useState(false);
+  const [cloudReconnectError, setCloudReconnectError] = useState<string | null>(null);
   const [showCloudUpgradeForm, setShowCloudUpgradeForm] = useState(false);
   const [cloudUpgradeEmail, setCloudUpgradeEmail] = useState('');
   const [cloudUpgradePassword, setCloudUpgradePassword] = useState('');
@@ -445,6 +472,8 @@ export default function Settings() {
   const [newProjectCategoryName, setNewProjectCategoryName] = useState('');
 
   const [userSettings, setUserSettings] = useState({
+    name: '',
+    email: '',
     senderOption: 'agency' as 'agency' | 'personal',
     defaultEmailTemplate: '',
     phone: '',
@@ -453,7 +482,9 @@ export default function Settings() {
     department: '',
     avatar: '',
     showPersonalContacts: true,
+    mailSignature: '',
   });
+  const [emailNotice, setEmailNotice] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -530,8 +561,8 @@ export default function Settings() {
       fetchProjectCategories();
       if (isOfflineBuild()) {
         checkCloudLinkStatus()
-          .then((s) => setCloudLinked(s.linked))
-          .catch(() => setCloudLinked(null));
+          .then((s) => { setCloudLinked(s.linked); setCloudImportCompleted(s.importCompleted); setCloudLinkedEmail(s.email); })
+          .catch(() => { setCloudLinked(null); setCloudImportCompleted(null); setCloudLinkedEmail(null); });
       }
       const bridge = desktopBridge();
       if (bridge) {
@@ -542,6 +573,8 @@ export default function Settings() {
     }
     if (currentUser) {
       setUserSettings({
+        name: currentUser.name || '',
+        email: currentUser.email || '',
         senderOption: currentUser.senderOption || 'agency',
         defaultEmailTemplate: currentUser.defaultEmailTemplate || '',
         phone: currentUser.phone || '',
@@ -550,6 +583,7 @@ export default function Settings() {
         department: currentUser.department || '',
         avatar: currentUser.avatar || '',
         showPersonalContacts: currentUser.showPersonalContacts ?? true,
+        mailSignature: currentUser.mailSignature || '',
       });
     }
   }, [currentUser]);
@@ -913,25 +947,20 @@ export default function Settings() {
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      alert(err?.message || "Échec de l'export des données du cabinet.");
+      alert(err?.message || t('settings_tenant_export_failed'));
     } finally {
       setIsExportingTenant(false);
     }
   };
 
   const handleRequestTenantDeletion = async () => {
-    if (!window.confirm(
-      "Demander la fermeture du cabinet ? Toutes les données du cabinet (projets, factures, documents, contacts...) seront " +
-      "définitivement supprimées automatiquement dans 30 jours, sauf annulation d'ici là. " +
-      "Avez-vous utilisé le bouton « Exporter toutes les données du cabinet » ci-dessus ? La loi française impose la " +
-      "conservation des documents comptables pendant 10 ans, indépendamment de cette suppression."
-    )) return;
+    if (!window.confirm(t('settings_confirm_tenant_deletion_request'))) return;
     setIsRequestingDeletion(true);
     try {
       const res = await apiFetch<{ deletion_requested_at: string }>('/api/settings/tenant-deletion', { method: 'POST' });
       setTenantDeletion(prev => ({ deletion_requested_at: res.deletion_requested_at, grace_period_days: prev?.grace_period_days || 30 }));
     } catch (err: any) {
-      alert(err?.message || "Échec de la demande de fermeture.");
+      alert(err?.message || t('settings_tenant_deletion_request_failed'));
     } finally {
       setIsRequestingDeletion(false);
     }
@@ -943,9 +972,40 @@ export default function Settings() {
       await apiFetch('/api/settings/tenant-deletion', { method: 'DELETE' });
       setTenantDeletion(prev => ({ deletion_requested_at: null, grace_period_days: prev?.grace_period_days || 30 }));
     } catch (err: any) {
-      alert(err?.message || "Échec de l'annulation.");
+      alert(err?.message || t('settings_tenant_deletion_cancel_failed'));
     } finally {
       setIsCancelingDeletion(false);
+    }
+  };
+
+  const handleRetryCloudImport = async () => {
+    setRetryCloudImportError(null);
+    setIsRetryingCloudImport(true);
+    try {
+      const result = await retryImport();
+      navigate(`/cloud-import-progress?jobId=${result.importJobId}`);
+    } catch (err: any) {
+      setRetryCloudImportError(err?.message || "Échec de la relance de l'import.");
+      setIsRetryingCloudImport(false);
+    }
+  };
+
+  const handleReconnectCloud = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCloudReconnectError(null);
+    setIsReconnectingCloud(true);
+    try {
+      await reconnectCloud(cloudReconnectPassword);
+      setCloudReconnectPassword('');
+      setShowCloudReconnectForm(false);
+      // La session cloud est rétablie — enchaîner directement sur la relance
+      // de l'import plutôt que de laisser l'utilisateur recliquer un second
+      // bouton pour la même intention.
+      await handleRetryCloudImport();
+    } catch (err: any) {
+      setCloudReconnectError(err?.message || 'Échec de la reconnexion.');
+    } finally {
+      setIsReconnectingCloud(false);
     }
   };
 
@@ -1130,10 +1190,12 @@ export default function Settings() {
     return (
       <div className="flex items-center gap-2 flex-wrap">
         <button type="button" disabled={status.saving} onClick={onSave}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
+          className="relative overflow-hidden flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-60"
           style={status.success ? { background: 'var(--tblr-success)', color: '#fff' } : { background: 'var(--tblr-primary)', color: '#fff' }}>
-          {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
-          {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+          <SwapText swapKey={status.saving ? 'saving' : status.success ? 'success' : 'idle'}>
+            {status.saving ? <IconLoader2 size={13} className="animate-spin" /> : status.success ? <IconCircleCheck size={13} /> : null}
+            {status.saving ? 'Enregistrement...' : status.success ? 'Enregistré' : label}
+          </SwapText>
         </button>
         {status.error && <span className="text-xs font-medium" style={{ color: 'var(--tblr-danger)' }}>{status.error}</span>}
       </div>
@@ -1148,8 +1210,20 @@ export default function Settings() {
     if (!currentUser) return;
     setSectionStatus(prev => ({ ...prev, profile: { saving: true, error: null, success: false } }));
     try {
-      await apiPutWithDeadline(`/api/team/${currentUser.id}`, userSettings);
-      setCurrentUser({ ...currentUser, ...userSettings } as any);
+      const { email: requestedEmail, ...profileFields } = userSettings;
+      await apiPutWithDeadline(`/api/team/${currentUser.id}`, profileFields);
+      // L'adresse sert d'identifiant de connexion : Supabase envoie un lien de
+      // confirmation à la NOUVELLE adresse et ne la change qu'une fois ouvert.
+      const wantedEmail = requestedEmail.trim().toLowerCase();
+      if (wantedEmail && wantedEmail !== (currentUser.email || '').toLowerCase()) {
+        const { error: emailErr } = await supabase.auth.updateUser(
+          { email: wantedEmail },
+          { emailRedirectTo: `${window.location.origin}/settings` },
+        );
+        if (emailErr) throw new Error(emailErr.message);
+        setEmailNotice(`Un lien de confirmation a été envoyé à ${wantedEmail}. L'adresse actuelle reste valable jusqu'à sa validation.`);
+      }
+      setCurrentUser({ ...currentUser, ...profileFields } as any);
       setSectionStatus(prev => ({ ...prev, profile: { saving: false, error: null, success: true } }));
       setTimeout(() => setSectionStatus(prev => ({ ...prev, profile: { ...prev.profile, success: false } })), 3000);
     } catch (err: any) {
@@ -1343,7 +1417,7 @@ export default function Settings() {
   // écritures, révoquer coupe aussi la lecture des fichiers déjà déposés.
   const handleStorageDisable = async () => {
     if (!externalStorage?.id) return;
-    if (!window.confirm("Déconnecter cet espace ?\n\nLes nouveaux documents et plans repartiront dans ArchiOffice. Ceux déjà déposés chez vous resteront consultables.")) return;
+    if (!window.confirm(t('settings_confirm_storage_disable'))) return;
     try {
       await apiFetch(`/api/external-storage/${externalStorage.id}/disable`, { method: 'POST' });
       await refreshExternalStorage();
@@ -1355,7 +1429,7 @@ export default function Settings() {
 
   const handleStorageRevoke = async () => {
     if (!externalStorage?.id) return;
-    if (!window.confirm("Révoquer les accès ?\n\nArchiOffice oubliera votre mot de passe d'application. Les documents et plans déjà déposés ne seront PLUS consultables depuis ArchiOffice — ils restent dans votre espace de stockage, mais l'application ne saura plus aller les chercher.")) return;
+    if (!window.confirm(t('settings_confirm_storage_revoke'))) return;
     try {
       await apiFetch(`/api/external-storage/${externalStorage.id}`, { method: 'DELETE' });
       await refreshExternalStorage();
@@ -1750,7 +1824,7 @@ export default function Settings() {
               checked={!!(settings as any).maf_enabled}
               onChange={e => setSettings({ ...settings, maf_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1816,7 +1890,7 @@ export default function Settings() {
               checked={!!(settings as any).tender_boamp_enabled}
               onChange={e => setSettings({ ...settings, tender_boamp_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
@@ -1880,7 +1954,7 @@ export default function Settings() {
               checked={!!(settings as any).tender_ted_enabled}
               onChange={e => setSettings({ ...settings, tender_ted_enabled: e.target.checked } as any)}
             />
-            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-5" />
+            <div className="w-10 h-5 rounded-full peer-checked:bg-blue-600 bg-gray-300 after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-4 after:w-4 after:transition peer-checked:after:translate-x-5" />
           </label>
         </div>
         <div className="p-3 rounded-lg text-xs" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
@@ -2506,6 +2580,40 @@ export default function Settings() {
               numAffaireDigits: settings.numAffaireDigits,
             }))}
           </div>
+
+          {/* ── Facturation : délai de paiement par défaut ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Facturation — Délai de paiement</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                Nombre de jours ajoutés à la date d'émission pour calculer la date d'échéance d'une facture
+                quand elle n'est pas saisie à la main (facture créée depuis une note d'honoraires, par exemple).
+                Ce même délai part avec la facture vers Zoho Invoice, Zoho Books ou Odoo si un connecteur comptable
+                est actif.
+              </p>
+            </div>
+            <div className="max-w-xs">
+              <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>Délai de paiement (jours)</label>
+              <input
+                type="number"
+                min={0}
+                max={365}
+                className="w-full p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={settings.invoicePaymentTermsDays ?? 30}
+                onChange={e => setSettings({ ...settings, invoicePaymentTermsDays: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+              />
+            </div>
+            {renderSaveButton('invoicePaymentTerms', () => saveSection('invoicePaymentTerms', {
+              invoicePaymentTermsDays: settings.invoicePaymentTermsDays,
+            }))}
+          </div>
+
+          {/* Bibliothèque de notes méthodologiques — action immédiate
+              (dépôt/suppression de fichiers), pas de formulaire via
+              saveSection/renderSaveButton, même principe que les cartes de
+              connexion ci-dessous. */}
+          <AgencyMethodologyLibraryCard />
         </>
       )}
 
@@ -2600,6 +2708,9 @@ export default function Settings() {
               senderOption: settings.senderOption, defaultEmailTemplate: settings.defaultEmailTemplate,
             }))}
           </div>
+
+          {/* ── Modèles de mails ── */}
+          <EmailTemplatesSettings />
         </>
       )}
 
@@ -2769,22 +2880,22 @@ export default function Settings() {
                         </div>
                         {/* Status badge */}
                         {plugin.status === 'coming_soon' ? (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          <span className="text-[0.6875rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             Bientôt
                           </span>
                         ) : isConnected ? (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
+                          <span className="flex items-center gap-1 text-[0.6875rem] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: '#d3f9d8', color: '#2f9e44' }}>
                             <IconPlugConnected size={10} /> Connecté
                           </span>
                         ) : (
-                          <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                          <span className="flex items-center gap-1 text-[0.6875rem] font-bold px-2 py-0.5 rounded-full whitespace-nowrap" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                             <IconPlugConnectedX size={10} /> Non connecté
                           </span>
                         )}
                       </div>
 
                       <p className="font-semibold text-sm" style={{ color: 'var(--tblr-text)' }}>{plugin.name}</p>
-                      <p className="text-[11px] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
+                      <p className="text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{plugin.vendor}</p>
                       <p className="text-xs leading-relaxed" style={{ color: 'var(--tblr-muted)' }}>{plugin.description}</p>
                     </div>
 
@@ -2806,7 +2917,7 @@ export default function Settings() {
                         <span className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>Disponible prochainement</span>
                       )}
                       <span className={cn(
-                        "text-[10px] font-medium px-2 py-0.5 rounded-full",
+                        "text-[0.6875rem] font-medium px-2 py-0.5 rounded-full",
                         plugin.category === 'accounting' ? "bg-blue-50 text-blue-600" :
                         plugin.category === 'storage' ? "bg-teal-50 text-teal-600" :
                         plugin.category === 'crm' ? "bg-purple-50 text-purple-600" :
@@ -2834,6 +2945,12 @@ export default function Settings() {
               </div>
             )}
           </div>
+
+          {/* n8n / IFTTT / tout automate HTTP — clé d'API entrante + webhooks
+              sortants. Ni l'un ni l'autre n'est un plugin du catalogue
+              ci-dessus (pas de connecteur à choisir : n'importe quel service
+              HTTP externe peut s'en servir), d'où une carte à part. */}
+          <AutomationIntegrationsCard />
         </>
       )}
 
@@ -2901,6 +3018,124 @@ export default function Settings() {
                   </button>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ── Poste lié au cloud mais dont l'import initial n'a jamais abouti ──
+              server.ts ne démarre /api/sync que si importCompleted est vrai :
+              un échec au premier lien (server/initialImport.ts) laisse donc ce
+              poste "lié" mais silencieusement jamais synchronisé — projets,
+              factures, contacts... restés vides indéfiniment, sans aucun autre
+              écran pour le relancer une fois passé l'écran d'import initial. */}
+          {isOfflineBuild() && cloudLinked === true && cloudImportCompleted === false && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-warning, #f59f00)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-warning, #f59f00)' }}>
+                <IconCloud size={15} /> Import cloud incomplet
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste est relié à votre compte cloud, mais la récupération initiale de vos données (projets,
+                factures, contacts...) ne s'est jamais terminée avec succès — c'est pourquoi certains écrans peuvent
+                rester vides. Vous pouvez relancer cet import ; il reprend ce qui manque sans dupliquer ce qui a déjà
+                été récupéré.
+              </p>
+              {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
+              {!showCloudReconnectForm ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handleRetryCloudImport}
+                    disabled={isRetryingCloudImport}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                    style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                  >
+                    {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                    Relancer l'import
+                  </button>
+                  {/* La session cloud (jeton de rafraîchissement) peut avoir expiré
+                      ou avoir été révoquée entre-temps — dans ce cas la relance
+                      ci-dessus échoue avec un message qui invite justement à se
+                      reconnecter ici. Toujours visible (pas seulement après un
+                      échec) : pas de raison de faire deviner ce recours. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCloudReconnectForm(true)}
+                    className="text-xs font-medium underline"
+                    style={{ color: 'var(--tblr-muted)' }}
+                  >
+                    Se reconnecter au cloud
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleReconnectCloud} className="space-y-3 max-w-sm">
+                  <div>
+                    <label className="block text-xs font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>
+                      Mot de passe du compte cloud{cloudLinkedEmail ? ` (${cloudLinkedEmail})` : ''}
+                    </label>
+                    <input
+                      type="password"
+                      value={cloudReconnectPassword}
+                      onChange={(e) => setCloudReconnectPassword(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm"
+                      style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  {cloudReconnectError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudReconnectError}</p>}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="submit"
+                      disabled={isReconnectingCloud}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-warning, #f59f00)' }}
+                    >
+                      {isReconnectingCloud ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                      Se reconnecter et relancer l'import
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setShowCloudReconnectForm(false); setCloudReconnectPassword(''); setCloudReconnectError(null); }}
+                      disabled={isReconnectingCloud}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                      style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* ── Poste lié au cloud : resynchronisation forcée à la demande ──
+              La synchro continue (server/cloudSync.ts) suit sync_log depuis
+              un filigrane et rattrape le flux normal, mais rien ne permettait
+              jusqu'ici de rejouer l'import complet une fois importCompleted
+              passé à vrai — utile pour un diagnostic (le job précédent, en
+              mémoire du process serveur, ne survit pas à un redémarrage de
+              l'appli) ou pour rattraper des lignes qu'un import antérieur
+              aurait laissées de côté sans avertissement remarqué à l'écran. */}
+          {isOfflineBuild() && cloudLinked === true && cloudImportCompleted === true && (
+            <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+              <h2 className="text-sm font-bold uppercase tracking-wider flex items-center gap-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <IconCloud size={15} /> Synchronisation cloud
+              </h2>
+              <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                Ce poste est relié et synchronisé. En cas de doute sur des données manquantes, vous pouvez forcer une
+                resynchronisation complète — elle reprend tout ce que le cloud porte pour ce cabinet sans dupliquer ce
+                qui est déjà présent ici.
+              </p>
+              {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
+              <button
+                type="button"
+                onClick={handleRetryCloudImport}
+                disabled={isRetryingCloudImport}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+              >
+                {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                Forcer une resynchronisation complète
+              </button>
             </div>
           )}
 
@@ -3045,7 +3280,7 @@ export default function Settings() {
               alt={currentUser?.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
               <IconCamera size={18} className="text-white" />
-              <span className="text-white text-[10px] font-medium">Modifier</span>
+              <span className="text-white text-[0.6875rem] font-medium">Modifier</span>
             </div>
           </button>
           <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
@@ -3060,6 +3295,9 @@ export default function Settings() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Nom et prénom" aria-label="Nom et prénom" maxLength={120} value={userSettings.name} onChange={e => setUserSettings({...userSettings, name: e.target.value})} />
+          <input type="email" className="p-2 rounded-lg text-sm md:col-span-2" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder="Adresse e-mail (identifiant de connexion)" aria-label="Adresse e-mail" maxLength={254} value={userSettings.email} onChange={e => setUserSettings({...userSettings, email: e.target.value})} />
+          {emailNotice && <p className="md:col-span-2 text-xs" role="status" style={{ color: 'var(--tblr-muted)' }}>{emailNotice}</p>}
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('phone')} value={userSettings.phone} onChange={e => setUserSettings({...userSettings, phone: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('address')} value={userSettings.address} onChange={e => setUserSettings({...userSettings, address: e.target.value})} />
           <input className="p-2 rounded-lg text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }} placeholder={t('job_title')} value={userSettings.jobTitle} onChange={e => setUserSettings({...userSettings, jobTitle: e.target.value})} />
@@ -3110,6 +3348,26 @@ export default function Settings() {
           onChange={e => setUserSettings({...userSettings, defaultEmailTemplate: e.target.value})} />
       </div>
 
+      {/* ── Signature de courrier ── */}
+      <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        <div className="flex items-center gap-2">
+          <IconMailbox size={16} style={{ color: 'var(--tblr-muted)' }} />
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_title')}</h2>
+            <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_mail_signature_desc')}</p>
+          </div>
+        </div>
+        <textarea
+          rows={6}
+          maxLength={2000}
+          value={userSettings.mailSignature}
+          onChange={e => setUserSettings({ ...userSettings, mailSignature: e.target.value })}
+          placeholder={t('settings_mail_signature_placeholder') as string}
+          className="w-full p-2.5 rounded-lg text-sm resize-y"
+          style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+        />
+      </div>
+
       {/* ── Contacts personnels ── */}
       <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         <div className="flex items-center gap-2">
@@ -3138,6 +3396,24 @@ export default function Settings() {
           pas par saveSection/renderSaveButton : connecter/déconnecter/définir
           par défaut sont des actions immédiates, pas un formulaire à valider. */}
       <MailAccountsCard />
+
+      {/* Liaison Gemini (MCP) — même principe : action immédiate (révoquer),
+          pas de formulaire à valider via saveSection/renderSaveButton. */}
+      <McpConnectionsCard />
+
+      {/* Bot Telegram — même principe : actions immédiates (générer un code,
+          révoquer), pas de formulaire via saveSection/renderSaveButton. */}
+      <TelegramConnectionsCard />
+
+      {/* Courrier entrant — même principe : choisir l'agent de triage est
+          une action immédiate, pas un champ du grand formulaire. Ne
+          s'affiche que si l'instance a un domaine de réception configuré
+          (server/agentMailInbox.ts). */}
+      <AgentMailInboxCard />
+
+      {/* Revue matinale des mails par un agent (server/agentMailReview.ts) :
+          réglage personnel, une boîte mail l'étant. */}
+      <AgentMailReviewCard />
         </>
       )}
         </div>

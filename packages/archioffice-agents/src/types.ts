@@ -68,11 +68,12 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     defaults: { status: 'Draft', amount: 0 },
     fields: 'title*, client_id, amount, status (Draft/Sent/Accepted/Rejected), description, notes, vat_rate' },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
-    knownFields: ['name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address'],
+    knownFields: ['name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address', 'ref_cadastrale'],
     required: ['name', 'client'],
     enums: { status: ['Planning', 'In Progress', 'Completed', 'On Hold'] },
     defaults: { status: 'Planning' },
-    fields: 'name*, client*, status (Planning/In Progress/Completed/On Hold), client_id, budget, category, start_date, end_date, description, address' },
+    fields: 'name*, client*, status (Planning/In Progress/Completed/On Hold), client_id, budget, category, start_date, end_date, description, address, ref_cadastrale (référence cadastrale du terrain). ' +
+      "Une mise à jour (update_record) ne touche que les champs fournis : pas besoin de renvoyer name/client pour ne changer qu'un seul champ." },
   { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, identityField: 'name',
     knownFields: ['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status', 'description', 'location', 'start_date', 'project_manager', 'construction_cost', 'remuneration', 'fee_rate', 'progression'],
     required: ['name'],
@@ -91,21 +92,16 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     enums: { status: ['Draft', 'Sent', 'Paid', 'Overdue'] },
     defaults: { status: 'Draft' },
     fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
-  { key: 'specifications', label: 'CCTP', basePath: '/api/specifications', create: true, update: true, delete: true, list: true, identityField: 'title',
-    knownFields: ['title', 'project_id', 'description', 'content'],
-    // project_id est obligatoire depuis l'incident du 7 septembre 2026 : un
-    // agent avait créé 19 CCTP sans projet (project_id NULL), invisibles
-    // nulle part dans l'application (la seule vue qui les affiche filtre par
-    // projet), en réponse à des demandes qui visaient en réalité la
-    // Bibliothèque d'ouvrages (voir la ressource 'articles_type' ci-dessous).
-    required: ['title', 'project_id'],
-    fields: 'title*, project_id*, description, content' },
   { key: 'articles_type', label: "Bibliothèque d'ouvrages", basePath: '/api/price-library', create: true, update: true, delete: true, list: true, identityField: 'designation',
-    // À ne pas confondre avec 'specifications' (CCTP) : ceci est le catalogue
-    // d'articles réutilisables du cabinet — un article a un prix unitaire et
-    // se range par corps de métier, un CCTP est un document de projet. Un
-    // agent qui « intègre les articles d'un document à la bibliothèque »
-    // crée un enregistrement par article ici, jamais un CCTP par chapitre.
+    // La ressource 'specifications' (anciennes fiches CCTP, table et route
+    // /api/specifications) a été retirée du système — voir CLAUDE.md, « Le
+    // CCTP n'est pas un document séparé » : elle n'était plus le CCTP réel
+    // depuis longtemps (write_dpgf_article, capacité docsWrite, est le seul
+    // moyen d'écrire un CCTP/DPGF) et avait causé l'incident du 7 septembre
+    // 2026 (19 fiches créées pour rien en réponse à des demandes qui
+    // visaient en réalité CETTE ressource, articles_type — un agent qui
+    // « intègre les articles d'un document à la bibliothèque » crée un
+    // enregistrement par article ici, jamais un CCTP par chapitre).
     knownFields: ['designation', 'unite', 'prix_unitaire', 'categorie', 'lot_type', 'description', 'notes', 'origine', 'code'],
     required: ['designation'],
     enums: { origine: ['reference', 'saisie', 'bpu', 'offre', 'import'] },
@@ -135,7 +131,9 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     required: ['title', 'date'],
     enums: { type: ['projet', 'visite_candidature', 'visite_proposition'] },
     defaults: { type: 'projet' },
-    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes" },
+    // Les comptes-rendus de chantier de l'onglet DET vivent dans site_reports,
+    // pas dans meetings. L'outil create_site_report les crée explicitement.
+    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes. Réunion classique uniquement : pour une réunion/visite de chantier ou un CR dans l'onglet DET, utiliser create_site_report." },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
     knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero'],
     enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
@@ -167,6 +165,16 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     knownFields: ['project_id', 'contrat_id', 'numero', 'date', 'objet', 'montant_ht', 'status', 'tva_rate'],
     defaults: { status: 'Brouillon' },
     fields: 'project_id, contrat_id, numero, date, objet, montant_ht' },
+  // GET /api/permits?project_id=... est filtré par projet côté client, mais
+  // renvoie bien la liste complète du cabinet sans le paramètre (list: true) —
+  // nécessaire pour search_records et la détection de doublons.
+  { key: 'permits', label: 'Permis (PC/DP/AT)', basePath: '/api/permits', create: true, update: true, delete: true, list: true, identityField: 'reference',
+    knownFields: ['project_id', 'type', 'reference', 'submission_date', 'decision_date', 'status', 'notes'],
+    required: ['project_id', 'type'],
+    enums: { type: ['PC', 'DP', 'AT'], status: ['en_instruction', 'accorde', 'refuse', 'recours'] },
+    defaults: { status: 'en_instruction' },
+    fields: 'project_id*, type* (PC/DP/AT), reference (numéro de permis), submission_date, decision_date, status (en_instruction/accorde/refuse/recours), notes. ' +
+      "Utilise cette ressource pour le numéro, la date de dépôt/décision et le statut d'un permis — jamais la description du projet, qui n'est pas exploitable ailleurs dans l'application." },
 ];
 
 // Périmètre d'écriture par défaut d'un métier, appliqué quand un cabinet
@@ -175,18 +183,22 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // le template reste la source, cette table n'intervient que s'il arrive vide,
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
-  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects'],
-  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves'],
+  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
-  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'specifications', 'articles_type'],
+  'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
   'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
-  'responsable-hqe':     ['specifications', 'tasks'],
-  'ingenieur-thermique': ['specifications'],
-  'ingenieur-structure': ['specifications'],
-  'ingenieur-fluides':   ['specifications'],
-  'acousticien':         ['specifications'],
-  'paysagiste':          ['specifications', 'tasks'],
+  'responsable-hqe':     ['tasks'],
+  // Ces quatre métiers n'avaient que 'specifications' (l'ancienne ressource
+  // CCTP, retirée du système — voir CLAUDE.md) en défaut : sans elle, aucun
+  // périmètre d'écriture par défaut ne leur correspond encore, à régler au
+  // cas par cas depuis /agents/:id/edit plutôt que d'improviser un remplaçant.
+  'ingenieur-thermique': [],
+  'ingenieur-structure': [],
+  'ingenieur-fluides':   [],
+  'acousticien':         [],
+  'paysagiste':          ['tasks'],
   'urbaniste':           ['contacts', 'meetings', 'tasks', 'projects'],
 };
 
@@ -201,10 +213,23 @@ export interface AgentCapabilities {
   mailRead: boolean;
   /** Envoi de mail. Palier distinct de la lecture, jamais implicite. */
   mailSend: boolean;
+  /** read_email_attachment — ouvrir et extraire le contenu d'une pièce
+   *  jointe d'un email déjà lu. Palier distinct de la lecture, comme
+   *  mailSend/docsWrite : ouvrir une pièce jointe télécharge des octets
+   *  externes et peut déclencher un OCR, plus coûteux qu'une lecture de
+   *  corps de message, et mérite d'être activé sciemment. */
+  mailAttachments: boolean;
   /** Modules cartographiques : adresse, cadastre, PLU, risques, monuments. */
   geo: boolean;
   /** Lecture du CCTP et du DPGF d'un projet. */
   docsRead: boolean;
+  /** write_dpgf_article — créer ou modifier un article du CCTP/DPGF d'un
+   *  projet (texte technique et/ou ligne chiffrée). Palier distinct de la
+   *  lecture, jamais implicite : mêmes principes que mailSend/mailRead.
+   *  Sans elle, un agent n'a AUCUN moyen d'écrire un CCTP ou un DPGF —
+   *  AGENT_RESOURCES n'a plus de ressource 'specifications' vers laquelle
+   *  se replier depuis son retrait du système (voir CLAUDE.md). */
+  docsWrite: boolean;
   /** consulter_agent — interroger un collègue (autre agent actif du cabinet)
    *  et recevoir sa réponse dans le même tour. Un seul niveau : un agent
    *  consulté ne peut pas lui-même en consulter un autre (voir routes.ts,
@@ -223,6 +248,20 @@ export interface AgentCapabilities {
    *  Conversations, routes.ts n'active le tool que quand
    *  LlmProvider.supportsWebSearch est vrai — voir mistral.ts. */
   webSearch: boolean;
+  /** Bibliothèque de connaissances propre à cet agent (documents.resource_type
+   *  = 'agents', voir migrate_agent_knowledge.sql) : réglementation, DTU,
+   *  notices déposées par l'architecte via ResourceAttachments sur la fiche
+   *  agent. Contrairement aux documents joints à un message, ces documents
+   *  sont auto-injectés à chaque tour, comme firm_knowledge — pas de tool à
+   *  appeler, pas de condition de context_scopes (voir buildAgentContext). */
+  knowledge: boolean;
+  /** suggerer_amelioration — l'agent peut proposer une correction à retenir,
+   *  signaler une capacité qui lui manque, ou rédiger une note pour sa propre
+   *  bibliothèque de connaissances. Toujours une PROPOSITION en attente
+   *  (agent_learning_suggestions, statut 'pending') : rien ne s'applique tout
+   *  seul, l'architecte valide depuis /agents/learning. Off par défaut et
+   *  jamais héritée d'un template, comme knowledge_enabled. */
+  learning: boolean;
 }
 
 export function capabilitiesFromAgent(agent: {
@@ -230,11 +269,15 @@ export function capabilitiesFromAgent(agent: {
   web_fetch_enabled?: boolean | null;
   mail_enabled?: boolean | null;
   mail_send_enabled?: boolean | null;
+  mail_attachments_enabled?: boolean | null;
   geo_enabled?: boolean | null;
   docs_read_enabled?: boolean | null;
+  docs_write_enabled?: boolean | null;
   delegate_enabled?: boolean | null;
   notify_users_enabled?: boolean | null;
   web_search_enabled?: boolean | null;
+  knowledge_enabled?: boolean | null;
+  learning_enabled?: boolean | null;
 }): AgentCapabilities {
   return {
     actionScopes: agent.action_scopes || [],
@@ -243,11 +286,21 @@ export function capabilitiesFromAgent(agent: {
     // L'envoi suppose la lecture : un agent qui ne voit pas la boîte n'a
     // aucun contexte pour écrire à quelqu'un en son nom.
     mailSend: !!agent.mail_enabled && !!agent.mail_send_enabled,
+    // Même invariant que mailSend : ouvrir une pièce jointe sans pouvoir lire
+    // la messagerie n'a pas de sens (elle vient toujours d'un message déjà lu).
+    mailAttachments: !!agent.mail_enabled && !!agent.mail_attachments_enabled,
     geo: !!agent.geo_enabled,
     docsRead: !!agent.docs_read_enabled,
+    // Même invariant que mailSend : écrire sans lire n'a pas de sens (un
+    // agent ne peut pas ajouter un article cohérent à un document qu'il ne
+    // consulte pas) et le serveur le refuserait de toute façon (PUT
+    // /api/agents/:id applique le même ET).
+    docsWrite: !!agent.docs_read_enabled && !!agent.docs_write_enabled,
     delegate: !!agent.delegate_enabled,
     notifyUsers: !!agent.notify_users_enabled,
     webSearch: !!agent.web_search_enabled,
+    knowledge: !!agent.knowledge_enabled,
+    learning: !!agent.learning_enabled,
   };
 }
 
@@ -267,11 +320,15 @@ export interface Agent {
   web_fetch_enabled: boolean;
   mail_enabled: boolean;
   mail_send_enabled: boolean;
+  mail_attachments_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  docs_write_enabled: boolean;
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
+  knowledge_enabled: boolean;
+  learning_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
   created_at: string;
@@ -344,11 +401,15 @@ export interface AgentRow {
   web_fetch_enabled: boolean;
   mail_enabled: boolean;
   mail_send_enabled: boolean;
+  mail_attachments_enabled: boolean;
   geo_enabled: boolean;
   docs_read_enabled: boolean;
+  docs_write_enabled: boolean;
   delegate_enabled: boolean;
   notify_users_enabled: boolean;
   web_search_enabled: boolean;
+  knowledge_enabled: boolean;
+  learning_enabled: boolean;
   is_active: boolean;
   is_system_template: boolean;
 }
@@ -399,4 +460,19 @@ export interface AgentContext {
     projectCostHistory: { designation: string; unite: string; avgPrixUnitaireHt: number; occurrences: number }[];
     cctpExcerpts: { title: string; excerpt: string }[];
   };
+  /**
+   * Bibliothèque de connaissances propre à cet agent (réglementation, DTU,
+   * notices déposées via ResourceAttachments sur documents.resource_type =
+   * 'agents') — voir capabilities.knowledge et migrate_agent_knowledge.sql.
+   * Auto-injecté à chaque tour comme firmKnowledge, jamais via un tool.
+   */
+  knowledgeDocuments: { title: string; excerpt: string }[];
+  /**
+   * Corrections et notes APPROUVÉES par l'architecte (agent_learning_suggestions,
+   * statut 'approved', kind 'correction'/'knowledge_note') — la mémoire
+   * d'apprentissage de cet agent. Comme knowledgeDocuments : auto-injectée à
+   * chaque tour, jamais via un tool, jamais tant qu'une proposition reste
+   * 'pending'. Voir capabilities.learning et migrate_agent_learning.sql.
+   */
+  learningNotes: { kind: 'correction' | 'knowledge_note'; title: string; content: string }[];
 }

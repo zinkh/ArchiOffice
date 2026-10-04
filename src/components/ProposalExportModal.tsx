@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   IconX, IconDownload, IconSettings, IconLayout, IconPalette, IconLetterCase, IconLayoutSidebar,
 } from '@tabler/icons-react';
@@ -176,7 +177,11 @@ function PageHeader({ d }: { d: ProposalPdfData }) {
   );
 }
 
+/** Nombre total de pages du document, connu une fois toutes les sections rendues. */
+const PageTotalContext = React.createContext(0);
+
 function PageFooter({ d, page }: { d: ProposalPdfData; page: number }) {
+  const total = React.useContext(PageTotalContext);
   return (
     <div style={{
       position: 'absolute', bottom: '10mm', left: '25mm', right: '25mm',
@@ -184,7 +189,8 @@ function PageFooter({ d, page }: { d: ProposalPdfData; page: number }) {
       color: '#94a3b8', borderTop: '0.5px solid #e2e8f0', paddingTop: '2mm',
     }}>
       <div>{d.agenceNom} - {d.dateEmission}</div>
-      <div>Page {page}</div>
+      {/* Pagination du cabinet : P1|2 */}
+      <div style={{ fontWeight: 'bold', color: '#111827' }}>P{page}|{total}</div>
     </div>
   );
 }
@@ -660,7 +666,7 @@ function TemplateEditorPanel({
 
       <div className="p-4 space-y-8">
         <section className="space-y-3">
-          <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400">Version</h3>
+          <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest text-blue-600 dark:text-blue-400">Version</h3>
           <div className="flex rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 text-xs font-medium">
             <button
               type="button"
@@ -682,7 +688,7 @@ function TemplateEditorPanel({
         <section className="space-y-3">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
             <IconLayout size={14} />
-            <h3 className="text-[10px] font-bold uppercase tracking-widest">Sections</h3>
+            <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest">Sections</h3>
           </div>
           <div className="space-y-2">
             {visibleSections.map(({ id, label }) => (
@@ -702,18 +708,18 @@ function TemplateEditorPanel({
         <section className="space-y-4">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
             <IconPalette size={14} />
-            <h3 className="text-[10px] font-bold uppercase tracking-widest">Personnalisation Visuelle</h3>
+            <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest">Personnalisation Visuelle</h3>
           </div>
           <div className="space-y-3">
             <div className="space-y-1">
-              <label className="text-[8px] font-bold text-zinc-400 uppercase">Couleur Principale</label>
+              <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">Couleur Principale</label>
               <div className="flex gap-2">
                 <input type="color" value={template.visual.primaryColor} onChange={(e) => onChange({ ...template, visual: { ...template.visual, primaryColor: e.target.value } })} className="w-10 h-8 rounded border-0 p-0 bg-transparent cursor-pointer" />
                 <input type="text" value={template.visual.primaryColor} onChange={(e) => onChange({ ...template, visual: { ...template.visual, primaryColor: e.target.value } })} className="flex-1 px-2 py-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-xs" />
               </div>
             </div>
             <div className="space-y-1">
-              <label className="text-[8px] font-bold text-zinc-400 uppercase">Police de caractères</label>
+              <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">Police de caractères</label>
               <select value={template.visual.fontFamily} onChange={(e) => onChange({ ...template, visual: { ...template.visual, fontFamily: e.target.value as ProposalTemplate['visual']['fontFamily'] } })} className="w-full px-2 py-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-xs">
                 <option value="Helvetica">Helvetica / Sans-serif</option>
                 <option value="Times New Roman">Times New Roman / Serif</option>
@@ -722,7 +728,7 @@ function TemplateEditorPanel({
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
-                <label className="text-[8px] font-bold text-zinc-400 uppercase">Taille Logo</label>
+                <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">Taille Logo</label>
                 <select value={template.visual.logoSize} onChange={(e) => onChange({ ...template, visual: { ...template.visual, logoSize: e.target.value as ProposalTemplate['visual']['logoSize'] } })} className="w-full px-2 py-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-xs">
                   <option value="small">Petit</option>
                   <option value="medium">Moyen</option>
@@ -730,7 +736,7 @@ function TemplateEditorPanel({
                 </select>
               </div>
               <div className="space-y-1">
-                <label className="text-[8px] font-bold text-zinc-400 uppercase">Position Logo</label>
+                <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">Position Logo</label>
                 <select value={template.visual.logoPosition} onChange={(e) => onChange({ ...template, visual: { ...template.visual, logoPosition: e.target.value as ProposalTemplate['visual']['logoPosition'] } })} className="w-full px-2 py-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-xs">
                   <option value="left">Gauche</option>
                   <option value="center">Centre</option>
@@ -743,7 +749,7 @@ function TemplateEditorPanel({
         <section className="space-y-4">
           <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400">
             <IconLetterCase size={14} />
-            <h3 className="text-[10px] font-bold uppercase tracking-widest">Clauses & Textes</h3>
+            <h3 className="text-[0.6875rem] font-bold uppercase tracking-widest">Clauses & Textes</h3>
           </div>
           <div className="space-y-4">
             {([
@@ -755,11 +761,11 @@ function TemplateEditorPanel({
               ['appendixNotes', 'Notes annexes (assurances, taxes...)'],
             ] as const).map(([key, label]) => (
               <div key={key} className="space-y-1">
-                <label className="text-[8px] font-bold text-zinc-400 uppercase">{label}</label>
+                <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase">{label}</label>
                 <textarea
                   value={template.clauses[key]}
                   onChange={(e) => onChange({ ...template, clauses: { ...template.clauses, [key]: e.target.value } })}
-                  className="w-full h-24 px-2 py-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[10px] resize-none focus:ring-1 focus:ring-blue-500 outline-none"
+                  className="w-full h-24 px-2 py-1 bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded text-[0.6875rem] resize-none focus:ring-1 focus:ring-blue-500 outline-none"
                 />
               </div>
             ))}
@@ -773,6 +779,7 @@ function TemplateEditorPanel({
 // ─── Main modal ──────────────────────────────────────────────────────────────
 
 export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal; onClose: () => void }) {
+  const { t } = useTranslation();
   const { settings } = useSettings();
   const [template, setTemplate] = useState<ProposalTemplate>(() => loadStoredTemplate());
   const [isGenerating, setIsGenerating] = useState(false);
@@ -820,7 +827,7 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
       await exportProposalPdf(previewRef.current, data);
     } catch (err) {
       console.error('PDF Generation Error:', err);
-      alert('Erreur lors de la génération du PDF. Veuillez réessayer.');
+      alert(t('proposal_export_modal_pdf_error'));
     } finally {
       setIsGenerating(false);
     }
@@ -851,14 +858,14 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
             </button>
             <div>
               <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Export PDF de la Proposition</h2>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{data.reference} | {data.indice}</p>
+              <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider">{data.reference} | {data.indice}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleExport}
               disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition-all"
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition"
             >
               <IconDownload size={16} />
               {isGenerating ? 'Génération...' : 'Exporter PDF'}
@@ -884,7 +891,7 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
           <div className="flex-1 overflow-auto p-8 bg-zinc-100 dark:bg-zinc-950">
             <style dangerouslySetInnerHTML={{ __html: getPdfStyles() }} />
             <div ref={previewRef} className="flex flex-col items-center gap-6">
-              {pages}
+              <PageTotalContext.Provider value={pageCounter}>{pages}</PageTotalContext.Provider>
             </div>
           </div>
         </div>

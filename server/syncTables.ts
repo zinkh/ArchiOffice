@@ -28,14 +28,14 @@ export const SYNC_TABLES: readonly string[] = [
   'act_data', 'article_prix_observations', 'articles_type', 'bpu_data', 'cctps',
   'contact_categories', 'contacts', 'contrats_moe',
   'custom_references', 'detail_situations',
-  'document_versions', 'documents', 'dpgf_items', 'dpgfs', 'invoice_items',
+  'document_versions', 'documents', 'dpgf_items', 'dpgf_versions', 'dpgfs', 'invoice_items',
   'invoices', 'lignes_ouvrages', 'maf_project_data', 'marches_entreprises',
   'milestones', 'notes_honoraires', 'observations', 'ordres_de_service',
   'plans', 'project_categories', 'project_cotraitants', 'project_lots',
   'project_members', 'project_stakeholders', 'project_templates',
   'projects', 'proposal_specialties', 'proposals', 'receptions',
   'reserves', 'settings', 'site_report_notes', 'site_reports',
-  'situations', 'specifications', 'tasks', 'team_members',
+  'situations', 'tasks', 'team_members',
   'tender_specialties', 'tenders', 'visas',
 ];
 

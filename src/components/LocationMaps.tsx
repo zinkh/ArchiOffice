@@ -5,11 +5,11 @@ import { cn } from '../lib/utils';
 export const GeoportailMap = ({
   address,
   banId,
-  onParcelSelect,
+  onSelectionChange,
 }: {
   address: string;
   banId?: string;
-  onParcelSelect?: (parcel: CadastreParcel) => void;
+  onSelectionChange?: (parcels: CadastreParcel[]) => void;
 }) => {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -60,7 +60,7 @@ export const GeoportailMap = ({
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address to see the map</div>;
 
-  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onParcelSelect={onParcelSelect} />;
+  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onSelectionChange={onSelectionChange} />;
 };
 
 export const GoogleMap = ({ address }: { address: string }) => {
@@ -103,99 +103,6 @@ export const GoogleMap = ({ address }: { address: string }) => {
       title="OpenStreetMap"
       loading="lazy"
     />
-  );
-};
-
-export const GeorisquesMap = ({ address, banId }: { address: string; banId?: string }) => {
-  const [addressDetails, setAddressDetails] = useState<{ 
-    lat: number; 
-    lon: number; 
-    city: string; 
-    codeInsee: string; 
-    adresse: string; 
-    commune: string; 
-  } | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if ((!address || address.length < 5) && !banId) return;
-    
-    const fetchCoords = async () => {
-      setLoading(true);
-      setError('');
-      try {
-        const queryParams = new URLSearchParams();
-        if (banId) queryParams.append('banId', banId);
-        if (address) queryParams.append('q', address);
-        queryParams.append('limit', '1');
-
-        const res = await fetch(`/api/address-search?${queryParams.toString()}`);
-        if (res.ok) {
-          const contentType = res.headers.get('content-type');
-          if (contentType && contentType.includes('application/json')) {
-            const data = await res.json();
-            if (data.features && data.features.length > 0) {
-              const feature = data.features[0];
-              const [lon, lat] = feature.geometry.coordinates;
-              setAddressDetails({ 
-                lat, 
-                lon,
-                city: feature.properties.city,
-                codeInsee: feature.properties.citycode,
-                adresse: feature.properties.label,
-                commune: feature.properties.city || feature.properties.name
-              });
-            } else {
-              setError('Address not found');
-            }
-          } else {
-            setError('Invalid response from geocoder');
-          }
-        }
-      } catch (err) {
-        console.error(err);
-        setError('Error fetching coordinates');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    const timer = setTimeout(fetchCoords, 1000);
-    return () => clearTimeout(timer);
-  }, [address, banId]);
-
-  if (loading) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading risks...</div>;
-  if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
-  if (!addressDetails) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address</div>;
-
-  const georisquesUrl = `https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi/rapport2?form-adresse=true&isCadastre=false&city=${encodeURIComponent(addressDetails.city)}&type=adresse&typeForm=adresse&codeInsee=${addressDetails.codeInsee}&lon=${addressDetails.lon}&lat=${addressDetails.lat}&go_back=/&propertiesType=housenumber&adresse=${encodeURIComponent(addressDetails.adresse)}&longitude=${addressDetails.lon}&latitude=${addressDetails.lat}&commune=${encodeURIComponent(addressDetails.commune)}`;
-
-  // Georisques blocks iframing of their site for security reasons.
-  // Instead of an iframe, we provide a clear link to open the report in a new window.
-  return (
-    <div className="w-full h-full flex flex-col items-center justify-center p-6 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border-2 border-dashed border-zinc-200 dark:border-zinc-800">
-      <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-full flex items-center justify-center mb-4">
-        <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-      </div>
-      <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mb-2">Georisques Report</h3>
-      <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center mb-6 max-w-xs">
-        For security reasons, Georisques does not allow its report to be embedded. Click below to view the full natural risk analysis for this address.
-      </p>
-      <a
-        href={georisquesUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-2 shadow-lg shadow-red-500/20"
-      >
-        Open Georisques Report
-        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-        </svg>
-      </a>
-    </div>
   );
 };
 
@@ -262,19 +169,28 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
 
   if (!address || address.length < 10) return null;
   if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Fetching risk data...</div>;
-  if (error) return <div className="text-xs text-red-500">{error}</div>;
+  // Le service public Géorisques expire régulièrement (504) : un code
+  // d'erreur brut n'apprend rien à l'architecte, un lien vers le site oui.
+  if (error) return (
+    <div className="text-xs text-zinc-500 dark:text-zinc-400">
+      Service Géorisques momentanément indisponible.{' '}
+      <a href="https://www.georisques.gouv.fr/mes-risques/connaitre-les-risques-pres-de-chez-moi" target="_blank" rel="noopener noreferrer" className="underline hover:text-zinc-800 dark:hover:text-zinc-200">
+        Consulter georisques.gouv.fr
+      </a>
+    </div>
+  );
   if (!risks) return null;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-1">
-        <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[10px] font-bold rounded uppercase tracking-wider">Risks Summary (API)</span>
+        <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Risks Summary (API)</span>
         {risks.url && (
           <a 
             href={risks.url} 
             target="_blank" 
             rel="noopener noreferrer"
-            className="text-[10px] text-zinc-400 hover:text-red-500 flex items-center gap-1 transition-colors"
+            className="text-[0.6875rem] text-zinc-400 hover:text-red-500 flex items-center gap-1 transition-colors"
           >
             Full Report
             <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -286,13 +202,13 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
       <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col">
-            <span className="text-[10px] text-zinc-400 uppercase font-bold">Natural Risks</span>
+            <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Natural Risks</span>
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
               {risks.risques_naturels?.length || 0} identified
             </span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] text-zinc-400 uppercase font-bold">Tech Risks</span>
+            <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Tech Risks</span>
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
               {risks.risques_technologiques?.length || 0} identified
             </span>
@@ -303,12 +219,12 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
           <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
             <div className="flex flex-wrap gap-1">
               {risks.risques_naturels?.map((r: string, i: number) => (
-                <span key={`nat-${i}`} className="px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[9px] rounded border border-red-100 dark:border-red-900/30 uppercase tracking-tight">
+                <span key={`nat-${i}`} className="px-1.5 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[0.6875rem] rounded border border-red-100 dark:border-red-900/30 uppercase tracking-tight">
                   {r}
                 </span>
               ))}
               {risks.risques_technologiques?.map((r: string, i: number) => (
-                <span key={`tech-${i}`} className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[9px] rounded border border-amber-100 dark:border-amber-900/30 uppercase tracking-tight">
+                <span key={`tech-${i}`} className="px-1.5 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 text-[0.6875rem] rounded border border-amber-100 dark:border-amber-900/30 uppercase tracking-tight">
                   {r}
                 </span>
               ))}
@@ -386,7 +302,7 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 mb-1">
-        <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-[10px] font-bold rounded uppercase tracking-wider">BDNB Buildings</span>
+        <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">BDNB Buildings</span>
       </div>
       <div className="space-y-3">
         {buildings.map((b: any) => (
@@ -405,18 +321,18 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                   </svg>
                 </a>
-                <span className="text-[10px] text-zinc-400 uppercase font-bold mt-1">
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold mt-1">
                   {b.usage_principal_bdnb_open || 'Usage inconnu'}
                 </span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3 mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
               <div className="flex flex-col">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold">Construction</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Construction</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">{b.annee_construction || 'N/A'}</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold">DPE</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">DPE</span>
                 <span className={cn(
                   "text-xs font-bold px-1.5 py-0.5 rounded w-fit",
                   b.classe_bilan_dpe === 'A' ? "bg-green-100 text-green-700" :
@@ -433,26 +349,26 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
               </div>
               
               <div className="flex flex-col">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold">Usage</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Usage</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate" title={b.categorie_usage_propriete}>
                   {b.categorie_usage_propriete || 'N/A'}
                 </span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold">Logements / Niveaux</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Logements / Niveaux</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                   {b.nb_log || 0} log. / {b.nb_niveau || 0} niv.
                 </span>
               </div>
 
               <div className="flex flex-col">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold">Hauteur / Altitude</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Hauteur / Altitude</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                   {b.hauteur_mean ? `${Math.round(b.hauteur_mean)}m` : 'N/A'} / {b.altitude_sol_mean ? `${Math.round(b.altitude_sol_mean)}m` : 'N/A'}
                 </span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[9px] text-zinc-400 uppercase font-bold">Immat. Copro</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Immat. Copro</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate">
                   {b.numero_immat_principal || 'N/A'}
                 </span>
@@ -460,20 +376,20 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
 
               <div className="col-span-2 space-y-2 mt-1">
                 <div className="flex flex-col">
-                  <span className="text-[9px] text-zinc-400 uppercase font-bold">Systèmes</span>
+                  <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Systèmes</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {b.type_generateur_chauffage && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[0.6875rem] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
                         Chauffage: {b.type_generateur_chauffage}
                       </span>
                     )}
                     {b.type_generateur_ecs && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[0.6875rem] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
                         ECS: {b.type_generateur_ecs} ({b.type_installation_ecs || 'N/A'})
                       </span>
                     )}
                     {b.type_ventilation && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[0.6875rem] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
                         VMC: {b.type_ventilation}
                       </span>
                     )}
@@ -481,20 +397,20 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
                 </div>
 
                 <div className="flex flex-col">
-                  <span className="text-[9px] text-zinc-400 uppercase font-bold">Isolation</span>
+                  <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Isolation</span>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {b.type_isolation_mur_exterieur && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[0.6875rem] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
                         Murs: {b.type_isolation_mur_exterieur}
                       </span>
                     )}
                     {b.type_isolation_plancher_haut && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[0.6875rem] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
                         Toit: {b.type_isolation_plancher_haut} ({b.type_plancher_haut_deperditif || 'N/A'})
                       </span>
                     )}
                     {b.type_plancher_bas_deperditif && (
-                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[9px] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
+                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 text-[0.6875rem] rounded border border-zinc-200 dark:border-zinc-700 uppercase">
                         Sol: {b.type_plancher_bas_deperditif}
                       </span>
                     )}
@@ -558,7 +474,7 @@ export const RNBInfo = ({ address }: { address: string }) => {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 mb-1">
-        <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-bold rounded uppercase tracking-wider">RNB Buildings Found</span>
+        <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">RNB Buildings Found</span>
       </div>
       <div className="space-y-3">
         {buildings.map((b: any) => (
@@ -574,12 +490,12 @@ export const RNBInfo = ({ address }: { address: string }) => {
                   {b.rnb_id}
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                 </a>
-                <span className={`text-[10px] uppercase font-bold mt-1 ${b.status === 'constructed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                <span className={`text-[0.6875rem] uppercase font-bold mt-1 ${b.status === 'constructed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                   {b.status}
                 </span>
               </div>
               <div className="flex flex-col items-end">
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${b.is_active ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' : 'bg-red-100 dark:bg-red-900/30 text-red-600'}`}>
+                <span className={`text-[0.6875rem] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${b.is_active ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' : 'bg-red-100 dark:bg-red-900/30 text-red-600'}`}>
                   {b.is_active ? 'Active' : 'Inactive'}
                 </span>
               </div>
@@ -587,7 +503,7 @@ export const RNBInfo = ({ address }: { address: string }) => {
             
             {b.addresses && b.addresses.length > 0 && (
               <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                <p className="text-[10px] text-zinc-400 uppercase font-bold mb-1">Registered Addresses</p>
+                <p className="text-[0.6875rem] text-zinc-400 uppercase font-bold mb-1">Registered Addresses</p>
                 <div className="space-y-1">
                   {b.addresses.map((addr: any, idx: number) => (
                     <p key={idx} className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">

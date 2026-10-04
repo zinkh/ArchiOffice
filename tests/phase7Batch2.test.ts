@@ -148,7 +148,11 @@ describe('Project Phase History', () => {
     const first = await request(app).post('/api/projects/p1/phase').set(authHeader(token)).send({ phase: 'ESQ' });
     expect(first.status).toBe(201);
 
-    const second = await request(app).post('/api/projects/p1/phase').set(authHeader(token)).send({ phase: 'APS' });
+    const preview = await request(app).get('/api/projects/p1/phase-controls?to=APS').set(authHeader(token));
+    const second = await request(app).post('/api/projects/p1/phase').set(authHeader(token)).send({
+      phase: 'APS', revision: preview.body.revision, expectedCurrentId: preview.body.expectedCurrentId,
+      answers: preview.body.controls.map((c: any) => ({ ...c.answer, status: 'done' })),
+    });
     expect(second.status).toBe(201);
 
     const history = fakeSupabaseAdmin.getTable('project_phase_history').filter(h => h.project_id === 'p1');

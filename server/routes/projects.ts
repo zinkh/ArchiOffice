@@ -10,6 +10,10 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { attachReservePhotos } from '../reservePhotos';
 import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
+import { dispatchWebhookEvent } from '../webhookDispatch';
+import { applyTemplateToProject } from '../projectTemplateApply';
+import { OPERATION_LABELS } from '../../src/lib/projectTemplates';
+import type { TemplateOperationType } from '../../src/types';
 
 /** Validates every `contact_id` in a list of cotraitants/lots/stakeholders belongs to this tenant. */
 async function assertListContacts(supabaseAdmin: any, tenantId: string, list: any[] | undefined): Promise<boolean> {
@@ -93,10 +97,9 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       // alimente le classement « ouverts récemment ». Meilleur effort : une
       // instance non migrée ne doit pas perdre l'accès à ses projets pour ça.
       recordProjectOpened(supabaseAdmin, tenantId, req.user.id, id).catch(() => {});
-      const [milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reservesRows, plans] = await Promise.all([
+      const [milestones, invoices, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reservesRows, plans] = await Promise.all([
         supabaseAdmin.from('milestones').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('invoices').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
-        supabaseAdmin.from('specifications').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('ordres_de_service').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('avenants_moe').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
         supabaseAdmin.from('marches_entreprises').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
@@ -106,7 +109,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         supabaseAdmin.from('plans').select('*').eq('project_id', id).eq('tenant_id', tenantId).then((r: any) => r.data || []),
       ]);
       const reserves = await attachReservePhotos(supabaseAdmin, tenantId, 'opr', reservesRows);
-      res.json({ project, milestones, invoices, specifications, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
+      res.json({ project, milestones, invoices, ordres_de_service, avenants_moe, marches_entreprises, visas, receptions, reserves, plans });
     } catch (e: any) {
       console.error(e);
       res.status(500).json({ error: "Failed to fetch project details" });
@@ -138,7 +141,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       await checkQuota(tenantId, 'projects');
       const {
-        id: bodyId, name, client, status, budget, category, start_date, end_date, description, image_url, address,
+        id: bodyId, name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
@@ -148,9 +151,21 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, template_id
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      // Modèle de projet : lu ici depuis la base (jamais depuis le corps), et
+      // vérifié comme toute référence inter-ressources. Ses lots, jalons et
+      // tâches sont appliqués une fois l'affaire créée, plus bas.
+      let template: any = null;
+      if (template_id) {
+        const { data: tpl } = await tenantScopedFrom(supabaseAdmin, tenantId, 'project_templates').select('*').eq('id', template_id).maybeSingle();
+        if (!tpl) return res.status(400).json({ error: "Modèle de projet introuvable pour ce cabinet." });
+        template = tpl;
+      }
+      if (client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
@@ -182,17 +197,19 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const project_code = affairePrefix ? `${affairePrefix}${sepPrefix ? '-' : ''}${yearPart}` : yearPart;
       const id = bodyId || crypto.randomUUID();
       const { error: pe } = await supabaseAdmin.from('projects').insert({
-        id, tenant_id: tenantId, name, client, status: status || 'Planning', budget: budget || 0,
+        id, tenant_id: tenantId, name, client, client_id: client_id || null, status: status || 'Planning', budget: budget || 0,
         category: category || null, start_date: start_date || new Date().toISOString().split('T')[0],
         end_date: end_date || new Date().toISOString().split('T')[0], description: description || null,
         image_url: image_url || null, project_code, address: address || null,
-        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        is_complete_mission: !!is_complete_mission, etudes_notes, chantier_notes,
+        is_public_client: !!is_public_client || template?.marche_type === 'public',
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat,
+        type_projet: type_projet || (template?.operation_type && template.operation_type !== 'autre' ? OPERATION_LABELS[template.operation_type as TemplateOperationType] : undefined),
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
@@ -210,11 +227,18 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       if (categories_list?.length) {
         await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
       }
+      // Lots, jalons et tâches du modèle, datés depuis le démarrage de l'affaire.
+      let templateApplied: Awaited<ReturnType<typeof applyTemplateToProject>> | undefined;
+      if (template) {
+        templateApplied = await applyTemplateToProject(supabaseAdmin, tenantId, req.user.id, id, template, start_date || new Date().toISOString().split('T')[0]);
+        if (templateApplied.failed.length) console.error('[POST /api/projects] modèle appliqué partiellement', templateApplied.failed);
+      }
       // Log activity
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"`, name, id, 'project', 'Projets');
+      logActivity(tenantId, req.user.id, userName, `Création du projet "${name}"${template ? ` (modèle « ${template.name} »)` : ''}`, name, id, 'project', 'Projets');
+      dispatchWebhookEvent(supabaseAdmin, tenantId, 'project.created', { id, name, project_code, client, status: status || 'Planning' });
 
-      res.status(201).json({ id, project_code });
+      res.status(201).json({ id, project_code, ...(templateApplied ? { template_applied: templateApplied } : {}) });
     } catch (error: any) {
       console.error("Error creating project:", error);
       res.status(error.status || 500).json({ error: error.message || "Failed to create project" });
@@ -226,8 +250,8 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const {
-        name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission, is_chantier, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
+        name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
+        is_complete_mission, is_chantier, offline_enabled, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         cotraitants_list, lots_list, stakeholders_list, categories_list,
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
@@ -238,15 +262,27 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       } = req.body;
-      if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
+      // Une mise à jour partielle (un agent qui ne touche qu'un champ, par
+      // exemple) ne doit pas être bloquée faute de renvoyer le nom et le
+      // client déjà en base : ils ne sont exigés qu'à la création. Absents du
+      // corps de la requête, on retombe sur les valeurs déjà enregistrées.
+      const { data: existingProject } = await supabaseAdmin.from('projects').select('name, client, client_id')
+        .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      const finalName = name ?? (existingProject as any)?.name;
+      const finalClient = client ?? (existingProject as any)?.client;
+      const finalClientId = client_id !== undefined ? client_id : (existingProject as any)?.client_id;
+      if (!finalName || !finalClient) return res.status(400).json({ error: "Name and client are required" });
+      if (finalClientId && !(await assertTenantEntity(supabaseAdmin, 'contacts', finalClientId, tenantId))) {
+        return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
       if (!(await assertListContacts(supabaseAdmin, tenantId, cotraitants_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, lots_list))
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
       const { error: ue } = await supabaseAdmin.from('projects').update({
-        name, client, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
+        name: finalName, client: finalClient, client_id: finalClientId || null, status, budget, category, start_date, end_date, description, image_url, address,
+        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, offline_enabled: !!offline_enabled, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
         client_siret: client_siret || null, client_vat_number: client_vat_number || null,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
@@ -258,22 +294,32 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
-      // Update related lists (delete + reinsert)
-      await supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (cotraitants_list?.length) {
-        await supabaseAdmin.from('project_cotraitants').insert(cotraitants_list.map((c: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, specialty: c.specialty, contact_id: c.contact_id || null })));
-      }
-      await supabaseAdmin.from('project_lots').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (lots_list?.length) {
-        await supabaseAdmin.from('project_lots').insert(lots_list.map((l: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null })));
-      }
-      await supabaseAdmin.from('project_stakeholders').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (stakeholders_list?.length) {
-        await supabaseAdmin.from('project_stakeholders').insert(stakeholders_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, name: s.name, role: s.role, contact_id: s.contact_id || null })));
-      }
-      await supabaseAdmin.from('project_categories_junction').delete().eq('project_id', id).eq('tenant_id', tenantId);
-      if (categories_list?.length) {
-        await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
+      // Listes rattachées : remplacées SEULEMENT si le corps de la requête les
+      // porte. Une mise à jour qui ne les envoie pas (la fiche affaire, qui
+      // s'enregistre seule et n'édite pas ces listes) les laissait jusqu'ici
+      // vidées, puis recréées. Et une ligne qui existait déjà garde son
+      // identifiant et ses autres colonnes : les lots étaient réinsérés avec un
+      // nouvel id et sans leurs montants (base_amount...), ce qui détachait les
+      // visas, les marchés et le DPGF (projectLotId) qui les référencent.
+      const replaceList = async (table: string, items: any[] | undefined, pick: (item: any) => Record<string, unknown>) => {
+        if (items === undefined) return;
+        const { data: existingRows } = await supabaseAdmin.from(table).select('*').eq('project_id', id).eq('tenant_id', tenantId);
+        const existingById = new Map<string, any>((existingRows || []).map((r: any) => [r.id, r]));
+        await supabaseAdmin.from(table).delete().eq('project_id', id).eq('tenant_id', tenantId);
+        if (!items?.length) return;
+        await supabaseAdmin.from(table).insert(items.map((item: any) => {
+          const previous = item?.id ? existingById.get(item.id) : undefined;
+          return { ...(previous || {}), ...pick(item), id: previous ? previous.id : crypto.randomUUID(), tenant_id: tenantId, project_id: id };
+        }));
+      };
+      await replaceList('project_cotraitants', cotraitants_list, (c: any) => ({ specialty: c.specialty, contact_id: c.contact_id || null }));
+      await replaceList('project_lots', lots_list, (l: any) => ({ lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null }));
+      await replaceList('project_stakeholders', stakeholders_list, (s: any) => ({ name: s.name, role: s.role, contact_id: s.contact_id || null }));
+      if (categories_list !== undefined) {
+        await supabaseAdmin.from('project_categories_junction').delete().eq('project_id', id).eq('tenant_id', tenantId);
+        if (categories_list?.length) {
+          await supabaseAdmin.from('project_categories_junction').insert(categories_list.map((catId: string) => ({ project_id: id, category_id: catId, tenant_id: tenantId })));
+        }
       }
       res.json({ success: true });
     } catch (error: any) {
@@ -290,7 +336,6 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       await Promise.all([
         supabaseAdmin.from('project_team').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('milestones').delete().eq('project_id', id).eq('tenant_id', tenantId),
-        supabaseAdmin.from('specifications').delete().eq('project_id', id).eq('tenant_id', tenantId),
         supabaseAdmin.from('project_cotraitants').delete().eq('project_id', id).eq('tenant_id', tenantId),
       ]);
       const { error } = await supabaseAdmin.from('projects').delete().eq('id', id).eq('tenant_id', tenantId);

@@ -22,6 +22,32 @@ import { encryptSecret, decryptSecret } from '../secretsCrypto';
 import { fetchImapFullMessage, fetchImapAttachment } from '../mailFullMessage';
 import { normalizeImapMailboxes } from '../mailFolders';
 
+export interface ImapSearchParams {
+  email?: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  q?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}
+
+// Pure, testable sans serveur IMAP réel — voir tests/imapSearchCriteria.test.ts.
+export function buildImapSearchCriteria(params: ImapSearchParams): Record<string, any> {
+  const { email, from, to, subject, q, dateFrom, dateTo } = params;
+  const criteria: Record<string, any> = {};
+  if (email) criteria.or = [{ from: email }, { to: email }];
+  if (from) criteria.from = from;
+  if (to) criteria.to = to;
+  if (subject) criteria.subject = subject;
+  // `text` (IMAP SEARCH TEXT) couvre les en-têtes — objet compris — ET le
+  // corps, contrairement à `body` qui ne cherchait que le corps.
+  if (q) criteria.text = q;
+  if (dateFrom) criteria.since = new Date(dateFrom);
+  if (dateTo) criteria.before = new Date(dateTo);
+  return criteria;
+}
+
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
@@ -183,11 +209,15 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
   // additive for the Mailbox page's advanced search panel. When `folder` is
   // given, search is scoped to just that one mailbox instead of the
   // INBOX+Sent default (matching how /messages already takes a single
-  // `folder`). `q` maps to a body search — IMAP SEARCH has no single
-  // "subject or body" operator to combine with the other AND'd criteria
-  // below without also restructuring how they combine, so free text here
-  // only matches body content, not subject (use the `subject` field for
-  // that). There's also no hasAttachment param: IMAP SEARCH has no
+  // `folder`). `q` maps to ImapFlow's `text` criterion (IMAP SEARCH TEXT,
+  // RFC 3501), which matches header fields — Subject included — AND the
+  // body: a free-text query used to map to `body` only, so a word present
+  // solely in the subject (e.g. an affaire's name in "71 BLANDAN Devis
+  // signe") was never found even though the dedicated `subject` field would
+  // find it (confirmed against a real message: search by subject found it,
+  // the same word via `q` did not). Gmail's bare `q` term and Outlook's
+  // `$search` already cover subject+body, so this was an IMAP-only gap.
+  // There's also no hasAttachment param: IMAP SEARCH has no
   // attachment-presence criterion without fetching and inspecting each
   // message's BODYSTRUCTURE, which isn't worth the cost here.
   app.get('/api/mail/imap/search', withRequestTimeout, async (req: any, res: any) => {
@@ -201,14 +231,7 @@ export function registerImapMailSyncRoutes(app: Express, { supabaseAdmin, getTen
       }
       const limit = Math.min(Math.max(parseInt(String(req.query.limit || SEARCH_LIMIT), 10) || SEARCH_LIMIT, 1), 50);
 
-      const criteria: Record<string, any> = {};
-      if (email) criteria.or = [{ from: email }, { to: email }];
-      if (from) criteria.from = from;
-      if (to) criteria.to = to;
-      if (subject) criteria.subject = subject;
-      if (q) criteria.body = q;
-      if (dateFrom) criteria.since = new Date(dateFrom);
-      if (dateTo) criteria.before = new Date(dateTo);
+      const criteria = buildImapSearchCriteria({ email, from, to, subject, q, dateFrom, dateTo });
 
       const password = decryptSecret(connection.imap_password_encrypted);
       const client = new ImapFlow({

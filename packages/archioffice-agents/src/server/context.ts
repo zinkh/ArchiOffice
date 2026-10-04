@@ -9,6 +9,7 @@ import { AGENT_RESOURCES } from '../types.js';
 // 1.x is a pure-JS text-only extractor with zero native dependencies.
 import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
+import { parseWithActiveEngine } from './documentParser.js';
 import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS, rasterizePdf, visionMimeType, ocrMaxPages, OCR_MIN_TEXT_CHARS } from './ocr.js';
 import { readExternalFile } from './externalFiles.js';
 
@@ -69,7 +70,7 @@ function parseStorageRef(fileUrl: string): { bucket: string; path: string } | nu
 // plain fetch() against the stored reference URL, which would 401/403.
 // Falls back to a direct fetch for anything that isn't one of our own
 // storage refs (e.g. a document imported from an external link).
-async function readStorageObject(supabaseAdmin: any, tenantId: string, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+export async function readStorageObject(supabaseAdmin: any, tenantId: string, fileUrl: string): Promise<{ buffer: Buffer; contentType: string } | null> {
   // Un fichier hébergé sur l'espace de stockage du cabinet (Google Drive,
   // Dropbox, Nextcloud, kDrive) n'est joignable ni par Storage ni par un fetch
   // direct : seul l'hôte sait construire l'adaptateur. Sans ce passage, les
@@ -103,6 +104,23 @@ const MAX_PRICE_CATALOG_ROWS = 40;
 const MAX_COST_HISTORY_ROWS = 30;
 const MAX_CCTP_EXCERPTS = 5;
 const MAX_CCTP_EXCERPT_CHARS = 2000;
+
+// La bibliothèque de connaissances d'un agent (réglementation, DTU, notices)
+// est, comme firm_knowledge, auto-injectée à chaque tour et facturée au
+// jeton — mêmes plafonds d'ordre de grandeur que les extraits de CCTP
+// ci-dessus, volontairement serrés : ce n'est pas un canal de recherche dans
+// un gros document, mais l'injection directe de quelques pièces courtes
+// choisies par l'architecte (voir CLAUDE.md, "Bibliothèque de connaissances
+// des agents").
+const MAX_KNOWLEDGE_DOCS = 10;
+const MAX_KNOWLEDGE_DOC_CHARS = 6000;
+const KNOWLEDGE_EXTRACTION_TIMEOUT_MS = 10_000;
+
+// Mémoire d'apprentissage (agent_learning_suggestions approuvées) : du texte
+// court déjà en base, pas un document à extraire — plafonds bien plus serrés
+// que la bibliothèque de connaissances, qui porte des pièces entières.
+const MAX_LEARNING_NOTES = 15;
+const MAX_LEARNING_NOTE_CHARS = 1000;
 
 function daysBetween(start: string, end: string): number | null {
   const s = new Date(start).getTime();
@@ -190,6 +208,50 @@ function summarizeCctpExcerpts(rows: { data: string | any }[]): { title: string;
   return excerpts;
 }
 
+// Extraction texte-seul (pas de vision) pour un document de la bibliothèque
+// de connaissances d'un agent : une réglementation ou un DTU est un texte,
+// jamais une photo à lire pixel par pixel comme une pièce jointe de message
+// (voir la note sur ctx.documentImages plus bas) — pas de branche vision ici,
+// volontairement, pour rester le sous-ensemble strictement nécessaire plutôt
+// que de dupliquer toute la marche à suivre de la boucle contentFetches
+// ci-dessous (redirection PDF scanné vers rasterizePdf comprise).
+export async function extractKnowledgeDocText(
+  supabaseAdmin: any,
+  tenantId: string,
+  doc: { name: string; file_url: string },
+  // Faux pour la bibliothèque d'un agent, relue à CHAQUE tour de chaque
+  // conversation : Nomic se paie à la page, et le même DTU refacturé à chaque
+  // message n'apporterait rien qu'une lecture locale n'ait déjà donné.
+  // Vrai pour une lecture ponctuelle (analyse du DCE, génération du CCTP).
+  allowNomic: boolean = true,
+): Promise<string | null> {
+  const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
+  if (!fetched) return null;
+  const { buffer, contentType } = fetched;
+  const lowerName = String(doc.name || '').toLowerCase();
+
+  // Nomic Parse quand il est le moteur choisi dans /admin (plans et pièces du
+  // DCE surtout, voir documentParser.ts) ; null = moteur local ci-dessous.
+  const nomicText = allowNomic ? await parseWithActiveEngine(lowerName, buffer) : null;
+  if (nomicText) return nomicText;
+
+  let text: string | null = null;
+  if (lowerName.endsWith('.pdf')) {
+    text = (await pdfParse(buffer)).text;
+  } else if (lowerName.endsWith('.docx')) {
+    text = (await mammoth.extractRawText({ buffer })).value;
+  } else if (contentType.includes('text') || contentType.includes('json') || contentType.includes('csv') || contentType.includes('xml')) {
+    text = buffer.toString('utf8');
+  }
+
+  if (isOcrCandidate(lowerName, text)) {
+    const ocr = await ocrDocument(lowerName, buffer).catch(() => null);
+    if (ocr?.text?.trim()) text = ocr.text;
+  }
+
+  return text && text.trim() ? text : null;
+}
+
 export async function buildAgentContext(
   supabaseAdmin: any,
   tenantId: string,
@@ -203,7 +265,12 @@ export async function buildAgentContext(
   // défaut : un appelant qui ne le passe pas (les tests existants, avant
   // cette capacité) garde le comportement OCR d'origine plutôt que de
   // planter sur un paramètre manquant.
-  supportsVision: boolean = false
+  supportsVision: boolean = false,
+  // capabilitiesFromAgent(agent).knowledge — indépendant de context_scopes,
+  // comme docsRead/docsWrite (voir AgentCapabilities.knowledge dans types.ts).
+  knowledgeEnabled: boolean = false,
+  // capabilitiesFromAgent(agent).learning — même indépendance de context_scopes.
+  learningEnabled: boolean = false
 ): Promise<AgentContext> {
   const [tenantRes, profileRes] = await Promise.all([
     supabaseAdmin.from('tenants').select('name').eq('id', tenantId).single(),
@@ -224,6 +291,8 @@ export async function buildAgentContext(
     colleagues: [],
     teamMembers: [],
     firmKnowledge: { phaseBenchmarks: [], priceCatalog: [], projectCostHistory: [], cctpExcerpts: [] },
+    knowledgeDocuments: [],
+    learningNotes: [],
   };
 
   const fetches: Promise<void>[] = [];
@@ -359,6 +428,28 @@ export async function buildAgentContext(
     );
   }
 
+  // Mémoire d'apprentissage — corrections et notes déjà APPROUVÉES par
+  // l'architecte (agent_learning_suggestions), jamais une proposition encore
+  // 'pending'. Toujours peuplée quand learningEnabled, comme
+  // knowledgeDocuments : c'est ce qui referme la boucle de
+  // suggerer_amelioration une fois la proposition validée.
+  if (learningEnabled) {
+    fetches.push(
+      supabaseAdmin.from('agent_learning_suggestions')
+        .select('kind, title, content')
+        .eq('tenant_id', tenantId).eq('agent_id', currentAgentId).eq('status', 'approved')
+        .in('kind', ['correction', 'knowledge_note'])
+        .order('created_at', { ascending: false })
+        .limit(MAX_LEARNING_NOTES)
+        .then((r: any) => {
+          if (r.error) { console.warn('[agent context] learning notes fetch failed:', r.error.message); return; }
+          ctx.learningNotes = ((r.data || []) as any[]).map(row => ({
+            kind: row.kind, title: row.title, content: String(row.content || '').slice(0, MAX_LEARNING_NOTE_CHARS),
+          }));
+        })
+    );
+  }
+
   // Fetch specific documents attached to this message (overrides scope-based recentDocuments)
   if (attachedDocumentIds.length > 0) {
     fetches.push(
@@ -416,6 +507,21 @@ export async function buildAgentContext(
           // Fournisseur sans vision (ex. Mistral) : reste sur l'OCR texte
           // classique ci-dessous, dégradé mais honnête — c'est le chemin
           // isOcrCandidate/ocrDocument existant, inchangé.
+        }
+
+        // Moteur Nomic choisi dans /admin : lecture complète (couche texte,
+        // OCR, tableaux) d'un PDF ou d'un document Office — après la branche
+        // vision ci-dessus, qui reste préférée pour une photo. Null = moteur
+        // local, y compris après un échec de Nomic.
+        const nomicText = await parseWithActiveEngine(lowerName, buffer);
+        if (nomicText) {
+          ctx.documentContents.push({
+            id: doc.id,
+            name: doc.name,
+            content: '[Document lu par Nomic Parse.]\n\n' + nomicText.slice(0, MAX_DOC_BYTES),
+          });
+          console.log(`[agent context] document "${doc.name}" extracted by Nomic in ${Date.now() - docStart}ms (${nomicText.length} chars)`);
+          return;
         }
 
         let text: string | null = null;
@@ -503,6 +609,36 @@ export async function buildAgentContext(
     });
 
     await Promise.all(contentFetches);
+  }
+
+  // Bibliothèque de connaissances de l'agent — auto-injectée à chaque tour,
+  // comme firm_knowledge, jamais conditionnée par attachedDocumentIds : ces
+  // documents (documents.resource_type = 'agents', resource_id = l'agent)
+  // ont été déposés une fois pour toutes par l'architecte via
+  // ResourceAttachments sur la fiche agent, pas joints à CE message.
+  if (knowledgeEnabled) {
+    const { data: knowledgeDocs } = await supabaseAdmin
+      .from('documents')
+      .select('id, name, file_url')
+      .eq('tenant_id', tenantId)
+      .eq('resource_type', 'agents')
+      .eq('resource_id', currentAgentId)
+      .order('uploaded_at', { ascending: false })
+      .limit(MAX_KNOWLEDGE_DOCS);
+
+    const knowledgeFetches = ((knowledgeDocs as any[]) || []).map((doc: any) =>
+      withTimeout(
+        extractKnowledgeDocText(supabaseAdmin, tenantId, doc, false).then(text => {
+          if (text) ctx.knowledgeDocuments.push({ title: doc.name, excerpt: text.slice(0, MAX_KNOWLEDGE_DOC_CHARS) });
+        }),
+        KNOWLEDGE_EXTRACTION_TIMEOUT_MS
+      ).catch((e: any) => {
+        // Même logique que l'extraction des pièces jointes : un document
+        // illisible ou trop lent est ignoré, jamais bloquant pour le tour.
+        console.log(`[agent context] knowledge document "${doc.name}" extraction failed: ${e?.message}`);
+      })
+    );
+    await Promise.all(knowledgeFetches);
   }
 
   return ctx;

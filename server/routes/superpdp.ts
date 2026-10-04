@@ -7,12 +7,13 @@
 // matching the other integration modules.
 import type { Express } from 'express';
 import { buildEnInvoiceData } from '../../src/lib/facturX';
-import { computeEtatAcompte, buildEtatAcomptePdfBuffer } from '../etatAcompte';
+import { certificatSituation, buildCertificatPdfBuffer } from '../etatAcompte';
 import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  requireTenantAdmin: (userId: string) => Promise<string>;
 }
 
 const SUPERPDP_BASE = 'https://api.superpdp.tech';
@@ -92,7 +93,7 @@ async function buildEnInvoice(supabaseAdmin: any, tenantId: string, invoice: any
   });
 }
 
-export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
+export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin }: RouteDeps) {
   // GET /api/superpdp/status
   app.get('/api/superpdp/status', async (req: any, res: any) => {
     try {
@@ -107,17 +108,17 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
   // DELETE /api/superpdp/disconnect
   app.delete('/api/superpdp/disconnect', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       await supabaseAdmin.from('settings').update({ superpdp_client_id: null, superpdp_client_secret: null }).eq('tenant_id', tenantId);
       res.json({ success: true });
     } catch (e: any) {
-      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(500).json({ error: e.message }); }
+      console.error("[DELETE /api/superpdp/disconnect]", e); res.status(e.status || 500).json({ error: e.message }); }
   });
 
   // POST /api/superpdp/test — verify credentials by fetching company info
   app.post('/api/superpdp/test', async (req: any, res: any) => {
     try {
-      const tenantId = await getTenantId(req.user.id);
+      const tenantId = await requireTenantAdmin(req.user.id);
       const { data: s } = await supabaseAdmin.from('settings').select('superpdp_client_id,superpdp_client_secret').eq('tenant_id', tenantId).single();
       const cfg = s as any;
       if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Configuration incomplète' });
@@ -125,7 +126,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       const company = await superpdpFetch(token, '/v1.beta/companies/me');
       res.json({ connected: true, company: company?.formal_name || company?.name || 'SuperPDP' });
     } catch (e: any) {
-      console.error("[POST /api/superpdp/test]", e); res.status(400).json({ connected: false, error: e.message }); }
+      console.error("[POST /api/superpdp/test]", e); res.status(e.status || 400).json({ connected: false, error: e.message }); }
   });
 
   // POST /api/superpdp/send/:invoiceId — send one invoice to SuperPDP
@@ -226,12 +227,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       .single();
     if (!sit) return null;
     const marche = (sit as any).marche as any;
-    const { data: detailsRaw } = await supabaseAdmin
-      .from('detail_situations')
-      .select('*, dpgf_item:dpgf_items(designation, prix_unitaire_ht, quantite_prevue, unite)')
-      .eq('tenant_id', tenantId)
-      .eq('situation_id', situationId);
-    return { sit, marche, details: detailsRaw ?? [] };
+    return { sit, marche };
   }
 
   // POST /api/superpdp/search-situation-facture/:situationId — find the
@@ -310,10 +306,10 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
       const cfg = settingsRes.data as any;
       if (!cfg?.superpdp_client_id || !cfg?.superpdp_client_secret) return res.status(400).json({ error: 'Super PDP non configuré' });
       if (!loaded) return res.status(404).json({ error: 'Situation introuvable' });
-      const { sit, marche, details } = loaded;
+      const { sit, marche } = loaded;
       if (!sit.superpdp_id) return res.status(400).json({ error: "Recherchez et liez d'abord la facture de l'entreprise avant de joindre l'état d'acompte" });
 
-      const pdfBuf = await buildEtatAcomptePdfBuffer(sit, marche, details, cfg.agency_name || '');
+      const pdfBuf = await buildCertificatPdfBuffer(supabaseAdmin, tenantId, sit, marche);
       const token = await superpdpToken(cfg.superpdp_client_id, cfg.superpdp_client_secret);
       await superpdpFetch(token, `/v1.beta/invoices/${sit.superpdp_id}/attachments`, {
         method: 'POST',
@@ -366,17 +362,16 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data, error } = await supabaseAdmin.from('situations')
-        .select('*, marche:marches_entreprises(entreprise_nom,entreprise_siret,lot_numero,lot_titre,tva_rate,revision_active), projects(name)')
+        .select('*, marche:marches_entreprises(*), projects(name)')
         .eq('tenant_id', tenantId)
         .not('superpdp_id', 'is', null)
         .order('date_situation', { ascending: false });
       if (error) throw error;
       const result = await Promise.all((data || []).map(async (s: any) => {
-        const { data: details } = await supabaseAdmin.from('detail_situations').select('*').eq('tenant_id', tenantId).eq('situation_id', s.id);
-        const net = computeEtatAcompte(s, s.marche, details ?? []);
+        const net = await certificatSituation(supabaseAdmin, tenantId, s, s.marche);
         const project_name = s.projects?.name || null;
         const { projects: _p, ...rest } = s;
-        return { ...rest, project_name, montant_ttc: net.net };
+        return { ...rest, project_name, montant_ttc: net.netAPayer };
       }));
       res.json(result);
     } catch (e: any) {
