@@ -8,7 +8,14 @@ import {
   IconSubtask, IconArrowBarToLeft, IconArrowBarToRight, IconArrowsMaximize, IconArrowsMinimize,
   IconLayoutSidebarLeftCollapse,
 } from '@tabler/icons-react';
-import { useProToolbar } from './toolbar/proToolbar';
+import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
+import { ToolbarMenu } from './toolbar/ToolbarMenu';
+import { hierarchyKey } from './hierarchyOps';
+import { useSettings } from '../../hooks/useSettings';
+import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection } from '../../lib/batimentsArticles';
+import { exportCctpDocx, exportCctpPdf } from '../../lib/cctpExport';
+import type { ProNotify } from './DPGFWorkspace';
+import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall } from '@tabler/icons-react';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { DPGF, Chapitre, Ligne } from '../../types/dpgf';
@@ -28,6 +35,8 @@ interface CCTPEditorProps {
   onToggleTree?: () => void;
   /** Drop cross-panel : appelé quand une ligne est déposée depuis le panneau droit. */
   onDropExternal?: (ligne: Ligne) => void;
+  projectName?: string;
+  notify?: ProNotify;
 }
 
 let _uid = 0;
@@ -42,8 +51,9 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, notify }) => {
   const { t } = useTranslation();
+  const { settings } = useSettings();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
   const showTree = showTreeProp ?? localShowTree;
@@ -294,6 +304,42 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     if (selection.kind === 'chapitre') deleteCCTPChapitre(selection.lotIdx, selection.chapIdx);
     else deleteCCTPLigne(selection.lotIdx, selection.chapIdx, selection.lignePath);
   };
+  // ── Export du CCTP et bâtiments ────────────────────────────────────────────
+  const batimentsCctp = dpgf.multiBatiments ? batimentsParOrdre(dpgf.batiments) : [];
+  const exporter = async (format: 'pdf' | 'docx', batimentId?: string) => {
+    const batiment = batimentsCctp.find(b => b.id === batimentId);
+    try {
+      const opts = { projectName, settings: settings ?? {}, batiment };
+      await (format === 'pdf' ? exportCctpPdf(dpgf, opts) : exportCctpDocx(dpgf, opts));
+    } catch (e) {
+      notify?.(t('pro_cctp_export_failed', { error: e instanceof Error ? e.message : String(e) }), { type: 'error' });
+    }
+  };
+  const exporterParBatiment = async (format: 'pdf' | 'docx') => {
+    // Un article chiffrable sans bâtiment n'entre dans aucun CCTP de bâtiment : on le dit.
+    const orphelins = articlesSansBatiment(dpgf).length;
+    for (const b of batimentsCctp) await exporter(format, b.id);
+    if (orphelins) notify?.(t('pro_cctp_export_unassigned', { count: orphelins }), { type: 'error' });
+  };
+  const batimentEntries = (key: string): ToolbarMenuEntry[] => batimentsCctp.map(b => {
+    const etat = etatBatimentSelection(dpgf.lots, [key], b.id);
+    return {
+      id: `bat-${b.id}`, label: b.libelle ? `${b.code} · ${b.libelle}` : b.code, keepOpen: true,
+      checked: etat === 'tous' ? true : etat === 'certains' ? 'mixed' as const : false,
+      onClick: () => {
+        const lots = basculerBatimentEnMasse(dpgf.lots, [key], b.id, etat !== 'tous');
+        const totalHT = lots.reduce((s, l) => s + l.sousTotal, 0);
+        onChange({ ...dpgf, lots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
+      },
+    };
+  });
+  const resumeBatiments = (key: string) => {
+    const etats = batimentsCctp.map(b => [b.code, etatBatimentSelection(dpgf.lots, [key], b.id)] as const);
+    const codes = etats.filter(([, e]) => e === 'tous').map(([c]) => c);
+    const partiel = etats.some(([, e]) => e === 'certains');
+    return codes.length || partiel ? `${codes.join(', ')}${partiel ? (codes.length ? ', …' : '…') : ''}` : t('pro_buildings_none');
+  };
+
   useProToolbar([
     {
       kind: 'menu', id: 'cctp-add', label: t('pro_add'), icon: <IconPlus size={16} />, accent: true, mobile: true,
@@ -306,6 +352,23 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     { kind: 'button', id: 'cctp-generate', label: t('pro_cctp_generate'), icon: <IconSparkles size={16} />, hint: t('pro_cctp_generate_hint'), onClick: () => setShowGenerate(true) },
     { kind: 'button', id: 'cctp-library', label: t('pro_library'), icon: <IconBuildingStore size={16} />, pressed: showLibrary, onClick: () => setShowLibrary(v => !v) },
     { kind: 'button', id: 'cctp-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v) },
+    {
+      kind: 'menu', id: 'cctp-export', label: t('pro_export'), icon: <IconDownload size={16} />,
+      entries: [
+        ...(batimentsCctp.length ? [{ id: 'cctp-export-all', heading: t('pro_cctp_export_whole') } as ToolbarMenuEntry] : []),
+        { id: 'cctp-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exporter('pdf') },
+        { id: 'cctp-docx', label: t('pro_export_word'), icon: <IconFileTypeDoc size={16} />, onClick: () => exporter('docx') },
+        ...(batimentsCctp.length ? [
+          { id: 'cctp-export-each', heading: t('pro_export_by_building') } as ToolbarMenuEntry,
+          { id: 'cctp-pdf-each', label: t('pro_cctp_export_each_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exporterParBatiment('pdf') },
+          { id: 'cctp-docx-each', label: t('pro_cctp_export_each_word'), icon: <IconFileTypeDoc size={16} />, onClick: () => exporterParBatiment('docx') },
+          ...batimentsCctp.flatMap(b => [
+            { id: `cctp-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exporter('pdf', b.id) },
+            { id: `cctp-docx-${b.id}`, label: `${b.code} · ${t('pro_export_word')}`, icon: <IconFileTypeDoc size={16} />, onClick: () => exporter('docx', b.id) },
+          ]),
+        ] : []),
+      ],
+    },
   ]);
   const selectionActions: SelectionAction[] = [
     { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: !canMove(dpgf.lots, selection, -1) },
@@ -592,11 +655,24 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                 {/* Bâtiment / phase / localisation */}
                 {(dpgf.multiBatiments || dpgf.multiPhases || selection.kind === 'ligne') && (
                   <div className="mt-3 flex flex-wrap items-center gap-3">
-                    {(dpgf.multiBatiments || dpgf.multiPhases) && (
+                    {dpgf.multiBatiments && (
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">Bâtiment / phase :</span>
+                        <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('pro_buildings')} :</span>
+                        <ToolbarMenu
+                          entries={() => batimentEntries(hierarchyKey(selection))}
+                          onSelect={entry => entry.onClick()}
+                          ariaLabel={t('pro_buildings_of', { numero: selData.name })}
+                          triggerClassName="inline-flex items-center gap-1 h-7 px-2 rounded border text-xs outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                          triggerStyle={{ borderColor: 'var(--tblr-border)' }}
+                          trigger={<>{resumeBatiments(hierarchyKey(selection))}<IconChevronDownSmall size={12} aria-hidden /></>}
+                        />
+                      </div>
+                    )}
+                    {dpgf.multiPhases && (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">{t('pro_col_phase')} :</span>
                         <SelecteursDecoupage
-                          doc={selData.ligne?.quantitesBatiments !== undefined ? { ...dpgf, multiBatiments: false } : dpgf}
+                          doc={{ ...dpgf, multiBatiments: false }}
                           batimentId={selData.batimentId}
                           phaseId={selData.phaseId}
                           onBatimentChange={v => updateBatimentPhase('batimentId', v)}

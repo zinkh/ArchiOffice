@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IconCheck } from '@tabler/icons-react';
+import { IconCheck, IconMinus } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
 import { isHeading, isSeparator, type ToolbarMenuEntry } from './proToolbar';
 
@@ -169,14 +169,14 @@ export function ToolbarMenu({
                 title={entry.hint}
                 onClick={() => {
                   if (entry.disabled) return;
-                  close(true);
+                  if (!entry.keepOpen) close(true);
                   onSelect(entry);
                 }}
                 onKeyDown={e => {
                   if (e.key !== 'Enter' && e.key !== ' ') return;
                   e.preventDefault();
                   if (entry.disabled) return;
-                  close(true);
+                  if (!entry.keepOpen) close(true);
                   onSelect(entry);
                 }}
                 className={cn(
@@ -185,9 +185,20 @@ export function ToolbarMenu({
                 )}
                 style={entry.danger && !entry.disabled ? { color: 'var(--tblr-danger)' } : undefined}
               >
-                <span className="w-4 shrink-0 flex items-center justify-center" aria-hidden>
-                  {entry.checked ? <IconCheck size={16} /> : entry.icon}
-                </span>
+                {entry.checked === undefined ? (
+                  <span className="w-4 shrink-0 flex items-center justify-center" aria-hidden>{entry.icon}</span>
+                ) : (
+                  // Une vraie case : cochée, cochée pour une partie de la sélection, ou vide.
+                  <span
+                    aria-hidden
+                    className="w-4 h-4 shrink-0 flex items-center justify-center rounded-[3px] border"
+                    style={entry.checked
+                      ? { background: 'var(--tblr-primary)', borderColor: 'var(--tblr-primary)', color: '#fff' }
+                      : { borderColor: 'var(--tblr-muted)' }}
+                  >
+                    {entry.checked === 'mixed' ? <IconMinus size={12} stroke={3} /> : entry.checked ? <IconCheck size={12} stroke={3} /> : null}
+                  </span>
+                )}
                 <span className="flex-1 min-w-0 truncate">{entry.label}</span>
                 {entry.shortcut && (
                   <span className="shrink-0 text-xs font-mono" style={{ color: 'var(--tblr-muted)' }}>{entry.shortcut}</span>

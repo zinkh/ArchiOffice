@@ -1,6 +1,5 @@
 import { ProReadOnlyPanel } from './ProReadOnlyPanel';
 import { appliquerTitresLots, titresModifies } from '../../lib/lotTitles';
-import { ArticleBuildingPanel } from './ArticleBuildingPanel';
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
@@ -702,7 +701,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
 
       {renaming > 0 && <p role="status" className="px-3 text-sm">Synchronisation des titres de lots…</p>}
       {titleError && <p role="alert" className="px-3 text-sm text-red-600">{titleError} Le titre n’a pas été enregistré ; réessayez le renommage.</p>}
-      {!isBpuTab && dpgf && <ArticleBuildingPanel dpgf={dpgf} onChange={editDpgf} projectName={projectName} />}
       <VersionsDialog
         versions={versions}
         onClose={() => setVersions(null)}
@@ -831,7 +829,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} />
+              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} notify={notify} />
             ) : null}
           </div>
           {splitView && (

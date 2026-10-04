@@ -24,6 +24,11 @@ import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
+import {
+  basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
+  heritagePour, modifierFeuilles, quantitesParBatiment,
+} from '../../lib/batimentsArticles';
+import { forBuilding } from '../../lib/dpgfBuildings';
 
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
@@ -112,7 +117,14 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // (bâtiment, phase — chacune conditionnelle — et localisation, toujours
   // présente). Sert à étendre le colSpan des lignes de totaux en pied de
   // tableau, qui ne connaissent pas ces colonnes autrement.
-  const nbColsDecoupage = (dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0) + 1;
+  const nbColsDecoupage = (dpgf.multiPhases ? 1 : 0) + 1;
+  // Plusieurs bâtiments : une colonne « Bâtiments » (cases à cocher) puis une
+  // quantité par bâtiment, avant la quantité totale.
+  const multiBat = !!dpgf.multiBatiments;
+  const batiments = multiBat ? batimentsParOrdre(dpgf.batiments) : [];
+  const nbColsBat = multiBat ? 1 + batiments.length : 0;
+  // La phase seule reste dans la colonne de découpage : le bâtiment a la sienne.
+  const docPhases = { ...dpgf, multiBatiments: false };
 
   const flatRows: FlatRow<Lot, Chapitre, Ligne>[] =
     buildFlatRows(dpgf.lots, { expandedLots, expandedChaps, expandedLignes });
@@ -335,6 +347,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const parsed = parseRowKey(rKey);
     if (!parsed) { setEditingCell(null); return; }
 
+    // Quantité d'un bâtiment : « qb:<id du bâtiment> ».
+    if (field.startsWith('qb:') && parsed.kind === 'ligne') {
+      const id = field.slice(3);
+      const q = evalFormula(value);
+      commitLots(modifierFeuilles(dpgf.lots, feuillesSelectionnees(dpgf.lots, [rKey]), f => fixerQuantiteBatiment(f.ligne, id, q, f.herite)));
+      setEditingCell(null);
+      return;
+    }
+
     if (parsed.kind === 'ligne') {
       const { lotIdx: li, chapIdx: ci, lignePath } = parsed;
       mutateLots(lots => {
@@ -484,6 +505,42 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     });
   };
 
+  // ── Bâtiments des articles ──────────────────────────────────────────────────
+  // Cases à cocher, pour une ligne comme pour une sélection : un lot, un
+  // chapitre ou un article à sous-articles vaut tous ses articles.
+  const batimentEntries = (keys: string[]): ToolbarMenuEntry[] => {
+    if (!batiments.length) return [{ id: 'bat-none', label: t('pro_buildings_none_declared'), onClick: () => setShowDecoupage(true) }];
+    return batiments.map(b => {
+      const etat = etatBatimentSelection(dpgf.lots, keys, b.id);
+      return {
+        id: `bat-${b.id}`,
+        label: b.libelle ? `${b.code} · ${b.libelle}` : b.code,
+        checked: etat === 'tous' ? true : etat === 'certains' ? 'mixed' as const : false,
+        keepOpen: true,
+        onClick: () => commitLots(basculerBatimentEnMasse(dpgf.lots, keys, b.id, etat !== 'tous')),
+      };
+    });
+  };
+  const resumeBatiments = (keys: string[]): string => {
+    const etats = batiments.map(b => [b.code, etatBatimentSelection(dpgf.lots, keys, b.id)] as const);
+    const codes = etats.filter(([, e]) => e === 'tous').map(([c]) => c);
+    const partiel = etats.some(([, e]) => e === 'certains');
+    return codes.length || partiel ? `${codes.join(', ')}${partiel ? (codes.length ? ', …' : '…') : ''}` : '—';
+  };
+  const batimentsCell = (rKey: string, label: string) => (
+    <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
+      <ToolbarMenu
+        entries={() => batimentEntries([rKey])}
+        onSelect={entry => entry.onClick()}
+        ariaLabel={t('pro_buildings_of', { numero: label })}
+        title={t('pro_buildings_of', { numero: label })}
+        triggerClassName="w-full inline-flex items-center justify-between gap-1 h-7 px-1.5 rounded border text-xs whitespace-nowrap outline-none hover:bg-[var(--tblr-surface)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+        triggerStyle={{ borderColor: 'var(--tblr-border)' }}
+        trigger={<><span className="truncate">{resumeBatiments([rKey])}</span><IconChevronDown size={12} aria-hidden className="shrink-0" /></>}
+      />
+    </td>
+  );
+
   const selectionActions = (sel: HierarchySelection[]): SelectionAction[] => {
     const one = sel.length === 1 ? sel[0] : null;
     const onlyOne = t('pro_selection_single_only');
@@ -498,6 +555,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         onClick: () => one && changeHierarchy(one, 'promote'), disabled: one?.kind !== 'ligne', hint: sel.length > 1 ? onlyOne : undefined },
       { id: 'demote', label: t('pro_demote'), icon: <IconArrowBarToRight size={16} />, iconOnly: true, shortcut: 'Tab',
         onClick: () => one && changeHierarchy(one, 'demote'), disabled: !canDemote(dpgf.lots, one), hint: sel.length > 1 ? onlyOne : undefined },
+      ...(multiBat ? [{ id: 'batiments', label: t('pro_buildings'), icon: <IconBuildingCommunity size={16} />, groupStart: true, onClick: () => {},
+        menu: () => batimentEntries(sel.map(hierarchyKey)) }] : []),
       { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+D', mobile: true, groupStart: true,
         onClick: () => one && changeHierarchy(one, 'duplicate'), disabled: !one, hint: sel.length > 1 ? onlyOne : undefined },
       { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+C',
@@ -517,7 +576,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       : s.kind === 'chapitre'
       ? [{ id: 'add-art', label: t('pro_add_article'), icon: <IconRowInsertBottom size={16} />, onClick: () => addLigne(s.lotIdx, s.chapIdx) }]
       : [{ id: 'add-sub', label: t('pro_add_sub_article'), icon: <IconSubtask size={16} />, onClick: () => addSubLigne(s.lotIdx, s.chapIdx, s.lignePath), disabled: !canAddChildTo(s) }];
-    return [...add, { id: 'sep', separator: true }, ...selectionActions([s])];
+    return [...add, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
   };
 
   // ── Raccourcis clavier du tableau ───────────────────────────────────────────
@@ -666,6 +725,14 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       entries: [
         { id: 'dpgf-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}) },
         { id: 'dpgf-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement, settings ?? {}) },
+        ...(batiments.length ? [{ id: 'dpgf-by-building', heading: t('pro_export_by_building') } as ToolbarMenuEntry] : []),
+        ...batiments.flatMap(b => {
+          const titre = `${projectName ?? dpgf.titre} · ${b.code}${b.libelle ? ` ${b.libelle}` : ''}`;
+          return [
+            { id: `dpgf-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
+            { id: `dpgf-xlsx-${b.id}`, label: `${b.code} · ${t('pro_export_excel')}`, icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
+          ];
+        }),
       ],
     },
   ]);
@@ -830,6 +897,28 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             {isMobile ? (
               <DpgfMobileList
                 rows={flatRows}
+                extra={multiBat ? (row, rKey) => {
+                  const l = row.ligne!;
+                  const quantites = l.children?.length ? {} : quantitesParBatiment(l, heritagePour(row.lot, row.chapitre!, row.lignePath!));
+                  return (
+                    <div className="flex flex-wrap items-center gap-2 text-[0.8125rem]">
+                      <ToolbarMenu
+                        entries={() => batimentEntries([rKey])}
+                        onSelect={entry => entry.onClick()}
+                        ariaLabel={t('pro_buildings_of', { numero: l.numero })}
+                        triggerClassName="inline-flex items-center gap-1 h-9 px-2 rounded border text-xs"
+                        triggerStyle={{ borderColor: 'var(--tblr-border)' }}
+                        trigger={<><IconBuildingCommunity size={14} aria-hidden />{resumeBatiments([rKey])}<IconChevronDown size={12} aria-hidden /></>}
+                      />
+                      {batiments.filter(b => b.id in quantites).map(b => (
+                        <span key={b.id} className="inline-flex items-center gap-1">
+                          <span style={{ color: 'var(--tblr-muted)' }}>{b.code}</span>
+                          <span className="w-16"><EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric showZero editOnClick label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} /></span>
+                        </span>
+                      ))}
+                    </div>
+                  );
+                } : undefined}
                 sousTotaux={totaux.sousTotaux}
                 selected={selectedKeys}
                 onToggleSelect={toggleKey}
@@ -859,10 +948,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   <th className="px-2 py-2 text-left font-semibold w-24">{t('pro_col_number')}</th>
                   <th className="px-2 py-2 text-left font-semibold">{t('pro_col_designation')}</th>
                   <th className="px-2 py-2 text-center font-semibold w-16">{t('pro_col_unit')}</th>
-                  <th className="px-2 py-2 text-right font-semibold w-24">{t('pro_col_quantity')}</th>
+                  {multiBat && <th className="px-1 py-2 text-left font-semibold w-24">{t('pro_buildings')}</th>}
+                  {batiments.map(b => (
+                    <th key={b.id} className="px-2 py-2 text-right font-semibold w-20" title={b.libelle || b.code}>{t('pro_col_quantity_of', { code: b.code })}</th>
+                  ))}
+                  <th className="px-2 py-2 text-right font-semibold w-24">{multiBat ? t('pro_col_quantity_total') : t('pro_col_quantity')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-28">{t('pro_col_unit_price')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-32">{t('pro_col_total')}</th>
-                  {dpgf.multiBatiments && <th className="px-1 py-2 text-center font-semibold w-14">{t('pro_col_building')}</th>}
                   {dpgf.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">{t('pro_col_phase')}</th>}
                   <th className="px-2 py-2 text-left font-semibold w-28">{t('pro_col_location')}</th>
                   <th className="w-10"><span className="sr-only">{t('pro_col_actions')}</span></th>
@@ -893,17 +985,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 font-mono text-xs" style={{ color: 'var(--tblr-muted)' }}>
                           <EditableCell rKey={rKey} field="numero" value={row.lot.numero} {...cellProps} />
                         </td>
-                        <td className="px-2 py-1" colSpan={4}>
+                        <td className="px-2 py-1" colSpan={multiBat ? 2 : 4}>
                           <EditableCell rKey={rKey} field="titre" value={row.lot.titre} {...cellProps} />
                         </td>
+                        {multiBat && <>{batimentsCell(rKey, row.lot.numero)}<td colSpan={batiments.length + 2} /></>}
                         <td className="px-2 py-1 text-right font-mono tabular-nums">
                           {formatCurrency(totaux.sousTotaux[row.lotIdx])}
                         </td>
-                        {(dpgf.multiBatiments || dpgf.multiPhases) && (
-                          <td className="px-1 py-1" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)} onClick={e => e.stopPropagation()}>
+                        {dpgf.multiPhases && (
+                          <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-center">
                               <SelecteursDecoupage
-                                doc={dpgf} batimentId={row.lot.batimentId} phaseId={row.lot.phaseId}
+                                doc={docPhases} batimentId={row.lot.batimentId} phaseId={row.lot.phaseId}
                                 onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
                                 onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
                               />
@@ -938,14 +1031,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 font-mono text-xs font-normal" style={{ color: 'var(--tblr-muted)' }}>
                           <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} {...cellProps} />
                         </td>
-                        <td className="px-2 py-1" colSpan={5}>
+                        <td className="px-2 py-1" colSpan={multiBat ? 2 : 5}>
                           <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} {...cellProps} />
                         </td>
-                        {(dpgf.multiBatiments || dpgf.multiPhases) && (
-                          <td className="px-1 py-1" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)} onClick={e => e.stopPropagation()}>
+                        {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 3} /></>}
+                        {dpgf.multiPhases && (
+                          <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-center">
                               <SelecteursDecoupage
-                                doc={dpgf} batimentId={row.chapitre!.batimentId} phaseId={row.chapitre!.phaseId}
+                                doc={docPhases} batimentId={row.chapitre!.batimentId} phaseId={row.chapitre!.phaseId}
                                 onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
                                 onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
                               />
@@ -1017,8 +1111,19 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <td className="px-2 py-0.5 text-center">
                         <EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center" {...cellProps} />
                       </td>
+                      {multiBat && batimentsCell(rKey, l.numero)}
+                      {batiments.map(b => {
+                        const quantites = hasChildren ? {} : quantitesParBatiment(l, heritagePour(row.lot, row.chapitre!, row.lignePath!));
+                        return (
+                          <td key={b.id} className="px-2 py-0.5">
+                            {b.id in quantites
+                              ? <EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric showZero label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} />
+                              : <span className="block text-right px-1" style={{ color: 'var(--tblr-muted)' }} title={t('pro_building_not_assigned')}>·</span>}
+                          </td>
+                        );
+                      })}
                       <td className="px-2 py-0.5">
-                        {l.quantitesBatiments !== undefined ? <span title={t('pro_quantities_by_building')}>{l.quantite}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric {...cellProps} />)}
+                        {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(l.quantite)}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric {...cellProps} />)}
                       </td>
                       <td className="px-2 py-0.5">
                         <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric {...cellProps} />
@@ -1032,11 +1137,11 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric {...cellProps} />
                         )}
                       </td>
-                      {(dpgf.multiBatiments || dpgf.multiPhases) && (
-                        <td className="px-1 py-0.5" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)} onClick={e => e.stopPropagation()}>
+                      {dpgf.multiPhases && (
+                        <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1 justify-center">
                             <SelecteursDecoupage
-                              doc={l.quantitesBatiments !== undefined ? { ...dpgf, multiBatiments: false } : dpgf} batimentId={l.batimentId} phaseId={l.phaseId}
+                              doc={docPhases} batimentId={l.batimentId} phaseId={l.phaseId}
                               onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
                               onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
                             />
@@ -1053,17 +1158,17 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 
                 {/* Totaux, recalculés depuis les articles */}
                 <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                  <th scope="row" colSpan={7} className="px-4 py-2 text-left text-sm font-semibold">{t('pro_total_ht')}</th>
+                  <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-2 text-left text-sm font-semibold">{t('pro_total_ht')}</th>
                   <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>
                 <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
-                  <th scope="row" colSpan={7} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
+                  <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
                   <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.montantTVA)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>
                 <tr className="border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                  <th scope="row" colSpan={7} className="px-4 py-2 text-left font-bold">{t('pro_total_ttc')}</th>
+                  <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-2 text-left font-bold">{t('pro_total_ttc')}</th>
                   <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>

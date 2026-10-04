@@ -21,6 +21,8 @@ interface DpgfMobileListProps {
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
   onCommit: (v: string) => void;
   onCancel: () => void;
+  /** Bâtiments et quantités par bâtiment de l'article, quand l'opération en compte plusieurs. */
+  extra?: (row: FlatRow<Lot, Chapitre, Ligne>, rKey: string) => React.ReactNode;
 }
 
 const fmtQte = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(n || 0);
@@ -34,7 +36,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
   const { t } = useTranslation();
   const {
     rows, sousTotaux, selected, onToggleSelect, expandedLots, expandedChaps, expandedLignes,
-    onToggleLot, onToggleChap, onToggleLigne, editingCell, onStartEdit, onCommit, onCancel,
+    onToggleLot, onToggleChap, onToggleLigne, editingCell, onStartEdit, onCommit, onCancel, extra,
   } = props;
   const cell = { editingCell, onStartEdit, onCommit, onCancel, editOnClick: true };
 
@@ -126,6 +128,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
                 </div>
               )}
               {l.localisation && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{l.localisation}</span>}
+              {extra?.(row, rKey)}
             </div>
           </div>
         );

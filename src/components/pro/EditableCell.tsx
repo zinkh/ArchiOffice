@@ -37,7 +37,7 @@ export const CellInput = ({
 };
 
 export const EditableCell = ({
-  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label,
+  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false,
 }: {
   rKey: string; field: string; value: string | number; editingCell: EditingCell | null;
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
@@ -46,9 +46,11 @@ export const EditableCell = ({
   editOnClick?: boolean;
   /** Nom du champ, annoncé pendant la saisie. */
   label?: string;
+  /** Affiche « 0,00 » plutôt qu'une case vide (quantité attendue d'un bâtiment coché). */
+  showZero?: boolean;
 }) => {
   const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
-  const display = numeric && typeof value === 'number' && value > 0
+  const display = numeric && typeof value === 'number' && (value > 0 || (showZero && value === 0))
     ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
     : String(value || '');
 

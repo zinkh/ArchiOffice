@@ -1,9 +1,9 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconDots, IconX } from '@tabler/icons-react';
+import { IconChevronDown, IconDots, IconX } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
 import { ToolbarMenu } from './ToolbarMenu';
-import type { ToolbarAction } from './proToolbar';
+import type { ToolbarAction, ToolbarMenuEntry } from './proToolbar';
 
 export interface SelectionAction extends ToolbarAction {
   /** Reste dans la barre sur téléphone ; sinon l'action passe dans « Plus ». */
@@ -12,6 +12,8 @@ export interface SelectionAction extends ToolbarAction {
   groupStart?: boolean;
   /** Au bureau, icône seule (le libellé passe en infobulle et en nom accessible). */
   iconOnly?: boolean;
+  /** Ouvre un menu (ex. les bâtiments à cocher) au lieu d'agir tout de suite. */
+  menu?: () => ToolbarMenuEntry[];
 }
 
 interface SelectionBarProps {
@@ -32,8 +34,9 @@ export function SelectionBar({ label, actions, onClear, isMobile }: SelectionBar
   const { t } = useTranslation();
 
   if (isMobile) {
-    const primary = actions.filter(a => a.mobile);
-    const rest = actions.filter(a => !a.mobile);
+    // Un menu ne s'imbrique pas dans « Plus » : il reste dans la barre.
+    const primary = actions.filter(a => a.mobile || a.menu);
+    const rest = actions.filter(a => !a.mobile && !a.menu);
     return (
       <div
         role="toolbar"
@@ -52,7 +55,17 @@ export function SelectionBar({ label, actions, onClear, isMobile }: SelectionBar
           </button>
         </div>
         <div className="flex justify-between">
-          {primary.map(action => (
+          {primary.map(action => action.menu ? (
+            <ToolbarMenu
+              key={action.id}
+              entries={action.menu}
+              onSelect={entry => entry.onClick()}
+              align="end"
+              ariaLabel={action.label}
+              triggerClassName="flex flex-col items-center justify-center gap-0.5 min-w-14 h-[3.25rem] px-1 rounded-md text-[0.6875rem] font-medium"
+              trigger={<><span aria-hidden className="flex">{action.icon}</span>{action.label}</>}
+            />
+          ) : (
             <button
               key={action.id}
               type="button"
@@ -96,6 +109,16 @@ export function SelectionBar({ label, actions, onClear, isMobile }: SelectionBar
         {actions.map(action => (
           <React.Fragment key={action.id}>
             {action.groupStart && <span aria-hidden className="w-px h-5 mx-1" style={{ background: 'var(--tblr-border)' }} />}
+            {action.menu ? (
+              <ToolbarMenu
+                entries={action.menu}
+                onSelect={entry => entry.onClick()}
+                ariaLabel={action.label}
+                title={action.hint}
+                triggerClassName="inline-flex items-center gap-1.5 h-8 px-2 rounded-[var(--tblr-radius)] text-[0.8125rem] font-medium whitespace-nowrap outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                trigger={<><span aria-hidden className="flex">{action.icon}</span>{action.label}<IconChevronDown size={14} aria-hidden /></>}
+              />
+            ) : (
             <button
               type="button"
               onClick={action.onClick}
@@ -113,6 +136,7 @@ export function SelectionBar({ label, actions, onClear, isMobile }: SelectionBar
               <span aria-hidden className="flex">{action.icon}</span>
               {!action.iconOnly && action.label}
             </button>
+            )}
           </React.Fragment>
         ))}
         <span aria-hidden className="w-px h-5 mx-1" style={{ background: 'var(--tblr-border)' }} />
