@@ -15,3 +15,4 @@ export {
   invalidateDocumentParserCache, DOCUMENT_PARSER_ENGINES, type DocumentParserEngine,
 } from './documentParser.js';
 export { isNomicConfigured, nomicUploadFile, nomicExtract, nomicContentType, nomicParseResultToText, NomicError } from './nomic.js';
+export { loadAgencyIdentity, type AgencyIdentity } from './agencyIdentity.js';

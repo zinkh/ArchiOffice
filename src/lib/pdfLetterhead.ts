@@ -13,6 +13,8 @@ export interface LetterheadOptions {
   title: string;
   subtitle?: string;
   reference?: string;
+  /** Date imprimée sous le titre (date du document) ; à défaut, celle du jour. */
+  date?: string;
   margin?: number;
   /** Logo déjà chargé en data URL. Voir loadLogoDataUrl. */
   logo?: { dataUrl: string; format: 'PNG' | 'JPEG'; width: number; height: number } | null;
@@ -116,7 +118,7 @@ export function drawAgencyHeader(
     pdf.setTextColor(...GRIS_DOUX);
     pdf.text(opts.subtitle, pageW - margin, y + 9.5, { align: 'right' });
   }
-  const droite = [opts.reference, new Date().toLocaleDateString('fr-FR')].filter(Boolean).join('  ·  ');
+  const droite = [opts.reference, opts.date || new Date().toLocaleDateString('fr-FR')].filter(Boolean).join('  ·  ');
   if (droite) {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(7.5);

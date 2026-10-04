@@ -203,7 +203,7 @@ export default function ChorusProPortal() {
         <div className="rounded-xl p-12 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
           <IconBuildingBank size={40} style={{ color: 'var(--tblr-muted)', margin: '0 auto 12px' }} />
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>Aucune facture entreprise liée sur Chorus Pro pour l'instant.</p>
-          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Utilisez le bouton <strong>Rechercher sur Chorus Pro</strong> depuis l'onglet Situations d'un projet pour retrouver la facture déposée par l'entreprise, puis y joindre l'état d'acompte.</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>Depuis l'onglet RDT d'une affaire, ouvrez une situation au certificat établi et utilisez <strong>Rechercher sur Chorus Pro</strong> pour retrouver la facture déposée par l'entreprise, puis y joindre le certificat de paiement.</p>
         </div>
       ) : (
         <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>

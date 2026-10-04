@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isProjectDirty, projectSignature } from '../projectDirty';
+import { canAutosaveProject, isProjectDirty, projectSavePayload, projectSignature } from '../projectDirty';
 
 describe('isProjectDirty', () => {
   const saved = { id: 'p1', name: 'Villa Martin', description: 'Extension', programme: null, remuneration: 0 };
@@ -37,5 +37,29 @@ describe('isProjectDirty', () => {
   it("ne signale rien sans fiche chargée", () => {
     expect(isProjectDirty(null, saved)).toBe(false);
     expect(projectSignature(null)).toBe('');
+  });
+});
+
+describe('projectSavePayload', () => {
+  it("n'envoie pas les listes rattachées que la fiche n'édite pas", () => {
+    const payload = projectSavePayload({
+      id: 'p1', name: 'Villa Martin', programme: 'Extension',
+      lots_list: [{ id: 'l1' }], cotraitants_list: [], stakeholders_list: [], categories_list: ['c1'],
+    });
+    expect(payload).toEqual({ id: 'p1', name: 'Villa Martin', programme: 'Extension' });
+  });
+
+  it('ne modifie pas la fiche passée en argument', () => {
+    const project = { id: 'p1', name: 'Villa Martin', lots_list: [{ id: 'l1' }] };
+    projectSavePayload(project);
+    expect(project.lots_list).toHaveLength(1);
+  });
+});
+
+describe('canAutosaveProject', () => {
+  it('refuse une fiche dont le nom a été vidé', () => {
+    expect(canAutosaveProject({ name: '  ' })).toBe(false);
+    expect(canAutosaveProject({ name: 'Villa Martin' })).toBe(true);
+    expect(canAutosaveProject(null)).toBe(false);
   });
 });
