@@ -848,7 +848,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center" />
                     </td>
                     <td className="px-2 py-0.5">
-                      <EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric />
+                      {l.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{l.quantite}</span> : <EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric />}
                     </td>
                     <td className="px-2 py-0.5">
                       <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric />
@@ -866,7 +866,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <td className="px-1 py-0.5" colSpan={(dpgf.multiBatiments ? 1 : 0) + (dpgf.multiPhases ? 1 : 0)}>
                         <div className="flex items-center gap-1 justify-center">
                           <SelecteursDecoupage
-                            doc={dpgf} batimentId={l.batimentId} phaseId={l.phaseId}
+                            doc={l.quantitesBatiments !== undefined ? { ...dpgf, multiBatiments: false } : dpgf} batimentId={l.batimentId} phaseId={l.phaseId}
                             onBatimentChange={v => setDecoupageChamp(rKey, 'batimentId', v)}
                             onPhaseChange={v => setDecoupageChamp(rKey, 'phaseId', v)}
                           />

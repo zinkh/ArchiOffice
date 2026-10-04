@@ -1,3 +1,4 @@
+import { buildingQuantities } from '../../lib/dpgfBuildings';
 // ── Vue groupée du DPGF, par bâtiment et/ou par phase ────────────────────────
 // L'arbre éditable du DPGF reste organisé par lot — c'est la seule vue où l'on
 // modifie quoi que ce soit, comme le comparatif ACT reste éditable pendant que
@@ -24,6 +25,14 @@ function aplatir(dpgf: DPGF): ArticleAplati[] {
       // Un article parent porte la somme de ses enfants : il ne se chiffre
       // pas et n'a donc pas sa place dans une addition par groupe.
       if (l.children?.length) { descendre(l.children, lot, chapitre); continue; }
+      if (l.cctpOnly || chapitre.cctpOnly) continue;
+      if (l.quantitesBatiments !== undefined) {
+        for (const [batimentId, quantite] of Object.entries(buildingQuantities(l))) out.push({
+          ligne: { ...l, quantite, prixTotal: quantite * l.prixUnitaire }, lot, chapitre, batimentId,
+          phaseId: phaseEffective(lot, chapitre, l),
+        });
+        continue;
+      }
       out.push({
         ligne: l, lot, chapitre,
         batimentId: batimentEffectif(lot, chapitre, l),
@@ -112,7 +121,7 @@ export const DpgfGroupedView: React.FC<{ dpgf: DPGF; groupement: GroupementDpgf 
                 </td>
               </tr>
               {g.articles.map(a => (
-                <tr key={a.ligne.id} className="border-b border-zinc-100 dark:border-zinc-800">
+                <tr key={`${a.ligne.id}-${a.batimentId ?? ""}`} className="border-b border-zinc-100 dark:border-zinc-800">
                   <td className="px-2 py-0.5 text-xs text-zinc-400">{a.ligne.numero}</td>
                   <td className="px-2 py-0.5">{a.ligne.designation}</td>
                   <td className="px-2 py-0.5 text-xs text-zinc-500 truncate">{a.lot.numero} {a.lot.titre}</td>

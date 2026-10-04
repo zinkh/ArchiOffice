@@ -1,3 +1,4 @@
+import { ArticleBuildingPanel } from './ArticleBuildingPanel';
 import React, { useState, useEffect, useCallback } from 'react';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
@@ -403,6 +404,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName }) => {
           )}
         </div>
       </div>
+
+      {!isBpuTab && dpgf && <ArticleBuildingPanel dpgf={dpgf} onChange={setDpgf} projectName={projectName} />}
 
       {/* ── Content ────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex">

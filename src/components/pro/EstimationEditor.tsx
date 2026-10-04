@@ -338,7 +338,9 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                           </button>
                         </td>
                         <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={showMarge ? 6 : 5}>
-                          {chap.titre}
+                          <input aria-label="Nom du chapitre" className="w-full bg-transparent" value={chap.titre} onChange={e => {
+                            onChange({ ...dpgf, lots: dpgf.lots.map((l, i) => i !== li ? l : { ...l, chapitres: l.chapitres.map((c, j) => j !== ci ? c : { ...c, titre: e.target.value }) }) });
+                          }} />
                         </td>
                         <td />
                       </tr>
@@ -360,11 +362,11 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             `}
                           >
                             <td className="px-2 py-0.5 pl-8 text-xs text-zinc-400">{ligne.numero}</td>
-                            <td className="px-2 py-0.5 text-sm">{ligne.designation}</td>
+                            <td className="px-2 py-0.5 text-sm"><input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, lgi, { designation: e.target.value })} /></td>
                             <td className="px-2 py-0.5 text-center text-xs text-zinc-500">{ligne.unite}</td>
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
-                                <EditNum rowId={rowId} field="quantite" value={ligne.quantite} />
+                                {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{ligne.quantite}</span> : <EditNum rowId={rowId} field="quantite" value={ligne.quantite} />}
                               </td>
                             )}
                             {showQtyPU && (
@@ -373,7 +375,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                               </td>
                             )}
                             <td className="px-1 py-0.5">
-                              <EditNum rowId={rowId} field="prixTotal" value={ligne.prixTotal} />
+                              {ligne.quantitesBatiments !== undefined ? <span>{fmt2(ligne.prixTotal)}</span> : <EditNum rowId={rowId} field="prixTotal" value={ligne.prixTotal} />}
                             </td>
                             <td className="px-2 py-0.5 text-right font-mono text-xs text-zinc-500">
                               {ttc > 0 ? fmt2(ttc) : ''}
