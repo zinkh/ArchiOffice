@@ -66,6 +66,7 @@ import { Toast } from '../components/ui/Toast';
 import { useConfirmDialog } from '../components/ui/ConfirmDialog';
 import { usePhaseNotes } from '../hooks/usePhaseNotes';
 import { nextPhase } from '../lib/phaseJournal';
+import { PhaseControlDialog } from '../components/projectDetail/PhaseControlDialog';
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useProjectAutosave } from '../hooks/useProjectAutosave';
 import { AutosaveIndicator } from '../components/projectDetail/AutosaveIndicator';
@@ -270,15 +271,7 @@ export default function ProjectDetail() {
     }])
   ), [phaseNotes.summary, t]);
   const advancePhase = async () => {
-    if (!upcomingPhase || !actualCurrentPhase) return;
-    const ok = await confirmAction({
-      title: t('project_phase_advance_title', { phase: upcomingPhase }),
-      message: t('project_phase_advance_message', { from: actualCurrentPhase, to: upcomingPhase, label: t(`mission_phase_${upcomingPhase}`) }),
-      confirmLabel: t('project_phase_advance_confirm', { phase: upcomingPhase }),
-      cancelLabel: t('projectdetail_dialog_cancel'),
-      tone: 'primary',
-    });
-    if (ok) await handleSetPhase(upcomingPhase);
+    if (upcomingPhase) await handleSetPhase(upcomingPhase);
   };
   const [notesHonoraires, setNotesHonoraires] = useState<any[]>([]);
   const [isAddingNote, setIsAddingNote] = useState(false);
@@ -745,27 +738,8 @@ export default function ProjectDetail() {
     } catch (err) { console.error('Failed to fetch project activity:', err); }
   };
 
-  const handleSetPhase = async (phase: DocumentPhase) => {
-    if (!id) return;
-    try {
-      const res = await fetch(`/api/projects/${id}/phase`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase }),
-      });
-      if (res.ok) {
-        fetchPhaseHistory();
-        fetchProjectActivity();
-        setViewedPhase(null); // resync the overview's note column to the new actual phase
-      } else {
-        const err = await res.json().catch(() => null);
-        showToast(t('projectdetail_phase_change_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
-      }
-    } catch (err) {
-      console.error('Failed to update project phase:', err);
-      showToast(t('projectdetail_phase_change_failed'), 'error', { duration: 6000 });
-    }
-  };
+  const [phaseToCheck, setPhaseToCheck] = useState<DocumentPhase | null>(null);
+  const handleSetPhase = async (phase: DocumentPhase) => { setPhaseToCheck(phase); };
 
   const applyFullProjectData = (data: any) => {
     const loaded = {
@@ -1718,6 +1692,11 @@ export default function ProjectDetail() {
     <div className="flex flex-col lg:h-full">
       <Toast toast={toast} />
       {confirmDialog}
+      {phaseToCheck && id && <PhaseControlDialog projectId={id} phase={phaseToCheck}
+        members={team.map(m => ({ id: m.id, name: m.name }))}
+        canConfigure={['admin', 'manager', 'pm'].includes(currentUser?.system_role ?? '')}
+        onClose={() => setPhaseToCheck(null)}
+        onComplete={() => { setPhaseToCheck(null); void fetchPhaseHistory(); void fetchProjectActivity(); setViewedPhase(null); }} />}
       {/* Compact topbar */}
       <div
         className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
