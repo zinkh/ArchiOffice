@@ -1,3 +1,4 @@
+import { LotTitleInput } from './LotTitleInput';
 import React, { useState, useRef } from 'react';
 import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
@@ -317,7 +318,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                         <span className="text-xs">{lot.numero}</span>
                       </button>
                     </td>
-                    <td className="px-2 py-2 text-sm">{lot.titre}</td>
+                    <td className="px-2 py-2 text-sm"><LotTitleInput value={lot.titre} onCommit={titre => onChange({ ...dpgf, lots: dpgf.lots.map(l => l.id === lot.id ? { ...l, titre } : l) })} /></td>
                     <td />
                     {showQtyPU && <td />}
                     {showQtyPU && <td />}

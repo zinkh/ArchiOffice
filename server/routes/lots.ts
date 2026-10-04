@@ -44,6 +44,7 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
       const patch: Record<string, string> = {};
       if (typeof req.body?.lot_number === 'string') patch.lot_number = req.body.lot_number.trim();
       if (typeof req.body?.lot_title === 'string') patch.lot_title = req.body.lot_title.trim();
+      if (patch.lot_title !== undefined && !patch.lot_title) return res.status(400).json({ error: "Le titre du lot ne peut pas être vide" });
       if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
       const { error } = await supabaseAdmin.from('project_lots').update(patch).eq('id', req.params.id).eq('tenant_id', tenantId);
       if (error) throw error;

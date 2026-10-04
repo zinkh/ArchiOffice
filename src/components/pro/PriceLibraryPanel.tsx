@@ -18,14 +18,15 @@ export type ArticleType = ArticleBibliotheque;
 interface Props {
   onClose: () => void;
   /** Insère les articles cochés là où l'éditeur appelant sait les mettre. */
-  onInsert: (articles: ArticleBibliotheque[]) => void;
+  onInsert: (articles: ArticleBibliotheque[]) => boolean | void;
   /** Faux quand aucune cible n'est sélectionnée : on ne saurait pas où insérer. */
   canInsert: boolean;
+  targetSelector?: React.ReactNode;
   /** Message d'aide quand `canInsert` est faux, propre à chaque éditeur. */
   hintCible?: string;
 }
 
-export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInsert, hintCible }) => {
+export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInsert, hintCible, targetSelector }) => {
   const [q, setQ] = useState('');
   const [corpsEtat, setCorpsEtat] = useState('');
   const [dtu, setDtu] = useState('');
@@ -87,8 +88,8 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
   }, [referentiels]);
 
   const inserer = () => {
-    if (!selection.length) return;
-    onInsert(selection);
+    if (!canInsert || !selection.length) return;
+    if (onInsert(selection) === false) return;
     // Le compteur d'usage est ce qui fait remonter les articles réellement
     // employés : envoyé sans attendre la réponse.
     for (const a of selection) {
@@ -116,6 +117,8 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><IconX size={14} /></button>
       </div>
 
+      {targetSelector && <div className="p-2 border-b">{targetSelector}</div>}
+      {!canInsert && <p role="status" className="px-2 text-xs text-amber-700">{hintCible ?? "Sélectionnez une destination pour insérer."}</p>}
       <div className="p-2 space-y-2 border-b border-zinc-200 dark:border-zinc-700">
         <div className="relative">
           <IconSearch size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400" />

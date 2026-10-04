@@ -1,3 +1,4 @@
+import { LotTitleInput } from './LotTitleInput';
 import React, { useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown,
@@ -512,7 +513,9 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                   )}
                 </div>
 
-                {selection && selection.kind !== 'lot' ? (
+                {selection && selection.kind === 'lot' ? (
+                  <LotTitleInput value={dpgf.lots[selection.lotIdx].titre} onCommit={titre => mutateDPGF(d => { d.lots[selection.lotIdx].titre = titre; })} />
+                ) : selection ? (
                   <input
                     type="text"
                     value={
@@ -524,9 +527,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                     className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
                     placeholder="Titre…"
                   />
-                ) : (
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{selData.name}</h2>
-                )}
+                ) : null}
 
                 {/* DPGF article info badge */}
                 {selection.kind === 'ligne' && !isSelCctpOnly && (() => {
