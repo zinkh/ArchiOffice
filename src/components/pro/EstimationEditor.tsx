@@ -4,11 +4,11 @@ import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconLayoutColumns, IconRefresh, IconX, IconDeviceFloppy,
-  IconMapPin,
+  IconMapPin, IconArrowUp, IconArrowDown,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot } from '../../types/dpgf';
-import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes } from './treeOps';
+import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling } from './treeOps';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
 import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
@@ -78,6 +78,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const [tvaDraft, setTvaDraft] = useState(String(dpgf.TVA));
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
+  const [selectedRow, setSelectedRow] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [breakdown, setBreakdown] = useState<{ lotIdx: number; chapIdx: number; ligneIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
@@ -173,6 +174,14 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     setDragSource(null);
   };
 
+  const moveSelected = (direction: -1 | 1) => {
+    if (!selectedRow) return;
+    const next = JSON.parse(JSON.stringify(dpgf)) as DPGF;
+    const chap = next.lots[selectedRow.lotIdx].chapitres[selectedRow.chapIdx];
+    chap.lignes = renumeroterLignes(moveLigneSibling(chap.lignes, selectedRow.path, direction), String(chap.numero || selectedRow.chapIdx + 1));
+    onChange(recomputeDPGF(next));
+  };
+
   // ── Ribbon ────────────────────────────────────────────────────────────────────
   const ribbonTabs: RibbonTabDef[] = [
     {
@@ -182,6 +191,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         {
           label: 'Colonnes',
           actions: [
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRow },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRow },
             { id: 'colSynthese', label: 'Synthèse', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('synthese'), active: colSet === 'synthese' },
             { id: 'colDetail', label: 'Détail', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('detail'), active: colSet === 'detail' },
             { id: 'colMarge', label: '+ Marge', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('marge'), active: colSet === 'marge' },
@@ -394,6 +405,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                         return (
                           <tr
                             key={ligne.id}
+                            onClick={() => setSelectedRow({ lotIdx: li, chapIdx: ci, path })}
                             draggable
                             onDragStart={e => handleDragStart(e, ligne, li, ci, path)}
                             onDragOver={e => { e.preventDefault(); setDropTarget(rowId); }}

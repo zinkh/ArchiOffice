@@ -5,6 +5,7 @@ import {
   IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush,
   IconX, IconBuildingStore, IconFileImport, IconScale, IconBuildingCommunity,
+  IconArrowUp, IconArrowDown,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
@@ -22,6 +23,7 @@ import {
   uid, evalFormula, MAX_ARTICLE_DEPTH,
   mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
   takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
+  moveLigneSibling,
   collectLigneIdsWithChildren, sumLigne, recomputeLot as recomputeLotOp,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey,
   type FlatRow,
@@ -142,6 +144,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
   const [selectedChapId, setSelectedChapId] = useState('');
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const targets = dpgf.lots.flatMap((lot, lotIdx) => lot.chapitres.filter(c => !c.cctpOnly).map(chap => ({
     id: chap.id, lotIdx, chapIdx: lot.chapitres.findIndex(c => c.id === chap.id), label: `${lot.numero} ${lot.titre} / ${chap.numero} ${chap.titre}`,
   })));
@@ -556,6 +559,19 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setDragState(null);
   };
 
+  const moveSelected = (direction: -1 | 1) => {
+    if (!selectedRowKey) return;
+    const parsed = parseRowKey(selectedRowKey);
+    if (!parsed || parsed.kind !== 'ligne') return;
+    mutateLots(lots => lots.map((lot, li) => li !== parsed.lotIdx ? lot : {
+      ...lot,
+      chapitres: lot.chapitres.map((chap, ci) => ci !== parsed.chapIdx ? chap : {
+        ...chap,
+        lignes: renumeroterLignes(moveLigneSibling(chap.lignes, parsed.lignePath, direction), String(chap.numero || ci + 1)),
+      }),
+    }).map(recomputeLot));
+  };
+
   // ── Ribbon definition ─────────────────────────────────────────────────────────
   const ribbonTabs: RibbonTabDef[] = [
     {
@@ -572,6 +588,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Structure',
           actions: [
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRowKey },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRowKey },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {
@@ -861,6 +879,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 return (
                   <tr
                     key={rKey}
+                    onClick={() => setSelectedRowKey(rKey)}
                     draggable={!hasChildren}
                     onDragStart={e => handleDragStart(e, row)}
                     className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-[#f0f6ff] dark:hover:bg-zinc-800/60

@@ -157,6 +157,25 @@ export function renumeroterLignes<T extends { numero?: string; children?: any[] 
   });
 }
 
+/** Déplace une ligne parmi ses frères et renvoie le nouvel arbre. */
+export function moveLigneSibling<T extends { children?: any[] }>(lignes: T[], path: number[], direction: -1 | 1): T[] {
+  if (!path.length) return lignes;
+  const parentPath = path.slice(0, -1);
+  const index = path[path.length - 1];
+  if (parentPath.length) {
+    const parent = lignes[parentPath[0]];
+    if (!parent) return lignes;
+    const next = [...lignes];
+    next[parentPath[0]] = { ...parent, children: moveLigneSibling(parent.children || [], parentPath.slice(1), direction) };
+    return next;
+  }
+  const target = index + direction;
+  if (index < 0 || index >= lignes.length || target < 0 || target >= lignes.length) return lignes;
+  const next = [...lignes];
+  [next[index], next[target]] = [next[target], next[index]];
+  return next;
+}
+
 /** Un parent porte la somme de ses enfants plutôt que son propre montant. */
 export function sumLigne<T extends { prixTotal: number; children?: any[] }>(ligne: T): number {
   if (ligne.children && ligne.children.length > 0) {

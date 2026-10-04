@@ -6,6 +6,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
   IconLayoutColumns, IconBuildingStore, IconFileImport, IconFileExport,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
+  IconArrowUp, IconArrowDown,
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
@@ -14,6 +15,7 @@ import {
   evalFormula, MAX_ARTICLE_DEPTH,
   mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
   takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
+  moveLigneSibling,
   collectLigneIdsWithChildren, sumLigne, recomputeLot,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey, forEachLigne,
   type FlatRow,
@@ -533,6 +535,18 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
   // ── Ruban ───────────────────────────────────────────────────────────────────
   const selectionCount = selectedRowKeys.size;
+  const moveSelected = (direction: -1 | 1) => {
+    const key = [...selectedRowKeys][0];
+    const parsed = key ? parseRowKey(key) : null;
+    if (!parsed || parsed.kind !== 'ligne') return;
+    mutateLots(lots => lots.map((lot, li) => li !== parsed.lotIdx ? lot : {
+      ...lot,
+      chapitres: lot.chapitres.map((chap, ci) => ci !== parsed.chapIdx ? chap : {
+        ...chap,
+        lignes: renumeroterLignes(moveLigneSibling(chap.lignes, parsed.lignePath, direction), String(chap.numero || ci + 1)),
+      }),
+    }).map(recomputeLot));
+  };
 
   const ribbonTabs: RibbonTabDef[] = [
     {
@@ -548,6 +562,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         {
           label: 'Structure',
           actions: [
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: selectionCount === 0 },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: selectionCount === 0 },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {
