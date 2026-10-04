@@ -1,16 +1,20 @@
 import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
-  IconPlus, IconTrash, IconCopy, IconClipboard, IconDeviceFloppy,
+  IconPlus, IconTrash, IconCopy, IconClipboard,
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
-  IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
+  IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
-  IconLayoutColumns, IconBuildingStore, IconFileImport, IconFileExport,
+  IconBuildingStore, IconFileImport, IconFileExport,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
-  IconArrowUp, IconArrowDown,
+  IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
 } from '@tabler/icons-react';
-import { ProRibbon, RibbonTabDef } from './ProRibbon';
+import { useProToolbar } from './toolbar/proToolbar';
+import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
+import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
+import type { ProNotify } from './DPGFWorkspace';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
 import { natureEffective, trancheEffective } from '../../types/bpu';
 import {
@@ -40,8 +44,8 @@ export type ColSet = 'bpu' | 'dqe' | 'comparatif';
 interface BPUWorkspaceProps {
   bpu: BPU;
   onChange: (bpu: BPU) => void;
-  onSave: () => void;
   mode: 'bpu' | 'dqe';
+  notify?: ProNotify;
   projectName?: string;
   offres?: OffreBPU[];
   /** Lots du projet (project_lots), pour rattacher les lots du bordereau. */
@@ -112,12 +116,15 @@ function ventilation(bpu: BPU) {
 // ── Composant ─────────────────────────────────────────────────────────────────
 
 export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
-  bpu, onChange, onSave, mode, projectName, offres = [], projectLots = [],
+  bpu, onChange, mode, projectName, offres = [], projectLots = [], notify,
   showTree: showTreeProp, onToggleTree, onDragStart, onDropExternal,
   onInitFromDpgf, onPushToDpgf, onOpenLibrary, onPushToLibrary,
   onImportOffre, onExportPdf, onExportExcel, onPushToAct,
 }) => {
   const [colSet, setColSet] = useState<ColSet>(mode);
+  // Le même atelier sert les onglets BPU et DQE : changer d'onglet change de colonnes.
+  useEffect(() => { setColSet(mode); }, [mode]);
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const { t } = useTranslation();
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(bpu.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
@@ -132,7 +139,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   // en lot en dépendent. DPGFWorkspace n'en a jamais eu.
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowKey: string; field: string; value: string } | null>(null);
-  const [clipboard, setClipboard] = useState<BPULigne | null>(null);
+  const [clipboard, setClipboard] = useState<BPULigne[]>([]);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showMarche, setShowMarche] = useState(false);
@@ -142,6 +149,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   // Chapitre visé par une insertion depuis la bibliothèque.
   const [selectedChap, setSelectedChap] = useState<{ lotIdx: number; chapIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
+  const bpuRef = useRef(bpu);
+  bpuRef.current = bpu;
 
   const flatRows = useMemo<FlatRow<BPULot, BPUChapitre, BPULigne>[]>(
     () => buildFlatRows(bpu.lots, { expandedLots, expandedChaps, expandedLignes }),
@@ -409,23 +418,41 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
   // ── Presse-papiers ──────────────────────────────────────────────────────────
   const copySelected = () => {
-    const [first] = selectedLignes();
-    if (first) setClipboard({ ...first });
+    const lignes = collectSelectedLignes<BPULigne>(bpu.lots, selectedRowKeys);
+    if (!lignes.length) return;
+    // La référence de bordereau identifie UN article chez les entreprises :
+    // une copie en reçoit une nouvelle à l'export.
+    const sansRef = (l: BPULigne): BPULigne => ({ ...l, refBpu: undefined, children: l.children?.map(sansRef) });
+    setClipboard(lignes.map(sansRef));
+    notify?.(t('pro_copied', { count: lignes.length }));
   };
 
   const pasteLigne = () => {
-    if (!clipboard || !selectedLotId) return;
-    const lotIdx = bpu.lots.findIndex(l => l.id === selectedLotId);
-    const chapIdx = bpu.lots[lotIdx]?.chapitres.length - 1;
-    if (lotIdx < 0 || chapIdx < 0) return;
-    mutateLots(lots => {
-      const next = [...lots];
-      const lot = { ...next[lotIdx] };
-      const chap = { ...lot.chapitres[chapIdx] };
-      chap.lignes = [...chap.lignes, { ...clipboard, id: newId(), refBpu: undefined, children: [] }];
-      lot.chapitres = [...lot.chapitres.slice(0, chapIdx), chap, ...lot.chapitres.slice(chapIdx + 1)];
-      next[lotIdx] = recomputeLot(lot);
-      return next;
+    const target = parseSelection(selectedRowKeys).at(-1) ?? null;
+    const result = pasteLignes(bpu.lots, target, clipboard, newId);
+    if (!result) return;
+    onChange(recomputeBPU({ ...bpu, lots: result.lots }));
+    setSelectedRowKeys(new Set(result.pasted.map(hierarchyKey)));
+  };
+
+  const deleteSelected = () => {
+    const keys = [...selectedRowKeys];
+    if (!keys.length) return;
+    const before = bpu;
+    const lots = deleteSelection(bpu.lots, keys);
+    onChange(recomputeBPU({ ...bpu, lots }));
+    setSelectedRowKeys(new Set());
+    notify?.(t('pro_deleted', { count: keys.length }), {
+      action: {
+        label: t('pro_undo'),
+        onClick: () => {
+          if (JSON.stringify(bpuRef.current.lots) !== JSON.stringify(recomputeBPU({ ...before, lots }).lots)) {
+            notify?.(t('pro_undo_unavailable'), { type: 'error' });
+            return;
+          }
+          onChange(before);
+        },
+      },
     });
   };
 
@@ -561,133 +588,64 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     setExpandedChaps(new Set(result.lots.flatMap(l => l.chapitres.map(c => c.id))));
   };
 
-  const ribbonTabs: RibbonTabDef[] = [
+  // ── Barre d'outils (ligne des sous-onglets de ProTab) ───────────────────────
+  const targetLotIdx = bpu.lots.findIndex(l => l.id === selectedLotId);
+  const targetChapIdx = (bpu.lots[targetLotIdx]?.chapitres.length ?? 0) - 1;
+  useProToolbar([
     {
-      id: 'accueil', label: 'Accueil',
-      groups: [
-        {
-          label: 'Presse-papiers',
-          actions: [
-            { id: 'copy', label: 'Copier', icon: <IconCopy size={20} />, onClick: copySelected, disabled: selectionCount === 0 },
-            { id: 'paste', label: 'Coller', icon: <IconClipboard size={20} />, onClick: pasteLigne, disabled: !clipboard },
-          ],
-        },
-        {
-          label: 'Structure',
-          actions: [
-            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(-1), disabled: !canMove(bpu.lots, hierarchySelection, -1) },
-            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => changeHierarchy(1), disabled: !canMove(bpu.lots, hierarchySelection, 1) },
-            { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => changeHierarchy('duplicate'), disabled: !hierarchySelection },
-            { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(), disabled: hierarchySelection?.kind !== 'ligne' },
-            { id: 'demote', label: t('pro_demote'), icon: <IconArrowDown size={20} />, onClick: () => changeHierarchy('demote'), disabled: !canDemote(bpu.lots, hierarchySelection) },
-            { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
-            { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
-            {
-              id: 'addLigne', label: 'Article', icon: <IconRowInsertBottom size={20} />,
-              onClick: () => {
-                const li = bpu.lots.findIndex(l => l.id === selectedLotId);
-                if (li < 0 || bpu.lots[li].chapitres.length === 0) return;
-                addLigne(li, bpu.lots[li].chapitres.length - 1);
-              },
-              disabled: !selectedLotId || (bpu.lots.find(l => l.id === selectedLotId)?.chapitres.length ?? 0) === 0,
-            },
-          ],
-        },
-        {
-          label: 'Document',
-          actions: [{ id: 'save', label: 'Enregistrer', icon: <IconDeviceFloppy size={20} />, onClick: onSave }],
-        },
+      kind: 'menu', id: 'bpu-add', label: t('pro_add'), icon: <IconPlus size={16} />, accent: true, mobile: true,
+      entries: [
+        { id: 'bpu-add-lot', label: t('pro_add_lot'), icon: <IconFolderPlus size={16} />, onClick: addLot },
+        { id: 'bpu-add-chap', label: t('pro_add_chapter'), icon: <IconStackPush size={16} />, onClick: addChapitre, disabled: !selectedLotId, hint: selectedLotId ? undefined : t('pro_add_lot_first') },
+        { id: 'bpu-add-art', label: t('pro_add_article'), icon: <IconRowInsertBottom size={16} />, onClick: () => addLigne(targetLotIdx, targetChapIdx), disabled: targetChapIdx < 0, hint: targetChapIdx < 0 ? t('pro_add_chapter_first') : undefined },
       ],
     },
     {
-      id: 'vue', label: 'Vue',
-      groups: [
-        {
-          label: 'Colonnes',
-          actions: [
-            { id: 'colBpu', label: 'BPU', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('bpu'), active: colSet === 'bpu' },
-            { id: 'colDqe', label: 'DQE', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('dqe'), active: colSet === 'dqe' },
-            { id: 'colCmp', label: 'Comparatif', icon: <IconScale size={20} />, onClick: () => setColSet('comparatif'), active: colSet === 'comparatif', disabled: offres.length === 0 },
-          ],
-        },
-        {
-          label: 'Volet arbre',
-          actions: [{ id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: toggleTree, active: showTree }],
-        },
-        {
-          label: 'Développement',
-          actions: [
-            { id: 'expand', label: 'Tout développer', icon: <IconArrowsMaximize size={20} />, onClick: expandAll },
-            { id: 'collapse', label: 'Tout réduire', icon: <IconArrowsMinimize size={20} />, onClick: collapseAll },
-          ],
-        },
+      kind: 'button', id: 'bpu-library', label: t('pro_library'), icon: <IconBuildingStore size={16} />,
+      pressed: showLibrary, onClick: () => { setShowLibrary(v => !v); onOpenLibrary?.(); },
+    },
+    {
+      kind: 'menu', id: 'bpu-market', label: t('pro_market'), icon: <IconScale size={16} />,
+      entries: [
+        { id: 'bpu-marche', label: t('pro_bpu_market_header'), icon: <IconAbc size={16} />, checked: showMarche, onClick: () => setShowMarche(v => !v) },
+        { id: 'bpu-tranches', label: t('pro_bpu_tranches'), icon: <IconStackPush size={16} />, checked: showTranches, onClick: () => setShowTranches(v => !v) },
+        { id: 'bpu-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, checked: showDecoupage, onClick: () => setShowDecoupage(v => !v) },
+        { id: 'bpu-lettres', label: t('pro_bpu_prices_in_words'), icon: <IconAbc size={16} />, checked: !!bpu.prixEnLettres, onClick: () => patchBpu({ prixEnLettres: !bpu.prixEnLettres }) },
+        { id: 'bpu-compare', label: t('pro_bpu_compare_offers'), icon: <IconScale size={16} />, checked: colSet === 'comparatif', onClick: () => setColSet(c => c === 'comparatif' ? mode : 'comparatif'), disabled: offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
+        { id: 'bpu-market-sep', separator: true },
+        { id: 'bpu-from-dpgf', label: t('pro_bpu_init_from_dpgf'), icon: <IconArrowsExchange size={16} />, onClick: () => onInitFromDpgf?.(), disabled: !onInitFromDpgf },
+        { id: 'bpu-to-dpgf', label: t('pro_bpu_push_to_dpgf'), icon: <IconArrowsExchange size={16} />, onClick: () => onPushToDpgf?.(), disabled: !onPushToDpgf },
       ],
     },
     {
-      id: 'marche', label: 'Marché',
-      groups: [
-        {
-          label: 'Cadre',
-          actions: [
-            { id: 'marche', label: 'En-tête', icon: <IconAbc size={20} />, onClick: () => setShowMarche(v => !v), active: showMarche },
-            { id: 'tranches', label: 'Tranches', icon: <IconStackPush size={20} />, onClick: () => setShowTranches(v => !v), active: showTranches },
-            {
-              id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
-              onClick: () => setShowDecoupage(v => !v), active: showDecoupage,
-              badge: !!(bpu.multiBatiments || bpu.multiPhases),
-            },
-            {
-              id: 'lettres', label: 'Prix en lettres', icon: <IconAbc size={20} />,
-              onClick: () => patchBpu({ prixEnLettres: !bpu.prixEnLettres }), active: bpu.prixEnLettres,
-            },
-          ],
-        },
-        {
-          label: 'DPGF',
-          actions: [
-            { id: 'fromDpgf', label: 'Initialiser depuis le DPGF', icon: <IconArrowsExchange size={20} />, onClick: () => onInitFromDpgf?.(), disabled: !onInitFromDpgf },
-            { id: 'toDpgf', label: 'Reverser vers le DPGF', icon: <IconArrowsExchange size={20} />, onClick: () => onPushToDpgf?.(), disabled: !onPushToDpgf },
-          ],
-        },
+      kind: 'menu', id: 'bpu-exchange', label: t('pro_import_export'), icon: <IconFileExport size={16} />,
+      entries: [
+        { id: 'bpu-exchange-out', heading: t('pro_bpu_to_companies') },
+        { id: 'bpu-xls-blank', label: t('pro_bpu_excel_blank'), icon: <IconTable size={16} />, onClick: () => onExportExcel?.(colSet, true), disabled: !onExportExcel },
+        { id: 'bpu-xls-priced', label: t('pro_bpu_excel_priced'), icon: <IconTable size={16} />, onClick: () => onExportExcel?.(colSet, false), disabled: !onExportExcel },
+        { id: 'bpu-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => onExportPdf?.(colSet), disabled: !onExportPdf },
+        { id: 'bpu-exchange-in', heading: t('pro_bpu_offers_received') },
+        { id: 'bpu-import', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
+        { id: 'bpu-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
       ],
     },
-    {
-      id: 'bibliotheque', label: 'Bibliothèque',
-      groups: [
-        {
-          label: 'Prix du cabinet',
-          actions: [
-            { id: 'openLib', label: 'Ouvrir', icon: <IconBuildingStore size={20} />, onClick: () => { setShowLibrary(v => !v); onOpenLibrary?.(); }, active: showLibrary },
-            {
-              id: 'pushLib', label: `Envoyer${selectionCount ? ` (${selectionCount})` : ''}`,
-              icon: <IconFileExport size={20} />,
-              onClick: () => onPushToLibrary?.(selectedLignes()),
-              disabled: !onPushToLibrary || selectionCount === 0,
-            },
-          ],
-        },
-      ],
-    },
-    {
-      id: 'echange', label: 'Import / Export',
-      groups: [
-        {
-          label: 'Aux entreprises',
-          actions: [
-            { id: 'xlsVierge', label: 'Excel vierge', icon: <IconTable size={20} />, onClick: () => onExportExcel?.(colSet, true), disabled: !onExportExcel },
-            { id: 'xlsChiffre', label: 'Excel chiffré', icon: <IconTable size={20} />, onClick: () => onExportExcel?.(colSet, false), disabled: !onExportExcel },
-            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => onExportPdf?.(colSet), disabled: !onExportPdf },
-          ],
-        },
-        {
-          label: 'Offres reçues',
-          actions: [
-            { id: 'import', label: 'Importer une offre', icon: <IconFileImport size={20} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
-            { id: 'toAct', label: 'Verser au comparatif ACT', icon: <IconScale size={20} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0 },
-          ],
-        },
-      ],
-    },
+  ]);
+
+  const selection = parseSelection(selectedRowKeys);
+  const one = hierarchySelection;
+  const onlyOne = selectionCount > 1 ? t('pro_selection_single_only') : undefined;
+  const hasLigneSelected = selection.some(s => s.kind === 'ligne');
+  const pasteTarget = selection.at(-1) ?? null;
+  const selectionActions: SelectionAction[] = [
+    { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => changeHierarchy(-1), disabled: !canMove(bpu.lots, one, -1), hint: onlyOne },
+    { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => changeHierarchy(1), disabled: !canMove(bpu.lots, one, 1), hint: onlyOne },
+    { id: 'promote', label: t('pro_promote'), icon: <IconArrowBarToLeft size={16} />, iconOnly: true, onClick: () => changeHierarchy(), disabled: one?.kind !== 'ligne', hint: onlyOne },
+    { id: 'demote', label: t('pro_demote'), icon: <IconArrowBarToRight size={16} />, iconOnly: true, onClick: () => changeHierarchy('demote'), disabled: !canDemote(bpu.lots, one), hint: onlyOne },
+    { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, mobile: true, groupStart: true, onClick: () => changeHierarchy('duplicate'), disabled: !one, hint: onlyOne },
+    { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, onClick: copySelected, disabled: !hasLigneSelected, hint: hasLigneSelected ? undefined : t('pro_copy_articles_only') },
+    { id: 'paste', label: t('pro_paste'), icon: <IconClipboard size={16} />, iconOnly: true, onClick: pasteLigne, disabled: !clipboard.length || !pasteTarget || pasteTarget.kind === 'lot' },
+    { id: 'to-library', label: t('pro_bpu_send_to_library'), icon: <IconFileArrowRight size={16} />, onClick: () => onPushToLibrary?.(selectedLignes()), disabled: !onPushToLibrary || !hasLigneSelected },
+    { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !selectionCount },
   ];
 
   // ── Cellules ────────────────────────────────────────────────────────────────
@@ -753,18 +711,18 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     () => new Map(bpu.tranches.map(t => [t.id, t])), [bpu.tranches],
   );
 
-  const grandTVA = bpu.totalHT * bpu.TVA / 100;
+  // Recalculés depuis les articles, comme dans le DPGF.
+  const totaux = totauxDocument(bpu.lots, bpu.TVA);
 
   // Dépassement de la fourchette d'un marché à bons de commande.
   const horsFourchette =
-    colSet === 'dqe' && bpu.totalHT > 0 && (
-      (bpu.marche.montantMaxiHT != null && bpu.totalHT > bpu.marche.montantMaxiHT) ||
-      (bpu.marche.montantMiniHT != null && bpu.totalHT < bpu.marche.montantMiniHT)
+    colSet === 'dqe' && totaux.totalHT > 0 && (
+      (bpu.marche.montantMaxiHT != null && totaux.totalHT > bpu.marche.montantMaxiHT) ||
+      (bpu.marche.montantMiniHT != null && totaux.totalHT < bpu.marche.montantMiniHT)
     );
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
-      <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
 
       {/* ── Cadre du marché ──────────────────────────────────────────────── */}
       {showMarche && (
@@ -792,9 +750,20 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
         {/* ── Volet arbre ────────────────────────────────────────────────── */}
         {showTree && (
-          <div className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm">
-            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
-              {colSet === 'bpu' ? 'Bordereau' : 'Structure'}
+          <div className="w-56 shrink-0 border-r overflow-y-auto text-sm" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+            <div className="flex items-center gap-0.5 pl-3 pr-1 py-1.5 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span className="flex-1 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('pro_structure')}</span>
+              {[
+                { label: t('pro_expand_all'), icon: <IconArrowsMaximize size={14} />, onClick: expandAll },
+                { label: t('pro_collapse_all'), icon: <IconArrowsMinimize size={14} />, onClick: collapseAll },
+                { label: t('pro_hide_structure'), icon: <IconLayoutSidebarLeftCollapse size={14} />, onClick: toggleTree },
+              ].map(b => (
+                <button key={b.label} type="button" onClick={b.onClick} aria-label={b.label} title={b.label}
+                  className="w-7 h-7 inline-flex items-center justify-center rounded hover:bg-[var(--tblr-surface)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                  style={{ color: 'var(--tblr-muted)' }}>
+                  {b.icon}
+                </button>
+              ))}
             </div>
             {bpu.lots.map(lot => (
               <div key={lot.id}>
@@ -810,7 +779,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                     <span className="font-bold text-zinc-400">{lot.numero}</span>
                     <span className="truncate">{lot.titre}</span>
                   </span>
-                  {showTotaux && <span className="text-[#1e5090] font-mono shrink-0 ml-1">{formatCurrency(lot.sousTotal)}</span>}
+                  {showTotaux && <span className="font-mono tabular-nums shrink-0 ml-1">{formatCurrency(totaux.sousTotaux[bpu.lots.indexOf(lot)])}</span>}
                 </button>
                 {expandedLots.has(lot.id) && lot.chapitres.map(chap => (
                   <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[0.6875rem] text-zinc-500 dark:text-zinc-400 truncate">
@@ -841,7 +810,16 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         )}
 
         {/* ── Table ──────────────────────────────────────────────────────── */}
-        <div ref={tableRef} className="flex-1 overflow-auto">
+        <div className="relative flex-1 min-w-0 flex flex-col">
+        {selectionCount > 0 && (
+          <SelectionBar
+            label={t('pro_selection_count', { count: selectionCount })}
+            actions={selectionActions}
+            onClear={() => setSelectedRowKeys(new Set())}
+            isMobile={isMobile}
+          />
+        )}
+        <div ref={tableRef} className={`flex-1 overflow-auto ${selectionCount ? 'pb-20' : ''}`}>
           {horsFourchette && (
             <div className="px-3 py-2 text-xs bg-amber-50 border-b border-amber-200 text-amber-800">
               Le montant estimatif ({formatCurrency(bpu.totalHT)}) sort de la fourchette du marché
@@ -852,7 +830,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
           <table className="w-full border-collapse text-sm" style={{ minWidth: showOffres ? 900 : 720 }}>
             <thead className="sticky top-0 z-10">
-              <tr className="bg-[#1e5090] text-white text-xs">
+              <tr className="text-xs" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', boxShadow: 'inset 0 -1px 0 var(--tblr-border)' }}>
                 <th className="px-2 py-2 text-left font-semibold w-8"></th>
                 <th className="px-2 py-2 text-left font-semibold w-20">N°</th>
                 <th className="px-2 py-2 text-left font-semibold">Désignation</th>
@@ -916,7 +894,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       {showQte && <td />}
                       <td />
                       {showLettres && <td />}
-                      {showMontant && <td className="px-2 py-2 text-right font-mono text-[#1e5090]">{formatCurrency(row.lot.sousTotal)}</td>}
+                      {showMontant && <td className="px-2 py-2 text-right font-mono tabular-nums">{formatCurrency(totaux.sousTotaux[row.lotIdx])}</td>}
                       {showOffres && offres.map(o => <td key={o.id} />)}
                       {showOffres && <td />}
                       {(bpu.multiBatiments || bpu.multiPhases) && (
@@ -1002,7 +980,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       onDrop={e => handleDrop(e, row)}
                       onClick={e => toggleSelect(rKey, e.ctrlKey || e.metaKey)}
                       className={`border-b border-zinc-100 dark:border-zinc-800 cursor-pointer
-                        ${isSelected ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-[#f0f6ff] dark:hover:bg-zinc-800/60'}
+                        ${isSelected ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-[var(--tblr-surface-2)]'}
                         ${l.type === 'titre' ? 'bg-zinc-50 italic text-zinc-500' : ''}
                         ${l.type === 'commentaire' ? 'text-zinc-400' : ''}`}>
                     <td className="px-2 py-0.5" style={{ paddingLeft: 8 + row.depth * 12 }}>
@@ -1038,7 +1016,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       </td>
                     )}
                     {showMontant && (
-                      <td className="px-1 py-0.5 text-right font-mono text-[#1e5090] font-medium">
+                      <td className="px-1 py-0.5 text-right font-mono tabular-nums font-medium">
                         {hasChildren
                           ? <span className="px-1 text-sm text-zinc-500 italic">{formatCurrency(sumLigne(l))}</span>
                           : <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric />}
@@ -1112,25 +1090,25 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       <td colSpan={1 + nbColsDecoupage} />
                     </tr>
                   ))}
-                  <tr className="bg-[#edf1f7] dark:bg-zinc-800/30">
-                    <td colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm text-zinc-600 font-semibold">TVA {bpu.TVA} %</td>
-                    <td className="px-2 py-2 text-right font-mono text-zinc-600">{formatCurrency(grandTVA)}</td>
+                  <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                    <th scope="row" colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm font-semibold">
+                      {colSet === 'comparatif' ? t('pro_total_ht') : t('pro_bpu_estimated_ht')}
+                    </th>
+                    <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
                     <td colSpan={1 + nbColsDecoupage} />
                   </tr>
-                  <tr className="bg-[#1e5090] text-white font-bold">
-                    <td colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm">
-                      {colSet === 'comparatif' ? 'TOTAL HT' : 'MONTANT ESTIMATIF HT'}
-                    </td>
-                    <td className="px-2 py-2 text-right font-mono">{formatCurrency(bpu.totalHT)}</td>
+                  <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                    <th scope="row" colSpan={nbCols - 2} className="px-4 py-1.5 text-right text-sm font-normal">{t('pro_vat_rate', { rate: bpu.TVA })}</th>
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums">{formatCurrency(totaux.montantTVA)}</td>
                     <td colSpan={1 + nbColsDecoupage} />
                   </tr>
-                  <tr className="bg-[#1a4080] text-white font-bold">
-                    <td colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm">MONTANT ESTIMATIF TTC</td>
-                    <td className="px-2 py-2 text-right font-mono">{formatCurrency(bpu.totalTTC)}</td>
+                  <tr className="border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                    <th scope="row" colSpan={nbCols - 2} className="px-4 py-2 text-right font-bold">{t('pro_bpu_estimated_ttc')}</th>
+                    <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
                     <td colSpan={1 + nbColsDecoupage} />
                   </tr>
                   {showOffres && (
-                    <tr className="bg-[#0f2d5c] text-white font-bold text-xs">
+                    <tr className="font-bold text-xs border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                       <td colSpan={4 + (showQte ? 1 : 0) + 1} className="px-4 py-2 text-right">TOTAL DE L'OFFRE</td>
                       {offres.map(o => (
                         <td key={o.id} className="px-2 py-2 text-right font-mono">{formatCurrency(totauxOffres.get(o.id) ?? 0)}</td>
@@ -1157,10 +1135,11 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
           {bpu.lots.length === 0 && (
             <div className="p-10 text-center text-sm text-zinc-400">
               Ce {mode === 'bpu' ? 'bordereau' : 'DQE'} est vide.
-              {onInitFromDpgf && ' Vous pouvez l’initialiser depuis le DPGF du projet (onglet Marché du ruban),'}
+              {onInitFromDpgf && ' Vous pouvez l’initialiser depuis le DPGF du projet (menu Marché),'}
               {onInitFromDpgf ? ' ou créer' : ' Créez'} un premier lot.
             </div>
           )}
+        </div>
         </div>
 
         {/* ── Bibliothèque de prix du cabinet ──────────────────────────────── */}

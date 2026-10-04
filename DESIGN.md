@@ -9,7 +9,7 @@ colors:
   surface-sunken: "#f8fafc"
   hairline: "#dce1e7"
   ink: "#1d273b"
-  ink-muted: "#6c7a91"
+  ink-muted: "#5f6d84"
   success: "#2fb344"
   warning: "#f76707"
   danger: "#d63939"
@@ -20,6 +20,7 @@ colors:
   dark-surface-sunken: "#1e2d40"
   dark-hairline: "#2d3f55"
   dark-ink: "#c8d3e1"
+  dark-ink-muted: "#6c7a91"
 typography:
   headline:
     fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"
@@ -163,7 +164,7 @@ Une palette de neutres ardoise légèrement bleutés, un seul accent bleu franc,
 - **Surface en retrait** (`surface-sunken`, sombre `dark-surface-sunken`) : en-têtes de tableau, survol de ligne, piste des onglets, champ de recherche.
 - **Trait** (`hairline`, sombre `dark-hairline`) : toutes les bordures et séparations, toujours à 1 px.
 - **Encre** (`ink`, sombre `dark-ink`) : texte courant et titres.
-- **Encre atténuée** (`ink-muted`, identique dans les deux thèmes) : libellés, en-têtes de colonnes, texte secondaire, icônes au repos.
+- **Encre atténuée** (`ink-muted`, sombre `dark-ink-muted`) : libellés, en-têtes de colonnes, texte secondaire, icônes au repos. En clair, `#5f6d84` plutôt que l'ancien `#6c7a91` : celui-ci restait sous le contraste de 4,5:1 sur blanc et sur `surface-sunken`, or c'est la couleur des petits textes (en-têtes de colonnes, numéros d'articles).
 
 ### Status
 - **Vert réussite** (`success`), **orange attention** (`warning`), **rouge danger** (`danger`) : pastilles de statut, compteurs, bouton de suppression, messages d'erreur. Jamais décoratifs.

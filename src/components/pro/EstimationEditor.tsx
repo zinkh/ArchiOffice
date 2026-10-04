@@ -1,14 +1,17 @@
 import { LotTitleInput } from './LotTitleInput';
 import React, { useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
-  IconLayoutSidebar, IconArrowsMaximize, IconArrowsMinimize,
-  IconLayoutColumns, IconRefresh, IconX, IconDeviceFloppy,
-  IconMapPin, IconArrowUp, IconArrowDown,
+  IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
+  IconRefresh, IconX, IconMapPin, IconArrowUp, IconArrowDown, IconDownload, IconReceiptTax,
 } from '@tabler/icons-react';
-import { ProRibbon, RibbonTabDef } from './ProRibbon';
-import { DPGF, Lot } from '../../types/dpgf';
-import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling } from './treeOps';
+import { DPGF } from '../../types/dpgf';
+import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
+import { totauxDocument } from './selectionOps';
+import { useProToolbar } from './toolbar/proToolbar';
+import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
 import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
@@ -21,7 +24,6 @@ type ColSet = 'synthese' | 'detail' | 'marge';
 interface EstimationEditorProps {
   dpgf: DPGF;
   onChange: (dpgf: DPGF) => void;
-  onSave: () => void;
   projectName?: string;
   externalDrop?: import('../../types/dpgf').Ligne | null;
   onDragStart?: (ligne: import('../../types/dpgf').Ligne) => void;
@@ -46,13 +48,10 @@ function destAppend(doc: DPGF, lotIdx: number, chapIdx: number, ligne: import('.
   const chap = doc.lots[lotIdx].chapitres[chapIdx];
   chap.lignes = renumeroterLignes([...chap.lignes, ligne], String(chap.numero || chapIdx + 1));
 }
+// Les sous-articles comptent : un parent porte la somme de ses enfants
+// (recomputeLot descend dans l'arbre, la somme à plat les ignorait).
 function recomputeDPGF(dpgf: DPGF): DPGF {
-  const newLots = dpgf.lots.map(lot => {
-    const sousTotal = lot.chapitres.reduce(
-      (s, c) => s + c.lignes.reduce((ls, l) => ls + l.prixTotal, 0), 0
-    );
-    return { ...lot, sousTotal };
-  });
+  const newLots = dpgf.lots.map(lot => recomputeLot(lot));
   const totalHT = newLots.reduce((s, l) => s + l.sousTotal, 0);
   return { ...dpgf, lots: newLots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) };
 }
@@ -60,10 +59,12 @@ function recomputeDPGF(dpgf: DPGF): DPGF {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const EstimationEditor: React.FC<EstimationEditorProps> = ({
-  dpgf, onChange, onSave, projectName, externalDrop, onDragStart,
+  dpgf, onChange, projectName, externalDrop, onDragStart,
   showTree: showTreeProp, onToggleTree,
 }) => {
   const { settings } = useSettings();
+  const { t } = useTranslation();
+  const isMobile = useMediaQuery('(max-width: 767px)');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
     new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
@@ -115,12 +116,13 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   };
 
   // ── TVA update ───────────────────────────────────────────────────────────────
+  const setTVA = (tva: number) => {
+    setTvaDraft(String(tva));
+    onChange({ ...dpgf, TVA: tva, totalTTC: dpgf.totalHT * (1 + tva / 100) });
+  };
   const applyTVA = () => {
-    const tva = parseFloat(tvaDraft);
-    if (!isNaN(tva)) {
-      const newDpgf = { ...dpgf, TVA: tva, totalTTC: dpgf.totalHT * (1 + tva / 100) };
-      onChange(newDpgf);
-    }
+    const tva = parseFloat(tvaDraft.replace(',', '.'));
+    if (!isNaN(tva)) setTVA(tva);
   };
 
   // ── Expand/Collapse ───────────────────────────────────────────────────────────
@@ -179,64 +181,50 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     const chap = next.lots[selectedRow.lotIdx].chapitres[selectedRow.chapIdx];
     chap.lignes = renumeroterLignes(moveLigneSibling(chap.lignes, selectedRow.path, direction), String(chap.numero || selectedRow.chapIdx + 1));
     onChange(recomputeDPGF(next));
+    // La sélection suit la ligne déplacée.
+    setSelectedRow({ ...selectedRow, path: [...selectedRow.path.slice(0, -1), selectedRow.path.at(-1)! + direction] });
   };
 
-  // ── Ribbon ────────────────────────────────────────────────────────────────────
-  const ribbonTabs: RibbonTabDef[] = [
+  // ── Barre d'outils ─────────────────────────────────────────────────────────
+  const fmtTaux = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 2 }).format(n);
+  useProToolbar([
     {
-      id: 'accueil',
-      label: 'Accueil',
-      groups: [
-        {
-          label: 'Colonnes',
-          actions: [
-            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRow },
-            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRow },
-            { id: 'colSynthese', label: 'Synthèse', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('synthese'), active: colSet === 'synthese' },
-            { id: 'colDetail', label: 'Détail', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('detail'), active: colSet === 'detail' },
-            { id: 'colMarge', label: '+ Marge', icon: <IconLayoutColumns size={20} />, onClick: () => setColSet('marge'), active: colSet === 'marge' },
-          ],
-        },
-        {
-          label: 'Document',
-          actions: [
-            { id: 'save', label: 'Enregistrer', icon: <IconDeviceFloppy size={20} />, onClick: onSave },
-          ],
-        },
+      kind: 'segmented', id: 'est-cols', label: t('pro_columns'), value: colSet, onChange: v => setColSet(v as ColSet),
+      options: [
+        { id: 'synthese', label: t('pro_columns_summary') },
+        { id: 'detail', label: t('pro_columns_detail') },
+        { id: 'marge', label: t('pro_columns_margin') },
       ],
     },
     {
-      id: 'vue',
-      label: 'Vue',
-      groups: [
-        {
-          label: 'Volet arbre',
-          actions: [
-            { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: toggleTree, active: showTree },
-          ],
-        },
-        {
-          label: 'Développement',
-          actions: [
-            { id: 'expand', label: 'Développer', icon: <IconArrowsMaximize size={20} />, onClick: expandAll },
-            { id: 'collapse', label: 'Réduire', icon: <IconArrowsMinimize size={20} />, onClick: collapseAll },
-          ],
-        },
-      ],
+      kind: 'menu', id: 'est-tva', label: t('pro_vat_rate', { rate: fmtTaux(dpgf.TVA) }), icon: <IconReceiptTax size={16} />,
+      entries: [20, 10, 5.5, 2.1, 0].map(rate => ({
+        id: `est-tva-${rate}`, label: `${fmtTaux(rate)} %`, checked: dpgf.TVA === rate, onClick: () => setTVA(rate),
+      })),
     },
     {
-      id: 'export',
-      label: 'Exporter',
-      groups: [
-        {
-          label: 'Formats',
-          actions: [
-            { id: 'pdf', label: 'PDF', icon: <IconFileTypePdf size={20} />, onClick: () => exportEstimationtoPDF(dpgf, projectName, settings ?? {}) },
-            { id: 'excel', label: 'Excel', icon: <IconTable size={20} />, onClick: () => exportEstimationtoExcel(dpgf, projectName, settings ?? {}) },
-          ],
-        },
+      kind: 'menu', id: 'est-export', label: t('pro_export'), icon: <IconDownload size={16} />,
+      entries: [
+        { id: 'est-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportEstimationtoPDF(dpgf, projectName, settings ?? {}) },
+        { id: 'est-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportEstimationtoExcel(dpgf, projectName, settings ?? {}) },
       ],
     },
+  ]);
+  const selectedLigne = selectedRow ? (() => {
+    let lignes = dpgf.lots[selectedRow.lotIdx]?.chapitres[selectedRow.chapIdx]?.lignes ?? [];
+    let node;
+    for (const i of selectedRow.path) { node = lignes[i]; lignes = node?.children ?? []; }
+    return node;
+  })() : undefined;
+  const siblingsOfSelected = selectedRow ? (() => {
+    let lignes = dpgf.lots[selectedRow.lotIdx]?.chapitres[selectedRow.chapIdx]?.lignes ?? [];
+    for (const i of selectedRow.path.slice(0, -1)) lignes = lignes[i]?.children ?? [];
+    return lignes;
+  })() : [];
+  const selIndex = selectedRow?.path.at(-1) ?? -1;
+  const selectionActions: SelectionAction[] = [
+    { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: selIndex <= 0 },
+    { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => moveSelected(1), disabled: selIndex < 0 || selIndex >= siblingsOfSelected.length - 1 },
   ];
 
   // ── Column definitions ────────────────────────────────────────────────────────
@@ -256,7 +244,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
             if (e.key === 'Enter') commitCell((e.target as HTMLInputElement).value);
             if (e.key === 'Escape') setEditCell(null);
           }}
-          className="w-full px-1 py-0 bg-[#fffde7] border border-blue-400 rounded text-right font-mono text-sm outline-none"
+          className="w-full px-1 py-0 rounded text-right font-mono text-sm outline-none border border-[var(--tblr-primary)] bg-[var(--tblr-surface)]"
         />
       );
     }
@@ -272,68 +260,89 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   };
 
   // ── Grand totals ──────────────────────────────────────────────────────────────
-  const grandHT = dpgf.totalHT;
-  const grandTVA = grandHT * dpgf.TVA / 100;
-  const grandTTC = grandHT + grandTVA;
+  // Recalculés depuis les articles, comme dans le DPGF.
+  const totaux = totauxDocument(dpgf.lots, dpgf.TVA);
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
-      <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
-
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left tree ──────────────────────────────────────────────────── */}
         {showTree && (
-          <div className="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm">
-            <div className="px-3 py-2 text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wider border-b border-zinc-200 dark:border-zinc-700">
-              Lots / Chapitres
+          <nav aria-label={t('pro_structure')} className="w-56 shrink-0 border-r overflow-y-auto text-sm" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+            <div className="flex items-center gap-0.5 pl-3 pr-1 py-1.5 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
+              <span className="flex-1 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('pro_structure')}</span>
+              {[
+                { label: t('pro_expand_all'), icon: <IconArrowsMaximize size={14} />, onClick: expandAll },
+                { label: t('pro_collapse_all'), icon: <IconArrowsMinimize size={14} />, onClick: collapseAll },
+                { label: t('pro_hide_structure'), icon: <IconLayoutSidebarLeftCollapse size={14} />, onClick: toggleTree },
+              ].map(b => (
+                <button key={b.label} type="button" onClick={b.onClick} aria-label={b.label} title={b.label}
+                  className="w-7 h-7 inline-flex items-center justify-center rounded hover:bg-[var(--tblr-surface)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                  style={{ color: 'var(--tblr-muted)' }}>
+                  {b.icon}
+                </button>
+              ))}
             </div>
-            {dpgf.lots.map(lot => (
+            {dpgf.lots.map((lot, li) => (
               <div key={lot.id}>
                 <button
-                  className={`w-full flex items-center justify-between gap-1 px-2 py-1.5 text-left hover:bg-blue-50 dark:hover:bg-zinc-700 text-xs
-                    ${selectedLotId === lot.id ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300 font-semibold' : 'font-medium text-zinc-700 dark:text-zinc-300'}`}
+                  className={`w-full flex items-center justify-between gap-1 px-2 py-1.5 text-left text-xs font-medium hover:bg-[var(--tblr-surface)]
+                    ${selectedLotId === lot.id ? 'bg-[var(--tblr-primary-lt)] font-semibold' : ''}`}
                   onClick={() => scrollToLot(lot.id)}
                 >
                   <span className="flex items-center gap-1 min-w-0">
                     <span className="shrink-0" onClick={e => { e.stopPropagation(); toggleLot(lot.id); }}>
                       {expandedLots.has(lot.id) ? <IconChevronDown size={13} /> : <IconChevronRight size={13} />}
                     </span>
-                    <span className="font-bold text-zinc-400">{lot.numero}</span>
+                    <span className="font-mono" style={{ color: 'var(--tblr-muted)' }}>{lot.numero}</span>
                     <span className="truncate">{lot.titre}</span>
                   </span>
-                  <span className="text-[#1e5090] font-mono shrink-0 ml-1">{formatCurrency(lot.sousTotal)}</span>
+                  <span className="font-mono tabular-nums shrink-0 ml-1">{formatCurrency(totaux.sousTotaux[li])}</span>
                 </button>
                 {expandedLots.has(lot.id) && lot.chapitres.filter(chap => !chap.cctpOnly).map(chap => (
-                  <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[0.6875rem] text-zinc-500 dark:text-zinc-400 flex items-center justify-between">
+                  <div key={chap.id} className="pl-6 pr-2 py-0.5 text-[0.6875rem] flex items-center justify-between" style={{ color: 'var(--tblr-muted)' }}>
                     <span className="truncate">{chap.numero} {chap.titre}</span>
                   </div>
                 ))}
               </div>
             ))}
-            {/* TVA control */}
-            <div className="border-t border-zinc-200 dark:border-zinc-700 mt-2 p-2">
-              <div className="text-[0.6875rem] text-zinc-500 mb-1">TVA (%)</div>
+            {/* Taux de TVA hors des taux usuels proposés par la barre (DOM, etc.) */}
+            <div className="border-t mt-2 p-2" style={{ borderColor: 'var(--tblr-border)' }}>
+              <label htmlFor="est-tva-custom" className="block text-[0.6875rem] mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('pro_vat_custom')}</label>
               <div className="flex gap-1">
                 <input
-                  type="number"
+                  id="est-tva-custom"
+                  type="text"
+                  inputMode="decimal"
                   value={tvaDraft}
                   onChange={e => setTvaDraft(e.target.value)}
-                  className="w-14 px-2 py-1 text-xs border border-zinc-300 rounded focus:ring-1 focus:ring-blue-400 outline-none"
+                  onKeyDown={e => { if (e.key === 'Enter') applyTVA(); }}
+                  className="w-16 px-2 py-1 text-xs border rounded outline-none focus:ring-1 focus:ring-[var(--tblr-primary)]"
+                  style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
                 />
-                <button onClick={applyTVA} className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">
+                <button type="button" onClick={applyTVA} aria-label={t('pro_vat_apply')} title={t('pro_vat_apply')} className="px-2 py-1 rounded text-xs border hover:bg-[var(--tblr-surface)]" style={{ borderColor: 'var(--tblr-border)' }}>
                   <IconRefresh size={12} />
                 </button>
               </div>
             </div>
-          </div>
+          </nav>
         )}
 
         {/* ── Right table ─────────────────────────────────────────────────── */}
-        <div ref={tableRef} className="flex-1 overflow-auto">
+        <div className="relative flex-1 min-w-0 flex flex-col">
+        {selectedRow && selectedLigne && (
+          <SelectionBar
+            label={t('pro_article_label', { numero: selectedLigne.numero })}
+            actions={selectionActions}
+            onClear={() => setSelectedRow(null)}
+            isMobile={isMobile}
+          />
+        )}
+        <div ref={tableRef} className={`flex-1 overflow-auto ${selectedRow ? 'pb-20' : ''}`}>
           <table className="w-full border-collapse text-sm" style={{ minWidth: showMarge ? 900 : 700 }}>
             <thead className="sticky top-0 z-10">
-              <tr className="bg-[#1e5090] text-white text-xs">
+              <tr className="text-xs" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', boxShadow: 'inset 0 -1px 0 var(--tblr-border)' }}>
                 <th className="px-2 py-2 text-left w-24">N°</th>
                 <th className="px-2 py-2 text-left">Désignation</th>
                 <th className="px-2 py-2 text-center w-16">Unité</th>
@@ -351,7 +360,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                   {/* Lot header */}
                   <tr
                     data-lot-id={lot.id}
-                    className="bg-[#c8d8ec] dark:bg-blue-900/30 border-b border-[#9ab0cb] font-bold"
+                    className="border-y font-semibold"
+                    style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}
                     onDragOver={e => { e.preventDefault(); setDropTarget(`lot-${li}`); }}
                     onDrop={e => { e.preventDefault(); setDropTarget(null); }}
                     onDragLeave={() => setDropTarget(null)}
@@ -366,8 +376,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                     <td />
                     {showQtyPU && <td />}
                     {showQtyPU && <td />}
-                    <td className="px-2 py-2 text-right font-mono text-[#1e5090]">{formatCurrency(lot.sousTotal)}</td>
-                    <td className="px-2 py-2 text-right font-mono text-zinc-600">{formatCurrency(lot.sousTotal * (1 + dpgf.TVA / 100))}</td>
+                    <td className="px-2 py-2 text-right font-mono tabular-nums">{formatCurrency(totaux.sousTotaux[li])}</td>
+                    <td className="px-2 py-2 text-right font-mono tabular-nums" style={{ color: 'var(--tblr-muted)' }}>{formatCurrency(totaux.sousTotaux[li] * (1 + dpgf.TVA / 100))}</td>
                     {showMarge && <td />}
                     <td />
                   </tr>
@@ -376,7 +386,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                     <React.Fragment key={chap.id}>
                       {/* Chapitre header */}
                       <tr
-                        className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 ${dropTarget === `chap-${li}-${ci}` ? 'ring-1 ring-blue-400' : ''}`}
+                        className={`border-b font-semibold ${dropTarget === `chap-${li}-${ci}` ? 'bg-[var(--tblr-primary-lt)]' : ''}`}
+                        style={{ borderColor: 'var(--tblr-border)' }}
                         onDragOver={e => { e.preventDefault(); setDropTarget(`chap-${li}-${ci}`); }}
                         onDrop={e => handleDrop(e, li, ci)}
                         onDragLeave={() => setDropTarget(null)}
@@ -409,10 +420,11 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             onDragStart={e => handleDragStart(e, ligne, li, ci, path)}
                             onDragOver={e => { e.preventDefault(); setDropTarget(rowId); }}
                             onDrop={e => handleDrop(e, li, ci, path)}
-                            className={`border-b border-zinc-100 dark:border-zinc-800 hover:bg-[#f0f6ff] dark:hover:bg-zinc-800/60 cursor-grab
-                              ${ligne.type === 'titre' ? 'bg-zinc-50 italic text-zinc-500' : ''}
-                              ${ligne.type === 'commentaire' ? 'text-zinc-400' : ''}
+                            className={`border-b cursor-grab
+                              ${selectedRow && selectedRow.lotIdx === li && selectedRow.chapIdx === ci && selectedRow.path.join('.') === path.join('.') ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-[var(--tblr-surface-2)]'}
+                              ${ligne.type === 'titre' ? 'italic' : ''}
                             `}
+                            style={{ borderColor: 'var(--tblr-border)', ...(ligne.type !== 'ouvrage' ? { color: 'var(--tblr-muted)' } : {}) }}
                           >
                             <td className="px-2 py-0.5 text-xs text-zinc-400" style={{ paddingLeft: `${2 + depth * 1.25}rem` }}>{ligne.numero}</td>
                             <td className="px-2 py-0.5 text-sm"><input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, path, { designation: e.target.value })} /></td>
@@ -461,32 +473,24 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                 </React.Fragment>
               ))}
 
-              {/* Grand totals */}
-              <tr className="bg-[#edf1f7] dark:bg-zinc-800/30">
-                <td colSpan={showQtyPU ? 5 : 3} className="px-4 py-2 text-sm text-zinc-600 font-semibold">
-                  TVA {dpgf.TVA}%
-                </td>
-                <td className="px-2 py-2 text-right font-mono text-zinc-600">{formatCurrency(grandTVA)}</td>
-                <td className="px-2 py-2 text-right font-mono text-zinc-600">{formatCurrency(grandTVA)}</td>
+              {/* Totaux, recalculés depuis les articles */}
+              <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                <th scope="row" colSpan={showQtyPU ? 5 : 3} className="px-4 py-2 text-left font-bold">{t('pro_total')}</th>
+                <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
+                <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
                 {showMarge && <td />}
                 <td />
               </tr>
-              <tr className="bg-[#1e5090] text-white font-bold">
-                <td colSpan={showQtyPU ? 5 : 3} className="px-4 py-2 text-sm">TOTAL HT</td>
-                <td className="px-2 py-2 text-right font-mono">{formatCurrency(grandHT)}</td>
-                <td className="px-2 py-2 text-right font-mono text-blue-200">{formatCurrency(grandHT)}</td>
-                {showMarge && <td />}
+              <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                <th scope="row" colSpan={showQtyPU ? 5 : 3} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_included', { rate: dpgf.TVA })}</th>
                 <td />
-              </tr>
-              <tr className="bg-[#1a4080] text-white font-bold">
-                <td colSpan={showQtyPU ? 5 : 3} className="px-4 py-3 text-base">TOTAL TTC</td>
-                <td className="px-2 py-3 text-right font-mono text-blue-200">{formatCurrency(grandHT)}</td>
-                <td className="px-2 py-3 text-right font-mono text-lg">{formatCurrency(grandTTC)}</td>
+                <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.montantTVA)}</td>
                 {showMarge && <td />}
                 <td />
               </tr>
             </tbody>
           </table>
+        </div>
         </div>
       </div>
       {breakdown && (() => {

@@ -111,7 +111,7 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
   const champ = 'px-2 py-1 text-xs border border-zinc-300 rounded focus:ring-1 focus:ring-blue-400 outline-none';
 
   return (
-    <div className="w-80 shrink-0 border-l border-zinc-200 dark:border-zinc-700 bg-[#f9fafb] dark:bg-zinc-800/30 flex flex-col overflow-hidden">
+    <div className="w-80 shrink-0 border-l border-zinc-200 dark:border-zinc-700 bg-[#f9fafb] dark:bg-zinc-800/30 flex flex-col overflow-hidden max-md:fixed max-md:inset-0 max-md:z-50 max-md:w-full max-md:border-l-0">
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
         <h3 className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500">Bibliothèque d’ouvrages</h3>
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><IconX size={14} /></button>
