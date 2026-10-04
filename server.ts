@@ -46,6 +46,9 @@ import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences"
 import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
 import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
 import { registerTenderAiRoutes } from "./server/routes/tenderAi";
+import { registerProposalFeasibilityRoutes } from "./server/routes/proposalFeasibility";
+import { registerProposalFeasibilityAiRoutes } from "./server/routes/proposalFeasibilityAi";
+import { loadFeasibilitySiteData } from "./server/feasibilitySiteData";
 import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
 import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
@@ -521,7 +524,7 @@ export async function createApp() {
   async function settleAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation' | 'proposal_ai';
     provider: string; model: string;
     reservedCents: number;
     inputTokens: number; outputTokens: number;
@@ -1030,6 +1033,8 @@ export async function createApp() {
   registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
   registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerProposalFeasibilityRoutes(app, { supabaseAdmin, getTenantId, loadSiteData: loadFeasibilitySiteData });
+  registerProposalFeasibilityAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents, loadSiteData: loadFeasibilitySiteData });
   registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
