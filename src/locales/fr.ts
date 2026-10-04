@@ -1,4 +1,5 @@
 export default {
+  "pro_demote": "Descendre d’un niveau",
   "pro_duplicate": "Dupliquer",
   "pro_promote": "Remonter d’un niveau",
   "pro_add_child": "Sous-article",

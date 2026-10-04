@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
+import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
 import { LotTitleInput } from './LotTitleInput';
 import React, { useState } from 'react';
 import {
@@ -282,6 +282,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
       { id: 'down', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !canMove(dpgf.lots, selection, 1) },
       { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
             { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: promoteSelected, disabled: selection?.kind !== 'ligne' },
+      { id: 'demote', label: t('pro_demote'), icon: <IconArrowDown size={20} />, onClick: () => selection && applyHierarchy(demoteHierarchy(dpgf.lots, selection, uid)), disabled: !canDemote(dpgf.lots, selection) },
       { id: 'child', label: t('pro_add_child'), icon: <IconPlus size={20} />, onClick: addSelectedChild, disabled: selection?.kind !== 'ligne' || 1 + selection.lignePath.length >= MAX_ARTICLE_DEPTH },
       { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
       { id: 'expand', label: 'Développer', icon: <IconArrowsMaximize size={20} />, onClick: () => setExpandedChaps(new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))) },
