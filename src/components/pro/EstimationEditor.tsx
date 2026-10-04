@@ -46,7 +46,6 @@ function destAppend(doc: DPGF, lotIdx: number, chapIdx: number, ligne: import('.
   const chap = doc.lots[lotIdx].chapitres[chapIdx];
   chap.lignes = renumeroterLignes([...chap.lignes, ligne], String(chap.numero || chapIdx + 1));
 }
-
 function recomputeDPGF(dpgf: DPGF): DPGF {
   const newLots = dpgf.lots.map(lot => {
     const sousTotal = lot.chapitres.reduce(
