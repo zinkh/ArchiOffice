@@ -40,6 +40,19 @@ export const aiGenerationLimiter = rateLimit({
   message: { error: 'Trop de requêtes IA. Veuillez patienter avant de réessayer.' },
 });
 
+// Relais de tuiles IGN de l'étude de faisabilité (/api/feasibility/map-tile) :
+// un extrait de carte en demande une cinquantaine (fond + parcellaire), et
+// chaque réglage changé le recompose. Le plafond laisse une composition
+// confortable tout en empêchant d'utiliser le relais comme aspirateur de tuiles.
+export const mapTileLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de tuiles demandées. Patientez quelques instants.' },
+});
+
 // Outbound mail relays a tenant's own SMTP credentials — still worth capping
 // so a compromised/misused account can't be turned into a spam cannon.
 export const sendEmailLimiter = rateLimit({

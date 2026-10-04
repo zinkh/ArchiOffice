@@ -26,6 +26,7 @@ import MilestoneGantt from '../components/MilestoneGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedMeetings from '../components/LinkedMeetings';
+import { FeasibilityStudy } from '../components/proposal/FeasibilityStudy';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { ProposalExportModal } from '../components/ProposalExportModal';
@@ -113,6 +114,19 @@ export default function Proposals() {
     setCorrespondenceOpen(prev => {
       const next = !prev;
       try { localStorage.setItem('proposals.correspondenceOpen', next ? '1' : '0'); } catch { /* stockage indisponible */ }
+      return next;
+    });
+  };
+  // Étude de faisabilité : repliée par défaut (elle peut être longue), le
+  // choix est mémorisé sur le poste comme pour la correspondance.
+  const [feasibilityOpen, setFeasibilityOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem('proposals.feasibilityOpen') === '1'; } catch { return false; }
+  });
+  const [feasibilityCount, setFeasibilityCount] = useState(0);
+  const toggleFeasibility = () => {
+    setFeasibilityOpen(prev => {
+      const next = !prev;
+      try { localStorage.setItem('proposals.feasibilityOpen', next ? '1' : '0'); } catch { /* stockage indisponible */ }
       return next;
     });
   };
@@ -1318,6 +1332,32 @@ export default function Proposals() {
                   </div>
                 )}
               </form>
+
+              {editingProposal && (
+                <div className={`px-6 shrink-0 ${feasibilityOpen ? 'pb-4 max-h-[60dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <button
+                    type="button"
+                    onClick={toggleFeasibility}
+                    aria-expanded={feasibilityOpen}
+                    className="w-full flex items-center justify-between py-3 text-sm font-bold uppercase tracking-widest"
+                    style={{ color: 'var(--tblr-text)' }}
+                  >
+                    {t('feas_title')}{feasibilityCount ? ` (${feasibilityCount})` : ''}
+                    <IconChevronDown size={18} className={`transition-transform ${feasibilityOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--tblr-muted)' }} />
+                  </button>
+                  {/* Monté même replié pour afficher le nombre de rubriques dans l'en-tête. */}
+                  <div className={feasibilityOpen ? '' : 'hidden'}>
+                    <FeasibilityStudy
+                      key={editingProposal.id}
+                      proposalId={editingProposal.id}
+                      proposal={{ ...newProposal, id: editingProposal.id }}
+                      parcelGeometry={selectedParcelGeometry}
+                      settings={settings ?? {}}
+                      onCount={setFeasibilityCount}
+                    />
+                  </div>
+                </div>
+              )}
 
               {editingProposal && (
                 <div className={`px-6 shrink-0 ${meetingsOpen ? 'pb-4 max-h-[40dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>

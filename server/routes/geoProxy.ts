@@ -66,7 +66,7 @@ function parseWgs84Coordinates(value: unknown): { lat: number; lon: number } | n
   return { lat, lon };
 }
 
-interface GeoJSONGeometry {
+export interface GeoJSONGeometry {
   type: string;
   coordinates: any;
 }
@@ -100,7 +100,7 @@ interface ApicartoPluResponse<T> {
   }>;
 }
 
-interface PluResult {
+export interface PluResult {
   libelle: string;
   libelong: string;
   typezone: string;
@@ -118,7 +118,7 @@ interface PluResult {
 /**
  * Fetch PLU data from APICARTO IGN GPU API
  */
-async function getPlu(geometry: GeoJSONGeometry): Promise<PluResult> {
+export async function getPlu(geometry: GeoJSONGeometry): Promise<PluResult> {
   try {
     const zoneUrbaUrl = "https://apicarto.ign.fr/api/gpu/zone-urba";
     console.log(`[GPU] Calling zone-urba API with geometry: ${JSON.stringify(geometry)}`);
@@ -198,13 +198,13 @@ interface GeorisquesV1Response {
   url: string;
 }
 
-interface GeorisquesResult {
+export interface GeorisquesResult {
   url: string;
   risques_naturels: string[];
   risques_technologiques: string[];
 }
 
-async function getGeorisques(lon: number, lat: number, codeInsee: string): Promise<GeorisquesResult> {
+export async function getGeorisques(lon: number, lat: number, codeInsee: string): Promise<GeorisquesResult> {
   const v1Url = `https://georisques.gouv.fr/api/v1/resultats_rapport_risque?latlon=${lon},${lat}`;
   console.log(`Attempting Georisques API v1: ${v1Url}`);
 
@@ -316,6 +316,75 @@ function formatWeatherData(data: any) {
     meteo: weatherMap[code] || "Variable",
     temperature: temp == null ? null : Math.round(temp)
   };
+}
+
+/**
+ * Monuments historiques (base Mérimée, data.gouv.fr) à moins de `distance`
+ * mètres d'un point, les dix plus proches. Partagé par /api/historical-monuments
+ * et par l'étude de faisabilité d'une proposition (server/feasibilitySiteData.ts).
+ */
+export async function findHistoricalMonuments(lat: number, lon: number, insee: string, distance: number): Promise<any[]> {
+  const params = new URLSearchParams({
+    // L'API tabulaire refuse toute valeur supérieure à 200.
+    page_size: '200',
+    page: '1',
+    COG_Insee_lors_de_la_protection__exact: insee,
+    columns: [
+      'Reference', 'Denomination_de_l_edifice', 'Adresse_forme_index',
+      'Commune_forme_index', 'Date_et_typologie_de_la_protection',
+      'Departement_en_lettres', 'Statut_juridique_de_l_edifice',
+      'Precision_de_la_protection', 'Auteur_de_l_edifice',
+      'coordonnees_au_format_WGS84',
+    ].join(','),
+  });
+  const endpoint = `https://tabular-api.data.gouv.fr/api/resources/${HISTORICAL_MONUMENTS_RESOURCE_ID}/data/`;
+  const fetchPage = async (page: number) => {
+    params.set('page', String(page));
+    const response = await fetchWithTimeout(`${endpoint}?${params}`, { headers: { Accept: 'application/json' } }, 20_000);
+    if (!response.ok) {
+      const details = await response.text().catch(() => '');
+      const error: any = new Error(`data.gouv.fr returned ${response.status}: ${details.substring(0, 200)}`);
+      error.status = response.status;
+      throw error;
+    }
+    return response.json();
+  };
+
+  const firstPage = await fetchPage(1);
+  const total = Number(firstPage.meta?.total || firstPage.data?.length || 0);
+  const pageCount = Math.min(Math.ceil(total / 200), 10);
+  const otherPages = pageCount > 1
+    ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => fetchPage(index + 2)))
+    : [];
+  const rows = [firstPage, ...otherPages].flatMap((page: any) => page.data || []);
+
+  const records = rows
+    .map((row: any) => {
+      const coords = parseWgs84Coordinates(row.coordonnees_au_format_WGS84);
+      if (!coords) return null;
+      const dist = distanceMetres(lat, lon, coords.lat, coords.lon);
+      if (dist > distance) return null;
+      return {
+        recordid: row.Reference,
+        fields: {
+          ref_merimee: row.Reference,
+          tico: row.Denomination_de_l_edifice || 'Monument historique',
+          comm: row.Commune_forme_index || '',
+          dpt: row.Departement_en_lettres || '',
+          stat: row.Statut_juridique_de_l_edifice || row.Date_et_typologie_de_la_protection || 'Protégé MH',
+          prec_lib: row.Precision_de_la_protection || null,
+          dpro: row.Date_et_typologie_de_la_protection || null,
+          autr: row.Auteur_de_l_edifice || null,
+          adrs: row.Adresse_forme_index || null,
+          coordonnees_ban: [coords.lat, coords.lon],
+          dist,
+        },
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => a.fields.dist - b.fields.dist)
+    .slice(0, 10);
+  return records;
 }
 
 export function registerGeoProxyRoutes(app: Express) {
@@ -649,66 +718,7 @@ export function registerGeoProxyRoutes(app: Express) {
       const insee = String(inseeQuery).trim();
       if (!/^\d{5}$/.test(insee)) return res.status(400).json({ error: "Invalid INSEE code" });
 
-      const params = new URLSearchParams({
-        // L'API tabulaire refuse toute valeur supérieure à 200.
-        page_size: '200',
-        page: '1',
-        COG_Insee_lors_de_la_protection__exact: insee,
-        columns: [
-          'Reference', 'Denomination_de_l_edifice', 'Adresse_forme_index',
-          'Commune_forme_index', 'Date_et_typologie_de_la_protection',
-          'Departement_en_lettres', 'Statut_juridique_de_l_edifice',
-          'Precision_de_la_protection', 'Auteur_de_l_edifice',
-          'coordonnees_au_format_WGS84',
-        ].join(','),
-      });
-      const endpoint = `https://tabular-api.data.gouv.fr/api/resources/${HISTORICAL_MONUMENTS_RESOURCE_ID}/data/`;
-      const fetchPage = async (page: number) => {
-        params.set('page', String(page));
-        const response = await fetchWithTimeout(`${endpoint}?${params}`, { headers: { Accept: 'application/json' } }, 20_000);
-        if (!response.ok) {
-          const details = await response.text().catch(() => '');
-          const error: any = new Error(`data.gouv.fr returned ${response.status}: ${details.substring(0, 200)}`);
-          error.status = response.status;
-          throw error;
-        }
-        return response.json();
-      };
-
-      const firstPage = await fetchPage(1);
-      const total = Number(firstPage.meta?.total || firstPage.data?.length || 0);
-      const pageCount = Math.min(Math.ceil(total / 200), 10);
-      const otherPages = pageCount > 1
-        ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => fetchPage(index + 2)))
-        : [];
-      const rows = [firstPage, ...otherPages].flatMap((page: any) => page.data || []);
-
-      const records = rows
-        .map((row: any) => {
-          const coords = parseWgs84Coordinates(row.coordonnees_au_format_WGS84);
-          if (!coords) return null;
-          const dist = distanceMetres(lat, lon, coords.lat, coords.lon);
-          if (dist > distance) return null;
-          return {
-            recordid: row.Reference,
-            fields: {
-              ref_merimee: row.Reference,
-              tico: row.Denomination_de_l_edifice || 'Monument historique',
-              comm: row.Commune_forme_index || '',
-              dpt: row.Departement_en_lettres || '',
-              stat: row.Statut_juridique_de_l_edifice || row.Date_et_typologie_de_la_protection || 'Protégé MH',
-              prec_lib: row.Precision_de_la_protection || null,
-              dpro: row.Date_et_typologie_de_la_protection || null,
-              autr: row.Auteur_de_l_edifice || null,
-              adrs: row.Adresse_forme_index || null,
-              coordonnees_ban: [coords.lat, coords.lon],
-              dist,
-            },
-          };
-        })
-        .filter(Boolean)
-        .sort((a: any, b: any) => a.fields.dist - b.fields.dist)
-        .slice(0, 10);
+      const records = await findHistoricalMonuments(lat, lon, insee, distance);
 
       res.setHeader('Cache-Control', 'private, max-age=3600');
       res.json({ records });

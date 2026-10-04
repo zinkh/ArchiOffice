@@ -360,6 +360,19 @@ CREATE TABLE IF NOT EXISTS proposal_specialties (
   specialty_name TEXT NOT NULL, contact_id TEXT
 );
 
+-- Étude de faisabilité d'une proposition (voir migrate_proposal_feasibility.sql)
+CREATE TABLE IF NOT EXISTS proposal_feasibility_sections (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  proposal_id TEXT REFERENCES proposals(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', instructions TEXT NOT NULL DEFAULT '',
+  illustrations JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'a_rediger' CHECK (status IN ('a_rediger', 'redige')),
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_proposal_feasibility_proposal ON proposal_feasibility_sections(tenant_id, proposal_id, sort_order);
+
 CREATE TABLE IF NOT EXISTS milestones (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -742,6 +755,7 @@ ALTER TABLE tender_methodology_notes  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tender_activity_notes     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposals            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE proposal_specialties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE proposal_feasibility_sections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE milestones           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoice_items        ENABLE ROW LEVEL SECURITY;
@@ -837,6 +851,8 @@ CREATE POLICY "tenant_isolation" ON tender_activity_notes
 CREATE POLICY "tenant_isolation" ON proposals
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON proposal_specialties
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON proposal_feasibility_sections
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON milestones
   USING (tenant_id = my_tenant_id());

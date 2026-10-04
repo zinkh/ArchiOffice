@@ -918,6 +918,67 @@ exécute → règle déjà en place pour le chat des agents :
    la lecture partagée par ce geste et par « Analyser le DCE »/« Chercher
    dans le DCE ».
 
+### Étude de faisabilité d'une proposition
+
+Volet repliable « Étude de faisabilité » du détail d'une proposition
+(`Proposals.tsx`, composant `src/components/proposal/FeasibilityStudy.tsx`),
+sur le modèle de la note méthodologique ci-dessus : des rubriques ordonnées
+(`proposal_feasibility_sections`, `supabase/migrate_proposal_feasibility.sql`),
+une seule étude par proposition (l'étude EST l'ensemble de ses rubriques, sans
+table parente). Chaque rubrique porte `content`, `instructions` (consigne libre
+pour l'IA, jamais imprimée) et `illustrations` (jsonb, extraits de cartes).
+
+**Seule la rédaction IA est réservée au plan Enterprise.** Rubriques, blocs
+d'informations, extraits de cartes, exports et « Préremplir les rubriques »
+sans IA restent ouverts à tous (`server/routes/proposalFeasibility.ts`).
+`server/routes/proposalFeasibilityAi.ts` porte les deux gestes IA, en réserve
+→ exécute → règle (`endpoint_type = 'proposal_ai'`) :
+
+- **Préremplir** pose `DEFAULT_FEASIBILITY_TITLES` sans appel au modèle ; avec
+  une pièce jointe à la proposition ET le plan Enterprise, l'IA adapte ce plan
+  à l'opération. Jamais de doublon de titre (comparaison sans casse).
+- **Rédiger avec IA** combine toujours tout ce qui est disponible : champs de la
+  proposition, données publiques du terrain, texte des pièces jointes (les
+  images, donc les extraits de cartes, sont ignorées), bibliothèque du cabinet
+  (`agency_library`), texte déjà saisi et consigne. Le prompt interdit
+  d'inventer une règle d'urbanisme ou un chiffre absent des données : une
+  information manquante est écrite « à vérifier ».
+
+**Données du terrain** (`server/feasibilitySiteData.ts`) : géocodage
+Géoplateforme, zone du PLU (`getPlu`), Géorisques (`getGeorisques`) et
+monuments historiques à moins de 500 m (`findHistoricalMonuments`, extraite de
+la route `/api/historical-monuments`). Ces trois fonctions sont exportées par
+`server/routes/geoProxy.ts` et appelées directement, sans boucle locale. Chaque
+service est en meilleur effort et indépendant des autres ; cache de 10 minutes
+par adresse. Exposées à l'écran par `GET /api/proposals/:id/feasibility-site-data`
+(adresse ENREGISTRÉE de la proposition, jamais celle du formulaire non sauvé).
+
+**Blocs « Insérer »** (`src/lib/feasibilityBlocks.ts`, pur et testé, partagé
+avec le serveur qui en tire le contexte du prompt par
+`feasibilityContextForPrompt`) : terrain, urbanisme, risques, patrimoine,
+programme, ERP, enveloppe. Un bloc sans donnée rend une chaîne vide plutôt
+qu'un titre sans contenu, et l'IA ne voit jamais un libellé vide à compléter.
+
+**Extraits de cartes** (`FeasibilityMapDialog.tsx`, calculs dans
+`src/lib/feasibilityMap.ts`, testés) : les cartes de la proposition sont des
+iframes, impossibles à capturer, donc l'extrait est recomposé dans un canvas à
+partir des tuiles WMTS IGN (plan IGN, photo aérienne, parcellaire : les mêmes
+couches que `MapLibreCadastre.tsx`, seules acceptées par le relais). Les tuiles
+passent par `GET /api/feasibility/map-tile` (liste fermée de couches, matrice
+vérifiée, `mapTileLimiter`) : chargées directement depuis data.geopf.fr, elles
+saliraient le canvas faute de garantie CORS. Contour des parcelles choisies sur
+la carte cadastrale de la proposition, sinon de la seule parcelle CONTENANT
+l'adresse (`pointInGeometry` : le service renvoie les voisines à défaut, qu'il
+serait faux de présenter comme le terrain), flèche du nord, barre d'échelle,
+source. L'image validée devient un document de la proposition (catégorie
+« Faisabilité ») ; retirer l'extrait supprime aussi ce document, en meilleur
+effort. Le zonage du PLU n'est pas proposé en fond de carte : aucune couche
+raster GPU n'a été vérifiée sur la Géoplateforme.
+
+**Exports** (`src/lib/feasibilityExport.ts`) PDF et Word à la charte : page de
+garde, sommaire, une rubrique par page, extraits de cartes avec légende,
+pagination « P1|2 ». Le Word reste modifiable (texte, puces, images).
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres
