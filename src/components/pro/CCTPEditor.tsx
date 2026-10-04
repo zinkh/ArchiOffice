@@ -21,6 +21,13 @@ interface CCTPEditorProps {
 let _uid = 0;
 const uid = () => `cctp_${Date.now()}_${_uid++}`;
 
+function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): Array<{ ligne: Ligne; path: number[]; depth: number }> {
+  return lignes.flatMap((ligne, index) => [
+    { ligne, path: [...prefix, index], depth },
+    ...(ligne.children?.length ? flattenCctpLignes(ligne.children, [...prefix, index], depth + 1) : []),
+  ]);
+}
+
 type Selection =
   | { kind: 'lot'; lotIdx: number }
   | { kind: 'chapitre'; lotIdx: number; chapIdx: number }
@@ -396,12 +403,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
 
                         {expandedChaps.has(chap.id) && (
                           <>
-                            {chap.lignes.map((ligne, lgi) => (
+                            {flattenCctpLignes(chap.lignes).map(({ ligne, path, depth }) => (
                               <div
                                 key={ligne.id}
-                                onClick={() => setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: lgi })}
-                                className={`flex items-center gap-1 pl-12 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
-                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.ligneIdx === lgi
+                                onClick={() => setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}
+                                style={{ paddingLeft: `${3 + depth * 1.1}rem` }}
+                                className={`flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
+                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.ligneIdx === path[0]
                                     ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                                     : 'text-zinc-500 dark:text-zinc-400'
                                 } ${ligne.cctpOnly ? 'italic' : ''}`}

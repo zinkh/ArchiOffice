@@ -8,7 +8,7 @@ import {
 } from '@tabler/icons-react';
 import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import { DPGF, Lot } from '../../types/dpgf';
-import { evalFormula } from './treeOps';
+import { evalFormula, mutateLigneAtPath, deleteLigneAtPath } from './treeOps';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
 import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
@@ -34,6 +34,13 @@ interface EstimationEditorProps {
 // dans treeOps.ts, partagé par les trois ateliers.
 let _uid = 0;
 const uid = () => `est_${Date.now()}_${_uid++}`;
+
+function flattenLignes(lignes: import('../../types/dpgf').Ligne[], prefix: number[] = [], depth = 0) {
+  return lignes.flatMap((ligne, index) => [
+    { ligne, path: [...prefix, index], depth },
+    ...(ligne.children?.length ? flattenLignes(ligne.children, [...prefix, index], depth + 1) : []),
+  ]);
+}
 
 function recomputeDPGF(dpgf: DPGF): DPGF {
   const newLots = dpgf.lots.map(lot => {
@@ -72,13 +79,14 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
 
   // ── Lot-level editing (for Estimation, we mainly edit quantite + prixUnitaire) ──
-  const mutateLigne = (lotIdx: number, chapIdx: number, ligneIdx: number, patch: Partial<import('../../types/dpgf').Ligne>) => {
+  const mutateLigne = (lotIdx: number, chapIdx: number, lignePath: number[], patch: Partial<import('../../types/dpgf').Ligne>) => {
     const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
-    const ligne = { ...newDpgf.lots[lotIdx].chapitres[chapIdx].lignes[ligneIdx], ...patch };
+    const current = newDpgf.lots[lotIdx].chapitres[chapIdx].lignes;
+    const ligne = { ...current[lignePath[0]], ...patch };
     if (('quantite' in patch || 'prixUnitaire' in patch) && !('prixTotal' in patch)) {
       ligne.prixTotal = ligne.quantite * ligne.prixUnitaire;
     }
-    newDpgf.lots[lotIdx].chapitres[chapIdx].lignes[ligneIdx] = ligne;
+    newDpgf.lots[lotIdx].chapitres[chapIdx].lignes = mutateLigneAtPath(current, lignePath, () => ligne);
     onChange(recomputeDPGF(newDpgf));
   };
 
@@ -87,9 +95,11 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     const { rowId, field } = editCell;
     const parts = rowId.split('-');
     if (parts[0] === 'ligne') {
-      const [, li, ci, lgi] = parts.map(Number);
+      const li = Number(parts[1]);
+      const ci = Number(parts[2]);
+      const path = parts.slice(3).join('-').split('.').map(Number);
       const v = evalFormula(rawValue);
-      mutateLigne(li, ci, lgi, { [field]: v });
+      mutateLigne(li, ci, path, { [field]: v });
     }
     setEditCell(null);
   };
@@ -351,9 +361,9 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                         <td />
                       </tr>
 
-                      {expandedChaps.has(chap.id) && chap.lignes.map((ligne, lgi) => {
+                      {expandedChaps.has(chap.id) && flattenLignes(chap.lignes).map(({ ligne, path, depth }) => {
                         if (ligne.cctpOnly) return null;
-                        const rowId = `ligne-${li}-${ci}-${lgi}`;
+                        const rowId = `ligne-${li}-${ci}-${path.join('.')}`;
                         const ttc = ligne.prixTotal * (1 + dpgf.TVA / 100);
                         const margeVal = ligne.prixUnitaire > 0
                           ? ((ligne.prixUnitaire - (ligne.prixUnitaire * 0.7)) / ligne.prixUnitaire * 100) : 0;
@@ -367,8 +377,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                               ${ligne.type === 'commentaire' ? 'text-zinc-400' : ''}
                             `}
                           >
-                            <td className="px-2 py-0.5 pl-8 text-xs text-zinc-400">{ligne.numero}</td>
-                            <td className="px-2 py-0.5 text-sm"><input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, lgi, { designation: e.target.value })} /></td>
+                            <td className="px-2 py-0.5 text-xs text-zinc-400" style={{ paddingLeft: `${2 + depth * 1.25}rem` }}>{ligne.numero}</td>
+                            <td className="px-2 py-0.5 text-sm"><input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, path, { designation: e.target.value })} /></td>
                             <td className="px-2 py-0.5 text-center text-xs text-zinc-500">{ligne.unite}</td>
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
@@ -398,7 +408,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                               <button
                                 onClick={() => {
                                   const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
-                                  newDpgf.lots[li].chapitres[ci].lignes = chap.lignes.filter((_, i) => i !== lgi);
+                                  newDpgf.lots[li].chapitres[ci].lignes = deleteLigneAtPath(chap.lignes, path);
                                   onChange(recomputeDPGF(newDpgf));
                                 }}
                                 className="text-red-400 hover:text-red-600 opacity-40 hover:opacity-100"
