@@ -1,3 +1,4 @@
+import { LotTitleInput } from './LotTitleInput';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { IconTrash, IconPlus, IconRefresh, IconGripVertical } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
@@ -19,10 +20,20 @@ interface LotsManagerProps {
    * l'ordre) est fournie pour répercuter ordre et numéros sur le DPGF/CCTP.
    */
   onChange?: (lots: LotProjet[]) => void;
+  onRename?: (id: string, title: string) => Promise<void>;
 }
 
-export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange }) => {
+export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, onRename }) => {
   const [lots, setLots] = useState<Lot[]>([]);
+  const [error, setError] = useState('');
+  const rename = async (id: string, title: string) => {
+    setError('');
+    try {
+      if (onRename) { await onRename(id, title); return; }
+      await apiFetch(`/api/lots/${id}`, { method: 'PUT', body: JSON.stringify({ lot_title: title }) });
+      notifier(await fetchLots());
+    } catch (e) { setError(e instanceof Error ? e.message : 'Échec du renommage'); }
+  };
   const [loading, setLoading] = useState(false);
   const [newLot, setNewLot] = useState({ number: '', title: '' });
 
@@ -140,6 +151,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
 
   return (
     <div className="space-y-8 pt-8 pb-8">
+      {error && <p role="alert" className="text-red-600">{error}</p>}
       <div className="flex justify-between items-center pb-4 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
         <div>
           <h3 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>Lots de travaux</h3>
@@ -188,7 +200,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange })
                   </button>
                 </td>
                 <td className="p-4 text-sm font-medium">{lot.lot_number}</td>
-                <td className="p-4 text-sm">{lot.lot_title}</td>
+                <td className="p-4 text-sm"><LotTitleInput value={lot.lot_title} onCommit={title => void rename(lot.id, title)} /></td>
                 <td className="p-4 text-right">
                   <button
                     onClick={() => void handleDeleteLot(lot.id)}

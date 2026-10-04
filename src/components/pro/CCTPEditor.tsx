@@ -1,3 +1,4 @@
+import { LotTitleInput } from './LotTitleInput';
 import React, { useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown,
@@ -19,6 +20,13 @@ interface CCTPEditorProps {
 
 let _uid = 0;
 const uid = () => `cctp_${Date.now()}_${_uid++}`;
+
+function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): Array<{ ligne: Ligne; path: number[]; depth: number }> {
+  return lignes.flatMap((ligne, index) => [
+    { ligne, path: [...prefix, index], depth },
+    ...(ligne.children?.length ? flattenCctpLignes(ligne.children, [...prefix, index], depth + 1) : []),
+  ]);
+}
 
 type Selection =
   | { kind: 'lot'; lotIdx: number }
@@ -395,12 +403,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
 
                         {expandedChaps.has(chap.id) && (
                           <>
-                            {chap.lignes.map((ligne, lgi) => (
+                            {flattenCctpLignes(chap.lignes).map(({ ligne, path, depth }) => (
                               <div
                                 key={ligne.id}
-                                onClick={() => setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: lgi })}
-                                className={`flex items-center gap-1 pl-12 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
-                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.ligneIdx === lgi
+                                onClick={() => setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}
+                                style={{ paddingLeft: `${3 + depth * 1.1}rem` }}
+                                className={`flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
+                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.ligneIdx === path[0]
                                     ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                                     : 'text-zinc-500 dark:text-zinc-400'
                                 } ${ligne.cctpOnly ? 'italic' : ''}`}
@@ -434,7 +443,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                 )}
                                 {ligne.cctpOnly && (
                                   <button
-                                    onClick={e => { e.stopPropagation(); deleteCCTPLigne(li, ci, lgi); }}
+                                    onClick={e => { e.stopPropagation(); deleteCCTPLigne(li, ci, path[0]); }}
                                     className="shrink-0 ml-1 text-zinc-300 hover:text-red-500 transition-colors"
                                     title="Supprimer"
                                   >
@@ -512,7 +521,9 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                   )}
                 </div>
 
-                {selection && selection.kind !== 'lot' ? (
+                {selection && selection.kind === 'lot' ? (
+                  <LotTitleInput value={dpgf.lots[selection.lotIdx].titre} onCommit={titre => mutateDPGF(d => { d.lots[selection.lotIdx].titre = titre; })} />
+                ) : selection ? (
                   <input
                     type="text"
                     value={
@@ -524,9 +535,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                     className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
                     placeholder="Titre…"
                   />
-                ) : (
-                  <h2 className="text-xl font-bold text-zinc-900 dark:text-white">{selData.name}</h2>
-                )}
+                ) : null}
 
                 {/* DPGF article info badge */}
                 {selection.kind === 'ligne' && !isSelCctpOnly && (() => {

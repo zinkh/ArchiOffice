@@ -1,3 +1,4 @@
+import { withProjectLotTitles } from '../proLotTitles';
 // ── BPU / DQE ────────────────────────────────────────────────────────────────
 // Même forme que server/routes/actData.ts : un document JSONB par projet,
 // lu et écrit en bloc, via tenantScopedFrom pour que le filtre tenant ne
@@ -31,7 +32,8 @@ export function registerBpuRoutes(app: Express, { supabaseAdmin, getTenantId, ge
   app.get('/api/projects/:projectId/bpu', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      res.json(await loadRow(supabaseAdmin, tenantId, req.params.projectId));
+      const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
+      res.json(row ? { ...row, document: await withProjectLotTitles(supabaseAdmin, tenantId, req.params.projectId, row.document) } : null);
     } catch (e: any) {
       console.error('[GET /api/projects/:projectId/bpu]', e);
       res.status(500).json({ error: 'Failed to fetch BPU' });

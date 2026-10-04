@@ -139,7 +139,12 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [groupement, setGroupement] = useState<GroupementDpgf>('lot');
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
-  const [selectedChap, setSelectedChap] = useState<{ lotIdx: number; chapIdx: number } | null>(null);
+  const [selectedChapId, setSelectedChapId] = useState('');
+  const targets = dpgf.lots.flatMap((lot, lotIdx) => lot.chapitres.filter(c => !c.cctpOnly).map(chap => ({
+    id: chap.id, lotIdx, chapIdx: lot.chapitres.findIndex(c => c.id === chap.id), label: `${lot.numero} ${lot.titre} / ${chap.numero} ${chap.titre}`,
+  })));
+  const selectedChap = targets.find(c => c.id === selectedChapId) ?? (!selectedChapId && targets.length === 1 ? targets[0] : null);
+  const [insertMessage, setInsertMessage] = useState('');
   const tableRef = useRef<HTMLDivElement>(null);
 
   // ── Derived flat rows ────────────────────────────────────────────────────────
@@ -248,7 +253,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // que le maître d'œuvre renseigne, et `articleTypeId` conservé — c'est par ce
   // fil que le prix remontera vers la bibliothèque quand une offre arrivera.
   const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]) => {
-    if (!selectedChap) return;
+    if (!selectedChap) { setInsertMessage('Choisissez un chapitre de destination.'); return false; }
     const { lotIdx, chapIdx } = selectedChap;
     // Les clés de ligne sont positionnelles : une insertion par programme
     // pendant une édition validerait dans le mauvais article.
@@ -276,6 +281,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       next[lotIdx] = recomputeLot(lot);
       return next;
     });
+    setExpandedLots(prev => new Set([...prev, dpgf.lots[lotIdx].id]));
+    setExpandedChaps(prev => new Set([...prev, dpgf.lots[lotIdx].chapitres[chapIdx].id]));
+    setInsertMessage(`${articles.length} article(s) inséré(s) dans ${selectedChap.label}.`);
+    return true;
   };
 
   const addSubLigne = (lotIdx: number, chapIdx: number, parentLignePath: number[]) => {
@@ -555,7 +564,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           actions: [
             {
               id: 'openLib', label: 'Bibliothèque', icon: <IconBuildingStore size={20} />,
-              onClick: () => setShowLibrary(v => !v), active: showLibrary,
+              onClick: () => { setGroupement('lot'); setShowLibrary(v => !v); }, active: showLibrary,
             },
             {
               id: 'decoupage', label: 'Bâtiments / phases', icon: <IconBuildingCommunity size={20} />,
@@ -617,6 +626,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       <ProRibbon tabs={ribbonTabs} defaultTab="accueil" />
+      <div className="px-3 py-1 border-b flex gap-3 items-center text-xs">
+        <button className="text-blue-600" onClick={() => { setGroupement('lot'); setShowLibrary(v => !v); }}>Bibliothèque d’ouvrages</button>
+        {insertMessage && <span role="status">{insertMessage}</span>}
+      </div>
 
       {showDecoupage && (
         <DecoupagePanel
@@ -773,7 +786,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                     <tr
                       key={rKey}
                       className={`border-b border-zinc-200 dark:border-zinc-700 ${isDropTarget ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-[#edf1f7] dark:bg-zinc-800/40'} ${chapVise ? 'ring-1 ring-blue-500' : ''}`}
-                      onClick={() => setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! })}
+                      onClick={() => setSelectedChapId(row.chapitre!.id)}
                       onDragOver={e => handleDragOver(e, rKey)}
                       onDrop={e => handleDrop(e, row)}
                       onDragLeave={() => setDropTarget(null)}
@@ -938,6 +951,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             onClose={() => setShowLibrary(false)}
             onInsert={insererDepuisBibliotheque}
             canInsert={!!selectedChap}
+            targetSelector={<label className="text-xs block">Insérer dans le chapitre
+              <select aria-label="Chapitre de destination" className="w-full border rounded p-1 mt-1" value={selectedChap?.id ?? ''} onChange={e => setSelectedChapId(e.target.value)}>
+                <option value="">Choisir une destination</option>
+                {targets.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              {!targets.length && <span>Ajoutez un chapitre au lot pour y insérer des ouvrages.</span>}
+            </label>}
             hintCible="Sélectionnez d’abord un chapitre dans le DPGF"
           />
         )}

@@ -1,3 +1,4 @@
+import { withProjectLotTitles } from '../proLotTitles';
 // Phase 7 extraction — moved verbatim out of server.ts's "─── DPGF Items
 // CRUD ───" and "─── DPGFs CRUD ───" sections (dpgf_items are children of a
 // parent dpgfs row — kept together as one domain module). GET
@@ -58,7 +59,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       const { data: dpgf, error } = await supabaseAdmin.from('dpgfs').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (error && error.code !== 'PGRST116') throw error;
       if (dpgf) {
-        res.json(typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data);
+        res.json(await withProjectLotTitles(supabaseAdmin, tenantId, projectId, typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data));
       } else {
         res.status(404).json({ error: "DPGF not found" });
       }

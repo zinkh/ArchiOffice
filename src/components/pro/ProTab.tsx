@@ -1,3 +1,5 @@
+import { ProReadOnlyPanel } from './ProReadOnlyPanel';
+import { appliquerTitresLots, titresModifies } from '../../lib/lotTitles';
 import { ArticleBuildingPanel } from './ArticleBuildingPanel';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -135,11 +137,17 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
 
   // Le panneau droit passe par le même hook : il gagne au passage
   // l'autosauvegarde qu'il n'avait pas, seul un bouton manuel le sauvegardait.
-  const rightDoc = useAutosavedDoc<DPGF>({
-    key: rightProjectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
-    enabled: splitView,
-  });
-  const { doc: rightDpgf, setDoc: setRightDpgf, loading: rightLoading, saveNow: handleRightSave } = rightDoc;
+  const [rightDpgf, setRightDpgf] = useState<DPGF | null>(null);
+  const [rightLoading, setRightLoading] = useState(false);
+  useEffect(() => {
+    if (!splitView || rightProjectId === projectId) return;
+    let cancelled = false;
+    setRightLoading(true); setRightDpgf(null);
+    loadDPGF(rightProjectId).then(doc => { if (!cancelled) setRightDpgf(doc ?? EMPTY_DPGF(rightProjectId)); })
+      .catch(() => { if (!cancelled) setRightDpgf(null); })
+      .finally(() => { if (!cancelled) setRightLoading(false); });
+    return () => { cancelled = true; };
+  }, [splitView, rightProjectId, projectId]);
 
   // ── Document BPU ────────────────────────────────────────────────────────────
   // Chargé seulement une fois l'un des onglets BPU ou DQE ouvert, et gardé
@@ -189,13 +197,55 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
   const divergence = projectLotsLoaded && !dpgfLoading && lotsDivergent(dpgf, projectLots);
   const [lotsVersion, setLotsVersion] = useState(0);
 
+  const [titleError, setTitleError] = useState('');
+  const [renaming, setRenaming] = useState(0);
+  const currentTitles = useRef({ dpgf, bpu, projectLots, projectId });
+  currentTitles.current = { dpgf, bpu, projectLots, projectId };
+  const titleQueue = useRef(Promise.resolve());
+  const renameLot = (id: string, title: string): Promise<void> => {
+    const titre = title.trim();
+    if (!titre) { setTitleError('Le titre du lot ne peut pas être vide.'); return Promise.reject(new Error('Le titre du lot ne peut pas être vide.')); }
+    setRenaming(n => n + 1); setTitleError('');
+    const operation = titleQueue.current.catch(() => {}).then(async () => {
+      await apiFetch(`/api/lots/${id}`, { method: 'PUT', body: JSON.stringify({ lot_title: titre }) });
+      const current = currentTitles.current;
+      if (current.projectId !== projectId) return;
+      const lots = current.projectLots.map(l => l.id === id ? { ...l, lot_title: titre } : l);
+      setProjectLots(lots);
+      const nextDpgf = current.dpgf && appliquerTitresLots(current.dpgf, lots);
+      const nextBpu = current.bpu && appliquerTitresLots(current.bpu, lots);
+      if (nextDpgf) setDpgf(nextDpgf);
+      if (nextBpu) setBpu(nextBpu);
+      currentTitles.current = { ...current, projectLots: lots, dpgf: nextDpgf, bpu: nextBpu };
+      setLotsVersion(v => v + 1); onLotsChanged?.();
+    }).catch(e => {
+      if (currentTitles.current.projectId === projectId) setTitleError(e instanceof Error ? e.message : 'Échec de la synchronisation des titres.');
+      throw e;
+    }).finally(() => setRenaming(n => Math.max(0, n - 1)));
+    titleQueue.current = operation;
+    return operation;
+  };
+  const editDpgf = (next: DPGF) => {
+    const changes = dpgf ? titresModifies(dpgf, next) : [];
+    if (!changes.length) { setDpgf(next); return; }
+    for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+  };
+  const editBpu = (next: BPU) => {
+    const changes = bpu ? titresModifies(bpu, next) : [];
+    if (!changes.length) { setBpu(next); return; }
+    for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+  };
+
+  const displayedRightDpgf = rightProjectId === projectId ? dpgf : rightDpgf;
+  const displayedRightLoading = rightProjectId === projectId ? dpgfLoading : rightLoading;
+
   // Sans lot au projet, les documents ne sont pas touchés : une liste vide
   // ne doit pas vider un CCTP déjà rédigé.
   const synchroniserLots = useCallback((lotsProjet: LotProjet[]) => {
     setProjectLots(lotsProjet);
     if (lotsProjet.length) {
-      if (dpgf && !lotsDivergent(dpgf, lotsProjet)) setDpgf(appliquerOrdreLots(dpgf, lotsProjet));
-      if (bpuTouched && bpu && !lotsDivergent(bpu, lotsProjet)) setBpu(appliquerOrdreLots(bpu, lotsProjet));
+      if (dpgf) setDpgf(lotsDivergent(dpgf, lotsProjet) ? appliquerTitresLots(dpgf, lotsProjet) : appliquerOrdreLots(dpgf, lotsProjet));
+      if (bpuTouched && bpu) setBpu(lotsDivergent(bpu, lotsProjet) ? appliquerTitresLots(bpu, lotsProjet) : appliquerOrdreLots(bpu, lotsProjet));
     }
     onLotsChanged?.();
   }, [dpgf, setDpgf, bpuTouched, bpu, setBpu, onLotsChanged]);
@@ -445,7 +495,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     { id: 'DQE', label: 'DQE', icon: IconSum },
   ];
 
-  const canSplit = activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
+  const canSplit = activeSubTab === 'CCTP' || activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
 
   // Un seul indicateur, toujours celui du document à l'écran.
   const activeSaveStatus = isBpuTab ? bpuSaveStatus : saveStatus;
@@ -537,7 +587,9 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         </div>
       </div>
 
-      {!isBpuTab && dpgf && <ArticleBuildingPanel dpgf={dpgf} onChange={setDpgf} projectName={projectName} />}
+      {renaming > 0 && <p role="status" className="px-3 text-sm">Synchronisation des titres de lots…</p>}
+      {titleError && <p role="alert" className="px-3 text-sm text-red-600">{titleError} Le titre n’a pas été enregistré ; réessayez le renommage.</p>}
+      {!isBpuTab && dpgf && <ArticleBuildingPanel dpgf={dpgf} onChange={editDpgf} projectName={projectName} />}
       {versions && <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onMouseDown={e => { if (e.target === e.currentTarget) setVersions(null); }}>
         <div className="w-full max-w-2xl max-h-[75dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
           <div className="flex items-center justify-between px-4 py-3 border-b"><div><h3 className="font-semibold">Versions figées du dossier PRO</h3><p className="text-xs text-zinc-500">CCTP, DPGF et estimation au même instant</p></div><button onClick={() => setVersions(null)}><IconX size={18} /></button></div>
@@ -564,22 +616,30 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         {/* LOTS */}
         {activeSubTab === 'LOTS' && (
           <div className="flex-1 overflow-y-auto px-4">
-            <LotsManager key={lotsVersion} projectId={projectId} onChange={synchroniserLots} />
+            <LotsManager key={lotsVersion} projectId={projectId} onChange={synchroniserLots} onRename={renameLot} />
           </div>
         )}
 
         {/* CCTP */}
         {activeSubTab === 'CCTP' && (
-          <div className="flex-1 overflow-hidden">
+          <>
+          <div className={`flex flex-col overflow-hidden ${splitView ? 'w-1/2 border-r border-[var(--tblr-border)]' : 'flex-1'}`}>
             {dpgfLoading ? (
               <div className="flex items-center gap-2 p-8 text-[var(--tblr-muted)]">
                 <div className="w-4 h-4 border-2 border-[var(--tblr-primary)] border-t-transparent rounded-full animate-spin" />
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor dpgf={dpgf} onChange={setDpgf} onSave={handleSave} />
+              <CCTPEditor dpgf={dpgf} onChange={editDpgf} onSave={handleSave} />
             ) : null}
           </div>
+          {splitView && (
+            <div className="w-1/2 flex flex-col overflow-hidden">
+              <RightPanelHeader projectId={rightProjectId} currentProjectId={projectId} onChange={setRightProjectId} onClose={() => setSplitView(false)} />
+              {displayedRightLoading ? <div className="flex items-center justify-center flex-1 text-[var(--tblr-muted)]">Chargement…</div> : displayedRightDpgf ? <ProReadOnlyPanel dpgf={displayedRightDpgf} cctp onDragStart={ligne => setDraggedLigne(ligne)} /> : null}
+            </div>
+          )}
+          </>
         )}
 
         {/* DPGF */}
@@ -592,7 +652,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
               ) : dpgf ? (
                 <DPGFWorkspace
                   dpgf={dpgf}
-                  onChange={setDpgf}
+                  onChange={editDpgf}
                   onSave={handleSave}
                   projectName={projectName}
                   showTree={showTree}
@@ -626,18 +686,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                   onChange={setRightProjectId}
                   onClose={() => setSplitView(false)}
                 />
-                {rightLoading ? (
+                {displayedRightLoading ? (
                   <div className="flex items-center justify-center flex-1 text-[var(--tblr-muted)]">Chargement…</div>
-                ) : rightDpgf ? (
-                  <DPGFWorkspace
-                    dpgf={rightDpgf}
-                    onChange={setRightDpgf}
-                    onSave={handleRightSave}
-                    projectName={`Projet ${rightProjectId}`}
-                    showTree={showTree}
-                    onToggleTree={toggleTree}
-                    onDragStart={ligne => setDraggedLigne(ligne)}
-                  />
+                ) : displayedRightDpgf ? (
+                  <ProReadOnlyPanel dpgf={displayedRightDpgf} onDragStart={ligne => setDraggedLigne(ligne)} />
                 ) : null}
               </div>
             )}
@@ -654,7 +706,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
               ) : dpgf ? (
                 <EstimationEditor
                   dpgf={dpgf}
-                  onChange={setDpgf}
+                  onChange={editDpgf}
                   onSave={handleSave}
                   projectName={projectName}
                   showTree={showTree}
@@ -675,18 +727,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                   }}
                   onClose={() => setSplitView(false)}
                 />
-                {rightLoading ? (
+                {displayedRightLoading ? (
                   <div className="flex items-center justify-center flex-1 text-[var(--tblr-muted)]">Chargement…</div>
-                ) : rightDpgf ? (
-                  <EstimationEditor
-                    dpgf={rightDpgf}
-                    onChange={setRightDpgf}
-                    onSave={handleRightSave}
-                    projectName={`Projet ${rightProjectId}`}
-                    showTree={showTree}
-                    onToggleTree={toggleTree}
-                    onDragStart={ligne => setDraggedLigne(ligne)}
-                  />
+                ) : displayedRightDpgf ? (
+                  <ProReadOnlyPanel dpgf={displayedRightDpgf} estimation onDragStart={ligne => setDraggedLigne(ligne)} />
                 ) : null}
               </div>
             )}
@@ -703,7 +747,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
             ) : bpu ? (
               <BPUWorkspace
                 bpu={bpu}
-                onChange={setBpu}
+                onChange={editBpu}
                 onSave={handleBpuSave}
                 mode={activeSubTab === 'BPU' ? 'bpu' : 'dqe'}
                 projectName={projectName}
