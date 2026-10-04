@@ -973,14 +973,14 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                       return (
                         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                           {photos.map((url, i) => (
-                            <button
+                            <SignedPhotoButton
                               key={i}
-                              type="button"
-                              onClick={() => openSignedUrl(url)}
+                              src={url}
+                              label={`Ouvrir la photo ${i + 1} du compte-rendu n° ${selectedReport.report_number}`}
                               className="block aspect-square rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800"
-                            >
-                              <SignedImage src={url} alt="" className="w-full h-full object-cover" />
-                            </button>
+                              frameClassName="h-full w-full"
+                              imageClassName="w-full h-full object-cover"
+                            />
                           ))}
                         </div>
                       );
@@ -1224,21 +1224,77 @@ function PhotosTab({ observations, reports }: { observations: Observation[]; rep
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {items.map((item, i) => (
-        <button
+        <SignedPhotoButton
           key={i}
-          type="button"
-          onClick={() => openSignedUrl(item.url)}
+          src={item.url}
+          label={`Ouvrir la photo ${i + 1}${item.report ? ` du compte-rendu n° ${item.report.report_number}` : ''}${item.obs.lot?.lot_title ? ` — ${item.obs.lot.lot_title}` : ''}`}
           className="block text-left rounded-lg overflow-hidden"
           style={{ border: '1px solid var(--tblr-border)' }}
-        >
-          <div className="aspect-square bg-zinc-100 dark:bg-zinc-800">
-            <SignedImage src={item.url} alt="" className="w-full h-full object-cover" />
-          </div>
-          <div className="p-2 text-[0.6875rem] text-[var(--tblr-muted)] truncate">
-            {item.report ? `CR ${item.report.report_number}` : ''} {item.obs.lot?.lot_title || ''}
-          </div>
-        </button>
+          frameClassName="aspect-square bg-zinc-100 dark:bg-zinc-800"
+          imageClassName="w-full h-full object-cover"
+          caption={item.report ? `CR ${item.report.report_number} ${item.obs.lot?.lot_title || ''}` : (item.obs.lot?.lot_title || '')}
+        />
       ))}
     </div>
+  );
+}
+
+function SignedPhotoButton({
+  src,
+  label,
+  className,
+  style,
+  frameClassName,
+  imageClassName,
+  caption,
+}: {
+  src: string;
+  label: string;
+  className: string;
+  style?: React.CSSProperties;
+  frameClassName: string;
+  imageClassName: string;
+  caption?: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+
+  const handleClick = () => {
+    if (failed) {
+      setFailed(false);
+      setAttempt(current => current + 1);
+      return;
+    }
+    openSignedUrl(src);
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleClick}
+      aria-label={failed ? `${label} — photo indisponible. Réessayer.` : label}
+      className={className}
+      style={style}
+    >
+      <div className={frameClassName}>
+        {failed ? (
+          <div role="status" className="flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-xs text-[var(--tblr-muted)]">
+            <IconPhoto size={20} aria-hidden="true" />
+            <span>Photo indisponible</span>
+            <span className="font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300">Réessayer</span>
+          </div>
+        ) : (
+          <SignedImage
+            key={attempt}
+            src={src}
+            alt=""
+            deferUntilVisible
+            onLoadError={() => setFailed(true)}
+            className={imageClassName}
+          />
+        )}
+      </div>
+      {caption && <div className="truncate p-2 text-[0.6875rem] text-[var(--tblr-muted)]">{caption}</div>}
+    </button>
   );
 }
