@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
 import React, { useState, useCallback, useRef, useMemo } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard, IconDeviceFloppy,
@@ -12,10 +14,9 @@ import { ProRibbon, RibbonTabDef } from './ProRibbon';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
 import { natureEffective, trancheEffective } from '../../types/bpu';
 import {
-  evalFormula, MAX_ARTICLE_DEPTH,
+  evalFormula, MAX_ARTICLE_DEPTH, childNumber,
   mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
   takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
-  moveLigneSibling,
   collectLigneIdsWithChildren, sumLigne, recomputeLot,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey, forEachLigne,
   type FlatRow,
@@ -117,6 +118,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   onImportOffre, onExportPdf, onExportExcel, onPushToAct,
 }) => {
   const [colSet, setColSet] = useState<ColSet>(mode);
+  const { t } = useTranslation();
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(bpu.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
     new Set(bpu.lots.flatMap(l => l.chapitres.map(c => c.id))),
@@ -245,7 +247,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   };
 
   const addSubLigne = (lotIdx: number, chapIdx: number, parentPath: number[]) => {
-    if (2 + parentPath.length >= MAX_ARTICLE_DEPTH) return;
+    if (1 + parentPath.length >= MAX_ARTICLE_DEPTH) return;
     let parent = bpu.lots[lotIdx].chapitres[chapIdx].lignes[parentPath[0]];
     for (let i = 1; i < parentPath.length; i++) parent = parent.children![parentPath[i]];
     const ligne = makeLigne(`${parent.numero}.${(parent.children ?? []).length + 1}`);
@@ -535,17 +537,23 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
   // ── Ruban ───────────────────────────────────────────────────────────────────
   const selectionCount = selectedRowKeys.size;
-  const moveSelected = (direction: -1 | 1) => {
-    const key = [...selectedRowKeys][0];
-    const parsed = key ? parseRowKey(key) : null;
-    if (!parsed || parsed.kind !== 'ligne') return;
-    mutateLots(lots => lots.map((lot, li) => li !== parsed.lotIdx ? lot : {
-      ...lot,
-      chapitres: lot.chapitres.map((chap, ci) => ci !== parsed.chapIdx ? chap : {
-        ...chap,
-        lignes: renumeroterLignes(moveLigneSibling(chap.lignes, parsed.lignePath, direction), String(chap.numero || ci + 1)),
-      }),
-    }).map(recomputeLot));
+  const hierarchySelection = selectedRowKeys.size === 1 ? parseRowKey([...selectedRowKeys][0]) : null;
+  const changeHierarchy = (direction?: -1 | 1 | 'duplicate') => {
+    if (!hierarchySelection) return;
+    const result = direction === 'duplicate'
+      ? duplicateHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
+      : direction === undefined
+      ? promoteHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
+      : moveHierarchy(bpu.lots, hierarchySelection, direction);
+    mutateLots(() => result.lots);
+    setSelectedRowKeys(new Set([hierarchyKey(result.selection)]));
+    const selected = result.selection;
+    if (selected.kind !== 'lot') {
+      setSelectedLotId(result.lots[selected.lotIdx].id);
+      setSelectedChap({ lotIdx: selected.lotIdx, chapIdx: selected.chapIdx });
+    }
+    setExpandedLots(new Set(result.lots.map(l => l.id)));
+    setExpandedChaps(new Set(result.lots.flatMap(l => l.chapitres.map(c => c.id))));
   };
 
   const ribbonTabs: RibbonTabDef[] = [
@@ -562,8 +570,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         {
           label: 'Structure',
           actions: [
-            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: selectionCount === 0 },
-            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: selectionCount === 0 },
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(-1), disabled: !canMove(bpu.lots, hierarchySelection, -1) },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => changeHierarchy(1), disabled: !canMove(bpu.lots, hierarchySelection, 1) },
+            { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => changeHierarchy('duplicate'), disabled: !hierarchySelection },
+            { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(), disabled: hierarchySelection?.kind !== 'ligne' },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {
@@ -866,6 +876,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   const t = row.lot.trancheId ? trancheById.get(row.lot.trancheId) : undefined;
                   return (
                     <tr key={rKey} data-lot-id={row.lot.id}
+                        onClick={() => { setSelectedRowKeys(new Set([rKey])); setSelectedLotId(row.lot.id); }}
                         className={`border-b border-[#9ab0cb] ${isDropTarget ? 'bg-blue-100' : 'bg-[#c8d8ec] dark:bg-blue-900/30'} font-bold`}>
                       <td className="px-2 py-2">
                         <button onClick={() => toggleLot(row.lot.id)} className="text-zinc-600">
@@ -926,9 +937,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 if (row.kind === 'chapitre') {
                   return (
                     <tr key={rKey}
-                        onClick={() => setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! })}
+                        onClick={() => { setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! }); setSelectedLotId(row.lot.id); setSelectedRowKeys(new Set([rKey])); }}
                         className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 cursor-pointer
                           ${isDropTarget ? 'ring-1 ring-blue-400' : ''}
+                          ${selectedRowKeys.has(rKey) ? 'ring-1 ring-inset ring-blue-500' : ''}
                           ${showLibrary && selectedChap?.lotIdx === row.lotIdx && selectedChap?.chapIdx === row.chapIdx ? 'ring-1 ring-blue-500' : ''}`}
                         onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = dragSource ? 'move' : 'copy'; setDropTarget(rKey); }}
                         onDragLeave={() => setDropTarget(null)}

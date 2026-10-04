@@ -1,4 +1,8 @@
 export default {
+  "pro_duplicate": "Dupliquer",
+  "pro_promote": "Remonter d’un niveau",
+  "pro_add_child": "Sous-article",
+  "pro_new_article": "Nouvel article",
   "pc_title": "Contrôles avant changement de phase",
   "pc_error": "Impossible de charger les contrôles.",
   "pc_cancel": "Annuler",
