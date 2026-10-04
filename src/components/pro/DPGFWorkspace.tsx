@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
 import React, { useState, useCallback, useRef } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard, IconDeviceFloppy,
@@ -20,10 +22,9 @@ import type { ArticleBibliotheque } from '../../types/library';
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
 import {
-  uid, evalFormula, MAX_ARTICLE_DEPTH,
+  uid, evalFormula, MAX_ARTICLE_DEPTH, childNumber,
   mutateLigneAtPath, deleteLigneAtPath, addChildToLigneAtPath,
   takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
-  moveLigneSibling,
   collectLigneIdsWithChildren, sumLigne, recomputeLot as recomputeLotOp,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey,
   type FlatRow,
@@ -140,6 +141,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
+  const { t } = useTranslation();
   const [groupement, setGroupement] = useState<GroupementDpgf>('lot');
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
@@ -293,7 +295,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   };
 
   const addSubLigne = (lotIdx: number, chapIdx: number, parentLignePath: number[]) => {
-    if (2 + parentLignePath.length >= MAX_ARTICLE_DEPTH) return;
+    if (1 + parentLignePath.length >= MAX_ARTICLE_DEPTH) return;
     // Find parent to get its id and current children count
     let parentLigne = dpgf.lots[lotIdx].chapitres[chapIdx].lignes[parentLignePath[0]];
     for (let i = 1; i < parentLignePath.length; i++) {
@@ -304,7 +306,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const parentId = parentLigne.id;
     const newLigne: Ligne = {
       id: uid(),
-      numero: `${parentLigne.numero}.${childIdx + 1}`,
+      numero: childNumber(parentLigne.numero, childIdx, 2 + parentLignePath.length),
       designation: 'Nouvel article',
       unite: 'u',
       quantite: 0,
@@ -559,17 +561,23 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setDragState(null);
   };
 
-  const moveSelected = (direction: -1 | 1) => {
-    if (!selectedRowKey) return;
-    const parsed = parseRowKey(selectedRowKey);
-    if (!parsed || parsed.kind !== 'ligne') return;
-    mutateLots(lots => lots.map((lot, li) => li !== parsed.lotIdx ? lot : {
-      ...lot,
-      chapitres: lot.chapitres.map((chap, ci) => ci !== parsed.chapIdx ? chap : {
-        ...chap,
-        lignes: renumeroterLignes(moveLigneSibling(chap.lignes, parsed.lignePath, direction), String(chap.numero || ci + 1)),
-      }),
-    }).map(recomputeLot));
+  const hierarchySelection = groupement === 'lot' && selectedRowKey ? parseRowKey(selectedRowKey) : null;
+  const changeHierarchy = (direction?: -1 | 1 | 'duplicate') => {
+    if (!hierarchySelection) return;
+    const result = direction === 'duplicate'
+      ? duplicateHierarchy(dpgf.lots, hierarchySelection, () => crypto.randomUUID())
+      : direction === undefined
+      ? promoteHierarchy(dpgf.lots, hierarchySelection, () => crypto.randomUUID())
+      : moveHierarchy(dpgf.lots, hierarchySelection, direction);
+    mutateLots(() => result.lots);
+    setSelectedRowKey(hierarchyKey(result.selection));
+    const selected = result.selection;
+    if (selected.kind !== 'lot') {
+      setSelectedLotId(result.lots[selected.lotIdx].id);
+      setSelectedChapId(result.lots[selected.lotIdx].chapitres[selected.chapIdx].id);
+    }
+    setExpandedLots(new Set(result.lots.map(l => l.id)));
+    setExpandedChaps(new Set(result.lots.flatMap(l => l.chapitres.map(c => c.id))));
   };
 
   // ── Ribbon definition ─────────────────────────────────────────────────────────
@@ -588,8 +596,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         {
           label: 'Structure',
           actions: [
-            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRowKey },
-            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRowKey },
+            { id: 'moveUp', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(-1), disabled: !canMove(dpgf.lots, hierarchySelection, -1) },
+            { id: 'moveDown', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => changeHierarchy(1), disabled: !canMove(dpgf.lots, hierarchySelection, 1) },
+            { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => changeHierarchy('duplicate'), disabled: !hierarchySelection },
+            { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: () => changeHierarchy(), disabled: hierarchySelection?.kind !== 'ligne' },
             { id: 'addLot', label: 'Lot', icon: <IconFolderPlus size={20} />, onClick: addLot },
             { id: 'addChap', label: 'Chapitre', icon: <IconStackPush size={20} />, onClick: addChapitre, disabled: !selectedLotId },
             {
@@ -783,6 +793,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                     <tr
                       key={rKey}
                       data-lot-id={row.lot.id}
+                      onClick={() => { setSelectedRowKey(rKey); setSelectedLotId(row.lot.id); }}
                       className={`border-b border-[#9ab0cb] ${isDropTarget ? 'bg-blue-100' : 'bg-[#c8d8ec] dark:bg-blue-900/30'}`}
                       onDragOver={e => handleDragOver(e, rKey)}
                       onDrop={e => handleDrop(e, row)}
@@ -830,7 +841,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                     <tr
                       key={rKey}
                       className={`border-b border-zinc-200 dark:border-zinc-700 ${isDropTarget ? 'bg-blue-50 ring-1 ring-blue-300' : 'bg-[#edf1f7] dark:bg-zinc-800/40'} ${chapVise ? 'ring-1 ring-blue-500' : ''}`}
-                      onClick={() => setSelectedChapId(row.chapitre!.id)}
+                      onClick={() => { setSelectedChapId(row.chapitre!.id); setSelectedLotId(row.lot.id); setSelectedRowKey(rKey); }}
                       onDragOver={e => handleDragOver(e, rKey)}
                       onDrop={e => handleDrop(e, row)}
                       onDragLeave={() => setDropTarget(null)}

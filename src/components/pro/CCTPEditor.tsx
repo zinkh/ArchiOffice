@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+import { duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
 import { LotTitleInput } from './LotTitleInput';
 import React, { useState } from 'react';
 import {
@@ -13,7 +15,7 @@ import { CctpGenerateDialog } from './CctpGenerateDialog';
 import { ProRibbon, type RibbonTabDef } from './ProRibbon';
 import { IconArrowUp, IconArrowDown, IconArrowsMaximize, IconArrowsMinimize } from '@tabler/icons-react';
 import { lotsDepuisGeneration, type CctpGenerationEngine, type GeneratedLot } from '../../lib/cctpGeneration';
-import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling } from './treeOps';
+import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
   dpgf: DPGF;
@@ -31,12 +33,10 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
   ]);
 }
 
-type Selection =
-  | { kind: 'lot'; lotIdx: number }
-  | { kind: 'chapitre'; lotIdx: number; chapIdx: number }
-  | { kind: 'ligne'; lotIdx: number; chapIdx: number; ligneIdx: number };
+type Selection = HierarchySelection;
 
 export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }) => {
+  const { t } = useTranslation();
   const [showTree, setShowTree] = useState(true);
   const [expandedLots, setExpandedLots] = useState<Set<string>>(
     new Set(dpgf.lots.map(l => l.id))
@@ -48,7 +48,6 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
-  const [selectedRow, setSelectedRow] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showGenerate, setShowGenerate] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
@@ -103,7 +102,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     };
     mutateDPGF(d => d.lots[lotIdx].chapitres[chapIdx].lignes.push(newLigne));
     setExpandedChaps(prev => new Set([...prev, chap.id]));
-    setSelection({ kind: 'ligne', lotIdx, chapIdx, ligneIdx: chap.lignes.length });
+    setSelection({ kind: 'ligne', lotIdx, chapIdx, lignePath: [chap.lignes.length] });
   };
 
   // ── Bibliothèque d'ouvrages ───────────────────────────────────────────────
@@ -132,7 +131,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     }));
     mutateDPGF(d => { d.lots[lotIdx].chapitres[chapIdx].lignes.push(...nouvelles); });
     setExpandedChaps(prev => new Set([...prev, chap.id]));
-    setSelection({ kind: 'ligne', lotIdx, chapIdx, ligneIdx: base });
+    setSelection({ kind: 'ligne', lotIdx, chapIdx, lignePath: [base] });
   };
 
   // ── Génération par IA ─────────────────────────────────────────────────────
@@ -153,8 +152,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
     setSelection(null);
   };
 
-  const deleteCCTPLigne = (lotIdx: number, chapIdx: number, ligneIdx: number) => {
-    mutateDPGF(d => d.lots[lotIdx].chapitres[chapIdx].lignes.splice(ligneIdx, 1));
+  const deleteCCTPLigne = (lotIdx: number, chapIdx: number, path: number[]) => {
+    mutateDPGF(d => { const chap = d.lots[lotIdx].chapitres[chapIdx]; chap.lignes = takeLigneAtPath(chap.lignes, path).lignes; });
     setSelection(null);
   };
 
@@ -166,7 +165,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
         const chap = d.lots[selection.lotIdx].chapitres[selection.chapIdx];
         chap.cctpOnly = !chap.cctpOnly;
       } else {
-        const ligne = d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx];
+        const ligne = ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)!;
         ligne.cctpOnly = !ligne.cctpOnly;
       }
     });
@@ -181,7 +180,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
       } else if (selection.kind === 'chapitre') {
         d.lots[selection.lotIdx].chapitres[selection.chapIdx].cctpDescription = desc;
       } else {
-        d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx].cctpDescription = desc;
+        ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)!.cctpDescription = desc;
       }
     });
   };
@@ -193,7 +192,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
       if (selection.kind === 'chapitre') {
         d.lots[selection.lotIdx].chapitres[selection.chapIdx].titre = name;
       } else if (selection.kind === 'ligne') {
-        d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx].designation = name;
+        ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)!.designation = name;
       }
     });
   };
@@ -209,7 +208,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
       } else if (selection.kind === 'chapitre') {
         (d.lots[selection.lotIdx].chapitres[selection.chapIdx] as any)[champ] = valeur;
       } else {
-        (d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx] as any)[champ] = valeur;
+        (ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)! as any)[champ] = valeur;
       }
     });
   };
@@ -217,7 +216,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const updateLocalisation = (localisation: string) => {
     if (!selection || selection.kind !== 'ligne') return;
     mutateDPGF(d => {
-      d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes[selection.ligneIdx].localisation = localisation;
+      ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)!.localisation = localisation;
     });
   };
 
@@ -242,7 +241,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
       };
     }
     const chap = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx];
-    const ligne = chap?.lignes[selection.ligneIdx];
+    const ligne = chap && ligneAtPath(chap.lignes, selection.lignePath);
     if (!ligne) return null;
     return {
       label: 'Article', name: `${ligne.numero} — ${ligne.designation}`, cctpOnly: !!ligne.cctpOnly,
@@ -254,17 +253,36 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
   const selData = getSelectedData();
   const isSelCctpOnly = selData?.cctpOnly ?? false;
 
+  const applyHierarchy = (result: ReturnType<typeof moveHierarchy>) => {
+    const totalHT = result.lots.reduce((sum, lot) => sum + lot.sousTotal, 0);
+    onChange({ ...dpgf, lots: result.lots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
+    setSelection(result.selection);
+    setExpandedLots(new Set(result.lots.map(l => l.id)));
+    setExpandedChaps(new Set(result.lots.flatMap(l => l.chapitres.map(c => c.id))));
+  };
   const moveSelected = (direction: -1 | 1) => {
-    if (!selectedRow) return;
-    mutateDPGF(next => {
-      const chap = next.lots[selectedRow.lotIdx].chapitres[selectedRow.chapIdx];
-      chap.lignes = renumeroterLignes(moveLigneSibling(chap.lignes, selectedRow.path, direction), String(chap.numero || selectedRow.chapIdx + 1));
-    });
+    if (selection) applyHierarchy(moveHierarchy(dpgf.lots, selection, direction));
+  };
+  const addSelectedChild = () => {
+    if (selection?.kind !== 'ligne' || 1 + selection.lignePath.length >= MAX_ARTICLE_DEPTH) return;
+    const chap = dpgf.lots[selection.lotIdx].chapitres[selection.chapIdx];
+    const parent = ligneAtPath(chap.lignes, selection.lignePath);
+    if (!parent) return;
+    const index = parent.children?.length ?? 0;
+    const child: Ligne = { id: uid(), numero: childNumber(parent.numero, index, 2 + selection.lignePath.length), designation: t('pro_new_article'), unite: '', quantite: 0, prixUnitaire: 0, prixTotal: 0, type: 'ouvrage', cctpOnly: parent.cctpOnly };
+    mutateDPGF(d => { const target = d.lots[selection.lotIdx].chapitres[selection.chapIdx]; target.lignes = addChildToLigneAtPath(target.lignes, selection.lignePath, child); });
+    setSelection({ ...selection, lignePath: [...selection.lignePath, index] });
+  };
+  const promoteSelected = () => {
+    if (selection) applyHierarchy(promoteHierarchy(dpgf.lots, selection, uid));
   };
   const ribbonTabs: RibbonTabDef[] = [{ id: 'accueil', label: 'Accueil', groups: [
     { label: 'Hiérarchie', actions: [
-      { id: 'up', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !selectedRow },
-      { id: 'down', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !selectedRow },
+      { id: 'up', label: 'Monter', icon: <IconArrowUp size={20} />, onClick: () => moveSelected(-1), disabled: !canMove(dpgf.lots, selection, -1) },
+      { id: 'down', label: 'Descendre', icon: <IconArrowDown size={20} />, onClick: () => moveSelected(1), disabled: !canMove(dpgf.lots, selection, 1) },
+      { id: 'duplicate', label: t('pro_duplicate'), icon: <IconPlus size={20} />, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
+            { id: 'promote', label: t('pro_promote'), icon: <IconArrowUp size={20} />, onClick: promoteSelected, disabled: selection?.kind !== 'ligne' },
+      { id: 'child', label: t('pro_add_child'), icon: <IconPlus size={20} />, onClick: addSelectedChild, disabled: selection?.kind !== 'ligne' || 1 + selection.lignePath.length >= MAX_ARTICLE_DEPTH },
       { id: 'tree', label: 'Arbre', icon: <IconLayoutSidebar size={20} />, onClick: () => setShowTree(v => !v), active: showTree },
       { id: 'expand', label: 'Développer', icon: <IconArrowsMaximize size={20} />, onClick: () => setExpandedChaps(new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))) },
       { id: 'collapse', label: 'Réduire', icon: <IconArrowsMinimize size={20} />, onClick: () => setExpandedChaps(new Set()) },
@@ -437,10 +455,10 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                 onDragStart={e => { const s = { lotIdx: li, chapIdx: ci, path }; setDragSource(s); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(s)); e.dataTransfer.setData('application/json', JSON.stringify(ligne)); }}
                                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDrop={e => { e.preventDefault(); if (!dragSource) return; const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = insertLigneAtPath(dest.lignes, path.slice(0, -1), path[path.length - 1], taken.ligne); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || ci + 1)); onChange(next); } setDragSource(null); }}
-                                onClick={() => { setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, ligneIdx: path[0] }); setSelectedRow({ lotIdx: li, chapIdx: ci, path }); }}
+                                onClick={() => { setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, lignePath: path }); }}
                                 style={{ paddingLeft: `${3 + depth * 1.1}rem` }}
                                 className={`flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
-                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.ligneIdx === path[0]
+                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.lignePath.join('.') === path.join('.')
                                     ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                                     : 'text-zinc-500 dark:text-zinc-400'
                                 } ${ligne.cctpOnly ? 'italic' : ''}`}
@@ -474,7 +492,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                                 )}
                                 {ligne.cctpOnly && (
                                   <button
-                                    onClick={e => { e.stopPropagation(); deleteCCTPLigne(li, ci, path[0]); }}
+                                    onClick={e => { e.stopPropagation(); deleteCCTPLigne(li, ci, path); }}
                                     className="shrink-0 ml-1 text-zinc-300 hover:text-red-500 transition-colors"
                                     title="Supprimer"
                                   >
@@ -560,7 +578,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
                     value={
                       selection.kind === 'chapitre'
                         ? dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.titre ?? ''
-                        : dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes[selection.ligneIdx]?.designation ?? ''
+                        : ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath)?.designation ?? ''
                     }
                     onChange={e => updateName(e.target.value)}
                     className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
@@ -570,7 +588,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, onSave }
 
                 {/* DPGF article info badge */}
                 {selection.kind === 'ligne' && !isSelCctpOnly && (() => {
-                  const l = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes[selection.ligneIdx];
+                  const l = ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath);
                   if (!l) return null;
                   return (
                     <div className="mt-3 flex flex-wrap gap-3">

@@ -1,4 +1,8 @@
 export default {
+  "pro_duplicate": "Duplicate",
+  "pro_promote": "Promote one level",
+  "pro_add_child": "Sub-article",
+  "pro_new_article": "New article",
   "pc_title": "Phase transition checks",
   "pc_error": "Unable to load checks.",
   "pc_cancel": "Cancel",

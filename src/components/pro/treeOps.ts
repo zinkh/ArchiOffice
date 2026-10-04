@@ -41,8 +41,8 @@ export function evalFormula(raw: string): number {
   }
 }
 
-// Profondeur maximale : 0=lot, 1=chapitre, 2=article, 3 et 4=sous-articles.
-export const MAX_ARTICLE_DEPTH = 4;
+// Sept niveaux : 0=lot, 1=chapitre, 2=article, 3 à 6=sous-articles.
+export const MAX_ARTICLE_DEPTH = 6;
 
 // ── Formes minimales attendues ───────────────────────────────────────────────
 export interface LigneLike {
@@ -143,16 +143,26 @@ export function insertLigneAtPath<T extends { children?: any[] }>(
   return next;
 }
 
+/** Numérotation alphabétique sans limite à 26 éléments. */
+export function alphabeticIndex(index: number): string {
+  let result = ''; let n = index + 1;
+  while (n > 0) { n--; result = String.fromCharCode(97 + n % 26) + result; n = Math.floor(n / 26); }
+  return result;
+}
+export function childNumber(prefix: string, index: number, depth: number): string {
+  return prefix + '.' + (depth === MAX_ARTICLE_DEPTH ? alphabeticIndex(index) : index + 1);
+}
+
 /** Renumérote récursivement les articles d'un chapitre après un déplacement. */
 export function renumeroterLignes<T extends { numero?: string; children?: any[] }>(
-  lignes: T[], prefix: string,
+  lignes: T[], prefix: string, depth = 2,
 ): T[] {
   return lignes.map((ligne, i) => {
-    const numero = `${prefix}.${i + 1}`;
+    const numero = childNumber(prefix, i, depth);
     return {
       ...ligne,
       numero,
-      children: ligne.children?.length ? renumeroterLignes(ligne.children as T[], numero) : ligne.children,
+      children: ligne.children?.length ? renumeroterLignes(ligne.children as T[], numero, depth + 1) : ligne.children,
     };
   });
 }
@@ -166,7 +176,7 @@ export function moveLigneSibling<T extends { children?: any[] }>(lignes: T[], pa
     const parent = lignes[parentPath[0]];
     if (!parent) return lignes;
     const next = [...lignes];
-    next[parentPath[0]] = { ...parent, children: moveLigneSibling(parent.children || [], parentPath.slice(1), direction) };
+    next[parentPath[0]] = { ...parent, children: moveLigneSibling(parent.children || [], path.slice(1), direction) };
     return next;
   }
   const target = index + direction;
