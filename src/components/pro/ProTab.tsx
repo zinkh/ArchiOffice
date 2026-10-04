@@ -226,13 +226,26 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
     return operation;
   };
   const editDpgf = (next: DPGF) => {
+    const beforeIds = new Set<string>();
+    const collect = (doc: any, out: Set<string>) => doc?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id) out.add(x.id); walk(x.children || []); }); walk(c.lignes || []); }));
+    collect(dpgf, beforeIds);
+    const added: any[] = []; const collectAdded = (doc: any) => doc?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id && !beforeIds.has(x.id) && x.designation) added.push(x); walk(x.children || []); }); walk(c.lignes || []); }));
+    collectAdded(next);
+    if (added.length) void apiFetch('/api/price-library/bulk', { method: 'POST', body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }) }).catch(() => {});
     const changes = dpgf ? titresModifies(dpgf, next) : [];
-    if (!changes.length) { setDpgf(next); return; }
+    setDpgf(next);
+    if (!changes.length) return;
     for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
   };
   const editBpu = (next: BPU) => {
+    const beforeIds = new Set<string>();
+    const collect = (doc: any, out: Set<string>) => doc?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id) out.add(x.id); walk(x.children || []); }); walk(c.lignes || []); }));
+    collect(bpu, beforeIds);
+    const added: any[] = []; next?.lots?.forEach((l: any) => l.chapitres?.forEach((c: any) => { const walk = (xs: any[]) => xs?.forEach(x => { if (x.id && !beforeIds.has(x.id) && x.designation) added.push(x); walk(x.children || []); }); walk(c.lignes || []); }));
+    if (added.length) void apiFetch('/api/price-library/bulk', { method: 'POST', body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }) }).catch(() => {});
     const changes = bpu ? titresModifies(bpu, next) : [];
-    if (!changes.length) { setBpu(next); return; }
+    setBpu(next);
+    if (!changes.length) return;
     for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
   };
 
@@ -661,18 +674,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                   onPushToAct={dpgf.lots.length > 0 ? verserAuComparatifActDpgf : undefined}
                   offres={dpgfOffres}
                   onDragStart={ligne => setDraggedLigne(ligne)}
-                  onDropExternal={ligne => {
-                    // Dropped from right panel — find last chapitre in last lot
-                    if (!dpgf.lots.length) return;
-                    const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
-                    const lot = newDpgf.lots[newDpgf.lots.length - 1];
-                    if (!lot.chapitres.length) return;
-                    const chap = lot.chapitres[lot.chapitres.length - 1];
-                    chap.lignes.push({ ...ligne, id: `imp_${Date.now()}` });
-                    lot.sousTotal = lot.chapitres.reduce((s, c) => s + c.lignes.reduce((ls, l) => ls + l.prixTotal, 0), 0);
-                    const totalHT = newDpgf.lots.reduce((s, l) => s + l.sousTotal, 0);
-                    setDpgf({ ...newDpgf, totalHT, totalTTC: totalHT * (1 + newDpgf.TVA / 100) });
-                  }}
                 />
               ) : null}
             </div>

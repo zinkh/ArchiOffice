@@ -108,6 +108,55 @@ export function addChildToLigneAtPath<T extends { children?: any[] }>(
   return newLignes;
 }
 
+/** Retire une ligne et renvoie l'arbre restant ainsi que la ligne retirée. */
+export function takeLigneAtPath<T extends { children?: any[] }>(
+  lignes: T[], path: number[],
+): { lignes: T[]; ligne?: T } {
+  if (!path.length) return { lignes };
+  const [idx, ...rest] = path;
+  if (rest.length === 0) {
+    const ligne = lignes[idx];
+    return { lignes: lignes.filter((_, i) => i !== idx), ligne };
+  }
+  const parent = lignes[idx];
+  if (!parent) return { lignes };
+  const taken = takeLigneAtPath(parent.children || [], rest);
+  const next = [...lignes];
+  next[idx] = { ...parent, children: taken.lignes };
+  return { lignes: next, ligne: taken.ligne };
+}
+
+/** Insère une ligne comme soeur à l'index indiqué dans son parent. */
+export function insertLigneAtPath<T extends { children?: any[] }>(
+  lignes: T[], parentPath: number[], index: number, ligne: T,
+): T[] {
+  if (!parentPath.length) {
+    const next = [...lignes];
+    next.splice(Math.max(0, Math.min(index, next.length)), 0, ligne);
+    return next;
+  }
+  const [idx, ...rest] = parentPath;
+  const parent = lignes[idx];
+  if (!parent) return lignes;
+  const next = [...lignes];
+  next[idx] = { ...parent, children: insertLigneAtPath(parent.children || [], rest, index, ligne) };
+  return next;
+}
+
+/** Renumérote récursivement les articles d'un chapitre après un déplacement. */
+export function renumeroterLignes<T extends { numero?: string; children?: any[] }>(
+  lignes: T[], prefix: string,
+): T[] {
+  return lignes.map((ligne, i) => {
+    const numero = `${prefix}.${i + 1}`;
+    return {
+      ...ligne,
+      numero,
+      children: ligne.children?.length ? renumeroterLignes(ligne.children as T[], numero) : ligne.children,
+    };
+  });
+}
+
 /** Un parent porte la somme de ses enfants plutôt que son propre montant. */
 export function sumLigne<T extends { prixTotal: number; children?: any[] }>(ligne: T): number {
   if (ligne.children && ligne.children.length > 0) {
