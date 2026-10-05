@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { missionFlagsFromMaf } from '../mafUtils';
 import { clientFieldsFromContact, mirroredAddress, progressFromMilestones, tvaFromSiren } from '../projectClientPrefill';
 
 const contact: any = {
@@ -54,5 +55,20 @@ describe('progressFromMilestones', () => {
   });
   test('undefined without milestones', () => {
     expect(progressFromMilestones([])).toBeUndefined();
+  });
+});
+
+describe('missionFlagsFromMaf', () => {
+  test('jaune follows the mission rate', () => {
+    expect(missionFlagsFromMaf('jaune', 100)).toEqual({ is_complete_mission: true, is_chantier: true });
+    expect(missionFlagsFromMaf('jaune', 60)).toEqual({ is_complete_mission: false, is_chantier: false });
+  });
+  test('types without works execution have no site mission', () => {
+    expect(missionFlagsFromMaf('violet', undefined)).toEqual({ is_complete_mission: false, is_chantier: false });
+  });
+  test('undecided types leave the flags alone', () => {
+    expect(missionFlagsFromMaf(undefined, 100)).toEqual({});
+    expect(missionFlagsFromMaf('jaune', undefined)).toEqual({});
+    expect(missionFlagsFromMaf('puc', 100)).toEqual({});
   });
 });

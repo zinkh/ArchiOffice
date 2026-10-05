@@ -89,7 +89,7 @@ import MilestoneGantt from '../components/MilestoneGantt';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ProTab } from '../components/pro/ProTab';
 import { SituationsTravaux } from '../components/projectDetail/situations/SituationsTravaux';
-import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
+import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS, computePartInteretFromContrat, missionFlagsFromMaf } from '../lib/mafUtils';
 import { useMafCost } from '../hooks/useMafCost';
 import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
@@ -103,7 +103,7 @@ import { ResourceAttachments } from '../components/ResourceAttachments';
 import { useTranslation } from 'react-i18next';
 
 // Champ de la fiche complète : libellé relié au contrôle (htmlFor), quel que soit son type.
-const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp, placeholder }: any) => {
+const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp, placeholder, readOnly, hint }: any) => {
   const { t } = useTranslation();
   const autoId = useId();
   const id = idProp || autoId;
@@ -147,11 +147,13 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
         id={id}
         type={type}
         placeholder={placeholder}
-        className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
+        readOnly={readOnly}
+        className={cn('w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium', readOnly && 'opacity-70 cursor-default')}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
       />
     )}
+    {hint && <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{hint}</p>}
   </div>
   );
 };
@@ -603,6 +605,29 @@ export default function ProjectDetail() {
     () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
     [linkedContratsMoe],
   );
+
+  // Mission complète et mission de chantier se déduisent du type de mission MAF.
+  const mafMissionFlags = missionFlagsFromMaf(project?.maf_intercalaire, project?.taux_mission);
+  const missionFlagsLocked = mafMissionFlags.is_complete_mission !== undefined;
+  useEffect(() => {
+    setProject(prev => {
+      if (!prev) return prev;
+      const flags = missionFlagsFromMaf(prev.maf_intercalaire, prev.taux_mission);
+      const patch: Partial<Project> = {};
+      if (flags.is_complete_mission !== undefined && !!prev.is_complete_mission !== flags.is_complete_mission) patch.is_complete_mission = flags.is_complete_mission;
+      if (flags.is_chantier !== undefined && !!prev.is_chantier !== flags.is_chantier) patch.is_chantier = flags.is_chantier;
+      return Object.keys(patch).length ? { ...prev, ...patch } : prev;
+    });
+  }, [project?.maf_intercalaire, project?.taux_mission]);
+
+  // Part d'intérêt MAF : 100 % moins la part des cotraitants du contrat MOE lié.
+  const partInteretContrat = contratHonoraires
+    ? (computePartInteretFromContrat(contratHonoraires.cotraitants ?? []) ?? 100)
+    : null;
+  useEffect(() => {
+    if (partInteretContrat == null) return;
+    setProject(prev => (prev && prev.part_interet !== partInteretContrat ? { ...prev, part_interet: partInteretContrat } : prev));
+  }, [partInteretContrat]);
 
   // Seule la fiche (aperçu, fiche complète, champs HONOS) attend le bouton
   // Enregistrer : notes, avenants, jalons et documents s'écrivent seuls. Les
@@ -3739,7 +3764,7 @@ export default function ProjectDetail() {
                                 </select>
                               </div>
                             )}
-                            <FormField label={t('projectdetail_ff_share')} type="number" value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
+                            <FormField label={t('projectdetail_ff_share')} type="number" readOnly={partInteretContrat != null} hint={partInteretContrat != null ? t('projectdetail_share_auto') : undefined} value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
                           </div>
                           {mafCost && (
                             <div className="mt-4">
@@ -3825,6 +3850,7 @@ export default function ProjectDetail() {
                             id="is_complete_mission"
                             className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
                             checked={!!project.is_complete_mission}
+                            disabled={missionFlagsLocked}
                             onChange={e => setProject({...project, is_complete_mission: e.target.checked})}
                           />
                           <label htmlFor="is_complete_mission" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
@@ -3837,6 +3863,7 @@ export default function ProjectDetail() {
                             id="is_chantier"
                             className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
                             checked={!!project.is_chantier}
+                            disabled={missionFlagsLocked}
                             onChange={e => setProject({...project, is_chantier: e.target.checked})}
                           />
                           <label htmlFor="is_chantier" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
