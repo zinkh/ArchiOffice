@@ -82,6 +82,25 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const scalerRef = useRef<HTMLDivElement>(null);
+  // Largeur d'une page A4 à 96 dpi : l'aperçu est réduit pour tenir dans l'écran.
+  const A4_WIDTH_PX = 794;
+  const A4_HEIGHT_PX = 1123;
+  const [previewScale, setPreviewScale] = useState(1);
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el || view !== 'preview') return;
+    const fit = () => {
+      const style = getComputedStyle(el);
+      const room = el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      setPreviewScale(Math.min(1, Math.max(0.2, room / A4_WIDTH_PX)));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [view]);
 
   const calculateTotals = () => {
     const net = data.items?.reduce((acc, item) => acc + (item.quantity * item.unit_price), 0) || 0;
@@ -171,6 +190,10 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     // Hide icons before generation to prevent html2canvas errors
     const icons = previewRef.current.querySelectorAll('svg');
     icons.forEach(icon => icon.style.display = 'none');
+    // La capture se fait à l'échelle réelle de la page, pas à celle de l'écran.
+    const scaler = scalerRef.current;
+    const scaledTransform = scaler?.style.transform ?? '';
+    if (scaler) scaler.style.transform = 'none';
     
     try {
       const { default: jsPDF } = await import('jspdf');
@@ -221,6 +244,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     } finally {
       // Restore icons
       icons.forEach(icon => icon.style.display = '');
+      if (scaler) scaler.style.transform = scaledTransform;
       setIsGenerating(false);
     }
   };
@@ -248,40 +272,49 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-0 sm:p-4 bg-black/60 backdrop-blur-sm">
       <motion.div 
         ref={launchOriginRef}
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
-        className="bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-6xl h-[90dvh] flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
+        className="bg-white dark:bg-zinc-900 shadow-2xl w-full max-w-6xl h-[100dvh] sm:h-[90dvh] rounded-none sm:rounded-2xl flex flex-col overflow-hidden border border-zinc-200 dark:border-zinc-800"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
-          <div className="flex items-center gap-4">
-            <h2 className="text-lg font-bold text-zinc-900 dark:text-white">Générateur de Facture (Factur-X Ready)</h2>
-            <div className="flex bg-zinc-200 dark:bg-zinc-800 p-1 rounded-lg">
-              <button 
+        {/* Header : sur un téléphone, titre et fermeture, puis le choix de vue, puis les actions. */}
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between p-3 sm:p-4 pt-[max(0.75rem,env(safe-area-inset-top))] border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-4 min-w-0">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-base sm:text-lg font-bold text-zinc-900 dark:text-white">Générateur de facture<span className="hidden sm:inline"> (Factur-X Ready)</span></h2>
+              <button onClick={onClose} aria-label="Fermer" className="lg:hidden p-2 -mr-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 rounded-full transition-colors">
+                <IconX size={22} />
+              </button>
+            </div>
+            <div className="flex bg-zinc-200 dark:bg-zinc-800 p-1 rounded-lg" role="tablist">
+              <button
+                role="tab"
+                aria-selected={view === 'edit'}
                 onClick={() => setView('edit')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${view === 'edit' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                className={`flex-1 lg:flex-none justify-center flex items-center gap-2 px-3 py-2 lg:py-1.5 rounded-md text-sm font-medium transition ${view === 'edit' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
               >
                 <IconEdit size={16} />
                 Édition
               </button>
-              <button 
+              <button
+                role="tab"
+                aria-selected={view === 'preview'}
                 onClick={() => setView('preview')}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition ${view === 'preview' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                className={`flex-1 lg:flex-none justify-center flex items-center gap-2 px-3 py-2 lg:py-1.5 rounded-md text-sm font-medium transition ${view === 'preview' ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
               >
                 <IconEye size={16} />
                 Aperçu
               </button>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <button 
+          <div className="flex items-center gap-2 sm:gap-3">
+            <button
               onClick={handleSave}
               disabled={isSaving}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 press"
+              className="flex-1 lg:flex-none justify-center flex items-center gap-2 px-4 py-2.5 lg:py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-blue-500/20 press"
             >
               {isSaving ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -290,27 +323,30 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
               )}
               {isSaving ? 'Enregistrement...' : 'Enregistrer'}
             </button>
-            <button 
+            <button
               onClick={exportPDF}
               disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 press"
+              className="flex-1 lg:flex-none justify-center flex items-center gap-2 px-4 py-2.5 lg:py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded-lg text-sm font-bold shadow-lg shadow-emerald-500/20 press"
             >
               {isGenerating ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
               ) : (
                 <IconDownload size={18} />
               )}
-              {isGenerating ? 'Génération...' : 'Exporter (Factur-X)'}
+              {isGenerating ? 'Génération...' : <>Exporter<span className="hidden sm:inline"> (Factur-X)</span></>}
             </button>
-            <button onClick={onClose} className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-full transition-colors">
+            <button onClick={onClose} aria-label="Fermer" className="hidden lg:block p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-full transition-colors">
               <IconX size={20} />
             </button>
           </div>
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 bg-zinc-100 dark:bg-zinc-950 relative">
-          <div className={view === 'preview' ? "flex flex-col items-center py-8 min-h-full" : "fixed -left-[9999px] top-0"}>
+        <div ref={contentRef} className="flex-1 overflow-y-auto p-3 sm:p-6 bg-zinc-100 dark:bg-zinc-950 relative">
+          <div className={view === 'preview' ? "flex flex-col items-center py-4 sm:py-8 min-h-full" : "fixed -left-[9999px] top-0"}>
+            {/* Cadre de la taille réduite : la page A4 garde ses dimensions réelles à l'intérieur. */}
+            <div style={view === 'preview' ? { width: A4_WIDTH_PX * previewScale, height: A4_HEIGHT_PX * previewScale } : undefined}>
+            <div ref={scalerRef} style={view === 'preview' ? { width: A4_WIDTH_PX, transform: `scale(${previewScale})`, transformOrigin: 'top left' } : undefined}>
             <div ref={previewRef}>
               <div className="pdf-page bg-white text-black w-[210mm] h-[297mm] p-[20mm] shadow-xl font-sans text-[10pt] leading-relaxed flex flex-col" style={{ fontFamily: 'Inter, sans-serif' }}>
                 {/* Header */}
@@ -435,6 +471,8 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                 </div>
               </div>
             </div>
+            </div>
+            </div>
           </div>
 
           {view === 'edit' && (
@@ -442,9 +480,9 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="md:col-span-2 space-y-6">
                   {/* General Info */}
-                  <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-4">
+                  <div className="bg-white dark:bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-4">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Informations Générales</h3>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 min-[420px]:grid-cols-2 gap-4">
                       <div className="space-y-1">
                         <label className="text-xs font-medium text-zinc-500">N° Facture</label>
                         <input 
@@ -496,7 +534,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                   </div>
 
                   {/* Items */}
-                  <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-4">
+                  <div className="bg-white dark:bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-4">
                     <div className="flex items-center justify-between">
                       <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Lignes de facture</h3>
                       <button onClick={addItem} className="p-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 rounded-lg transition-colors">
@@ -542,7 +580,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
                 <div className="space-y-6">
                   {/* Seller Details */}
-                  <div className="bg-white dark:bg-zinc-900 p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-4">
+                  <div className="bg-white dark:bg-zinc-900 p-4 sm:p-6 rounded-xl border border-zinc-200 dark:border-zinc-800 space-y-4">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-zinc-400">Détails Émetteur</h3>
                     <div className="space-y-3">
                       <div className="space-y-1">
@@ -602,7 +640,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                   </div>
 
                   {/* Totals Summary */}
-                  <div className="bg-emerald-600 text-white p-6 rounded-xl shadow-lg shadow-emerald-500/20 space-y-4">
+                  <div className="bg-emerald-600 text-white p-4 sm:p-6 rounded-xl shadow-lg shadow-emerald-500/20 space-y-4">
                     <h3 className="text-xs font-bold uppercase tracking-wider opacity-80">Récapitulatif</h3>
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm">
