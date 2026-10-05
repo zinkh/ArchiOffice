@@ -123,12 +123,15 @@ export function zohoPhasesText(inv: any): string {
  * to a single line carrying the invoice total when the row has no itemised
  * breakdown.
  *
- * Le texte d'avancement par phase d'un acompte est ajouté à la DESCRIPTION de
- * la première ligne seulement (il décrit la facture, pas chaque ligne), jamais
- * à son `name` : c'est le nom qui identifie l'article Zoho (voir
- * zohoItemIdentity), et il ne doit pas changer d'une facture à l'autre.
+ * Pour un acompte, la DESCRIPTION de la première ligne (le détail de
+ * l'article chez Zoho) devient : l'intitulé de l'opération, son adresse, puis
+ * l'avancement par phase, une information par ligne. L'intitulé de la ligne
+ * de facture n'y est pas répété : il reste dans son `name`. Ce bloc décrit la
+ * facture, pas chaque ligne, d'où la première seulement ; et jamais dans le
+ * `name`, qui identifie l'article Zoho (voir zohoItemIdentity) et ne doit pas
+ * changer d'une facture à l'autre.
  */
-export function zohoLineItems(inv: any): any[] {
+export function zohoLineItems(inv: any, affaire?: ZohoAffaireInfo): any[] {
   const items = Array.isArray(inv?.items) ? inv.items : [];
   const lines = items.length
     ? items.map((item: any) => ({
@@ -146,7 +149,10 @@ export function zohoLineItems(inv: any): any[] {
         tax_percentage: inv?.vat_rate || 0,
       }];
   const phases = zohoPhasesText(inv);
-  if (phases) lines[0] = { ...lines[0], description: [lines[0].description, phases].filter(Boolean).join('\n\n') };
+  if (phases) {
+    const detail = [affaire?.projectName, affaire?.projectAddress, phases].map(v => (v || '').trim()).filter(Boolean).join('\n');
+    lines[0] = { ...lines[0], description: detail };
+  }
   return lines;
 }
 
