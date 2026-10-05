@@ -80,7 +80,7 @@ import ACTModule from '../components/ACTModule';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT, isClientContact } from '../lib/contactCategories';
-import { clientFieldsFromContact, mirroredAddress } from '../lib/projectClientPrefill';
+import { clientFieldsFromContact, mirroredAddress, progressFromMilestones, tvaFromSiren } from '../lib/projectClientPrefill';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
@@ -103,7 +103,7 @@ import { ResourceAttachments } from '../components/ResourceAttachments';
 import { useTranslation } from 'react-i18next';
 
 // Champ de la fiche complète : libellé relié au contrôle (htmlFor), quel que soit son type.
-const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp }: any) => {
+const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp, placeholder }: any) => {
   const { t } = useTranslation();
   const autoId = useId();
   const id = idProp || autoId;
@@ -146,6 +146,7 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
       <input 
         id={id}
         type={type}
+        placeholder={placeholder}
         className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
@@ -241,6 +242,7 @@ export default function ProjectDetail() {
       role: m.role && m.role !== 'member' ? m.role : undefined,
     };
   }), [projectMembers, team]);
+
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   // Vrai une fois les jalons du projet réellement lus en base : la
@@ -367,6 +369,36 @@ export default function ProjectDetail() {
     return isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
   });
   const [showFullEditor, setShowFullEditor] = useState(false);
+
+  // L'avancement se déduit des jalons cochés dès que l'affaire en a.
+  useEffect(() => {
+    if (!milestonesLoaded) return;
+    const auto = progressFromMilestones(milestones);
+    if (auto === undefined) return;
+    setProject(prev => (prev && prev.progression !== auto ? { ...prev, progression: auto } : prev));
+  }, [milestones, milestonesLoaded]);
+
+  // Zone du PLU : relue depuis l'adresse tant que le champ est vide (une fois par adresse).
+  const pluLookedUp = useRef('');
+  useEffect(() => {
+    const address = project?.address || project?.adresse_terrain;
+    if (!showFullEditor || !project?.id || !address || project.zone_plu || pluLookedUp.current === address) return;
+    pluLookedUp.current = address;
+    let cancelled = false;
+    (async () => {
+      try {
+        const geo = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`);
+        if (!geo.ok) return;
+        const coords = (await geo.json()).features?.[0]?.geometry?.coordinates;
+        if (!coords) return;
+        const plu = await fetch(`/api/urbanisme?geom=${encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: coords }))}`);
+        if (!plu.ok) return;
+        const zone = (await plu.json()).libelle;
+        if (zone && !cancelled) setProject(prev => (prev && !prev.zone_plu ? { ...prev, zone_plu: zone } : prev));
+      } catch { /* meilleur effort : le champ reste saisissable à la main */ }
+    })();
+    return () => { cancelled = true; };
+  }, [showFullEditor, project?.id, project?.address, project?.adresse_terrain, project?.zone_plu]);
   // Which phase's notes are shown in the overview's "Note de phase" column.
   // Distinct from the project's actual current phase (phaseHistory) — the
   // topbar pills only change this, they never transition the real mission
@@ -3341,9 +3373,14 @@ export default function ProjectDetail() {
                               min="0"
                               max="100"
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
+                              readOnly={milestones.length > 0}
+                              title={milestones.length > 0 ? t('projectdetail_progress_auto') : undefined}
                               value={project.progression || 0}
                               onChange={e => setProject({...project, progression: Number(e.target.value)})}
                             />
+                            {milestones.length > 0 && (
+                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_progress_auto')}</p>
+                            )}
                           </div>
                           <div className="space-y-2">
                             <label htmlFor="fiche-code" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_code')}</label>
@@ -3565,7 +3602,9 @@ export default function ProjectDetail() {
                                   setProject(prev => prev ? ({
                                     ...prev,
                                     nom_societe: val,
-                                    rcs: details.siren || details.siret || '',
+                                    rcs: details.siren || '',
+                                    client_siret: details.siret || prev.client_siret || '',
+                                    client_vat_number: prev.client_vat_number || tvaFromSiren(details.siren || details.siret) || '',
                                     adresse_client: details.address || '',
                                     cp_client: details.zipcode || '',
                                     ville_client: details.city || '',
@@ -3619,7 +3658,7 @@ export default function ProjectDetail() {
                             {t('projectdetail_ff_section_site')}
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <FormField label={t('projectdetail_ff_reference')} value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_reference')} placeholder={project.project_code || undefined} value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
                             <FormField label={t('projectdetail_ff_index')} value={project.ind} onChange={(v: any) => setProject(prev => prev ? ({...prev, ind: v}) : null)} />
                             <FormField label={t('projectdetail_ff_detail')} type="textarea" value={project.projet_detail} onChange={(v: any) => setProject(prev => prev ? ({...prev, projet_detail: v}) : null)} />
                           </div>

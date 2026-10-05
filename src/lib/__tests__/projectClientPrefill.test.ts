@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { clientFieldsFromContact, mirroredAddress } from '../projectClientPrefill';
+import { clientFieldsFromContact, mirroredAddress, progressFromMilestones, tvaFromSiren } from '../projectClientPrefill';
 
 const contact: any = {
   first_name: 'Anne', last_name: 'Durand', company_name: 'SCI Les Lilas', job_title: 'Gérante',
@@ -34,5 +34,25 @@ describe('mirroredAddress', () => {
   });
   test('keeps a deliberately different counterpart', () => {
     expect(mirroredAddress('a', 'z', 'b')).toBeUndefined();
+  });
+});
+
+describe('tvaFromSiren', () => {
+  test('computes the French VAT key from a SIREN or a SIRET', () => {
+    expect(tvaFromSiren('732 829 320')).toBe('FR44732829320');
+    expect(tvaFromSiren('73282932000074')).toBe('FR44732829320');
+  });
+  test('refuses anything that is not 9 or 14 digits', () => {
+    expect(tvaFromSiren('123')).toBeUndefined();
+    expect(tvaFromSiren(undefined)).toBeUndefined();
+  });
+});
+
+describe('progressFromMilestones', () => {
+  test('share of completed milestones, rounded', () => {
+    expect(progressFromMilestones([{ completed: true }, { completed: false }, { completed: false }])).toBe(33);
+  });
+  test('undefined without milestones', () => {
+    expect(progressFromMilestones([])).toBeUndefined();
   });
 });

@@ -2210,6 +2210,7 @@ export default {
       "projectdetail_full_client_new": "New client",
       "projectdetail_full_category": "Category",
       "projectdetail_full_manager_placeholder": "Choose from the team",
+      "projectdetail_progress_auto": "Calculated from completed milestones.",
       "projectdetail_full_surface": "Area (m²)",
       "projectdetail_full_progress": "Progress (%)",
       "projectdetail_full_code": "Project code",
