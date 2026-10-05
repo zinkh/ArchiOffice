@@ -86,6 +86,7 @@ const ChorusProPortal = lazy(() => import('./pages/ChorusProPortal'));
 const DocumentTemplates = lazy(() => import('./pages/DocumentTemplates'));
 // Agent UI — @zinkh/archioffice-agents (licence propriétaire)
 import ProjectTabsBar from './components/ProjectTabsBar';
+import { projectIdFromPath, useOpenProjectTabs } from './lib/openProjectTabs';
 import { AgentChatProvider, Agents, AgentConfig, AgentAlerts, AgentLearning, AgentChatPage } from '@zinkh/archioffice-agents/client';
 
 function SyncStatus() {
@@ -187,6 +188,7 @@ function Header() {
   const { settings } = useSettings();
   const location = useLocation();
   const navigate = useNavigate();
+  const openTabs = useOpenProjectTabs();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -323,19 +325,27 @@ function Header() {
             <BrandLogo logoUrl={settings?.logoUrl} size={24} />
             ArchiOffice
           </Link>
-          <h1
-            className="hidden md:block text-sm font-semibold truncate"
-            style={{ color: 'var(--tblr-text)' }}
-          >
-            {headerTitle}
-          </h1>
+          {/* Sur une fiche affaire, son onglet porte déjà le nom : le titre cède la place aux onglets. */}
+          {!(openTabs.length > 0 && projectIdFromPath(location.pathname)) && (
+            <h1
+              className={cn('hidden md:block text-sm font-semibold truncate', openTabs.length > 0 && 'max-w-[10rem]')}
+              style={{ color: 'var(--tblr-text)' }}
+            >
+              {headerTitle}
+            </h1>
+          )}
+          {openTabs.length > 0 && (
+            <div className="hidden md:flex min-w-0 flex-1">
+              <ProjectTabsBar variant="header" />
+            </div>
+          )}
           {/* Le cabinet courant, affiché en permanence dès qu'il y en a
               plusieurs : savoir dans quelle structure on écrit compte plus
               que la place que prend cette mention. Un compte à cabinet
               unique, lui, ne voit rien de nouveau. */}
           {tenants.length > 1 && (
             <span
-              className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-medium truncate max-w-[220px]"
+              className={cn('hidden items-center gap-1 px-2 py-0.5 rounded text-[0.6875rem] font-medium truncate max-w-[220px]', openTabs.length > 0 ? '2xl:inline-flex' : 'md:inline-flex')}
               style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', border: '1px solid var(--tblr-border)' }}
               title={t('tenant_switcher_current')}
             >
@@ -748,7 +758,7 @@ function ProtectedLayout() {
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
         <Header />
-        <ProjectTabsBar />
+        <div className="md:hidden"><ProjectTabsBar variant="strip" /></div>
 
         <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}>
           <Outlet />

@@ -10,13 +10,14 @@ import {
   VisibilityState,
   ColumnSizingState,
 } from '@tanstack/react-table';
-import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconLayoutRows } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconLayoutRows, IconArrowRight } from '@tabler/icons-react';
 import { useConfirmDialog } from './ui/ConfirmDialog';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { db } from '../db';
+import { apiFetch } from '../lib/api';
 
 interface Props {
   projectId: string;
@@ -25,7 +26,20 @@ interface Props {
   currentReportId?: string;
   /** Restricts the table to one observation type (e.g. 'reserve' for the "Réserves" tab). */
   typeFilter?: Observation['type'];
+  /** Nature donnée aux lignes ajoutées quand aucun `typeFilter` ne l'impose. */
+  defaultType?: Observation['type'];
+  /** Appelé quand des réserves de l'AOR viennent d'être créées (pour rafraîchir leur liste). */
+  onReservesChanged?: () => void;
 }
+
+const TYPE_LABELS: Record<NonNullable<Observation['type']>, string> = {
+  observation: 'Remarque',
+  reserve: 'À lever',
+  a_faire: 'Travail à faire',
+};
+
+/** Observation que l'on peut encore reprendre en réserve de l'AOR : ni levée, ni refusée, ni déjà reprise. */
+const isReprenable = (o: Observation) => !o.reserve_id && o.statut !== 'Levée' && o.statut !== 'Refusée';
 
 const STATUTS = ['À faire', 'En cours', 'Levée', 'Urgent', 'Refusée'] as const;
 
@@ -81,6 +95,7 @@ function AutoTextarea({ value, onCommit, className, placeholder }: { value: stri
 const COLUMN_LABELS: Record<string, string> = {
   number: 'N°',
   lot: 'Lot',
+  type: 'Nature',
   texte: 'Observation',
   statut: 'Statut',
   urgence: 'Urgence',
@@ -88,10 +103,11 @@ const COLUMN_LABELS: Record<string, string> = {
   created_report_number: 'CR émis',
   resolved_report_number: 'CR levée',
   photos: 'Photos',
+  aor: 'Réserve AOR',
   actions: '',
 };
 
-export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter }: Props) {
+export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter, defaultType, onReservesChanged }: Props) {
   const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -103,6 +119,8 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
   const [openOnly, setOpenOnly] = useState(false);
+  const [typeSelect, setTypeSelect] = useState('');
+  const [aorMessage, setAorMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const storeKey = `obsTable:${typeFilter || 'all'}`;
   const [columnSizing, setColumnSizing] = useState<ColumnSizingState>(() => {
     try { return JSON.parse(localStorage.getItem(`${storeKey}:sizes`) || '{}'); } catch { return {}; }
@@ -183,7 +201,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     // Id généré côté client : une création rejouée après coupure réseau
     // (file de synchro hors-ligne) ne crée jamais deux observations.
     const id = crypto.randomUUID();
-    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || 'observation', created_report_id: currentReportId || undefined };
+    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined };
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${projectId}/observations`, body });
       const newObs: Observation = queued ? { ...body, project_id: projectId, pendingSync: true } : data!;
@@ -209,6 +227,46 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     }
   }, [confirmAction, t]);
 
+  // Reprise en réserve de l'AOR (OPR) : l'observation reste en place et affiche
+  // le numéro de sa réserve. En ligne seulement : la numérotation est tenue par le serveur.
+  const reprendreEnReserve = useCallback(async (id: string) => {
+    const confirmed = await confirmAction({
+      title: "Reprendre cette observation en réserve de l'AOR ?",
+      message: "Une réserve est créée dans l'onglet Réception (AOR), avec le lot, l'entreprise et le délai de l'observation. L'observation reste dans les comptes-rendus.",
+      confirmLabel: 'Reprendre en réserve',
+      cancelLabel: t('projectdetail_dialog_cancel'),
+      tone: 'primary',
+    });
+    if (!confirmed) return;
+    try {
+      const created = await apiFetch<{ reserve_id: string; number: number }>(`/api/observations/${id}/to-reserve`, { method: 'POST' });
+      updateLocal(id, { reserve_id: created.reserve_id, reserve_number: created.number });
+      setAorMessage({ tone: 'ok', text: `Réserve n° ${created.number} créée dans l'AOR.` });
+      onReservesChanged?.();
+    } catch (err: any) {
+      setAorMessage({ tone: 'error', text: err?.message || 'La reprise en réserve a échoué.' });
+    }
+  }, [confirmAction, t, updateLocal, onReservesChanged]);
+
+  const reprendreToutesEnReserves = useCallback(async (count: number) => {
+    const confirmed = await confirmAction({
+      title: `Reprendre ${count} observation${count > 1 ? 's' : ''} à lever en réserves de l'AOR ?`,
+      message: "À faire à l'approche de la réception : chaque observation « à lever » encore ouverte devient une réserve de l'OPR. Les observations restent dans les comptes-rendus et ne sont jamais reprises deux fois.",
+      confirmLabel: 'Reprendre en réserves',
+      cancelLabel: t('projectdetail_dialog_cancel'),
+      tone: 'primary',
+    });
+    if (!confirmed) return;
+    try {
+      const res = await apiFetch<{ created: unknown[] }>(`/api/projects/${projectId}/observations/to-reserves`, { method: 'POST' });
+      setAorMessage({ tone: 'ok', text: `${res.created.length} réserve${res.created.length > 1 ? 's' : ''} créée${res.created.length > 1 ? 's' : ''} dans l'AOR.` });
+      fetchObservations();
+      onReservesChanged?.();
+    } catch (err: any) {
+      setAorMessage({ tone: 'error', text: err?.message || 'La reprise en réserves a échoué.' });
+    }
+  }, [confirmAction, t, projectId, fetchObservations, onReservesChanged]);
+
   // TanStack Table expects `data` and `columns` to be referentially stable
   // across renders (its docs call this out explicitly): recreating either
   // as a fresh array every render — as this component did before — makes
@@ -219,6 +277,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   // for the memoization to keep rebuilding — see the 2026-09-08 incident.
   const filtered = useMemo(() => observations.filter(o => {
     if (typeFilter && (o.type || 'observation') !== typeFilter) return false;
+    if (typeSelect && (o.type || 'observation') !== typeSelect) return false;
     if (openOnly && o.statut === 'Levée') return false;
     if (statusFilter && o.statut !== statusFilter) return false;
     if (lotFilter && o.lot_id !== lotFilter) return false;
@@ -228,7 +287,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         (o.lot?.lot_title || '').toLowerCase().includes(q);
     }
     return true;
-  }), [observations, typeFilter, openOnly, statusFilter, lotFilter, globalFilter]);
+  }), [observations, typeFilter, typeSelect, openOnly, statusFilter, lotFilter, globalFilter]);
 
   const columns = useMemo(() => [
     columnHelper.accessor('number', {
@@ -283,6 +342,26 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
               <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
             )}
           </div>
+        );
+      },
+    }),
+    columnHelper.accessor('type', {
+      header: 'Nature',
+      size: 110,
+      cell: info => {
+        const row = info.row.original;
+        const val = (info.getValue() || 'observation') as NonNullable<Observation['type']>;
+        return (
+          <select
+            className="w-full p-1 rounded text-xs border border-zinc-200 dark:border-zinc-700 bg-transparent cursor-pointer"
+            value={val}
+            onChange={e => {
+              updateLocal(row.id, { type: e.target.value as Observation['type'] });
+              saveField(row.id, 'type', e.target.value);
+            }}
+          >
+            {(Object.keys(TYPE_LABELS) as NonNullable<Observation['type']>[]).map(k => <option key={k} value={k}>{TYPE_LABELS[k]}</option>)}
+          </select>
         );
       },
     }),
@@ -374,6 +453,32 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
       },
     }),
     columnHelper.display({
+      id: 'aor',
+      header: 'AOR',
+      size: 120,
+      cell: info => {
+        const row = info.row.original;
+        if (row.reserve_id) {
+          return (
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300" title="Réserve de l'AOR qui reprend cette observation">
+              <IconArrowRight size={13} /> Réserve n° {row.reserve_number ?? '—'}
+            </span>
+          );
+        }
+        if (!isReprenable(row) || row.pendingSync) return null;
+        return (
+          <button
+            type="button"
+            onClick={() => void reprendreEnReserve(row.id)}
+            className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+            title="Reprendre en réserve de l'AOR"
+          >
+            <IconArrowRight size={13} /> En réserve
+          </button>
+        );
+      },
+    }),
+    columnHelper.display({
       id: 'actions',
       size: 40,
       cell: info => (
@@ -386,7 +491,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         </button>
       ),
     }),
-  ], [lots, saveField, updateLocal, deleteRow]);
+  ], [lots, saveField, updateLocal, deleteRow, reprendreEnReserve]);
 
   const table = useReactTable({
     data: filtered,
@@ -415,6 +520,8 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table.getRowModel().rows, lots]);
 
+  const aReprendre = useMemo(() => observations.filter(o => (o.type || 'observation') === 'reserve' && isReprenable(o) && !o.pendingSync).length, [observations]);
+
   const allColumnIds = columns
     .map(c => ('accessorKey' in c ? String(c.accessorKey) : (c as any).id))
     .filter(id => id && id !== 'actions' && id !== 'number');
@@ -439,6 +546,15 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           {lots.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
         </select>
         <select
+          value={typeSelect}
+          onChange={e => setTypeSelect(e.target.value)}
+          aria-label="Nature"
+          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option value="">Toutes les natures</option>
+          {(Object.keys(TYPE_LABELS) as NonNullable<Observation['type']>[]).map(k => <option key={k} value={k}>{TYPE_LABELS[k]}</option>)}
+        </select>
+        <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
           className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -456,6 +572,16 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         </label>
         {Object.keys(columnSizing).length > 0 && (
           <button type="button" onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
+        )}
+        {aReprendre > 0 && (
+          <button
+            type="button"
+            onClick={() => void reprendreToutesEnReserves(aReprendre)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold border border-zinc-300 dark:border-zinc-600 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors dark:text-white"
+            title="À l'approche de la réception : les observations « à lever » encore ouvertes deviennent des réserves de l'AOR"
+          >
+            <IconArrowRight size={15} /> Reprendre les {aReprendre} à lever en réserves AOR
+          </button>
         )}
         <div className="ml-auto relative" ref={columnMenuRef}>
           <button
@@ -487,6 +613,18 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           )}
         </div>
       </div>
+
+      {aorMessage && (
+        <div
+          role="status"
+          className={`flex items-center justify-between gap-3 px-4 py-2 rounded-xl border text-sm ${aorMessage.tone === 'ok'
+            ? 'border-zinc-300 dark:border-zinc-600 text-zinc-700 dark:text-zinc-200'
+            : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'}`}
+        >
+          <span>{aorMessage.text}</span>
+          <button type="button" onClick={() => setAorMessage(null)} className="text-xs underline shrink-0">Fermer</button>
+        </div>
+      )}
 
       {loadError && (
         <div className="flex items-center justify-between gap-3 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-sm text-red-700 dark:text-red-300">

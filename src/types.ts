@@ -1244,7 +1244,11 @@ export interface SiteReportLotTracking {
   /** Retard d'exécution cumulé depuis le début du chantier, en jours. */
   retard_cumule?: number;
   retard_remise_docs?: boolean;
+  /** Retard de remise des documents, en jours (remplace la case oui/non ci-dessus). */
+  retard_docs_jours?: number;
   intemperies?: boolean;
+  /** Jours d'intempéries sur la période (remplace la case oui/non ci-dessus). */
+  intemperies_jours?: number;
   convoque_reunion_suivante?: boolean;
   /** Lieu de la prochaine réunion ; absent = « Sur site ». */
   lieu?: string;
@@ -1311,6 +1315,9 @@ export interface Observation {
   created_at?: string;
   report_ids?: string[];
   type?: 'observation' | 'reserve' | 'a_faire';
+  /** Réserve de l'AOR (OPR) qui reprend cette observation, et son numéro. */
+  reserve_id?: string | null;
+  reserve_number?: number | null;
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */

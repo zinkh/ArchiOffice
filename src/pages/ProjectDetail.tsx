@@ -4002,6 +4002,7 @@ export default function ProjectDetail() {
             {/* Tab content for PRO, VISA, AOR ... */}
             {activeTab === 'DET' && (
               <ChantierModule
+                onReservesChanged={fetchReserves}
                 project={project}
                 lots_list={project.lots_list || []}
                 ordresDeService={ordresDeService}

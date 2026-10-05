@@ -181,7 +181,7 @@ export async function exportSiteReportToPDF(
   const tracking = report.lot_tracking || [];
   autoTable(doc, {
     startY: y,
-    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Retard docs', 'Intempéries', 'Convoqué suiv.', 'Lieu', 'Heure']],
+    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Retard docs (j)', 'Intempéries (j)', 'Convoqué suiv.', 'Lieu', 'Heure']],
     body: [...lots].sort((a, b) => a.lot_number.localeCompare(b.lot_number, 'fr', { numeric: true })).map(lot => {
       const t = tracking.find(x => x.lot_id === lot.id);
       const contact = lot.contact_id ? contactById.get(lot.contact_id) : undefined;
@@ -196,8 +196,8 @@ export async function exportSiteReportToPDF(
         t?.effectif != null ? String(t.effectif) : '',
         t?.retard_semaine != null ? String(t.retard_semaine) : (t?.retard_execution && t?.retard_cumule == null ? 'Oui' : ''),
         t?.retard_cumule != null ? String(t.retard_cumule) : '',
-        t?.retard_remise_docs ? 'Oui' : '',
-        t?.intemperies ? 'Oui' : '',
+        t?.retard_docs_jours != null ? String(t.retard_docs_jours) : (t?.retard_remise_docs ? 'Oui' : ''),
+        t?.intemperies_jours != null ? String(t.intemperies_jours) : (t?.intemperies ? 'Oui' : ''),
         t?.convoque_reunion_suivante ? 'Oui' : '',
         t?.lieu ?? 'Sur site',
         t?.heure || '',

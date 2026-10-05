@@ -13,6 +13,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { convertObservationsToReserves, CLOSED_OBSERVATION_STATUSES } from '../observationToReserve';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
@@ -34,11 +35,22 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
         .eq('project_id', projectId)
         .order('number', { ascending: true });
       if (error) throw error;
+      // Numéro de la réserve de l'AOR qui reprend l'observation : une seule
+      // lecture groupée, jamais une par ligne (absente tant que la migration
+      // n'est pas jouée : `reserve_id` n'existe alors pas sur les lignes).
+      const reserveIds = [...new Set((data || []).map((o: any) => o.reserve_id).filter(Boolean))] as string[];
+      const { data: reserveRows } = reserveIds.length
+        ? await supabaseAdmin.from('reserves').select('id, number').eq('tenant_id', tenantId).in('id', reserveIds)
+        : { data: [] };
+      const reserveNumberById = new Map<string, number>(((reserveRows || []) as any[]).map(r => [r.id, r.number]));
       const mapped = (data || []).map((o: any) => ({
         ...o,
         created_report_number: o.created_report?.report_number,
         resolved_report_number: o.resolved_report?.report_number,
         report_ids: (o.observation_reports || []).map((r: any) => r.report_id),
+        // Une réserve supprimée depuis laisse un lien orphelin côté client : on ne le rend pas.
+        reserve_id: o.reserve_id && reserveNumberById.has(o.reserve_id) ? o.reserve_id : null,
+        reserve_number: o.reserve_id ? reserveNumberById.get(o.reserve_id) ?? null : null,
       }));
       res.json(mapped);
     } catch (error) {
@@ -121,6 +133,57 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
     } catch (error) {
       console.error("[PUT /api/observations/:id]", error);
       res.status(500).json({ error: "Failed to update observation" });
+    }
+  });
+
+  // Reprise en réserve de l'AOR (OPR) : une observation, ou toutes celles qui
+  // restent à lever. Voir server/observationToReserve.ts.
+  const respondConversionError = (res: any, route: string, error: any) => {
+    console.error(`[${route}]`, error);
+    // Colonne `reserve_id` absente : migration supabase/migrate_observation_reserve_link.sql non jouée.
+    const missingColumn = /reserve_id/i.test(String(error?.message || ''));
+    res.status(missingColumn ? 503 : 500).json({ error: missingColumn
+      ? "La reprise en réserve n'est pas encore disponible sur cette instance (migration en attente)."
+      : "Échec de la reprise en réserve" });
+  };
+
+  app.post("/api/observations/:id/to-reserve", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: obs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('project_id').eq('id', id).maybeSingle();
+      if (!obs) return res.status(404).json({ error: "Observation introuvable." });
+      const result = await convertObservationsToReserves(supabaseAdmin, tenantId, (obs as any).project_id, [id]);
+      const skipped = result.skipped[0];
+      if (skipped?.reason === 'deja_reprise') return res.status(409).json({ error: "Cette observation est déjà reprise en réserve." });
+      if (skipped?.reason === 'cloturee') return res.status(400).json({ error: "Une observation levée ou refusée ne se reprend pas en réserve." });
+      if (!result.created[0]) return res.status(404).json({ error: "Observation introuvable." });
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Reprise de l'observation en réserve N° ${result.created[0].number}`, '', result.created[0].reserve_id, 'reserve', 'Réserves/Observations');
+      res.json(result.created[0]);
+    } catch (error) {
+      respondConversionError(res, 'POST /api/observations/:id/to-reserve', error);
+    }
+  });
+
+  app.post("/api/projects/:projectId/observations/to-reserves", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      if (!(await assertTenantEntity(supabaseAdmin, 'projects', projectId, tenantId))) {
+        return res.status(404).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      const { data: rows } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations')
+        .select('id, statut, type, reserve_id, number').eq('project_id', projectId).eq('type', 'reserve').order('number', { ascending: true });
+      const candidates = ((rows || []) as any[]).filter(o => !o.reserve_id && !CLOSED_OBSERVATION_STATUSES.includes(o.statut)).map(o => o.id);
+      const result = await convertObservationsToReserves(supabaseAdmin, tenantId, projectId, candidates);
+      if (result.created.length > 0) {
+        const userName = await getUserName(tenantId, req.user.id, req.user.email);
+        logActivity(tenantId, req.user.id, userName, `Reprise de ${result.created.length} observation(s) de la DET en réserves`, '', projectId, 'project', 'Réserves/Observations');
+      }
+      res.json(result);
+    } catch (error) {
+      respondConversionError(res, 'POST /api/projects/:projectId/observations/to-reserves', error);
     }
   });
 
