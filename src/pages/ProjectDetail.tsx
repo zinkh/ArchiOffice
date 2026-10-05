@@ -80,6 +80,7 @@ import ACTModule from '../components/ACTModule';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT, isClientContact } from '../lib/contactCategories';
+import { clientFieldsFromContact, mirroredAddress } from '../lib/projectClientPrefill';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
@@ -3235,7 +3236,8 @@ export default function ProjectDetail() {
                               onChange={id => {
                                 const contact = contacts.find(c => c.id === id);
                                 if (contact) {
-                                  setProject({...project, client_id: contact.id, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
+                                  // Les champs « client » vides se remplissent depuis la fiche contact.
+                                  setProject({...project, ...clientFieldsFromContact(contact, project), client_id: contact.id, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
                                 }
                               }}
                               onAddNew={() => setIsContactModalOpen(true)}
@@ -3370,7 +3372,23 @@ export default function ProjectDetail() {
                         <div className="mt-4">
                           <AddressAutocomplete 
                             value={project.address || ''}
-                            onChange={addr => setProject(prev => prev ? ({...prev, address: addr}) : null)}
+                            onChange={addr => setProject(prev => prev ? ({
+                              ...prev,
+                              address: addr,
+                              // Même adresse que celle du terrain (section Projet) tant qu'elles ne divergent pas.
+                              adresse_terrain: mirroredAddress(prev.address, prev.adresse_terrain, addr) ?? prev.adresse_terrain,
+                            }) : null)}
+                            onSelect={details => setProject(prev => prev ? ({
+                              ...prev,
+                              ...(mirroredAddress(prev.address, prev.adresse_terrain, details.fullAddress) !== undefined || prev.adresse_terrain === details.fullAddress ? {
+                                adresse_terrain: details.fullAddress,
+                                cp_ville_terrain: `${details.zipcode || ''} ${details.city || ''}`.trim(),
+                                site_postcode: details.zipcode || '',
+                                site_city: details.city || '',
+                                ban_id_terrain: details.banId || '',
+                                city_code_terrain: details.cityCode || '',
+                              } : {}),
+                            }) : null)}
                           />
                         </div>
                       </div>
@@ -3614,6 +3632,8 @@ export default function ProjectDetail() {
                                   setProject(prev => {
                                     if (!prev) return null;
                                     const updates: any = { adresse_terrain: val };
+                                    const mirrored = mirroredAddress(prev.adresse_terrain, prev.address, val);
+                                    if (mirrored !== undefined) updates.address = mirrored;
                                     if (!val) {
                                       updates.cp_ville_terrain = '';
                                       updates.site_postcode = '';
