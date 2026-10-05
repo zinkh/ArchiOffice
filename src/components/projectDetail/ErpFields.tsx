@@ -1,10 +1,13 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { ErpCalcul } from '../../types';
 import { ERP_CATEGORIES, ERP_TYPES, categorieFromEffectif, formatTypeEtCat, parseTypeEtCat } from '../../lib/erp';
 import { calculerEffectif, categorieErp, descriptionSeuils, naturesDuType, natureParShort } from '../../lib/erpEffectif';
 
 interface Props {
   value?: string;
+  calcul?: ErpCalcul | null;
+  onCalculChange: (calcul: ErpCalcul) => void;
   effectifPublic: number;
   effectifPersonnel: number;
   onChange: (typeEtCat: string) => void;
@@ -17,19 +20,22 @@ const labelCls = 'block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppe
 const linkBtn = 'h-9 px-3 inline-flex items-center rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
 
 /** Type, nature et catégorie ERP (stockés dans `type_et_cat`) et calcul de l'effectif du type choisi. */
-export function ErpFields({ value, effectifPublic, effectifPersonnel, onChange, onApplyEffectif }: Props) {
+export function ErpFields({ value, calcul, onCalculChange, effectifPublic, effectifPersonnel, onChange, onApplyEffectif }: Props) {
   const { t } = useTranslation();
   const ids = [useId(), useId(), useId(), useId(), useId()];
   const { code, categorie, nature: natureShort } = parseTypeEtCat(value);
   const natures = naturesDuType(code);
   const nature = natureParShort(code, natureShort) ?? (natures.length === 1 ? natures[0] : undefined);
 
-  const [quantites, setQuantites] = useState<Record<string, string>>({});
-  const [declare, setDeclare] = useState('');
-  const [sousSol, setSousSol] = useState('');
-  const [etages, setEtages] = useState('');
-  const [natureEnCours, setNatureEnCours] = useState(nature?.id);
-  if (nature?.id !== natureEnCours) { setNatureEnCours(nature?.id); setQuantites({}); setDeclare(''); setSousSol(''); setEtages(''); }
+  // Les saisies appartiennent à la nature pour laquelle elles ont été faites.
+  const saisies = calcul && calcul.nature === nature?.id ? calcul : undefined;
+  const quantites = saisies?.quantites ?? {};
+  const declare = saisies?.declare ?? '';
+  const sousSol = saisies?.sous_sol ?? '';
+  const etages = saisies?.etages ?? '';
+  const saisir = (patch: Partial<ErpCalcul>) => {
+    if (nature) onCalculChange({ nature: nature.id, quantites, declare, sous_sol: sousSol, etages, ...patch });
+  };
 
   const nombres = useMemo(() => Object.fromEntries(Object.entries(quantites).map(([k, v]) => [k, Number(v) || 0])), [quantites]);
   const calcule = nature ? calculerEffectif(nature, nombres, declare === '' ? undefined : Number(declare)) : null;
@@ -93,7 +99,7 @@ export function ErpFields({ value, effectifPublic, effectifPersonnel, onChange, 
                       <label htmlFor={id} className="block text-xs text-[var(--tblr-text)]">{l.label}</label>
                       <div className="flex items-center gap-2">
                         <input id={id} type="number" min="0" inputMode="decimal" className={inputCls} value={quantites[l.id] ?? ''}
-                          onChange={e => setQuantites(q => ({ ...q, [l.id]: e.target.value }))} />
+                          onChange={e => saisir({ quantites: { ...quantites, [l.id]: e.target.value } })} />
                         <span className="text-xs text-[var(--tblr-muted)] shrink-0 w-20">{l.unit}</span>
                       </div>
                     </div>
@@ -104,7 +110,7 @@ export function ErpFields({ value, effectifPublic, effectifPersonnel, onChange, 
 
             <div className="space-y-1 max-w-sm">
               <label htmlFor={ids[4]} className="block text-xs text-[var(--tblr-text)]">{t('projectdetail_erp_declared')}</label>
-              <input id={ids[4]} type="number" min="0" inputMode="numeric" className={inputCls} value={declare} onChange={e => setDeclare(e.target.value)} />
+              <input id={ids[4]} type="number" min="0" inputMode="numeric" className={inputCls} value={declare} onChange={e => saisir({ declare: e.target.value })} />
             </div>
 
             {calcule && (
@@ -129,13 +135,13 @@ export function ErpFields({ value, effectifPublic, effectifPersonnel, onChange, 
                   {nature.seuils.sousSol !== null && (
                     <label className="space-y-1 block">
                       <span className="block text-xs text-[var(--tblr-text)]">{t('projectdetail_erp_basement')}</span>
-                      <input type="number" min="0" inputMode="numeric" className={inputCls} value={sousSol} onChange={e => setSousSol(e.target.value)} />
+                      <input type="number" min="0" inputMode="numeric" className={inputCls} value={sousSol} onChange={e => saisir({ sous_sol: e.target.value })} />
                     </label>
                   )}
                   {nature.seuils.etages !== null && (
                     <label className="space-y-1 block">
                       <span className="block text-xs text-[var(--tblr-text)]">{t('projectdetail_erp_floors')}</span>
-                      <input type="number" min="0" inputMode="numeric" className={inputCls} value={etages} onChange={e => setEtages(e.target.value)} />
+                      <input type="number" min="0" inputMode="numeric" className={inputCls} value={etages} onChange={e => saisir({ etages: e.target.value })} />
                     </label>
                   )}
                 </div>

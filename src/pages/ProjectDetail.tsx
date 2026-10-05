@@ -3734,6 +3734,8 @@ export default function ProjectDetail() {
                             <FormField label={t('projectdetail_ff_after_works')} value={project.apres_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, apres_trav: v}) : null)} />
                             <ErpFields
                               value={project.type_et_cat}
+                              calcul={project.erp_calcul}
+                              onCalculChange={c => setProject(prev => prev ? ({...prev, erp_calcul: c}) : null)}
                               effectifPublic={Number(project.effectif_public) || 0}
                               effectifPersonnel={Number(project.effectif_personnel) || 0}
                               onChange={v => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)}

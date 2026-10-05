@@ -148,7 +148,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, template_id
@@ -208,7 +208,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul,
         type_projet: type_projet || (template?.operation_type && template.operation_type !== 'autre' ? OPERATION_LABELS[template.operation_type as TemplateOperationType] : undefined),
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
@@ -257,7 +257,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         reference, projet_detail, is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
@@ -288,7 +288,7 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
-        nom_etablissement, avant_trav, apres_trav, type_et_cat, type_projet,
+        nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
         maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
