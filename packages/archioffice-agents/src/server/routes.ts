@@ -573,7 +573,7 @@ export function registerAgentRoutes(
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: agentId } = req.params;
-      const { message, document_ids } = req.body;
+      const { message, document_ids, active_project_id } = req.body;
       if (!message?.trim()) return res.status(400).json({ error: 'message is required' });
       const requestDocumentIds: string[] = Array.isArray(document_ids) ? document_ids : [];
 
@@ -654,6 +654,17 @@ export function registerAgentRoutes(
       const webSearchActive = caps.webSearch && !!provider.supportsWebSearch;
 
       const ctx = await buildAgentContext(supabaseAdmin, tenantId, req.user.id, agentId, (agent as any).context_scopes || [], attachedDocumentIds, !!provider.supportsVision, caps.knowledge, caps.learning);
+      // Affaire ouverte à l'écran : l'identifiant vient du client, donc relu dans
+      // CE cabinet avant d'être donné à l'agent (un id d'un autre cabinet, ou
+      // inconnu, est simplement ignoré). Meilleur effort : jamais bloquant.
+      if (typeof active_project_id === 'string' && /^[0-9a-fA-F-]{8,64}$/.test(active_project_id)) {
+        const { data: activeProject } = await supabaseAdmin.from('projects')
+          .select('id, name, project_code, address').eq('id', active_project_id).eq('tenant_id', tenantId).maybeSingle();
+        if (activeProject) {
+          const p = activeProject as any;
+          ctx.activeProject = { id: p.id, name: p.name, code: p.project_code || undefined, address: p.address || undefined };
+        }
+      }
       console.log(`[agent chat] context built in ${Date.now() - contextStart}ms conv=${convId} agent=${agentId} attachedDocs=${attachedDocumentIds.length} images=${ctx.documentImages.length}`);
       const systemPrompt = buildAgentSystemPrompt(agent as AgentRow, ctx, webSearchActive);
 

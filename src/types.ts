@@ -1216,8 +1216,8 @@ export interface InvoicePhase {
   montant_phase: number;
 }
 
-/** Statut de présence à une réunion de chantier : Présent, Retard, Absent Excusé, Absent Non Excusé. */
-export type PresenceStatus = 'P' | 'R' | 'AE' | 'ANE';
+/** Statut de présence à une réunion de chantier : Présent, Retard, Absent Excusé, Absent Non Excusé, Non Convoqué. */
+export type PresenceStatus = 'P' | 'R' | 'AE' | 'ANE' | 'NC';
 
 export interface SiteReportAttendee {
   name: string;
@@ -1237,11 +1237,19 @@ export interface SiteReportLotTracking {
   lot_id: string;
   status?: PresenceStatus;
   effectif?: number;
+  /** Ancien indicateur oui/non, remplacé par les retards chiffrés ci-dessous (repris tel quel à l'export tant qu'ils sont vides). */
   retard_execution?: boolean;
+  /** Retard d'exécution, en jours, constaté sur la semaine écoulée. */
+  retard_semaine?: number;
+  /** Retard d'exécution cumulé depuis le début du chantier, en jours. */
+  retard_cumule?: number;
   retard_remise_docs?: boolean;
   intemperies?: boolean;
   convoque_reunion_suivante?: boolean;
+  /** Lieu de la prochaine réunion ; absent = « Sur site ». */
   lieu?: string;
+  /** Heure de convocation (HH:MM) quand les entreprises sont convoquées à des heures différentes. */
+  heure?: string;
   /** Lot concerné par des travaux (W), des documents à remettre (D), les deux, ou aucun. */
   concerned?: 'W' | 'D' | 'WD';
 }
