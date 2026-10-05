@@ -230,6 +230,16 @@ export default function ProjectDetail() {
   }, [project, setHeaderTitle]);
   const [team, setTeam] = useState<any[]>([]);
   const [projectMembers, setProjectMembers] = useState<any[]>([]);
+  // Les lignes `project_members` ne portent que user_id et rôle : le nom vient des effectifs.
+  const namedMembers = useMemo(() => projectMembers.map(m => {
+    const person = team.find(tm => tm.id === (m.user_id || m.id));
+    return {
+      ...m,
+      name: m.name || person?.name,
+      email: m.email || person?.email,
+      role: m.role && m.role !== 'member' ? m.role : undefined,
+    };
+  }), [projectMembers, team]);
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   // Vrai une fois les jalons du projet réellement lus en base : la
@@ -1826,7 +1836,7 @@ export default function ProjectDetail() {
             journalPhases={missionPhases}
             phaseHistory={phaseHistory}
             projectActivity={projectActivity}
-            projectMembers={projectMembers}
+            projectMembers={namedMembers}
             permits={permits}
             milestones={milestones}
             onOpenFullEditor={() => setShowFullEditor(true)}
@@ -3860,7 +3870,7 @@ export default function ProjectDetail() {
                       <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">{t('projectdetail_team_empty')}</p>
                     ) : (
                       <div className="flex flex-wrap gap-3">
-                        {projectMembers.map(m => (
+                        {namedMembers.map(m => (
                           <div key={m.id || m.user_id} className="flex items-center gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
                             <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-xs font-bold text-violet-700 dark:text-violet-400 flex-shrink-0">
                               {(m.name || m.email || '?').charAt(0).toUpperCase()}
