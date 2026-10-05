@@ -44,7 +44,7 @@ const THUMB_GAP = 4;
 
 const sanitize = (s: string) => (s || 'compte_rendu').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w-]+/g, '_');
 
-const STATUS_LABELS: Record<string, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé' };
+const STATUS_LABELS: Record<string, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
 
 /** Statut P/R/AE/ANE déduit des champs anciens (present/excused) quand `status` est absent. */
 function attendeeStatus(a: { present?: boolean; excused?: boolean; status?: string }): string {
@@ -181,7 +181,7 @@ export async function exportSiteReportToPDF(
   const tracking = report.lot_tracking || [];
   autoTable(doc, {
     startY: y,
-    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard exéc.', 'Retard docs', 'Intempéries', 'Convoqué suiv.', 'Lieu']],
+    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Retard docs', 'Intempéries', 'Convoqué suiv.', 'Lieu', 'Heure']],
     body: [...lots].sort((a, b) => a.lot_number.localeCompare(b.lot_number, 'fr', { numeric: true })).map(lot => {
       const t = tracking.find(x => x.lot_id === lot.id);
       const contact = lot.contact_id ? contactById.get(lot.contact_id) : undefined;
@@ -194,11 +194,13 @@ export async function exportSiteReportToPDF(
         phones.mobile || phones.fixe,
         status,
         t?.effectif != null ? String(t.effectif) : '',
-        t?.retard_execution ? 'Oui' : '',
+        t?.retard_semaine != null ? String(t.retard_semaine) : (t?.retard_execution && t?.retard_cumule == null ? 'Oui' : ''),
+        t?.retard_cumule != null ? String(t.retard_cumule) : '',
         t?.retard_remise_docs ? 'Oui' : '',
         t?.intemperies ? 'Oui' : '',
         t?.convoque_reunion_suivante ? 'Oui' : '',
-        t?.lieu || '',
+        t?.lieu ?? 'Sur site',
+        t?.heure || '',
       ];
     }),
     styles: { fontSize: 7, textColor: GRIS_TEXTE, cellPadding: 1.4, overflow: 'linebreak' },

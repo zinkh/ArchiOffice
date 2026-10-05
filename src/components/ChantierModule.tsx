@@ -26,7 +26,44 @@ interface ChantierModuleProps {
   settings?: AgencySettings | null;
 }
 
-const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé' };
+const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
+
+const DEFAULT_LIEU = 'Sur site';
+
+/**
+ * Champ saisi localement et validé à la sortie du champ (ou Entrée). Chaque
+ * frappe envoyée au serveur renvoyait le CR entier, dont la réponse (parfois
+ * dans le désordre) écrasait la saisie en cours : le texte semblait se
+ * réinitialiser. Le brouillon local n'est resynchronisé que hors saisie.
+ */
+function DraftInput({ value, onCommit, className, ...rest }: {
+  value: string;
+  onCommit: (v: string) => void;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur'>) {
+  const [draft, setDraft] = useState(value);
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
+  const commit = () => {
+    setEditing(false);
+    if (draft !== value) onCommit(draft);
+  };
+  return (
+    <input
+      {...rest}
+      className={className}
+      value={draft}
+      onFocus={() => setEditing(true)}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+    />
+  );
+}
+
+const parseDays = (v: string): number | undefined => {
+  const n = parseInt(v, 10);
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+};
 
 type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'photos';
 
@@ -68,7 +105,12 @@ function isBadWeather(meteo?: string) {
   return WEATHER_ALERT_KEYWORDS.some(k => lower.includes(k));
 }
 
-export default function ChantierModule({ project, lots_list, ordresDeService, osSituationsContent, contacts, settings }: ChantierModuleProps) {
+export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, contacts, settings }: ChantierModuleProps) {
+  // Lots et entreprises classés par numéro de lot (« 2 » avant « 10 »), partout dans le module.
+  const lots_list = useMemo(
+    () => [...lotsBruts].sort((a, b) => String(a.lot_number ?? '').localeCompare(String(b.lot_number ?? ''), 'fr', { numeric: true })),
+    [lotsBruts],
+  );
   const { toast, showToast } = useToastWithUndo();
   const [activeTab, setActiveTab] = useState<ChantierTab>('comptes-rendus');
 
@@ -704,7 +746,7 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
 
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
                       <MiniStat label="Présents" value={String((selectedReport.attendance || []).filter(a => a.present).length)} />
-                      <MiniStat label="Absents/Excusés" value={String((selectedReport.attendance || []).filter(a => !a.present).length)} />
+                      <MiniStat label="Absents/Excusés" value={String((selectedReport.attendance || []).filter(a => !a.present && a.status !== 'NC').length)} />
                       <MiniStat label="Observations" value={String(reportObservations.length)} />
                       <MiniStat label="Réserves ouv./tot." value={`${reportObservations.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length}/${reportObservations.filter(o => o.type === 'reserve').length}`} />
                     </div>
@@ -776,11 +818,13 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                             <th className="text-left py-1.5 pr-2">Lot / Entreprise</th>
                             <th className="text-left py-1.5 pr-2">Statut</th>
                             <th className="text-left py-1.5 pr-2">Effectif</th>
-                            <th className="text-center py-1.5 pr-2">Retard exéc.</th>
+                            <th className="text-center py-1.5 pr-2">Retard sem. (j)</th>
+                            <th className="text-center py-1.5 pr-2">Retard cumulé (j)</th>
                             <th className="text-center py-1.5 pr-2">Retard docs</th>
                             <th className="text-center py-1.5 pr-2">Intempéries</th>
                             <th className="text-center py-1.5 pr-2">Convoqué suiv.</th>
-                            <th className="text-left py-1.5">Lieu</th>
+                            <th className="text-left py-1.5 pr-2">Lieu</th>
+                            <th className="text-left py-1.5">Heure</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -815,7 +859,16 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                                     value={t?.effectif ?? ''} onChange={e => setLotTracking(lot.id, { effectif: e.target.value ? parseInt(e.target.value) : undefined })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
-                                  <input type="checkbox" checked={!!t?.retard_execution} onChange={e => setLotTracking(lot.id, { retard_execution: e.target.checked })} />
+                                  <DraftInput type="number" min={0} aria-label={`Retard de la semaine en jours, ${lot.lot_title}`}
+                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
+                                    value={t?.retard_semaine != null ? String(t.retard_semaine) : ''}
+                                    onCommit={v => setLotTracking(lot.id, { retard_semaine: parseDays(v) })} />
+                                </td>
+                                <td className="py-2 pr-2 text-center">
+                                  <DraftInput type="number" min={0} aria-label={`Retard cumulé en jours, ${lot.lot_title}`}
+                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
+                                    value={t?.retard_cumule != null ? String(t.retard_cumule) : ''}
+                                    onCommit={v => setLotTracking(lot.id, { retard_cumule: parseDays(v) })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
                                   <input type="checkbox" checked={!!t?.retard_remise_docs} onChange={e => setLotTracking(lot.id, { retard_remise_docs: e.target.checked })} />
@@ -826,9 +879,17 @@ export default function ChantierModule({ project, lots_list, ordresDeService, os
                                 <td className="py-2 pr-2 text-center">
                                   <input type="checkbox" checked={!!t?.convoque_reunion_suivante} onChange={e => setLotTracking(lot.id, { convoque_reunion_suivante: e.target.checked })} />
                                 </td>
+                                <td className="py-2 pr-2">
+                                  <DraftInput aria-label={`Lieu de la réunion, ${lot.lot_title}`}
+                                    className="w-28 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={t?.lieu ?? DEFAULT_LIEU}
+                                    onCommit={v => setLotTracking(lot.id, { lieu: v.trim() || DEFAULT_LIEU })} />
+                                </td>
                                 <td className="py-2">
-                                  <input className="w-24 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
-                                    value={t?.lieu || ''} onChange={e => setLotTracking(lot.id, { lieu: e.target.value })} />
+                                  <DraftInput type="time" aria-label={`Heure de convocation, ${lot.lot_title}`}
+                                    className="w-24 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={t?.heure || ''}
+                                    onCommit={v => setLotTracking(lot.id, { heure: v || undefined })} />
                                 </td>
                               </tr>
                             );
