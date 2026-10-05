@@ -80,7 +80,7 @@ import ACTModule from '../components/ACTModule';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT, isClientContact } from '../lib/contactCategories';
-import { ERP_CATEGORIES, ERP_TYPES, categorieFromEffectif, formatTypeEtCat, parseTypeEtCat } from '../lib/erp';
+import { ErpFields } from '../components/projectDetail/ErpFields';
 import { clientFieldsFromContact, mirroredAddress, progressFromMilestones, tvaFromSiren } from '../lib/projectClientPrefill';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
@@ -104,40 +104,6 @@ import { ResourceAttachments } from '../components/ResourceAttachments';
 import { useTranslation } from 'react-i18next';
 
 // Champ de la fiche complète : libellé relié au contrôle (htmlFor), quel que soit son type.
-/** Type et catégorie ERP : deux listes issues du règlement de sécurité, stockées dans `type_et_cat`. */
-const ErpTypeCategoryFields = ({ value, effectif, onChange }: { value?: string; effectif: number; onChange: (v: string) => void }) => {
-  const { t } = useTranslation();
-  const typeId = useId();
-  const catId = useId();
-  const { code, categorie } = parseTypeEtCat(value);
-  const suggested = categorieFromEffectif(effectif);
-  const selectCls = 'w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium';
-  const labelCls = 'block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider';
-  return (
-    <>
-      <div className="space-y-1">
-        <label htmlFor={typeId} className={labelCls}>{t('projectdetail_erp_type')}</label>
-        <select id={typeId} className={selectCls} value={code} onChange={e => onChange(formatTypeEtCat({ code: e.target.value, categorie }))}>
-          <option value="">{t('projectdetail_field_select')}</option>
-          {ERP_TYPES.map(o => <option key={o.code} value={o.code}>{`${o.code} : ${o.nature}`}</option>)}
-        </select>
-      </div>
-      <div className="space-y-1">
-        <label htmlFor={catId} className={labelCls}>{t('projectdetail_erp_category')}</label>
-        <select id={catId} className={selectCls} value={categorie ?? ''} onChange={e => onChange(formatTypeEtCat({ code, categorie: e.target.value ? Number(e.target.value) : null }))}>
-          <option value="">{t('projectdetail_field_select')}</option>
-          {ERP_CATEGORIES.map(o => <option key={o.value} value={o.value}>{`${o.label} (${o.effectif})`}</option>)}
-        </select>
-        {suggested != null && suggested !== categorie && (
-          <button type="button" className="text-[0.6875rem] font-semibold text-[var(--tblr-primary)] underline underline-offset-2" onClick={() => onChange(formatTypeEtCat({ code, categorie: suggested }))}>
-            {t('projectdetail_erp_suggest', { cat: ERP_CATEGORIES[suggested - 1].label, count: effectif })}
-          </button>
-        )}
-      </div>
-    </>
-  );
-};
-
 const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp, placeholder, readOnly, hint }: any) => {
   const { t } = useTranslation();
   const autoId = useId();
@@ -3766,10 +3732,12 @@ export default function ProjectDetail() {
                             <FormField label={t('projectdetail_ff_establishment')} value={project.nom_etablissement} onChange={(v: any) => setProject(prev => prev ? ({...prev, nom_etablissement: v}) : null)} />
                             <FormField label={t('projectdetail_ff_before_works')} value={project.avant_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, avant_trav: v}) : null)} />
                             <FormField label={t('projectdetail_ff_after_works')} value={project.apres_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, apres_trav: v}) : null)} />
-                            <ErpTypeCategoryFields
+                            <ErpFields
                               value={project.type_et_cat}
-                              effectif={(Number(project.effectif_public) || 0) + (Number(project.effectif_personnel) || 0)}
+                              effectifPublic={Number(project.effectif_public) || 0}
+                              effectifPersonnel={Number(project.effectif_personnel) || 0}
                               onChange={v => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)}
+                              onApplyEffectif={e => setProject(prev => prev ? ({...prev, effectif_public: String(e.public), effectif_personnel: String(e.personnel)}) : null)}
                             />
                             <FormField label={t('projectdetail_ff_type')} value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
                             <FormField label={t('projectdetail_ff_category')} value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />

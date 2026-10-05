@@ -33,20 +33,22 @@ export const ERP_CATEGORIES: ReadonlyArray<{ value: number; label: string; effec
   { value: 5, label: '5e catégorie', effectif: 'sous le seuil fixé pour chaque type d\'exploitation' },
 ];
 
-export interface ErpSelection { code: string; categorie: number | null }
+export interface ErpSelection { code: string; categorie: number | null; nature?: string }
 
-/** `type_et_cat` est stocké en texte : « N - 4e catégorie ». */
-export function formatTypeEtCat({ code, categorie }: ErpSelection): string {
+/** `type_et_cat` est stocké en texte : « N - 4e catégorie », ou « L (cabaret) - 5e catégorie ». */
+export function formatTypeEtCat({ code, categorie, nature }: ErpSelection): string {
   const cat = ERP_CATEGORIES.find(c => c.value === categorie)?.label;
-  return [code, cat].filter(Boolean).join(' - ');
+  const head = code && nature ? `${code} (${nature})` : code;
+  return [head, cat].filter(Boolean).join(' - ');
 }
 
 export function parseTypeEtCat(raw: string | undefined | null): ErpSelection {
   const text = (raw ?? '').trim();
   const code = ERP_TYPES.map(t => t.code).sort((a, b) => b.length - a.length)
-    .find(c => new RegExp(`^${c}(\\b|\\s|-|,|$)`, 'i').test(text)) ?? '';
+    .find(c => new RegExp(`^${c}(\\b|\\s|-|,|\\(|$)`, 'i').test(text)) ?? '';
   const cat = text.match(/([1-5])\s*(?:re|e|ère|ème|er)?\s*cat/i);
-  return { code, categorie: cat ? Number(cat[1]) : null };
+  const nature = text.match(/^[A-Za-z]+\s*\(([^)]*)\)/)?.[1];
+  return { code, categorie: cat ? Number(cat[1]) : null, ...(nature ? { nature } : {}) };
 }
 
 /** Catégorie certaine d'après l'effectif total ; en dessous de 301 elle dépend du seuil du type (4e ou 5e). */
