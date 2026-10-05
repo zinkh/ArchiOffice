@@ -10,6 +10,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { ContratMOE, ContratMOEMission, ContratMissionCategory, ContratCotraitant, ContratSousTraitant, Contact, Project, ProjectTemplate } from '../types';
 import { contratDefaultsFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
+import { contratFieldsFromProject } from '../lib/contratFromProject';
 import { useTranslation } from 'react-i18next';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -379,6 +380,29 @@ function ContratModal({
     if (template) setForm(f => ({ ...f, ...contratDefaultsFromTemplate(template) }));
   };
 
+  // Associer une affaire en reprend toutes les informations (client, intitulé,
+  // adresse, surface, dates, montants, cotraitants). La liste des affaires ne
+  // porte pas les cotraitants : la fiche complète est lue à part, et si cette
+  // lecture échoue la liste suffit à renseigner le reste.
+  const [projectLoading, setProjectLoading] = useState(false);
+  const selectProject = async (id: string) => {
+    if (!id) { setForm(f => ({ ...f, project_id: undefined, project_name: undefined })); return; }
+    const listed = projects.find(p => p.id === id);
+    if (!listed) return;
+    setForm(f => ({ ...f, project_id: id, project_name: listed.name }));
+    setProjectLoading(true);
+    let project = listed;
+    try {
+      const full = await fetchJson<{ project: Project }>(`/api/projects/${id}/full`);
+      project = { ...listed, ...full.project };
+    } catch (e) {
+      console.error('Failed to fetch project details:', e);
+    } finally {
+      setProjectLoading(false);
+    }
+    setForm(f => ({ ...f, ...contratFieldsFromProject(project, f, contacts) }));
+  };
+
   const applyPreset = (cats: readonly ContratMissionCategory[]) => {
     setForm(f => ({
       ...f,
@@ -559,10 +583,15 @@ function ContratModal({
                   </Field>
 
                   <Field label="Projet associé">
-                    <select className={inputCls} style={inputStyle} value={form.project_id || ''} onChange={e => set('project_id', e.target.value || undefined)}>
+                    <select className={inputCls} style={inputStyle} value={form.project_id || ''} disabled={projectLoading} onChange={e => selectProject(e.target.value)}>
                       <option value="">— Aucun —</option>
                       {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                     </select>
+                    <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                      {projectLoading
+                        ? 'Lecture des informations du projet…'
+                        : "Les informations du projet (client, adresse, surface, dates, montants, cotraitants) sont reprises dans le contrat."}
+                    </p>
                   </Field>
 
                   <Field label="Intitulé du projet">
