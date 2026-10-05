@@ -3192,12 +3192,14 @@ export default function ProjectDetail() {
                   <div className="lg:col-span-2 space-y-8">
                     {/* Hero Section - Editable */}
                     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                      <div className="aspect-[21/9] relative overflow-hidden bg-zinc-100 dark:bg-zinc-800 group">
+                      {/* Le contenu (nom, client, catégorie) fait grandir le bandeau au lieu de
+                            déborder d'un ratio figé : sur un téléphone, 21/9 ne laisse que ~170 px. */}
+                      <div className="relative overflow-hidden bg-zinc-800 group flex flex-col justify-end min-h-[13rem] sm:min-h-0 sm:aspect-[21/9]">
                         {project.image_url ? (
-                          <img src={project.image_url} alt={project.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={project.image_url} alt={project.name} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-[var(--tblr-muted)]">
-                            <IconUpload size={48} />
+                          <div aria-hidden className="absolute top-4 left-4 sm:inset-0 sm:flex sm:items-center sm:justify-center text-white/30">
+                            <IconUpload size={40} />
                           </div>
                         )}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 pointer-coarse:bg-transparent pointer-coarse:items-start pointer-coarse:justify-end pointer-coarse:p-3 transition-opacity flex items-center justify-center">
@@ -3206,11 +3208,11 @@ export default function ProjectDetail() {
                             {project.image_url ? t('projectdetail_cover_change') : t('projectdetail_cover_add')}
                           </label>
                         </div>
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
-                        <div className="absolute inset-x-0 bottom-0 p-8 space-y-4">
+                        {project.image_url && <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />}
+                        <div className="relative p-4 pt-16 sm:p-8 space-y-3 sm:space-y-4">
                           <input 
                             type="text"
-                            className="w-full bg-transparent border-none text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
+                            className="w-full bg-transparent border-none text-2xl sm:text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
                             value={project.name}
                             onChange={e => setProject({...project, name: e.target.value})}
                             aria-label={t('projectdetail_full_name')}
@@ -3250,7 +3252,7 @@ export default function ProjectDetail() {
                             <label htmlFor="fiche-description" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('project_overview_objet')}</label>
                             <textarea
                               id="fiche-description"
-                              className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] min-h-[120px] resize-none"
+                              className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] min-h-[120px] max-h-[40dvh] resize-none [field-sizing:content]"
                               value={project.description}
                               onChange={e => setProject({...project, description: e.target.value})}
                               placeholder={t('project_overview_objet_placeholder')}
