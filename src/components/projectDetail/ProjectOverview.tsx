@@ -17,11 +17,13 @@ import {
   IconBuilding,
   IconCalendarEvent,
   IconCheck,
+  IconPhone,
 } from '@tabler/icons-react';
 import { formatCurrency } from '../../lib/utils';
 import { useTasks } from '../../hooks/useTasks';
 import LinkedMeetings from '../LinkedMeetings';
 import { getTaskStatus, taskDeadline } from '../tasks/taskDisplay';
+import { projectIntervenants, type IntervenantLine } from '../../lib/projectIntervenants';
 import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
 import type { PhaseNotesApi } from '../../hooks/usePhaseNotes';
 import { PhaseJournal } from './PhaseJournal';
@@ -68,6 +70,36 @@ function CollapsibleSection({ title, defaultOpen = true, children }: Collapsible
   );
 }
 
+/** Une ligne d'intervenant : rôle, nom, puis téléphone et e-mail en un appui (lecture seule). */
+function IntervenantRow({ line }: { line: IntervenantLine }) {
+  const { t } = useTranslation();
+  const who = line.name || line.label;
+  return (
+    <div className="flex items-start justify-between gap-2 text-xs">
+      <div className="min-w-0">
+        <div className="truncate" style={{ color: 'var(--tblr-muted)' }}>{line.label}</div>
+        <div className="font-medium truncate" style={{ color: line.name ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>
+          {line.name || t('project_overview_intervenant_unnamed')}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {line.phone && (
+          <a href={`tel:${line.phone.replace(/\s/g, '')}`} aria-label={t('project_overview_intervenant_call', { name: who })} title={line.phone}
+            className="p-2 rounded-lg hover:bg-[var(--tblr-surface-2)]" style={{ color: 'var(--tblr-primary)' }}>
+            <IconPhone size={14} />
+          </a>
+        )}
+        {line.email && (
+          <a href={`mailto:${line.email}`} aria-label={t('project_overview_intervenant_mail', { name: who })} title={line.email}
+            className="p-2 rounded-lg hover:bg-[var(--tblr-surface-2)]" style={{ color: 'var(--tblr-primary)' }}>
+            <IconMail size={14} />
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function InfoRow({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-2 text-xs">
@@ -83,6 +115,8 @@ export interface ProjectOverviewProps {
   phaseHistory: ProjectPhaseHistoryEntry[];
   projectActivity: any[];
   projectMembers: any[];
+  /** Annuaire du cabinet, pour le téléphone et l'e-mail des intervenants. */
+  contacts?: Parameters<typeof projectIntervenants>[1];
   permits: Permit[];
   milestones: Milestone[];
   onOpenFullEditor: () => void;
@@ -106,7 +140,7 @@ export interface ProjectOverviewProps {
 }
 
 export function ProjectOverview({
-  project, setProject, phaseHistory, projectActivity, projectMembers, permits, milestones,
+  project, setProject, phaseHistory, projectActivity, projectMembers, contacts, permits, milestones,
   onOpenFullEditor, onAddMilestone, onToggleMilestone,
   newMilestoneTitle, setNewMilestoneTitle, newMilestoneDate, setNewMilestoneDate,
   isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase, phaseNotes, journalPhases,
@@ -120,6 +154,7 @@ export function ProjectOverview({
   // The phase whose notes Column C displays/edits — may differ from the
   // above while the user is just browsing phase notes via the topbar pills.
   const viewedPhase: DocumentPhase = notePhase || currentPhase;
+  const intervenants = useMemo(() => projectIntervenants(project, contacts), [project.stakeholders_list, project.cotraitants_list, project.lots_list, contacts]);
   const pendingPermit = useMemo(() => permits.find(p => p.status === 'en_instruction'), [permits]);
   const nextMilestone = useMemo(() => {
     // Un jalon sans date (ou à date illisible) n'est pas une échéance : il
@@ -244,6 +279,21 @@ export function ProjectOverview({
           <InfoRow k={t('project_overview_property_type')} v={project.type_projet || project.categorie_projet || t('project_overview_not_set')} />
           <InfoRow k={t('project_overview_programme')} v={project.programme ? (project.programme.length > 28 ? project.programme.slice(0, 28) + '…' : project.programme) : t('project_overview_not_set')} />
         </CollapsibleSection>
+
+        {intervenants.total > 0 && (
+          <CollapsibleSection title={t('project_overview_section_intervenants', { count: intervenants.total })} defaultOpen>
+            {([
+              ['project_overview_group_stakeholders', intervenants.stakeholders],
+              ['project_overview_group_cotraitants', intervenants.cotraitants],
+              ['project_overview_group_entreprises', intervenants.entreprises],
+            ] as const).filter(([, lines]) => lines.length > 0).map(([titleKey, lines]) => (
+              <div key={titleKey} className="flex flex-col gap-2">
+                <div className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t(titleKey)}</div>
+                {lines.map(l => <IntervenantRow key={l.key} line={l} />)}
+              </div>
+            ))}
+          </CollapsibleSection>
+        )}
 
         {projectMembers.length > 0 && (
           <CollapsibleSection title={t('project_overview_section_team', { count: projectMembers.length })} defaultOpen={false}>

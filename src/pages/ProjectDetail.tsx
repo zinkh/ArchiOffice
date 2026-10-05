@@ -1896,6 +1896,7 @@ export default function ProjectDetail() {
             phaseHistory={phaseHistory}
             projectActivity={projectActivity}
             projectMembers={namedMembers}
+            contacts={contacts}
             permits={permits}
             milestones={milestones}
             onOpenFullEditor={() => setShowFullEditor(true)}
