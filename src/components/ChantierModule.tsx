@@ -24,6 +24,8 @@ interface ChantierModuleProps {
   osSituationsContent: React.ReactNode;
   contacts: Contact[];
   settings?: AgencySettings | null;
+  /** Rafraîchit les réserves de l'AOR après une reprise d'observations. */
+  onReservesChanged?: () => void;
 }
 
 const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
@@ -105,7 +107,7 @@ function isBadWeather(meteo?: string) {
   return WEATHER_ALERT_KEYWORDS.some(k => lower.includes(k));
 }
 
-export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, contacts, settings }: ChantierModuleProps) {
+export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, contacts, settings, onReservesChanged }: ChantierModuleProps) {
   // Lots et entreprises classés par numéro de lot (« 2 » avant « 10 »), partout dans le module.
   const lots_list = useMemo(
     () => [...lotsBruts].sort((a, b) => String(a.lot_number ?? '').localeCompare(String(b.lot_number ?? ''), 'fr', { numeric: true })),
@@ -602,7 +604,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           <StatPill label="CR diffusés" value={String(crDiffuses)} />
           <StatPill label="Dernier CR diffusé" value={dernierCrDiffuse ? `n° ${dernierCrDiffuse.report_number}` : '—'} hint={dernierCrDiffuse?.date} />
           <StatPill
-            label="Observations ouvertes"
+            label="Observations à lever"
             value={String(reservesOuvertes.length)}
             accent={reservesOuvertes.length > 0}
             hint={reservesOuvertes.length > 0 ? reservesOuvertes.slice(0, 3).map(o => o.texte).join(' · ') : undefined}
@@ -757,7 +759,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                       <MiniStat label="Présents" value={String((selectedReport.attendance || []).filter(a => a.present).length)} />
                       <MiniStat label="Absents/Excusés" value={String((selectedReport.attendance || []).filter(a => !a.present && a.status !== 'NC').length)} />
                       <MiniStat label="Observations" value={String(reportObservations.length)} />
-                      <MiniStat label="Obs. ouvertes/tot." value={`${reportObservations.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length}/${reportObservations.filter(o => o.type === 'reserve').length}`} />
+                      <MiniStat label="À lever (ouv./tot.)" value={`${reportObservations.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length}/${reportObservations.filter(o => o.type === 'reserve').length}`} />
                     </div>
                   </div>
 
@@ -1072,7 +1074,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           )}
 
           {activeTab === 'reserves' && (
-            <ObservationsTable projectId={project.id} lots={lots_list} typeFilter="reserve" />
+            <ObservationsTable projectId={project.id} lots={lots_list} defaultType="reserve" onReservesChanged={onReservesChanged} />
           )}
 
           {activeTab === 'entreprises' && <EntreprisesTab lots_list={lots_list} observations={allObservations} />}
@@ -1206,7 +1208,7 @@ function EntreprisesTab({ lots_list, observations }: { lots_list: ProjectLot[]; 
             <th className="px-4 py-3 text-left">Lot</th>
             <th className="px-4 py-3 text-left">Entreprise</th>
             <th className="px-4 py-3 text-center">Observations (total)</th>
-            <th className="px-4 py-3 text-center">Observations ouvertes</th>
+            <th className="px-4 py-3 text-center">À lever (ouvertes)</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[var(--tblr-border)]">

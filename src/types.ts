@@ -1315,6 +1315,9 @@ export interface Observation {
   created_at?: string;
   report_ids?: string[];
   type?: 'observation' | 'reserve' | 'a_faire';
+  /** Réserve de l'AOR (OPR) qui reprend cette observation, et son numéro. */
+  reserve_id?: string | null;
+  reserve_number?: number | null;
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
