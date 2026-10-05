@@ -24,9 +24,10 @@ import { useTasks } from '../../hooks/useTasks';
 import LinkedMeetings from '../LinkedMeetings';
 import { getTaskStatus, taskDeadline } from '../tasks/taskDisplay';
 import { projectIntervenants, type IntervenantLine } from '../../lib/projectIntervenants';
-import type { Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
+import type { Contact, Project, Milestone, Permit, ProjectPhaseHistoryEntry, DocumentPhase } from '../../types';
 import type { PhaseNotesApi } from '../../hooks/usePhaseNotes';
 import { PhaseJournal } from './PhaseJournal';
+import { StakeholdersEditor } from './StakeholdersEditor';
 
 
 
@@ -116,7 +117,9 @@ export interface ProjectOverviewProps {
   projectActivity: any[];
   projectMembers: any[];
   /** Annuaire du cabinet, pour le téléphone et l'e-mail des intervenants. */
-  contacts?: Parameters<typeof projectIntervenants>[1];
+  contacts?: Contact[];
+  /** Enregistre la liste des intervenants (route dédiée) ; rejette si l'écriture échoue. */
+  onSaveStakeholders?: (list: { id?: string; role: string; name: string; contact_id: string | null }[]) => Promise<void>;
   permits: Permit[];
   milestones: Milestone[];
   onOpenFullEditor: () => void;
@@ -140,7 +143,7 @@ export interface ProjectOverviewProps {
 }
 
 export function ProjectOverview({
-  project, setProject, phaseHistory, projectActivity, projectMembers, contacts, permits, milestones,
+  project, setProject, phaseHistory, projectActivity, projectMembers, contacts, onSaveStakeholders, permits, milestones,
   onOpenFullEditor, onAddMilestone, onToggleMilestone,
   newMilestoneTitle, setNewMilestoneTitle, newMilestoneDate, setNewMilestoneDate,
   isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase, phaseNotes, journalPhases,
@@ -154,6 +157,7 @@ export function ProjectOverview({
   // The phase whose notes Column C displays/edits — may differ from the
   // above while the user is just browsing phase notes via the topbar pills.
   const viewedPhase: DocumentPhase = notePhase || currentPhase;
+  const [editingStakeholders, setEditingStakeholders] = useState(false);
   const intervenants = useMemo(() => projectIntervenants(project, contacts), [project.stakeholders_list, project.cotraitants_list, project.lots_list, contacts]);
   const pendingPermit = useMemo(() => permits.find(p => p.status === 'en_instruction'), [permits]);
   const nextMilestone = useMemo(() => {
@@ -280,18 +284,41 @@ export function ProjectOverview({
           <InfoRow k={t('project_overview_programme')} v={project.programme ? (project.programme.length > 28 ? project.programme.slice(0, 28) + '…' : project.programme) : t('project_overview_not_set')} />
         </CollapsibleSection>
 
-        {intervenants.total > 0 && (
+        {(intervenants.total > 0 || onSaveStakeholders) && (
           <CollapsibleSection title={t('project_overview_section_intervenants', { count: intervenants.total })} defaultOpen>
-            {([
-              ['project_overview_group_stakeholders', intervenants.stakeholders],
-              ['project_overview_group_cotraitants', intervenants.cotraitants],
-              ['project_overview_group_entreprises', intervenants.entreprises],
-            ] as const).filter(([, lines]) => lines.length > 0).map(([titleKey, lines]) => (
-              <div key={titleKey} className="flex flex-col gap-2">
-                <div className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t(titleKey)}</div>
-                {lines.map(l => <IntervenantRow key={l.key} line={l} />)}
-              </div>
-            ))}
+            {editingStakeholders && onSaveStakeholders ? (
+              <StakeholdersEditor
+                stakeholders={project.stakeholders_list ?? []}
+                contacts={contacts ?? []}
+                onSave={async list => { await onSaveStakeholders(list); setEditingStakeholders(false); }}
+                onCancel={() => setEditingStakeholders(false)}
+              />
+            ) : (
+              <>
+                {onSaveStakeholders && (
+                  <button
+                    type="button" onClick={() => setEditingStakeholders(true)}
+                    className="self-end flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium hover:bg-[var(--tblr-surface-2)]"
+                    style={{ color: 'var(--tblr-primary)' }}
+                  >
+                    <IconEdit size={12} /> {t('project_overview_stakeholders_edit')}
+                  </button>
+                )}
+                {([
+                  ['project_overview_group_stakeholders', intervenants.stakeholders],
+                  ['project_overview_group_cotraitants', intervenants.cotraitants],
+                  ['project_overview_group_entreprises', intervenants.entreprises],
+                ] as const).filter(([, lines]) => lines.length > 0).map(([titleKey, lines]) => (
+                  <div key={titleKey} className="flex flex-col gap-2">
+                    <div className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t(titleKey)}</div>
+                    {lines.map(l => <IntervenantRow key={l.key} line={l} />)}
+                  </div>
+                ))}
+                {intervenants.total === 0 && (
+                  <p className="text-xs italic" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_stakeholders_empty')}</p>
+                )}
+              </>
+            )}
           </CollapsibleSection>
         )}
 
