@@ -102,7 +102,7 @@ async function getOrCreateZohoBooksItem(apiBase: string, orgId: string, headers:
 async function buildZohoBooksLineItemsWithArticles(apiBase: string, orgId: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
   const lines = zohoLineItems(inv);
   return Promise.all(lines.map(async (line) => {
-    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const { name, description } = zohoItemIdentity(line.name, affaire);
     const item_id = await getOrCreateZohoBooksItem(apiBase, orgId, headers, name, description, line.rate);
     return item_id ? { ...line, item_id } : line;
   }));

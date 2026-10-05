@@ -1339,6 +1339,17 @@ par l'article — Zoho les respecte comme un prix ajusté pour cette facture
 précise, exactement comme dans son interface (choisir un article puis
 modifier son prix pour cette ligne).
 
+**Avancement par phase d'un acompte.** `zohoPhasesText()` (`zohoSync.ts`) reprend
+le bloc « Avancement par phase » de l'aperçu de la facture (une ligne par phase :
+`Esquisse (ESQ) : 100% d'avancement, 1 074,45 €`, montants à espace ordinaire car
+l'espace fine de fr-FR s'affiche mal chez Zoho) et `zohoLineItems()` l'ajoute à la
+DESCRIPTION de la première ligne seulement, pour Zoho Invoice comme pour Zoho Books.
+Jamais dans le `name` : c'est lui qui identifie l'article, donc
+`buildZohoLineItemsWithArticles` appelle `zohoItemIdentity(line.name, ...)` et non
+plus `line.description`, sans quoi chaque avancement créerait un article distinct.
+Seules les factures `invoice_type = 'acompte'` ont ce texte (`phases`, à défaut la
+phase unique `mission_name`/`advancement_pct` des factures antérieures).
+
 Le numéro et l'adresse de l'affaire remontent jusqu'à ces fonctions par le
 même chemin que `project_name` déjà en place : `server/routes/invoices.ts`
 étend son `SELECT` sur `projects` (`name, project_code, address`) à la

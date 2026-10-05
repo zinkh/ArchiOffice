@@ -90,29 +90,64 @@ export function zohoItemIdentity(lineDescription: string | undefined, affaire: Z
   };
 }
 
+/** Phases d'un acompte : `phases`, à défaut la phase unique des factures antérieures au modèle multi-phases. */
+function effectivePhases(inv: any): { phase_name: string; avancement_pct: number; montant_phase: number }[] {
+  if (Array.isArray(inv?.phases) && inv.phases.length) return inv.phases;
+  if (inv?.mission_name) return [{ phase_name: inv.mission_name, avancement_pct: inv.advancement_pct || 0, montant_phase: inv.amount || 0 }];
+  return [];
+}
+
+/** Montant en euros avec une espace ordinaire : l'espace fine insécable de fr-FR s'affiche mal chez Zoho. */
+function plainEuros(amount: number, currency = 'EUR'): string {
+  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency }).format(Number(amount) || 0).replace(/[\u202F\u00A0]/g, ' ');
+}
+
+/**
+ * Le texte « Avancement par phase » de l'aperçu de la facture (acompte),
+ * tel qu'il doit figurer dans le détail de l'article chez Zoho. Vide pour une
+ * facture qui n'est pas un acompte ou sans phase.
+ */
+export function zohoPhasesText(inv: any): string {
+  if (inv?.invoice_type !== 'acompte') return '';
+  const phases = effectivePhases(inv);
+  if (!phases.length) return '';
+  const currency = typeof inv?.currency === 'string' && inv.currency ? inv.currency : 'EUR';
+  return [
+    'Avancement par phase :',
+    ...phases.map(p => `${p.phase_name} : ${p.avancement_pct}% d'avancement, ${plainEuros(p.montant_phase, currency)}`),
+  ].join('\n');
+}
+
 /**
  * Line items for a Zoho invoice payload, from our own invoice row. Falls back
  * to a single line carrying the invoice total when the row has no itemised
  * breakdown.
+ *
+ * Le texte d'avancement par phase d'un acompte est ajouté à la DESCRIPTION de
+ * la première ligne seulement (il décrit la facture, pas chaque ligne), jamais
+ * à son `name` : c'est le nom qui identifie l'article Zoho (voir
+ * zohoItemIdentity), et il ne doit pas changer d'une facture à l'autre.
  */
 export function zohoLineItems(inv: any): any[] {
   const items = Array.isArray(inv?.items) ? inv.items : [];
-  if (items.length) {
-    return items.map((item: any) => ({
-      name: item.description || 'Honoraires',
-      description: item.description || '',
-      quantity: item.quantity || 1,
-      rate: item.unit_price ?? item.amount ?? 0,
-      tax_percentage: item.vat_rate || 0,
-    }));
-  }
-  return [{
-    name: inv?.description || 'Honoraires',
-    description: inv?.description || '',
-    quantity: 1,
-    rate: inv?.amount || 0,
-    tax_percentage: inv?.vat_rate || 0,
-  }];
+  const lines = items.length
+    ? items.map((item: any) => ({
+        name: item.description || 'Honoraires',
+        description: item.description || '',
+        quantity: item.quantity || 1,
+        rate: item.unit_price ?? item.amount ?? 0,
+        tax_percentage: item.vat_rate || 0,
+      }))
+    : [{
+        name: inv?.description || 'Honoraires',
+        description: inv?.description || '',
+        quantity: 1,
+        rate: inv?.amount || 0,
+        tax_percentage: inv?.vat_rate || 0,
+      }];
+  const phases = zohoPhasesText(inv);
+  if (phases) lines[0] = { ...lines[0], description: [lines[0].description, phases].filter(Boolean).join('\n\n') };
+  return lines;
 }
 
 /**

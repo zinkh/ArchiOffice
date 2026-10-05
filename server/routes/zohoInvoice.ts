@@ -97,7 +97,7 @@ async function getOrCreateZohoItem(apiBase: string, headers: any, name: string, 
 async function buildZohoLineItemsWithArticles(apiBase: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
   const lines = zohoLineItems(inv);
   return Promise.all(lines.map(async (line) => {
-    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const { name, description } = zohoItemIdentity(line.name, affaire);
     const item_id = await getOrCreateZohoItem(apiBase, headers, name, description, line.rate);
     return item_id ? { ...line, item_id } : line;
   }));
