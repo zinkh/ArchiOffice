@@ -42,6 +42,7 @@ import {
   } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
+import { setProjectTabInfo } from '../lib/openProjectTabs';
 import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-library/react-table-library/table';
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
@@ -175,6 +176,10 @@ export default function ProjectDetail() {
   // enregistrement réussi) : c'est elle qui dit s'il reste des saisies à
   // enregistrer.
   const [savedProject, setSavedProject] = useState<Project | null>(null);
+  // Nom et code de l'affaire pour sa barre d'onglets (ProjectTabsBar).
+  useEffect(() => {
+    if (project?.id && project.name) setProjectTabInfo(project.id, { name: project.name, code: project.project_code || project.reference || undefined });
+  }, [project?.id, project?.name, project?.project_code, project?.reference]);
   const { toast, showToast } = useToastWithUndo();
   const undoableDelete = useUndoableDelete(showToast);
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();

@@ -454,6 +454,12 @@ export interface AgentContext {
    * `colleagues`, toujours peuplé : ce sont des noms, pas une donnée métier.
    */
   teamMembers: { id: string; name: string }[];
+  /**
+   * Affaire ouverte à l'écran quand le message part (voir routes.ts,
+   * `active_project_id`). Vérifiée dans le cabinet avant d'arriver ici ; absente
+   * hors d'une fiche affaire.
+   */
+  activeProject?: { id: string; name: string; code?: string; address?: string };
   firmKnowledge: {
     phaseBenchmarks: { phase: string; avgDurationDays: number; sampleSize: number }[];
     priceCatalog: { designation: string; unite: string; prix_unitaire: number; categorie: string | null }[];

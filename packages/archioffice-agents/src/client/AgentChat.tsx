@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { projectIdFromPath, useOpenProjectTabs } from '@/src/lib/openProjectTabs';
 import { motion, AnimatePresence } from 'motion/react';
 import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
@@ -296,6 +297,11 @@ export function saveDraft(agentId: string, value: string): void {
 export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  // Affaire ouverte à l'écran : envoyée avec chaque message pour que l'agent
+  // intervienne dessus par défaut (le serveur la revérifie dans le cabinet).
+  const location = useLocation();
+  const activeProjectId = projectIdFromPath(location.pathname);
+  const activeProjectTab = useOpenProjectTabs().find(tab => tab.id === activeProjectId);
   const [isOpen, setIsOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -491,7 +497,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await apiFetch(`/api/agents/${activeAgentId}/chat`, {
         method: 'POST',
-        body: JSON.stringify({ message: rawInput, document_ids: docsToSend.map(d => d.id) }),
+        body: JSON.stringify({ message: rawInput, document_ids: docsToSend.map(d => d.id), active_project_id: activeProjectId ?? undefined }),
         signal: controller.signal,
       });
       const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {
@@ -753,6 +759,18 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
             >
               {t('agent_chat_ai_disclaimer')}
             </div>
+
+            {/* Affaire ouverte à l'écran : cible par défaut des demandes à l'agent. */}
+            {activeProjectId && (
+              <div
+                className="px-4 py-1.5 text-[12px] border-b shrink-0 truncate"
+                style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+                title="Les demandes de cette conversation portent sur cette affaire, sauf si vous en nommez une autre."
+              >
+                <span style={{ color: 'var(--tblr-muted)' }}>Affaire active : </span>
+                <span className="font-semibold">{[activeProjectTab?.code, activeProjectTab?.name].filter(Boolean).join(' ') || 'affaire ouverte'}</span>
+              </div>
+            )}
 
             {/* Agent selector dropdown */}
             <AnimatePresence>
