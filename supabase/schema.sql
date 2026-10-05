@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS projects (
   telephone TEXT, portable TEXT, email_client TEXT,
   adresse_terrain TEXT, cp_ville_terrain TEXT, ban_id_terrain TEXT,
   city_code_terrain TEXT, ref_cadastrale TEXT, zone_plu TEXT, surface_parcelle TEXT,
-  nom_etablissement TEXT, avant_trav TEXT, apres_trav TEXT, type_et_cat TEXT,
+  nom_etablissement TEXT, avant_trav TEXT, apres_trav TEXT, type_et_cat TEXT, erp_calcul JSONB,
   type_projet TEXT, categorie_projet TEXT, surface_plancher TEXT,
   surface_plancher_ext TEXT, surface_erp TEXT, surface_ert TEXT,
   effectif_public TEXT, effectif_personnel TEXT, ind TEXT, date_modification TEXT,

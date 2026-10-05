@@ -177,3 +177,24 @@ export function computeMafCost(params: {
     tauxPermil,
   };
 }
+
+/**
+ * Mission complète et mission de chantier déduites du type de mission MAF (et du
+ * taux T pour l'intercalaire jaune). `undefined` : le type choisi ne tranche pas,
+ * la case reste à cocher à la main.
+ */
+const SANS_EXECUTION: MafIntercalaire[] = ['vert', 'violet', 'orange_clair', 'bleu', 'tabac'];
+
+export function missionFlagsFromMaf(
+  intercalaire: MafIntercalaire | undefined,
+  tauxMission: number | undefined,
+): { is_complete_mission?: boolean; is_chantier?: boolean } {
+  if (!intercalaire) return {};
+  if (intercalaire === 'grand_chantier') return { is_complete_mission: true, is_chantier: true };
+  if (SANS_EXECUTION.includes(intercalaire)) return { is_complete_mission: false, is_chantier: false };
+  if (intercalaire === 'jaune' && tauxMission != null) {
+    const complete = tauxMission >= 100;
+    return { is_complete_mission: complete, is_chantier: complete };
+  }
+  return {};
+}

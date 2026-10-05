@@ -80,6 +80,8 @@ import ACTModule from '../components/ACTModule';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT, isClientContact } from '../lib/contactCategories';
+import { ErpFields } from '../components/projectDetail/ErpFields';
+import { clientFieldsFromContact, mirroredAddress, progressFromMilestones, tvaFromSiren } from '../lib/projectClientPrefill';
 import { CadastreDownload } from '../components/CadastreDownload';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
@@ -88,7 +90,7 @@ import MilestoneGantt from '../components/MilestoneGantt';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { ProTab } from '../components/pro/ProTab';
 import { SituationsTravaux } from '../components/projectDetail/situations/SituationsTravaux';
-import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils';
+import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS, computePartInteretFromContrat, missionFlagsFromMaf } from '../lib/mafUtils';
 import { useMafCost } from '../hooks/useMafCost';
 import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
@@ -102,7 +104,7 @@ import { ResourceAttachments } from '../components/ResourceAttachments';
 import { useTranslation } from 'react-i18next';
 
 // Champ de la fiche complète : libellé relié au contrôle (htmlFor), quel que soit son type.
-const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp }: any) => {
+const FormField = ({ label, value, onChange, type = 'text', options = [], required = false, id: idProp, placeholder, readOnly, hint }: any) => {
   const { t } = useTranslation();
   const autoId = useId();
   const id = idProp || autoId;
@@ -145,11 +147,14 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
       <input 
         id={id}
         type={type}
-        className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium"
+        placeholder={placeholder}
+        readOnly={readOnly}
+        className={cn('w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-medium', readOnly && 'opacity-70 cursor-default')}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
       />
     )}
+    {hint && <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{hint}</p>}
   </div>
   );
 };
@@ -230,6 +235,17 @@ export default function ProjectDetail() {
   }, [project, setHeaderTitle]);
   const [team, setTeam] = useState<any[]>([]);
   const [projectMembers, setProjectMembers] = useState<any[]>([]);
+  // Les lignes `project_members` ne portent que user_id et rôle : le nom vient des effectifs.
+  const namedMembers = useMemo(() => projectMembers.map(m => {
+    const person = team.find(tm => tm.id === (m.user_id || m.id));
+    return {
+      ...m,
+      name: m.name || person?.name,
+      email: m.email || person?.email,
+      role: m.role && m.role !== 'member' ? m.role : undefined,
+    };
+  }), [projectMembers, team]);
+
   const [phaseHistory, setPhaseHistory] = useState<ProjectPhaseHistoryEntry[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   // Vrai une fois les jalons du projet réellement lus en base : la
@@ -356,6 +372,36 @@ export default function ProjectDetail() {
     return isProjectTab(tab) ? tab : DEFAULT_PROJECT_TAB;
   });
   const [showFullEditor, setShowFullEditor] = useState(false);
+
+  // L'avancement se déduit des jalons cochés dès que l'affaire en a.
+  useEffect(() => {
+    if (!milestonesLoaded) return;
+    const auto = progressFromMilestones(milestones);
+    if (auto === undefined) return;
+    setProject(prev => (prev && prev.progression !== auto ? { ...prev, progression: auto } : prev));
+  }, [milestones, milestonesLoaded]);
+
+  // Zone du PLU : relue depuis l'adresse tant que le champ est vide (une fois par adresse).
+  const pluLookedUp = useRef('');
+  useEffect(() => {
+    const address = project?.address || project?.adresse_terrain;
+    if (!showFullEditor || !project?.id || !address || project.zone_plu || pluLookedUp.current === address) return;
+    pluLookedUp.current = address;
+    let cancelled = false;
+    (async () => {
+      try {
+        const geo = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`);
+        if (!geo.ok) return;
+        const coords = (await geo.json()).features?.[0]?.geometry?.coordinates;
+        if (!coords) return;
+        const plu = await fetch(`/api/urbanisme?geom=${encodeURIComponent(JSON.stringify({ type: 'Point', coordinates: coords }))}`);
+        if (!plu.ok) return;
+        const zone = (await plu.json()).libelle;
+        if (zone && !cancelled) setProject(prev => (prev && !prev.zone_plu ? { ...prev, zone_plu: zone } : prev));
+      } catch { /* meilleur effort : le champ reste saisissable à la main */ }
+    })();
+    return () => { cancelled = true; };
+  }, [showFullEditor, project?.id, project?.address, project?.adresse_terrain, project?.zone_plu]);
   // Which phase's notes are shown in the overview's "Note de phase" column.
   // Distinct from the project's actual current phase (phaseHistory) — the
   // topbar pills only change this, they never transition the real mission
@@ -560,6 +606,29 @@ export default function ProjectDetail() {
     () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
     [linkedContratsMoe],
   );
+
+  // Mission complète et mission de chantier se déduisent du type de mission MAF.
+  const mafMissionFlags = missionFlagsFromMaf(project?.maf_intercalaire, project?.taux_mission);
+  const missionFlagsLocked = mafMissionFlags.is_complete_mission !== undefined;
+  useEffect(() => {
+    setProject(prev => {
+      if (!prev) return prev;
+      const flags = missionFlagsFromMaf(prev.maf_intercalaire, prev.taux_mission);
+      const patch: Partial<Project> = {};
+      if (flags.is_complete_mission !== undefined && !!prev.is_complete_mission !== flags.is_complete_mission) patch.is_complete_mission = flags.is_complete_mission;
+      if (flags.is_chantier !== undefined && !!prev.is_chantier !== flags.is_chantier) patch.is_chantier = flags.is_chantier;
+      return Object.keys(patch).length ? { ...prev, ...patch } : prev;
+    });
+  }, [project?.maf_intercalaire, project?.taux_mission]);
+
+  // Part d'intérêt MAF : 100 % moins la part des cotraitants du contrat MOE lié.
+  const partInteretContrat = contratHonoraires
+    ? (computePartInteretFromContrat(contratHonoraires.cotraitants ?? []) ?? 100)
+    : null;
+  useEffect(() => {
+    if (partInteretContrat == null) return;
+    setProject(prev => (prev && prev.part_interet !== partInteretContrat ? { ...prev, part_interet: partInteretContrat } : prev));
+  }, [partInteretContrat]);
 
   // Seule la fiche (aperçu, fiche complète, champs HONOS) attend le bouton
   // Enregistrer : notes, avenants, jalons et documents s'écrivent seuls. Les
@@ -1826,7 +1895,7 @@ export default function ProjectDetail() {
             journalPhases={missionPhases}
             phaseHistory={phaseHistory}
             projectActivity={projectActivity}
-            projectMembers={projectMembers}
+            projectMembers={namedMembers}
             permits={permits}
             milestones={milestones}
             onOpenFullEditor={() => setShowFullEditor(true)}
@@ -3192,12 +3261,14 @@ export default function ProjectDetail() {
                   <div className="lg:col-span-2 space-y-8">
                     {/* Hero Section - Editable */}
                     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                      <div className="aspect-[21/9] relative overflow-hidden bg-zinc-100 dark:bg-zinc-800 group">
+                      {/* Le contenu (nom, client, catégorie) fait grandir le bandeau au lieu de
+                            déborder d'un ratio figé : sur un téléphone, 21/9 ne laisse que ~170 px. */}
+                      <div className="relative overflow-hidden bg-zinc-800 group flex flex-col justify-end min-h-[13rem] sm:min-h-0 sm:aspect-[21/9]">
                         {project.image_url ? (
-                          <img src={project.image_url} alt={project.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          <img src={project.image_url} alt={project.name} className="absolute inset-0 w-full h-full object-cover" referrerPolicy="no-referrer" />
                         ) : (
-                          <div className="w-full h-full flex items-center justify-center text-[var(--tblr-muted)]">
-                            <IconUpload size={48} />
+                          <div aria-hidden className="absolute top-4 left-4 sm:inset-0 sm:flex sm:items-center sm:justify-center text-white/30">
+                            <IconUpload size={40} />
                           </div>
                         )}
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 pointer-coarse:bg-transparent pointer-coarse:items-start pointer-coarse:justify-end pointer-coarse:p-3 transition-opacity flex items-center justify-center">
@@ -3206,11 +3277,11 @@ export default function ProjectDetail() {
                             {project.image_url ? t('projectdetail_cover_change') : t('projectdetail_cover_add')}
                           </label>
                         </div>
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />
-                        <div className="absolute inset-x-0 bottom-0 p-8 space-y-4">
+                        {project.image_url && <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent pointer-events-none" />}
+                        <div className="relative p-4 pt-16 sm:p-8 space-y-3 sm:space-y-4">
                           <input 
                             type="text"
-                            className="w-full bg-transparent border-none text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
+                            className="w-full bg-transparent border-none text-2xl sm:text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
                             value={project.name}
                             onChange={e => setProject({...project, name: e.target.value})}
                             aria-label={t('projectdetail_full_name')}
@@ -3223,7 +3294,8 @@ export default function ProjectDetail() {
                               onChange={id => {
                                 const contact = contacts.find(c => c.id === id);
                                 if (contact) {
-                                  setProject({...project, client_id: contact.id, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
+                                  // Les champs « client » vides se remplissent depuis la fiche contact.
+                                  setProject({...project, ...clientFieldsFromContact(contact, project), client_id: contact.id, client: contact.company_name || `${contact.first_name} ${contact.last_name}`});
                                 }
                               }}
                               onAddNew={() => setIsContactModalOpen(true)}
@@ -3250,7 +3322,7 @@ export default function ProjectDetail() {
                             <label htmlFor="fiche-description" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('project_overview_objet')}</label>
                             <textarea
                               id="fiche-description"
-                              className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] min-h-[120px] resize-none"
+                              className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] min-h-[120px] max-h-[40dvh] resize-none [field-sizing:content]"
                               value={project.description}
                               onChange={e => setProject({...project, description: e.target.value})}
                               placeholder={t('project_overview_objet_placeholder')}
@@ -3259,14 +3331,21 @@ export default function ProjectDetail() {
                           <div className="space-y-6">
                             <div className="space-y-2">
                               <label htmlFor="fiche-chef-projet" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('project_overview_project_manager')}</label>
-                              <input
+                              <select
                                 id="fiche-chef-projet"
-                                type="text"
                                 className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                                 value={project.project_manager || ''}
                                 onChange={e => setProject({...project, project_manager: e.target.value})}
-                                placeholder={t('projectdetail_full_manager_placeholder')}
-                              />
+                              >
+                                <option value="">{t('projectdetail_full_manager_placeholder')}</option>
+                                {/* Valeur saisie avant ce choix, absente des effectifs : conservée plutôt qu'effacée. */}
+                                {project.project_manager && !team.some(m => m.name === project.project_manager) && (
+                                  <option value={project.project_manager}>{project.project_manager}</option>
+                                )}
+                                {team.filter(m => m.name).map(m => (
+                                  <option key={m.id} value={m.name}>{m.name}</option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         </div>
@@ -3320,9 +3399,14 @@ export default function ProjectDetail() {
                               min="0"
                               max="100"
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
+                              readOnly={milestones.length > 0}
+                              title={milestones.length > 0 ? t('projectdetail_progress_auto') : undefined}
                               value={project.progression || 0}
                               onChange={e => setProject({...project, progression: Number(e.target.value)})}
                             />
+                            {milestones.length > 0 && (
+                              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_progress_auto')}</p>
+                            )}
                           </div>
                           <div className="space-y-2">
                             <label htmlFor="fiche-code" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_code')}</label>
@@ -3351,7 +3435,23 @@ export default function ProjectDetail() {
                         <div className="mt-4">
                           <AddressAutocomplete 
                             value={project.address || ''}
-                            onChange={addr => setProject(prev => prev ? ({...prev, address: addr}) : null)}
+                            onChange={addr => setProject(prev => prev ? ({
+                              ...prev,
+                              address: addr,
+                              // Même adresse que celle du terrain (section Projet) tant qu'elles ne divergent pas.
+                              adresse_terrain: mirroredAddress(prev.address, prev.adresse_terrain, addr) ?? prev.adresse_terrain,
+                            }) : null)}
+                            onSelect={details => setProject(prev => prev ? ({
+                              ...prev,
+                              ...(mirroredAddress(prev.address, prev.adresse_terrain, details.fullAddress) !== undefined || prev.adresse_terrain === details.fullAddress ? {
+                                adresse_terrain: details.fullAddress,
+                                cp_ville_terrain: `${details.zipcode || ''} ${details.city || ''}`.trim(),
+                                site_postcode: details.zipcode || '',
+                                site_city: details.city || '',
+                                ban_id_terrain: details.banId || '',
+                                city_code_terrain: details.cityCode || '',
+                              } : {}),
+                            }) : null)}
                           />
                         </div>
                       </div>
@@ -3528,7 +3628,9 @@ export default function ProjectDetail() {
                                   setProject(prev => prev ? ({
                                     ...prev,
                                     nom_societe: val,
-                                    rcs: details.siren || details.siret || '',
+                                    rcs: details.siren || '',
+                                    client_siret: details.siret || prev.client_siret || '',
+                                    client_vat_number: prev.client_vat_number || tvaFromSiren(details.siren || details.siret) || '',
                                     adresse_client: details.address || '',
                                     cp_client: details.zipcode || '',
                                     ville_client: details.city || '',
@@ -3582,7 +3684,7 @@ export default function ProjectDetail() {
                             {t('projectdetail_ff_section_site')}
                           </h3>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <FormField label={t('projectdetail_ff_reference')} value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
+                            <FormField label={t('projectdetail_ff_reference')} placeholder={project.project_code || undefined} value={project.reference} onChange={(v: any) => setProject(prev => prev ? ({...prev, reference: v}) : null)} />
                             <FormField label={t('projectdetail_ff_index')} value={project.ind} onChange={(v: any) => setProject(prev => prev ? ({...prev, ind: v}) : null)} />
                             <FormField label={t('projectdetail_ff_detail')} type="textarea" value={project.projet_detail} onChange={(v: any) => setProject(prev => prev ? ({...prev, projet_detail: v}) : null)} />
                           </div>
@@ -3595,6 +3697,8 @@ export default function ProjectDetail() {
                                   setProject(prev => {
                                     if (!prev) return null;
                                     const updates: any = { adresse_terrain: val };
+                                    const mirrored = mirroredAddress(prev.adresse_terrain, prev.address, val);
+                                    if (mirrored !== undefined) updates.address = mirrored;
                                     if (!val) {
                                       updates.cp_ville_terrain = '';
                                       updates.site_postcode = '';
@@ -3628,7 +3732,15 @@ export default function ProjectDetail() {
                             <FormField label={t('projectdetail_ff_establishment')} value={project.nom_etablissement} onChange={(v: any) => setProject(prev => prev ? ({...prev, nom_etablissement: v}) : null)} />
                             <FormField label={t('projectdetail_ff_before_works')} value={project.avant_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, avant_trav: v}) : null)} />
                             <FormField label={t('projectdetail_ff_after_works')} value={project.apres_trav} onChange={(v: any) => setProject(prev => prev ? ({...prev, apres_trav: v}) : null)} />
-                            <FormField label={t('projectdetail_ff_erp_type')} value={project.type_et_cat} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)} />
+                            <ErpFields
+                              value={project.type_et_cat}
+                              calcul={project.erp_calcul}
+                              onCalculChange={c => setProject(prev => prev ? ({...prev, erp_calcul: c}) : null)}
+                              effectifPublic={Number(project.effectif_public) || 0}
+                              effectifPersonnel={Number(project.effectif_personnel) || 0}
+                              onChange={v => setProject(prev => prev ? ({...prev, type_et_cat: v}) : null)}
+                              onApplyEffectif={e => setProject(prev => prev ? ({...prev, effectif_public: String(e.public), effectif_personnel: String(e.personnel)}) : null)}
+                            />
                             <FormField label={t('projectdetail_ff_type')} value={project.type_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, type_projet: v}) : null)} />
                             <FormField label={t('projectdetail_ff_category')} value={project.categorie_projet} onChange={(v: any) => setProject(prev => prev ? ({...prev, categorie_projet: v}) : null)} />
                             <div className="space-y-1">
@@ -3661,7 +3773,7 @@ export default function ProjectDetail() {
                                 </select>
                               </div>
                             )}
-                            <FormField label={t('projectdetail_ff_share')} type="number" value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
+                            <FormField label={t('projectdetail_ff_share')} type="number" readOnly={partInteretContrat != null} hint={partInteretContrat != null ? t('projectdetail_share_auto') : undefined} value={project.part_interet} onChange={(v: any) => setProject(prev => prev ? ({...prev, part_interet: v ? Number(v) : undefined}) : null)} />
                           </div>
                           {mafCost && (
                             <div className="mt-4">
@@ -3747,6 +3859,7 @@ export default function ProjectDetail() {
                             id="is_complete_mission"
                             className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
                             checked={!!project.is_complete_mission}
+                            disabled={missionFlagsLocked}
                             onChange={e => setProject({...project, is_complete_mission: e.target.checked})}
                           />
                           <label htmlFor="is_complete_mission" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
@@ -3759,6 +3872,7 @@ export default function ProjectDetail() {
                             id="is_chantier"
                             className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
                             checked={!!project.is_chantier}
+                            disabled={missionFlagsLocked}
                             onChange={e => setProject({...project, is_chantier: e.target.checked})}
                           />
                           <label htmlFor="is_chantier" className="text-sm font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
@@ -3851,7 +3965,7 @@ export default function ProjectDetail() {
                       <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">{t('projectdetail_team_empty')}</p>
                     ) : (
                       <div className="flex flex-wrap gap-3">
-                        {projectMembers.map(m => (
+                        {namedMembers.map(m => (
                           <div key={m.id || m.user_id} className="flex items-center gap-2 px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg group">
                             <div className="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-xs font-bold text-violet-700 dark:text-violet-400 flex-shrink-0">
                               {(m.name || m.email || '?').charAt(0).toUpperCase()}

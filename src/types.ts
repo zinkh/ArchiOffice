@@ -340,6 +340,8 @@ export interface Project {
   avant_trav?: string;
   apres_trav?: string;
   type_et_cat?: string;
+  /** Saisies du calcul d'effectif ERP (voir `ErpCalcul`). */
+  erp_calcul?: ErpCalcul | null;
   type_projet?: string;
   categorie_projet?: string;
   surface_plancher?: string;
@@ -1715,4 +1717,14 @@ export interface NoteHonoraires {
   notes?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+/** Saisies du calcul d'effectif ERP de la fiche, gardées avec l'affaire. */
+export interface ErpCalcul {
+  /** Nature pour laquelle les quantités ont été saisies : elles ne valent pas pour une autre. */
+  nature?: string;
+  quantites?: Record<string, string>;
+  declare?: string;
+  sous_sol?: string;
+  etages?: string;
 }
