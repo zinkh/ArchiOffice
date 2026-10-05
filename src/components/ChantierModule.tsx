@@ -569,7 +569,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
   const tabs: { id: ChantierTab; label: string; icon: React.ComponentType<{ size?: number }> }[] = [
     { id: 'comptes-rendus', label: 'Comptes-rendus', icon: IconClipboardList },
-    { id: 'reserves', label: 'Réserves', icon: IconAlertTriangle },
+    { id: 'reserves', label: 'Observations', icon: IconAlertTriangle },
     { id: 'entreprises', label: 'Entreprises', icon: IconBuilding },
     { id: 'os', label: 'OS & situations', icon: IconTools },
     { id: 'photos', label: 'Photos', icon: IconPhoto },
@@ -586,7 +586,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
             </p>
             <h2 className="text-2xl font-bold text-[var(--tblr-text)]">Chantier</h2>
             <p className="text-sm text-[var(--tblr-muted)] mt-1 max-w-xl">
-              Suivi de l'exécution : visites, comptes-rendus diffusés aux entreprises, réserves et ordres de service.
+              Suivi de l'exécution : visites, comptes-rendus diffusés aux entreprises, observations et ordres de service.
             </p>
           </div>
           <button
@@ -596,11 +596,20 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
             <IconPlus size={16} /> Nouveau compte-rendu
           </button>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+        <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-4 mt-5">
           <StatPill label="Avancement DET" value={`${avancementDet} %`} />
           <StatPill label="Comptes-rendus" value={String(reports.length)} />
-          <StatPill label="Réserves ouvertes" value={String(reservesOuvertes.length)} accent={reservesOuvertes.length > 0} />
+          <StatPill label="CR diffusés" value={String(crDiffuses)} />
+          <StatPill label="Dernier CR diffusé" value={dernierCrDiffuse ? `n° ${dernierCrDiffuse.report_number}` : '—'} hint={dernierCrDiffuse?.date} />
+          <StatPill
+            label="Observations ouvertes"
+            value={String(reservesOuvertes.length)}
+            accent={reservesOuvertes.length > 0}
+            hint={reservesOuvertes.length > 0 ? reservesOuvertes.slice(0, 3).map(o => o.texte).join(' · ') : undefined}
+            title={reservesOuvertes.map(o => o.texte).join('\n') || undefined}
+          />
           <StatPill label="OS émis" value={String(osEmisTravaux)} />
+          <StatPill label="Intempéries cumulées" value={`${intemperies} j`} />
         </div>
       </div>
 
@@ -622,8 +631,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         ))}
       </div>
 
-      {/* Body: main content + persistent sidebar */}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-4 items-start">
+      {/* Body */}
+      <div>
         <div className="min-w-0">
           {activeTab === 'comptes-rendus' && (
             <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
@@ -663,7 +672,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
               {/* CR detail */}
               {selectedReport ? (
-                <div className="space-y-4">
+                <div className="space-y-4 min-w-0">
                   <div className="rounded-xl p-4 sm:p-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div className="flex items-center gap-3">
@@ -748,7 +757,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                       <MiniStat label="Présents" value={String((selectedReport.attendance || []).filter(a => a.present).length)} />
                       <MiniStat label="Absents/Excusés" value={String((selectedReport.attendance || []).filter(a => !a.present && a.status !== 'NC').length)} />
                       <MiniStat label="Observations" value={String(reportObservations.length)} />
-                      <MiniStat label="Réserves ouv./tot." value={`${reportObservations.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length}/${reportObservations.filter(o => o.type === 'reserve').length}`} />
+                      <MiniStat label="Obs. ouvertes/tot." value={`${reportObservations.filter(o => o.type === 'reserve' && o.statut !== 'Levée').length}/${reportObservations.filter(o => o.type === 'reserve').length}`} />
                     </div>
                   </div>
 
@@ -820,8 +829,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                             <th className="text-left py-1.5 pr-2">Effectif</th>
                             <th className="text-center py-1.5 pr-2">Retard sem. (j)</th>
                             <th className="text-center py-1.5 pr-2">Retard cumulé (j)</th>
-                            <th className="text-center py-1.5 pr-2">Retard docs</th>
-                            <th className="text-center py-1.5 pr-2">Intempéries</th>
+                            <th className="text-center py-1.5 pr-2">Retard docs (j)</th>
+                            <th className="text-center py-1.5 pr-2">Intempéries (j)</th>
                             <th className="text-center py-1.5 pr-2">Convoqué suiv.</th>
                             <th className="text-left py-1.5 pr-2">Lieu</th>
                             <th className="text-left py-1.5">Heure</th>
@@ -871,10 +880,16 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                     onCommit={v => setLotTracking(lot.id, { retard_cumule: parseDays(v) })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
-                                  <input type="checkbox" checked={!!t?.retard_remise_docs} onChange={e => setLotTracking(lot.id, { retard_remise_docs: e.target.checked })} />
+                                  <DraftInput type="number" min={0} aria-label={`Retard de remise des documents en jours, ${lot.lot_title}`}
+                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
+                                    value={t?.retard_docs_jours != null ? String(t.retard_docs_jours) : ''}
+                                    onCommit={v => setLotTracking(lot.id, { retard_docs_jours: parseDays(v) })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
-                                  <input type="checkbox" checked={!!t?.intemperies} onChange={e => setLotTracking(lot.id, { intemperies: e.target.checked })} />
+                                  <DraftInput type="number" min={0} aria-label={`Jours d\'intempéries, ${lot.lot_title}`}
+                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
+                                    value={t?.intemperies_jours != null ? String(t.intemperies_jours) : ''}
+                                    onCommit={v => setLotTracking(lot.id, { intemperies_jours: parseDays(v) })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
                                   <input type="checkbox" checked={!!t?.convoque_reunion_suivante} onChange={e => setLotTracking(lot.id, { convoque_reunion_suivante: e.target.checked })} />
@@ -1067,63 +1082,6 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           {activeTab === 'photos' && <PhotosTab observations={allObservations} reports={reports} />}
         </div>
 
-        {/* Sidebar */}
-        <div className="space-y-4">
-          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Dernier CR diffusé</p>
-            {dernierCrDiffuse ? (
-              <p className="text-sm text-[var(--tblr-text)]">CR n° {dernierCrDiffuse.report_number} — {dernierCrDiffuse.date}</p>
-            ) : (
-              <p className="text-sm text-[var(--tblr-muted)] italic">Aucun CR diffusé pour l'instant.</p>
-            )}
-          </div>
-          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-3">Avancement DET</p>
-            <p className="text-3xl font-bold text-[var(--tblr-text)]">{avancementDet} %</p>
-            <div className="w-full h-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-full mt-2 overflow-hidden">
-              <div className="h-full bg-blue-600" style={{ width: `${avancementDet}%` }} />
-            </div>
-            <ul className="mt-4 space-y-1.5 text-sm text-[var(--tblr-muted)]">
-              <li className="flex justify-between"><span>Comptes-rendus</span><span className="font-semibold text-[var(--tblr-text)]">{reports.length}</span></li>
-              <li className="flex justify-between"><span>CR diffusés</span><span className="font-semibold text-[var(--tblr-text)]">{crDiffuses}</span></li>
-              <li className="flex justify-between"><span>OS émis</span><span className="font-semibold text-[var(--tblr-text)]">{osEmisTravaux}</span></li>
-            </ul>
-          </div>
-          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">
-              Réserves ouvertes <span className="text-red-600 dark:text-red-400">{reservesOuvertes.length}</span>
-            </p>
-            {reservesOuvertes.length === 0 ? (
-              <p className="text-sm text-[var(--tblr-muted)] italic">Aucune réserve ouverte.</p>
-            ) : (
-              <div className="space-y-2">
-                {reservesOuvertes.slice(0, 5).map(o => (
-                  <div key={o.id} className="border-l-2 border-red-500 pl-2">
-                    <p className="text-xs text-[var(--tblr-text)] line-clamp-2">{o.texte}</p>
-                    {o.due_date && <p className="text-[0.6875rem] text-red-500 font-semibold">échéance {o.due_date}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Entreprises sur site</p>
-            <div className="space-y-1.5 text-sm">
-              {lots_list.slice(0, 6).map(lot => (
-                <div key={lot.id} className="flex justify-between text-[var(--tblr-text)]">
-                  <span className="truncate">{lot.contact_name?.split(' - ')[0] || lot.lot_title}</span>
-                  <span className="text-[var(--tblr-muted)] text-xs">{lot.lot_number}</span>
-                </div>
-              ))}
-              {lots_list.length === 0 && <p className="text-[var(--tblr-muted)] italic">Aucun lot renseigné.</p>}
-            </div>
-          </div>
-          <div className="rounded-xl p-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-            <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-2">Intempéries cumulées</p>
-            <p className="text-2xl font-bold text-[var(--tblr-text)]">{intemperies} <span className="text-sm font-normal text-[var(--tblr-muted)]">j</span></p>
-            <p className="text-xs text-[var(--tblr-muted)] mt-1">Comptes-rendus signalant une météo défavorable.</p>
-          </div>
-        </div>
       </div>
 
       <Toast toast={toast} />
@@ -1159,11 +1117,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   );
 }
 
-function StatPill({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function StatPill({ label, value, accent, hint, title }: { label: string; value: string; accent?: boolean; hint?: string; title?: string }) {
   return (
-    <div>
+    <div className="min-w-0" title={title}>
       <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
       <p className={cn('text-xl font-bold', accent ? 'text-red-600 dark:text-red-400' : 'text-[var(--tblr-text)]')}>{value}</p>
+      {hint && <p className="text-[0.6875rem] text-[var(--tblr-muted)] truncate">{hint}</p>}
     </div>
   );
 }
@@ -1246,8 +1205,8 @@ function EntreprisesTab({ lots_list, observations }: { lots_list: ProjectLot[]; 
           <tr>
             <th className="px-4 py-3 text-left">Lot</th>
             <th className="px-4 py-3 text-left">Entreprise</th>
-            <th className="px-4 py-3 text-center">Observations</th>
-            <th className="px-4 py-3 text-center">Réserves ouvertes</th>
+            <th className="px-4 py-3 text-center">Observations (total)</th>
+            <th className="px-4 py-3 text-center">Observations ouvertes</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[var(--tblr-border)]">

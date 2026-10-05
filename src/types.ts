@@ -1244,7 +1244,11 @@ export interface SiteReportLotTracking {
   /** Retard d'exécution cumulé depuis le début du chantier, en jours. */
   retard_cumule?: number;
   retard_remise_docs?: boolean;
+  /** Retard de remise des documents, en jours (remplace la case oui/non ci-dessus). */
+  retard_docs_jours?: number;
   intemperies?: boolean;
+  /** Jours d'intempéries sur la période (remplace la case oui/non ci-dessus). */
+  intemperies_jours?: number;
   convoque_reunion_suivante?: boolean;
   /** Lieu de la prochaine réunion ; absent = « Sur site ». */
   lieu?: string;
