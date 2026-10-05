@@ -2365,7 +2365,7 @@ export default {
       "projectdetail_full_client": "Maître d'ouvrage",
       "projectdetail_full_client_new": "Nouveau maître d'ouvrage",
       "projectdetail_full_category": "Catégorie",
-      "projectdetail_full_manager_placeholder": "Nom du chef de projet",
+      "projectdetail_full_manager_placeholder": "Choisir dans l'équipe",
       "projectdetail_full_surface": "Surface (m²)",
       "projectdetail_full_progress": "Avancement (%)",
       "projectdetail_full_code": "Code affaire",

@@ -3261,14 +3261,21 @@ export default function ProjectDetail() {
                           <div className="space-y-6">
                             <div className="space-y-2">
                               <label htmlFor="fiche-chef-projet" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('project_overview_project_manager')}</label>
-                              <input
+                              <select
                                 id="fiche-chef-projet"
-                                type="text"
                                 className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                                 value={project.project_manager || ''}
                                 onChange={e => setProject({...project, project_manager: e.target.value})}
-                                placeholder={t('projectdetail_full_manager_placeholder')}
-                              />
+                              >
+                                <option value="">{t('projectdetail_full_manager_placeholder')}</option>
+                                {/* Valeur saisie avant ce choix, absente des effectifs : conservée plutôt qu'effacée. */}
+                                {project.project_manager && !team.some(m => m.name === project.project_manager) && (
+                                  <option value={project.project_manager}>{project.project_manager}</option>
+                                )}
+                                {team.filter(m => m.name).map(m => (
+                                  <option key={m.id} value={m.name}>{m.name}</option>
+                                ))}
+                              </select>
                             </div>
                           </div>
                         </div>
