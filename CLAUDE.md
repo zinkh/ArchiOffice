@@ -1500,6 +1500,30 @@ existants, quantités et prix à 0, chaque article marqué `genereParIa` (badge
 l'enregistrement habituel. Seules les pièces dont `project_id` est l'affaire
 visée sont lues.
 
+### Compte-rendu de chantier au téléphone
+
+`ChantierModule.tsx` (onglet Comptes-rendus) est le premier écran du chantier : ses
+pièces vivent dans `src/components/chantier/`. Règles à garder :
+
+- **Une rangée au bureau, une carte sous 768 px**, par `order-*` et `flex-wrap`, jamais
+  deux DOM : `RubriqueRow`, `DecisionRow`, `ObservationRow` (`ReportRows.tsx`). L'ordre
+  du DOM reste celui de la rangée de bureau, donc celui du clavier. Champs encadrés et
+  cibles de 44 px au doigt (`ROW_FIELD`, `TOUCH_TARGET`, `fields.tsx`).
+- **« Présence & suivi des lots »** : tableau à partir de 768 px, une carte par lot
+  (`LotTrackingCards.tsx`, `useMediaQuery`, un seul rendu monté) en dessous. Même
+  `lot_tracking`, mêmes champs ; le premier choix de statut crée la ligne de présence
+  AVEC ce statut (il était ignoré, la ligne naissant « Présent »).
+- **Aucune saisie ne part à chaque frappe** : `DraftInput` et `CommitTextarea`
+  n'enregistrent qu'à la sortie du champ. Chaque frappe renvoyait le compte-rendu entier
+  au serveur, dont la réponse écrasait la saisie en cours (le lieu « se réinitialisait »,
+  les décisions aussi).
+- **`Section`** est repliable, état mémorisé par section (`chantier:section:<id>`) ; son
+  action passe sous le titre quand la largeur manque au lieu de sortir de l'écran.
+- **`QuickCaptureBar`** (téléphone seulement) : « Observation » et « Photo » fixés en bas.
+  La photo ouvre l'appareil (`capture="environment"`) et crée l'observation qui la porte.
+- Libellés : la nature `reserve` s'affiche « À lever » (`chantierConstants.ts`) ; « réserve »
+  est réservé à l'AOR.
+
 ### Dictée vocale
 
 Un micro dans la barre de saisie du chat (`client/useDictation.ts`). Le texte

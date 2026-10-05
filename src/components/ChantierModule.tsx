@@ -3,7 +3,7 @@ import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from './ui/Toast';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
-  IconUsers, IconChevronLeft, IconChevronRight, IconTrash, IconCamera,
+  IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
   IconBuilding, IconTools, IconPhoto, IconClipboardList, IconAlertTriangle,
   IconRefresh, IconListDetails,
 } from '@tabler/icons-react';
@@ -16,6 +16,12 @@ import { cachedListFirst } from '../lib/offlineReadCache';
 import { db } from '../db';
 import { cn } from '../lib/utils';
 import type { AgencySettings } from '../lib/proposalExport';
+import { useMediaQuery } from '../hooks/useMediaQuery';
+import { Section } from './chantier/Section';
+import { DraftInput, parseDays } from './chantier/fields';
+import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
+import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
+import { QuickCaptureBar } from './chantier/QuickCaptureBar';
 
 interface ChantierModuleProps {
   project: Project;
@@ -30,43 +36,6 @@ interface ChantierModuleProps {
 
 const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
 
-const DEFAULT_LIEU = 'Sur site';
-
-/**
- * Champ saisi localement et validé à la sortie du champ (ou Entrée). Chaque
- * frappe envoyée au serveur renvoyait le CR entier, dont la réponse (parfois
- * dans le désordre) écrasait la saisie en cours : le texte semblait se
- * réinitialiser. Le brouillon local n'est resynchronisé que hors saisie.
- */
-function DraftInput({ value, onCommit, className, ...rest }: {
-  value: string;
-  onCommit: (v: string) => void;
-} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'onBlur'>) {
-  const [draft, setDraft] = useState(value);
-  const [editing, setEditing] = useState(false);
-  useEffect(() => { if (!editing) setDraft(value); }, [value, editing]);
-  const commit = () => {
-    setEditing(false);
-    if (draft !== value) onCommit(draft);
-  };
-  return (
-    <input
-      {...rest}
-      className={className}
-      value={draft}
-      onFocus={() => setEditing(true)}
-      onChange={e => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-    />
-  );
-}
-
-const parseDays = (v: string): number | undefined => {
-  const n = parseInt(v, 10);
-  return Number.isFinite(n) && n >= 0 ? n : undefined;
-};
-
 type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'photos';
 
 const STATUT_CR_LABELS: Record<string, string> = {
@@ -79,24 +48,6 @@ const STATUT_CR_COLORS: Record<string, string> = {
   brouillon: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200',
   diffuse: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
   archive: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  observation: 'OBSERVATION',
-  reserve: 'RÉSERVE',
-  a_faire: 'À FAIRE',
-};
-
-const TYPE_COLORS: Record<string, string> = {
-  observation: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300',
-  reserve: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
-  a_faire: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-};
-
-const URGENCE_LABELS: Record<string, string> = {
-  normal: '',
-  urgent: 'URGENT',
-  bloquant: 'BLOQUANT',
 };
 
 const WEATHER_ALERT_KEYWORDS = ['pluie', 'neige', 'intemp', 'orage', 'gel', 'vent fort'];
@@ -366,12 +317,26 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     setAttendance(index, { status, present: status === 'P' || status === 'R', excused: status === 'AE' });
   };
 
-  const ensureAttendanceRow = (lot: ProjectLot) => {
+  const ensureAttendanceRow = (lot: ProjectLot, status: PresenceStatus = 'P') => {
     const list = selectedReport?.attendance || [];
     if (list.some(a => a.role === lot.lot_title)) return;
     const name = lot.contact_name?.split(' - ')[1] || lot.contact_name?.split(' - ')[0] || '';
-    updateReportField('attendance', [...list, { name, role: lot.lot_title, present: true, status: 'P' as PresenceStatus }]);
+    updateReportField('attendance', [...list, { name, role: lot.lot_title, present: status === 'P' || status === 'R', excused: status === 'AE', status }]);
   };
+
+  // Statut de présence d'un lot (« Présent » tant qu'aucune ligne n'existe) et son
+  // changement : le premier choix crée la ligne AVEC le statut choisi (il était
+  // auparavant ignoré, la ligne naissant « Présent »).
+  const lotStatus = (lot: ProjectLot): PresenceStatus => {
+    const row = (selectedReport?.attendance || []).find(a => a.role === lot.lot_title);
+    return row ? (row.status || (row.present ? 'P' : row.excused ? 'AE' : 'ANE')) : 'P';
+  };
+  const changeLotStatus = (lot: ProjectLot, status: PresenceStatus) => {
+    const idx = (selectedReport?.attendance || []).findIndex(a => a.role === lot.lot_title);
+    if (idx < 0) ensureAttendanceRow(lot, status);
+    else setAttendanceStatus(idx, status);
+  };
+  const isDesktop = useMediaQuery('(min-width: 768px)');
 
   // Présence des intervenants du projet (MOA/AMO/MOE/CT/CSPS...), distincte
   // de la présence des lots ci-dessus : même tableau `attendance`, ligne
@@ -461,8 +426,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     updateReportField('decisions', (selectedReport?.decisions || []).filter((_, i) => i !== index));
   };
 
-  const addObservation = async (type: Observation['type'] = 'observation') => {
-    if (!selectedReportId) return;
+  const addObservation = async (type: Observation['type'] = 'observation'): Promise<string | undefined> => {
+    if (!selectedReportId) return undefined;
     // Id généré côté client : une création rejouée après coupure réseau
     // (file de synchro hors-ligne, src/lib/offlineQueue.ts) ne crée jamais
     // deux observations.
@@ -473,7 +438,14 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       const newObs: Observation = queued ? { ...body, project_id: project.id, pendingSync: true } : data!;
       setReportObservations(prev => [...prev, newObs]);
       fetchAllObservations().catch(() => {});
-    } catch (err) { console.error(err); }
+      return id;
+    } catch (err) { console.error(err); return undefined; }
+  };
+
+  // Photo prise depuis la barre du bas : elle crée l'observation à laquelle elle se rattache.
+  const captureObservationPhoto = async (file: File) => {
+    const id = await addObservation('observation');
+    if (id) await uploadObservationPhoto(id, file);
   };
 
   const saveObservationField = async (obsId: string, field: string, value: any) => {
@@ -764,7 +736,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </div>
 
                   {/* Présence des intervenants (page de garde du CR) */}
-                  <Section title="Présence des intervenants" icon={IconUsers}>
+                  <Section id="intervenants" title="Présence des intervenants" icon={IconUsers}>
                     {(project.stakeholders_list || []).length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">
                         Aucun intervenant renseigné — ajoutez le groupement (MOA, AMO, MOE, CT, CSPS...) depuis la fiche projet.
@@ -818,10 +790,20 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </Section>
 
                   {/* Présence & suivi des lots (page 2 du CR) */}
-                  <Section title="Présence & suivi des lots" icon={IconBuilding}>
+                  <Section id="presence" title="Présence & suivi des lots" icon={IconBuilding}>
                     {lots_list.length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">Aucun lot renseigné pour ce projet.</p>
                     )}
+                    {!isDesktop ? (
+                      <LotTrackingCards
+                        lots={lots_list}
+                        statusLabels={PRESENCE_LABELS}
+                        getStatus={lotStatus}
+                        onStatus={changeLotStatus}
+                        getTracking={lotId => (selectedReport.lot_tracking || []).find(x => x.lot_id === lotId)}
+                        onTrack={setLotTracking}
+                      />
+                    ) : (
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
                         <thead className="text-[var(--tblr-muted)] text-[0.6875rem] font-bold uppercase tracking-wider">
@@ -854,11 +836,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                   <select
                                     className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs"
                                     value={status}
-                                    onFocus={() => { if (idx < 0) ensureAttendanceRow(lot); }}
-                                    onChange={e => {
-                                      if (idx < 0) { ensureAttendanceRow(lot); return; }
-                                      setAttendanceStatus(idx, e.target.value as PresenceStatus);
-                                    }}
+                                    onChange={e => changeLotStatus(lot, e.target.value as PresenceStatus)}
                                   >
                                     {(Object.keys(PRESENCE_LABELS) as PresenceStatus[]).map(v => (
                                       <option key={v} value={v}>{PRESENCE_LABELS[v]}</option>
@@ -866,8 +844,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                   </select>
                                 </td>
                                 <td className="py-2 pr-2">
-                                  <input type="number" min={0} className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
-                                    value={t?.effectif ?? ''} onChange={e => setLotTracking(lot.id, { effectif: e.target.value ? parseInt(e.target.value) : undefined })} />
+                                  <DraftInput type="number" min={0} aria-label={`Effectif, ${lot.lot_title}`}
+                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={t?.effectif != null ? String(t.effectif) : ''}
+                                    onCommit={v => setLotTracking(lot.id, { effectif: parseDays(v) })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
                                   <DraftInput type="number" min={0} aria-label={`Retard de la semaine en jours, ${lot.lot_title}`}
@@ -914,23 +894,24 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         </tbody>
                       </table>
                     </div>
+                    )}
                   </Section>
 
                   {/* Rubriques personnalisées (corps administratif du CR) */}
-                  <Section
+                  <Section id="rubriques"
                     title="Rubriques"
                     icon={IconListDetails}
                     action={
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
                         <input
-                          className="text-xs px-2 py-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent w-40"
+                          className="min-w-0 flex-1 sm:flex-none text-sm sm:text-xs px-2.5 py-2 sm:py-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent sm:w-40"
                           placeholder="Nouvelle rubrique..."
                           value={newRubriqueName}
                           onChange={e => setNewRubriqueName(e.target.value)}
                           onKeyDown={e => { if (e.key === 'Enter') addRubrique(); }}
                         />
                         <button type="button" onClick={addRubrique}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
                           <IconPlus size={14} /> Ajouter
                         </button>
                       </div>
@@ -951,20 +932,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           </div>
                           <div className="space-y-1.5">
                             {[...items].sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || '')).map(n => (
-                              <div key={n.id} className="flex items-start gap-2 p-2 rounded-lg bg-[var(--tblr-surface-2)]">
-                                <input type="date" className="shrink-0 text-xs bg-transparent border-none outline-none w-28"
-                                  defaultValue={n.issue_date} onBlur={e => saveNoteField(n.id, 'issue_date', e.target.value)} />
-                                <input className="flex-1 bg-transparent border-none outline-none text-sm min-w-[120px]"
-                                  defaultValue={n.text} placeholder="Texte..." onBlur={e => saveNoteField(n.id, 'text', e.target.value)} />
-                                <input className="shrink-0 w-32 bg-transparent border-none outline-none text-xs"
-                                  defaultValue={n.responsible_company || ''} placeholder="Société" onBlur={e => saveNoteField(n.id, 'responsible_company', e.target.value)} />
-                                <select className="shrink-0 text-[0.6875rem] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
-                                  value={n.status} onChange={e => saveNoteField(n.id, 'status', e.target.value)}>
-                                  <option value="open">Ouvert</option>
-                                  <option value="done">Soldé</option>
-                                </select>
-                                <button type="button" onClick={() => deleteNote(n.id)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
-                              </div>
+                              <RubriqueRow key={n.id} note={n} onSave={saveNoteField} onDelete={deleteNote} />
                             ))}
                           </div>
                         </div>
@@ -973,7 +941,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </Section>
 
                   {/* Observations par lot */}
-                  <Section
+                  <Section id="observations"
                     title="Observations par lot"
                     icon={IconClipboardList}
                     action={
@@ -1014,7 +982,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </Section>
 
                   {/* Décisions de la maîtrise d'œuvre */}
-                  <Section
+                  <Section id="decisions"
                     title="Décisions de la maîtrise d'œuvre"
                     action={
                       <button type="button" onClick={addDecision}
@@ -1028,23 +996,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     )}
                     <div className="space-y-2">
                       {(selectedReport.decisions || []).map((d, i) => (
-                        <div key={i} className="flex items-start gap-2 p-2 rounded-lg bg-[var(--tblr-surface-2)]">
-                          <input className="flex-1 bg-transparent border-none outline-none text-sm"
-                            placeholder="Décision..." value={d.texte} onChange={e => updateDecision(i, { texte: e.target.value })} />
-                          <select className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-full border-none bg-zinc-200 dark:bg-zinc-700"
-                            value={d.tag} onChange={e => updateDecision(i, { tag: e.target.value as any })}>
-                            <option value="planning">Planning</option>
-                            <option value="technique">Technique</option>
-                            <option value="financier">Financier</option>
-                          </select>
-                          <button type="button" onClick={() => removeDecision(i)} className="text-zinc-300 hover:text-red-500"><IconTrash size={15} /></button>
-                        </div>
+                        <DecisionRow key={i} decision={d} onChange={patch => updateDecision(i, patch)} onRemove={() => removeDecision(i)} />
                       ))}
                     </div>
                   </Section>
 
                   {/* Reportage photo */}
-                  <Section title="Reportage photo" icon={IconCamera}>
+                  <Section id="photos" title="Reportage photo" icon={IconCamera}>
                     {(() => {
                       const photos = reportObservations.flatMap(o => o.photos || []);
                       if (photos.length === 0) return <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">Aucune photo pour ce compte-rendu.</p>;
@@ -1064,6 +1022,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                       );
                     })()}
                   </Section>
+
+                  {/* Réserve la place de la barre fixe du bas (téléphone) pour que la dernière section reste atteignable. */}
+                  <div className="h-16 md:hidden" aria-hidden="true" />
+                  <QuickCaptureBar onAddObservation={() => { void addObservation('observation'); }} onCapturePhoto={file => { void captureObservationPhoto(file); }} />
                 </div>
               ) : (
                 <div className="rounded-xl p-10 text-center text-[var(--tblr-muted)] italic" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
@@ -1134,66 +1096,6 @@ function MiniStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg bg-[var(--tblr-surface-2)] p-2.5 text-center">
       <p className="text-lg font-bold text-[var(--tblr-text)]">{value}</p>
       <p className="text-[0.6875rem] uppercase tracking-wider text-[var(--tblr-muted)]">{label}</p>
-    </div>
-  );
-}
-
-function Section({ title, icon: Icon, action, children }: { title: string; icon?: React.ComponentType<{ size?: number }>; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="rounded-xl p-4 sm:p-5" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-      <div className="flex items-center justify-between gap-2 mb-3">
-        <div className="flex items-center gap-2 text-sm font-bold text-[var(--tblr-text)]">
-          {Icon && <Icon size={18} />} {title}
-        </div>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function ObservationRow({ obs, onSave, onUploadPhoto }: { obs: Observation; onSave: (id: string, field: string, value: any) => void; onUploadPhoto: (id: string, file: File) => void }) {
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-  return (
-    <div className="flex items-start gap-2 p-2 rounded-lg bg-[var(--tblr-surface-2)] group">
-      <select
-        className={cn('shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded border-none cursor-pointer', TYPE_COLORS[obs.type || 'observation'])}
-        value={obs.type || 'observation'}
-        onChange={e => onSave(obs.id, 'type', e.target.value)}
-      >
-        {Object.entries(TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-      </select>
-      <input
-        className="flex-1 bg-transparent border-none outline-none text-sm min-w-[120px]"
-        defaultValue={obs.texte}
-        placeholder="Description..."
-        onBlur={e => onSave(obs.id, 'texte', e.target.value)}
-      />
-      {obs.pendingSync && (
-        <span className="shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
-      )}
-      {obs.urgence === 'bloquant' && (
-        <span className="shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-red-600 text-white">{URGENCE_LABELS.bloquant}</span>
-      )}
-      <select
-        className="shrink-0 text-[0.6875rem] px-1.5 py-1 rounded border border-[var(--tblr-border)] bg-transparent"
-        value={obs.urgence || 'normal'}
-        onChange={e => onSave(obs.id, 'urgence', e.target.value)}
-      >
-        <option value="normal">Normal</option>
-        <option value="urgent">Urgent</option>
-        <option value="bloquant">Bloquant</option>
-      </select>
-      <input type="date" className="shrink-0 text-xs bg-transparent border-none outline-none w-28"
-        defaultValue={obs.due_date || ''} onBlur={e => onSave(obs.id, 'due_date', e.target.value)} />
-      <button type="button" onClick={() => fileInputRef.current?.click()} className="shrink-0 p-1 text-zinc-400 hover:text-blue-500" title="Ajouter une photo">
-        <IconCamera size={16} />
-      </button>
-      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(obs.id, f); e.target.value = ''; }} />
-      {(obs.photos || []).length > 0 && (
-        <span className="shrink-0 text-[0.6875rem] text-[var(--tblr-muted)]">{obs.photos!.length} 📷</span>
-      )}
     </div>
   );
 }
