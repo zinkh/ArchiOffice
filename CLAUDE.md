@@ -775,6 +775,51 @@ migration).
 - `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
   et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
 
+### Négociation des offres (ACT) : fiches, options, synthèse économique
+
+Phase « Négociation » du module ACT, entre la collecte et l'analyse. Tout vit
+dans la consultation (`act_data.consultation`, jsonb) sous des clés
+facultatives : **aucune migration SQL**, une consultation ancienne reste
+valide. La logique pure est dans `src/lib/actNegociation.ts` (testée), l'écran
+dans `src/components/act/` (`NegociationPhase` : fiches par lot, pièces
+reçues, synthèse économique), les exports dans `src/lib/actNegociationExport.ts`.
+
+- **La base reste `Offre.montant_base`** (source unique du prix de base). Les
+  options et variantes sont des `LigneOffre` de la négociation du couple
+  lot x entreprise (`consultation.negociations`). Une **option s'ajoute au
+  total, une variante est une offre de substitution** et n'y entre jamais. Même
+  éditeur (`LignesOffreEditor`) à l'ouverture des plis (collecte) et en
+  négociation.
+- **Trois étages de prix** : ouverture, vérifié (`montants_verifies`, seulement
+  quand il diffère), courant (le dernier tour qui a touché la ligne, tours lus
+  dans l'ordre des dates). Un tour ne porte que les lignes qui ont bougé.
+  Total, gain, reste à obtenir et statut (`à vérifier`, `à négocier`, `en
+  négociation`, `offre finale`, `retenue`, `écartée`) se **déduisent**, jamais
+  saisis.
+- **L'analyse, l'attribution et les exports lisent le prix courant**
+  (`offresAuPrixCourant`, `montantAttribution`), pas celui de l'ouverture ; le
+  montant d'ouverture reste affiché barré à côté. Une offre sans négociation se
+  comporte exactement comme avant.
+- **Synthèse économique** (`lignesSynthese`, `totauxOperation`) : estimations
+  APD, PRO base et PRO + options par lot (saisies, à défaut l'estimatif du
+  sous-total du DPGF versé au comparatif), moins-disant et moyenne, écarts en
+  euros et en pourcentage, objectif (saisi, à défaut celui de l'offre
+  moins-disante), décision. **Un lot sans offre exploitable est compté à son
+  estimation** dans les totaux, sinon le dépassement serait faussé. Une offre
+  non conforme ou écartée de la négociation n'entre jamais dans la comparaison.
+- **Tolérance du CCAP** (`controleTolerance`) : estimation actualisée par
+  `indice connu / indice à la date de l'estimation` (BT01), plafond = estimation
+  actualisée x (1 + tolérance), trois niveaux (sous l'estimation, dans la
+  tolérance, au-delà). Taux de TVA et de tolérance dans `consultation.parametres`.
+- **Pièces reçues** (`pieces_recues`, entreprise -> pièces cochées) : pièces
+  administratives de la consultation + pièces d'offre (`PIECES_OFFRE_DEFAUT`).
+  « Marquer non conforme » est un geste explicite, jamais automatique.
+- **Exports** à la charte (nuances de gris, « P1|2 ») : PV d'ouverture par lot,
+  fiche de négociation d'une entreprise, synthèse en PDF et en Excel (feuille
+  « Synthèse » avec formules de somme, feuille « Négociation »). Les montants
+  des PDF passent par un `euros()` qui remplace l'espace fine U+202F, absente des
+  polices de jsPDF (sinon « 31 /210 » : voir la note d'honoraires plus haut).
+
 ### Exports PDF et Excel : une seule charte
 
 Tout document produit depuis l'interface porte la charte du cabinet : en-tête

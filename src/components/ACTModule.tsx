@@ -6,7 +6,7 @@ import {
   IconFileText, IconBuilding, IconUsers, IconScale, IconTrophy,
   IconDownload, IconMessageDots, IconMail, IconAlertTriangle,
   IconClipboardList, IconCurrencyEuro, IconPercentage, IconStar,
-  IconX, IconEdit, IconEye, IconSend, IconCircleCheck, IconSearch,
+  IconX, IconEdit, IconEye, IconSend, IconCircleCheck, IconSearch, IconArrowsExchange, IconAdjustments,
 } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -25,6 +25,13 @@ import { EntrepriseAddForm, type NouvelleEntreprise } from './EntrepriseAddForm'
 import { useQualifications } from '../hooks/useQualifications';
 import { ContactModal } from './ContactModal';
 import { isEntrepriseContact, CONTACT_CATEGORY_ENTREPRISE } from '../lib/contactCategories';
+import NegociationPhase from './act/NegociationPhase';
+import LignesOffreEditor from './act/LignesOffreEditor';
+import {
+  montantAttribution, offresAuPrixCourant, trouverNegociation,
+  type DonneesNegociation,
+} from '../lib/actNegociation';
+import { genererPVOuverture } from '../lib/actNegociationExport';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,7 +113,7 @@ interface ComparatifLot {
   articles: ComparatifArticle[];
 }
 
-interface Consultation {
+interface Consultation extends DonneesNegociation {
   dce_documents: DCEDocument[];
   entreprises: EntrepriseConsultee[];
   criteres: CritereNotation[];
@@ -117,13 +124,14 @@ interface Consultation {
   comparatif: ComparatifLot[];
 }
 
-type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'analyse';
+type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse';
 
 const PHASES: { id: Phase; label: string; short: string; icon: React.ElementType }[] = [
   { id: 'preparation', label: 'Préparation de la consultation', short: 'Préparation', icon: IconFileText },
   { id: 'criteres', label: 'Critères d\'analyse', short: 'Critères', icon: IconScale },
   { id: 'portail', label: 'Portail entreprises / Q&R', short: 'Q & R', icon: IconMessageDots },
   { id: 'collecte', label: 'Collecte des offres', short: 'Offres', icon: IconCurrencyEuro },
+  { id: 'negociation', label: 'Négociation des offres', short: 'Négociation', icon: IconArrowsExchange },
   { id: 'analyse', label: 'Analyse & Attribution', short: 'Attribution', icon: IconTrophy },
 ];
 
@@ -254,6 +262,14 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   const [qrForm, setQrForm] = useState({ entreprise_id: '', question: '', reponse: '', publique: false });
   const [repondreId, setRepondreId] = useState<string | null>(null);
 
+  // Lignes « options / variantes » dépliées dans la collecte (clé lot:entreprise).
+  const [lignesOuvertes, setLignesOuvertes] = useState<Set<string>>(new Set());
+  const basculerLignes = (cle: string) => setLignesOuvertes(prev => {
+    const n = new Set(prev);
+    if (n.has(cle)) n.delete(cle); else n.add(cle);
+    return n;
+  });
+
   // Comparatif
   const [showComparatif, setShowComparatif] = useState(false);
   const [expandedComparatifLots, setExpandedComparatifLots] = useState<Set<string>>(new Set());
@@ -328,6 +344,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
 
   const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
     update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
+  };
+
+  const patchNegociation = (patch: Partial<DonneesNegociation>) => update({ ...consultation, ...patch });
+
+  /** Pièces manquantes : marque non conformes les offres de l'entreprise, avec ce motif (geste explicite de l'architecte). */
+  const marquerNonConforme = (entrepriseId: string, motif: string) => {
+    update({
+      ...consultation,
+      offres: consultation.offres.map(o => (o.entreprise_id === entrepriseId ? { ...o, conforme: false, motif_nc: motif } : o)),
+    });
   };
 
   const changeCorpsEtat = (e: EntrepriseConsultee, next: string[]) => {
@@ -415,6 +441,17 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
   };
 
   const phaseIdx = PHASES.findIndex(p => p.id === phase);
+
+  // L'analyse, l'attribution et les exports lisent les prix de la négociation en
+  // cours (dernier tour, sinon prix vérifié), pas ceux de l'ouverture des plis.
+  const offresCourantes = useMemo(
+    () => offresAuPrixCourant(consultation.offres, consultation.negociations),
+    [consultation.offres, consultation.negociations],
+  );
+  const consultationCourante = useMemo(
+    () => ({ ...consultation, offres: offresCourantes }),
+    [consultation, offresCourantes],
+  );
 
   // ── RENDER ────────────────────────────────────────────────────────────────
 
@@ -933,7 +970,15 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                     <span className="px-2 py-0.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[0.6875rem] font-black">Lot {lot.lot_number}</span>
                     {lot.lot_title}
                   </h3>
-                  <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">{entreprisesLot.length} entreprise(s) consultée(s) sur ce lot</p>
+                  <div className="flex items-center justify-between gap-3 mt-0.5">
+                    <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{entreprisesLot.length} entreprise(s) consultée(s) sur ce lot</p>
+                    <button
+                      onClick={() => genererPVOuverture(lots, consultation, projectName, settings ?? {}, lot.id)}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-[0.6875rem] font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                    >
+                      <IconDownload size={12} /> PV d'ouverture
+                    </button>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[600px]">
@@ -944,6 +989,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
                         <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Motif NC</th>
+                        <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Options / variantes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[var(--tblr-border)]">
@@ -960,8 +1006,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                           }
                           update({ ...consultation, offres: newOffres });
                         };
+                        const cleLignes = `${lot.id}:${entreprise.id}`;
+                        const negOffre = trouverNegociation(consultation.negociations, lot.id, entreprise.id);
+                        const nbLignes = negOffre?.lignes.length ?? 0;
                         return (
-                          <tr key={entreprise.id} className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', !offre.conforme && 'bg-red-50/50 dark:bg-red-900/10')}>
+                          <React.Fragment key={entreprise.id}>
+                          <tr className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', !offre.conforme && 'bg-red-50/50 dark:bg-red-900/10')}>
                             <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise.nom}</td>
                             <td className="px-4 py-3">
                               <input type="number" min={0} step={100}
@@ -990,11 +1040,30 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                                   onChange={e => updateOffre({ motif_nc: e.target.value })} />
                               )}
                             </td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                type="button" aria-expanded={lignesOuvertes.has(cleLignes)} onClick={() => basculerLignes(cleLignes)}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
+                              >
+                                <IconAdjustments size={12} /> {nbLignes > 0 ? `${nbLignes} ligne${nbLignes > 1 ? 's' : ''}` : 'Ajouter'}
+                              </button>
+                            </td>
                           </tr>
+                          {lignesOuvertes.has(cleLignes) && (
+                            <tr className="bg-[var(--tblr-surface-2)]/40">
+                              <td colSpan={6} className="px-4 py-3">
+                                <LignesOffreEditor
+                                  lotId={lot.id} entrepriseId={entreprise.id} negociations={consultation.negociations}
+                                  onChange={negociations => update({ ...consultation, negociations })}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                         );
                       })}
                       {entreprisesLot.length === 0 && (
-                        <tr><td colSpan={5} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
+                        <tr><td colSpan={6} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1041,7 +1110,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                   <IconCheck size={13} /> Auto-remplir totaux
                 </button>
                 <button
-                  onClick={() => generateComparatifExcel(lots, consultation, projectName, settings ?? {})}
+                  onClick={() => generateComparatifExcel(lots, consultationCourante, projectName, settings ?? {})}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 transition"
                 >
                   <IconDownload size={13} /> Export Excel
@@ -1236,6 +1305,17 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
       )}
 
       {/* ── Phase 5 : Analyse & Attribution ──────────────────────────── */}
+      {phase === 'negociation' && (
+        <NegociationPhase
+          lots={lots}
+          consultation={{ ...consultation, entreprises: consultation.entreprises }}
+          projectName={projectName}
+          settings={settings ?? {}}
+          onPatch={patchNegociation}
+          onMotifNonConformite={marquerNonConforme}
+        />
+      )}
+
       {phase === 'analyse' && (
         <div className="space-y-6">
           {/* Bouton global RAO */}
@@ -1245,7 +1325,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
               <p className="text-[0.6875rem] text-[var(--tblr-muted)]">Génère un PDF comparatif pour tous les lots ou par lot</p>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => generateRAO(lots, consultation, projectName, settings ?? {})}
+              <button onClick={() => generateRAO(lots, consultationCourante, projectName, settings ?? {})}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 transition">
                 <IconDownload size={14} /> RAO Global
               </button>
@@ -1254,7 +1334,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
 
           {/* Par lot */}
           {lots.map(lot => {
-            const offresLot = consultation.offres.filter(o => o.lot_id === lot.id);
+            const offresLot = offresCourantes.filter(o => o.lot_id === lot.id);
             const offresConformes = offresLot.filter(o => o.conforme && o.montant_base > 0);
             const minMontant = offresConformes.length > 0 ? Math.min(...offresConformes.map(o => o.montant_base)) : 0;
             const attribution = consultation.attributions.find(a => a.lot_id === lot.id);
@@ -1282,7 +1362,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                       </span>
                     )}
                   </h3>
-                  <button onClick={() => generateRAO(lots, consultation, projectName, settings ?? {}, lot.id)}
+                  <button onClick={() => generateRAO(lots, consultationCourante, projectName, settings ?? {}, lot.id)}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 transition">
                     <IconDownload size={13} /> RAO Lot
                   </button>
@@ -1320,7 +1400,15 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                               ) : <span className="text-red-500 text-xs font-bold">NC</span>}
                             </td>
                             <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise?.nom || '—'}</td>
-                            <td className="px-4 py-3 text-right font-bold text-[var(--tblr-text)]">{fmt(offre.montant_base)}</td>
+                            <td className="px-4 py-3 text-right font-bold text-[var(--tblr-text)]">
+                              {fmt(offre.montant_base)}
+                              {(() => {
+                                const ouverture = consultation.offres.find(o => o.id === offre.id)?.montant_base;
+                                return ouverture != null && ouverture !== offre.montant_base
+                                  ? <span className="block text-[0.6875rem] font-normal text-[var(--tblr-muted)] line-through">{fmt(ouverture)}</span>
+                                  : null;
+                              })()}
+                            </td>
                             <td className="px-4 py-3 text-right text-[var(--tblr-muted)] text-xs">
                               {offre.conforme && pctMinDisant !== '—' ? `+${pctMinDisant}%` : '—'}
                             </td>
@@ -1340,7 +1428,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                                 <button onClick={() => {
                                   const newAttrs = consultation.attributions.filter(a => a.lot_id !== lot.id);
                                   if (!isAttribue) {
-                                    newAttrs.push({ lot_id: lot.id, entreprise_id: offre.entreprise_id, montant: offre.montant_base });
+                                    newAttrs.push({ lot_id: lot.id, entreprise_id: offre.entreprise_id, montant: montantAttribution(offre, consultation.negociations) });
                                   }
                                   update({ ...consultation, attributions: newAttrs });
                                 }} className={cn(
