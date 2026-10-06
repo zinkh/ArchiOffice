@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS inspiration_boards (
 );
 CREATE INDEX IF NOT EXISTS idx_inspiration_boards_tenant_project
   ON inspiration_boards(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_boards_project
+  ON inspiration_boards(project_id);
 
 CREATE TABLE IF NOT EXISTS inspiration_items (
   id TEXT PRIMARY KEY,
@@ -37,6 +39,8 @@ CREATE INDEX IF NOT EXISTS idx_inspiration_items_tenant_project
   ON inspiration_items(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_inspiration_items_tenant_phase
   ON inspiration_items(tenant_id, project_id, phase);
+CREATE INDEX IF NOT EXISTS idx_inspiration_items_project
+  ON inspiration_items(project_id);
 
 CREATE TABLE IF NOT EXISTS inspiration_board_items (
   id TEXT PRIMARY KEY,
@@ -58,6 +62,10 @@ CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_tenant_project
   ON inspiration_board_items(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_board
   ON inspiration_board_items(board_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_project
+  ON inspiration_board_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_item
+  ON inspiration_board_items(item_id);
 
 ALTER TABLE inspiration_boards ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inspiration_items ENABLE ROW LEVEL SECURITY;
