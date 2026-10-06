@@ -81,6 +81,34 @@ self.addEventListener('notificationclick', (event) => {
 });
 
 
+// Capability handshake used by the client to detect an older active worker
+// that predates Android Web Share Target support. This matters with
+// registerType="prompt": a user can otherwise keep the old worker alive for
+// days while Android already exposes ArchiOffice in the system share sheet.
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'ARCHIOFFICE_SHARE_CAPABILITY') {
+    if (event.ports && event.ports[0]) {
+      event.ports[0].postMessage({ shareTarget: true, version: 1 });
+    }
+    return;
+  }
+
+  // Explicitly support the same activation message used by vite-plugin-pwa,
+  // so the client can promote a share-capable worker even if the generated
+  // Workbox wrapper changes its own prompt-mode listener.
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
+self.addEventListener('activate', (event) => {
+  // Once the share-capable worker is promoted, make it control an already
+  // open standalone PWA immediately instead of requiring the user to kill
+  // and relaunch ArchiOffice before sharing again.
+  event.waitUntil(self.clients.claim());
+});
+
+
 // Réception native Android via Web Share Target API.
 //
 // Android POSTe les fichiers vers /share-target. Comme une navigation ne peut

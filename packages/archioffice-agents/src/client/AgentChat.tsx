@@ -20,7 +20,12 @@ interface AgentChatContextValue {
    * the user can review/edit an AI-suggested message before sending it —
    * callers should never use this to auto-send on the user's behalf.
    */
-  openChat: (agentId?: string, draftMessage?: string) => void;
+  openChat: (
+    agentId?: string,
+    draftMessage?: string,
+    documents?: { id: string; name: string }[],
+    projectId?: string,
+  ) => void;
   closeChat: () => void;
   /** Re-fetches the proactive "next steps" suggestions shown on the floating badge. */
   refreshCopilotSuggestions: () => void;
@@ -314,6 +319,10 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
   const [attachedDocs, setAttachedDocs] = useState<{ id: string; name: string }[]>([]);
+  // Optional project context supplied by external entry points such as the
+  // Android Web Share Target. On regular in-app opens, the route-derived
+  // project remains authoritative.
+  const [contextProjectId, setContextProjectId] = useState<string | null>(null);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
@@ -432,12 +441,25 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     if (isOpen && activeAgentId) loadConversation(activeAgentId);
   }, [isOpen, activeAgentId, loadConversation]);
 
-  const openChat = useCallback((agentId?: string, draftMessage?: string): void => {
+  const openChat = useCallback((
+    agentId?: string,
+    draftMessage?: string,
+    documents?: { id: string; name: string }[],
+    projectId?: string,
+  ): void => {
     if (agentId) {
       setActiveAgentId(agentId);
       if (!draftMessage) setInput(loadDraft(agentId));
     }
     if (draftMessage) setInput(draftMessage);
+    if (documents?.length) {
+      setAttachedDocs(prev => {
+        const byId = new Map(prev.map(doc => [doc.id, doc]));
+        documents.forEach(doc => byId.set(doc.id, doc));
+        return Array.from(byId.values());
+      });
+    }
+    setContextProjectId(projectId || null);
     setIsOpen(true);
     if (draftMessage) setTimeout(() => textareaRef.current?.focus(), 50);
   }, []);
@@ -446,6 +468,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setIsOpen(false);
     setAgentSelectorOpen(false);
     setExpanded(false);
+    setContextProjectId(null);
     // Une réponse ne continue pas à se lire derrière un panneau refermé.
     speech.stop();
   }, [speech]);
@@ -497,7 +520,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     try {
       const res = await apiFetch(`/api/agents/${activeAgentId}/chat`, {
         method: 'POST',
-        body: JSON.stringify({ message: rawInput, document_ids: docsToSend.map(d => d.id), active_project_id: activeProjectId ?? undefined }),
+        body: JSON.stringify({
+          message: rawInput,
+          document_ids: docsToSend.map(d => d.id),
+          active_project_id: contextProjectId ?? activeProjectId ?? undefined,
+        }),
         signal: controller.signal,
       });
       const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {

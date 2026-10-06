@@ -11,6 +11,72 @@ const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 // cached app shell indefinitely — the same class of "won't load" bug as a
 // stuck auth token, just at the service-worker layer.
 const DISMISS_SNOOZE_MS = 4 * 60 * 60 * 1000;
+const SHARE_CAPABILITY_TIMEOUT_MS = 700;
+
+function supportsAndroidShareTarget(worker: ServiceWorker): Promise<boolean> {
+  return new Promise(resolve => {
+    const channel = new MessageChannel();
+    let settled = false;
+    const finish = (supported: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      channel.port1.close();
+      resolve(supported);
+    };
+    const timer = window.setTimeout(() => finish(false), SHARE_CAPABILITY_TIMEOUT_MS);
+    channel.port1.onmessage = event => finish(Boolean(event.data?.shareTarget));
+
+    try {
+      worker.postMessage({ type: 'ARCHIOFFICE_SHARE_CAPABILITY' }, [channel.port2]);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+/**
+ * Web Share Target was added after the PWA had already been installed on
+ * users' phones. In prompt update mode an old active worker can survive even
+ * though Android has refreshed the manifest and now offers ArchiOffice in the
+ * share sheet. Detect that exact mismatch and promote only the share-capable
+ * worker automatically; ordinary app updates keep using the existing prompt.
+ */
+async function ensureAndroidShareTargetWorker(registration: ServiceWorkerRegistration): Promise<void> {
+  const active = registration.active || navigator.serviceWorker?.controller;
+  if (!active || await supportsAndroidShareTarget(active)) {
+    await registration.update();
+    return;
+  }
+
+  let reloadRequested = false;
+  const reloadOnControl = () => {
+    if (reloadRequested) return;
+    reloadRequested = true;
+    window.location.reload();
+  };
+  navigator.serviceWorker?.addEventListener('controllerchange', reloadOnControl, { once: true });
+
+  const promoteWaiting = () => {
+    registration.waiting?.postMessage({ type: 'SKIP_WAITING' });
+  };
+  const watchInstalling = () => {
+    const installing = registration.installing;
+    if (!installing) return;
+    const onStateChange = () => {
+      if (installing.state === 'installed') {
+        installing.removeEventListener('statechange', onStateChange);
+        promoteWaiting();
+      }
+    };
+    installing.addEventListener('statechange', onStateChange);
+  };
+
+  watchInstalling();
+  registration.addEventListener('updatefound', watchInstalling, { once: true });
+  await registration.update();
+  promoteWaiting();
+}
 
 export function UpdateBanner() {
   const { t } = useTranslation();
@@ -24,8 +90,12 @@ export function UpdateBanner() {
       if (!registration) return;
       // Check right away (a tab can sit open for days before the first
       // hourly check) and again whenever the tab regains focus, in addition
-      // to the hourly poll.
-      registration.update();
+      // to the hourly poll. The first check also repairs the specific
+      // pre-Web-Share worker mismatch on already-installed Android PWAs.
+      void ensureAndroidShareTargetWorker(registration).catch(() => {
+        // Update probing must never prevent the application from mounting.
+        registration.update();
+      });
       setInterval(() => {
         registration.update();
       }, UPDATE_CHECK_INTERVAL_MS);
