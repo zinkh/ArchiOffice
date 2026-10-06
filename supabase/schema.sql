@@ -551,6 +551,57 @@ CREATE TABLE IF NOT EXISTS plans (
 );
 CREATE INDEX IF NOT EXISTS idx_plans_tenant_project ON plans(tenant_id, project_id);
 
+CREATE TABLE IF NOT EXISTS inspiration_boards (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT,
+  phase TEXT NOT NULL DEFAULT 'ESQ',
+  format TEXT NOT NULL DEFAULT 'A3L',
+  layout TEXT NOT NULL DEFAULT 'grid',
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_inspiration_boards_tenant_project ON inspiration_boards(tenant_id, project_id);
+
+CREATE TABLE IF NOT EXISTS inspiration_items (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  title TEXT,
+  caption TEXT,
+  phase TEXT NOT NULL DEFAULT 'ESQ',
+  category TEXT NOT NULL DEFAULT 'architecture',
+  file_url TEXT,
+  source_url TEXT,
+  storage_backend TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT inspiration_item_has_source CHECK (file_url IS NOT NULL OR source_url IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS idx_inspiration_items_tenant_project ON inspiration_items(tenant_id, project_id);
+
+CREATE TABLE IF NOT EXISTS inspiration_board_items (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  board_id TEXT REFERENCES inspiration_boards(id) ON DELETE CASCADE NOT NULL,
+  item_id TEXT REFERENCES inspiration_items(id) ON DELETE CASCADE NOT NULL,
+  position_x NUMERIC,
+  position_y NUMERIC,
+  width NUMERIC,
+  height NUMERIC,
+  rotation NUMERIC NOT NULL DEFAULT 0,
+  z_index INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(board_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_tenant_project ON inspiration_board_items(tenant_id, project_id);
+
 CREATE TABLE IF NOT EXISTS reserves (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -771,6 +822,9 @@ ALTER TABLE document_versions    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE visas                ENABLE ROW LEVEL SECURITY;
 ALTER TABLE receptions           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE plans                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inspiration_boards   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inspiration_items    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inspiration_board_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reserves             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dpgf_items           ENABLE ROW LEVEL SECURITY;
 ALTER TABLE dpgf_versions        ENABLE ROW LEVEL SECURITY;
@@ -883,6 +937,12 @@ CREATE POLICY "tenant_isolation" ON visas
 CREATE POLICY "tenant_isolation" ON receptions
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON plans
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON inspiration_boards
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON inspiration_items
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON inspiration_board_items
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON reserves
   USING (tenant_id = my_tenant_id());
