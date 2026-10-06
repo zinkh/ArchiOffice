@@ -31,12 +31,12 @@ const GROUP_ICONS: Record<ProjectTabGroupId, React.ElementType> = {
 };
 
 /** Sigle de mission MOP accolé au nom de famille, là où une seule mission la compose. */
-const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'PRO', CONSULTATION: 'ACT' };
+const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'ESQ–PRO', CONSULTATION: 'ACT' };
 
 /**
  * Barre d'onglets de la fiche affaire : au plus sept familles au premier
- * niveau, et les missions de chantier (VISA, DET, RDT, AOR) en second niveau,
- * sous « Chantier », plutôt que dix onglets alignés.
+ * niveau. Les inspirations et le PRO vivent sous « Études » ; les missions de
+ * chantier (VISA, DET, RDT, AOR) vivent sous « Chantier ».
  */
 export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabState }: ProjectTabBarProps) {
   const { t } = useTranslation();

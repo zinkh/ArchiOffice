@@ -18,11 +18,14 @@ const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
   siteReport: 'Compte-rendu de chantier',
   proposal: 'Proposition',
   tender: 'Appel d\'offres',
+  inspirationBoard: 'Planche d\'inspiration',
+  inspirationItem: 'Image d\'inspiration',
+  inspirationBoardItem: 'Composition de planche',
 };
 
 /**
  * Écritures « suivi de chantier » en attente d'envoi (src/lib/offlineQueue.ts)
- * — réunions, réserves OPR/GPA, observations et leurs photos. Toujours
+ * — réunions, réserves OPR/GPA, observations, inspirations et leurs photos. Toujours
  * visible, y compris sur téléphone : c'est précisément là que ce badge sert,
  * sur le chantier plutôt qu'au bureau (contrairement à `<SyncStatus />`,
  * réservée aux grands écrans).

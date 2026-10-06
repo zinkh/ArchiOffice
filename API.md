@@ -123,6 +123,11 @@ CCTP is not a separate resource — it's the `cctpDescription`/`cctpOnly` fields
 - `GET/POST/PUT/DELETE /api/documents(/:id)` (file upload), `GET /api/documents/:id/versions`, `PATCH /api/documents/:id/statut`, `GET/POST /api/documents/:id/diffusions`, `PATCH /api/documents/:id/diffusions/:diffId/acknowledge`.
 - `GET/POST/DELETE /api/plans(/:id)` (file upload).
 
+### Inspiration boards
+- `GET/POST /api/inspiration-boards`, `PUT/DELETE /api/inspiration-boards/:id` — project moodboards and presentation settings.
+- `POST /api/inspiration-items`, `PUT/DELETE /api/inspiration-items/:id` — reusable inspiration images or source URLs.
+- `POST /api/inspiration-boards/:id/items`, `PUT/DELETE /api/inspiration-boards/:id/items/:itemId` — place or remove a library item on a board without duplicating the image.
+
 ### Storage
 - `GET /api/storage/signed-url?url=<reference>` — turns a stored file reference into a link valid for one hour. For a Supabase object it returns a signed Storage URL; for a file on the tenant's own space it returns an `/api/storage/external/<ticket>` URL on this same origin. Checks the caller's tenant owns the object (the `<tenantId>/` path prefix, or ownership of the storage connection) and answers `403` otherwise.
 - `GET /api/storage/external/:ticket` — serves a file held on the tenant's own space. **No bearer token**: the signed ticket in the path authenticates, exactly as a Supabase signed URL does, because this URL is opened by `window.open()` or set as an `<img src>`. Honours `Range` and replays `206`. Redirects (`302`) to a short-lived provider link where the provider offers one (Dropbox), streams otherwise.

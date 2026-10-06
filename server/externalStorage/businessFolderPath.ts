@@ -45,6 +45,17 @@ export function buildPlanFolderPath(project: FolderProject | null | undefined): 
   return [projectFolderName(project), 'Plans'];
 }
 
+/** Les références visuelles suivent la phase de conception, dans un
+ *  sous-dossier Inspiration pour ne pas les mélanger aux pièces contractuelles. */
+export function buildInspirationFolderPath(
+  project: FolderProject | null | undefined,
+  phase: string | null | undefined,
+): string[] {
+  const phaseSegment = sanitizeFolderSegment(phase || 'ESQ');
+  if (!project) return [SANS_AFFAIRE, phaseSegment, 'Inspiration'];
+  return [projectFolderName(project), phaseSegment, 'Inspiration'];
+}
+
 /** Un visa non plus, mais « VISA » est déjà l'une des phases connues : le visa
  *  tombe donc naturellement dans le même dossier que les documents de cette
  *  phase, plutôt que d'en ouvrir un treizième. */
