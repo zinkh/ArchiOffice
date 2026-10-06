@@ -2,7 +2,7 @@
 --
 -- Une notice est identifiée par l'affaire, son type et sa phase. Les notices
 -- architecturales sont ainsi conservées séparément en ESQ / APS / APD / PC /
--- PRO au lieu d'écraser le texte de la phase précédente. Les notices
+-- PRO / DCE au lieu d'écraser le texte de la phase précédente. Les notices
 -- accessibilité et sécurité sont initialement portées par la phase PC.
 -- Voir server/routes/projectNotices.ts et
 -- src/components/projectDetail/ProjectNoticesTab.tsx.
