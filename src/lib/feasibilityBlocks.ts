@@ -239,3 +239,16 @@ export function feasibilityCoverFields(p: ProposalLike): Array<[string, string]>
   ];
   return rows.filter(([, v]) => String(v).trim());
 }
+
+// Le texte rédigé (souvent par l'IA) porte du balisage Markdown et des guillemets
+// droits : *texte* et "texte" deviennent des guillemets français, **texte** perd
+// son balisage. Les espaces des guillemets sont insécables pour ne jamais être
+// séparés du mot qu'ils entourent.
+const NBSP = '\u00A0';
+export function typographie(text: string): string {
+  return text
+    .replace(/\*\*(\S(?:[^*\n]*?\S)?)\*\*/g, '$1')
+    .replace(/(^|[^*\w])\*(\S(?:[^*\n]*?\S)?)\*(?![*\w])/g, `$1«${NBSP}$2${NBSP}»`)
+    .replace(/"([^"\n]+)"/g, `«${NBSP}$1${NBSP}»`)
+    .replace(/\u202F/g, ' ');
+}

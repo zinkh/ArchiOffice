@@ -7,7 +7,7 @@ import type { Proposal } from '../types';
 
 type ProposalForExport = Partial<Proposal>;
 import type { AgencySettings } from './proposalExport';
-import { feasibilityCoverFields, feasibilityFilename, type FeasibilitySection } from './feasibilityBlocks';
+import { feasibilityCoverFields, feasibilityFilename, typographie, type FeasibilitySection } from './feasibilityBlocks';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { compressImage, type CompressedImage } from './imageCompression';
 import { resolveSignedUrl } from './signedStorageUrl';
@@ -16,6 +16,8 @@ const DOC_TITLE = 'Étude de faisabilité';
 const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
 const GRIS_DOUX: [number, number, number] = [107, 114, 128];
 const GRIS_FILET: [number, number, number] = [209, 213, 219];
+
+const BULLET_RE = /^\s*[-*•]\s+/;
 
 async function loadIllustration(fileUrl: string): Promise<CompressedImage | null> {
   try {
@@ -57,7 +59,7 @@ export async function exportFeasibilityPdf(p: ProposalForExport, sections: Feasi
   y += 8;
   pdf.setDrawColor(...GRIS_FILET); pdf.setLineWidth(0.4); pdf.line(margin, y, pageW - margin, y);
   y += 8;
-  const fields = feasibilityCoverFields(p);
+  const fields = feasibilityCoverFields(p).map(([k, v]) => [k, typographie(v)] as [string, string]);
   font('bold', 9);
   const labelW = Math.max(0, ...fields.map(([k]) => pdf.getTextWidth(`${k} :`))) + 4;
   for (const [k, v] of fields) {
@@ -97,15 +99,26 @@ export async function exportFeasibilityPdf(p: ProposalForExport, sections: Feasi
     const paragraphs = (s.content || '').split(/\n/);
     for (const para of paragraphs) {
       if (!para.trim()) { y += 2.5; continue; }
-      const isBullet = /^\s*-\s+/.test(para);
-      const text = isBullet ? para.replace(/^\s*-\s+/, '') : para;
+      const isBullet = BULLET_RE.test(para);
+      const text = typographie(isBullet ? para.replace(BULLET_RE, '') : para);
       const indent = isBullet ? 5 : 0;
-      const wrapped = pdf.splitTextToSize(text, contentW - indent) as string[];
+      const lineW = contentW - indent;
+      const wrapped = pdf.splitTextToSize(text, lineW) as string[];
       for (const [li, line] of wrapped.entries()) {
         ensure(5);
         font('normal', 10);
         if (isBullet && li === 0) pdf.text('•', margin + 1, y);
-        pdf.text(line, margin + indent, y);
+        // Texte justifié : toutes les lignes sauf la dernière du paragraphe.
+        const gaps = line.split(' ').length - 1;
+        const justify = li < wrapped.length - 1 && gaps > 0;
+        if (justify) {
+          const spacing = ((lineW - pdf.getTextWidth(line)) / gaps) * pdf.internal.scaleFactor;
+          (pdf.internal as any).write(`${spacing.toFixed(3)} Tw`);
+          pdf.text(line, margin + indent, y);
+          (pdf.internal as any).write('0 Tw');
+        } else {
+          pdf.text(line, margin + indent, y);
+        }
         y += 4.8;
       }
       y += 1.2;
@@ -142,24 +155,41 @@ const DOCX_IMAGE_W = 642;
 export async function exportFeasibilityDocx(p: ProposalForExport, sections: FeasibilitySection[], settings: AgencySettings): Promise<void> {
   const {
     Document, Packer, Paragraph, TextRun, ImageRun, Header, Footer, PageNumber, AlignmentType, HeadingLevel, BorderStyle,
+    Table, TableRow, TableCell, WidthType, VerticalAlign,
   } = await import('docx');
 
-  const headerChildren: InstanceType<typeof Paragraph>[] = [];
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92) : null;
-  if (logo) {
-    const h = 40;
-    headerChildren.push(new Paragraph({
-      children: [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
-    }));
-  }
-  headerChildren.push(
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
-    new Paragraph({
-      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } },
-      spacing: { after: 120 },
-      children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
+  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 1, 'image/png') : null;
+  const sansBordure = { style: BorderStyle.NONE, size: 0, color: 'FFFFFF' };
+  const bordures = { top: sansBordure, bottom: sansBordure, left: sansBordure, right: sansBordure };
+  const coordonnees = [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  ');
+  const logoH = 40;
+  const logoW = logo ? Math.round((logo.w / logo.h) * logoH) : 0;
+  // Logo à gauche, nom et coordonnées à côté, comme dans l'export PDF.
+  const headerChildren: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [
+    new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: { ...bordures, insideHorizontal: sansBordure, insideVertical: sansBordure },
+      rows: [new TableRow({
+        children: [
+          ...(logo ? [new TableCell({
+            width: { size: (logoW + 20) * 15, type: WidthType.DXA },
+            borders: bordures,
+            verticalAlign: VerticalAlign.CENTER,
+            children: [new Paragraph({ children: [new ImageRun({ type: 'png', data: logo.buffer, transformation: { width: logoW, height: logoH } })] })],
+          })] : []),
+          new TableCell({
+            borders: bordures,
+            verticalAlign: VerticalAlign.CENTER,
+            children: [
+              new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 22, color: '111827' })] }),
+              new Paragraph({ children: [new TextRun({ text: coordonnees, size: 15, color: '6B7280' })] }),
+            ],
+          }),
+        ],
+      })],
     }),
-  );
+    new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } }, spacing: { after: 120 }, children: [] }),
+  ];
 
   const footerChildren = [
     new Paragraph({
@@ -181,7 +211,8 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
     new Paragraph({ heading: HeadingLevel.TITLE, spacing: { before: 600, after: 120 }, children: [new TextRun({ text: DOC_TITLE, bold: true, size: 44, color: '111827' })] }),
   ];
   if (p.title) body.push(new Paragraph({ spacing: { after: 360 }, children: [new TextRun({ text: p.title, size: 26, color: '6B7280' })] }));
-  for (const [k, v] of feasibilityCoverFields(p)) {
+  for (const [k, v0] of feasibilityCoverFields(p)) {
+    const v = typographie(v0);
     body.push(new Paragraph({ spacing: { after: 60 }, children: [
       new TextRun({ text: `${k} : `, bold: true, size: 19, color: '6B7280' }),
       new TextRun({ text: v, size: 20, color: '111827' }),
@@ -199,10 +230,11 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
     }));
     for (const para of (s.content || '').split(/\n/)) {
       if (!para.trim()) continue;
-      const isBullet = /^\s*-\s+/.test(para);
-      const text = isBullet ? para.replace(/^\s*-\s+/, '') : para;
+      const isBullet = BULLET_RE.test(para);
+      const text = typographie(isBullet ? para.replace(BULLET_RE, '') : para);
       body.push(new Paragraph({
-        spacing: { after: 100 },
+        alignment: AlignmentType.JUSTIFIED,
+        spacing: { after: 100, line: 276 },
         ...(isBullet ? { bullet: { level: 0 } } : {}),
         children: [new TextRun({ text, size: 20, color: '111827' })],
       }));
@@ -219,8 +251,17 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
   }
 
   const doc = new Document({
+    // Police et styles du cabinet : sans cela Word retombe sur Times New Roman
+    // et sur les styles de titre bleus par défaut.
+    styles: {
+      default: {
+        document: { run: { font: 'Arial', size: 20, color: '111827' } },
+        title: { run: { font: 'Arial', bold: true, size: 44, color: '111827' } },
+        heading1: { run: { font: 'Arial', bold: true, size: 28, color: '111827' } },
+      },
+    },
     sections: [{
-      properties: {},
+      properties: { page: { margin: { top: 1700, bottom: 1300, left: 1020, right: 1020, header: 567, footer: 567 } } },
       headers: { default: new Header({ children: headerChildren }) },
       footers: { default: new Footer({ children: footerChildren }) },
       children: body,
