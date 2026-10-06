@@ -69,6 +69,39 @@ export function registerInspirationRoutes(
     return data as any;
   };
 
+  const ensurePlacement = async (
+    tenantId: string,
+    projectId: string,
+    boardId: string,
+    itemId: string,
+    requestedId?: string | null,
+    zIndex = 0,
+  ) => {
+    const { data: existing } = await supabaseAdmin.from('inspiration_board_items')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .eq('board_id', boardId)
+      .eq('item_id', itemId)
+      .maybeSingle();
+    if (existing) return existing;
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabaseAdmin.from('inspiration_board_items')
+      .insert({
+        id: requestedId || crypto.randomUUID(),
+        tenant_id: tenantId,
+        project_id: projectId,
+        board_id: boardId,
+        item_id: itemId,
+        z_index: zIndex,
+        created_at: now,
+        updated_at: now,
+      })
+      .select().single();
+    if (error) throw error;
+    return data;
+  };
+
   app.get('/api/inspiration-boards', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -127,8 +160,13 @@ export function registerInspirationRoutes(
         created_at: req.body?.created_at || now,
         updated_at: now,
       };
+      const existing = await loadBoard(row.id, tenantId);
+      if (existing) {
+        if (existing.project_id !== projectId) return res.status(409).json({ error: 'Identifiant de planche déjà utilisé.' });
+        return res.status(200).json(existing);
+      }
       const { data, error } = await supabaseAdmin.from('inspiration_boards')
-        .upsert(row, { onConflict: 'id' }).select().single();
+        .insert(row).select().single();
       if (error) throw error;
       res.status(201).json(data);
     } catch (e: any) {
@@ -195,12 +233,30 @@ export function registerInspirationRoutes(
         }
       }
 
+      const id = cleanText(body.id, 100) || crypto.randomUUID();
+      const existingItem = await loadItem(id, tenantId);
+      if (existingItem) {
+        if (existingItem.project_id !== projectId) {
+          return res.status(409).json({ error: 'Identifiant d’inspiration déjà utilisé.' });
+        }
+        const placement = boardId
+          ? await ensurePlacement(
+              tenantId,
+              projectId,
+              boardId,
+              id,
+              cleanText(body.placement_id, 100),
+              Number(body.z_index || 0),
+            )
+          : null;
+        return res.status(200).json({ item: existingItem, placement });
+      }
+
       const sourceUrl = cleanText(body.source_url, 3000);
       if (!req.file && !sourceUrl) {
         return res.status(400).json({ error: 'Une image ou une URL source est requise.' });
       }
 
-      const id = cleanText(body.id, 100) || crypto.randomUUID();
       const phase = phaseOf(body.phase);
       let fileUrl: string | null = null;
       let storageBackend: string | null = null;
@@ -233,26 +289,24 @@ export function registerInspirationRoutes(
         updated_at: now,
       };
       const { data: item, error } = await supabaseAdmin.from('inspiration_items')
-        .upsert(row, { onConflict: 'id' }).select().single();
-      if (error) throw error;
-
-      let placement: any = null;
-      if (boardId) {
-        const placementRow = {
-          id: cleanText(body.placement_id, 100) || crypto.randomUUID(),
-          tenant_id: tenantId,
-          project_id: projectId,
-          board_id: boardId,
-          item_id: id,
-          z_index: Number(body.z_index || 0),
-          created_at: now,
-          updated_at: now,
-        };
-        const result = await supabaseAdmin.from('inspiration_board_items')
-          .upsert(placementRow, { onConflict: 'board_id,item_id' }).select().single();
-        if (result.error) throw result.error;
-        placement = result.data;
+        .insert(row).select().single();
+      if (error) {
+        if (isOwnStorageRef(fileUrl, 'documents')) {
+          removeBusinessFile(tenantId, 'documents', fileUrl as string).catch(() => {});
+        }
+        throw error;
       }
+
+      const placement = boardId
+        ? await ensurePlacement(
+            tenantId,
+            projectId,
+            boardId,
+            id,
+            cleanText(body.placement_id, 100),
+            Number(body.z_index || 0),
+          )
+        : null;
 
       res.status(201).json({ item, placement });
     } catch (e: any) {
@@ -313,20 +367,14 @@ export function registerInspirationRoutes(
         return res.status(400).json({ error: 'Planche ou inspiration incompatible.' });
       }
 
-      const now = new Date().toISOString();
-      const row = {
-        id: cleanText(req.body?.id, 100) || crypto.randomUUID(),
-        tenant_id: tenantId,
-        project_id: board.project_id,
-        board_id: board.id,
-        item_id: item.id,
-        z_index: Number(req.body?.z_index || 0),
-        created_at: now,
-        updated_at: now,
-      };
-      const { data, error } = await supabaseAdmin.from('inspiration_board_items')
-        .upsert(row, { onConflict: 'board_id,item_id' }).select().single();
-      if (error) throw error;
+      const data = await ensurePlacement(
+        tenantId,
+        board.project_id,
+        board.id,
+        item.id,
+        cleanText(req.body?.id, 100),
+        Number(req.body?.z_index || 0),
+      );
       res.status(201).json(data);
     } catch (e: any) {
       console.error('[POST /api/inspiration-boards/:id/items]', e);
