@@ -11,7 +11,7 @@ import {
 
 describe('project notices', () => {
   it('keeps one architectural outline for every study phase', () => {
-    expect(ARCHITECTURAL_NOTICE_PHASES).toEqual(['ESQ', 'APS', 'APD', 'PC', 'PRO']);
+    expect(ARCHITECTURAL_NOTICE_PHASES).toEqual(['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE']);
     for (const phase of ARCHITECTURAL_NOTICE_PHASES) {
       const outline = projectNoticeOutline('architectural', phase);
       expect(outline.length).toBeGreaterThanOrEqual(8);
