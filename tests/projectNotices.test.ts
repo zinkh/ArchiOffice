@@ -45,6 +45,13 @@ describe('Notices de l’opération', () => {
     expect(list.status).toBe(200);
     expect(list.body).toHaveLength(2);
     expect(list.body.map((n: any) => n.phase).sort()).toEqual(['APD', 'APS']);
+
+    const controls = await request(app).get('/api/projects/notice-1/phase-controls?to=APD').set(authHeader(token));
+    expect(controls.status).toBe(200);
+    const noticeControl = controls.body.controls.find((control: any) => control.rule.id === 'notice');
+    expect(noticeControl?.candidates?.some((candidate: any) =>
+      String(candidate.id).startsWith('notice:') && /notice sommaire/i.test(candidate.name)
+    )).toBe(true);
   });
 
   it('met à jour une notice existante au lieu de la dupliquer', async () => {
