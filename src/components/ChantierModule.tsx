@@ -739,7 +739,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   <Section id="intervenants" title="Présence des intervenants" icon={IconUsers}>
                     {(project.stakeholders_list || []).length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">
-                        Aucun intervenant renseigné — ajoutez le groupement (MOA, AMO, MOE, CT, CSPS...) depuis la fiche projet.
+                        Aucun intervenant renseigné — ajoutez le groupement (MOA, AMO, MOE, CT, CSPS...) depuis l'onglet Infos de l'affaire.
                       </p>
                     )}
                     <div className="overflow-x-auto">

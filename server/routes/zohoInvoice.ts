@@ -95,9 +95,9 @@ async function getOrCreateZohoItem(apiBase: string, headers: any, name: string, 
  * elle-même : `item_id` fixe l'article facturé, il ne fige pas son prix.
  */
 async function buildZohoLineItemsWithArticles(apiBase: string, headers: any, inv: any, affaire: ZohoAffaireInfo): Promise<any[]> {
-  const lines = zohoLineItems(inv);
+  const lines = zohoLineItems(inv, affaire);
   return Promise.all(lines.map(async (line) => {
-    const { name, description } = zohoItemIdentity(line.description, affaire);
+    const { name, description } = zohoItemIdentity(line.name, affaire);
     const item_id = await getOrCreateZohoItem(apiBase, headers, name, description, line.rate);
     return item_id ? { ...line, item_id } : line;
   }));

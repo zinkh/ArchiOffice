@@ -52,7 +52,7 @@ import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offlinePrefetch';
 import { db } from '../db';
-import type { Project, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
+import type { Project, ProjectStakeholder, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { RESERVE_STATUSES, reserveStatusKey } from '../components/pro/reserveShared';
 import { useUser } from '../UserContext';
@@ -186,6 +186,26 @@ export default function ProjectDetail() {
     if (project?.id && project.name) setProjectTabInfo(project.id, { name: project.name, code: project.project_code || project.reference || undefined });
   }, [project?.id, project?.name, project?.project_code, project?.reference]);
   const { toast, showToast } = useToastWithUndo();
+
+  // Les intervenants s'enregistrent par leur propre route : l'enregistrement
+  // automatique de la fiche n'envoie jamais ces listes. La liste est mise à
+  // jour dans la fiche ET dans sa dernière version enregistrée, sinon la fiche
+  // paraîtrait modifiée et repartirait en écriture pour rien.
+  const handleSaveStakeholders = async (list: { id?: string; role: string; name: string; contact_id: string | null }[]) => {
+    if (!project) return;
+    try {
+      const res = await apiFetch<{ stakeholders: ProjectStakeholder[] }>(`/api/projects/${project.id}/stakeholders`, {
+        method: 'PUT', body: JSON.stringify({ stakeholders: list }),
+      });
+      const apply = (p: Project | null) => (p ? { ...p, stakeholders_list: res.stakeholders } : p);
+      setProject(apply);
+      setSavedProject(apply);
+      showToast(t('project_overview_stakeholders_saved'));
+    } catch (err: any) {
+      showToast(err?.error || err?.message || t('project_overview_stakeholders_save_failed'), 'error', { duration: 6000 });
+      throw err;
+    }
+  };
   const undoableDelete = useUndoableDelete(showToast);
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
   // Suppression définitive (fichiers, visas, réserves...) : confirmée dans une
@@ -1896,6 +1916,8 @@ export default function ProjectDetail() {
             phaseHistory={phaseHistory}
             projectActivity={projectActivity}
             projectMembers={namedMembers}
+            contacts={contacts}
+            onSaveStakeholders={handleSaveStakeholders}
             permits={permits}
             milestones={milestones}
             onOpenFullEditor={() => setShowFullEditor(true)}
