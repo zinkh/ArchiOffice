@@ -19,7 +19,7 @@ export const PROJECT_NOTICE_KINDS: readonly ProjectNoticeKind[] = [
   'architectural', 'accessibility', 'security',
 ];
 
-export const ARCHITECTURAL_NOTICE_PHASES: readonly DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO'];
+export const ARCHITECTURAL_NOTICE_PHASES: readonly DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE'];
 
 export const PROJECT_NOTICE_PHASES: readonly string[] = [
   'ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR',
@@ -81,6 +81,18 @@ const ARCHITECTURAL_OUTLINES: Record<string, readonly string[]> = {
     'Accessibilité et sécurité',
     'Performance environnementale',
     'Points de vigilance pour le DCE et l’exécution',
+  ],
+  DCE: [
+    'Objet et synthèse du dossier de consultation',
+    'Dispositions architecturales définitives',
+    'Organisation fonctionnelle et exigences d’usage',
+    'Enveloppe, façades et toitures',
+    'Matériaux, finitions et niveaux de prestation',
+    'Principes structurels et interfaces entre lots',
+    'Coordination des lots techniques',
+    'Accessibilité et sécurité',
+    'Exigences environnementales et performances',
+    'Points de vigilance pour la consultation et l’exécution',
   ],
 };
 
