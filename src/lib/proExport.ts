@@ -1,7 +1,7 @@
 import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
 import type { AgencySettings } from './proposalExport';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, loadCotraitantLogos, tableauGris, TABLEAU_GRIS, type GroupementMember } from './pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE,
 } from './xlsxLetterhead';
@@ -99,13 +99,11 @@ function flattenDPGF(lots: Lot[]): Array<{
 
 export async function exportDPGFtoPDF(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
-  cotraitants: GroupementMember[] = [],
 ) {
-  const [{ default: jsPDF }, { default: autoTable }, logo, partnerLogos] = await Promise.all([
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
     loadLogoDataUrl(settings.logoUrl),
-    loadCotraitantLogos(cotraitants),
   ]);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
@@ -113,7 +111,7 @@ export async function exportDPGFtoPDF(
     title: 'DPGF — Décomposition du Prix Global et Forfaitaire',
     subtitle: projectName,
     reference: `v${dpgf.version}${classement}`,
-    margin: 14, logo, partnerLogos,
+    margin: 14, logo,
   };
   const startY = drawAgencyHeader(doc, settings, letterhead);
 
@@ -180,17 +178,14 @@ export async function exportDPGFtoPDF(
 
 // ── Estimation PDF ────────────────────────────────────────────────────────────
 
-export async function exportEstimationtoPDF(
-  dpgf: DPGF, projectName?: string, settings: AgencySettings = {}, cotraitants: GroupementMember[] = [],
-) {
-  const [{ default: jsPDF }, { default: autoTable }, logo, partnerLogos] = await Promise.all([
+export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}) {
+  const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
     loadLogoDataUrl(settings.logoUrl),
-    loadCotraitantLogos(cotraitants),
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const letterhead = { title: 'ESTIMATION — Récapitulatif par lot', subtitle: projectName, margin: 14, logo, partnerLogos };
+  const letterhead = { title: 'ESTIMATION — Récapitulatif par lot', subtitle: projectName, margin: 14, logo };
   const startY = drawAgencyHeader(doc, settings, letterhead);
 
   autoTable(doc, {

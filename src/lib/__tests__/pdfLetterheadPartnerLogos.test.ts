@@ -57,3 +57,34 @@ describe('loadCotraitantLogos', () => {
     spy.mockRestore();
   });
 });
+
+describe('groupement actif', () => {
+  const colonnes = [{ header: 'A', width: 20 }, { header: 'B', width: 20 }];
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  it("l'en-tête PDF reprend les logos du groupement actif, et une liste explicite vide les retire", async () => {
+    const { setActiveGroupementLogos } = await import('../pdfLetterhead');
+    setActiveGroupementLogos([logo(100, 100)]);
+    const pdf = fakePdf();
+    drawAgencyHeader(pdf, {}, { title: 'Doc' });
+    expect(pdf.addImage).toHaveBeenCalledTimes(1);
+    const pdf2 = fakePdf();
+    drawAgencyHeader(pdf2, {}, { title: 'Doc', partnerLogos: [] });
+    expect(pdf2.addImage).not.toHaveBeenCalled();
+    setActiveGroupementLogos([]);
+  });
+
+  it('la feuille Excel réserve des lignes et pose les logos du groupement', async () => {
+    const { ajouterFeuille, nouveauClasseur } = await import('../xlsxLetterhead');
+    const wb = await nouveauClasseur();
+    const sans = ajouterFeuille(wb, { nom: 'S', settings: {}, title: 'T', colonnes });
+    const avec = ajouterFeuille(wb, {
+      nom: 'A', settings: {}, title: 'T', colonnes,
+      partnerLogos: [{ dataUrl: png, format: 'PNG', width: 1, height: 1 }],
+    });
+    expect(avec.ws.getImages()).toHaveLength(1);
+    expect(sans.ws.getImages()).toHaveLength(0);
+    expect(avec.ws.pageSetup.printTitlesRow).not.toBe(sans.ws.pageSetup.printTitlesRow);
+    expect(avec.ws.getCell('A5').value).toBe('En groupement avec');
+  });
+});

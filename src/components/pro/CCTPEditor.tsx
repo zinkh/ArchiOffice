@@ -11,7 +11,6 @@ import {
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { hierarchyKey } from './hierarchyOps';
-import { useGroupementMembers } from './GroupementContext';
 import { useSettings } from '../../hooks/useSettings';
 import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection } from '../../lib/batimentsArticles';
 import { exportCctpDocx, exportCctpPdf } from '../../lib/cctpExport';
@@ -55,7 +54,6 @@ type Selection = HierarchySelection;
 export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, notify }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
-  const cotraitants = useGroupementMembers();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
   const showTree = showTreeProp ?? localShowTree;
@@ -311,7 +309,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const exporter = async (format: 'pdf' | 'docx', batimentId?: string) => {
     const batiment = batimentsCctp.find(b => b.id === batimentId);
     try {
-      const opts = { projectName, settings: settings ?? {}, batiment, cotraitants };
+      const opts = { projectName, settings: settings ?? {}, batiment };
       await (format === 'pdf' ? exportCctpPdf(dpgf, opts) : exportCctpDocx(dpgf, opts));
     } catch (e) {
       notify?.(t('pro_cctp_export_failed', { error: e instanceof Error ? e.message : String(e) }), { type: 'error' });

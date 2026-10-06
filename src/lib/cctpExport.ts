@@ -8,7 +8,8 @@
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
 import type { Batiment, DPGF, Ligne } from '../types/dpgf';
 import type { AgencySettings } from './proposalExport';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl, loadCotraitantLogos, type GroupementMember } from './pdfLetterhead';
+import { partnerLogosParagraph } from './docxPartnerLogos';
+import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { batimentsDeLigne, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 
 export interface CctpBloc {
@@ -26,8 +27,6 @@ export interface CctpExportOptions {
   settings: AgencySettings;
   /** CCTP d'un seul bâtiment ; absent, l'opération complète. */
   batiment?: Batiment;
-  /** Cotraitants du groupement : leurs logos s'impriment sous l'en-tête du cabinet (PDF). */
-  cotraitants?: GroupementMember[];
 }
 
 const libelleBatiment = (b: Batiment) => (b.libelle ? `${b.code} ${b.libelle}` : b.code);
@@ -89,16 +88,14 @@ const GRIS_DOUX: [number, number, number] = [107, 114, 128];
 // ── PDF ──────────────────────────────────────────────────────────────────────
 
 export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise<void> {
-  const [{ default: JsPDF }, logo, partnerLogos] = await Promise.all([
-    import('jspdf'), loadLogoDataUrl(opts.settings.logoUrl), loadCotraitantLogos(opts.cotraitants),
-  ]);
+  const [{ default: JsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(opts.settings.logoUrl)]);
   const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
   const margin = 18;
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
   const largeur = pageW - margin * 2;
   const letterhead = {
-    title: cctpTitre(opts), subtitle: opts.projectName, reference: `v${doc.version}`, margin, logo, partnerLogos,
+    title: cctpTitre(opts), subtitle: opts.projectName, reference: `v${doc.version}`, margin, logo,
   };
   let y = drawAgencyHeader(pdf, opts.settings, letterhead) + 4;
   const basDePage = pageH - 18;
@@ -172,20 +169,8 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
       children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
     }),
   );
-  // Logos des cotraitants, en une ligne sous l'en-tête du cabinet.
-  const partnerLogos = await loadCotraitantLogos(opts.cotraitants);
-  if (partnerLogos.length > 0) {
-    const h = 32;
-    const images = partnerLogos.map(l => {
-      const bytes = Uint8Array.from(atob(l.dataUrl.split(',')[1]), c => c.charCodeAt(0));
-      const w = Math.min(Math.round((l.width / l.height) * h), 130);
-      return new ImageRun({ type: 'png', data: bytes, transformation: { width: w, height: Math.round((l.height / l.width) * w) } });
-    });
-    headerChildren.push(new Paragraph({
-      spacing: { after: 120 },
-      children: [new TextRun({ text: 'En groupement avec  ', size: 13, color: '6B7280' }), ...images.flatMap(img => [img, new TextRun({ text: '    ' })])],
-    }));
-  }
+  const bandeau = await partnerLogosParagraph();
+  if (bandeau) headerChildren.push(bandeau);
   const footerChildren = [
     new Paragraph({
       border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } },

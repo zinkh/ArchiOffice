@@ -28,9 +28,28 @@ export interface LetterheadOptions {
   /**
    * Logos des cotraitants du groupement, déjà chargés (voir loadCotraitantLogos).
    * Ils s'impriment en bandeau sous l'en-tête du cabinet, sur chaque page.
-   * Liste vide ou absente : l'en-tête reste celui du cabinet seul.
+   * Absent : le groupement actif de l'écran (voir resolvePartnerLogos) ;
+   * liste vide : l'en-tête reste celui du cabinet seul.
    */
   partnerLogos?: LogoImage[];
+}
+
+// ── Groupement actif ─────────────────────────────────────────────────────────
+// Les logos des cotraitants doivent figurer sur TOUS les documents d'une
+// affaire (PDF, Word, Excel) sans que chaque export ait à recevoir le
+// groupement : l'écran qui travaille sur une affaire déclare son groupement
+// (useActiveGroupement), et chaque en-tête le lit ici. Une option explicite
+// `partnerLogos` l'emporte (liste vide pour s'en passer). Hors d'une affaire,
+// ou côté serveur, le registre est vide : aucun logo.
+let groupementActif: LogoImage[] = [];
+
+export function setActiveGroupementLogos(logos: LogoImage[]): void {
+  groupementActif = logos;
+}
+
+/** Logos à imprimer : ceux passés explicitement, à défaut ceux du groupement actif. */
+export function resolvePartnerLogos(explicit?: LogoImage[]): LogoImage[] {
+  return explicit ?? groupementActif;
 }
 
 /** Hauteur du bandeau de logos des cotraitants, en mm. */
@@ -149,7 +168,7 @@ export function drawAgencyHeader(
   pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
 
-  const bandeauBas = drawPartnerLogos(pdf, opts.partnerLogos, margin, y + 3);
+  const bandeauBas = drawPartnerLogos(pdf, resolvePartnerLogos(opts.partnerLogos), margin, y + 3);
   if (bandeauBas !== null) {
     pdf.setLineWidth(0.25);
     pdf.line(margin, bandeauBas, pageW - margin, bandeauBas);
@@ -163,7 +182,7 @@ export function drawAgencyHeader(
  * sous l'en-tête du cabinet, hauteur commune, rapport conservé. Rend l'ordonnée
  * du bas du bandeau, ou null quand il n'y a rien à dessiner.
  */
-function drawPartnerLogos(
+export function drawPartnerLogos(
   pdf: any, logos: LogoImage[] | undefined, margin: number, top: number,
 ): number | null {
   if (!logos || logos.length === 0) return null;

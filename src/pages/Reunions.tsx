@@ -30,6 +30,7 @@ import {
 import { apiFetch } from '../lib/api';
 import { CollapsiblePanel, PanelCollapseButton, useListPanel, useExpandLabel } from '../components/CollapsiblePanel';
 import { useMediaQuery } from '../hooks/useMediaQuery';
+import { useProjectGroupement } from '../hooks/useActiveGroupement';
 import { queuedJsonRequest, queuedMultipartRequest, listPendingWrites, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { db } from '../db';
@@ -359,6 +360,8 @@ export default function Reunions() {
   // Active entity
   const [activeKind, setActiveKind] = useState<ParentKind>('project');
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
+  // Les logos des cotraitants de l'affaire figurent sur les comptes rendus exportés.
+  useProjectGroupement(activeKind === 'project' ? selectedProject?.id : null);
   const [selectedProposal, setSelectedProposal] = useState<Proposal | null>(null);
   const [selectedTender, setSelectedTender] = useState<Tender | null>(null);
 
