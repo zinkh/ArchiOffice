@@ -35,7 +35,7 @@ const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'ESQ�
 
 /**
  * Barre d'onglets de la fiche affaire : au plus sept familles au premier
- * niveau. Les inspirations et le PRO vivent sous « Études » ; les missions de
+ * niveau. Les inspirations, le PRO et les notices vivent sous « Études » ; les missions de
  * chantier (VISA, DET, RDT, AOR) vivent sous « Chantier ».
  */
 export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabState }: ProjectTabBarProps) {

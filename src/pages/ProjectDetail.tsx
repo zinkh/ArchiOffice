@@ -101,6 +101,7 @@ import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
+import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
 
 import { useTranslation } from 'react-i18next';
@@ -3281,6 +3282,9 @@ export default function ProjectDetail() {
             )}
             {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} />}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
+            {activeTab === 'NOTICES' && project && (
+              <ProjectNoticesTab project={project} phases={missionPhases} currentPhase={actualCurrentPhase} />
+            )}
             {activeTab === 'TACHES' && <ProjectTasksTab projectId={id!} projects={project ? [project] : []} />}
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">

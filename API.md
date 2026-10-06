@@ -84,6 +84,9 @@ Endpoints are grouped by resource. Most resources follow a standard `GET (list) 
 - `GET/PUT /api/projects/:projectId/act` — ACT-phase document.
 - `GET/POST/PUT/DELETE /api/projects/:projectId/det(/:crId)` — DET-phase site-visit records.
 - `POST /api/projects/:id/phase`, `GET /api/projects/:id/phase-history` — lifecycle phase transitions.
+- `GET /api/projects/:id/notices` — list persisted study/regulatory notices.
+- `PUT /api/projects/:id/notices/:kind/:phase` — save a notice draft.
+- `POST /api/projects/:id/notices/:kind/:phase/generate-ai` — generate/update an Enterprise AI draft.
 
 ### Tenders
 - `GET/POST/PUT/DELETE /api/tenders(/:id)`.

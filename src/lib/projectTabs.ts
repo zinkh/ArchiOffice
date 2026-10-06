@@ -1,12 +1,12 @@
-// Navigation de la fiche affaire : onze onglets regroupés par famille.
+// Navigation de la fiche affaire : douze onglets regroupés par famille.
 //
 // L'inspiration rejoint la famille Études sans ajouter une famille principale.
 // Les missions de chantier restent regroupées pour préserver une barre compacte.
 // Les identifiants historiques et leurs liens `?tab=` restent inchangés ; seul
-// INSPIRATION s'ajoute sous Études.
+// INSPIRATION et NOTICES s'ajoutent sous Études.
 
 export type ProjectTabId =
-  | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'PRO' | 'ACT'
+  | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'PRO' | 'NOTICES' | 'ACT'
   | 'VISA' | 'DET' | 'RDT' | 'AOR' | 'CORRESPONDANCE';
 
 export type ProjectTabGroupId =
@@ -22,7 +22,7 @@ export const PROJECT_TAB_GROUPS: readonly ProjectTabGroup[] = [
   // Hors du filtre chantier : des tâches existent dès la phase études.
   { id: 'TACHES', tabs: ['TACHES'] },
   { id: 'HONOS', tabs: ['HONOS'] },
-  { id: 'ETUDES', tabs: ['INSPIRATION', 'PRO'] },
+  { id: 'ETUDES', tabs: ['INSPIRATION', 'PRO', 'NOTICES'] },
   { id: 'CONSULTATION', tabs: ['ACT'] },
   { id: 'CHANTIER', tabs: ['VISA', 'DET', 'RDT', 'AOR'] },
   { id: 'CORRESPONDANCE', tabs: ['CORRESPONDANCE'] },

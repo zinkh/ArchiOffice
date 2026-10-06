@@ -5,10 +5,10 @@ import {
 } from '../projectTabs';
 
 describe('navigation de la fiche affaire', () => {
-  it('range chacun des onze onglets dans une seule famille', () => {
+  it('range chacun des douze onglets dans une seule famille', () => {
     const all = PROJECT_TAB_GROUPS.flatMap(g => g.tabs);
-    expect(all).toHaveLength(11);
-    expect(new Set(all).size).toBe(11);
+    expect(all).toHaveLength(12);
+    expect(new Set(all).size).toBe(12);
   });
 
   it('accepte les identifiants des liens existants (?tab=) et refuse le reste', () => {
@@ -24,6 +24,7 @@ describe('navigation de la fiche affaire', () => {
     expect(groupOfTab('RDT')?.id).toBe('CHANTIER');
     expect(groupOfTab('INSPIRATION')?.id).toBe('ETUDES');
     expect(groupOfTab('PRO')?.id).toBe('ETUDES');
+    expect(groupOfTab('NOTICES')?.id).toBe('ETUDES');
   });
 
   it('hors mission chantier, ne garde que cinq entrées', () => {
@@ -31,7 +32,7 @@ describe('navigation de la fiche affaire', () => {
     expect(groups.map(g => g.id)).toEqual(['INFOS', 'TACHES', 'HONOS', 'ETUDES', 'CORRESPONDANCE']);
   });
 
-  it('en mission chantier, ramène onze onglets à sept entrées', () => {
+  it('en mission chantier, ramène douze onglets à sept entrées', () => {
     expect(visibleTabGroups(() => true)).toHaveLength(7);
   });
 
