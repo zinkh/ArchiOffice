@@ -565,6 +565,7 @@ CREATE TABLE IF NOT EXISTS inspiration_boards (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_inspiration_boards_tenant_project ON inspiration_boards(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_boards_project ON inspiration_boards(project_id);
 
 CREATE TABLE IF NOT EXISTS inspiration_items (
   id TEXT PRIMARY KEY,
@@ -583,6 +584,7 @@ CREATE TABLE IF NOT EXISTS inspiration_items (
   CONSTRAINT inspiration_item_has_source CHECK (file_url IS NOT NULL OR source_url IS NOT NULL)
 );
 CREATE INDEX IF NOT EXISTS idx_inspiration_items_tenant_project ON inspiration_items(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_items_project ON inspiration_items(project_id);
 
 CREATE TABLE IF NOT EXISTS inspiration_board_items (
   id TEXT PRIMARY KEY,
@@ -601,6 +603,8 @@ CREATE TABLE IF NOT EXISTS inspiration_board_items (
   UNIQUE(board_id, item_id)
 );
 CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_tenant_project ON inspiration_board_items(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_project ON inspiration_board_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_inspiration_board_items_item ON inspiration_board_items(item_id);
 
 CREATE TABLE IF NOT EXISTS reserves (
   id TEXT PRIMARY KEY,
