@@ -32,3 +32,8 @@ ALTER TABLE project_notices ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "tenant_isolation" ON project_notices;
 CREATE POLICY "tenant_isolation" ON project_notices
   USING (tenant_id = my_tenant_id());
+
+-- Cette table est utilisée uniquement par les routes serveur avec supabaseAdmin.
+-- Le GRANT explicite évite de dépendre des anciens privilèges par défaut de
+-- Supabase pour les nouvelles tables du schéma public.
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project_notices TO service_role;
