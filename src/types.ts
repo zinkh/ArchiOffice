@@ -566,6 +566,51 @@ export interface Plan {
   category?: 'PRO' | 'AOR';
 }
 
+export type InspirationPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE';
+
+export interface InspirationBoard {
+  id: string;
+  project_id: string;
+  title: string;
+  description?: string | null;
+  phase: InspirationPhase;
+  format: 'A4P' | 'A4L' | 'A3P' | 'A3L' | '16:9' | 'FREE';
+  layout: 'grid' | 'mosaic' | 'materials';
+  created_at?: string;
+  updated_at?: string;
+  pendingSync?: boolean;
+}
+
+export interface InspirationItem {
+  id: string;
+  project_id: string;
+  title?: string | null;
+  caption?: string | null;
+  phase: InspirationPhase;
+  category: string;
+  file_url?: string | null;
+  source_url?: string | null;
+  storage_backend?: 'supabase' | 'external' | null;
+  created_at?: string;
+  updated_at?: string;
+  pendingSync?: boolean;
+  local_preview_url?: string;
+}
+
+export interface InspirationBoardItem {
+  id: string;
+  project_id: string;
+  board_id: string;
+  item_id: string;
+  position_x?: number | null;
+  position_y?: number | null;
+  width?: number | null;
+  height?: number | null;
+  rotation?: number;
+  z_index?: number;
+  pendingSync?: boolean;
+}
+
 export interface TeamMember {
   id: string;
   name: string;
