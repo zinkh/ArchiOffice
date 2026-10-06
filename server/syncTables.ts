@@ -29,7 +29,7 @@ export const SYNC_TABLES: readonly string[] = [
   'contact_categories', 'contacts', 'contrats_moe',
   'custom_references', 'detail_situations',
   'document_versions', 'documents', 'dpgf_items', 'dpgf_versions', 'dpgfs', 'invoice_items',
-  'invoices', 'lignes_ouvrages', 'maf_project_data', 'marches_entreprises',
+  'inspiration_board_items', 'inspiration_boards', 'inspiration_items', 'invoices', 'lignes_ouvrages', 'maf_project_data', 'marches_entreprises',
   'milestones', 'notes_honoraires', 'observations', 'ordres_de_service',
   'plans', 'project_categories', 'project_cotraitants', 'project_lots',
   'project_members', 'project_stakeholders', 'project_templates',
