@@ -8,6 +8,7 @@
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
 import type { Batiment, DPGF, Ligne } from '../types/dpgf';
 import type { AgencySettings } from './proposalExport';
+import { partnerLogosParagraph } from './docxPartnerLogos';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { batimentsDeLigne, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 
@@ -168,6 +169,8 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
       children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
     }),
   );
+  const bandeau = await partnerLogosParagraph();
+  if (bandeau) headerChildren.push(bandeau);
   const footerChildren = [
     new Paragraph({
       border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'D1D5DB' } },

@@ -47,6 +47,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { useActiveGroupement } from '../hooks/useActiveGroupement';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
@@ -626,6 +627,8 @@ export default function ProjectDetail() {
     () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
     [linkedContratsMoe],
   );
+  // Les cotraitants du contrat figurent (logos) sur tous les documents exportés depuis la fiche.
+  useActiveGroupement(contratHonoraires?.cotraitants);
 
   // Mission complète et mission de chantier se déduisent du type de mission MAF.
   const mafMissionFlags = missionFlagsFromMaf(project?.maf_intercalaire, project?.taux_mission);

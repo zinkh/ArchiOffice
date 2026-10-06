@@ -2,7 +2,7 @@
 // below) — same lazy-loading convention as meetingExport.ts.
 import type { DocumentTemplateVariable } from '../types';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
-import { drawAgencyFooters } from './pdfLetterhead';
+import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
 
 export type AgencySettings = BaseAgencySettings;
 
@@ -87,6 +87,9 @@ export async function exportTemplatePdf(
   pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
   y += 9;
+  // Logos du groupement, sous le filet.
+  const bandeauBas = drawPartnerLogos(pdf, undefined, margin, y - 6);
+  if (bandeauBas !== null) y = bandeauBas + 6;
 
   applyFont('bold', 15);
   const titleLines = pdf.splitTextToSize(title, contentW) as string[];
