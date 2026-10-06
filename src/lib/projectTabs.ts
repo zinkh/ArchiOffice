@@ -2,10 +2,8 @@
 //
 // L'inspiration rejoint la famille Études sans ajouter une famille principale.
 // Les missions de chantier restent regroupées pour préserver une barre compacte.
-// parcourt d'un coup d'œil. Les onglets restent les mêmes (même identifiant,
-// même contenu, mêmes liens `?tab=`) : seule leur présentation est regroupée,
-// le chantier passant sous une seule entrée avec ses quatre missions en
-// second niveau.
+// Les identifiants historiques et leurs liens `?tab=` restent inchangés ; seul
+// INSPIRATION s'ajoute sous Études.
 
 export type ProjectTabId =
   | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'PRO' | 'ACT'
