@@ -649,6 +649,12 @@ dernière phase connue de la famille ; les colonnes ne sont pas supprimées.
 Tant qu'aucune entrée `legacy-` n'est lue, l'aperçu montre ces anciennes
 observations en lecture seule : une instance non migrée ne les perd pas de vue.
 
+### Notices d’études et réglementaires
+
+L’onglet projet **Études > NOTICES** (`src/components/projectDetail/ProjectNoticesTab.tsx`) conserve des brouillons distincts dans `project_notices` (`supabase/migrate_project_notices.sql`) : notice architecturale par phase ESQ / APS / APD / PC / PRO / DCE, plus notices Accessibilité et Sécurité incendie portées par le dossier PC. L’édition, les trames et les exports PDF/Word sont disponibles sans IA ; la rédaction assistée Enterprise passe par `server/routes/projectNotices.ts` et reprend la fiche affaire, le journal de phase, la notice architecturale précédente et les pièces jointes exploitables.
+
+Les prompts réglementaires interdisent d’inventer catégories ERP, effectifs, dimensions, classements feu, SSI, références d’articles ou dérogations absentes des données. Une inconnue doit rester explicitement « à vérifier / à confirmer » et la sortie n’est jamais déclarée conforme de manière générale. Une notice rédigée est exposée comme **preuve suggérée** dans les contrôles de changement de phase via `server/phaseControls.ts` ; cette présence ne valide jamais automatiquement le contrôle.
+
 ### Onglet PRO : une barre au lieu du ruban
 
 Le ruban (`ProRibbon`, supprimé) et les boutons Enregistrer ont disparu. La
