@@ -6,7 +6,8 @@ import type { Meeting, MeetingAttendee } from '../types';
 import { compressImage, type CompressedImage } from './imageCompression';
 import { resolveSignedUrl } from './signedStorageUrl';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
-import { drawAgencyFooters } from './pdfLetterhead';
+import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
+import { partnerLogosParagraph } from './docxPartnerLogos';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -100,6 +101,9 @@ export async function exportMeetingToPDF(
   pdf.setLineWidth(0.6);
   pdf.line(margin, y, pageW - margin, y);
   y += 7;
+  // Logos du groupement, sous le filet.
+  const bandeauBas = drawPartnerLogos(pdf, undefined, margin, y - 4);
+  if (bandeauBas !== null) y = bandeauBas + 5;
 
   // ── Meeting title & meta ───────────────────────────────────────────────────
   applyFont('bold', 16);
@@ -286,6 +290,8 @@ export async function exportMeetingToDocx(
     logoChildren.push(new TextRun({ text: settings.agencyName || 'Agence', bold: true, size: 28 }));
   }
 
+  const bandeauLogos = await partnerLogosParagraph();
+
   // ── Agency info paragraphs ───────────────────────────────────────────────
   const agencyParagraphs: Paragraph[] = [
     new Paragraph({ children: logoChildren }),
@@ -301,6 +307,7 @@ export async function exportMeetingToDocx(
     ...(settings.email
       ? [new Paragraph({ children: [new TextRun({ text: settings.email, size: 18, color: '6B7280' })] })]
       : []),
+    ...(bandeauLogos ? [bandeauLogos] : []),
   ];
 
   // ── Attendees table ───────────────────────────────────────────────────────

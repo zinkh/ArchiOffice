@@ -7,6 +7,7 @@ import type { Proposal, MafCostResult } from '../types';
 import { useSettings } from '../hooks/useSettings';
 import { useMafCost } from '../hooks/useMafCost';
 import { MafCostBadge } from './MafCostBadge';
+import { loadCotraitantLogos } from '../lib/pdfLetterhead';
 import {
   ProposalPdfData, ProposalTemplate, ProposalSectionId,
   PROPOSAL_SECTION_DEFS, mapProposalToPdfData, getPdfStyles,
@@ -220,6 +221,14 @@ const renderGarde: SectionRenderer = (d, t, _ctx, page) => {
           <div style={{ fontSize: '24pt', fontWeight: 'bold', color: t.visual.primaryColor }}>{(d.agenceNom || '??').substring(0, 2).toUpperCase()}</div>
         )}
       </div>
+      {!!d.cotraitantLogos?.length && (
+        <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '6mm', marginTop: '4mm', justifyContent: t.visual.logoPosition === 'center' ? 'center' : 'flex-start' }}>
+          <span style={{ fontSize: '7pt', color: '#666' }}>En groupement avec</span>
+          {d.cotraitantLogos.map((src, i) => (
+            <img key={i} src={src} style={{ height: '12mm', maxWidth: '40mm', objectFit: 'contain' }} />
+          ))}
+        </div>
+      )}
       <div style={{ textAlign: 'center', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
         <h1 style={{ margin: 0, marginBottom: '5mm', fontSize: '28pt', fontWeight: 'bold', textAlign: 'center', color: '#000', textTransform: 'uppercase' }}>LETTRE DE MISSION</h1>
         <div style={{ fontSize: '12pt', color: '#666' }}>Réf: {d.reference} | Indice: {d.indice}</div>
@@ -815,9 +824,17 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
     return () => { alive = false; };
   }, [rawData.agenceLogo]);
 
+  // Logos des cotraitants, lus sur leurs fiches contact (best effort).
+  const [cotraitantLogos, setCotraitantLogos] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    loadCotraitantLogos(proposal.specialties_list).then(logos => { if (alive) setCotraitantLogos(logos.map(l => l.dataUrl)); });
+    return () => { alive = false; };
+  }, [proposal.specialties_list]);
+
   const data = useMemo(
-    () => (compressedLogo ? { ...rawData, agenceLogo: compressedLogo } : rawData),
-    [rawData, compressedLogo],
+    () => ({ ...rawData, ...(compressedLogo ? { agenceLogo: compressedLogo } : {}), cotraitantLogos }),
+    [rawData, compressedLogo, cotraitantLogos],
   );
 
   const handleExport = async () => {

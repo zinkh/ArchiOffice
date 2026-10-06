@@ -8,6 +8,13 @@
 // désormais par ici.
 import type { AgencySettings } from './proposalExport';
 
+export interface LogoImage {
+  dataUrl: string;
+  format: 'PNG' | 'JPEG';
+  width: number;
+  height: number;
+}
+
 export interface LetterheadOptions {
   /** Titre du document, repris dans le pied de page. */
   title: string;
@@ -17,8 +24,38 @@ export interface LetterheadOptions {
   date?: string;
   margin?: number;
   /** Logo déjà chargé en data URL. Voir loadLogoDataUrl. */
-  logo?: { dataUrl: string; format: 'PNG' | 'JPEG'; width: number; height: number } | null;
+  logo?: LogoImage | null;
+  /**
+   * Logos des cotraitants du groupement, déjà chargés (voir loadCotraitantLogos).
+   * Ils s'impriment en bandeau sous l'en-tête du cabinet, sur chaque page.
+   * Absent : le groupement actif de l'écran (voir resolvePartnerLogos) ;
+   * liste vide : l'en-tête reste celui du cabinet seul.
+   */
+  partnerLogos?: LogoImage[];
 }
+
+// ── Groupement actif ─────────────────────────────────────────────────────────
+// Les logos des cotraitants doivent figurer sur TOUS les documents d'une
+// affaire (PDF, Word, Excel) sans que chaque export ait à recevoir le
+// groupement : l'écran qui travaille sur une affaire déclare son groupement
+// (useActiveGroupement), et chaque en-tête le lit ici. Une option explicite
+// `partnerLogos` l'emporte (liste vide pour s'en passer). Hors d'une affaire,
+// ou côté serveur, le registre est vide : aucun logo.
+let groupementActif: LogoImage[] = [];
+
+export function setActiveGroupementLogos(logos: LogoImage[]): void {
+  groupementActif = logos;
+}
+
+/** Logos à imprimer : ceux passés explicitement, à défaut ceux du groupement actif. */
+export function resolvePartnerLogos(explicit?: LogoImage[]): LogoImage[] {
+  return explicit ?? groupementActif;
+}
+
+/** Hauteur du bandeau de logos des cotraitants, en mm. */
+const PARTNER_LOGO_HEIGHT = 9;
+const PARTNER_LOGO_GAP = 7;
+const PARTNER_LOGO_MAX_WIDTH = 34;
 
 const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
 const GRIS_DOUX: [number, number, number] = [107, 114, 128];
@@ -44,7 +81,7 @@ export function agencyFooterLine(s: AgencySettings): string {
  */
 export async function loadLogoDataUrl(
   logoUrl?: string,
-): Promise<LetterheadOptions['logo']> {
+): Promise<LogoImage | null> {
   if (!logoUrl) return null;
   try {
     const img = await new Promise<HTMLImageElement>((resolve, reject) => {
@@ -130,7 +167,76 @@ export function drawAgencyHeader(
   pdf.setDrawColor(...GRIS_FILET);
   pdf.setLineWidth(0.4);
   pdf.line(margin, y, pageW - margin, y);
+
+  const bandeauBas = drawPartnerLogos(pdf, resolvePartnerLogos(opts.partnerLogos), margin, y + 3);
+  if (bandeauBas !== null) {
+    pdf.setLineWidth(0.25);
+    pdf.line(margin, bandeauBas, pageW - margin, bandeauBas);
+    return bandeauBas + 5;
+  }
   return y + 5;
+}
+
+/**
+ * Bandeau « en groupement avec » : les logos des cotraitants, alignés à gauche
+ * sous l'en-tête du cabinet, hauteur commune, rapport conservé. Rend l'ordonnée
+ * du bas du bandeau, ou null quand il n'y a rien à dessiner.
+ */
+export function drawPartnerLogos(
+  pdf: any, logos: LogoImage[] | undefined, margin: number, top: number,
+): number | null {
+  if (!logos || logos.length === 0) return null;
+  const pageW = pdf.internal.pageSize.getWidth();
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(6.5);
+  pdf.setTextColor(...GRIS_DOUX);
+  pdf.text('En groupement avec', margin, top + 2);
+
+  let x = margin;
+  const logoTop = top + 4;
+  for (const logo of logos) {
+    // Un logo très large est réduit en largeur plutôt que de pousser les autres.
+    let h = PARTNER_LOGO_HEIGHT;
+    let w = (logo.width / logo.height) * h;
+    if (w > PARTNER_LOGO_MAX_WIDTH) {
+      w = PARTNER_LOGO_MAX_WIDTH;
+      h = (logo.height / logo.width) * w;
+    }
+    if (x + w > pageW - margin) break;
+    try {
+      pdf.addImage(logo.dataUrl, logo.format, x, logoTop + (PARTNER_LOGO_HEIGHT - h) / 2, w, h);
+    } catch { /* un logo illisible ne doit pas emporter l'export */ }
+    x += w + PARTNER_LOGO_GAP;
+  }
+  return logoTop + PARTNER_LOGO_HEIGHT + 2;
+}
+
+/** Membre d'un groupement référencé par sa fiche contact. */
+export interface GroupementMember {
+  contact_id?: string;
+}
+
+/**
+ * Logos des cotraitants d'un document, dans l'ordre du groupement, sans doublon.
+ * Un cotraitant sans fiche contact, ou dont la fiche n'a pas de logo, est
+ * simplement ignoré : un logo manquant ne doit jamais empêcher un export.
+ */
+export async function loadCotraitantLogos(
+  members: GroupementMember[] | undefined | null,
+): Promise<LogoImage[]> {
+  const ids = [...new Set((members ?? []).map(m => m.contact_id).filter((id): id is string => !!id))];
+  if (ids.length === 0) return [];
+  try {
+    const r = await fetch('/api/contacts');
+    if (!r.ok) return [];
+    const contacts = (await r.json()) as Array<{ id: string; logo?: string | null }>;
+    const parId = new Map(contacts.map(c => [c.id, c.logo || '']));
+    const loaded = await Promise.all(ids.map(id => loadLogoDataUrl(parId.get(id) || undefined)));
+    return loaded.filter((l): l is LogoImage => l !== null);
+  } catch {
+    return [];
+  }
 }
 
 /**

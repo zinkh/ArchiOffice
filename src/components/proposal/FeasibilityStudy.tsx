@@ -22,6 +22,7 @@ import {
 } from '../../lib/feasibilityBlocks';
 import type { Proposal } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
+import { useActiveGroupement } from '../../hooks/useActiveGroupement';
 
 /** Blocs qui ont besoin des données publiques du terrain (lues à la demande). */
 const SITE_BLOCKS: FeasibilityBlockKind[] = ['urbanisme', 'risques', 'patrimoine'];
@@ -41,6 +42,8 @@ interface Props {
 
 export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, settings, onCount }: Props) {
   const { t } = useTranslation();
+  // Les logos des cotraitants de la proposition figurent sur l'étude exportée.
+  useActiveGroupement(proposal.specialties_list);
   const { tenantPlan } = useUser();
   const isEnterprise = tenantPlan === 'enterprise';
 

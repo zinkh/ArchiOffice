@@ -4,7 +4,7 @@
 // partagés (drawAgencyHeader/drawAgencyFooters, cf. pdfLetterhead.ts) — même
 // convention que bpuExport.ts.
 import type { AgencySettings } from './proposalExport';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, loadCotraitantLogos } from './pdfLetterhead';
 import { montantEnLettres } from './numberToFrenchWords';
 import type { NoteHonoraires, ContratMOE, NoteHonorairePhase } from '../types';
 
@@ -38,6 +38,7 @@ export async function exportNoteHonorairesToPDF(
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const logo = await loadLogoDataUrl(settings.logoUrl);
+  const partnerLogos = await loadCotraitantLogos(contrat?.cotraitants);
 
   const letterhead = {
     title: `Note d'Honoraires N° ${note.numero || ''}`,
@@ -45,6 +46,7 @@ export async function exportNoteHonorairesToPDF(
     reference: note.date ? new Date(note.date).toLocaleDateString('fr-FR') : undefined,
     margin: 14,
     logo,
+    partnerLogos,
   };
   let y = drawAgencyHeader(doc, settings, letterhead);
 

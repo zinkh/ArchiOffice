@@ -6,6 +6,7 @@ import { AddressAutocomplete } from './AddressAutocomplete';
 import { CompanyAutocomplete } from './CompanyAutocomplete';
 import { TagChipInput } from './TagChipInput';
 import { ContactQualifications } from './ContactQualifications';
+import { ContactLogoField } from './ContactLogoField';
 import { isEntrepriseContact, isBureauEtudesContact } from '../lib/contactCategories';
 import { frenchVatNumber, parseDirectors, streetWithoutCity, type CompanyDirector } from '../lib/siren';
 
@@ -545,6 +546,12 @@ export function ContactFormFields({ contact, onChange, categories, corpsEtatSugg
                 placeholder="https://"
               />
             </div>
+            <ContactLogoField
+              logo={contact.logo || ''}
+              onChange={logo => onChange({ logo })}
+              labelClass={labelClass}
+              labelStyle={labelStyle}
+            />
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className={labelClass} style={labelStyle}>{t('contacts_annual_turnover_label')}</label>

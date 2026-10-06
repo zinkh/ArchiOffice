@@ -47,6 +47,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { useActiveGroupement } from '../hooks/useActiveGroupement';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
@@ -98,8 +99,9 @@ import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
-import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
+import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
+import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
 
 import { useTranslation } from 'react-i18next';
@@ -627,6 +629,8 @@ export default function ProjectDetail() {
     () => linkedContratsMoe.find((c: any) => c.status === 'Signé') || linkedContratsMoe[0] || null,
     [linkedContratsMoe],
   );
+  // Les cotraitants du contrat figurent (logos) sur tous les documents exportés depuis la fiche.
+  useActiveGroupement(contratHonoraires?.cotraitants);
 
   // Mission complète et mission de chantier se déduisent du type de mission MAF.
   const mafMissionFlags = missionFlagsFromMaf(project?.maf_intercalaire, project?.taux_mission);
@@ -1933,8 +1937,8 @@ export default function ProjectDetail() {
             onGoToInvoices={() => setActiveTab('HONOS')}
           />
         ) : (
-          <div className={`lg:h-full overflow-visible lg:overflow-y-auto ${activeTab === 'PRO' ? 'p-0' : 'p-4 sm:p-6'}`}>
-            <div className={activeTab === 'PRO' || activeTab === 'DET' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
+          <div className={`lg:h-full overflow-visible lg:overflow-y-auto ${(activeTab === 'PRO' || activeTab === 'INSPIRATION') ? 'p-0' : 'p-4 sm:p-6'}`}>
+            <div className={activeTab === 'PRO' || activeTab === 'INSPIRATION' || activeTab === 'DET' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="flex items-center justify-between -mt-2 mb-2">
                 <button
@@ -3276,6 +3280,7 @@ export default function ProjectDetail() {
 
               </div>
             )}
+            {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} />}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
             {activeTab === 'NOTICES' && project && (
               <ProjectNoticesTab project={project} phases={missionPhases} currentPhase={actualCurrentPhase} />

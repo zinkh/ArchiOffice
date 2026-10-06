@@ -8,9 +8,13 @@
 import { saveAs } from 'file-saver';
 import type { Workbook, Worksheet, Alignment, Fill } from 'exceljs';
 import type { AgencySettings } from './proposalExport';
-import { agencyFooterLine, loadLogoDataUrl, type LetterheadOptions } from './pdfLetterhead';
+import { agencyFooterLine, loadLogoDataUrl, resolvePartnerLogos, type LetterheadOptions } from './pdfLetterhead';
 
 export type Logo = LetterheadOptions['logo'];
+
+/** Lignes ajoutées sous l'en-tête pour le bandeau des logos du groupement. */
+const LIGNES_LOGOS = 2;
+const LOGO_COTRAITANT_HAUTEUR_PX = 34;
 
 // Mêmes gris que le PDF (pdfLetterhead.ts, actExport.ts), en ARGB.
 const GRIS_TEXTE = 'FF111827';
@@ -45,6 +49,8 @@ export interface FeuilleOptions {
   nom: string;
   settings: AgencySettings;
   logo?: Logo;
+  /** Logos des cotraitants ; absent, ceux du groupement actif (resolvePartnerLogos). */
+  partnerLogos?: NonNullable<Logo>[];
   title: string;
   subtitle?: string;
   reference?: string;
@@ -104,6 +110,17 @@ export async function nouveauClasseur(): Promise<Workbook> {
  * page d'impression (A4, largeur ajustée, pied « P1|2 ») et le volet figé sous
  * l'entête de tableau. Les lignes se complètent ensuite par l'objet rendu.
  */
+/** Position horizontale (en colonnes, fractionnaire) d'un décalage en pixels depuis le bord gauche. */
+function colDepuisPx(largeurs: number[], px: number): number {
+  let reste = px;
+  for (let i = 0; i < largeurs.length; i++) {
+    const larg = largeurs[i] * PX_PAR_CARACTERE;
+    if (reste < larg) return i + reste / larg;
+    reste -= larg;
+  }
+  return largeurs.length - 1;
+}
+
 export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   const { settings, colonnes } = opts;
   const nbCol = Math.max(colonnes.length, 1);
@@ -129,7 +146,9 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   const largeurTitre = opts.title.length * 8.8;
   const texteSurTitre = nbCol < 2 || colTexte >= nbCol || largeurNom + largeurTitre + 40 > largeurDispo;
   const nbInfos = opts.infos?.length ?? 0;
-  const base = LIGNES_ENTETE + (texteSurTitre ? LIGNES_TITRE_SOUS_ENTETE : 0) + nbInfos;
+  const partenaires = resolvePartnerLogos(opts.partnerLogos);
+  const lignesLogos = partenaires.length > 0 ? LIGNES_LOGOS : 0;
+  const base = LIGNES_ENTETE + (texteSurTitre ? LIGNES_TITRE_SOUS_ENTETE : 0) + nbInfos + lignesLogos;
   const ws = wb.addWorksheet(nomOnglet(opts.nom), {
     state: opts.masque ? 'hidden' : 'visible',
     views: [{ showGridLines: false, state: 'frozen', ySplit: base + 1 }],
@@ -182,6 +201,24 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
     if (nbCol > 1) ws.mergeCells(r, 1, r, nbCol);
     ws.getRow(r).height = 14;
   });
+  // Bandeau des cotraitants : un libellé, puis les logos côte à côte.
+  if (lignesLogos > 0) {
+    const rLabel = premiereInfo + nbInfos;
+    cellule(rLabel, 1, 'En groupement avec', 7, false, GRIS_DOUX);
+    ws.getRow(rLabel).height = 12;
+    ws.getRow(rLabel + 1).height = 28;
+    let x = 4;
+    for (const l of partenaires) {
+      let w = Math.round((l.width / l.height) * LOGO_COTRAITANT_HAUTEUR_PX);
+      let h = LOGO_COTRAITANT_HAUTEUR_PX;
+      if (w > 130) { w = 130; h = Math.round((l.height / l.width) * w); }
+      try {
+        const imgId = wb.addImage({ base64: l.dataUrl, extension: 'png' });
+        ws.addImage(imgId, { tl: { col: colDepuisPx(largeurs, x), row: rLabel }, ext: { width: w, height: h } });
+      } catch { /* un logo illisible ne doit pas empêcher l'export */ }
+      x += w + 16;
+    }
+  }
   ws.getRow(base).height = 8;
 
   // ── Entête du tableau ──────────────────────────────────────────────────────

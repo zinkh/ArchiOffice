@@ -36,4 +36,10 @@ CREATE POLICY "tenant_isolation" ON project_notices
 -- Cette table est utilisée uniquement par les routes serveur avec supabaseAdmin.
 -- Le GRANT explicite évite de dépendre des anciens privilèges par défaut de
 -- Supabase pour les nouvelles tables du schéma public.
-GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project_notices TO service_role;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.project_notices TO service_role';
+  END IF;
+END
+$$;
