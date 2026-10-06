@@ -98,6 +98,7 @@ import { Card, CardHeader, CardBody } from '../components/ui/Card';
 import { StatTile, StatTileColor } from '../components/ui/StatTile';
 import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
+import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
 
@@ -3276,6 +3277,9 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
+            {activeTab === 'NOTICES' && project && (
+              <ProjectNoticesTab project={project} phases={missionPhases} currentPhase={actualCurrentPhase} />
+            )}
             {activeTab === 'TACHES' && <ProjectTasksTab projectId={id!} projects={project ? [project] : []} />}
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">
