@@ -6,9 +6,11 @@ import {
   IconFile,
   IconLink,
   IconLoader2,
+  IconRobot,
   IconShare3,
   IconUpload,
 } from '@tabler/icons-react';
+import { useAgentChat } from '@zinkh/archioffice-agents/client';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { useUser } from '../UserContext';
@@ -115,6 +117,7 @@ export default function ShareTarget() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentUser } = useUser();
+  const { openChat } = useAgentChat();
 
   const shareId = searchParams.get('shareId') || '';
   const shareError = searchParams.get('shareError') === '1';
@@ -127,6 +130,7 @@ export default function ShareTarget() {
   const [docType, setDocType] = useState('');
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [sendingToAgent, setSendingToAgent] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(
     shareError ? 'Android n’a pas pu transmettre ce partage à ArchiOffice.' : null,
@@ -166,6 +170,64 @@ export default function ShareTarget() {
 
   const files = useMemo(() => pendingShare ? materializeFiles(pendingShare) : [], [pendingShare]);
   const contextText = pendingShare ? shareText(pendingShare) : '';
+
+  async function sendToAgent() {
+    if (!pendingShare || files.length === 0 || sendingToAgent || uploading) return;
+    setSendingToAgent(true);
+    setError(null);
+
+    try {
+      const token = await getAccessToken();
+      const attachedDocuments: { id: string; name: string }[] = [];
+
+      for (const file of files) {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('name', file.name);
+        // A shared item is deliberately persisted in an inbox-like state
+        // before the agent sees it. The agent/user can then decide the real
+        // project, phase and category instead of silently filing it wrong.
+        form.append('category', 'À classer');
+        form.append('phase', 'Général');
+        form.append('description', contextText);
+        form.append('indice', 'A');
+        form.append('emetteur', currentUser?.name || '');
+        if (projectId) form.append('project_id', projectId);
+
+        const response = await fetch('/api/documents', {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: form,
+        });
+
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null);
+          throw new Error(payload?.error || `Échec de la préparation de « ${file.name} » (${response.status}).`);
+        }
+
+        const document = await response.json();
+        if (!document?.id) throw new Error(`Le document « ${file.name} » a été importé sans identifiant exploitable.`);
+        attachedDocuments.push({ id: document.id, name: file.name });
+      }
+
+      await deletePendingShare(pendingShare.id);
+
+      openChat(
+        undefined,
+        'Voici le contenu partagé depuis Android. ',
+        attachedDocuments,
+        projectId || undefined,
+      );
+
+      // Keep the chat visible over a useful workspace rather than leaving the
+      // now-consumed share-target form underneath it.
+      navigate(projectId ? `/projects/${projectId}` : '/documents');
+    } catch (e: any) {
+      setError(e?.message || 'Impossible de transmettre ce partage à l’agent.');
+    } finally {
+      setSendingToAgent(false);
+    }
+  }
 
   async function upload() {
     if (!pendingShare || files.length === 0 || uploading) return;
@@ -379,7 +441,7 @@ export default function ShareTarget() {
               <button
                 type="button"
                 onClick={() => navigate(-1)}
-                disabled={uploading}
+                disabled={uploading || sendingToAgent}
                 className="px-4 py-2.5 rounded-lg text-sm font-semibold border disabled:opacity-50"
                 style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}
               >
@@ -388,12 +450,22 @@ export default function ShareTarget() {
               <button
                 type="button"
                 onClick={upload}
-                disabled={uploading || files.length === 0}
+                disabled={uploading || sendingToAgent || files.length === 0}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold border disabled:opacity-50"
+                style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }}
+              >
+                {uploading ? <IconLoader2 size={17} className="animate-spin" /> : <IconUpload size={17} />}
+                {uploading ? 'Import en cours…' : 'Classer manuellement'}
+              </button>
+              <button
+                type="button"
+                onClick={sendToAgent}
+                disabled={sendingToAgent || uploading || files.length === 0}
                 className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold text-white disabled:opacity-50"
                 style={{ background: 'var(--tblr-primary)' }}
               >
-                {uploading ? <IconLoader2 size={17} className="animate-spin" /> : <IconUpload size={17} />}
-                {uploading ? 'Import en cours…' : files.length > 1 ? `Importer ${files.length} fichiers` : 'Importer'}
+                {sendingToAgent ? <IconLoader2 size={17} className="animate-spin" /> : <IconRobot size={17} />}
+                {sendingToAgent ? 'Préparation du chat…' : 'Demander à l’agent'}
               </button>
             </div>
           </div>
