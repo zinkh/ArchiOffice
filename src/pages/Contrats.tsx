@@ -18,7 +18,7 @@ import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_ENTREPRISE, CONTACT_CATEGORY_
 import { cn } from '../lib/utils';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, loadCotraitantLogos, fetchAgencySettings } from '../lib/pdfLetterhead';
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -135,11 +135,12 @@ async function generateContratPdf(contrat: ContratMOE, agencyName?: string) {
   // En-tête et pied du cabinet, comme les autres documents.
   const settings = await fetchAgencySettings();
   const logo = await loadLogoDataUrl(settings.logoUrl);
+  const partnerLogos = await loadCotraitantLogos(contrat.cotraitants);
   const letterhead = {
     title: "Contrat de maîtrise d'œuvre",
     subtitle: TYPE_CONTRAT_LABELS[contrat.type_contrat] ?? contrat.type_contrat,
     reference: contrat.numero ? `Réf. : ${contrat.numero}` : undefined,
-    margin, logo,
+    margin, logo, partnerLogos,
   };
   const headerEnd = drawAgencyHeader(doc, settings, letterhead);
   doc.setTextColor(...GRIS_DOUX);

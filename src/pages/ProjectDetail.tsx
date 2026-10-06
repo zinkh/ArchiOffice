@@ -47,7 +47,7 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, loadCotraitantLogos, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offlinePrefetch';
@@ -1327,11 +1327,12 @@ export default function ProjectDetail() {
     // En-tête et pied du cabinet, comme les autres documents.
     const agence = await fetchAgencySettings();
     const logo = await loadLogoDataUrl(agence.logoUrl);
+    const partnerLogos = await loadCotraitantLogos(contratHonoraires?.cotraitants);
     const letterhead = {
       title: "Avenant au contrat de maîtrise d'œuvre",
       subtitle: `N° Avenant : ${os.os_number}`,
       reference: os.date ? new Date(os.date).toLocaleDateString('fr-FR') : undefined,
-      margin, logo,
+      margin, logo, partnerLogos,
     };
     const headerEnd = drawAgencyHeader(doc, agence, letterhead);
     doc.setTextColor(...GRIS_DOUX); doc.setFontSize(9); doc.setFont('helvetica', 'bold');
@@ -1492,12 +1493,13 @@ export default function ProjectDetail() {
     // En-tête et pied du cabinet, comme les autres documents.
     const agence = await fetchAgencySettings();
     const logo = await loadLogoDataUrl(agence.logoUrl);
+    const partnerLogos = await loadCotraitantLogos(contratHonoraires?.cotraitants);
     const statusLabels: Record<string, string> = { draft: 'Brouillon', submitted: 'Émis', approved: 'AR reçu', rejected: 'Annulé' };
     const letterhead = {
       title: 'Ordre de service',
       subtitle: `N° ${os.os_number}${project?.name ? ` — ${project.name}` : ''}`,
       reference: `${statusLabels[os.status] ?? os.status}${os.date_emission ?? os.date ? ` · ${os.date_emission ?? os.date}` : ''}`,
-      margin: 14, logo,
+      margin: 14, logo, partnerLogos,
     };
     doc.setTextColor(17, 24, 39);
     let y = drawAgencyHeader(doc, agence, letterhead);
@@ -1571,11 +1573,12 @@ export default function ProjectDetail() {
     // En-tête et pied du cabinet, comme les autres documents.
     const agence = await fetchAgencySettings();
     const logo = await loadLogoDataUrl(agence.logoUrl);
+    const partnerLogos = await loadCotraitantLogos(contratHonoraires?.cotraitants);
     const letterhead = {
       title: 'Procès-verbal de réception',
       subtitle: projectName,
       reference: `${rec.reference_pv ? `Réf. : ${rec.reference_pv} · ` : ''}${rec.type === 'definitive' ? 'Réception définitive' : 'Réception provisoire'}`,
-      margin: 14, logo,
+      margin: 14, logo, partnerLogos,
     };
     doc.setTextColor(17, 24, 39);
     let y = drawAgencyHeader(doc, agence, letterhead) + 2;
@@ -3275,7 +3278,7 @@ export default function ProjectDetail() {
 
               </div>
             )}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} cotraitants={contratHonoraires?.cotraitants} /></div>}
             {activeTab === 'TACHES' && <ProjectTasksTab projectId={id!} projects={project ? [project] : []} />}
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="space-y-8">

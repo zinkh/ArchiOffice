@@ -13,6 +13,7 @@ import { useProToolbar } from './toolbar/proToolbar';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
+import { useGroupementMembers } from './GroupementContext';
 import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
 import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
@@ -63,6 +64,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   showTree: showTreeProp, onToggleTree,
 }) => {
   const { settings } = useSettings();
+  const cotraitants = useGroupementMembers();
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -205,7 +207,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     {
       kind: 'menu', id: 'est-export', label: t('pro_export'), icon: <IconDownload size={16} />,
       entries: [
-        { id: 'est-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportEstimationtoPDF(dpgf, projectName, settings ?? {}) },
+        { id: 'est-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportEstimationtoPDF(dpgf, projectName, settings ?? {}, cotraitants) },
         { id: 'est-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportEstimationtoExcel(dpgf, projectName, settings ?? {}) },
       ],
     },

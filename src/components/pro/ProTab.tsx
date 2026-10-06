@@ -36,6 +36,8 @@ import { useToastWithUndo } from '../../hooks/useToastWithUndo';
 import { Toast } from '../ui/Toast';
 import { collectLigneIds, collectNouvellesLignes } from './treeOps';
 import { VersionsDialog } from './VersionsDialog';
+import { GroupementProvider } from './GroupementContext';
+import type { GroupementMember } from '../../lib/pdfLetterhead';
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -47,7 +49,11 @@ interface ProTabProps {
   projectName?: string;
   /** Rappelé après création/suppression d'un lot, pour que la fiche projet (qui en garde une copie dans `lots_list`) se resynchronise. */
   onLotsChanged?: () => void;
+  /** Cotraitants du contrat MOE lié : leurs logos s'impriment dans l'en-tête des exports PDF. */
+  cotraitants?: GroupementMember[];
 }
+
+const NO_COTRAITANTS: GroupementMember[] = [];
 
 const EMPTY_DPGF = (projectId: string): DPGF => ({
   id: 'new',
@@ -89,7 +95,7 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsChanged }) => {
+export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsChanged, cotraitants }) => {
   const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
   const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
@@ -669,6 +675,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
 
   return (
     <ProToolbarContext.Provider value={toolbarRegistry}>
+    <GroupementProvider value={cotraitants ?? NO_COTRAITANTS}>
     <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100dvh - 200px)', minHeight: 500 }}>
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
@@ -974,6 +981,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
         />
       )}
     </div>
+    </GroupementProvider>
     </ProToolbarContext.Provider>
   );
 };

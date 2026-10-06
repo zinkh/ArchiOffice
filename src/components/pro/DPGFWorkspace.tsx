@@ -11,6 +11,7 @@ import {
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
 import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
+import { useGroupementMembers } from './GroupementContext';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -78,6 +79,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   showTree: showTreeProp, onToggleTree, onImportOffre, onPushToAct, offres = [], notify,
 }) => {
   const { settings } = useSettings();
+  const cotraitants = useGroupementMembers();
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   // ── UI state ────────────────────────────────────────────────────────────────
@@ -723,13 +725,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     {
       kind: 'menu', id: 'dpgf-export', label: t('pro_export'), icon: <IconDownload size={16} />,
       entries: [
-        { id: 'dpgf-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}) },
+        { id: 'dpgf-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}, cotraitants) },
         { id: 'dpgf-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement, settings ?? {}) },
         ...(batiments.length ? [{ id: 'dpgf-by-building', heading: t('pro_export_by_building') } as ToolbarMenuEntry] : []),
         ...batiments.flatMap(b => {
           const titre = `${projectName ?? dpgf.titre} · ${b.code}${b.libelle ? ` ${b.libelle}` : ''}`;
           return [
-            { id: `dpgf-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
+            { id: `dpgf-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}, cotraitants) },
             { id: `dpgf-xlsx-${b.id}`, label: `${b.code} · ${t('pro_export_excel')}`, icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
           ];
         }),

@@ -125,6 +125,8 @@ export interface ProposalPdfData {
   agenceNom: string;
   agenceAdresse: string;
   agenceLogo?: string;
+  /** Logos des cotraitants (data URLs), chargés à part depuis leurs fiches contact. */
+  cotraitantLogos?: string[];
   architecteNom: string;
   oaNumber: string;
 }
