@@ -1,7 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import {
-  approximateScale, geometryRings, lonLatToWorldPx, metersPerPixel, niceScaleBar, planMapExtract, pointInGeometry, TILE_SIZE,
+  approximateScale, extentBbox, geometryCenter, geometryRings, lonLatToWorldPx, metersPerPixel, niceScaleBar, planMapExtract, pointInGeometry, shiftCenter, TILE_SIZE,
 } from '../feasibilityMap';
+
+describe('geometryCenter', () => {
+  it('returns the centre of the bounding box over every polygon', () => {
+    const multi = { type: 'MultiPolygon', coordinates: [
+      [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]],
+      [[[6, 1], [8, 1], [8, 5], [6, 5], [6, 1]]],
+    ] };
+    expect(geometryCenter(multi)).toEqual({ lon: 4, lat: 2.5 });
+  });
+
+  it('returns null without geometry', () => {
+    expect(geometryCenter(null)).toBeNull();
+    expect(geometryCenter({ type: 'Point', coordinates: [1, 2] })).toBeNull();
+  });
+});
+
+describe('shiftCenter', () => {
+  it('moves the centre opposite to the drag, north when dragging down', () => {
+    const c = shiftCenter({ lon: 6, lat: 0 }, 100, 100, 1);
+    expect(c.lon).toBeLessThan(6);
+    expect(c.lat).toBeGreaterThan(0);
+  });
+
+  it('is a no-op for a zero drag', () => {
+    expect(shiftCenter({ lon: 6, lat: 48 }, 0, 0, 2)).toEqual({ lon: 6, lat: 48 });
+  });
+});
 
 describe('lonLatToWorldPx', () => {
   it('maps (0, 0) to the centre of the world at any zoom', () => {
@@ -75,5 +102,16 @@ describe('pointInGeometry', () => {
   it('returns all rings for drawing', () => {
     expect(geometryRings(square)).toHaveLength(2);
     expect(geometryRings({ type: 'Point', coordinates: [0, 0] })).toEqual([]);
+  });
+});
+
+describe('extentBbox', () => {
+  it('spans the requested width and keeps the centre in the middle', () => {
+    const [minLon, minLat, maxLon, maxLat] = extentBbox({ lon: 6, lat: 48 }, 500, 1200, 800);
+    expect((minLon + maxLon) / 2).toBeCloseTo(6, 6);
+    expect((minLat + maxLat) / 2).toBeCloseTo(48, 6);
+    const widthM = (maxLon - minLon) * 111_320 * Math.cos((48 * Math.PI) / 180);
+    expect(widthM).toBeCloseTo(500, 0);
+    expect(((maxLat - minLat) * 111_320)).toBeCloseTo(500 * 800 / 1200, 0);
   });
 });

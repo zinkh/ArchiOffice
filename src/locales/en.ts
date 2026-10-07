@@ -412,6 +412,8 @@ export default {
       "feas_map_background": "Base map",
       "feas_map_extent": "Extent",
       "feas_map_parcel": "Parcel outline",
+      "feas_map_drag_hint": "Drag the map to move it",
+      "feas_map_recenter": "Recenter on the parcel",
       "feas_map_caption": "Caption",
       "feas_map_rendering": "Rendering the map...",
       "feas_map_insert": "Insert into section",

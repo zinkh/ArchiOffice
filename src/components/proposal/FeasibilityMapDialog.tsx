@@ -6,11 +6,11 @@
 // Les calculs (zoom, tuiles, projection, échelle) sont dans src/lib/feasibilityMap.ts.
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconX, IconMap2, IconLoader2 } from '@tabler/icons-react';
+import { IconX, IconMap2, IconLoader2, IconFocusCentered } from '@tabler/icons-react';
 import { getAccessToken } from '../../lib/authToken';
 import {
   FEASIBILITY_MAP_EXTENTS, FEASIBILITY_MAP_LAYERS, FEASIBILITY_MAP_PRESETS, approximateScale, defaultMapCaption,
-  geometryRings, niceScaleBar, planMapExtract, pointInGeometry, type MapExtractPlan,
+  extentBbox, geometryCenter, geometryRings, niceScaleBar, planMapExtract, pointInGeometry, shiftCenter, type MapExtractPlan,
 } from '../../lib/feasibilityMap';
 import type { FeasibilityIllustration } from '../../lib/feasibilityBlocks';
 
@@ -60,6 +60,44 @@ async function parcelAtPoint(lat: number, lon: number): Promise<GeoJSON.Geometry
     return hit?.geometry ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Parcellaire en vecteur (mêmes données que le contour de la parcelle), tracé
+ * en traits clairs à liseré sombre pour rester lisible sur la photo aérienne.
+ * Les tuiles raster du cadastre sont fines, translucides et parfois absentes :
+ * ce tracé garantit que la superposition apparaît. Rend false si indisponible.
+ */
+async function drawCadastreVector(ctx: CanvasRenderingContext2D, plan: MapExtractPlan, center: { lon: number; lat: number }, widthM: number, onOrtho: boolean): Promise<boolean> {
+  try {
+    const bbox = extentBbox(center, widthM, OUT_W, OUT_H).map(n => n.toFixed(6)).join(',');
+    const res = await fetch(`/api/cadastre/parcel?bbox=${bbox}`);
+    if (!res.ok) return false;
+    const features: any[] = (await res.json())?.features || [];
+    if (!features.length) return false;
+    ctx.save();
+    ctx.beginPath();
+    for (const f of features) {
+      for (const ring of geometryRings(f.geometry)) {
+        ring.forEach(([x, y], i) => {
+          const p = plan.project(x, y);
+          if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      }
+    }
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = onOrtho ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+    ctx.strokeStyle = onOrtho ? '#ffd24a' : '#555';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -146,6 +184,19 @@ export function FeasibilityMapDialog({ proposalId, lat, lon, parcelGeometry, onI
   const [rendering, setRendering] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Parcelle à tracer (celles choisies sur la carte de la proposition, sinon
+  // celle de l'adresse) et centre de l'extrait : par défaut le centre de la
+  // parcelle, déplaçable par glisser. `null` = recentré sur la parcelle.
+  const [geometry, setGeometry] = useState<GeoJSON.Geometry | null>(parcelGeometry ?? null);
+  const [panCenter, setPanCenter] = useState<{ lon: number; lat: number } | null>(null);
+  // Décalage visuel (px écran) pendant le glisser, jusqu'à la recomposition.
+  const [dragPx, setDragPx] = useState({ x: 0, y: 0 });
+  const dragStart = useRef<{ x: number; y: number; id: number } | null>(null);
+  const viewRef = useRef<HTMLDivElement | null>(null);
+
+  const parcelCenter = geometryCenter(geometry as any);
+  const centerLon = panCenter?.lon ?? parcelCenter?.lon ?? lon;
+  const centerLat = panCenter?.lat ?? parcelCenter?.lat ?? lat;
 
   const preset = FEASIBILITY_MAP_PRESETS.find(p => p.id === presetId) ?? FEASIBILITY_MAP_PRESETS[0];
   const scale = approximateScale(extent);
@@ -154,6 +205,17 @@ export function FeasibilityMapDialog({ proposalId, lat, lon, parcelGeometry, onI
   useEffect(() => {
     if (!captionTouched) setCaption(defaultMapCaption(presetLabel, scale));
   }, [presetLabel, scale, captionTouched]);
+
+  // Les parcelles choisies sur la carte de la proposition priment : un terrain
+  // en couvre souvent plusieurs, l'adresse n'en désigne qu'une.
+  useEffect(() => {
+    let cancelled = false;
+    setPanCenter(null);
+    if (parcelGeometry) { setGeometry(parcelGeometry); return; }
+    setGeometry(null);
+    parcelAtPoint(lat, lon).then(g => { if (!cancelled) setGeometry(g); });
+    return () => { cancelled = true; };
+  }, [parcelGeometry, lat, lon]);
 
   // Recomposition à chaque changement de réglage, la dernière demande gagnant.
   useEffect(() => {
@@ -171,21 +233,19 @@ export function FeasibilityMapDialog({ proposalId, lat, lon, parcelGeometry, onI
         ctx.fillStyle = '#f3f4f6';
         ctx.fillRect(0, 0, OUT_W, OUT_H);
         const base = FEASIBILITY_MAP_LAYERS[preset.base];
-        const plan = planMapExtract({ lon, lat, widthM: extent, outW: OUT_W, outH: OUT_H, maxZoom: base.maxZoom });
+        const plan = planMapExtract({ lon: centerLon, lat: centerLat, widthM: extent, outW: OUT_W, outH: OUT_H, maxZoom: base.maxZoom });
         const drawn = await drawLayer(ctx, preset.base, plan);
         if (cancelled) return;
         if (drawn === 0) throw new Error('tiles');
-        if (preset.cadastre) await drawLayer(ctx, 'cadastre', plan);
-        if (cancelled) return;
-        if (showParcel) {
-          // Les parcelles choisies sur la carte de la proposition priment : un
-          // terrain en couvre souvent plusieurs, l'adresse n'en désigne qu'une.
-          const geometry = parcelGeometry ?? await parcelAtPoint(lat, lon);
-          if (cancelled) return;
-          drawParcel(ctx, plan, geometry, lon, lat);
+        if (preset.cadastre) {
+          const vector = await drawCadastreVector(ctx, plan, { lon: centerLon, lat: centerLat }, extent, preset.base === 'ortho');
+          if (!vector) await drawLayer(ctx, 'cadastre', plan);
         }
+        if (cancelled) return;
+        if (showParcel) drawParcel(ctx, plan, geometry, lon, lat);
         drawDecorations(ctx, plan, preset.cadastre ? '© IGN Géoplateforme, cadastre DGFiP' : '© IGN Géoplateforme');
         setPreview(canvas.toDataURL('image/jpeg', 0.9));
+        setDragPx({ x: 0, y: 0 });
       } catch {
         if (!cancelled) { setPreview(null); setError(t('feas_map_error')); }
       } finally {
@@ -193,7 +253,29 @@ export function FeasibilityMapDialog({ proposalId, lat, lon, parcelGeometry, onI
       }
     })();
     return () => { cancelled = true; };
-  }, [preset, extent, showParcel, lat, lon, parcelGeometry, t]);
+  }, [preset, extent, showParcel, lat, lon, centerLat, centerLon, geometry, t]);
+
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!preview || e.button > 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragStart.current = { x: e.clientX, y: e.clientY, id: e.pointerId };
+  };
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const s = dragStart.current;
+    if (!s) return;
+    setDragPx({ x: e.clientX - s.x, y: e.clientY - s.y });
+  };
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>, commit: boolean) => {
+    const s = dragStart.current;
+    dragStart.current = null;
+    if (!s) return;
+    const width = viewRef.current?.getBoundingClientRect().width || OUT_W;
+    const dx = ((e.clientX - s.x) * OUT_W) / width;
+    const dy = ((e.clientY - s.y) * OUT_W) / width;
+    if (!commit || (Math.abs(dx) < 1 && Math.abs(dy) < 1)) { setDragPx({ x: 0, y: 0 }); return; }
+    // La vignette reste décalée jusqu'à la fin de la recomposition.
+    setPanCenter(shiftCenter({ lon: centerLon, lat: centerLat }, dx, dy, extent / OUT_W));
+  };
 
   const insert = async () => {
     const canvas = canvasRef.current;
@@ -255,8 +337,20 @@ export function FeasibilityMapDialog({ proposalId, lat, lon, parcelGeometry, onI
               {t('feas_map_parcel')}
             </label>
           </div>
-          <div className="relative rounded-lg overflow-hidden" style={{ aspectRatio: `${OUT_W} / ${OUT_H}`, background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-            {preview && <img src={preview} alt={caption} className="w-full h-full object-cover" />}
+          <div ref={viewRef} className="relative rounded-lg overflow-hidden select-none"
+            style={{ aspectRatio: `${OUT_W} / ${OUT_H}`, background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', cursor: preview ? 'grab' : undefined, touchAction: 'none' }}
+            title={t('feas_map_drag_hint') as string}
+            onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+            onPointerUp={e => endDrag(e, true)} onPointerCancel={e => endDrag(e, false)}>
+            {preview && <img src={preview} alt={caption} draggable={false} className="w-full h-full object-cover"
+              style={{ transform: `translate(${dragPx.x}px, ${dragPx.y}px)` }} />}
+            {panCenter && (
+              <button type="button" onPointerDown={e => e.stopPropagation()} onClick={() => setPanCenter(null)}
+                className="absolute top-2 left-2 px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1"
+                style={{ background: 'rgba(255,255,255,0.92)', color: '#111', border: '1px solid rgba(0,0,0,0.2)' }}>
+                <IconFocusCentered size={14} /> {t('feas_map_recenter')}
+              </button>
+            )}
             {rendering && (
               <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm" style={{ color: 'var(--tblr-muted)', background: preview ? 'rgba(255,255,255,0.5)' : undefined }}>
                 <IconLoader2 size={18} className="animate-spin" /> {t('feas_map_rendering')}
