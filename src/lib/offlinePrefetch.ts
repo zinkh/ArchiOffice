@@ -61,6 +61,7 @@ async function prefetchProjectChantier(projectId: string): Promise<void> {
     cachedListFirst(db.reservesCache, r => r.project_id === projectId, `/api/reserves?project_id=${projectId}`, () => {}),
     cachedListFirst(db.gpaReservesCache, r => r.project_id === projectId, `/api/gpa-reserves?project_id=${projectId}`, () => {}),
     cachedListFirst(db.observationsCache, o => o.project_id === projectId, `/api/projects/${projectId}/observations`, () => {}),
+    cachedListFirst(db.siteReportsCache, r => r.project_id === projectId, `/api/projects/${projectId}/reports`, () => {}),
   ]);
 }
 

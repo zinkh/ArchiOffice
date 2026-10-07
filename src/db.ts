@@ -1,4 +1,5 @@
 import Dexie, { Table } from 'dexie';
+import type { SiteReport, SiteReportNote } from './types';
 import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, Reserve, GpaReserve, Observation } from './types';
 
 /**
@@ -20,7 +21,7 @@ export interface PendingWrite {
   blobFieldName?: string;
   blobFilename?: string;
   extraFields?: Record<string, string>;
-  entity: 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem';
+  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem';
   status: 'pending' | 'error';
   attempts: number;
   lastError?: string;
@@ -48,6 +49,8 @@ export class AppDatabase extends Dexie {
   reservesCache!: Table<Reserve>;
   gpaReservesCache!: Table<GpaReserve>;
   observationsCache!: Table<Observation>;
+  siteReportsCache!: Table<SiteReport>;
+  siteReportNotesCache!: Table<SiteReportNote>;
   // Préchargement « disponible hors connexion » (src/lib/offlinePrefetch.ts) :
   // le payload de GET /api/projects/:id/full tel quel, un seul projet par
   // ligne — pas de risque d'écraser le cache d'un autre projet ici, jamais
@@ -113,6 +116,12 @@ export class AppDatabase extends Dexie {
     // supabase/migrate_project_offline_enabled.sql.
     this.version(7).stores({
       projectSnapshots: 'id, cachedAt',
+    });
+    // v8 : comptes-rendus de chantier et leurs rubriques — jusque-là jamais
+    // mis en cache, d'où une liste vide dès que le réseau manquait.
+    this.version(8).stores({
+      siteReportsCache: 'id, project_id',
+      siteReportNotesCache: 'id, report_id',
     });
   }
 }

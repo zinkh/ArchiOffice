@@ -1583,6 +1583,34 @@ existants, quantités et prix à 0, chaque article marqué `genereParIa` (badge
 l'enregistrement habituel. Seules les pièces dont `project_id` est l'affaire
 visée sont lues.
 
+### Chantier hors ligne, en plusieurs bâtiments et phases
+
+**Comptes-rendus hors ligne.** `GET /api/projects/:id/reports` n'était lu ni mis en
+cache : sans réseau la liste restait vide, et un compte-rendu créé sur le chantier
+disparaissait au premier rechargement. `siteReportsCache` et `siteReportNotesCache`
+(Dexie v8) suivent le patron des autres caches (`cachedListFirst`), et la file
+d'écritures est SUPERPOSÉE à la liste (`superposerEcrituresEnAttente`,
+`src/lib/chantierDecoupage.ts`, testée) : création en attente ajoutée, modifications en
+attente rejouées par-dessus. Toute modification d'un compte-rendu (`persistReport`),
+création, édition et suppression de rubrique passent par `queuedJsonRequest`. Deux
+pièges : une modification n'a jamais le même id de file que la création (sinon elle
+l'écraserait), et le numéro d'un compte-rendu en attente est provisoire, donc jamais
+renvoyé dans une modification. `POST /api/reports/:id/notes` accepte un `id` client
+(idempotent).
+
+**Bâtiments et phases.** Même registre que le CCTP/DPGF (`DecoupageDocument`) mais porté
+par l'affaire : `projects.chantier_decoupage` (jsonb), écrit par sa propre route
+`PUT /api/projects/:id/chantier-decoupage` (`server/routes/chantierDecoupage.ts`), jamais
+par l'enregistrement automatique de la fiche (qui l'ignore, sa liste blanche ne le
+contient pas). « Reprendre ceux du CCTP / DPGF » copie le registre du DPGF en gardant les
+identifiants. `site_reports` et `observations` portent `batiment_id` / `phase_id`
+(`supabase/migrate_chantier_decoupage.sql`), sans clé étrangère : retirer un bâtiment
+du registre ne supprime rien, les lignes repassent « sans bâtiment ». Une observation
+relevée dans un compte-rendu hérite de son bâtiment et de sa phase ; la liste des
+comptes-rendus et le tableau des observations se filtrent par bâtiment, phase ou
+« sans affectation », l'export PDF porte la ligne « Bâtiment / phase ». Rien n'apparaît
+tant que le registre est vide.
+
 ### Compte-rendu de chantier au téléphone
 
 `ChantierModule.tsx` (onglet Comptes-rendus) est le premier écran du chantier : ses

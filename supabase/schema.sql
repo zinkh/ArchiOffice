@@ -201,7 +201,9 @@ CREATE TABLE IF NOT EXISTS projects (
   -- cochée depuis la fiche projet, déclenche le préchargement en lecture seule
   -- des données du projet dans le cache Dexie du navigateur — jamais activée
   -- pour tous les projets à la fois, pour ne pas alourdir l'app sur les autres.
-  offline_enabled BOOLEAN NOT NULL DEFAULT false
+  offline_enabled BOOLEAN NOT NULL DEFAULT false,
+  -- Registre bâtiments/phases du chantier (supabase/migrate_chantier_decoupage.sql)
+  chantier_decoupage JSONB
 );
 
 CREATE TABLE IF NOT EXISTS project_categories_junction (
@@ -487,7 +489,9 @@ CREATE TABLE IF NOT EXISTS site_reports (
   decisions JSONB DEFAULT '[]',
   -- Suivi par lot (page 2 du CR : présence P/R/AE/ANE, effectif, retards,
   -- intempéries, lieu) — supabase/migrate_site_report_lot_tracking.sql
-  lot_tracking JSONB DEFAULT '[]'
+  lot_tracking JSONB DEFAULT '[]',
+  -- Bâtiment et phase du chantier visés (supabase/migrate_chantier_decoupage.sql)
+  batiment_id TEXT, phase_id TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_site_reports_tenant_project ON site_reports(tenant_id, project_id);
 

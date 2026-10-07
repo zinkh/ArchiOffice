@@ -25,6 +25,9 @@ export interface RouteDeps {
   uploadToStorage: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
 }
 
+/** Identifiant de bâtiment/phase du registre du chantier : texte court, sinon ignoré. */
+const cleanRef = (v: unknown): string => (typeof v === 'string' && v.length <= 64 ? v : '');
+
 export function registerObservationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage }: RouteDeps) {
   app.get("/api/projects/:projectId/observations", async (req: any, res: any) => {
     try {
@@ -64,6 +67,8 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const { id: bodyId, lot_id, contact_id, texte, statut, due_date, created_report_id, type, urgence } = req.body;
+      const batimentId = cleanRef(req.body.batiment_id);
+      const phaseId = cleanRef(req.body.phase_id);
       // Id fourni par le client (file de synchro hors-ligne) : rejouer la
       // même création après une coupure réseau ne doit ni créer une seconde
       // observation, ni consommer un second numéro dans la séquence du projet.
@@ -88,7 +93,8 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
         id, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
         texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
         created_report_id: created_report_id || null, number,
-        type: type || 'observation', urgence: urgence || 'normal'
+        type: type || 'observation', urgence: urgence || 'normal',
+        batiment_id: batimentId || null, phase_id: phaseId || null,
       }).select().single();
       if (error) throw error;
       if (created_report_id) {
@@ -126,6 +132,8 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       if (type !== undefined) update.type = type;
       if (urgence !== undefined) update.urgence = urgence;
       if (photos !== undefined) update.photos = photos;
+      if (req.body.batiment_id !== undefined) update.batiment_id = cleanRef(req.body.batiment_id) || null;
+      if (req.body.phase_id !== undefined) update.phase_id = cleanRef(req.body.phase_id) || null;
       if (statut === 'Levée' && resolved_report_id) update.resolved_report_id = resolved_report_id;
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update(update).eq('id', id);
       if (error) throw error;
