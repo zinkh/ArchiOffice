@@ -402,6 +402,8 @@ export default {
       "feas_photo": "Photo",
       "feas_photo_error": "Photo(s) not inserted (unreadable format or too large): {{files}}",
       "feas_photo_limit": "A section accepts at most {{max}} images.",
+      "feas_photo_title": "Insert photos",
+      "feas_photo_caption_placeholder": "Photo caption (place, date, subject...)",
       "feas_map": "Map",
       "feas_draft_ai": "Draft with AI",
       "feas_drafting": "Drafting...",

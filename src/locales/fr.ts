@@ -445,6 +445,8 @@ export default {
       "feas_photo": "Photo",
       "feas_photo_error": "Photo(s) non insérée(s) (format non lisible ou trop volumineux) : {{files}}",
       "feas_photo_limit": "Une rubrique accepte au plus {{max}} images.",
+      "feas_photo_title": "Insérer des photos",
+      "feas_photo_caption_placeholder": "Légende de la photo (lieu, date, objet...)",
       "feas_map": "Carte",
       "feas_draft_ai": "Rédiger avec IA",
       "feas_drafting": "Rédaction...",

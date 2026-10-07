@@ -20,6 +20,7 @@ import {
 import { useUser } from '../../UserContext';
 import { SignedImage } from '../SignedImage';
 import { FeasibilityMapDialog } from './FeasibilityMapDialog';
+import { FeasibilityPhotoDialog, type PhotoWithCaption } from './FeasibilityPhotoDialog';
 import {
   FEASIBILITY_BLOCK_KINDS, appendBlock, buildFeasibilityBlock,
   type FeasibilityBlockKind, type FeasibilityIllustration, type FeasibilitySection, type FeasibilitySiteData,
@@ -68,6 +69,8 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
   const [photoUploadingFor, setPhotoUploadingFor] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const photoTargetRef = useRef<string | null>(null);
+  // Photos choisies, en attente de leur légende avant l'envoi.
+  const [pendingPhotos, setPendingPhotos] = useState<{ sectionId: string; files: File[] } | null>(null);
 
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
@@ -183,19 +186,19 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
 
   // Photos externes à ArchiOffice (prises sur site, reçues du client...) : réduites
   // en JPEG puis déposées comme documents de la proposition, comme les extraits de cartes.
-  const uploadPhotos = async (sectionId: string, files: File[]) => {
+  const uploadPhotos = async (sectionId: string, photos: PhotoWithCaption[]) => {
     setNotice(null);
     setError(null);
     const section = sectionsRef.current.find(s => s.id === sectionId);
-    if (!section || !files.length) return;
+    if (!section || !photos.length) { setPendingPhotos(null); return; }
     const room = MAX_ILLUSTRATIONS_PER_SECTION - section.illustrations.length;
-    if (room <= 0) { setError(t('feas_photo_limit', { max: MAX_ILLUSTRATIONS_PER_SECTION }) as string); return; }
+    if (room <= 0) { setPendingPhotos(null); setError(t('feas_photo_limit', { max: MAX_ILLUSTRATIONS_PER_SECTION }) as string); return; }
     setPhotoUploadingFor(sectionId);
     const added: FeasibilityIllustration[] = [];
     const rejected: string[] = [];
     try {
       const token = await getAccessToken();
-      for (const file of files.slice(0, room)) {
+      for (const { file, caption } of photos.slice(0, room)) {
         try {
           if (!file.type.startsWith('image/') || file.size > PHOTO_MAX_INPUT_BYTES) throw new Error('unsupported');
           const blob = await photoToJpeg(file);
@@ -211,7 +214,7 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
           if (!res.ok || !data?.id) throw new Error(data?.error || 'upload');
           added.push({
             document_id: data.id, file_url: data.file_url, layer: 'photo', scale: 0,
-            caption: photoLabel(file.name), captured_at: new Date().toISOString(),
+            caption, captured_at: new Date().toISOString(),
           });
         } catch {
           rejected.push(file.name);
@@ -223,11 +226,12 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
         patchLocal(sectionId, { illustrations });
         await save(sectionId, { illustrations });
       }
-      const skipped = files.length - room > 0 ? files.length - room : 0;
+      const skipped = Math.max(0, photos.length - room);
       if (rejected.length) setError(t('feas_photo_error', { files: rejected.join(', ') }) as string);
       else if (skipped > 0) setNotice(t('feas_photo_limit', { max: MAX_ILLUSTRATIONS_PER_SECTION }) as string);
     } finally {
       setPhotoUploadingFor(null);
+      setPendingPhotos(null);
     }
   };
 
@@ -465,8 +469,17 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
           const files = Array.from(e.target.files ?? []);
           e.target.value = '';
           const target = photoTargetRef.current;
-          if (target) void uploadPhotos(target, files);
+          if (target && files.length) setPendingPhotos({ sectionId: target, files });
         }} />
+
+      {pendingPhotos && (
+        <FeasibilityPhotoDialog
+          files={pendingPhotos.files}
+          saving={photoUploadingFor === pendingPhotos.sectionId}
+          onConfirm={photos => uploadPhotos(pendingPhotos.sectionId, photos)}
+          onClose={() => setPendingPhotos(null)}
+        />
+      )}
 
       {mapSection && siteData?.address && (
         <FeasibilityMapDialog
