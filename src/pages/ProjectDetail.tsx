@@ -4539,6 +4539,13 @@ export default function ProjectDetail() {
                   projectName={project.name}
                   lots={project.lots_list || []}
                   contacts={contacts}
+                  operation={{
+                    code: project.project_code,
+                    adresse: project.address,
+                    maitreOuvrage: project.client,
+                    permisNumero: permits.find(pm => pm.type === 'PC')?.reference,
+                    permisDate: permits.find(pm => pm.type === 'PC')?.decision_date,
+                  }}
                 />
               </div>
             )}
