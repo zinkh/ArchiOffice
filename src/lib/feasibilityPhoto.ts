@@ -40,3 +40,24 @@ export async function photoToJpeg(file: File, maxSide = PHOTO_MAX_SIDE, quality 
     bitmap.close();
   }
 }
+
+/** Copie de `items` où l'élément `from` est déplacé en position `to` (indices bornés). */
+export function moveItem<T>(items: readonly T[], from: number, to: number): T[] {
+  const next = [...items];
+  if (from < 0 || from >= next.length) return next;
+  const target = Math.max(0, Math.min(next.length - 1, to));
+  const [held] = next.splice(from, 1);
+  next.splice(target, 0, held);
+  return next;
+}
+
+/** Indice du rectangle dont le centre est le plus proche du point (x, y), -1 sans rectangle. */
+export function nearestRectIndex(rects: ReadonlyArray<{ left: number; top: number; width: number; height: number }>, x: number, y: number): number {
+  let best = -1;
+  let bestDist = Infinity;
+  rects.forEach((r, i) => {
+    const dist = (r.left + r.width / 2 - x) ** 2 + (r.top + r.height / 2 - y) ** 2;
+    if (dist < bestDist) { bestDist = dist; best = i; }
+  });
+  return best;
+}

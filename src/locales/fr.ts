@@ -447,6 +447,7 @@ export default {
       "feas_photo_limit": "Une rubrique accepte au plus {{max}} images.",
       "feas_photo_title": "Insérer des photos",
       "feas_photo_caption_placeholder": "Légende de la photo (lieu, date, objet...)",
+      "feas_reorder_image": "Déplacer l'image (glisser ou flèches du clavier)",
       "feas_map": "Carte",
       "feas_draft_ai": "Rédiger avec IA",
       "feas_drafting": "Rédaction...",

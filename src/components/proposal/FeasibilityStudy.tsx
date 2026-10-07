@@ -9,13 +9,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconSparkles, IconWand, IconTrash, IconPlus, IconGripVertical, IconMap2, IconListDetails, IconLock,
-  IconFileTypePdf, IconFileTypeDocx, IconAlertTriangle, IconChevronDown, IconX, IconLoader2, IconPhoto,
+  IconFileTypePdf, IconFileTypeDocx, IconAlertTriangle, IconChevronDown, IconX, IconLoader2, IconPhoto, IconArrowsMove,
 } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { startPressDrag } from '../../lib/pressDrag';
 import { getAccessToken } from '../../lib/authToken';
 import {
-  MAX_ILLUSTRATIONS_PER_SECTION, PHOTO_MAX_INPUT_BYTES, photoLabel, photoToJpeg,
+  MAX_ILLUSTRATIONS_PER_SECTION, PHOTO_MAX_INPUT_BYTES, moveItem, nearestRectIndex, photoLabel, photoToJpeg,
 } from '../../lib/feasibilityPhoto';
 import { useUser } from '../../UserContext';
 import { SignedImage } from '../SignedImage';
@@ -69,6 +69,8 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
   const [photoUploadingFor, setPhotoUploadingFor] = useState<string | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const photoTargetRef = useRef<string | null>(null);
+  const [draggingIllId, setDraggingIllId] = useState<string | null>(null);
+  const figureRefs = useRef(new Map<string, HTMLElement>());
   // Photos choisies, en attente de leur légende avant l'envoi.
   const [pendingPhotos, setPendingPhotos] = useState<{ sectionId: string; files: File[] } | null>(null);
 
@@ -241,6 +243,45 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
     patchLocal(sectionId, { illustrations: section.illustrations.map(i => (i.document_id === documentId ? { ...i, caption } : i)) });
   };
 
+  // Réordonner les images d'une rubrique : au pointeur (poignée) ou aux flèches du clavier.
+  const reorderIllustrations = (sectionId: string, documentId: string, to: number): boolean => {
+    const section = sectionsRef.current.find(s => s.id === sectionId);
+    const from = section?.illustrations.findIndex(i => i.document_id === documentId) ?? -1;
+    if (!section || from < 0 || to === from) return false;
+    patchLocal(sectionId, { illustrations: moveItem(section.illustrations, from, to) });
+    return true;
+  };
+
+  const startIllReorder = (e: React.PointerEvent<HTMLElement>, sectionId: string, documentId: string) => {
+    const before = sectionsRef.current.find(s => s.id === sectionId)?.illustrations ?? [];
+    startPressDrag(e, {
+      onLift: () => setDraggingIllId(documentId),
+      onMove: ({ x, y }) => {
+        const current = sectionsRef.current.find(s => s.id === sectionId)?.illustrations ?? [];
+        const rects = current.map(i => figureRefs.current.get(i.document_id)?.getBoundingClientRect() ?? { left: -1e6, top: -1e6, width: 0, height: 0 });
+        const to = nearestRectIndex(rects, x, y);
+        if (to >= 0) reorderIllustrations(sectionId, documentId, to);
+      },
+      onEnd: ({ cancelled }) => {
+        setDraggingIllId(null);
+        if (cancelled) { patchLocal(sectionId, { illustrations: before }); return; }
+        const now = sectionsRef.current.find(s => s.id === sectionId)?.illustrations ?? [];
+        if (now.map(i => i.document_id).join() !== before.map(i => i.document_id).join()) void save(sectionId, { illustrations: now });
+      },
+    });
+  };
+
+  const nudgeIllustration = (e: React.KeyboardEvent, sectionId: string, documentId: string, delta: number) => {
+    e.preventDefault();
+    const section = sectionsRef.current.find(s => s.id === sectionId);
+    const from = section?.illustrations.findIndex(i => i.document_id === documentId) ?? -1;
+    if (!section || from < 0) return;
+    if (reorderIllustrations(sectionId, documentId, from + delta)) {
+      const now = sectionsRef.current.find(s => s.id === sectionId)?.illustrations ?? [];
+      void save(sectionId, { illustrations: now });
+    }
+  };
+
   const removeIllustration = async (section: FeasibilitySection, documentId: string) => {
     const illustrations = section.illustrations.filter(i => i.document_id !== documentId);
     patchLocal(section.id, { illustrations });
@@ -373,9 +414,22 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
             {section.illustrations.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {section.illustrations.map(ill => (
-                  <figure key={ill.document_id} className="space-y-1">
+                  <figure key={ill.document_id} className={`space-y-1 ${draggingIllId === ill.document_id ? 'opacity-70 ring-2 rounded-lg' : ''}`}
+                    ref={el => { if (el) figureRefs.current.set(ill.document_id, el); else figureRefs.current.delete(ill.document_id); }}>
                     <div className="relative rounded-lg overflow-hidden" style={{ border: '1px solid var(--tblr-border)' }}>
                       <SignedImage src={ill.file_url} alt={ill.caption} className="w-full h-auto block" />
+                      {section.illustrations.length > 1 && (
+                        <button type="button" onPointerDown={e => startIllReorder(e, section.id, ill.document_id)}
+                          onKeyDown={e => {
+                            if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nudgeIllustration(e, section.id, ill.document_id, -1);
+                            else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nudgeIllustration(e, section.id, ill.document_id, 1);
+                          }}
+                          title={t('feas_reorder_image') as string} aria-label={t('feas_reorder_image') as string}
+                          className="absolute top-1.5 left-1.5 p-1 rounded-full cursor-grab touch-none"
+                          style={{ background: 'rgba(255,255,255,0.9)', color: '#111' }}>
+                          <IconArrowsMove size={14} />
+                        </button>
+                      )}
                       <button type="button" onClick={() => removeIllustration(section, ill.document_id)}
                         className="absolute top-1.5 right-1.5 p-1 rounded-full" aria-label={t('feas_remove_illustration') as string}
                         style={{ background: 'rgba(255,255,255,0.9)', color: '#111' }}>
