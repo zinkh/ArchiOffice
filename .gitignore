@@ -14,3 +14,5 @@ uploads/
 scripts/eval-agents-reports/
 vendor/
 .npmrc
+
+__pycache__/
