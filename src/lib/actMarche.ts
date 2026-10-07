@@ -1,14 +1,13 @@
 // ── Documents contractuels du marché de travaux (module ACT) ─────────────────
-// Trois pièces produites à partir de la consultation :
+// Pièces produites à partir de la consultation (l'acte d'engagement, lui, est
+// un formulaire à remplir par l'entreprise : voir `actEngagementForm.ts`) :
 //   - le règlement de consultation (RC) ;
 //   - le CCAP, d'après le modèle de CCAP d'un marché de travaux privés
-//     (norme AFNOR P 03-001, annexes de l'Ordre des architectes) ;
-//   - l'acte d'engagement, un par lot et par entreprise.
+//     (norme NF P 03-001, annexes de l'Ordre des architectes).
 // Ce module ne fait que construire un contenu structuré (`DocModele`) : le rendu
 // PDF et Word est dans `actMarcheExport.ts`. Une information absente est
 // rendue par des points de suspension, jamais inventée.
-import { montantEnLettres } from './numberToFrenchWords';
-import { PARAMETRES_DEFAUT, type DonneesNegociation, type PieceAttendue } from './actNegociation';
+import type { PieceAttendue } from './actNegociation';
 
 export const POINTILLES = '……';
 
@@ -28,6 +27,7 @@ export interface ParametresMarche {
   controle_technique?: string;
   opc_par_moe?: boolean;
   penalite_retard?: string;
+  penalite_plafond_pct?: number;
   penalite_absence_eur?: number;
   penalite_documents_eur?: number;
   delai_execution_mois?: number;
@@ -60,19 +60,21 @@ export interface ParametresMarche {
 }
 
 export const PARAMETRES_MARCHE_DEFAUT: Required<Pick<ParametresMarche,
-  'habitation_neuve' | 'opc_par_moe' | 'controle_technique' | 'penalite_retard' | 'jours_intemperies' |
+  'habitation_neuve' | 'opc_par_moe' | 'controle_technique' | 'penalite_retard' | 'penalite_plafond_pct' | 'jours_intemperies' |
   'retenue_garantie_pct' | 'caution_delai_mois' | 'acompte_delai_jours' | 'solde_delai_jours' |
   'financement_pret' | 'seuil_pret_ttc' | 'seuil_garantie_paiement_ht' | 'rc_validite_offres_jours' |
   'rc_variantes' | 'rc_negociation' | 'rc_procedure'>> = {
   habitation_neuve: false,
   opc_par_moe: true,
   controle_technique: '',
-  penalite_retard: '1/3000e',
+  // Valeurs par défaut de la norme NF P 03-001 (articles 9.5, 20.3.1, 20.4.1 et 20.5).
+  penalite_retard: '1/1000e',
+  penalite_plafond_pct: 5,
   jours_intemperies: 10,
   retenue_garantie_pct: 5,
   caution_delai_mois: 12,
   acompte_delai_jours: 30,
-  solde_delai_jours: 45,
+  solde_delai_jours: 30,
   financement_pret: false,
   seuil_pret_ttc: 21500,
   seuil_garantie_paiement_ht: 12000,
@@ -208,7 +210,7 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
   const para = (text: string) => b.push({ t: 'p', text });
   const li = (text: string) => b.push({ t: 'li', text });
 
-  para('Établi selon la norme AFNOR P 03-001 relative au cahier des clauses administratives générales applicable aux travaux de bâtiment faisant l\'objet de marchés privés (CCAG).');
+  para('Établi selon la norme NF P 03-001 (décembre 2000, amendement A1 de novembre 2009) : cahier des clauses administratives générales applicable aux travaux de bâtiment faisant l\'objet de marchés privés. Cette norme est rendue applicable au présent marché par le présent CCAP.');
 
   art('1. Le marché');
   sub('1.1 Objet');
@@ -238,17 +240,17 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
   li('2. Le présent CCAP.');
   li('3. Le cahier des clauses techniques particulières (CCTP), comprenant le devis descriptif et les prescriptions communes à tous les corps d\'état, ainsi que les plans et dessins.');
   li('4. Le calendrier prévisionnel général d\'exécution, complété éventuellement par le calendrier détaillé d\'exécution.');
-  para('Pièces non jointes au marché : le cahier des clauses administratives générales applicables aux travaux de bâtiment faisant l\'objet de marchés privés, norme NF P 03-001, appelé « CCAG » dans le présent document.');
+  para('Pièces non jointes au marché : la norme NF P 03-001 (décembre 2000, amendement A1 de novembre 2009), cahier des clauses administratives générales applicable aux travaux de bâtiment faisant l\'objet de marchés privés, désignée « la norme NF P 03-001 » dans le présent document. Elle est rendue applicable par le présent CCAP et les dispositions du CCAP y dérogent lorsqu\'elles le précisent.');
   para('Pièce annexée au marché : la décomposition du prix global et forfaitaire (DPGF). Ce document n\'est pas contractuel, mais est utilisé pour l\'établissement des situations de travaux et pour l\'évaluation des travaux modificatifs.');
   sub('1.7 Sous-traitance');
-  para('Conformément à l\'article 4.4 du CCAG, l\'entrepreneur qui sous-traite l\'exécution de certaines prestations de son marché doit adresser au maître d\'ouvrage sa demande de sous-traitance par lettre recommandée avec avis de réception ou la remettre contre reçu. Si le maître d\'ouvrage n\'a pas répondu à cette demande dans un délai de 15 jours à compter de sa réception, l\'acceptation et l\'agrément des conditions de paiement du sous-traitant sont réputés acquis.');
+  para('Conformément à l\'article 4.4 de la norme NF P 03-001, l\'entrepreneur qui sous-traite l\'exécution de certaines prestations de son marché doit adresser au maître d\'ouvrage sa demande de sous-traitance par lettre recommandée avec avis de réception ou la remettre contre reçu. Si le maître d\'ouvrage n\'a pas répondu à cette demande dans un délai de 15 jours à compter de sa réception, l\'acceptation et l\'agrément des conditions de paiement du sous-traitant sont réputés acquis.');
 
   art('2. Représentation des parties, communication entre elles');
   sub('2.1 Présence aux rendez-vous de chantier');
   para('L\'entrepreneur ou le mandataire commun ou le représentant unique est tenu d\'assister aux rendez-vous de chantier provoqués par le maître d\'œuvre ou d\'y déléguer un agent qui a pouvoir pour donner sur-le-champ les ordres nécessaires sur le chantier.');
   para('Le maître d\'œuvre détermine en début de travaux le rythme des rendez-vous de chantier. Le programme de participation de l\'entrepreneur aux rendez-vous de chantier doit tenir compte du montant et de la nature des travaux.');
   sub('2.2 Comptes-rendus');
-  para('Les prescriptions contenues dans les comptes-rendus de réunions de chantier sont applicables sauf contestation écrite de la part de l\'entrepreneur dans un délai de 5 jours à compter de leur réception, par dérogation à l\'article 15.2.1 du CCAG. Les comptes-rendus sont transmis soit par lettre, soit par télécopie, soit par courriel.');
+  para('Les prescriptions contenues dans les comptes-rendus de réunions de chantier sont applicables sauf contestation écrite de la part de l\'entrepreneur dans un délai de 5 jours à compter de leur réception, par dérogation à l\'article 15.2.1 de la norme NF P 03-001. Les comptes-rendus sont transmis soit par lettre, soit par télécopie, soit par courriel.');
 
   art('3. Rémunération');
   sub('3.1 Prix du marché');
@@ -261,20 +263,20 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
 
   art('4. Pénalités');
   sub('4.1 Pénalités de retard');
-  para(`La pénalité prévue à l'article 9.5 du CCAG est fixée à ${v(p.penalite_retard)} du montant TTC du marché par jour calendaire de retard. Par dérogation au CCAG, elle est appliquée sans qu'il soit besoin d'une mise en demeure préalable et est plafonnée à 15 % du montant du marché.`);
+  para(`La pénalité prévue à l'article 9.5 de la norme NF P 03-001 est fixée à ${v(p.penalite_retard)} du montant TTC du marché par jour calendaire de retard. Par dérogation à cet article, elle est appliquée sans qu'il soit besoin d'une mise en demeure préalable et est plafonnée à ${nombre(p.penalite_plafond_pct)} % du montant du marché.`);
   sub('4.2 Retenues en cours de travaux');
   para('En cas de constat par le maître d\'œuvre de retards partiels en cours d\'exécution des travaux, une retenue, dont le montant est égal à la pénalité définie à l\'article 4.1, est appliquée sur la situation de la période où a été constaté le retard. Les sommes ainsi retenues sont reversées à l\'entrepreneur, en fin de travaux, s\'il a respecté le délai global d\'exécution. Sinon, ces retenues deviennent des pénalités de retard définitives.');
   sub('4.3 Absence à une réunion');
   para(`Toute absence non explicitée par un motif sérieux de l'entrepreneur à une réunion de chantier à laquelle il aura été dûment convoqué sera passible de l'application d'une pénalité forfaitaire de ${p.penalite_absence_eur != null ? eurosTxt(p.penalite_absence_eur) : `${POINTILLES} €`} TTC.`);
   sub('4.4 Retard dans la remise des documents');
-  para(`Tout retard dans la remise des documents par rapport aux délais prescrits par l'article 7.4 du CCAG (échantillons de matériaux, plans d'exécution, notes de calculs, etc.) sera passible d'une pénalité de ${p.penalite_documents_eur != null ? eurosTxt(p.penalite_documents_eur) : `${POINTILLES} €`} TTC par jour calendaire de retard.`);
+  para(`Tout retard dans la remise des documents par rapport aux délais prescrits par l'article 7.4 de la norme NF P 03-001 (échantillons de matériaux, plans d'exécution, notes de calculs, etc.) sera passible d'une pénalité de ${p.penalite_documents_eur != null ? eurosTxt(p.penalite_documents_eur) : `${POINTILLES} €`} TTC par jour calendaire de retard.`);
 
   art('5. Délais');
   sub('5.1 Calendrier prévisionnel général d\'exécution');
   para('Le délai global d\'exécution de l\'ensemble des lots est fixé dans l\'acte d\'engagement :');
   li(`il est établi en tenant compte de ${nombre(p.jours_intemperies)} jours d'intempéries prévisibles ;`);
   li('il est établi en tenant compte des périodes de congés payés ;');
-  li('il ne tient pas compte de la période de préparation prévue à l\'acte d\'engagement par dérogation au CCAG.');
+  li('il ne tient pas compte de la période de préparation prévue à l\'acte d\'engagement par dérogation à la norme NF P 03-001.');
   para('Les délais d\'exécution de chaque lot s\'inscrivent dans le délai global d\'exécution, conformément au calendrier prévisionnel général d\'exécution. Ils partent de la première intervention de l\'entrepreneur sur le chantier et expirent en même temps que sa dernière intervention.');
   sub('5.2 Calendrier détaillé d\'exécution');
   para('Le calendrier détaillé d\'exécution distingue les différents ouvrages ou groupes d\'ouvrages dont la construction fait l\'objet des travaux. Il indique en outre, pour chacun des lots, la durée et la date probable de départ des délais particuliers correspondant aux interventions successives de l\'entrepreneur sur le chantier.');
@@ -285,10 +287,10 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
   para('Les travaux modificatifs doivent faire l\'objet d\'un accord préalable écrit du maître d\'ouvrage.');
 
   art('7. Hygiène, sécurité, protection de la santé');
-  para('Les obligations de l\'entrepreneur sont définies à l\'article 5 du CCAG.');
+  para('Les obligations de l\'entrepreneur sont définies à l\'article 5 de la norme NF P 03-001.');
 
   art('8. Dépenses d\'intérêt commun, compte prorata');
-  para('Les dispositions de l\'article 14 du CCAG s\'appliquent.');
+  para('Les dispositions de l\'article 14 de la norme NF P 03-001 s\'appliquent.');
 
   art('9. Préparation de l\'exécution');
   sub('9.1 Période de préparation, programme d\'exécution des travaux');
@@ -301,7 +303,7 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
   art('10. Réception');
   sub('10.1 Réception');
   para('La réception a lieu à l\'achèvement de l\'ensemble des travaux. L\'entrepreneur chargé d\'aviser le maître d\'ouvrage et le maître d\'œuvre de la date à laquelle ces travaux sont considérés comme achevés est l\'entrepreneur titulaire du lot n° 1.');
-  para('Chaque entrepreneur est tenu d\'aviser le maître d\'ouvrage et le maître d\'œuvre de la date à laquelle l\'ensemble de ses travaux est achevé. Postérieurement à cette information, la procédure de réception se déroule, simultanément pour tous les lots considérés, comme il est stipulé à l\'article 17 du CCAG.');
+  para('Chaque entrepreneur est tenu d\'aviser le maître d\'ouvrage et le maître d\'œuvre de la date à laquelle l\'ensemble de ses travaux est achevé. Postérieurement à cette information, la procédure de réception se déroule, simultanément pour tous les lots considérés, comme il est stipulé à l\'article 17 de la norme NF P 03-001.');
   sub('10.2 Levées des réserves');
   para('Lorsque les procès-verbaux de réception font état de réserves, par dérogation à l\'article 17.2.5 l\'entrepreneur dispose d\'un délai fixé au procès-verbal de réception pour reprendre les travaux concernés.');
 
@@ -309,9 +311,9 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
   sub('11.1 État de situation');
   para('L\'entrepreneur remet chaque mois au maître d\'œuvre un état de situation. Cet état d\'acompte est présenté sous forme cumulative de l\'avancement des travaux.');
   sub('11.2 Paiements');
-  para(`Acomptes : dans les ${nombre(p.acompte_delai_jours)} jours à compter de la remise de l'état de situation au maître d'œuvre, les acomptes sont payés à l'entrepreneur et, s'il y a sous-traitance et délégation, au sous-traitant.`);
-  para(`Solde : dans les ${nombre(p.solde_delai_jours)} jours après l'expiration du délai défini à l'article 19.6.2 du CCAG pour la signification du décompte définitif, est dû le paiement du solde, amputé de la retenue de garantie constituée comme il est dit à l'article 20.5 du CCAG.`);
-  para(`Retenue de garantie : elle correspond à ${nombre(p.retenue_garantie_pct)} % du montant HT des travaux. Elle est consignée entre les mains du maître d'ouvrage, sauf présentation d'une caution par l'entrepreneur. La caution est libérée ou les sommes consignées sont versées à l'entrepreneur dans un délai de ${nombre(p.caution_delai_mois)} mois à compter de la date de réception (au plus tard à l'expiration du délai d'une année à compter de la date de réception faite avec ou sans réserves).`);
+  para(`Acomptes (article 20.3.1 de la norme NF P 03-001) : dans les ${nombre(p.acompte_delai_jours)} jours à compter de la remise de l'état de situation au maître d'œuvre, les acomptes sont payés à l'entrepreneur et, s'il y a sous-traitance et délégation, au sous-traitant.`);
+  para(`Solde (article 20.4.1 de la norme NF P 03-001) : ${nombre(p.solde_delai_jours)} jours après l'expiration du délai donné à l'article 19.6.2 de la norme pour la signification du décompte définitif, est dû le paiement du solde, amputé de la retenue de garantie constituée comme il est dit à l'article 20.5 de la norme.`);
+  para(`Retenue de garantie : elle correspond à ${nombre(p.retenue_garantie_pct)} % du montant HT des travaux (article 20.5 de la norme NF P 03-001). Elle est consignée entre les mains du maître d'ouvrage, sauf présentation d'une caution par l'entrepreneur. La caution est libérée ou les sommes consignées sont versées à l'entrepreneur dans un délai de ${nombre(p.caution_delai_mois)} mois à compter de la date de réception (au plus tard à l'expiration du délai d'une année à compter de la date de réception faite avec ou sans réserves).`);
   para('Intérêts moratoires : après mise en demeure par lettre recommandée avec avis de réception, les retards de paiement ouvrent droit, pour l\'entrepreneur, au paiement d\'intérêts moratoires à un taux qui sera le taux d\'intérêt légal augmenté de 7 points.');
 
   art('12. Financement');
@@ -327,14 +329,14 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
   }
 
   art('13. Garantie de paiement');
-  para(`Conformément aux dispositions de l'article 1799-1 du code civil, rappelées dans l'article 20.9 du CCAG, le maître d'ouvrage doit garantir le paiement des sommes dues à l'entrepreneur lorsque le montant des travaux, déduction faite de l'acompte versé à la commande, est supérieur à ${eurosTxt(p.seuil_garantie_paiement_ht)} HT.`);
+  para(`Conformément aux dispositions de l'article 1799-1 du code civil, rappelées dans l'article 20.9 de la norme NF P 03-001, le maître d'ouvrage doit garantir le paiement des sommes dues à l'entrepreneur lorsque le montant des travaux, déduction faite de l'acompte versé à la commande, est supérieur à ${eurosTxt(p.seuil_garantie_paiement_ht)} HT.`);
   para('Cette garantie peut prendre deux formes : le paiement direct par l\'établissement de crédit lorsque les travaux sont entièrement financés par un crédit spécifique, ou la garantie conventionnelle ou cautionnement solidaire lorsque le maître d\'ouvrage ne recourt pas à un crédit spécifique ou lorsqu\'il y recourt partiellement.');
 
   art('14. Assurances');
   para('Avant tout commencement d\'exécution, l\'entrepreneur ainsi que les co-traitants doivent justifier qu\'ils sont assurés. L\'attestation de la compagnie d\'assurance portant mention de l\'étendue de la garantie est jointe au présent marché.');
 
   art('15. Résiliation');
-  para('Le marché peut être résilié dans les conditions et formes définies à l\'article 22 du CCAG.');
+  para('Le marché peut être résilié dans les conditions et formes définies à l\'article 22 de la norme NF P 03-001.');
 
   art('16. Tribunal compétent');
   para('Les litiges sont portés devant les tribunaux du lieu d\'exécution des travaux.');
@@ -347,75 +349,3 @@ export function construireCCAP(ctx: ContexteMarche): DocModele {
 
   return { titre: 'CAHIER DES CLAUSES ADMINISTRATIVES PARTICULIÈRES (CCAP)', sousTitre: `Marché de travaux privés : ${ctx.operation.nom}`, reference: ctx.operation.code, blocs: b };
 }
-
-// ── Acte d'engagement ────────────────────────────────────────────────────────
-
-export interface EntrepriseActe {
-  nom: string;
-  representant?: string;
-  siege?: string;
-  siret?: string;
-  ape?: string;
-  rcs?: string;
-}
-
-export interface EntreesActe {
-  lot: { numero: string; titre: string };
-  entreprise: EntrepriseActe | null;
-  montantHT: number | null;
-  tvaPct: number;
-  fraisNonInclus?: string;
-}
-
-export function construireActeEngagement(ctx: ContexteMarche, e: EntreesActe): DocModele {
-  const p = { ...PARAMETRES_MARCHE_DEFAUT, ...ctx.params };
-  const ent = e.entreprise;
-  const tva = e.montantHT == null ? null : Math.round(e.montantHT * e.tvaPct) / 100;
-  const ttc = e.montantHT == null || tva == null ? null : Math.round((e.montantHT + tva) * 100) / 100;
-  const tvaTxt = (e.tvaPct || PARAMETRES_DEFAUT.tva_pct).toString().replace('.', ',');
-  const b: Bloc[] = [];
-
-  b.push({ t: 'kv', rows: [
-    ['Maître d\'ouvrage', v(p.moa_nom)],
-    ['Représenté par', v(p.moa_representant)],
-    ['Adresse', v(p.moa_adresse)],
-    ['Opération', ctx.operation.nom + (ctx.operation.code ? ` (${ctx.operation.code})` : '')],
-    ['Lot n°', `${e.lot.numero} : ${e.lot.titre}`],
-    ['Entreprise', v(ent?.nom)],
-  ] });
-
-  b.push({ t: 'h', text: 'Article 1. Identification de l\'entreprise' });
-  b.push({ t: 'p', text: `Je soussigné, ${v(ent?.representant)}, agissant au nom et pour le compte de l'entreprise ${v(ent?.nom)}, ayant son siège ${v(ent?.siege)}, immatriculée au RCS ou au répertoire des métiers :` });
-  b.push({ t: 'kv', rows: [
-    ['Numéro d\'identité d\'établissement (SIRET)', v(ent?.siret)],
-    ['Code d\'activité économique principale (APE)', v(ent?.ape)],
-    ['Numéro d\'inscription au registre du commerce', v(ent?.rcs)],
-  ] });
-  b.push({ t: 'p', text: `Après avoir pris connaissance du cahier des clauses administratives particulières (CCAP) et des documents qui y sont mentionnés, relatifs aux travaux nécessaires à ${v(p.nature_travaux)} situés ${v(p.lieu_construction || ctx.operation.adresse)}, pour le compte de ${v(p.moa_nom)}${p.moa_representant ? `, représenté par ${p.moa_representant}` : ''},` });
-  b.push({ t: 'p', text: `je m'engage sans réserve, conformément aux stipulations des documents visés ci-dessus, à exécuter les travaux concernant le lot n° ${e.lot.numero} (${e.lot.titre}) dans les conditions ci-après définies.` });
-
-  b.push({ t: 'h', text: 'Article 2. Prix' });
-  b.push({ t: 'kv', rows: [
-    ['Prix global forfaitaire, ferme, des travaux HT', eurosTxt(e.montantHT)],
-    [`TVA au taux de ${tvaTxt} %`, eurosTxt(tva)],
-    ['Total TTC', eurosTxt(ttc)],
-  ] });
-  if (ttc != null) b.push({ t: 'p', text: `Soit, en lettres, ${montantEnLettres(ttc)} toutes taxes comprises.` });
-  b.push({ t: 'p', text: `Frais et prestations à la charge du maître d'ouvrage et qui ne sont pas inclus dans le prix : ${e.fraisNonInclus?.trim() || POINTILLES}` });
-
-  b.push({ t: 'h', text: 'Article 3. Délais' });
-  b.push({ t: 'p', text: `Conformément à l'article 5 du CCAP, le délai global d'exécution des travaux est de ${nombre(p.delai_execution_mois)} mois à compter de la date fixée par l'ordre de service délivré au lot n° 1 et communiqué à toutes les entreprises.` });
-  b.push({ t: 'p', text: 'Mon propre délai d\'exécution sera déterminé dans les conditions prévues à cet article 5.' });
-  b.push({ t: 'p', text: `Fait à ${POINTILLES}, le ${POINTILLES}.` });
-  b.push({ t: 'sign', labels: ['Signature de l\'entrepreneur'] });
-
-  b.push({ t: 'h', text: 'Article 4. Notification' });
-  b.push({ t: 'p', text: 'Est acceptée la présente offre pour valoir acte d\'engagement.' });
-  b.push({ t: 'p', text: `À ${v(p.lieu_signature)}, le ${dateFr(p.date_signature)}.` });
-  b.push({ t: 'sign', labels: ['Signature du maître d\'ouvrage'] });
-
-  return { titre: 'ACTE D\'ENGAGEMENT', sousTitre: `Lot n° ${e.lot.numero} : ${e.lot.titre}`, reference: ctx.operation.code, blocs: b };
-}
-
-/** Compatibilité de type avec la consultation : seules les clés lues ici comptent. */
-export type ConsultationMarche = DonneesNegociation & { marche?: ParametresMarche };

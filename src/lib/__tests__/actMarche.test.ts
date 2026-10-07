@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { POINTILLES, construireActeEngagement, construireCCAP, construireRC, type ContexteMarche, type DocModele } from '../actMarche';
+import { POINTILLES, construireCCAP, construireRC, type ContexteMarche, type DocModele } from '../actMarche';
 
 const ctx: ContexteMarche = {
   operation: { nom: 'Villa Martin', code: '26014', adresse: '1 rue des Lilas, Nancy' },
@@ -27,12 +27,11 @@ describe('documents du marché', () => {
     expect(avec).toContain('12.1');
   });
 
-  it('l\'acte calcule la TVA et le TTC et les écrit en lettres', () => {
-    const d = construireActeEngagement(ctx, { lot: { numero: '01', titre: 'Gros œuvre' }, entreprise: { nom: 'Bati SAS', siret: '123' }, montantHT: 10000, tvaPct: 20 });
-    const t = texte(d);
-    expect(t).toContain('12 000,00 €');
-    expect(t).toContain('douze mille euros');
-    expect(t).toContain('Bati SAS');
+  it('le CCAP renvoie à la norme NF P 03-001 et jamais au sigle CCAG', () => {
+    const t = texte(construireCCAP(ctx));
+    expect(t).not.toContain('CCAG');
+    expect(t).toContain('article 9.5 de la norme NF P 03-001');
+    expect(t).toContain('article 20.5 de la norme NF P 03-001');
   });
 
   it('le RC liste critères, pièces et lots de la consultation', () => {

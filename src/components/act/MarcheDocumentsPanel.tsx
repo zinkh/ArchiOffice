@@ -1,25 +1,22 @@
-import React, { useMemo, useState } from 'react';
-import { IconFileText, IconDownload, IconChevronDown, IconGavel, IconFileDescription, IconSignature } from '@tabler/icons-react';
-import type { Contact, ProjectLot } from '../../types';
+import React, { useMemo, useRef, useState } from 'react';
+import { IconFileText, IconDownload, IconChevronDown, IconGavel, IconFileDescription, IconSignature, IconUpload } from '@tabler/icons-react';
+import type { ProjectLot } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAgencySettings } from '../../lib/pdfLetterhead';
 import {
-  PARAMETRES_MARCHE_DEFAUT, construireActeEngagement, construireCCAP, construireRC,
-  type ContexteMarche, type DocModele, type EntrepriseActe, type ParametresMarche,
+  PARAMETRES_MARCHE_DEFAUT, construireCCAP, construireRC,
+  type ContexteMarche, type DocModele, type ParametresMarche,
 } from '../../lib/actMarche';
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
-import {
-  PARAMETRES_DEFAUT, montantAttribution, parametresDe, piecesOffreDe, type DonneesNegociation,
-} from '../../lib/actNegociation';
+import { genererActeFormulaire, lireActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
+import { FormulaireNonReconnuError, champsDepuisPdf } from '../../lib/actEngagementImport';
+import { PARAMETRES_DEFAUT, parametresDe, piecesOffreDe, type DonneesNegociation } from '../../lib/actNegociation';
 
 interface ConsultationLue extends DonneesNegociation {
   marche?: ParametresMarche;
   dce_documents: { nom: string; type_doc: string }[];
-  entreprises: { id: string; contact_id?: string; nom: string; lots_ids: string[] }[];
   criteres: { nom: string; poids: number }[];
   pieces_admin: { id: string; nom: string }[];
-  offres: { id: string; lot_id: string; entreprise_id: string; montant_base: number }[];
-  attributions: { lot_id: string; entreprise_id: string; montant: number }[];
 }
 
 export interface OperationMarche {
@@ -34,7 +31,6 @@ export interface OperationMarche {
 interface Props {
   consultation: ConsultationLue;
   lots: ProjectLot[];
-  contacts: Contact[];
   operation: OperationMarche;
   onChange: (marche: ParametresMarche) => void;
 }
@@ -53,12 +49,42 @@ function Champ({ label, children, large }: { label: string; children: React.Reac
   );
 }
 
-export default function MarcheDocumentsPanel({ consultation, lots, contacts, operation, onChange }: Props) {
+function RecapActe({ lu }: { lu: { fichier: string; acte: ActeRempli } }) {
+  const { acte } = lu;
+  const euros = (n: number | null) => (n === null ? '—' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n));
+  return (
+    <div className="md:col-span-2 mt-2 rounded-lg border border-[var(--tblr-border)] p-4 text-sm space-y-3" aria-live="polite">
+      <p className="font-bold text-[var(--tblr-text)]">{acte.entreprise.entreprise || 'Entreprise non renseignée'} <span className="font-normal text-[var(--tblr-muted)]">({lu.fichier})</span></p>
+      <p className="text-xs text-[var(--tblr-muted)]">
+        {[acte.entreprise.siret && `SIRET ${acte.entreprise.siret}`, acte.entreprise.representant, acte.entreprise.email, acte.entreprise.telephone].filter(Boolean).join('  ·  ') || 'Aucune coordonnée renseignée'}
+      </p>
+      <table className="w-full text-xs">
+        <thead><tr className="text-left text-[var(--tblr-muted)]"><th className="py-1 pr-2">Lot</th><th className="py-1 pr-2 text-right">Prix HT</th><th className="py-1 text-right">Délai (mois)</th></tr></thead>
+        <tbody>
+          {acte.lots.filter(l => l.candidat).map(l => (
+            <tr key={l.numero} className="border-t border-[var(--tblr-border)]">
+              <td className="py-1 pr-2">Lot {l.numero}{l.titre ? ` : ${l.titre}` : ''}</td>
+              <td className="py-1 pr-2 text-right">{euros(l.prixHT)}</td>
+              <td className="py-1 text-right">{l.delaiMois ?? '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {acte.avertissements.length > 0 && (
+        <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-400 space-y-0.5">
+          {acte.avertissements.map(a => <li key={a}>{a}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+export default function MarcheDocumentsPanel({ consultation, lots, operation, onChange }: Props) {
   const [ouvert, setOuvert] = useState<DocId | null>('rc');
   const [enCours, setEnCours] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
-  const [lotId, setLotId] = useState<string>('');
-  const [entrepriseId, setEntrepriseId] = useState<string>('');
+  const [acteLu, setActeLu] = useState<{ fichier: string; acte: ActeRempli } | null>(null);
+  const champFichier = useRef<HTMLInputElement>(null);
 
   const p = { ...PARAMETRES_MARCHE_DEFAUT, ...(consultation.marche ?? {}) } as ParametresMarche;
   const maj = (patch: Partial<ParametresMarche>) => onChange({ ...(consultation.marche ?? {}), ...patch });
@@ -94,37 +120,7 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
 
   const tvaPct = parametresDe(consultation).tva_pct ?? PARAMETRES_DEFAUT.tva_pct;
 
-  const lotSelectionne = lots.find(l => l.id === lotId) ?? lots[0];
-  const entreprisesDuLot = useMemo(
-    () => consultation.entreprises.filter(e => lotSelectionne && e.lots_ids.includes(lotSelectionne.id)),
-    [consultation.entreprises, lotSelectionne],
-  );
-  const attribution = lotSelectionne ? consultation.attributions.find(a => a.lot_id === lotSelectionne.id) : undefined;
-  const entrepriseChoisie = entreprisesDuLot.find(e => e.id === entrepriseId)
-    ?? entreprisesDuLot.find(e => e.id === attribution?.entreprise_id)
-    ?? entreprisesDuLot[0];
-
-  const detailEntreprise = (e?: { nom: string; contact_id?: string }): EntrepriseActe | null => {
-    if (!e) return null;
-    const c = contacts.find(x => x.id === e.contact_id);
-    const rue = [c?.address_work_street, [c?.address_work_zip, c?.address_work_city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-    return { nom: e.nom, siret: c?.siret, siege: rue || undefined, representant: c ? [c.first_name, c.last_name].filter(Boolean).join(' ') : undefined };
-  };
-
-  const acteDe = (ctx: ContexteMarche, lot: ProjectLot, entrepriseIdLot?: string): DocModele => {
-    const ent = consultation.entreprises.find(e => e.id === entrepriseIdLot);
-    const attr = consultation.attributions.find(a => a.lot_id === lot.id && a.entreprise_id === entrepriseIdLot);
-    const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === entrepriseIdLot);
-    const montant = attr?.montant ?? (offre ? montantAttribution(offre as any, consultation.negociations) : null);
-    return construireActeEngagement(ctx, {
-      lot: { numero: lot.lot_number, titre: lot.lot_title },
-      entreprise: detailEntreprise(ent),
-      montantHT: montant && montant > 0 ? montant : null,
-      tvaPct,
-    });
-  };
-
-  const construire = (id: DocId | 'actes', ctx: ContexteMarche): DocModele[] => {
+  const construire = (id: 'rc' | 'ccap', ctx: ContexteMarche): DocModele[] => {
     if (id === 'rc') {
       return [construireRC(ctx, {
         dce: consultation.dce_documents,
@@ -134,47 +130,73 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
         lots: lots.map(l => ({ numero: l.lot_number, titre: l.lot_title })),
       })];
     }
-    if (id === 'ccap') return [construireCCAP(ctx)];
-    if (id === 'actes') {
-      return consultation.attributions
-        .map(a => ({ lot: lots.find(l => l.id === a.lot_id), a }))
-        .filter((x): x is { lot: ProjectLot; a: typeof x.a } => !!x.lot)
-        .map(x => acteDe(ctx, x.lot, x.a.entreprise_id));
-    }
-    return lotSelectionne ? [acteDe(ctx, lotSelectionne, entrepriseChoisie?.id)] : [];
+    return [construireCCAP(ctx)];
   };
 
-  const generer = async (id: DocId | 'actes', format: 'pdf' | 'docx') => {
+  const nomFichierBase = operation.code || operation.nom;
+
+  const generer = async (id: 'rc' | 'ccap', format: 'pdf' | 'docx') => {
     setErreur(null);
     setEnCours(`${id}-${format}`);
     try {
       const settings = await fetchAgencySettings();
       // Le cabinet (maître d'œuvre) vient des réglages, lus au moment de l'export.
-      const finaux = construire(id, { ...contexte, agence: { nom: settings.agencyName, adresse: settings.address } });
-      if (finaux.length === 0) { setErreur('Aucun lot attribué : attribuez au moins un lot, ou générez l\'acte lot par lot.'); return; }
-      const nom = `${id === 'rc' ? 'Reglement_consultation' : id === 'ccap' ? 'CCAP' : 'Acte_engagement'}_${operation.code || operation.nom}${id === 'acte' && lotSelectionne ? `_lot_${lotSelectionne.lot_number}` : ''}`;
-      if (format === 'pdf') await exporterMarchePdf(finaux, settings, nom);
-      else await exporterMarcheDocx(finaux, settings, nom);
+      const docs = construire(id, { ...contexte, agence: { nom: settings.agencyName, adresse: settings.address } });
+      const nom = `${id === 'rc' ? 'Reglement_consultation' : 'CCAP'}_${nomFichierBase}`;
+      if (format === 'pdf') await exporterMarchePdf(docs, settings, nom);
+      else await exporterMarcheDocx(docs, settings, nom);
     } catch (e) {
       console.error(e);
       setErreur('La génération du document a échoué.');
     } finally { setEnCours(null); }
   };
 
-  const Boutons = ({ id, actes }: { id: DocId; actes?: boolean }) => (
+  /** Formulaire d'acte d'engagement vierge : le même pour toutes les entreprises. */
+  const genererFormulaire = async () => {
+    setErreur(null);
+    setEnCours('acte-pdf');
+    try {
+      const settings = await fetchAgencySettings();
+      const data = await genererActeFormulaire(
+        { ...contexte, agence: { nom: settings.agencyName, adresse: settings.address } },
+        lots.map(l => ({ numero: l.lot_number, titre: l.lot_title })),
+        tvaPct, settings,
+      );
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([data], { type: 'application/pdf' }));
+      a.download = `Acte_engagement_formulaire_${nomFichierBase.replace(/[^\p{L}\p{N}]+/gu, '_')}.pdf`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    } catch (e) {
+      console.error(e);
+      setErreur('La génération du formulaire a échoué.');
+    } finally { setEnCours(null); }
+  };
+
+  /** Lit un formulaire rempli par une entreprise et en présente le contenu. */
+  const lireFormulaire = async (fichier: File) => {
+    setErreur(null);
+    setActeLu(null);
+    setEnCours('acte-lecture');
+    try {
+      const { pdfjs } = await import('react-pdf');
+      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
+        pdfjs.GlobalWorkerOptions.workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
+      }
+      const champs = await champsDepuisPdf(await fichier.arrayBuffer(), pdfjs as never);
+      setActeLu({ fichier: fichier.name, acte: lireActeFormulaire(champs, lots.map(l => ({ numero: l.lot_number, titre: l.lot_title }))) });
+    } catch (e) {
+      setErreur(e instanceof FormulaireNonReconnuError ? e.message : 'Ce fichier n\'a pas pu être lu comme un acte d\'engagement.');
+    } finally { setEnCours(null); }
+  };
+
+  const Boutons = ({ id }: { id: 'rc' | 'ccap' }) => (
     <div className="flex flex-wrap items-center gap-2 pt-2 md:col-span-2">
       {(['pdf', 'docx'] as const).map(f => (
         <button key={f} type="button" className={BOUTON} disabled={!!enCours} onClick={() => generer(id, f)}>
           <IconDownload size={13} /> {enCours === `${id}-${f}` ? 'Génération…' : f === 'pdf' ? 'Générer en PDF' : 'Générer en Word'}
         </button>
       ))}
-      {actes && (
-        <button type="button" className={BOUTON} disabled={!!enCours || consultation.attributions.length === 0}
-          title={consultation.attributions.length === 0 ? 'Aucun lot attribué' : undefined}
-          onClick={() => generer('actes', 'pdf')}>
-          <IconDownload size={13} /> Tous les lots attribués (PDF)
-        </button>
-      )}
     </div>
   );
 
@@ -247,26 +269,26 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
       ),
     },
     {
-      id: 'acte', titre: 'Acte d\'engagement', icone: IconSignature,
-      aide: 'Un acte par lot et par entreprise. Le prix reprend l\'attribution, à défaut l\'offre au prix courant ; TVA : ' + tvaPct + ' %.',
+      id: 'acte', titre: 'Acte d\'engagement (formulaire)', icone: IconSignature,
+      aide: 'Un seul formulaire PDF, identique pour toutes les entreprises : chacune le remplit (identité, lots chiffrés, délais), le signe et le retourne. Le formulaire rempli peut ensuite être relu ici.',
       contenu: (
         <>
-          <Champ label="Lot">
-            <select className={CHAMP} value={lotSelectionne?.id ?? ''} onChange={e => { setLotId(e.target.value); setEntrepriseId(''); }}>
-              {lots.map(l => <option key={l.id} value={l.id}>Lot {l.lot_number} : {l.lot_title}</option>)}
-            </select>
-          </Champ>
-          <Champ label="Entreprise">
-            <select className={CHAMP} value={entrepriseChoisie?.id ?? ''} onChange={e => setEntrepriseId(e.target.value)}>
-              {entreprisesDuLot.length === 0 && <option value="">Aucune entreprise consultée sur ce lot</option>}
-              {entreprisesDuLot.map(e => <option key={e.id} value={e.id}>{e.nom}{e.id === attribution?.entreprise_id ? ' (attributaire)' : ''}</option>)}
-            </select>
-          </Champ>
-          <Champ label="Délai global d'exécution (mois)">{nombre('delai_execution_mois')}</Champ>
-          <Champ label="Lieu de signature">{texte('lieu_signature')}</Champ>
           <Champ label="Maître d'ouvrage">{texte('moa_nom', operation.maitreOuvrage)}</Champ>
           <Champ label="Représenté par">{texte('moa_representant')}</Champ>
-          <Boutons id="acte" actes />
+          <Champ label="Adresse du maître d'ouvrage" large>{texte('moa_adresse')}</Champ>
+          <Champ label="Délai global d'exécution (mois)">{nombre('delai_execution_mois')}</Champ>
+          <Champ label="Lieu de signature (maître d'ouvrage)">{texte('lieu_signature')}</Champ>
+          <div className="flex flex-wrap items-center gap-2 pt-2 md:col-span-2">
+            <button type="button" className={BOUTON} disabled={!!enCours} onClick={genererFormulaire}>
+              <IconDownload size={13} /> {enCours === 'acte-pdf' ? 'Génération…' : 'Générer le formulaire (PDF à remplir)'}
+            </button>
+            <button type="button" className={BOUTON} disabled={!!enCours} onClick={() => champFichier.current?.click()}>
+              <IconUpload size={13} /> {enCours === 'acte-lecture' ? 'Lecture…' : 'Lire un formulaire rempli'}
+            </button>
+            <input ref={champFichier} type="file" accept="application/pdf,.pdf" className="hidden" aria-label="Acte d'engagement rempli (PDF)"
+              onChange={e => { const fichier = e.target.files?.[0]; e.target.value = ''; if (fichier) lireFormulaire(fichier); }} />
+          </div>
+          {acteLu && <RecapActe lu={acteLu} />}
         </>
       ),
     },
