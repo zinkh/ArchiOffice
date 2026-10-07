@@ -161,6 +161,35 @@ export function pointInGeometry(lon: number, lat: number, geometry: { type: stri
   return polygons.some(([outer, ...holes]) => !!outer && pointInRing(lon, lat, outer) && !holes.some(h => pointInRing(lon, lat, h)));
 }
 
+/** Centre de l'emprise (boîte englobante) d'une géométrie surfacique, ou null sans anneau. */
+export function geometryCenter(geometry: { type: string; coordinates: any } | null | undefined): { lon: number; lat: number } | null {
+  let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const ring of geometryRings(geometry)) {
+    for (const [x, y] of ring) {
+      if (x < minLon) minLon = x;
+      if (x > maxLon) maxLon = x;
+      if (y < minLat) minLat = y;
+      if (y > maxLat) maxLat = y;
+    }
+  }
+  if (!Number.isFinite(minLon)) return null;
+  return { lon: (minLon + maxLon) / 2, lat: (minLat + maxLat) / 2 };
+}
+
+const METERS_PER_DEGREE_LAT = 111_320;
+
+/**
+ * Déplace un centre de (dxPx, dyPx) pixels de SORTIE : un glisser vers la
+ * droite fait voir ce qui est à gauche, donc le centre recule d'autant.
+ */
+export function shiftCenter(center: { lon: number; lat: number }, dxPx: number, dyPx: number, metersPerOutPx: number): { lon: number; lat: number } {
+  const metersPerDegreeLon = METERS_PER_DEGREE_LAT * Math.cos((center.lat * Math.PI) / 180);
+  return {
+    lon: center.lon - (dxPx * metersPerOutPx) / metersPerDegreeLon,
+    lat: center.lat + (dyPx * metersPerOutPx) / METERS_PER_DEGREE_LAT,
+  };
+}
+
 /** Anneaux extérieurs et intérieurs d'une géométrie surfacique, pour le tracé. */
 export function geometryRings(geometry: { type: string; coordinates: any } | null | undefined): Ring[] {
   if (!geometry) return [];

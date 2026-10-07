@@ -455,6 +455,8 @@ export default {
       "feas_map_background": "Fond de carte",
       "feas_map_extent": "Emprise",
       "feas_map_parcel": "Contour de la parcelle",
+      "feas_map_drag_hint": "Glissez la carte pour la déplacer",
+      "feas_map_recenter": "Recentrer sur la parcelle",
       "feas_map_caption": "Légende",
       "feas_map_rendering": "Composition de la carte...",
       "feas_map_insert": "Insérer dans la rubrique",
