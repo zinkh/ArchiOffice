@@ -32,6 +32,8 @@ import {
   type DonneesNegociation,
 } from '../lib/actNegociation';
 import { genererPVOuverture } from '../lib/actNegociationExport';
+import MarcheDocumentsPanel, { type OperationMarche } from './act/MarcheDocumentsPanel';
+import type { ParametresMarche } from '../lib/actMarche';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -122,6 +124,8 @@ interface Consultation extends DonneesNegociation {
   offres: Offre[];
   attributions: Attribution[];
   comparatif: ComparatifLot[];
+  /** Réglages des documents du marché (RC, CCAP, acte d'engagement). */
+  marche?: ParametresMarche;
 }
 
 type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse';
@@ -185,9 +189,11 @@ interface ACTModuleProps {
   projectName: string;
   lots: ProjectLot[];
   contacts: Contact[];
+  /** Données de l'affaire reprises dans les documents du marché. */
+  operation?: Omit<OperationMarche, 'nom'>;
 }
 
-export default function ACTModule({ projectId, projectName, lots, contacts }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, lots, contacts, operation }: ACTModuleProps) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('preparation');
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
@@ -816,6 +822,18 @@ export default function ACTModule({ projectId, projectName, lots, contacts }: AC
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* Documents du marché : RC, CCAP, acte d'engagement */}
+          <div className="lg:col-span-2">
+            <MarcheDocumentsPanel
+              consultation={consultation as any}
+              lots={lots}
+              contacts={allContacts}
+              operation={{ nom: projectName, ...operation }}
+              onChange={marche => update({ ...consultation, marche })}
+              onImporterOffres={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
+            />
           </div>
         </div>
       )}
