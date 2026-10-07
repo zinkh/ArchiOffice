@@ -16,12 +16,16 @@ import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { cachedListFirst } from '../lib/offlineReadCache';
+import { SANS_AFFECTATION, DECOUPAGE_VIDE, batimentsActifs, phasesActives, correspondDecoupage, type DecoupageChantier, type FiltreDecoupage } from '../lib/chantierDecoupage';
+import { DecoupageFilters, DecoupageSelects } from './chantier/DecoupageFields';
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
 
 interface Props {
   projectId: string;
   lots: ProjectLot[];
+  /** Bâtiments et phases du chantier : colonne, filtres et affectation par ligne quand il y en a. */
+  decoupage?: DecoupageChantier;
   reportId?: string;
   currentReportId?: string;
   /** Restricts the table to one observation type (e.g. 'reserve' for the "Réserves" tab). */
@@ -95,6 +99,7 @@ function AutoTextarea({ value, onCommit, className, placeholder }: { value: stri
 const COLUMN_LABELS: Record<string, string> = {
   number: 'N°',
   lot: 'Lot',
+  decoupage: 'Bât. / phase',
   type: 'Nature',
   texte: 'Observation',
   statut: 'Statut',
@@ -107,7 +112,7 @@ const COLUMN_LABELS: Record<string, string> = {
   actions: '',
 };
 
-export default function ObservationsTable({ projectId, lots, reportId, currentReportId, typeFilter, defaultType, onReservesChanged }: Props) {
+export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged }: Props) {
   const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -119,6 +124,8 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
   const [openOnly, setOpenOnly] = useState(false);
+  const [filtreDecoupage, setFiltreDecoupage] = useState<FiltreDecoupage>({ batimentId: '', phaseId: '' });
+  const aDecoupage = batimentsActifs(decoupage).length + phasesActives(decoupage).length > 0;
   const [typeSelect, setTypeSelect] = useState('');
   const [aorMessage, setAorMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const storeKey = `obsTable:${typeFilter || 'all'}`;
@@ -201,7 +208,11 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     // Id généré côté client : une création rejouée après coupure réseau
     // (file de synchro hors-ligne) ne crée jamais deux observations.
     const id = crypto.randomUUID();
-    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined };
+    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
+      // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
+      batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
+      phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
+    };
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${projectId}/observations`, body });
       const newObs: Observation = queued ? { ...body, project_id: projectId, pendingSync: true } : data!;
@@ -281,13 +292,14 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
     if (openOnly && o.statut === 'Levée') return false;
     if (statusFilter && o.statut !== statusFilter) return false;
     if (lotFilter && o.lot_id !== lotFilter) return false;
+    if (!correspondDecoupage(o, filtreDecoupage)) return false;
     if (globalFilter) {
       const q = globalFilter.toLowerCase();
       return (o.texte || '').toLowerCase().includes(q) ||
         (o.lot?.lot_title || '').toLowerCase().includes(q);
     }
     return true;
-  }), [observations, typeFilter, typeSelect, openOnly, statusFilter, lotFilter, globalFilter]);
+  }), [observations, typeFilter, typeSelect, openOnly, statusFilter, lotFilter, filtreDecoupage, globalFilter]);
 
   const columns = useMemo(() => [
     columnHelper.accessor('number', {
@@ -321,6 +333,27 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         );
       },
     }),
+    ...(aDecoupage ? [columnHelper.display({
+      id: 'decoupage',
+      header: 'Bât. / phase',
+      size: 190,
+      cell: info => {
+        const row = info.row.original;
+        return (
+          <DecoupageSelects
+            decoupage={decoupage}
+            batimentId={row.batiment_id}
+            phaseId={row.phase_id}
+            className="flex flex-col gap-1"
+            onChange={patch => {
+              updateLocal(row.id, patch);
+              const [champ, valeur] = Object.entries(patch)[0] as [string, string | null];
+              saveField(row.id, champ, valeur || '');
+            }}
+          />
+        );
+      },
+    })] : []),
     columnHelper.accessor('texte', {
       header: 'Observation',
       size: 520,
@@ -491,7 +524,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
         </button>
       ),
     }),
-  ], [lots, saveField, updateLocal, deleteRow, reprendreEnReserve]);
+  ], [lots, decoupage, aDecoupage, saveField, updateLocal, deleteRow, reprendreEnReserve]);
 
   const table = useReactTable({
     data: filtered,
@@ -545,6 +578,7 @@ export default function ObservationsTable({ projectId, lots, reportId, currentRe
           <option value="">Tous les lots</option>
           {lots.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
         </select>
+        <DecoupageFilters decoupage={decoupage} filtre={filtreDecoupage} onChange={setFiltreDecoupage} />
         <select
           value={typeSelect}
           onChange={e => setTypeSelect(e.target.value)}

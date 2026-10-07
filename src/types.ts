@@ -300,6 +300,8 @@ export interface Project {
   offline_enabled?: boolean;
   etudes_notes?: string;
   chantier_notes?: string;
+  /** Registre bâtiments/phases du chantier (route dédiée, jamais enregistré avec la fiche). */
+  chantier_decoupage?: import('./lib/chantierDecoupage').DecoupageChantier | null;
   surface?: number;
   construction_cost?: number;
   remuneration?: number;
@@ -1323,6 +1325,9 @@ export interface SiteReport {
   statut?: 'brouillon' | 'diffuse' | 'archive';
   decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
   /** Créé hors ligne, pas encore atteint le serveur — voir src/lib/offlineQueue.ts. */
+  /** Bâtiment et phase du registre du chantier visés ; absents = toute l'opération. */
+  batiment_id?: string | null;
+  phase_id?: string | null;
   pendingSync?: boolean;
 }
 
@@ -1367,6 +1372,8 @@ export interface Observation {
   reserve_number?: number | null;
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
+  batiment_id?: string | null;
+  phase_id?: string | null;
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
   pendingSync?: boolean;
 }

@@ -13,6 +13,9 @@ export interface RouteDeps {
   captureWithContext: (error: any, context: Record<string, any>) => void;
 }
 
+/** Identifiant de bâtiment/phase du registre du chantier : texte court, sinon ignoré. */
+const cleanRef = (v: unknown): string => (typeof v === 'string' && v.length <= 64 ? v : '');
+
 export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext }: RouteDeps) {
   app.get("/api/projects/:projectId/reports", async (req: any, res: any) => {
     try {
@@ -42,6 +45,8 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
       const { id: bodyId, date, report_number, meteo, temperature, effectif_total } = req.body;
+      const batimentId = cleanRef(req.body.batiment_id);
+      const phaseId = cleanRef(req.body.phase_id);
       // Id fourni par le client (file de synchro hors-ligne,
       // src/lib/offlineQueue.ts) : rejouer la même création après une
       // coupure réseau ne doit jamais créer deux comptes-rendus.
@@ -66,6 +71,7 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const { error: insErr } = await supabaseAdmin.from('site_reports').insert({
         id, tenant_id: tenantId, project_id: projectId, date, report_number: number,
         meteo: meteo || null, temperature: temperature ?? null, effectif_total: effectif_total ?? null,
+        batiment_id: batimentId || null, phase_id: phaseId || null,
       });
       if (insErr) throw insErr;
       const projectName = (project as any)?.name || '';
@@ -106,7 +112,13 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
       const { category, note_number, responsible_company, issue_date, due_date, text, status } = req.body;
-      const id = crypto.randomUUID();
+      // Id fourni par le client (file hors ligne) : un rejeu ne crée jamais deux rubriques.
+      const bodyId = typeof req.body.id === 'string' && req.body.id ? req.body.id : null;
+      if (bodyId) {
+        const { data: existing } = await supabaseAdmin.from('site_report_notes').select('*').eq('id', bodyId).eq('tenant_id', tenantId).maybeSingle();
+        if (existing) return res.status(200).json(existing);
+      }
+      const id = bodyId || crypto.randomUUID();
       const row = { id, tenant_id: tenantId, report_id: reportId, category, note_number, responsible_company, issue_date, due_date, text: text || null, status: status || 'open' };
       const { error } = await supabaseAdmin.from('site_report_notes').insert(row);
       if (error) throw error;
@@ -145,6 +157,8 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (statut !== undefined) update.statut = statut;
       if (decisions !== undefined) update.decisions = decisions;
       if (lot_tracking !== undefined) update.lot_tracking = lot_tracking;
+      if (req.body.batiment_id !== undefined) update.batiment_id = cleanRef(req.body.batiment_id) || null;
+      if (req.body.phase_id !== undefined) update.phase_id = cleanRef(req.body.phase_id) || null;
       // Le client renvoie le CR entier à chaque sauvegarde : une date absente ou
       // non conforme (ancienne valeur) est simplement ignorée, jamais un refus.
       if (typeof req.body.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date) && !Number.isNaN(Date.parse(`${req.body.date}T00:00:00Z`))) {

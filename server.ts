@@ -23,6 +23,7 @@ import { registerCustomReferenceRoutes } from "./server/routes/customReferences"
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
+import { registerChantierDecoupageRoutes } from "./server/routes/chantierDecoupage";
 import { registerProjectNoticeRoutes } from "./server/routes/projectNotices";
 import { registerProjectStakeholdersRoutes } from "./server/routes/projectStakeholders";
 import { registerGlobalSearchRoutes } from "./server/routes/globalSearch";
@@ -1019,6 +1020,7 @@ export async function createApp() {
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
+  registerChantierDecoupageRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectNoticeRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerProjectStakeholdersRoutes(app, { supabaseAdmin, getTenantId });
   registerGlobalSearchRoutes(app, { supabaseAdmin, getTenantId });

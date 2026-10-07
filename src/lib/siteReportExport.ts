@@ -28,6 +28,8 @@ export interface ObservationsByLot {
 }
 
 export interface SiteReportExportOptions {
+  /** « A · PH1 » : bâtiment et phase visés par le compte-rendu (absent = toute l'opération). */
+  decoupageLabel?: string;
   onProgress?: (message: string) => void;
 }
 
@@ -104,6 +106,7 @@ export async function exportSiteReportToPDF(
     ['Projet', [project.project_code, project.name].filter(Boolean).join(' - ')],
     ["Maître d'ouvrage", project.client || ''],
     ['Adresse chantier', project.address || ''],
+    ['Bâtiment / phase', opts.decoupageLabel || ''],
     ['Date de la visite', fmtDate(report.date)],
     ['Météo', [report.meteo, report.temperature != null ? `${report.temperature}°C` : ''].filter(Boolean).join('  ·  ')],
     ['Prochaine réunion', report.nextMeeting || ''],

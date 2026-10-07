@@ -11,7 +11,12 @@ import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, Si
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
 import { openSignedUrl } from '../lib/signedStorageUrl';
-import { queuedJsonRequest, queuedMultipartRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { queuedJsonRequest, queuedMultipartRequest, listPendingWrites, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import {
+  DECOUPAGE_VIDE, sanitizeDecoupage, superposerEcrituresEnAttente, correspondDecoupage, etiquetteDecoupage,
+  batimentsActifs, phasesActives, type DecoupageChantier, type FiltreDecoupage,
+} from '../lib/chantierDecoupage';
+import { DecoupageSelects, DecoupageFilters, DecoupagePanelChantier } from './chantier/DecoupageFields';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { db } from '../db';
 import { cn } from '../lib/utils';
@@ -81,19 +86,83 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [saveError, setSaveError] = useState(false);
 
+  // Bâtiments et phases du chantier : lus de la fiche (donc aussi de son cliché hors
+  // connexion), écrits par leur route dédiée — jamais avec l'enregistrement de la fiche.
+  const [decoupage, setDecoupage] = useState<DecoupageChantier>(() => sanitizeDecoupage(project.chantier_decoupage ?? DECOUPAGE_VIDE));
+  useEffect(() => { setDecoupage(sanitizeDecoupage(project.chantier_decoupage ?? DECOUPAGE_VIDE)); }, [project.id, project.chantier_decoupage]);
+  const [isDecoupageOpen, setIsDecoupageOpen] = useState(false);
+  const [filtreDecoupage, setFiltreDecoupage] = useState<FiltreDecoupage>({ batimentId: '', phaseId: '' });
+  const [newReportDecoupage, setNewReportDecoupage] = useState<{ batiment_id?: string | null; phase_id?: string | null }>({});
+  const aDecoupage = batimentsActifs(decoupage).length + phasesActives(decoupage).length > 0;
+
+  const saveDecoupage = async (next: DecoupageChantier) => {
+    setDecoupage(next);
+    setIsDecoupageOpen(false);
+    try {
+      const { data } = await queuedJsonRequest<DecoupageChantier>({
+        entity: 'chantierDecoupage', id: crypto.randomUUID(), method: 'PUT', url: `/api/projects/${project.id}/chantier-decoupage`, body: next,
+      });
+      if (data) setDecoupage(sanitizeDecoupage(data));
+    } catch (err) {
+      console.error(err);
+      showToast((err as Error).message || 'Impossible d’enregistrer les bâtiments et phases.', 'error');
+    }
+  };
+
   const selectedReport = useMemo(
     () => reports.find(r => r.id === selectedReportId) || null,
     [reports, selectedReportId]
   );
 
+  // Cache d'abord, puis réseau, avec par-dessus la file d'écritures hors ligne
+  // (src/lib/chantierDecoupage.ts::superposerEcrituresEnAttente) : sans réseau, les
+  // comptes-rendus déjà consultés restent listés, et celui qu'on vient de créer
+  // sur le chantier reste là au lieu de disparaître au premier rechargement.
+  const visibleReports = useMemo(
+    () => reports.filter(r => correspondDecoupage(r, filtreDecoupage)),
+    [reports, filtreDecoupage],
+  );
+
   const fetchReports = useCallback(async () => {
-    const res = await fetch(`/api/projects/${project.id}/reports`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (!Array.isArray(data)) return;
-    setReports(data);
-    if (data.length > 0 && !selectedReportId) setSelectedReportId(data[0].id);
-  }, [project.id, selectedReportId]);
+    const pending = await listPendingWrites('siteReport');
+    await cachedListFirst(
+      db.siteReportsCache,
+      r => r.project_id === project.id,
+      `/api/projects/${project.id}/reports`,
+      list => setReports(superposerEcrituresEnAttente(Array.isArray(list) ? list : [], pending, project.id)),
+    );
+    // Rien en cache ni réseau : les créations en attente restent affichées seules.
+    setReports(prev => (prev.length === 0 && pending.length > 0 ? superposerEcrituresEnAttente([], pending, project.id) : prev));
+  }, [project.id]);
+
+  // Premier compte-rendu sélectionné d'office, une fois la liste connue.
+  useEffect(() => {
+    if (!selectedReportId && reports.length > 0) setSelectedReportId(reports[0].id);
+  }, [reports, selectedReportId]);
+
+  // Enregistre un compte-rendu entier : en ligne, la réponse du serveur fait foi ;
+  // hors ligne, la modification est mise en file (rejouée dans l'ordre) et le cache
+  // local garde la version affichée.
+  // Le numéro d'un compte-rendu encore en attente est provisoire : il ne part jamais
+  // dans une modification (le serveur le renumérotait, ou refusait un doublon).
+  const persistReport = async (
+    updated: SiteReport,
+    body: Record<string, unknown> = (() => {
+      const { report_number, ...sansNumero } = updated as any;
+      return updated.pendingSync ? sansNumero : (updated as any);
+    })(),
+  ): Promise<SiteReport | null> => {
+    setReports(prev => prev.map(r => (r.id === updated.id ? updated : r)));
+    db.siteReportsCache.put(updated).catch(() => {});
+    const { queued, data } = await queuedJsonRequest<SiteReport>({
+      entity: 'siteReport', id: crypto.randomUUID(), method: 'PUT', url: `/api/reports/${updated.id}`, body,
+    });
+    if (queued || !data) return null;
+    const saved = { ...data, pendingSync: updated.pendingSync };
+    setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
+    db.siteReportsCache.put(saved).catch(() => {});
+    return saved;
+  };
 
   // Cache d'abord (src/lib/offlineReadCache.ts) : hors-ligne, les
   // observations déjà consultées pour ce compte rendu/cette affaire restent
@@ -118,14 +187,17 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   }, [project.id]);
 
   const fetchReportNotes = useCallback(async () => {
-    if (!selectedReportId) { setReportNotes([]); return; }
-    const res = await fetch(`/api/reports/${selectedReportId}/notes`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (Array.isArray(data)) setReportNotes(data);
+    setReportNotes([]);
+    if (!selectedReportId) return;
+    await cachedListFirst(
+      db.siteReportNotesCache,
+      n => n.report_id === selectedReportId,
+      `/api/reports/${selectedReportId}/notes`,
+      list => setReportNotes(Array.isArray(list) ? list : []),
+    );
   }, [selectedReportId]);
 
-  useEffect(() => { fetchReports(); }, [fetchReports]);
+  useEffect(() => { fetchReports().catch(() => {}); }, [fetchReports]);
   useEffect(() => { fetchReportObservations(); }, [fetchReportObservations]);
   useEffect(() => { fetchAllObservations(); }, [fetchAllObservations]);
   useEffect(() => { fetchReportNotes(); }, [fetchReportNotes]);
@@ -162,6 +234,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       meteo: duplicateFrom ? duplicateFrom.meteo : (fetchedWeather?.meteo || 'Inconnu'),
       temperature: duplicateFrom ? duplicateFrom.temperature : (fetchedWeather?.temperature || 0),
       effectif_total: 0,
+      batiment_id: (duplicateFrom ? duplicateFrom.batiment_id : newReportDecoupage.batiment_id) || null,
+      phase_id: (duplicateFrom ? duplicateFrom.phase_id : newReportDecoupage.phase_id) || null,
     };
     try {
       const { queued, data } = await queuedJsonRequest<{ id: string; report_number: number }>({
@@ -175,9 +249,11 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         pendingSync: queued,
       };
       setReports(prev => [newReport, ...prev]);
+      db.siteReportsCache.put(newReport).catch(() => {});
       setSelectedReportId(newReport.id);
       setIsModalOpen(false);
       setFetchedWeather(null);
+      setNewReportDecoupage({});
     } catch (err) { console.error(err); }
   };
 
@@ -202,17 +278,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       if (!res.ok) return;
       const data = await res.json();
       if (!data.meteo || data.meteo === 'Inconnu') return;
-      const updated = { ...report, meteo: data.meteo, temperature: data.temperature ?? report.temperature };
-      setReports(prev => prev.map(r => (r.id === report.id ? updated : r)));
-      const saveRes = await fetch(`/api/reports/${report.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updated),
-      });
-      if (saveRes.ok) {
-        const saved = await saveRes.json();
-        setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
-      }
+      await persistReport({ ...report, meteo: data.meteo, temperature: data.temperature ?? report.temperature });
     } catch (err) {
       console.error('Failed to refresh weather:', err);
     } finally {
@@ -241,17 +307,14 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     const n = parseInt(numberDraft, 10);
     if (!Number.isInteger(n) || n < 1) { setNumberDraft(String(selectedReport.report_number ?? '')); return; }
     if (n === selectedReport.report_number) return;
-    const res = await fetch(`/api/reports/${selectedReport.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...selectedReport, report_number: n }),
-    });
-    if (res.ok) {
-      const saved = await res.json();
-      setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
-    } else {
-      const err = await res.json().catch(() => ({}));
-      showToast(err.error || 'Impossible de modifier le numéro.', 'error');
+    try {
+      const withNumber = { ...selectedReport, report_number: n };
+      await persistReport(withNumber, withNumber as any);
+    } catch (err) {
+      // Refus du serveur (numéro déjà pris) : on annonce et on rétablit l'ancien.
+      setReports(prev => prev.map(r => (r.id === selectedReport.id ? selectedReport : r)));
+      db.siteReportsCache.put(selectedReport).catch(() => {});
+      showToast((err as Error).message || 'Impossible de modifier le numéro.', 'error');
       setNumberDraft(String(selectedReport.report_number ?? ''));
     }
   };
@@ -277,33 +340,22 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       }
     }
     const updated: SiteReport = { ...selectedReport, date, meteo, temperature: temperature ?? undefined };
-    setReports(prev => prev.map(r => (r.id === selectedReport.id ? updated : r)));
-    // null (et non undefined) pour que le serveur efface l'ancienne température.
-    const res = await fetch(`/api/reports/${selectedReport.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...updated, temperature }),
-    });
-    if (res.ok) {
-      const saved = await res.json();
-      setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
-    } else {
+    try {
+      // null (et non undefined) pour que le serveur efface l'ancienne température.
+      await persistReport(updated, { ...updated, temperature });
+    } catch {
       setReports(prev => prev.map(r => (r.id === selectedReport.id ? selectedReport : r)));
+      db.siteReportsCache.put(selectedReport).catch(() => {});
     }
   };
 
   const updateReportField = async (field: keyof SiteReport, value: SiteReport[keyof SiteReport]) => {
     if (!selectedReport) return;
-    const updated = { ...selectedReport, [field]: value };
-    setReports(prev => prev.map(r => (r.id === selectedReport.id ? updated : r)));
-    const res = await fetch(`/api/reports/${selectedReport.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updated),
-    });
-    if (res.ok) {
-      const saved = await res.json();
-      setReports(prev => prev.map(r => (r.id === saved.id ? saved : r)));
+    try {
+      await persistReport({ ...selectedReport, [field]: value });
+    } catch (err) {
+      console.error(err);
+      setSaveError(true);
     }
   };
 
@@ -370,30 +422,31 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
   const addRubriqueEntry = async (category: string) => {
     if (!selectedReportId) return;
-    const res = await fetch(`/api/reports/${selectedReportId}/notes`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        category,
-        note_number: reportNotes.length + 1,
-        issue_date: selectedReport?.date || new Date().toISOString().split('T')[0],
-        text: '',
-        status: 'open',
-      }),
-    });
-    if (!res.ok) return;
-    const created = await res.json();
-    setReportNotes(prev => [...prev, created]);
+    // Id côté client : la création peut être mise en file hors ligne et rejouée sans doublon.
+    const id = crypto.randomUUID();
+    const body = {
+      id,
+      category,
+      note_number: reportNotes.length + 1,
+      issue_date: selectedReport?.date || new Date().toISOString().split('T')[0],
+      text: '',
+      status: 'open' as const,
+    };
+    try {
+      const { queued, data } = await queuedJsonRequest<SiteReportNote>({
+        entity: 'siteReportNote', id, method: 'POST', url: `/api/reports/${selectedReportId}/notes`, body,
+      });
+      const created: SiteReportNote = queued || !data ? { ...body, report_id: selectedReportId } : data;
+      setReportNotes(prev => [...prev, created]);
+      db.siteReportNotesCache.put(created).catch(() => {});
+    } catch (err) { console.error(err); }
   };
 
   const saveNoteField = async (noteId: string, field: keyof SiteReportNote, value: SiteReportNote[keyof SiteReportNote]) => {
     setReportNotes(prev => prev.map(n => (n.id === noteId ? { ...n, [field]: value } : n)));
+    db.siteReportNotesCache.update(noteId, { [field]: value }).catch(() => {});
     try {
-      await fetch(`/api/notes/${noteId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [field]: value }),
-      });
+      await queuedJsonRequest({ entity: 'siteReportNote', id: crypto.randomUUID(), method: 'PUT', url: `/api/notes/${noteId}`, body: { [field]: value } });
     } catch (err) {
       console.error('saveNoteField failed:', err);
     }
@@ -401,7 +454,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
   const deleteNote = async (noteId: string) => {
     setReportNotes(prev => prev.filter(n => n.id !== noteId));
-    await fetch(`/api/notes/${noteId}`, { method: 'DELETE' });
+    db.siteReportNotesCache.delete(noteId).catch(() => {});
+    try {
+      await queuedJsonRequest({ entity: 'siteReportNote', id: crypto.randomUUID(), method: 'DELETE', url: `/api/notes/${noteId}` });
+    } catch (err) { console.error('deleteNote failed:', err); }
   };
 
   const rubriquesByCategory = useMemo(() => {
@@ -432,7 +488,11 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     // (file de synchro hors-ligne, src/lib/offlineQueue.ts) ne crée jamais
     // deux observations.
     const id = crypto.randomUUID();
-    const body = { id, texte: '', statut: 'À faire' as const, type, created_report_id: selectedReportId };
+    const body = {
+      id, texte: '', statut: 'À faire' as const, type, created_report_id: selectedReportId,
+      // Une observation relevée dans un compte-rendu hérite de son bâtiment et de sa phase.
+      batiment_id: selectedReport?.batiment_id || null, phase_id: selectedReport?.phase_id || null,
+    };
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${project.id}/observations`, body });
       const newObs: Observation = queued ? { ...body, project_id: project.id, pendingSync: true } : data!;
@@ -523,6 +583,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage) },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -563,12 +624,23 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
               Suivi de l'exécution : visites, comptes-rendus diffusés aux entreprises, observations et ordres de service.
             </p>
           </div>
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition shrink-0"
-          >
-            <IconPlus size={16} /> Nouveau compte-rendu
-          </button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsDecoupageOpen(true)}
+              className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] px-3 py-2 rounded-lg text-sm font-bold transition"
+            >
+              <IconBuilding size={16} /> {aDecoupage
+                ? `${batimentsActifs(decoupage).length} bât. · ${phasesActives(decoupage).length} phase${phasesActives(decoupage).length > 1 ? 's' : ''}`
+                : 'Bâtiments et phases'}
+            </button>
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
+            >
+              <IconPlus size={16} /> Nouveau compte-rendu
+            </button>
+          </div>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-4 mt-5">
           <StatPill label="Avancement DET" value={`${avancementDet} %`} />
@@ -613,10 +685,15 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
               {/* CR list */}
               <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
                 <div className="px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
-                  Comptes-rendus · {reports.length}
+                  Comptes-rendus · {visibleReports.length}{visibleReports.length !== reports.length ? ` / ${reports.length}` : ''}
                 </div>
+                {aDecoupage && (
+                  <div className="flex flex-wrap gap-2 p-2 border-b border-[var(--tblr-border)]">
+                    <DecoupageFilters decoupage={decoupage} filtre={filtreDecoupage} onChange={setFiltreDecoupage} />
+                  </div>
+                )}
                 <div className="max-h-[70dvh] overflow-y-auto">
-                  {reports.map(r => (
+                  {visibleReports.map(r => (
                     <button
                       key={r.id}
                       onClick={() => setSelectedReportId(r.id)}
@@ -635,11 +712,15 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-[var(--tblr-muted)] mt-0.5">{r.date}</div>
+                      <div className="text-xs text-[var(--tblr-muted)] mt-0.5">
+                        {r.date}{etiquetteDecoupage(r, decoupage) && ` · ${etiquetteDecoupage(r, decoupage)}`}
+                      </div>
                     </button>
                   ))}
-                  {reports.length === 0 && (
-                    <p className="p-4 text-sm text-[var(--tblr-muted)] italic text-center">Aucun compte-rendu.</p>
+                  {visibleReports.length === 0 && (
+                    <p className="p-4 text-sm text-[var(--tblr-muted)] italic text-center">
+                      {reports.length === 0 ? 'Aucun compte-rendu.' : 'Aucun compte-rendu pour ce bâtiment ou cette phase.'}
+                    </p>
                   )}
                 </div>
               </div>
@@ -683,6 +764,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           className="p-1 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]"
                         ><IconChevronRight size={18} /></button>
                       </div>
+                      <DecoupageSelects
+                        decoupage={decoupage}
+                        batimentId={selectedReport.batiment_id}
+                        phaseId={selectedReport.phase_id}
+                        onChange={patch => persistReport({ ...selectedReport, ...patch }).catch(err => { console.error(err); setSaveError(true); })}
+                      />
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={generatePdf} disabled={isGeneratingPdf}
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
@@ -1036,7 +1123,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           )}
 
           {activeTab === 'reserves' && (
-            <ObservationsTable projectId={project.id} lots={lots_list} defaultType="reserve" onReservesChanged={onReservesChanged} />
+            <ObservationsTable projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} />
           )}
 
           {activeTab === 'entreprises' && <EntreprisesTab lots_list={lots_list} observations={allObservations} />}
@@ -1050,6 +1137,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
       <Toast toast={toast} />
 
+      {isDecoupageOpen && (
+        <DecoupagePanelChantier decoupage={decoupage} projectId={project.id} onSave={saveDecoupage} onClose={() => setIsDecoupageOpen(false)} />
+      )}
+
       {/* New CR modal */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setIsModalOpen(false)}>
@@ -1058,6 +1149,9 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
             <label className="block text-sm font-bold mb-1 dark:text-zinc-300">Date de la visite</label>
             <input type="date" className="w-full p-2 border rounded-lg mb-4 dark:bg-zinc-800 dark:border-zinc-700 dark:text-white"
               value={newReportDate} onChange={e => setNewReportDate(e.target.value)} />
+            <DecoupageSelects className="flex flex-wrap gap-2 mb-4" decoupage={decoupage}
+              batimentId={newReportDecoupage.batiment_id} phaseId={newReportDecoupage.phase_id}
+              onChange={patch => setNewReportDecoupage(prev => ({ ...prev, ...patch }))} />
             {project.address && (
               <div className="mb-4 p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm">
                 {weatherLoading ? 'Récupération météo...' : fetchedWeather ? `${fetchedWeather.meteo} — ${fetchedWeather.temperature}°C` : 'Météo indisponible'}
