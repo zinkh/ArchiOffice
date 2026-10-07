@@ -23,7 +23,7 @@ export function QuickCaptureBar({ onAddObservation, onCapturePhoto }: {
       <button
         type="button"
         onClick={onAddObservation}
-        className="flex-1 min-h-12 flex items-center justify-center gap-2 rounded-lg bg-blue-600 text-white text-sm font-bold active:scale-[0.98] transition-transform"
+        className="flex-1 min-h-12 flex items-center justify-center gap-2 rounded-lg bg-[var(--tblr-primary)] text-white text-sm font-bold active:scale-[0.98] transition-transform"
       >
         <IconPlus size={18} /> Observation
       </button>

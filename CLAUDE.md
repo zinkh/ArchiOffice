@@ -876,6 +876,34 @@ admise que pour une donnée qui en a besoin (statut d'une réserve, retard).
 - **Hors périmètre** : la facture d'abonnement ArchiOffice (`subscriptionInvoice.ts`),
   émise par la plateforme et non par le cabinet, et les exports Word.
 
+### Charte sobre : documents générés, pas l'interface
+
+La préférence de l'architecte pour le noir, le blanc et les gris, la couleur étant
+réservée aux données qui en ont besoin, vaut pour les **documents générés** (PDF,
+Word, Excel, courriers, exports) et **pas pour le code de l'interface**. L'interface
+reste bleue : ses couleurs passent par les jetons `--tblr-*` (`--tblr-primary`,
+`--tblr-primary-lt`, `--tblr-surface`...), jamais par des `bg-blue-*` / `text-blue-*`
+figés qui ignorent le thème sombre. Les couleurs de statut (vert, ambre, rouge) sont des
+données et restent.
+
+### Onglet DET : décisions d'interface
+
+- **En-tête masqué sous 1024 px** (mobile et tablette) : titre, indicateurs et bouton
+  disparaissent ; « Nouveau compte-rendu » est repris en tête de la liste des
+  comptes-rendus (`lg:hidden`). Les sous-onglets (Comptes-rendus, Observations,
+  Entreprises, OS & situations, Photos) passent par `PillTabs` (rôles ARIA, flèches).
+- **« Diffuser » ne fait que changer le statut** : aucun e-mail n'est envoyé d'ici. Il est
+  confirmé (`useConfirmDialog`) et suivi d'un toast « Annuler » de 6 s qui repart de la
+  version la plus récente du compte-rendu (`reportsRef`), jamais d'une copie périmée.
+- **La reprise en bloc des observations « à lever » en réserves AOR vit dans l'onglet
+  AOR** (`ReprendreObservationsBanner`, au-dessus du suivi des réserves). La reprise
+  d'UNE observation reste sur sa ligne du tableau des observations. Règle commune dans
+  `src/lib/observationsReserves.ts` (testée).
+- **Colonnes masquées du tableau des observations mémorisées par poste**
+  (`obsTable:<filtre>:visibility`, localStorage), comme les largeurs de colonnes.
+- Les contrôles sans libellé visible portent un `aria-label` (chevrons, météo,
+  température) et les chevrons une cible de 44 px.
+
 ### Qualifications des entreprises et recherche d'entreprises
 
 `contact_qualifications` (`supabase/migrate_contact_qualifications.sql`) : une ligne par qualification
