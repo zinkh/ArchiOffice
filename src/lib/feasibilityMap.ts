@@ -190,6 +190,14 @@ export function shiftCenter(center: { lon: number; lat: number }, dxPx: number, 
   };
 }
 
+/** Emprise géographique [minLon, minLat, maxLon, maxLat] d'un extrait centré sur `center`. */
+export function extentBbox(center: { lon: number; lat: number }, widthM: number, outW: number, outH: number): [number, number, number, number] {
+  const heightM = (widthM * outH) / outW;
+  const a = shiftCenter(center, widthM / 2, -heightM / 2, 1); // nord-ouest (coordonnées en mètres, 1 m par « pixel »)
+  const b = shiftCenter(center, -widthM / 2, heightM / 2, 1); // sud-est
+  return [Math.min(a.lon, b.lon), Math.min(a.lat, b.lat), Math.max(a.lon, b.lon), Math.max(a.lat, b.lat)];
+}
+
 /** Anneaux extérieurs et intérieurs d'une géométrie surfacique, pour le tracé. */
 export function geometryRings(geometry: { type: string; coordinates: any } | null | undefined): Ring[] {
   if (!geometry) return [];

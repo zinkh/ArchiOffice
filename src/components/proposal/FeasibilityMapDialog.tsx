@@ -10,7 +10,7 @@ import { IconX, IconMap2, IconLoader2, IconFocusCentered } from '@tabler/icons-r
 import { getAccessToken } from '../../lib/authToken';
 import {
   FEASIBILITY_MAP_EXTENTS, FEASIBILITY_MAP_LAYERS, FEASIBILITY_MAP_PRESETS, approximateScale, defaultMapCaption,
-  geometryCenter, geometryRings, niceScaleBar, planMapExtract, pointInGeometry, shiftCenter, type MapExtractPlan,
+  extentBbox, geometryCenter, geometryRings, niceScaleBar, planMapExtract, pointInGeometry, shiftCenter, type MapExtractPlan,
 } from '../../lib/feasibilityMap';
 import type { FeasibilityIllustration } from '../../lib/feasibilityBlocks';
 
@@ -60,6 +60,44 @@ async function parcelAtPoint(lat: number, lon: number): Promise<GeoJSON.Geometry
     return hit?.geometry ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Parcellaire en vecteur (mêmes données que le contour de la parcelle), tracé
+ * en traits clairs à liseré sombre pour rester lisible sur la photo aérienne.
+ * Les tuiles raster du cadastre sont fines, translucides et parfois absentes :
+ * ce tracé garantit que la superposition apparaît. Rend false si indisponible.
+ */
+async function drawCadastreVector(ctx: CanvasRenderingContext2D, plan: MapExtractPlan, center: { lon: number; lat: number }, widthM: number, onOrtho: boolean): Promise<boolean> {
+  try {
+    const bbox = extentBbox(center, widthM, OUT_W, OUT_H).map(n => n.toFixed(6)).join(',');
+    const res = await fetch(`/api/cadastre/parcel?bbox=${bbox}`);
+    if (!res.ok) return false;
+    const features: any[] = (await res.json())?.features || [];
+    if (!features.length) return false;
+    ctx.save();
+    ctx.beginPath();
+    for (const f of features) {
+      for (const ring of geometryRings(f.geometry)) {
+        ring.forEach(([x, y], i) => {
+          const p = plan.project(x, y);
+          if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+        });
+        ctx.closePath();
+      }
+    }
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = onOrtho ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+    ctx.strokeStyle = onOrtho ? '#ffd24a' : '#555';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -199,7 +237,10 @@ export function FeasibilityMapDialog({ proposalId, lat, lon, parcelGeometry, onI
         const drawn = await drawLayer(ctx, preset.base, plan);
         if (cancelled) return;
         if (drawn === 0) throw new Error('tiles');
-        if (preset.cadastre) await drawLayer(ctx, 'cadastre', plan);
+        if (preset.cadastre) {
+          const vector = await drawCadastreVector(ctx, plan, { lon: centerLon, lat: centerLat }, extent, preset.base === 'ortho');
+          if (!vector) await drawLayer(ctx, 'cadastre', plan);
+        }
         if (cancelled) return;
         if (showParcel) drawParcel(ctx, plan, geometry, lon, lat);
         drawDecorations(ctx, plan, preset.cadastre ? '© IGN Géoplateforme, cadastre DGFiP' : '© IGN Géoplateforme');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  approximateScale, geometryCenter, geometryRings, lonLatToWorldPx, metersPerPixel, niceScaleBar, planMapExtract, pointInGeometry, shiftCenter, TILE_SIZE,
+  approximateScale, extentBbox, geometryCenter, geometryRings, lonLatToWorldPx, metersPerPixel, niceScaleBar, planMapExtract, pointInGeometry, shiftCenter, TILE_SIZE,
 } from '../feasibilityMap';
 
 describe('geometryCenter', () => {
@@ -102,5 +102,16 @@ describe('pointInGeometry', () => {
   it('returns all rings for drawing', () => {
     expect(geometryRings(square)).toHaveLength(2);
     expect(geometryRings({ type: 'Point', coordinates: [0, 0] })).toEqual([]);
+  });
+});
+
+describe('extentBbox', () => {
+  it('spans the requested width and keeps the centre in the middle', () => {
+    const [minLon, minLat, maxLon, maxLat] = extentBbox({ lon: 6, lat: 48 }, 500, 1200, 800);
+    expect((minLon + maxLon) / 2).toBeCloseTo(6, 6);
+    expect((minLat + maxLat) / 2).toBeCloseTo(48, 6);
+    const widthM = (maxLon - minLon) * 111_320 * Math.cos((48 * Math.PI) / 180);
+    expect(widthM).toBeCloseTo(500, 0);
+    expect(((maxLat - minLat) * 111_320)).toBeCloseTo(500 * 800 / 1200, 0);
   });
 });
