@@ -151,7 +151,8 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, template_id
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, template_id,
+        client_email, date_depot_pc, num_permis_construire
       } = req.body;
       if (!name || !client) return res.status(400).json({ error: "Name and client are required" });
       // Modèle de projet : lu ici depuis la base (jamais depuis le corps), et
@@ -212,7 +213,8 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         type_projet: type_projet || (template?.operation_type && template.operation_type !== 'autre' ? OPERATION_LABELS[template.operation_type as TemplateOperationType] : undefined),
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme,
+        client_email, date_depot_pc: date_depot_pc || undefined, num_permis_construire
       });
       if (pe) throw pe;
       if (cotraitants_list?.length) {
@@ -260,7 +262,8 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code,
+        client_email, date_depot_pc, num_permis_construire
       } = req.body;
       // Une mise à jour partielle (un agent qui ne touche qu'un champ, par
       // exemple) ne doit pas être bloquée faute de renvoyer le nom et le
@@ -280,18 +283,40 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
           || !(await assertListContacts(supabaseAdmin, tenantId, stakeholders_list))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
-      const { error: ue } = await supabaseAdmin.from('projects').update({
-        name: finalName, client: finalClient, client_id: finalClientId || null, status, budget, category, start_date, end_date, description, image_url, address,
-        is_complete_mission: !!is_complete_mission, is_chantier: !!is_chantier, offline_enabled: !!offline_enabled, etudes_notes, chantier_notes, is_public_client: !!is_public_client,
-        client_siret: client_siret || null, client_vat_number: client_vat_number || null,
+      // Mise à jour partielle : seuls les champs PRÉSENTS dans le corps sont
+      // écrits. Auparavant chaque colonne partait, absente ou non (les absentes
+      // en `undefined`, ignorées par PostgREST, mais les booléens `!!x` et les
+      // `x || null` écrasaient is_complete_mission, is_chantier, is_public_client,
+      // is_entreprise, client_siret... à chaque mise à jour d'un seul champ,
+      // par exemple depuis le serveur MCP).
+      const provided: Record<string, unknown> = {
+        status, budget, category, start_date, end_date, description, image_url, address,
+        etudes_notes, chantier_notes,
         surface, construction_cost, remuneration, progression, project_manager, cotraitants, external_intervenants, entreprises,
-        reference, projet_detail, is_entreprise: !!is_entreprise, nom_societe, rcs, representant, qualite,
+        reference, projet_detail, nom_societe, rcs, representant, qualite,
         adresse_client, cp_client, ville_client, telephone, portable, email_client,
         adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, ref_cadastrale, zone_plu, surface_parcelle,
         nom_etablissement, avant_trav, apres_trav, type_et_cat, erp_calcul, type_projet,
         categorie_projet, surface_plancher, surface_plancher_ext, surface_erp,
         surface_ert, effectif_public, effectif_personnel, ind, date_modification,
-        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code
+        maf_intercalaire, taux_mission, part_interet, secteur_abf, programme, project_code,
+        client_email, num_permis_construire,
+        // Colonne DATE : une chaîne vide est refusée par Postgres, elle vaut « effacer ».
+        date_depot_pc: date_depot_pc === '' ? null : date_depot_pc,
+      };
+      const projectUpdate: Record<string, unknown> = {};
+      for (const [column, value] of Object.entries(provided)) {
+        if (value !== undefined) projectUpdate[column] = value;
+      }
+      const booleans: Record<string, unknown> = { is_complete_mission, is_chantier, offline_enabled, is_public_client, is_entreprise };
+      for (const [column, value] of Object.entries(booleans)) {
+        if (value !== undefined) projectUpdate[column] = !!value;
+      }
+      if (client_siret !== undefined) projectUpdate.client_siret = client_siret || null;
+      if (client_vat_number !== undefined) projectUpdate.client_vat_number = client_vat_number || null;
+      const { error: ue } = await supabaseAdmin.from('projects').update({
+        ...projectUpdate,
+        name: finalName, client: finalClient, client_id: finalClientId || null,
       }).eq('id', id).eq('tenant_id', tenantId);
       if (ue) throw ue;
       // Listes rattachées : remplacées SEULEMENT si le corps de la requête les
