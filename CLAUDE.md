@@ -826,6 +826,24 @@ reçues, synthèse économique), les exports dans `src/lib/actNegociationExport.
   des PDF passent par un `euros()` qui remplace l'espace fine U+202F, absente des
   polices de jsPDF (sinon « 31 /210 » : voir la note d'honoraires plus haut).
 
+### Documents du marché (ACT, phase Critères)
+
+Sous les critères et pièces administratives, `MarcheDocumentsPanel.tsx` génère le
+règlement de consultation, le CCAP (marché privé, renvoi à la norme NF P 03-001
+et non au sigle CCAG, valeurs par défaut de la norme) et l'acte d'engagement.
+Réglages dans `consultation.marche` (jsonb, sans migration), contenu pur dans
+`src/lib/actMarche.ts`, rendu PDF/Word dans `actMarcheExport.ts`. Un champ vide
+reste en pointillés, jamais inventé.
+
+**L'acte d'engagement est un formulaire PDF unique** (`actEngagementForm.ts`,
+champs `ae_*` stables : ne pas les renommer sans changer `AE_FORM_VERSION`),
+rempli par chaque entreprise. `champsDepuisPdf` (`actEngagementImport.ts`) le
+relit, `lireActeFormulaire` l'interprète en signalant les anomalies sans les
+corriger, `appliquerActeAuxOffres` (`actEngagementApply.ts`) le verse dans la
+consultation : entreprise rapprochée par SIRET (fiche contact) puis par nom,
+sinon créée ; offre du couple lot x entreprise mise à jour sans doublon, notes,
+conformité et négociations intactes. L'aperçu de l'effet précède l'import.
+
 ### Exports PDF et Excel : une seule charte
 
 Tout document produit depuis l'interface porte la charte du cabinet : en-tête

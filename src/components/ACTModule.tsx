@@ -829,8 +829,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
             <MarcheDocumentsPanel
               consultation={consultation as any}
               lots={lots}
+              contacts={allContacts}
               operation={{ nom: projectName, ...operation }}
               onChange={marche => update({ ...consultation, marche })}
+              onImporterOffres={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             />
           </div>
         </div>

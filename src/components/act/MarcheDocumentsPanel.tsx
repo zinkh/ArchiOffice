@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { IconFileText, IconDownload, IconChevronDown, IconGavel, IconFileDescription, IconSignature, IconUpload } from '@tabler/icons-react';
-import type { ProjectLot } from '../../types';
+import type { Contact, ProjectLot } from '../../types';
 import { cn } from '../../lib/utils';
 import { fetchAgencySettings } from '../../lib/pdfLetterhead';
 import {
@@ -10,12 +10,15 @@ import {
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
 import { genererActeFormulaire, lireActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
 import { FormulaireNonReconnuError, champsDepuisPdf } from '../../lib/actEngagementImport';
+import { appliquerActeAuxOffres, type EntrepriseOffre, type OffreImportee, type ResultatImport } from '../../lib/actEngagementApply';
 import { PARAMETRES_DEFAUT, parametresDe, piecesOffreDe, type DonneesNegociation } from '../../lib/actNegociation';
 
 interface ConsultationLue extends DonneesNegociation {
   marche?: ParametresMarche;
   dce_documents: { nom: string; type_doc: string }[];
   criteres: { nom: string; poids: number }[];
+  entreprises: EntrepriseOffre[];
+  offres: OffreImportee[];
   pieces_admin: { id: string; nom: string }[];
 }
 
@@ -31,8 +34,11 @@ export interface OperationMarche {
 interface Props {
   consultation: ConsultationLue;
   lots: ProjectLot[];
+  contacts: Contact[];
   operation: OperationMarche;
   onChange: (marche: ParametresMarche) => void;
+  /** Verse les entreprises et offres issues d'un acte d'engagement rempli. */
+  onImporterOffres: (res: ResultatImport) => void;
 }
 
 type DocId = 'rc' | 'ccap' | 'acte';
@@ -49,7 +55,7 @@ function Champ({ label, children, large }: { label: string; children: React.Reac
   );
 }
 
-function RecapActe({ lu }: { lu: { fichier: string; acte: ActeRempli } }) {
+function RecapActe({ lu, apercu, onImporter }: { lu: { fichier: string; acte: ActeRempli }; apercu: ResultatImport; onImporter: (res: ResultatImport) => void }) {
   const { acte } = lu;
   const euros = (n: number | null) => (n === null ? '—' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n));
   return (
@@ -75,15 +81,37 @@ function RecapActe({ lu }: { lu: { fichier: string; acte: ActeRempli } }) {
           {acte.avertissements.map(a => <li key={a}>{a}</li>)}
         </ul>
       )}
+      <div className="border-t border-[var(--tblr-border)] pt-3 space-y-2">
+        <p className="text-xs font-bold text-[var(--tblr-text)]">Effet de l'import dans les offres</p>
+        <p className="text-xs text-[var(--tblr-muted)]">
+          {apercu.resume.rapprochement === 'nouvelle'
+            ? `Nouvelle entreprise consultée : ${apercu.resume.entrepriseNom}.`
+            : `Entreprise déjà consultée, reconnue par ${apercu.resume.rapprochement === 'siret' ? 'son SIRET' : 'son nom'} : ${apercu.resume.entrepriseNom}.`}
+        </p>
+        <ul className="text-xs space-y-0.5">
+          {apercu.resume.lots.map(l => (
+            <li key={l.numero}>
+              Lot {l.numero} : {euros(l.prix)} HT, {l.action === 'ajoutee' ? 'offre ajoutée' : l.action === 'identique' ? 'offre déjà enregistrée à ce montant' : `offre mise à jour (${l.ancien ? euros(l.ancien) : 'non chiffrée'} avant)`}
+            </li>
+          ))}
+        </ul>
+        {apercu.resume.ignores.length > 0 && (
+          <ul className="list-disc pl-5 text-xs text-amber-700 dark:text-amber-400">{apercu.resume.ignores.map(i => <li key={i}>{i}</li>)}</ul>
+        )}
+        <button type="button" className={BOUTON} disabled={apercu.resume.lots.length === 0} onClick={() => onImporter(apercu)}>
+          <IconUpload size={13} /> Importer dans les offres
+        </button>
+      </div>
     </div>
   );
 }
 
-export default function MarcheDocumentsPanel({ consultation, lots, operation, onChange }: Props) {
+export default function MarcheDocumentsPanel({ consultation, lots, contacts, operation, onChange, onImporterOffres }: Props) {
   const [ouvert, setOuvert] = useState<DocId | null>('rc');
   const [enCours, setEnCours] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [acteLu, setActeLu] = useState<{ fichier: string; acte: ActeRempli } | null>(null);
+  const [importe, setImporte] = useState<string | null>(null);
   const champFichier = useRef<HTMLInputElement>(null);
 
   const p = { ...PARAMETRES_MARCHE_DEFAUT, ...(consultation.marche ?? {}) } as ParametresMarche;
@@ -177,6 +205,7 @@ export default function MarcheDocumentsPanel({ consultation, lots, operation, on
   const lireFormulaire = async (fichier: File) => {
     setErreur(null);
     setActeLu(null);
+    setImporte(null);
     setEnCours('acte-lecture');
     try {
       const { pdfjs } = await import('react-pdf');
@@ -288,7 +317,18 @@ export default function MarcheDocumentsPanel({ consultation, lots, operation, on
             <input ref={champFichier} type="file" accept="application/pdf,.pdf" className="hidden" aria-label="Acte d'engagement rempli (PDF)"
               onChange={e => { const fichier = e.target.files?.[0]; e.target.value = ''; if (fichier) lireFormulaire(fichier); }} />
           </div>
-          {acteLu && <RecapActe lu={acteLu} />}
+          {acteLu && (
+            <RecapActe
+              lu={acteLu}
+              apercu={appliquerActeAuxOffres(
+                { entreprises: consultation.entreprises, offres: consultation.offres },
+                acteLu.acte, lots, contacts,
+                { aujourdhui: new Date().toISOString().slice(0, 10), genererId: () => crypto.randomUUID() },
+              )}
+              onImporter={res => { onImporterOffres(res); setActeLu(null); setImporte(res.resume.entrepriseNom); }}
+            />
+          )}
+          {importe && <p role="status" className="md:col-span-2 text-xs text-green-600 dark:text-green-400 font-bold">Offres de {importe} importées : elles figurent dans la phase Offres.</p>}
         </>
       ),
     },
