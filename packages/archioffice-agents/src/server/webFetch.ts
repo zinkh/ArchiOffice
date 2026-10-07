@@ -149,3 +149,81 @@ export async function fetchUrlSafely(rawUrl: string): Promise<WebFetchResult> {
 
   throw new Error('Trop de redirections.');
 }
+
+export interface BinaryFetchResult {
+  url: string;
+  buffer: Buffer;
+  contentType: string;
+  /** Nom de fichier annoncé par Content-Disposition, sinon dernier segment du chemin. */
+  fileName: string;
+}
+
+// Variante binaire de fetchUrlSafely pour upload_document (file_url) : mêmes
+// garde-fous SSRF (hôte public, redirections revalidées) mais le corps est
+// rendu tel quel, lu en flux et abandonné dès que `maxBytes` est dépassé —
+// jamais bufferisé en entier avant de savoir qu'il est trop gros.
+export async function fetchBinaryUrlSafely(rawUrl: string, maxBytes: number, timeoutMs = 60_000): Promise<BinaryFetchResult> {
+  let currentUrl: URL;
+  try {
+    currentUrl = new URL(rawUrl);
+  } catch {
+    throw new Error(`URL invalide : ${rawUrl}`);
+  }
+  const deadline = AbortSignal.timeout(timeoutMs);
+
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (currentUrl.protocol !== 'https:' && currentUrl.protocol !== 'http:') {
+      throw new Error(`Protocole non autorisé : ${currentUrl.protocol}`);
+    }
+    await assertPublicHost(currentUrl.hostname);
+
+    const res = await fetch(currentUrl, {
+      redirect: 'manual',
+      signal: deadline,
+      headers: { 'User-Agent': 'ArchiOfficeAgent/1.0 (+upload_document)' },
+    });
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) throw new Error(`Redirection ${res.status} sans en-tête Location.`);
+      if (hop === MAX_REDIRECTS) throw new Error('Trop de redirections.');
+      currentUrl = new URL(location, currentUrl);
+      continue;
+    }
+    if (!res.ok) throw new Error(`Téléchargement impossible (HTTP ${res.status}).`);
+
+    const declared = Number(res.headers.get('content-length') || 0);
+    if (declared > maxBytes) throw new Error(`Fichier trop volumineux (${Math.round(declared / 1024 / 1024)} Mo, limite ${Math.round(maxBytes / 1024 / 1024)} Mo).`);
+
+    const chunks: Uint8Array[] = [];
+    let received = 0;
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error('Réponse sans contenu.');
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`Fichier trop volumineux (limite ${Math.round(maxBytes / 1024 / 1024)} Mo).`);
+      }
+      chunks.push(value);
+    }
+
+    const disposition = res.headers.get('content-disposition') || '';
+    const fromHeader = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1] ?? disposition.match(/filename="?([^";]+)"?/i)?.[1];
+    let fileName = '';
+    try {
+      fileName = fromHeader ? decodeURIComponent(fromHeader) : decodeURIComponent(currentUrl.pathname.split('/').filter(Boolean).pop() || '');
+    } catch {
+      fileName = currentUrl.pathname.split('/').filter(Boolean).pop() || '';
+    }
+    return {
+      url: currentUrl.toString(),
+      buffer: Buffer.concat(chunks),
+      contentType: (res.headers.get('content-type') || '').split(';')[0].trim(),
+      fileName,
+    };
+  }
+  throw new Error('Trop de redirections.');
+}

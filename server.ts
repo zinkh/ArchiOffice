@@ -7,6 +7,8 @@ import { contentSecurityPolicy as helmetCsp } from "helmet";
 import { captureWithContext } from "./server/sentryContext";
 import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerTelegramRoutes } from "./server/routes/telegram";
+import { registerMcpUploadRoute, MCP_UPLOAD_MAX_BYTES } from "./server/routes/mcpUpload";
+import { signMcpUploadTicket, MCP_UPLOAD_TICKET_TTL_SECONDS } from "./server/mcpUploadTicket";
 import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
 import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
 import { resolveAutomationApiKey } from "./server/automationApiKeys";
@@ -288,6 +290,12 @@ export async function createApp() {
       serviceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY!,
     }));
   }
+
+  // Dépôt de fichier du serveur MCP (PUT d'octets bruts sur une URL signée) :
+  // enregistré AVANT les analyseurs de corps ci-dessous, qui ne doivent jamais
+  // voir ce corps (plafond de 10 Mo, et un PDF n'est pas du JSON).
+  app.use('/mcp-upload', mcpToolLimiter);
+  registerMcpUploadRoute(app, () => supabaseAdmin, `http://127.0.0.1:${PORT}`);
 
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -1111,7 +1119,7 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint, setMcpUploadUrlIssuer, resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
   // Le package agents n'importe rien depuis server/ (module propriétaire
   // autonome) et ne peut donc pas construire lui-même un adaptateur de
   // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
@@ -1172,6 +1180,20 @@ export async function createApp() {
   const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
   registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
   registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
+  // create_upload_url : l'URL signée pointe sur le domaine public (APP_URL),
+  // jamais sur la boucle locale que le client MCP ne peut pas joindre.
+  setMcpUploadUrlIssuer(async (request) => {
+    const publicBase = process.env.APP_URL?.replace(/\/$/, '');
+    if (!publicBase) return { error: "APP_URL n'est pas configuré sur cette instance : utilise file_url à la place." };
+    const token = request.authorization.startsWith('Bearer ') ? request.authorization.slice(7) : '';
+    const resolved = token ? await resolveMcpAccessToken(supabaseAdmin, token) : null;
+    if (!resolved) return { error: 'Session MCP invalide.' };
+    const ticket = signMcpUploadTicket({
+      t: resolved.tenantId, u: resolved.userId, r: request.resource, i: request.resourceId,
+      n: request.fileName, m: request.mimeType, c: request.category, d: request.description,
+    });
+    return { url: `${publicBase}/mcp-upload/${ticket}`, expiresInSeconds: MCP_UPLOAD_TICKET_TTL_SECONDS, maxBytes: MCP_UPLOAD_MAX_BYTES };
+  });
 
 
   // Must be registered after all routes but before the SPA fallback below —

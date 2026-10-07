@@ -50,6 +50,12 @@ export interface AgentResourceDef {
    * rapporté au modèle, pour qu'il le dise à l'utilisateur.
    */
   defaults?: Record<string, string | number>;
+  /**
+   * Noms de champ que les modèles devinent volontiers (client_phone, zone...)
+   * et le champ réel vers lequel ils sont redirigés. Jamais écrasé : si le
+   * champ réel est aussi fourni, c'est lui qui gagne.
+   */
+  fieldAliases?: Record<string, string>;
 }
 
 export const AGENT_RESOURCES: AgentResourceDef[] = [
@@ -68,11 +74,28 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     defaults: { status: 'Draft', amount: 0 },
     fields: 'title*, client_id, amount, status (Draft/Sent/Accepted/Rejected), description, notes, vat_rate' },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
-    knownFields: ['name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address', 'ref_cadastrale'],
+    knownFields: [
+      'name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address', 'ref_cadastrale',
+      // Terrain
+      'adresse_terrain', 'cp_ville_terrain', 'ban_id_terrain', 'city_code_terrain', 'surface_parcelle', 'surface_plancher', 'surface_plancher_ext', 'zone_plu', 'secteur_abf',
+      // Opération
+      'programme', 'type_projet', 'categorie_projet', 'num_permis_construire', 'date_depot_pc',
+      // Maître d'ouvrage
+      'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client',
+      'client_siret', 'client_vat_number', 'is_public_client', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite',
+    ],
     required: ['name', 'client'],
     enums: { status: ['Planning', 'In Progress', 'Completed', 'On Hold'] },
     defaults: { status: 'Planning' },
+    fieldAliases: {
+      client_email: 'email_client', email_moa: 'email_client', client_phone: 'telephone', client_telephone: 'telephone',
+      client_mobile: 'portable', client_address: 'adresse_client', client_zip: 'cp_client', client_city: 'ville_client',
+      permit_number: 'num_permis_construire', numero_permis: 'num_permis_construire', permit_filing_date: 'date_depot_pc',
+    },
     fields: 'name*, client*, status (Planning/In Progress/Completed/On Hold), client_id, budget, category, start_date, end_date, description, address, ref_cadastrale (référence cadastrale du terrain). ' +
+      'Terrain : adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, surface_parcelle, surface_plancher, surface_plancher_ext, zone_plu, secteur_abf. ' +
+      'Opération : programme, type_projet, categorie_projet, num_permis_construire, date_depot_pc (AAAA-MM-JJ). ' +
+      "Maître d'ouvrage : adresse_client, cp_client, ville_client, telephone, portable, email_client (alias accepté : client_email), client_siret, client_vat_number, is_public_client, is_entreprise, nom_societe, rcs, representant, qualite. " +
       "Une mise à jour (update_record) ne touche que les champs fournis : pas besoin de renvoyer name/client pour ne changer qu'un seul champ." },
   { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, identityField: 'name',
     knownFields: ['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status', 'description', 'location', 'start_date', 'project_manager', 'construction_cost', 'remuneration', 'fee_rate', 'progression'],

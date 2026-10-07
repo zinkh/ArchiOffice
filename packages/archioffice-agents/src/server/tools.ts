@@ -139,8 +139,29 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
         properties: {
           resource: { type: 'string', enum: searchable, description: 'Type de ressource dans laquelle chercher' },
           query: { type: 'string', description: 'Mot-clé à rechercher (nom, société, titre...)' },
+          fields: { type: 'array', items: { type: 'string' }, description: "Optionnel — colonnes à joindre à chaque résultat (ex. [\"email\", \"phone\", \"address\"] pour un contact). Sans ce paramètre, seule l'identité est rendue ; pour tout le détail d'un enregistrement, utilise get_record." },
         },
         required: ['resource', 'query'],
+      },
+    });
+  }
+
+  const readable = authorized.filter(r => r.list).map(r => r.key);
+  if (readable.length > 0) {
+    tools.push({
+      name: 'get_record',
+      description:
+        "Lit UN enregistrement complet (adresse, téléphone, email, tous les champs) à partir de son identifiant, tel que renvoyé par search_records. " +
+        "search_records ne rend que l'identité : utilise get_record pour le détail d'un contact, d'un devis, d'une affaire... " +
+        "Le paramètre fields (liste de noms de colonnes) limite la réponse aux champs voulus ; les images encodées en base64 (image_url, logo) sont toujours omises.",
+      parametersJsonSchema: {
+        type: 'object',
+        properties: {
+          resource: { type: 'string', enum: readable, description: 'Type de ressource à lire' },
+          id: { type: 'string', description: "Identifiant de l'enregistrement" },
+          fields: { type: 'array', items: { type: 'string' }, description: 'Optionnel — colonnes à renvoyer (défaut : tous les champs, hors images base64)' },
+        },
+        required: ['resource', 'id'],
       },
     });
   }
@@ -253,6 +274,17 @@ export function prepareRecord(
         aliasedFields[key] = 'client';
         continue;
       }
+      const aliasTarget = resource.fieldAliases?.[key] ?? resource.fieldAliases?.[normalizedKey];
+      if (aliasTarget && resource.knownFields.includes(aliasTarget)) {
+        // Le champ réel, s'il est aussi fourni, gagne toujours (voir plus bas).
+        if (input[aliasTarget] === undefined && data[aliasTarget] === undefined) {
+          data[aliasTarget] = value;
+          aliasedFields[key] = aliasTarget;
+        } else {
+          ignoredFields.push(key);
+        }
+        continue;
+      }
       ignoredFields.push(key);
       continue;
     }
@@ -287,6 +319,32 @@ export function prepareRecord(
     : [];
 
   return { data, ignoredFields, appliedDefaults, normalizedValues, missingRequired, aliasedFields };
+}
+
+// Un enregistrement lu pour le modèle ne doit jamais embarquer d'image encodée
+// (projects.image_url est une data-URI de plusieurs centaines de Ko) : un seul
+// de ces champs suffit à dépasser la limite de sortie d'un outil MCP.
+const MAX_FIELD_CHARS = 4000;
+
+export function slimRecord(record: Record<string, unknown>, fields?: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const keys = fields && fields.length ? ['id', ...fields.filter(f => f !== 'id')] : Object.keys(record);
+  for (const key of keys) {
+    if (!(key in record)) continue;
+    const value = record[key];
+    if (typeof value === 'string') {
+      if (value.startsWith('data:')) { out[key] = '[image omise]'; continue; }
+      if (value.length > MAX_FIELD_CHARS) { out[key] = `${value.slice(0, MAX_FIELD_CHARS)}… [tronqué]`; continue; }
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
+function parseFieldList(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const list = raw.map(f => String(f).trim()).filter(Boolean).slice(0, 40);
+  return list.length ? list : undefined;
 }
 
 export interface AgentActionCall {
@@ -521,11 +579,23 @@ export async function executeAgentAction(
     const q = String(args.query || '').toLowerCase().trim();
     if (!q) return { response: { error: 'query est requis.' } };
     const list = await fetchResourceList(baseUrl, auth, resource);
+    const wanted = parseFieldList(args.fields);
     const matches = list
-      .map(r => ({ id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
+      .map(r => ({ row: r, id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
       .filter(r => r.identity && r.identity.toLowerCase().includes(q))
-      .slice(0, 10);
+      .slice(0, 10)
+      .map(({ row, id, identity }) => ({ id, identity, ...(wanted ? { fields: slimRecord(row, wanted) } : {}) }));
     return { response: { count: matches.length, matches } };
+  }
+
+  if (name === 'get_record') {
+    if (!resource.list) return { response: { error: `Lecture non disponible pour "${resourceKey}".` } };
+    const id = String(args.id || '');
+    if (!id) return { response: { error: 'id est requis.' } };
+    const list = await fetchResourceList(baseUrl, auth, resource);
+    const record = list.find(r => String((r as any).id) === id);
+    if (!record) return { response: { error: `Aucun enregistrement "${id}" dans « ${resource.label} ».` } };
+    return { response: { record: slimRecord(record, parseFieldList(args.fields)) } };
   }
 
   let method: 'POST' | 'PUT' | 'DELETE';
@@ -674,7 +744,7 @@ export async function executeAgentAction(
       response: {
         success: true,
         ...json,
-        ...(savedRecord ? { saved_record: savedRecord } : {}),
+        ...(savedRecord ? { saved_record: slimRecord(savedRecord) } : {}),
         ...(recordUrl ? { record_url: recordUrl } : {}),
         // Ce que la couche outil a corrigé d'elle-même. Le modèle doit le
         // répercuter à l'utilisateur : un champ écarté est une information

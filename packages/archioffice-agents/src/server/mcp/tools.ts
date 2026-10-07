@@ -33,6 +33,9 @@ import { AGENT_RESOURCES, type AgentCapabilities } from '../../types.js';
 import { resolveMailAccount } from '../mailTools.js';
 import { getFullMessage, downloadAttachmentBytes } from '../mailAttachmentTools.js';
 import { extractDocumentText, MAX_EXTRACTED_TEXT_CHARS, withTextExtractionTimeout } from '../documentTextExtraction.js';
+import { fetchBinaryUrlSafely } from '../webFetch.js';
+import { slimRecord } from '../tools.js';
+import { issueUploadUrl } from './uploadUrl.js';
 
 async function callApi(baseUrl: string, auth: InternalAuth, method: string, path: string, body?: unknown) {
   try {
@@ -162,25 +165,62 @@ async function downloadAttachedDocumentBytes(baseUrl: string, auth: InternalAuth
   }
 }
 
+const MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
+  doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  txt: 'text/plain', csv: 'text/csv', dwg: 'application/acad', dxf: 'application/dxf', zip: 'application/zip',
+};
+
+function guessMimeType(fileName: string, declared?: string): string {
+  if (declared && declared !== 'application/octet-stream') return declared;
+  const ext = fileName.split('.').pop()?.toLowerCase() || '';
+  return MIME_BY_EXTENSION[ext] || declared || 'application/octet-stream';
+}
+
 const DOCUMENT_TOOLS: FunctionDeclarationLike[] = [
   {
     name: 'upload_document',
     description:
       "Dépose un fichier (PDF, DOCX, XLSX, image...) et l'attache à une fiche existante du cabinet (projet, permis, appel d'offres, devis...). " +
-      `Le fichier voyage encodé en base64 dans file_content — limite ${MAX_MCP_FILE_BYTES / (1024 * 1024)} Mo. ` +
+      "Trois façons de fournir le fichier, une seule à la fois : " +
+      "(1) file_url, un lien https PUBLIC ou signé que le serveur télécharge lui-même (recommandé pour un PDF de plan : rien ne transite par toi) ; " +
+      "(2) pour un fichier local sans lien : appelle d'abord create_upload_url, envoie les octets bruts en PUT sur l'URL rendue, le fichier est alors attaché tout de suite et upload_document n'a plus à être appelé ; " +
+      `(3) file_content en base64, réservé aux petits fichiers (quelques Ko) — limite ${MAX_MCP_FILE_BYTES / (1024 * 1024)} Mo dans tous les cas. ` +
       "category est un intitulé libre (ex. « CERFA », « notice_securite », « notice_accessibilite », « plan », « photo »).",
     parametersJsonSchema: {
       type: 'object',
       properties: {
         resource: { type: 'string', enum: DOCUMENT_RESOURCE_TYPES, description: 'Type de fiche à laquelle attacher le fichier' },
         resource_id: { type: 'string', description: 'Identifiant de la fiche cible' },
-        file_name: { type: 'string' },
-        file_content: { type: 'string', description: 'Contenu du fichier encodé en base64' },
-        mime_type: { type: 'string' },
+        file_url: { type: 'string', description: 'Lien https public ou signé du fichier, téléchargé côté serveur (adresses internes refusées)' },
+        file_content: { type: 'string', description: 'Contenu du fichier encodé en base64 (petits fichiers seulement ; préfère file_url)' },
+        file_name: { type: 'string', description: 'Nom du fichier. Facultatif avec file_url (déduit du lien), obligatoire avec file_content.' },
+        mime_type: { type: 'string', description: 'Facultatif avec file_url (déduit de la réponse ou de l\'extension), obligatoire avec file_content.' },
         category: { type: 'string', description: 'Optionnel — classement libre du document' },
         description: { type: 'string', description: 'Optionnel' },
       },
-      required: ['resource', 'resource_id', 'file_name', 'file_content', 'mime_type'],
+      required: ['resource', 'resource_id'],
+    },
+  },
+  {
+    name: 'create_upload_url',
+    description:
+      "Première étape du dépôt d'un fichier LOCAL volumineux (un PDF de plan de 50 Ko à 25 Mo) sans base64 : rend une URL signée valable 15 minutes. " +
+      "Envoie ensuite les octets bruts du fichier en PUT sur cette URL (ex. curl -X PUT --data-binary @plan.pdf -H 'Content-Type: application/pdf' \"<upload_url>\") : " +
+      "le fichier est attaché à la fiche dès la fin du PUT, avec le nom, la catégorie et la description donnés ici. Aucun second appel n'est nécessaire ; vérifie le résultat avec list_documents.",
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        resource: { type: 'string', enum: DOCUMENT_RESOURCE_TYPES, description: 'Type de fiche à laquelle attacher le fichier' },
+        resource_id: { type: 'string', description: 'Identifiant de la fiche cible' },
+        file_name: { type: 'string', description: 'Nom du fichier, extension comprise' },
+        mime_type: { type: 'string', description: 'Facultatif — déduit de l\'extension sinon' },
+        category: { type: 'string', description: 'Optionnel — classement libre du document' },
+        description: { type: 'string', description: 'Optionnel' },
+      },
+      required: ['resource', 'resource_id', 'file_name'],
     },
   },
   {
@@ -274,15 +314,46 @@ async function executeDocumentTool(baseUrl: string, auth: InternalAuth, name: st
   if (!DOCUMENT_RESOURCE_TYPES.includes(resource)) return errorResult(`resource "${resource}" non pris en charge.`);
   if (!resourceId) return errorResult('resource_id est requis.');
 
+  if (name === 'create_upload_url') {
+    const fileName = String(args.file_name || '').trim();
+    if (!fileName) return errorResult('file_name est requis.');
+    const issued = await issueUploadUrl({
+      authorization: auth.authorization, tenantId: auth.tenantId, resource, resourceId, fileName,
+      mimeType: guessMimeType(fileName, args.mime_type ? String(args.mime_type) : undefined),
+      category: args.category ? String(args.category) : undefined,
+      description: args.description ? String(args.description) : undefined,
+    });
+    if ('error' in issued) return errorResult(issued.error);
+    return { content: [{ type: 'text' as const, text: JSON.stringify({
+      upload_url: issued.url, method: 'PUT', expires_in_seconds: issued.expiresInSeconds,
+      max_size_mb: Math.round(issued.maxBytes / 1024 / 1024),
+      instruction: "Envoie maintenant les octets bruts du fichier en PUT sur upload_url (corps = le fichier, pas de multipart). Le fichier est attaché à la fiche à la fin du PUT.",
+    }) }] };
+  }
+
   if (name === 'upload_document') {
-    const fileName = String(args.file_name || '');
-    const mimeType = String(args.mime_type || '');
-    if (!fileName || !args.file_content || !mimeType) return errorResult('file_name, file_content et mime_type sont requis.');
+    let fileName = String(args.file_name || '').trim();
+    let mimeType = String(args.mime_type || '').trim();
     let buffer: Buffer;
-    try {
-      buffer = Buffer.from(String(args.file_content), 'base64');
-    } catch {
-      return errorResult('file_content doit être un contenu encodé en base64 valide.');
+    if (args.file_url) {
+      if (args.file_content) return errorResult('Fournis file_url OU file_content, pas les deux.');
+      try {
+        const fetched = await fetchBinaryUrlSafely(String(args.file_url), MAX_MCP_FILE_BYTES);
+        buffer = fetched.buffer;
+        fileName = fileName || fetched.fileName;
+        mimeType = guessMimeType(fileName, mimeType || fetched.contentType);
+      } catch (e: any) {
+        return errorResult(e?.message || 'Téléchargement du fichier impossible.');
+      }
+      if (!fileName) return errorResult('Nom de fichier introuvable : renseigne file_name.');
+    } else {
+      if (!fileName || !args.file_content) return errorResult('Fournis file_url, ou file_name et file_content (ou utilise create_upload_url).');
+      mimeType = guessMimeType(fileName, mimeType);
+      try {
+        buffer = Buffer.from(String(args.file_content), 'base64');
+      } catch {
+        return errorResult('file_content doit être un contenu encodé en base64 valide.');
+      }
     }
     if (buffer.length === 0) return errorResult('Fichier vide.');
     if (buffer.length > MAX_MCP_FILE_BYTES) {
@@ -458,8 +529,16 @@ async function executeImportEmailAttachment(
 const RICH_TOOLS: FunctionDeclarationLike[] = [
   {
     name: 'list_projects',
-    description: "Liste les affaires (projets) du cabinet : id, nom, code, adresse, statut. Utilise-le pour retrouver l'id d'une affaire nommée avant d'appeler get_project.",
-    parametersJsonSchema: { type: 'object', properties: {} },
+    description: "Liste les affaires (projets) du cabinet, les plus récentes d'abord : id, nom, code, adresse, statut, client. Paginé (limit, 50 par défaut) : si next_cursor est non nul, rappelle avec cursor pour la page suivante. " +
+      "Utilise-le pour retrouver l'id d'une affaire nommée avant d'appeler get_project ; query filtre par nom, code ou client.",
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Nombre d\'affaires par page (1 à 100, défaut 50)' },
+        cursor: { type: 'string', description: 'next_cursor renvoyé par l\'appel précédent' },
+        query: { type: 'string', description: 'Optionnel — texte cherché dans le nom, le code ou le client' },
+      },
+    },
   },
   {
     name: 'get_project',
@@ -492,13 +571,61 @@ const RICH_TOOLS: FunctionDeclarationLike[] = [
 ];
 const RICH_TOOL_NAMES = RICH_TOOLS.map(t => t.name);
 
+const LIST_PROJECTS_DEFAULT_LIMIT = 50;
+const LIST_PROJECTS_MAX_LIMIT = 100;
+
+// GET /api/projects rend la ligne entière, image_url (data-URI base64) comprise :
+// plusieurs centaines de milliers de caractères par affaire. On ne garde ici que
+// l'identité de l'affaire, et on pagine côté serveur par curseur.
+async function listProjects(baseUrl: string, auth: InternalAuth, args: Record<string, any>) {
+  const requested = Number(args.limit);
+  const limit = Math.min(Math.max(Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : LIST_PROJECTS_DEFAULT_LIMIT, 1), LIST_PROJECTS_MAX_LIMIT);
+  const query = String(args.query || '').trim().toLowerCase();
+  const matches: Record<string, unknown>[] = [];
+  let cursor: string | null = args.cursor ? String(args.cursor) : null;
+  let exhausted = false;
+
+  // Avec un filtre, une page de l'API peut ne rien contenir de pertinent : on
+  // enchaîne les pages jusqu'à remplir `limit` ou épuiser la liste.
+  for (let page = 0; page < 20 && matches.length < limit && !exhausted; page++) {
+    const path = `/api/projects?limit=${LIST_PROJECTS_MAX_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+    const res = await fetch(baseUrl + path, { headers: internalHeaders(auth) }).catch(() => null);
+    const body: any = res ? await res.json().catch(() => null) : null;
+    if (!res || !res.ok || !Array.isArray(body?.data)) return errorResult(body?.error || 'Lecture des affaires impossible.');
+    for (const p of body.data) {
+      const haystack = [p.name, p.project_code, p.client].filter(Boolean).join(' ').toLowerCase();
+      if (query && !haystack.includes(query)) continue;
+      matches.push({
+        id: p.id, name: p.name, code: p.project_code ?? null,
+        adresse: p.address || p.adresse_terrain || null, statut: p.status ?? null, client: p.client ?? null,
+      });
+      if (matches.length === limit) { cursor = p.id ? Buffer.from(String(p.id), 'utf8').toString('base64url') : null; break; }
+    }
+    if (matches.length === limit) break;
+    cursor = body.nextCursor;
+    exhausted = !cursor;
+  }
+  const hasMore = matches.length === limit && !exhausted ? true : !!cursor && !exhausted;
+  return { content: [{ type: 'text' as const, text: JSON.stringify({ projects: matches, count: matches.length, next_cursor: hasMore ? cursor : null }) }] };
+}
+
 async function executeRichTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>) {
   switch (name) {
     case 'list_projects':
-      return callApi(baseUrl, auth, 'GET', '/api/projects');
-    case 'get_project':
+      return listProjects(baseUrl, auth, args);
+    case 'get_project': {
       if (!args.project_id) return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'project_id est requis.' }) }], isError: true };
-      return callApi(baseUrl, auth, 'GET', `/api/projects/${encodeURIComponent(args.project_id)}/full`);
+      const result = await callApi(baseUrl, auth, 'GET', `/api/projects/${encodeURIComponent(args.project_id)}/full`);
+      if (result.isError) return result;
+      // L'image de l'affaire (data-URI base64) dépasserait à elle seule la limite de sortie.
+      try {
+        const data = JSON.parse(result.content[0].text);
+        if (data?.project) data.project = slimRecord(data.project);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(data) }] };
+      } catch {
+        return result;
+      }
+    }
     case 'list_tasks':
       return callApi(baseUrl, auth, 'GET', `/api/tasks${args.project_id ? `?project_id=${encodeURIComponent(args.project_id)}` : ''}`);
     case 'create_task':
@@ -560,7 +687,7 @@ function genericTools(): FunctionDeclarationLike[] {
   return buildAgentTools(MCP_CAPS)
     .filter(t => t.name !== 'delete_record') // jamais depuis une liaison externe, quel que soit le connecteur
     .map(t => (
-      ['create_record', 'update_record', 'search_records'].includes(t.name)
+      ['create_record', 'update_record', 'search_records', 'get_record'].includes(t.name)
         ? { ...t, description: `${t.description}\n\nSCHÉMA DES RESSOURCES :\n${schema}` }
         : t
     ));
@@ -569,7 +696,13 @@ function genericTools(): FunctionDeclarationLike[] {
 export const MCP_TOOLS: FunctionDeclarationLike[] = [...RICH_TOOLS, ...DOCUMENT_TOOLS, ...genericTools()];
 export const MCP_TOOL_NAMES = MCP_TOOLS.map(t => t.name);
 
-export async function executeMcpTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>) {
+export type McpToolResult = {
+  [x: string]: unknown;
+  content: { type: 'text'; text: string }[];
+  isError?: boolean;
+};
+
+export async function executeMcpTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>): Promise<McpToolResult> {
   if (name === 'delete_record') {
     return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Action non autorisée depuis cette liaison.' }) }], isError: true };
   }
