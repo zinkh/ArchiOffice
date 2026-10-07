@@ -9,10 +9,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconSparkles, IconWand, IconTrash, IconPlus, IconGripVertical, IconMap2, IconListDetails, IconLock,
-  IconFileTypePdf, IconFileTypeDocx, IconAlertTriangle, IconChevronDown, IconX, IconLoader2,
+  IconFileTypePdf, IconFileTypeDocx, IconAlertTriangle, IconChevronDown, IconX, IconLoader2, IconPhoto,
 } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { startPressDrag } from '../../lib/pressDrag';
+import { getAccessToken } from '../../lib/authToken';
+import {
+  MAX_ILLUSTRATIONS_PER_SECTION, PHOTO_MAX_INPUT_BYTES, photoLabel, photoToJpeg,
+} from '../../lib/feasibilityPhoto';
 import { useUser } from '../../UserContext';
 import { SignedImage } from '../SignedImage';
 import { FeasibilityMapDialog } from './FeasibilityMapDialog';
@@ -61,6 +65,9 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
   const [siteData, setSiteData] = useState<FeasibilitySiteData | null>(null);
   const [siteLoading, setSiteLoading] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [photoUploadingFor, setPhotoUploadingFor] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const photoTargetRef = useRef<string | null>(null);
 
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
@@ -172,6 +179,56 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
     patchLocal(sectionId, { illustrations });
     setMapFor(null);
     await save(sectionId, { illustrations });
+  };
+
+  // Photos externes à ArchiOffice (prises sur site, reçues du client...) : réduites
+  // en JPEG puis déposées comme documents de la proposition, comme les extraits de cartes.
+  const uploadPhotos = async (sectionId: string, files: File[]) => {
+    setNotice(null);
+    setError(null);
+    const section = sectionsRef.current.find(s => s.id === sectionId);
+    if (!section || !files.length) return;
+    const room = MAX_ILLUSTRATIONS_PER_SECTION - section.illustrations.length;
+    if (room <= 0) { setError(t('feas_photo_limit', { max: MAX_ILLUSTRATIONS_PER_SECTION }) as string); return; }
+    setPhotoUploadingFor(sectionId);
+    const added: FeasibilityIllustration[] = [];
+    const rejected: string[] = [];
+    try {
+      const token = await getAccessToken();
+      for (const file of files.slice(0, room)) {
+        try {
+          if (!file.type.startsWith('image/') || file.size > PHOTO_MAX_INPUT_BYTES) throw new Error('unsupported');
+          const blob = await photoToJpeg(file);
+          const name = `${photoLabel(file.name) || 'Photo'}.jpg`;
+          const form = new FormData();
+          form.append('file', new File([blob], name, { type: 'image/jpeg' }));
+          form.append('resource_type', 'proposals');
+          form.append('resource_id', proposalId);
+          form.append('name', name);
+          form.append('category', 'Faisabilité');
+          const res = await fetch('/api/documents', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.id) throw new Error(data?.error || 'upload');
+          added.push({
+            document_id: data.id, file_url: data.file_url, layer: 'photo', scale: 0,
+            caption: photoLabel(file.name), captured_at: new Date().toISOString(),
+          });
+        } catch {
+          rejected.push(file.name);
+        }
+      }
+      if (added.length) {
+        const current = sectionsRef.current.find(s => s.id === sectionId);
+        const illustrations = [...(current?.illustrations ?? []), ...added];
+        patchLocal(sectionId, { illustrations });
+        await save(sectionId, { illustrations });
+      }
+      const skipped = files.length - room > 0 ? files.length - room : 0;
+      if (rejected.length) setError(t('feas_photo_error', { files: rejected.join(', ') }) as string);
+      else if (skipped > 0) setNotice(t('feas_photo_limit', { max: MAX_ILLUSTRATIONS_PER_SECTION }) as string);
+    } finally {
+      setPhotoUploadingFor(null);
+    }
   };
 
   const updateCaption = (sectionId: string, documentId: string, caption: string) => {
@@ -364,6 +421,11 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
                 className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60" style={softButton}>
                 <IconMap2 size={12} /> {t('feas_map')}
               </button>
+              <button type="button" disabled={photoUploadingFor === section.id}
+                onClick={() => { photoTargetRef.current = section.id; photoInputRef.current?.click(); }}
+                className="flex items-center gap-1 text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg disabled:opacity-60" style={softButton}>
+                {photoUploadingFor === section.id ? <IconLoader2 size={12} className="animate-spin" /> : <IconPhoto size={12} />} {t('feas_photo')}
+              </button>
               {!showInstructions && (
                 <button type="button" onClick={() => setInstructionsOpen(prev => new Set(prev).add(section.id))}
                   className="text-[0.6875rem] font-bold uppercase px-2 py-1 rounded-lg" style={{ color: 'var(--tblr-muted)' }}>
@@ -397,6 +459,14 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
           <IconPlus size={16} />
         </button>
       </div>
+
+      <input ref={photoInputRef} type="file" accept="image/*" multiple className="hidden" aria-label={t('feas_photo') as string}
+        onChange={e => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = '';
+          const target = photoTargetRef.current;
+          if (target) void uploadPhotos(target, files);
+        }} />
 
       {mapSection && siteData?.address && (
         <FeasibilityMapDialog
