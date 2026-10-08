@@ -680,6 +680,85 @@ describe('comptes-rendus de chantier DET', () => {
   });
 });
 
+describe('import de notes dans un CR de chantier', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const caps = () => capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+  const auth = { authorization: 'Bearer x' };
+  const report = { id: 'cr-1', report_number: 4, date: '2026-10-08', statut: 'brouillon', meetingNotes: 'Déjà saisi', decisions: [{ auteur: '', texte: 'Ancienne', tag: 'planning' }], stakeholders: [{ name: 'A', role: 'MOA' }], companies: [] };
+
+  const stub = (extra: Record<string, any> = {}) => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      const method = init?.method || 'GET';
+      let json: any = [];
+      if (url.endsWith('/projects/p1/reports')) json = extra.reports ?? [report];
+      else if (url.endsWith('/lots')) json = [{ id: 'lot-2', lot_number: '02', lot_title: 'PLATRERIE', contact_name: 'Dupont' }];
+      else if (method === 'POST') json = { id: 'new' };
+      else if (method === 'PUT') json = { ok: true };
+      return { ok: true, status: 200, json: async () => json };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+  const run = (args: any) => executeAgentAction('http://localhost', auth, caps(), { name: 'import_site_report_notes', args }) as Promise<{ response: any }>;
+
+  it("n'est proposé qu'aux agents ayant accès aux opérations, et exposé au MCP", async () => {
+    expect(buildAgentTools(caps()).map(t => t.name)).toContain('import_site_report_notes');
+    expect(buildAgentTools(capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['meetings'] })).map(t => t.name)).not.toContain('import_site_report_notes');
+    const { MCP_TOOL_NAMES } = await import('../packages/archioffice-agents/src/server/mcp/tools');
+    expect(MCP_TOOL_NAMES).toContain('import_site_report_notes');
+  });
+
+  it('range rubriques, observations, décisions et notes dans le brouillon', async () => {
+    const fetchMock = stub();
+    const result = await run({
+      project_id: 'p1',
+      rubriques: [{ category: 'Planning', text: 'Retard de 2 jours', due_date: '2026-10-15' }],
+      observations: [{ texte: 'Reprendre les cloisons', lot: '02', type: 'reserve', urgence: 'urgent' }],
+      decisions: [{ texte: 'Décalage de la livraison', tag: 'planning' }],
+      meeting_notes: 'RAS côté sécurité',
+    });
+    expect(result.response).toMatchObject({ success: true, ajoutes: { rubriques: 1, observations: 1, decisions: 1, meeting_notes: true } });
+    const calls = fetchMock.mock.calls.map(c => [c[1]?.method || 'GET', c[0]]);
+    expect(calls).toContainEqual(['POST', 'http://localhost/api/reports/cr-1/notes']);
+    expect(calls).toContainEqual(['POST', 'http://localhost/api/projects/p1/observations']);
+    const obs = JSON.parse(fetchMock.mock.calls.find(c => c[0].endsWith('/p1/observations') && c[1]?.method === 'POST')![1].body);
+    expect(obs).toMatchObject({ lot_id: 'lot-2', type: 'reserve', urgence: 'urgent', created_report_id: 'cr-1' });
+    const put = JSON.parse(fetchMock.mock.calls.find(c => c[1]?.method === 'PUT')![1].body);
+    expect(put.meetingNotes).toBe('Déjà saisi\n\nRAS côté sécurité');
+    expect(put.decisions.map((d: any) => d.texte)).toEqual(['Ancienne', 'Décalage de la livraison']);
+    expect(put.stakeholders).toEqual(report.stakeholders);
+  });
+
+  it('ignore les doublons et ne réécrit pas le CR quand rien ne change', async () => {
+    const fetchMock = stub();
+    const result = await run({ project_id: 'p1', decisions: [{ texte: 'ancienne' }], meeting_notes: 'déjà saisi' });
+    expect(result.response.ajoutes).toMatchObject({ decisions: 0, meeting_notes: false });
+    expect(result.response.doublons_ignores).toHaveLength(2);
+    expect(fetchMock.mock.calls.some(c => c[1]?.method === 'PUT')).toBe(false);
+  });
+
+  it('signale un lot introuvable sans bloquer le reste', async () => {
+    stub();
+    const result = await run({ project_id: 'p1', observations: [{ texte: 'Point A', lot: '99' }, { texte: 'Point B' }] });
+    expect(result.response.ajoutes.observations).toBe(1);
+    expect(result.response.non_importes[0].raison).toContain('introuvable');
+    expect(result.response.lots_possibles).toHaveLength(1);
+  });
+
+  it('refuse un CR diffusé ou plusieurs brouillons sans écrire', async () => {
+    const fetchMock = stub({ reports: [{ ...report, statut: 'diffuse' }] });
+    expect((await run({ project_id: 'p1', report_id: 'cr-1', meeting_notes: 'x' })).response.error).toContain('diffusé');
+    stub({ reports: [report, { ...report, id: 'cr-2' }] });
+    expect((await run({ project_id: 'p1', meeting_notes: 'x' })).response.error).toContain('Plusieurs brouillons');
+    expect(fetchMock.mock.calls.every(c => (c[1]?.method || 'GET') === 'GET')).toBe(true);
+  });
+
+  it("refuse un appel sans aucune note", async () => {
+    stub();
+    expect((await run({ project_id: 'p1' })).response.error).toContain('Aucune note');
+  });
+});
+
 describe('alertes : qualification d\'une entreprise consultée', () => {
   const projet = { id: 'p1', name: 'Villa Martin', status: 'In Progress' };
   const consultation = (entreprises: any[]) => [{ project_id: 'p1', consultation: { entreprises } }];

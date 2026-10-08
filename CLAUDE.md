@@ -1745,6 +1745,20 @@ défaut) et non dans `lot_tracking` (`lotPresenceStatus`, `src/lib/siteReportPre
   (`localStorage`, `chantier:pdf:rubriquePhotos`, coché par défaut) et passe par
   `includeRubriquePhotos`. Les rubriques reportées d'un CR au suivant ne reprennent pas les photos.
 
+### Import de notes dans un CR de chantier (agents et MCP)
+
+`import_site_report_notes` (`packages/archioffice-agents/src/server/siteReportNotesTool.ts`) range
+des notes déjà structurées dans le BROUILLON d'un CR de chantier : `rubriques` (site_report_notes),
+`observations` (rattachées au CR, lot résolu comme `add_site_report_observation`), `decisions` et
+`meeting_notes` (ajoutées à la suite du texte existant). L'outil n'interprète rien : l'agent lit
+d'abord la source (`read_email`, `read_email_attachment`, `read_document`) et fait le tri. Il suit les
+mêmes garde-fous que les autres outils DET : scope `projects`, jeton de la personne (API REST en boucle
+locale), jamais sur un CR diffusé, un seul brouillon choisi d'office sinon demande, doublons ignorés
+(comparaison sans casse : rejouer un import ne change rien), un lot introuvable ou une ligne refusée
+n'arrête pas le reste (`non_importes`, `lots_possibles`). Décisions et notes passent par UN `PUT
+/api/reports/:id`, qui réécrit format, intervenants et prochaine réunion depuis le corps : l'outil les
+renvoie tels que lus. Exposé au MCP sans code propre : `buildAgentTools(MCP_CAPS)` le reprend.
+
 ### Dictée vocale
 
 Un micro dans la barre de saisie du chat (`client/useDictation.ts`). Le texte
