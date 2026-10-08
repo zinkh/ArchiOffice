@@ -932,6 +932,18 @@ multipart à `POST /api/reports/:reportId/diffuse` (`server/routes/siteReportDif
 - Hors ligne ou saisie en attente de synchronisation : la diffusion est refusée, le message
   partirait sans elle.
 
+### Pièces jointes d'un e-mail : jamais relayées brutes à nodemailer
+
+`POST /api/send-email` relayait `attachments` tel que reçu, or nodemailer lit pour une pièce
+jointe `path` (fichier du serveur), `href` (adresse, donc le réseau interne), `raw`,
+`headers`... : toute personne connectée pouvait se faire envoyer `.env` ou une clé du serveur.
+`sanitizeEmailAttachments()` (`server/emailAttachments.ts`, `tests/emailAttachments.test.ts`)
+ne garde que `{ filename, content en base64, contentType }` : nom nettoyé (ni chemin ni
+retour à la ligne), contenu décodé en `Buffer`, type de contenu vérifié, 20 pièces et 25 Mo
+au plus. Tout le reste est retiré, et une pièce jointe sans contenu base64 est refusée en
+400. Tout nouveau chemin qui envoie des pièces jointes venues d'un client doit passer par là,
+ou par un fichier téléversé (`multer`), jamais par un objet nodemailer construit côté client.
+
 ### Qualifications des entreprises et recherche d'entreprises
 
 `contact_qualifications` (`supabase/migrate_contact_qualifications.sql`) : une ligne par qualification

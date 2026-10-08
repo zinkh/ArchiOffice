@@ -11,12 +11,14 @@
 // exactement comme s'il l'avait envoyée à la main depuis sa boîte.
 // Attachments aren't supported on that path yet (nodemailer's `attachments`
 // shape isn't normalized across providers) — a caller passing attachments
-// still goes straight to the cabinet SMTP below.
+// still goes straight to the cabinet SMTP below, après avoir été réduites à de
+// simples octets (server/emailAttachments.ts).
 import type { Express } from 'express';
 import nodemailer from 'nodemailer';
 import { sendEmailLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sendViaAccount } from '../mailSend';
+import { sanitizeEmailAttachments } from '../emailAttachments';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -26,16 +28,22 @@ export interface RouteDeps {
 export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.post("/api/send-email", sendEmailLimiter, async (req: any, res: any) => {
     try {
-      const { to, subject, text, html, attachments, userEmail } = req.body;
+      const { to, subject, text, html, userEmail } = req.body;
       const hasCrlf = (v: unknown): boolean =>
         Array.isArray(v) ? v.some(hasCrlf) : typeof v === 'string' && /[\r\n]/.test(v);
       if (hasCrlf(to) || hasCrlf(subject) || hasCrlf(userEmail)) {
         return res.status(400).json({ error: "Invalid characters in email fields" });
       }
 
+      // Jamais de `attachments` brut vers nodemailer : il lirait `path`/`href`
+      // (fichiers du serveur, réseau interne). Voir server/emailAttachments.ts.
+      const safe = sanitizeEmailAttachments(req.body.attachments);
+      if (!safe.ok) return res.status(400).json({ error: safe.error });
+      const attachments = safe.attachments;
+
       const tenantId = await getTenantId(req.user.id);
 
-      if (!attachments?.length) {
+      if (!attachments.length) {
         const { data: defaultAccount } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
           .select('*').eq('user_id', req.user.id).eq('is_default', true).maybeSingle();
         if (defaultAccount) {
@@ -88,7 +96,7 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
         subject,
         text,
         html,
-        attachments
+        attachments: attachments.length ? attachments : undefined,
       });
 
       res.json({ success: true });

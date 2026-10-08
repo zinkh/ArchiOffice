@@ -1,7 +1,7 @@
 // Pièces jointes des mails envoyés depuis l'application (facture, sollicitation
 // d'appel d'offres, message libre...). Le format {filename, content, encoding}
-// est celui que nodemailer attend tel quel — POST /api/send-email
-// (server/routes/sendEmail.ts) relaie `attachments` sans le retoucher.
+// est le SEUL que le serveur accepte : POST /api/send-email le réduit à des octets
+// (server/emailAttachments.ts) et retire tout autre champ (`path`, `href`...).
 import { apiFetch } from './api';
 import { resolveSignedUrl } from './signedStorageUrl';
 
