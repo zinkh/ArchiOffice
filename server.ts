@@ -1099,7 +1099,7 @@ export async function createApp() {
   registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });
-  registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
+  registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, uploadToStorage });
   registerSiteReportDiffusionRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });

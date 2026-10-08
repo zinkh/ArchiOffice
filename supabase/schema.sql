@@ -505,7 +505,8 @@ CREATE TABLE IF NOT EXISTS site_report_notes (
   responsible_company TEXT, issue_date TEXT NOT NULL,
   due_date TEXT, realization_date TEXT, status TEXT DEFAULT 'open',
   text TEXT, lot_concerne TEXT, photo_url TEXT, position TEXT,
-  description TEXT, statut TEXT
+  description TEXT, statut TEXT,
+  photos TEXT[] NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS idx_site_report_notes_tenant_report ON site_report_notes(tenant_id, report_id);
 

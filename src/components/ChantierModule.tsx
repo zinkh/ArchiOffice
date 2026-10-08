@@ -33,6 +33,7 @@ import { DraftInput, parseDays } from './chantier/fields';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
+import { CONCERNED_OPTIONS } from '../lib/siteReportPresence';
 
 interface ChantierModuleProps {
   project: Project;
@@ -527,7 +528,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
 
   const saveNoteField = async (noteId: string, field: keyof SiteReportNote, value: SiteReportNote[keyof SiteReportNote]) => {
     setReportNotes(prev => prev.map(n => (n.id === noteId ? { ...n, [field]: value } : n)));
-    db.siteReportNotesCache.update(noteId, { [field]: value }).catch(() => {});
+    db.siteReportNotesCache.update(noteId, { [field]: value } as any).catch(() => {});
     try {
       await queuedJsonRequest({ entity: 'siteReportNote', id: crypto.randomUUID(), method: 'PUT', url: `/api/notes/${noteId}`, body: { [field]: value } });
     } catch (err) {
@@ -541,6 +542,34 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     try {
       await queuedJsonRequest({ entity: 'siteReportNote', id: crypto.randomUUID(), method: 'DELETE', url: `/api/notes/${noteId}` });
     } catch (err) { console.error('deleteNote failed:', err); }
+  };
+
+  const uploadNotePhoto = async (noteId: string, file: File) => {
+    const photoId = crypto.randomUUID();
+    try {
+      const { queued, data } = await queuedMultipartRequest<{ photos: string[] }>({
+        entity: 'siteReportNotePhoto', id: photoId, method: 'POST', url: `/api/notes/${noteId}/photos`,
+        blob: file, blobFieldName: 'file', blobFilename: file.name, extraFields: { id: photoId },
+      });
+      if (!queued) setReportNotes(prev => prev.map(n => (n.id === noteId ? { ...n, photos: data!.photos } : n)));
+    } catch (err) { console.error('uploadNotePhoto failed:', err); showToast("La photo n'a pas pu être envoyée.", 'error'); }
+  };
+
+  const removeNotePhoto = async (noteId: string, url: string) => {
+    const photos = (reportNotes.find(n => n.id === noteId)?.photos || []).filter(u => u !== url);
+    setReportNotes(prev => prev.map(n => (n.id === noteId ? { ...n, photos } : n)));
+    try {
+      await queuedJsonRequest({ entity: 'siteReportNote', id: crypto.randomUUID(), method: 'PUT', url: `/api/notes/${noteId}/photos`, body: { photos } });
+    } catch (err) { console.error('removeNotePhoto failed:', err); }
+  };
+
+  // Réglage d'export, propre au poste : imprimer ou non les photos des rubriques.
+  const [pdfRubriquePhotos, setPdfRubriquePhotos] = useState(() => {
+    try { return localStorage.getItem('chantier:pdf:rubriquePhotos') !== '0'; } catch { return true; }
+  });
+  const changePdfRubriquePhotos = (value: boolean) => {
+    setPdfRubriquePhotos(value);
+    try { localStorage.setItem('chantier:pdf:rubriquePhotos', value ? '1' : '0'); } catch { /* préférence non mémorisée */ }
   };
 
   const rubriquesByCategory = useMemo(() => {
@@ -666,7 +695,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage) },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), includeRubriquePhotos: pdfRubriquePhotos },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -885,6 +914,19 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         <input type="number" className="bg-transparent border-none outline-none w-14" aria-label="Température en degrés Celsius"
                           value={selectedReport.temperature ?? ''} onChange={e => updateReportField('temperature', parseInt(e.target.value) || 0)} />°C
                       </span>
+                      <label className="flex items-center gap-1 text-xs">
+                        Format PDF
+                        <select aria-label="Format de page du PDF" className="bg-transparent border border-[var(--tblr-border)] rounded px-1 py-0.5"
+                          value={selectedReport.pageFormat || 'portrait'}
+                          onChange={e => updateReportField('pageFormat', e.target.value as SiteReport['pageFormat'])}>
+                          <option value="portrait">Portrait</option>
+                          <option value="landscape">Paysage</option>
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-1 text-xs">
+                        <input type="checkbox" checked={pdfRubriquePhotos} onChange={e => changePdfRubriquePhotos(e.target.checked)} />
+                        Photos des rubriques dans le PDF
+                      </label>
                       <button
                         onClick={() => refreshWeather(selectedReport)}
                         disabled={weatherLoading || !project.address}
@@ -985,7 +1027,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                             <th className="text-center py-1.5 pr-2">Intempéries (j)</th>
                             <th className="text-center py-1.5 pr-2">Convoqué suiv.</th>
                             <th className="text-left py-1.5 pr-2">Lieu</th>
-                            <th className="text-left py-1.5">Heure</th>
+                            <th className="text-left py-1.5 pr-2">Heure</th>
+                            <th className="text-left py-1.5">W/D</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1056,6 +1099,14 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                     value={t?.heure || ''}
                                     onCommit={v => setLotTracking(lot.id, { heure: v || undefined })} />
                                 </td>
+                                <td className="py-2">
+                                  <select aria-label={`Travaux ou documents, ${lot.lot_title}`}
+                                    className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs"
+                                    value={t?.concerned || ''}
+                                    onChange={e => setLotTracking(lot.id, { concerned: (e.target.value || undefined) as SiteReportLotTracking['concerned'] })}>
+                                    {CONCERNED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label || '—'}</option>)}
+                                  </select>
+                                </td>
                               </tr>
                             );
                           })}
@@ -1100,7 +1151,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           </div>
                           <div className="space-y-1.5">
                             {[...items].sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || '')).map(n => (
-                              <RubriqueRow key={n.id} note={n} onSave={saveNoteField} onDelete={deleteNote} />
+                              <RubriqueRow key={n.id} note={n} onSave={saveNoteField} onDelete={deleteNote} onUploadPhoto={uploadNotePhoto} onRemovePhoto={removeNotePhoto} />
                             ))}
                           </div>
                         </div>

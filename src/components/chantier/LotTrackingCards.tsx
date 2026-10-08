@@ -2,6 +2,7 @@ import React from 'react';
 import { cn } from '../../lib/utils';
 import type { PresenceStatus, ProjectLot, SiteReportLotTracking } from '../../types';
 import { DraftInput, parseDays, TOUCH_TARGET } from './fields';
+import { CONCERNED_OPTIONS } from '../../lib/siteReportPresence';
 
 /**
  * « Présence & suivi des lots » au téléphone : une carte par lot, à la place du
@@ -89,6 +90,17 @@ export function LotTrackingCards({ lots, statusLabels, getStatus, onStatus, getT
                 {days(lot.id, 'retard_docs_jours', 'Docs', 'Retard de remise des documents en jours', lot.lot_title)}
               </div>
             </fieldset>
+
+            <Labeled label="Travaux / documents">
+              <select
+                aria-label={`Travaux ou documents, ${lot.lot_title}`}
+                className={CARD_FIELD}
+                value={t?.concerned || ''}
+                onChange={e => onTrack(lot.id, { concerned: (e.target.value || undefined) as SiteReportLotTracking['concerned'] })}
+              >
+                {CONCERNED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.long}</option>)}
+              </select>
+            </Labeled>
 
             <div className="grid grid-cols-[1fr_8.5rem] gap-x-3">
               <Labeled label="Lieu">

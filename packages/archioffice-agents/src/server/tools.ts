@@ -10,6 +10,7 @@ import { buildLearningTools, executeLearningTool, LEARNING_TOOL_NAMES } from './
 import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
+import { IMPORT_SITE_REPORT_NOTES_TOOL, IMPORT_SITE_REPORT_NOTES_TOOL_NAME, importSiteReportNotes } from './siteReportNotesTool.js';
 
 export type { FunctionDeclarationLike };
 
@@ -62,6 +63,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
         required: ['project_id', 'texte'],
       },
     });
+    tools.push(IMPORT_SITE_REPORT_NOTES_TOOL);
   }
 
   if (creatable.length > 0) {
@@ -418,6 +420,12 @@ export async function executeAgentAction(
   const name = call.name;
   const args = call.args || {};
   const actionScopes = caps.actionScopes;
+
+  if (name === IMPORT_SITE_REPORT_NOTES_TOOL_NAME) {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return importSiteReportNotes(baseUrl, auth, args);
+  }
 
   if (name === 'add_site_report_observation') {
     if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
