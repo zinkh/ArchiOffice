@@ -82,7 +82,7 @@
     "react-dom": "^19.3.0",
     "react-i18next": "^17.0.15",
     "react-organizational-chart": "^2.2.1",
-    "react-pdf": "^10.5.0",
+    "react-pdf": "^11.0.0",
     "react-quill": "^2.0.0",
     "react-router-dom": "^7.18.4",
     "react-select": "^5.10.2",
