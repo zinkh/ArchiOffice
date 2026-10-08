@@ -104,3 +104,28 @@ describe('export helpers', () => {
     expect(feasibilityFilename({ title: 'Réhabilitation école', reference: 'P-12' }, 'pdf')).toBe('Etude_faisabilite_P-12_Rehabilitation_ecole.pdf');
   });
 });
+
+describe('mise en forme de l\'export (Word et PDF)', () => {
+  it('retire les marqueurs gras et italique', async () => {
+    const { parseInlineMarkdown, stripInlineMarkdown } = await import('../feasibilityBlocks');
+    expect(parseInlineMarkdown('le projet *COLAK* est **validé**')).toEqual([
+      { text: 'le projet ' }, { text: 'COLAK', italics: true }, { text: ' est ' }, { text: 'validé', bold: true },
+    ]);
+    expect(stripInlineMarkdown('a *b* **c**')).toBe('a b c');
+    expect(stripInlineMarkdown('2 * 3 = 6')).toBe('2 * 3 = 6');
+  });
+
+  it('reconnaît titres, puces et paragraphes', async () => {
+    const { classifyContentLine } = await import('../feasibilityBlocks');
+    expect(classifyContentLine('## Zone UH')).toEqual({ kind: 'heading', text: 'Zone UH' });
+    expect(classifyContentLine('* point')).toEqual({ kind: 'bullet', text: 'point' });
+    expect(classifyContentLine('- point')).toEqual({ kind: 'bullet', text: 'point' });
+    expect(classifyContentLine('texte')).toEqual({ kind: 'text', text: 'texte' });
+  });
+
+  it('ne répète pas code postal et ville déjà présents dans l\'adresse', async () => {
+    const { terrainLabel } = await import('../feasibilityBlocks');
+    expect(terrainLabel('45 Rue Jules Ferry 54390 Frouard', '54390 Frouard')).toBe('45 Rue Jules Ferry 54390 Frouard');
+    expect(terrainLabel('45 Rue Jules Ferry', '54390 Frouard')).toBe('45 Rue Jules Ferry, 54390 Frouard');
+  });
+});
