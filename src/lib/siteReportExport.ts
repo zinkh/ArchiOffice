@@ -11,6 +11,7 @@ import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import { loadPhotoDataUrl } from './planRender';
 import { autoSaveDocument } from './autoSaveDocument';
+import { attendeeStatus, lotPresenceStatus } from './siteReportPresence';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
 
 export interface SiteReportExportProject {
@@ -55,12 +56,7 @@ const sanitize = (s: string) => (s || 'compte_rendu').normalize('NFD').replace(/
 
 const STATUS_LABELS: Record<string, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
 
-/** Statut P/R/AE/ANE déduit des champs anciens (present/excused) quand `status` est absent. */
-function attendeeStatus(a: { present?: boolean; excused?: boolean; status?: string }): string {
-  if (a.status) return a.status;
-  if (a.present) return 'P';
-  return a.excused ? 'AE' : 'ANE';
-}
+const OBSERVATION_TYPE_LABELS: Record<string, string> = { reserve: 'À lever', a_faire: 'À faire' };
 
 const fmtDate = (iso?: string | null) => {
   if (!iso) return '';
@@ -116,6 +112,7 @@ export async function exportSiteReportToPDF(
     ['Bâtiment / phase', opts.decoupageLabel || ''],
     ['Date de la visite', fmtDate(report.date)],
     ['Météo', [report.meteo, report.temperature != null ? `${report.temperature}°C` : ''].filter(Boolean).join('  ·  ')],
+    ['Effectif total', report.effectif_total != null ? String(report.effectif_total) : ''],
     ['Prochaine réunion', report.nextMeeting || ''],
   ].filter(([, v]) => v) as [string, string][];
   doc.setFontSize(9.5);
@@ -132,30 +129,48 @@ export async function exportSiteReportToPDF(
   // Présence des intervenants
   progress('Tableau de présence…');
   const attendance = report.attendance || [];
-  autoTable(doc, {
-    startY: y,
-    head: [['Rôle', 'Société / Contact', 'Adresse', 'Mobile', 'Fixe', 'Statut', 'D']],
-    body: stakeholders.map(s => {
-      const contact = s.contact_id ? contactById.get(s.contact_id) : undefined;
-      const phones = contactPhones(contact);
-      const row = attendance.find(a => (s.contact_id ? a.contact_id === s.contact_id : (!a.contact_id && a.role === s.role && a.name === s.name)));
-      const status = row ? attendeeStatus(row) : '';
-      return [
-        s.role,
-        [s.name, contact?.company_name].filter(Boolean).join(' — '),
-        contact?.address || '',
-        phones.mobile,
-        phones.fixe,
-        status ? STATUS_LABELS[status] || status : '',
-        row?.diffusion ? 'X' : '',
-      ];
-    }),
-    styles: { fontSize: 7.5, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
-    headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
-    alternateRowStyles: { fillColor: GRIS_FOND },
-    columnStyles: { 5: { fontStyle: 'bold' }, 6: { halign: 'center', cellWidth: 8 } },
-    margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
+  const lotTitles = new Set(lots.map(l => l.lot_title));
+  const stakeholderRows = stakeholders.map(s => {
+    const contact = s.contact_id ? contactById.get(s.contact_id) : undefined;
+    const phones = contactPhones(contact);
+    const row = attendance.find(a => (s.contact_id ? a.contact_id === s.contact_id : (!a.contact_id && a.role === s.role && a.name === s.name)));
+    const status = row ? attendeeStatus(row) : 'P';
+    return [
+      s.role,
+      [s.name, contact?.company_name].filter(Boolean).join(' — '),
+      contact?.address || '',
+      phones.mobile,
+      phones.fixe,
+      STATUS_LABELS[status] || status,
+      row?.diffusion ? 'X' : '',
+    ];
   });
+  // Lignes saisies librement (ni intervenant du projet, ni lot) : elles figuraient à l'écran, jamais dans le PDF.
+  const freeRows = attendance
+    .filter(a => !lotTitles.has(a.role) && !stakeholders.some(s => (s.contact_id ? a.contact_id === s.contact_id : (!a.contact_id && a.role === s.role && a.name === s.name))))
+    .map(a => {
+      const contact = a.contact_id ? contactById.get(a.contact_id) : undefined;
+      const phones = contactPhones(contact);
+      const status = attendeeStatus(a);
+      return [a.role, [a.name, contact?.company_name].filter(Boolean).join(' — '), contact?.address || '', phones.mobile, phones.fixe, STATUS_LABELS[status] || status, a.diffusion ? 'X' : ''];
+    });
+  const attendeeRows = [...stakeholderRows, ...freeRows];
+  if (attendeeRows.length > 0) {
+    autoTable(doc, {
+      startY: y,
+      head: [['Rôle', 'Société / Contact', 'Adresse', 'Mobile', 'Fixe', 'Statut', 'D']],
+      body: attendeeRows,
+      styles: { fontSize: 7.5, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
+      headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 7.5 },
+      alternateRowStyles: { fillColor: GRIS_FOND },
+      columnStyles: { 5: { fontStyle: 'bold' }, 6: { halign: 'center', cellWidth: 8 } },
+      margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
+    });
+  } else {
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(8.5); doc.setTextColor(...GRIS_DOUX);
+    doc.text('Aucun intervenant renseigné pour cette opération.', MARGIN, y + 3);
+    (doc as any).lastAutoTable = { finalY: y + 3 };
+  }
   y = (doc as any).lastAutoTable.finalY + 8;
 
   if (report.meetingNotes) {
@@ -196,11 +211,12 @@ export async function exportSiteReportToPDF(
       const t = tracking.find(x => x.lot_id === lot.id);
       const contact = lot.contact_id ? contactById.get(lot.contact_id) : undefined;
       const phones = contactPhones(contact);
-      const status = t?.status ? STATUS_LABELS[t.status] || t.status : '';
+      const statusKey = lotPresenceStatus(lot, attendance, t?.status);
+      const status = STATUS_LABELS[statusKey] || statusKey;
       return [
         lot.lot_number,
         lot.lot_title,
-        lot.contact_name || '',
+        lot.contact_name?.split(' - ')[0] || contact?.company_name || '',
         phones.mobile || phones.fixe,
         status,
         t?.effectif != null ? String(t.effectif) : '',
@@ -243,11 +259,17 @@ export async function exportSiteReportToPDF(
       y += 10;
       autoTable(doc, {
         startY: y,
-        head: [['Date', 'Texte', 'Société', 'Statut']],
-        body: sorted.map(n => [fmtDate(n.issue_date), n.text || '', n.responsible_company || '', n.status]),
+        head: [['Date', 'Texte', 'Société', 'Échéance', 'Statut']],
+        body: sorted.map(n => [
+          fmtDate(n.issue_date),
+          [n.lot_concerne ? `Lot : ${n.lot_concerne}` : '', n.text || n.description || ''].filter(Boolean).join('\n'),
+          n.responsible_company || '',
+          fmtDate(n.due_date) + (n.realization_date ? `${n.due_date ? '\n' : ''}Réalisé le ${fmtDate(n.realization_date)}` : ''),
+          n.statut || n.status,
+        ]),
         styles: { fontSize: 8, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
         headStyles: { fillColor: [90, 90, 90], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-        columnStyles: { 0: { cellWidth: 20 }, 2: { cellWidth: 30 }, 3: { cellWidth: 22, fontStyle: 'bold' } },
+        columnStyles: { 0: { cellWidth: 20 }, 2: { cellWidth: 28 }, 3: { cellWidth: 22 }, 4: { cellWidth: 20, fontStyle: 'bold' } },
         margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
       });
       y = (doc as any).lastAutoTable.finalY + 6;
@@ -278,11 +300,18 @@ export async function exportSiteReportToPDF(
 
     autoTable(doc, {
       startY: y,
-      head: [['Échéance', 'Description', 'Statut', 'Urgence']],
-      body: group.items.map(o => [fmtDate(o.due_date), o.texte, o.statut, o.urgence === 'normal' || !o.urgence ? '' : o.urgence.toUpperCase()]),
+      head: [['N°', 'Description', 'Origine', 'Échéance', 'Statut', 'Urgence']],
+      body: group.items.map(o => [
+        o.number != null ? String(o.number) : '',
+        [OBSERVATION_TYPE_LABELS[o.type || ''] ? `[${OBSERVATION_TYPE_LABELS[o.type || '']}] ` : '', o.texte].join(''),
+        [o.created_report_number != null ? `CR n° ${o.created_report_number}` : '', o.resolved_report_number != null ? `Levée au CR n° ${o.resolved_report_number}` : ''].filter(Boolean).join('\n'),
+        fmtDate(o.due_date),
+        o.statut,
+        o.urgence === 'normal' || !o.urgence ? '' : o.urgence.toUpperCase(),
+      ]),
       styles: { fontSize: 8, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
       headStyles: { fillColor: [90, 90, 90], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      columnStyles: { 0: { cellWidth: 22 }, 2: { cellWidth: 22, fontStyle: 'bold' }, 3: { cellWidth: 22, fontStyle: 'bold' } },
+      columnStyles: { 0: { cellWidth: 10 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20 }, 4: { cellWidth: 20, fontStyle: 'bold' }, 5: { cellWidth: 20, fontStyle: 'bold' } },
       margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
     });
     y = (doc as any).lastAutoTable.finalY + 4;
