@@ -8,8 +8,9 @@ import {
   type ContexteMarche, type DocModele, type ParametresMarche,
 } from '../../lib/actMarche';
 import { exporterMarcheDocx, exporterMarchePdf } from '../../lib/actMarcheExport';
-import { genererActeFormulaire, lireActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
-import { FormulaireNonReconnuError, champsDepuisPdf } from '../../lib/actEngagementImport';
+import { genererActeFormulaire, type ActeRempli } from '../../lib/actEngagementForm';
+import { FormulaireNonReconnuError } from '../../lib/actEngagementImport';
+import { lireActeDepuisBuffer } from '../../lib/actEngagementRead';
 import { appliquerActeAuxOffres, type EntrepriseOffre, type OffreImportee, type ResultatImport } from '../../lib/actEngagementApply';
 import { PARAMETRES_DEFAUT, parametresDe, piecesOffreDe, type DonneesNegociation } from '../../lib/actNegociation';
 
@@ -55,7 +56,7 @@ function Champ({ label, children, large }: { label: string; children: React.Reac
   );
 }
 
-function RecapActe({ lu, apercu, onImporter }: { lu: { fichier: string; acte: ActeRempli }; apercu: ResultatImport; onImporter: (res: ResultatImport) => void }) {
+export function RecapActe({ lu, apercu, onImporter }: { lu: { fichier: string; acte: ActeRempli }; apercu: ResultatImport; onImporter: (res: ResultatImport) => void }) {
   const { acte } = lu;
   const euros = (n: number | null) => (n === null ? '—' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n));
   return (
@@ -208,12 +209,7 @@ export default function MarcheDocumentsPanel({ consultation, lots, contacts, ope
     setImporte(null);
     setEnCours('acte-lecture');
     try {
-      const { pdfjs } = await import('react-pdf');
-      if (!pdfjs.GlobalWorkerOptions.workerSrc) {
-        pdfjs.GlobalWorkerOptions.workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
-      }
-      const champs = await champsDepuisPdf(await fichier.arrayBuffer(), pdfjs as never);
-      setActeLu({ fichier: fichier.name, acte: lireActeFormulaire(champs, lots.map(l => ({ numero: l.lot_number, titre: l.lot_title }))) });
+      setActeLu({ fichier: fichier.name, acte: await lireActeDepuisBuffer(await fichier.arrayBuffer(), lots) });
     } catch (e) {
       setErreur(e instanceof FormulaireNonReconnuError ? e.message : 'Ce fichier n\'a pas pu être lu comme un acte d\'engagement.');
     } finally { setEnCours(null); }

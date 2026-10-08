@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  IconSearch, IconSend, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus,
+  IconSearch, IconSend, IconLink, IconTrash, IconPlus, IconAlertTriangle, IconX, IconUserPlus,
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { groupByLot } from '../lib/actExport';
@@ -43,6 +43,11 @@ interface Props {
   corpsEtatCodesFromContact: (contact: Contact) => string[];
   /** Qualifications des fiches contacts, par identifiant de contact. */
   qualifications?: Record<string, Qualification[]>;
+  /** Espace de dépôt des offres : actif (plan, marché privé, stockage externe) ou la raison de son indisponibilité. */
+  depot?: { actif: boolean; indisponible?: string };
+  /** Dernière remise à traiter, par identifiant d'entreprise (voir useConsultationDepot). */
+  depotRecuLe?: Record<string, string>;
+  onInviterDepot?: (entreprise: EntrepriseRow) => void;
   /** Ligne tout juste ajoutée : on lève les filtres, on défile jusqu'à elle et on la surligne un instant. */
   miseEnAvant?: { id: string; n: number } | null;
 }
@@ -51,6 +56,7 @@ const PILL: Record<StatutEntreprise, string> = {
   a_envoyer: 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700 dark:text-zinc-200',
   dce_envoye: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
   a_relancer: 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  offre_deposee: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
   offre_recue: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
   sans_reponse: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
   hors_envoi: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
@@ -120,6 +126,7 @@ export default function ACTEntreprisesTable({
   projectName, lots, entreprises, onChange, dcePieces, entrepriseContacts,
   corpsEtatOptions, lotOptions, onChangeCorpsEtat, onSelectContact, onCreateContact,
   corpsEtatCodesFromContact, qualifications = {}, miseEnAvant = null,
+  depot, depotRecuLe, onInviterDepot,
 }: Props) {
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const today = todayIso();
@@ -149,7 +156,15 @@ export default function ACTEntreprisesTable({
   const patchMany = (ids: Set<string>, p: (e: EntrepriseRow) => Partial<EntrepriseRow>) =>
     onChange(entreprises.map(e => (ids.has(e.id) ? { ...e, ...p(e) } : e)));
 
-  const resume = useMemo(() => resumeSuivi(entreprises, today), [entreprises, today]);
+  // Lecture seule : la date d'une remise à traiter nourrit le statut affiché,
+  // mais `patch` et `onChange` repartent de `entreprises`, jamais de cette vue,
+  // pour qu'elle ne soit jamais enregistrée avec la consultation.
+  const vue = useMemo(
+    () => entreprises.map(e => (depotRecuLe?.[e.id] ? { ...e, depot_recu_le: depotRecuLe[e.id] } : e)),
+    [entreprises, depotRecuLe],
+  );
+
+  const resume = useMemo(() => resumeSuivi(vue, today), [vue, today]);
   const couv = useMemo(() => couverture(entreprises, lots), [entreprises, lots]);
 
   const [regroupement, setRegroupement] = useState<Regroupement>(lireRegroupement);
@@ -160,12 +175,12 @@ export default function ACTEntreprisesTable({
   const plat = regroupement === 'aucun';
 
   const groupes = useMemo(() => {
-    const filtrees = filtrerEntreprises(entreprises, filtres, today);
+    const filtrees = filtrerEntreprises(vue, filtres, today);
     if (plat) return [{ key: '__plat__', libelle: '', entreprises: listeAPlat(filtrees, filtres.lot, lots) }]
       .filter(g => g.entreprises.length > 0);
     const tous = groupByLot(filtrees, lots);
     return filtres.lot ? tous.filter(g => g.key === filtres.lot) : tous;
-  }, [entreprises, filtres, lots, today, plat]);
+  }, [vue, filtres, lots, today, plat]);
 
   const idsAffiches = useMemo(() => new Set(groupes.flatMap(g => g.entreprises.map(e => e.id))), [groupes]);
   const nbAffichees = idsAffiches.size;
@@ -293,6 +308,14 @@ export default function ACTEntreprisesTable({
 
   const boutonsLigne = (e: EntrepriseRow) => (
     <div className="flex items-center gap-0.5">
+      {depot && onInviterDepot && (
+        <button
+          type="button" onClick={() => onInviterDepot(e)} disabled={!depot.actif}
+          title={depot.actif ? 'Lien de dépôt de l’offre' : depot.indisponible || 'Dépôt en ligne indisponible'}
+          aria-label={`Lien de dépôt de l’offre de ${e.nom || "l'entreprise"}`}
+          className="p-1.5 rounded-md text-zinc-400 hover:text-blue-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:hover:text-zinc-400 disabled:hover:bg-transparent"
+        ><IconLink size={14} /></button>
+      )}
       <button
         type="button" onClick={() => setMailPour(e.id)} disabled={!(e.email || '').trim()}
         title={(e.email || '').trim() ? 'Envoyer le DCE par mail' : "Renseignez l'email pour envoyer le DCE"}

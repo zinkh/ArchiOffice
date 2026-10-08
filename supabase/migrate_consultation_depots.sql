@@ -23,7 +23,7 @@
 CREATE TABLE IF NOT EXISTS consultation_depot_settings (
   id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   tenant_id   UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id  UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  project_id  TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
   -- Date limite de remise. Un dépôt reçu après n'est PAS refusé : il est
   -- signalé « hors délai » (hors_delai sur consultation_depots).
   deadline_at TIMESTAMPTZ,
@@ -54,12 +54,12 @@ CREATE POLICY tenant_isolation ON consultation_depot_settings
 CREATE TABLE IF NOT EXISTS consultation_depot_invites (
   id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id    UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
   -- Identifiant de l'entreprise DANS consultation.entreprises (jsonb) : pas de
   -- clé étrangère possible, c'est une valeur du document.
   entreprise_id TEXT NOT NULL,
   entreprise_nom TEXT NOT NULL,
-  contact_id    UUID REFERENCES contacts(id) ON DELETE SET NULL,
+  contact_id    TEXT REFERENCES contacts(id) ON DELETE SET NULL,
   email         TEXT,
   lots_ids      JSONB NOT NULL DEFAULT '[]'::jsonb,
   -- SHA-256 (hex) du jeton : un vol de base ne donne aucun lien utilisable.
@@ -86,7 +86,7 @@ CREATE POLICY tenant_isolation ON consultation_depot_invites
 CREATE TABLE IF NOT EXISTS consultation_depots (
   id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id    UUID REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  project_id    TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
   invite_id     UUID REFERENCES consultation_depot_invites(id) ON DELETE CASCADE NOT NULL,
   entreprise_id TEXT NOT NULL,
   entreprise_nom TEXT NOT NULL,

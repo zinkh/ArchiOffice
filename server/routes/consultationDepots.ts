@@ -21,6 +21,11 @@ import { genererJeton, hacherJeton, lienDepot } from '../consultationDepot/token
 import { parseExternalRef } from '../externalStorage/externalRef';
 import { getConnectionById } from '../externalStorage/externalConnection';
 import { signExternalTicket } from '../externalStorage/externalTicket';
+import { createProvider } from '../externalStorage/providerFactory';
+import { lireTexteDepot } from '../consultationDepot/analyse';
+import { aiGenerationLimiter } from '../rateLimit';
+import { MAX_FICHIER_OCTETS } from '../../src/lib/consultationDepot';
+import { extraireMontants } from '../../src/lib/depotMontants';
 import { isValidEmail } from '../../src/lib/crDiffusion';
 import { expirationLien, plisScelles, type ReglagesDepot } from '../../src/lib/consultationDepot';
 
@@ -335,4 +340,42 @@ export function registerConsultationDepotRoutes(app: Express, deps: RouteDeps) {
   // consultation est enregistré par ACTModule) ; la route ne fait que le constater.
   app.post('/api/depots/:id/integrer', traiter('integre'));
   app.post('/api/depots/:id/rejeter', traiter('rejete'));
+
+  // ── Montants probables dans le texte d'un fichier ──────────────────────────
+  // Lecture du texte (PDF, Word, tableur, ODT) et repérage des montants en euros
+  // par règles : aucun modèle, aucun coût. Une suggestion, jamais une intégration.
+  app.post('/api/depots/:id/analyser', aiGenerationLimiter, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await exigerPlan(tenantId, res))) return;
+      const depot = await chargerDepot(req, res, tenantId, { contenu: true });
+      if (!depot) return;
+      if (!depot.file_url || depot.status === 'retire') return res.status(400).json({ error: "Cette remise n'a pas de fichier à lire." });
+
+      const ref = parseExternalRef(depot.file_url);
+      const connexion = ref && await getConnectionById(supabaseAdmin, tenantId, ref.connectionId);
+      if (!ref || !connexion) return res.status(404).json({ error: "Le fichier n'est plus accessible depuis l'espace de stockage du cabinet." });
+
+      const flux = await createProvider(connexion).openReadStream(ref.externalId);
+      const morceaux: Buffer[] = [];
+      let total = 0;
+      for await (const m of flux.body) {
+        const b = Buffer.from(m as any);
+        total += b.length;
+        if (total > MAX_FICHIER_OCTETS + 1024) return res.status(413).json({ error: 'Fichier trop volumineux pour être lu.' });
+        morceaux.push(b);
+      }
+      const texte = await Promise.race([
+        lireTexteDepot(depot.file_name || '', Buffer.concat(morceaux)),
+        new Promise<never>((_, rejeter) => setTimeout(() => rejeter(new Error("La lecture du document a dépassé le délai imparti.")), 45_000)),
+      ]);
+      if (!texte) {
+        return res.json({ texte_lu: false, candidats: [], note: 'Aucun texte exploitable : le document est peut-être scanné. Ouvrez-le pour lire le montant.' });
+      }
+      res.json({ texte_lu: true, candidats: extraireMontants(texte), note: null });
+    } catch (err: any) {
+      console.error('[POST depots/:id/analyser]', err?.message);
+      res.status(500).json({ error: err?.message?.includes('délai') ? err.message : "La lecture du document a échoué." });
+    }
+  });
 }

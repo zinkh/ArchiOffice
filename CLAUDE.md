@@ -826,6 +826,66 @@ reçues, synthèse économique), les exports dans `src/lib/actNegociationExport.
   des PDF passent par un `euros()` qui remplace l'espace fine U+202F, absente des
   polices de jsPDF (sinon « 31 /210 » : voir la note d'honoraires plus haut).
 
+### Espace public de dépôt des offres (ACT)
+
+Une entreprise consultée reçoit un **lien personnel, sans compte** (`/depot/<jeton>`,
+`src/pages/DepotOffres.tsx`, route publique hors `ProtectedLayout`) et y remet son offre
+par **saisie en ligne** (montant de base HT, options, variantes, délai, observations),
+**bordereau chiffré** (Excel ou ODS) ou **fichiers**. Génération du lien, panneau
+« Dépôts des entreprises » (phase Offres) et réglages vivent dans le module ACT
+(`src/components/act/{InviterDepotDialog,DepotsRecusPanel,DepotSettingsDialog,DepotIntegration}.tsx`,
+`src/hooks/useConsultationDepot.ts`). Migration : `supabase/migrate_consultation_depots.sql`
+(`consultation_depot_settings`, `consultation_depot_invites`, `consultation_depots`, hors
+`SYNC_TABLES`).
+
+**Trois conditions, revérifiées à CHAQUE appel** (`server/consultationDepot/eligibility.ts`,
+côté cabinet comme côté portail) : plan **Enterprise** ; **marché privé** (`is_public_client`
+faux : en marché public la remise dématérialisée passe par un profil acheteur, que ce portail
+ne remplace pas) ; **espace de stockage externe actif** (`external_storage_connections`).
+Perdre l'une d'elles ferme les liens déjà émis (503 neutre côté entreprise, qui ne
+voit jamais ni le plan ni la configuration) sans rien supprimer ; les remises déjà reçues
+restent lisibles par le cabinet.
+
+- **Aucun octet d'offre dans Supabase.** `server/consultationDepot/storeDepotFile.ts` reprend la
+  mécanique de `storeBusinessFile` SANS sa branche Supabase : un drive en panne fait échouer
+  le dépôt en 502, jamais de repli. Rangement :
+  `<racine>/<code> - <affaire>/Consultation/<Lot xx - titre | Tous lots>/<entreprise>/<AAAA-MM-JJ> - <fichier>`.
+  Le fichier transite par le serveur (mémoire, `multer`), le fournisseur n'acceptant qu'un `Buffer`.
+- **Formats** : PDF, Word (`.docx`), Excel (`.xlsx`), ODS et ODT, **rien d'autre** (ni DWG ni DXF,
+  ni formats à macros, ni anciens binaires). Plafonds : 25 Mo par fichier, 100 Mo et 10 fichiers par
+  dépôt (`src/lib/consultationDepot.ts`, partagé écran / serveur). Le contrôle se fait sur les
+  **octets** (`fileRules.ts` : en-tête PDF, annuaire central des archives ZIP, entrées de macros
+  ou de programmes refusées, type ODF vérifié), jamais sur le nom ni le type MIME annoncés.
+- **Le jeton n'existe que dans le lien** : la base ne garde que son SHA-256 (`tokens.ts`). Il n'est
+  donc rendu qu'une fois ; « renvoyer le lien » en crée un nouveau et révoque l'ancien. Un jeton
+  mal formé, inconnu, révoqué ou expiré donne la même réponse 404. Expiration = date limite + 14 jours
+  (90 jours sans date limite), repoussée si la date limite recule, jamais raccourcie.
+- **Un dépôt n'écrase jamais l'offre.** Il arrive dans `consultation_depots` (zone d'attente,
+  versionnée, horodatée, empreinte SHA-256, accusé de réception par e-mail) et l'architecte
+  l'intègre explicitement, avec aperçu de l'effet : saisie → `src/lib/consultationDepotApply.ts`
+  (testé : base dans `Offre.montant_base`, options et variantes en lignes de négociation au prix
+  d'ouverture, tours intacts) ; bordereau → l'import existant du DPGF / BPU (`OffreImportDialog`,
+  `fichierInitial`) ; acte d'engagement → la lecture existante du formulaire (`RecapActe`,
+  `lireActeDepuisBuffer`). L'intégration se fait dans le navigateur (le document de la consultation
+  est enregistré par `ACTModule`) ; la route (`POST /api/depots/:id/integrer`) ne fait que constater.
+- **Hors délai = signalement, jamais refus.** `hors_delai` est posé à la réception ; le retrait par
+  l'entreprise n'est possible qu'avant la date limite.
+- **Plis scellés (option)** : tant que `sealed` et que la date limite n'est pas atteinte
+  (`plisScelles`), le cabinet voit qu'une remise existe sans nom de fichier ni contenu ; ouvrir,
+  intégrer, rejeter et analyser répondent 423 ; le scellement ne peut plus être levé ni la date
+  avancée. Un scellement exige une date limite.
+- **Statut « Offre déposée »** (`actEntreprises.ts`, `depot_recu_le`) se déduit des remises à
+  traiter et n'est JAMAIS enregistré dans la consultation (le tableau lit une vue, `patch` repart
+  de la source).
+- **Montants probables** (`POST /api/depots/:id/analyser`, `src/lib/depotMontants.ts`,
+  `server/consultationDepot/analyse.ts`) : lecture du texte (PDF, Word, tableur, ODT) et repérage
+  par règles des montants en euros, sans modèle ni coût ni OCR ; le texte n'est pas tronqué (le total
+  d'un devis est à la fin). Une SUGGESTION confirmée d'un clic, jamais appliquée seule.
+- **Limiteurs** (`rateLimit.ts`) : `depotReadLimiter` / `depotWriteLimiter` par IP, réglables par
+  `DEPOT_READ_LIMIT` / `DEPOT_WRITE_LIMIT` (les tests les relèvent).
+- **Pièces du DCE** : la consultation ne porte que des intitulés ; seules les pièces cochées dans
+  les réglages (`published_document_ids`, documents de l'affaire) sont téléchargeables depuis le lien.
+
 ### Documents du marché (ACT, phase Critères)
 
 Sous les critères et pièces administratives, `MarcheDocumentsPanel.tsx` génère le

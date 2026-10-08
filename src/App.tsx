@@ -38,6 +38,7 @@ import { useSettings } from './hooks/useSettings';
 // instead of every page (ProjectDetail alone is ~270KB) landing in one
 // upfront bundle.
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+const DepotOffres = lazy(() => import('./pages/DepotOffres'));
 const Projects = lazy(() => import('./pages/Projects'));
 const Proposals = lazy(() => import('./pages/Proposals'));
 const Invoices = lazy(() => import('./pages/Invoices'));
@@ -821,6 +822,8 @@ export default function App() {
             <Route path="/privacy" element={<PrivacyPolicy />} />
             <Route path="/terms" element={<TermsOfUse />} />
             <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
+            {/* Espace de dépôt des offres : page publique, accessible par lien personnel sans compte. */}
+            <Route path="/depot/:token" element={<DepotOffres />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />

@@ -525,3 +525,84 @@ describe('traitement par le cabinet', () => {
     expect(liste.body.depots).toHaveLength(1);
   });
 });
+
+describe('lecture des montants probables', () => {
+  async function deposer(c: Cabinet, jeton: string, buffer: Buffer, nom: string, kind = 'fichier') {
+    const r = await request(app).post(`/api/public/depot/${jeton}/fichiers`).field('lot_id', c.lotA).field('kind', kind).attach('files', buffer, nom);
+    expect(r.status).toBe(201);
+    return r.body.depots[0].id as string;
+  }
+  const analyser = (c: Cabinet, id: string) => request(app).post(`/api/depots/${id}/analyser`).set(authHeader(c.token));
+
+  it('lit un devis PDF et propose le total HT en premier', async () => {
+    const { jsPDF } = await import('jspdf');
+    const pdf = new jsPDF();
+    pdf.text('DEVIS 2026-118', 10, 10);
+    pdf.text('Charpente bois          24 320,00 EUR', 10, 20);
+    pdf.text('Total HT                36 200,00 EUR', 10, 30);
+    pdf.text('TVA 20 %                 7 240,00 EUR', 10, 40);
+    pdf.text('Total TTC               43 440,00 EUR', 10, 50);
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    const id = await deposer(c, jeton, Buffer.from(pdf.output('arraybuffer')), 'devis.pdf');
+    const r = await analyser(c, id);
+    expect(r.status).toBe(200);
+    expect(r.body.texte_lu).toBe(true);
+    expect(r.body.candidats[0]).toMatchObject({ montant: 36200, nature: 'total_ht' });
+    expect(r.body.candidats.find((x: any) => x.montant === 7240)).toBeUndefined();
+  });
+
+  it('lit un tableur xlsx ou ods dont les cellules n’ont pas de symbole €', async () => {
+    const XLSX = await import('xlsx');
+    const feuille = XLSX.utils.aoa_to_sheet([['Désignation', 'Montant'], ['Charpente', 24320], ['Total HT', 36200], ['TVA 20 %', 7240]]);
+    const classeur = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(classeur, feuille, 'Devis');
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    for (const [type, nom] of [['xlsx', 'devis.xlsx'], ['ods', 'devis.ods']] as const) {
+      const buffer = Buffer.from(XLSX.write(classeur, { type: 'buffer', bookType: type }));
+      const id = await deposer(c, jeton, buffer, nom, 'bordereau');
+      const r = await analyser(c, id);
+      expect(r.body.candidats[0]).toMatchObject({ montant: 36200, nature: 'total_ht' });
+    }
+  });
+
+  it('lit un document Word', async () => {
+    const docx = await import('docx');
+    const doc = new docx.Document({ sections: [{ children: [
+      new docx.Paragraph('Notre offre'),
+      new docx.Paragraph('Prix global HT : 18 500,00 €'),
+    ] }] });
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    const id = await deposer(c, jeton, Buffer.from(await docx.Packer.toBuffer(doc)), 'offre.docx');
+    const r = await analyser(c, id);
+    expect(r.body.candidats[0]).toMatchObject({ montant: 18500, nature: 'total_ht' });
+  });
+
+  it('dit honnêtement qu’un PDF sans texte est illisible', async () => {
+    const { jsPDF } = await import('jspdf');
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    const id = await deposer(c, jeton, Buffer.from(new jsPDF().output('arraybuffer')), 'scan.pdf');
+    const r = await analyser(c, id);
+    expect(r.body).toMatchObject({ texte_lu: false, candidats: [] });
+    expect(r.body.note).toMatch(/scanné/);
+  });
+
+  it('refuse l’analyse d’un pli scellé, d’une saisie ou hors plan Enterprise', async () => {
+    const c = cabinet();
+    const { jeton } = await inviter(c);
+    const id = await deposer(c, jeton, faussePdf(), 'a.pdf');
+    await request(app).post(`/api/public/depot/${jeton}/saisie`).send({ lot_id: c.lotA, montant_base: 5 });
+    const saisie = depotsEn(c.projectId).find(d => d.kind === 'saisie')!.id;
+    expect((await analyser(c, saisie)).status).toBe(400);
+
+    await request(app).put(`/api/projects/${c.projectId}/depot/settings`).set(authHeader(c.token))
+      .send({ deadline_at: new Date(Date.now() + 86400_000).toISOString(), sealed: true });
+    expect((await analyser(c, id)).status).toBe(423);
+
+    fakeSupabaseAdmin.getTable('tenants').find(t => t.id === c.tenantId)!.plan = 'pro';
+    expect((await analyser(c, id)).status).toBe(403);
+  });
+});

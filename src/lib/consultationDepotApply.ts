@@ -25,7 +25,7 @@ export interface OffreApplicable {
 }
 
 export interface ConsultationApplicable {
-  entreprises: Array<{ id: string; nom: string; offre_recue_le?: string; ne_repond_pas?: boolean }>;
+  entreprises: Array<{ id: string; nom: string; offre_recue_le?: string; ne_repond_pas?: boolean; lots_ids?: string[] }>;
   offres: OffreApplicable[];
   negociations?: Negociation[];
 }

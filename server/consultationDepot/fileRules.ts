@@ -10,6 +10,7 @@
 //
 // Aucun format de plan (DWG, DXF) n'est accepté, ni de format à macros (docm,
 // xlsm) ni d'ancien binaire (doc, xls) : voir src/lib/consultationDepot.ts.
+import zlib from 'zlib';
 import { extensionDe, type DepotExtension } from '../../src/lib/consultationDepot';
 import { looksDangerous } from '../documentUpload';
 
@@ -106,4 +107,45 @@ export function verifierOctets(nom: string, buf: Buffer): VerificationOctets {
     }
   }
   return { ok: true, mime: MIME_PAR_EXTENSION[ext] };
+}
+
+/** Plafond de décompression d'une entrée lue (protège d'une archive piégée). */
+const MAX_ENTREE_DECOMPRESSEE = 20 * 1024 * 1024;
+
+/**
+ * Contenu d'une entrée de l'archive (non compressée ou « deflate »), ou null si
+ * elle est absente, illisible ou trop volumineuse une fois décompressée.
+ */
+export function lireEntreeZip(buf: Buffer, nom: string): Buffer | null {
+  const min = Math.max(0, buf.length - 65557);
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= min; i -= 1) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) return null;
+  const total = buf.readUInt16LE(eocd + 10);
+  let pos = buf.readUInt32LE(eocd + 16);
+  for (let n = 0; n < total; n += 1) {
+    if (pos + 46 > buf.length || buf.readUInt32LE(pos) !== 0x02014b50) return null;
+    const methode = buf.readUInt16LE(pos + 10);
+    const taille = buf.readUInt32LE(pos + 20);
+    const nomLen = buf.readUInt16LE(pos + 28);
+    const extraLen = buf.readUInt16LE(pos + 30);
+    const commentLen = buf.readUInt16LE(pos + 32);
+    const local = buf.readUInt32LE(pos + 42);
+    if (buf.toString('utf8', pos + 46, pos + 46 + nomLen) === nom) {
+      if (local + 30 > buf.length || buf.readUInt32LE(local) !== 0x04034b50) return null;
+      const debut = local + 30 + buf.readUInt16LE(local + 26) + buf.readUInt16LE(local + 28);
+      const brut = buf.subarray(debut, debut + taille);
+      if (methode === 0) return brut;
+      if (methode !== 8) return null;
+      try {
+        return zlib.inflateRawSync(brut, { maxOutputLength: MAX_ENTREE_DECOMPRESSEE });
+      } catch {
+        return null;
+      }
+    }
+    pos += 46 + nomLen + extraLen + commentLen;
+  }
+  return null;
 }
