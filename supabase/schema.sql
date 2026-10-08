@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS tenant_memberships (
   system_role TEXT DEFAULT 'user',
   manager_id  UUID REFERENCES auth.users(id) ON DELETE SET NULL,
   is_default  BOOLEAN NOT NULL DEFAULT FALSE,
+  -- Adresse d'envoi personnelle dans CE cabinet (migrate_membership_sender_email.sql).
+  sender_email TEXT,
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, tenant_id)
 );

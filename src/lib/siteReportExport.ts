@@ -31,6 +31,13 @@ export interface SiteReportExportOptions {
   /** « A · PH1 » : bâtiment et phase visés par le compte-rendu (absent = toute l'opération). */
   decoupageLabel?: string;
   onProgress?: (message: string) => void;
+  /** Faux : le PDF n'est pas téléchargé, l'appelant en fait autre chose (diffusion par e-mail). Vrai par défaut. */
+  download?: boolean;
+}
+
+export interface SiteReportPdf {
+  blob: Blob;
+  filename: string;
 }
 
 const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
@@ -76,7 +83,7 @@ export async function exportSiteReportToPDF(
   contacts: Contact[],
   settings: AgencySettings,
   opts: SiteReportExportOptions = {},
-): Promise<void> {
+): Promise<SiteReportPdf> {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'), import('jspdf-autotable'),
   ]);
@@ -306,13 +313,15 @@ export async function exportSiteReportToPDF(
   progress('Finalisation…');
   drawAgencyFooters(doc, settings, letterhead);
   const filename = `CR_${report.report_number}_${sanitize(project.name)}.pdf`;
-  doc.save(filename);
+  if (opts.download !== false) doc.save(filename);
+  const blob: Blob = doc.output('blob');
   await autoSaveDocument({
-    blob: doc.output('blob'),
+    blob,
     filename,
     name: `CR Chantier N°${report.report_number} - ${project.name}`,
     projectId: project.id,
     phase: 'DET',
     category: 'Report',
   });
+  return { blob, filename };
 }

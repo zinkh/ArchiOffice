@@ -1,0 +1,16 @@
+-- ============================================================
+-- Adresse d'envoi personnelle, par personne ET par cabinet
+-- ============================================================
+-- Un même compte (contact@aazs.fr) exerce dans plusieurs agences, et l'adresse
+-- avec laquelle on écrit n'est pas celle du compte : dans l'agence AAZS on écrit
+-- depuis l'adresse générale de l'agence ou depuis son adresse personnelle de
+-- l'agence, et ce ne sont pas les mêmes dans l'agence AACZ.
+--
+-- `tenant_memberships` est la seule table qui porte déjà « une ligne par
+-- personne × cabinet » : l'adresse d'envoi personnelle y vit, à côté du rôle tenu
+-- dans ce cabinet. `profiles` (une ligne par PERSONNE) ne pouvait pas la porter.
+--
+-- NULL = pas d'adresse personnelle pour ce cabinet : les messages partent de
+-- l'adresse générale de l'agence (`settings.email`). Le serveur ne la lit
+-- JAMAIS depuis la requête d'un client (server/emailSender.ts).
+ALTER TABLE tenant_memberships ADD COLUMN IF NOT EXISTS sender_email TEXT;

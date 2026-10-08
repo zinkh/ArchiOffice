@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from './ui/Toast';
+import { PillTabs } from './ui/PillTabs';
+import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
+import { buildDiffusionRecipients } from '../lib/crDiffusion';
+import { baseFetchJson } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
+import { applyTenantHeader } from '../lib/activeTenant';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
@@ -70,6 +76,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     [lotsBruts],
   );
   const { toast, showToast } = useToastWithUndo();
+  const [diffusionOpen, setDiffusionOpen] = useState(false);
+  const [diffusionBusy, setDiffusionBusy] = useState(false);
+  const [diffusionResult, setDiffusionResult] = useState<DiffusionResult | null>(null);
+  const [diffusionError, setDiffusionError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ChantierTab>('comptes-rendus');
 
   const [reports, setReports] = useState<SiteReport[]>([]);
@@ -359,6 +369,79 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     }
   };
 
+  // ── Diffusion par e-mail ────────────────────────────────────────────────────
+  // Le PDF part avec les identifiants des contacts cochés ; le serveur retrouve
+  // lui-même adresses et observations (server/routes/siteReportDiffusion.ts).
+  const diffusionRecipients = useMemo(
+    () => buildDiffusionRecipients({
+      lots: lots_list,
+      stakeholders: project.stakeholders_list || [],
+      contacts,
+      observations: reportObservations,
+    }),
+    [lots_list, project.stakeholders_list, contacts, reportObservations],
+  );
+
+  const openDiffusion = () => {
+    if (!selectedReport) return;
+    if (!navigator.onLine) { showToast('La diffusion nécessite une connexion : reconnectez-vous puis réessayez.', 'error'); return; }
+    // Une saisie encore en attente de synchronisation n'est pas sur le serveur : le message partirait sans elle.
+    if (selectedReport.pendingSync || reportObservations.some(o => o.pendingSync)) {
+      showToast('Des saisies de ce compte-rendu ne sont pas encore synchronisées. Attendez la synchronisation avant de diffuser.', 'error');
+      return;
+    }
+    setDiffusionResult(null);
+    setDiffusionError(null);
+    setDiffusionOpen(true);
+  };
+
+  const sendDiffusion = async (contactIds: string[]) => {
+    if (!selectedReport || contactIds.length === 0) return;
+    if (!settings) { setDiffusionError('Réglages du cabinet non chargés, réessayez dans un instant.'); return; }
+    setDiffusionBusy(true);
+    setDiffusionError(null);
+    try {
+      const { exportSiteReportToPDF } = await import('../lib/siteReportExport');
+      const { blob, filename } = await exportSiteReportToPDF(
+        selectedReport,
+        reportNotes,
+        observationsByLot,
+        { id: project.id, name: project.name, project_code: project.project_code, address: project.address, client: project.client },
+        lots_list,
+        project.stakeholders_list || [],
+        contacts,
+        settings,
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), download: false },
+      );
+      const body = new FormData();
+      body.append('file', blob, filename);
+      body.append('contact_ids', JSON.stringify(contactIds));
+      // Pas d'apiFetch ici : il imposerait un Content-Type JSON, or un envoi multipart doit
+      // laisser le navigateur poser sa propre limite.
+      const headers = new Headers();
+      const token = await getAccessToken();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      applyTenantHeader(headers);
+      const res = await baseFetchJson<DiffusionResult & { statut?: string }>(`/api/reports/${selectedReport.id}/diffuse`, { method: 'POST', body, headers });
+      setDiffusionResult(res);
+      const diffused = { ...selectedReport, statut: 'diffuse' as SiteReport['statut'] };
+      setReports(prev => prev.map(r => (r.id === diffused.id ? { ...r, statut: diffused.statut } : r)));
+      db.siteReportsCache.put(diffused).catch(() => {});
+      showToast(
+        res.failed.length > 0
+          ? `Diffusé à ${res.sent.length} destinataire${res.sent.length > 1 ? 's' : ''}, ${res.failed.length} échec${res.failed.length > 1 ? 's' : ''}.`
+          : `Compte-rendu diffusé à ${res.sent.length} destinataire${res.sent.length > 1 ? 's' : ''}.`,
+        res.failed.length > 0 ? 'error' : 'success',
+        { duration: 6000 },
+      );
+    } catch (err) {
+      console.error('Diffusion du compte-rendu :', err);
+      setDiffusionError((err as Error).message || 'La diffusion a échoué.');
+    } finally {
+      setDiffusionBusy(false);
+    }
+  };
+
   const setAttendance = (index: number, patch: Partial<SiteReportAttendee>) => {
     const list = [...(selectedReport?.attendance || [])];
     list[index] = { ...list[index], ...patch };
@@ -613,7 +696,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="rounded-xl p-4 sm:p-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+      <div className="hidden lg:block rounded-xl p-4 sm:p-6" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] mb-1">
@@ -636,7 +719,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
             </button>
             <button
               onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
+              className="flex items-center gap-2 bg-[var(--tblr-primary)] hover:brightness-90 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
             >
               <IconPlus size={16} /> Nouveau compte-rendu
             </button>
@@ -660,28 +743,25 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto pb-1">
-        {tabs.map(tabItem => (
-          <button
-            key={tabItem.id}
-            onClick={() => setActiveTab(tabItem.id)}
-            className={cn(
-              'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition',
-              activeTab === tabItem.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
-            )}
-          >
-            <tabItem.icon size={16} /> {tabItem.label}
-          </button>
-        ))}
-      </div>
+      <PillTabs
+        ariaLabel="Sections du chantier"
+        tabs={tabs}
+        activeId={activeTab}
+        onChange={id => setActiveTab(id as ChantierTab)}
+      />
 
       {/* Body */}
       <div>
         <div className="min-w-0">
           {activeTab === 'comptes-rendus' && (
             <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(true)}
+                className="lg:hidden min-h-11 flex items-center justify-center gap-2 bg-[var(--tblr-primary)] hover:brightness-90 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
+              >
+                <IconPlus size={16} /> Nouveau compte-rendu
+              </button>
               {/* CR list */}
               <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
                 <div className="px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
@@ -699,7 +779,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                       onClick={() => setSelectedReportId(r.id)}
                       className={cn(
                         'w-full text-left px-3 py-3 border-b border-[var(--tblr-border)] transition-colors',
-                        selectedReportId === r.id ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
+                        selectedReportId === r.id ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
                       )}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -736,7 +816,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                             const idx = reports.findIndex(r => r.id === selectedReportId);
                             if (idx < reports.length - 1) setSelectedReportId(reports[idx + 1].id);
                           }}
-                          className="p-1 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]"
+                          aria-label="Compte-rendu plus ancien"
+                          className="inline-flex h-11 w-11 items-center justify-center text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]"
                         ><IconChevronLeft size={18} /></button>
                         <div>
                           <h3 className="text-lg font-bold text-[var(--tblr-text)]">
@@ -745,7 +826,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                               type="number" min={1}
                               aria-label="Numéro du compte-rendu"
                               title="Modifier le numéro du compte-rendu"
-                              className="w-16 bg-transparent border-b border-dashed border-[var(--tblr-border)] focus:border-blue-500 outline-none font-bold text-lg text-center"
+                              className="w-16 bg-transparent border-b border-dashed border-[var(--tblr-border)] focus:border-[var(--tblr-primary)] outline-none font-bold text-lg text-center"
                               value={numberDraft}
                               onChange={e => setNumberDraft(e.target.value)}
                               onBlur={commitReportNumber}
@@ -761,7 +842,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                             const idx = reports.findIndex(r => r.id === selectedReportId);
                             if (idx > 0) setSelectedReportId(reports[idx - 1].id);
                           }}
-                          className="p-1 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]"
+                          aria-label="Compte-rendu plus récent"
+                          className="inline-flex h-11 w-11 items-center justify-center text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]"
                         ><IconChevronRight size={18} /></button>
                       </div>
                       <DecoupageSelects
@@ -779,10 +861,9 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                           <IconCopy size={14} /> Dupliquer
                         </button>
-                        <button type="button" onClick={() => updateReportField('statut', 'diffuse')}
-                          disabled={selectedReport.statut === 'diffuse'}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition">
-                          <IconSend size={14} /> Diffuser
+                        <button type="button" onClick={openDiffusion}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
+                          <IconSend size={14} /> {selectedReport.statut === 'diffuse' ? 'Rediffuser' : 'Diffuser'}
                         </button>
                       </div>
                     </div>
@@ -797,18 +878,18 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         onChange={e => changeReportDate(e.target.value)}
                       />
                       <span className="flex items-center gap-1"><IconCloud size={14} />
-                        <input className="bg-transparent border-none outline-none w-28"
+                        <input className="bg-transparent border-none outline-none w-28" aria-label="Météo"
                           value={selectedReport.meteo || ''} onChange={e => updateReportField('meteo', e.target.value)} />
                       </span>
                       <span className="flex items-center gap-1"><IconTemperature size={14} />
-                        <input type="number" className="bg-transparent border-none outline-none w-14"
+                        <input type="number" className="bg-transparent border-none outline-none w-14" aria-label="Température en degrés Celsius"
                           value={selectedReport.temperature ?? ''} onChange={e => updateReportField('temperature', parseInt(e.target.value) || 0)} />°C
                       </span>
                       <button
                         onClick={() => refreshWeather(selectedReport)}
                         disabled={weatherLoading || !project.address}
                         title={project.address ? 'Actualiser la météo pour la date du compte-rendu' : "Renseignez l'adresse de l'affaire (onglet INFOS) pour récupérer la météo"}
-                        className="flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50 disabled:no-underline"
+                        className="flex items-center gap-1 text-xs text-[var(--tblr-primary)] hover:underline disabled:opacity-50 disabled:no-underline"
                       >
                         <IconRefresh size={13} className={weatherLoading ? 'animate-spin' : ''} /> Actualiser
                       </button>
@@ -998,7 +1079,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           onKeyDown={e => { if (e.key === 'Enter') addRubrique(); }}
                         />
                         <button type="button" onClick={addRubrique}
-                          className="shrink-0 flex items-center gap-1.5 px-3 py-2 sm:py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
+                          className="shrink-0 flex items-center gap-1.5 px-3 py-2 sm:py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
                           <IconPlus size={14} /> Ajouter
                         </button>
                       </div>
@@ -1013,7 +1094,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           <div className="flex items-center justify-between gap-2 mb-2">
                             <span className="text-sm font-bold uppercase tracking-wide text-[var(--tblr-text)]">{category}</span>
                             <button type="button" onClick={() => addRubriqueEntry(category)}
-                              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                              className="text-xs font-semibold text-[var(--tblr-primary)] hover:underline">
                               + Entrée
                             </button>
                           </div>
@@ -1033,7 +1114,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     icon={IconClipboardList}
                     action={
                       <button type="button" onClick={() => addObservation('observation')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
                         <IconPlus size={14} /> Ajouter une observation
                       </button>
                     }
@@ -1136,6 +1217,17 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       </div>
 
       <Toast toast={toast} />
+      <DiffusionDialog
+        open={diffusionOpen}
+        reportNumber={selectedReport?.report_number ?? ''}
+        alreadyDiffused={selectedReport?.statut === 'diffuse'}
+        recipients={diffusionRecipients}
+        busy={diffusionBusy}
+        result={diffusionResult}
+        error={diffusionError}
+        onSend={ids => void sendDiffusion(ids)}
+        onClose={() => setDiffusionOpen(false)}
+      />
 
       {isDecoupageOpen && (
         <DecoupagePanelChantier decoupage={decoupage} projectId={project.id} onSave={saveDecoupage} onClose={() => setIsDecoupageOpen(false)} />
@@ -1163,7 +1255,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                 onClick={() => handleCreateReport()}
                 disabled={weatherLoading}
                 title={weatherLoading ? 'Récupération de la météo en cours...' : undefined}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-bold"
+                className="px-4 py-2 bg-[var(--tblr-primary)] hover:brightness-90 disabled:opacity-50 text-white rounded-lg text-sm font-bold"
               >
                 Créer
               </button>
@@ -1299,7 +1391,7 @@ function SignedPhotoButton({
           <div role="status" className="flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-xs text-[var(--tblr-muted)]">
             <IconPhoto size={20} aria-hidden="true" />
             <span>Photo indisponible</span>
-            <span className="font-semibold text-blue-700 underline underline-offset-2 dark:text-blue-300">Réessayer</span>
+            <span className="font-semibold text-[var(--tblr-primary)] underline underline-offset-2">Réessayer</span>
           </div>
         ) : (
           <SignedImage

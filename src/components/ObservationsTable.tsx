@@ -20,6 +20,7 @@ import { SANS_AFFECTATION, DECOUPAGE_VIDE, batimentsActifs, phasesActives, corre
 import { DecoupageFilters, DecoupageSelects } from './chantier/DecoupageFields';
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
+import { isReprenable } from '../lib/observationsReserves';
 
 interface Props {
   projectId: string;
@@ -41,9 +42,6 @@ const TYPE_LABELS: Record<NonNullable<Observation['type']>, string> = {
   reserve: 'À lever',
   a_faire: 'Travail à faire',
 };
-
-/** Observation que l'on peut encore reprendre en réserve de l'AOR : ni levée, ni refusée, ni déjà reprise. */
-const isReprenable = (o: Observation) => !o.reserve_id && o.statut !== 'Levée' && o.statut !== 'Refusée';
 
 const STATUTS = ['À faire', 'En cours', 'Levée', 'Urgent', 'Refusée'] as const;
 
@@ -119,7 +117,6 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   const [saveError, setSaveError] = useState(false);
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
   const [globalFilter, setGlobalFilter] = useState('');
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
@@ -136,6 +133,14 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   const [groupByLot, setGroupByLot] = useState<boolean>(() => {
     try { return localStorage.getItem(`${storeKey}:groupByLot`) !== '0'; } catch { return true; }
   });
+  // Colonnes masquées : mémorisées par poste, comme les largeurs.
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(`${storeKey}:visibility`) || '{}');
+      return stored && typeof stored === 'object' ? stored : {};
+    } catch { return {}; }
+  });
+  useEffect(() => { try { localStorage.setItem(`${storeKey}:visibility`, JSON.stringify(columnVisibility)); } catch {} }, [columnVisibility, storeKey]);
   useEffect(() => { try { localStorage.setItem(`${storeKey}:sizes`, JSON.stringify(columnSizing)); } catch {} }, [columnSizing, storeKey]);
   useEffect(() => { try { localStorage.setItem(`${storeKey}:groupByLot`, groupByLot ? '1' : '0'); } catch {} }, [groupByLot, storeKey]);
   const debounceRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -259,25 +264,6 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     }
   }, [confirmAction, t, updateLocal, onReservesChanged]);
 
-  const reprendreToutesEnReserves = useCallback(async (count: number) => {
-    const confirmed = await confirmAction({
-      title: `Reprendre ${count} observation${count > 1 ? 's' : ''} à lever en réserves de l'AOR ?`,
-      message: "À faire à l'approche de la réception : chaque observation « à lever » encore ouverte devient une réserve de l'OPR. Les observations restent dans les comptes-rendus et ne sont jamais reprises deux fois.",
-      confirmLabel: 'Reprendre en réserves',
-      cancelLabel: t('projectdetail_dialog_cancel'),
-      tone: 'primary',
-    });
-    if (!confirmed) return;
-    try {
-      const res = await apiFetch<{ created: unknown[] }>(`/api/projects/${projectId}/observations/to-reserves`, { method: 'POST' });
-      setAorMessage({ tone: 'ok', text: `${res.created.length} réserve${res.created.length > 1 ? 's' : ''} créée${res.created.length > 1 ? 's' : ''} dans l'AOR.` });
-      fetchObservations();
-      onReservesChanged?.();
-    } catch (err: any) {
-      setAorMessage({ tone: 'error', text: err?.message || 'La reprise en réserves a échoué.' });
-    }
-  }, [confirmAction, t, projectId, fetchObservations, onReservesChanged]);
-
   // TanStack Table expects `data` and `columns` to be referentially stable
   // across renders (its docs call this out explicitly): recreating either
   // as a fresh array every render — as this component did before — makes
@@ -317,7 +303,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         const row = info.row.original;
         return (
           <select
-            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs dark:text-white"
+            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs dark:text-white"
             value={row.lot_id || ''}
             onChange={e => {
               const lot = lots.find(l => l.id === e.target.value);
@@ -363,7 +349,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         return (
           <div className="flex items-start gap-1.5">
             <AutoTextarea
-              className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white resize-none overflow-hidden whitespace-pre-wrap break-words leading-snug"
+              className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-sm dark:text-white resize-none overflow-hidden whitespace-pre-wrap break-words leading-snug"
               value={info.getValue() || ''}
               placeholder="Saisir une observation..."
               onCommit={v => {
@@ -446,7 +432,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         return (
           <input
             type="date"
-            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-blue-500 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs dark:text-white"
+            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs dark:text-white"
             defaultValue={info.getValue() || ''}
             onBlur={e => {
               updateLocal(row.id, { due_date: e.target.value });
@@ -479,7 +465,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         const photos = info.getValue() || [];
         if (photos.length === 0) return null;
         return (
-          <button type="button" onClick={() => openSignedUrl(photos[0])} className="text-xs text-blue-500 hover:underline">
+          <button type="button" onClick={() => openSignedUrl(photos[0])} className="text-xs text-[var(--tblr-primary)] hover:underline">
             {photos.length} photo{photos.length > 1 ? 's' : ''}
           </button>
         );
@@ -503,7 +489,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
           <button
             type="button"
             onClick={() => void reprendreEnReserve(row.id)}
-            className="inline-flex items-center gap-1 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-[var(--tblr-primary)] hover:underline"
             title="Reprendre en réserve de l'AOR"
           >
             <IconArrowRight size={13} /> En réserve
@@ -553,7 +539,6 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table.getRowModel().rows, lots]);
 
-  const aReprendre = useMemo(() => observations.filter(o => (o.type || 'observation') === 'reserve' && isReprenable(o) && !o.pendingSync).length, [observations]);
 
   const allColumnIds = columns
     .map(c => ('accessorKey' in c ? String(c.accessorKey) : (c as any).id))
@@ -568,12 +553,12 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
           placeholder="Rechercher..."
           value={globalFilter}
           onChange={e => setGlobalFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 w-40"
+          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] w-40"
         />
         <select
           value={lotFilter}
           onChange={e => setLotFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
         >
           <option value="">Tous les lots</option>
           {lots.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
@@ -583,7 +568,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
           value={typeSelect}
           onChange={e => setTypeSelect(e.target.value)}
           aria-label="Nature"
-          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
         >
           <option value="">Toutes les natures</option>
           {(Object.keys(TYPE_LABELS) as NonNullable<Observation['type']>[]).map(k => <option key={k} value={k}>{TYPE_LABELS[k]}</option>)}
@@ -591,7 +576,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
         >
           <option value="">Tous les statuts</option>
           {STATUTS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -606,16 +591,6 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         </label>
         {Object.keys(columnSizing).length > 0 && (
           <button type="button" onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
-        )}
-        {aReprendre > 0 && (
-          <button
-            type="button"
-            onClick={() => void reprendreToutesEnReserves(aReprendre)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-semibold border border-zinc-300 dark:border-zinc-600 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors dark:text-white"
-            title="À l'approche de la réception : les observations « à lever » encore ouvertes deviennent des réserves de l'AOR"
-          >
-            <IconArrowRight size={15} /> Reprendre les {aReprendre} à lever en réserves AOR
-          </button>
         )}
         <div className="ml-auto relative" ref={columnMenuRef}>
           <button
@@ -702,7 +677,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
                         onTouchStart={header.getResizeHandler()}
                         onDoubleClick={() => header.column.resetSize()}
                         title="Glisser pour régler la largeur (double clic : réinitialiser)"
-                        className={`absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none touch-none hover:bg-blue-400 ${header.column.getIsResizing() ? 'bg-blue-500' : ''}`}
+                        className={`absolute right-0 top-0 h-full w-1.5 cursor-col-resize select-none touch-none hover:bg-[var(--tblr-primary)] ${header.column.getIsResizing() ? 'bg-[var(--tblr-primary)]' : ''}`}
                       />
                     )}
                   </th>
@@ -749,7 +724,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
           onClick={addRow}
           className="w-full p-3 text-left text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-200 transition flex items-center gap-2 text-sm border-t border-zinc-100 dark:border-zinc-700 group"
         >
-          <IconPlus size={15} className="text-zinc-400 group-hover:text-blue-500 transition-colors" />
+          <IconPlus size={15} className="text-zinc-400 group-hover:text-[var(--tblr-primary)] transition-colors" />
           Nouvelle observation
         </button>
       </div>

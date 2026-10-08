@@ -876,6 +876,98 @@ admise que pour une donnée qui en a besoin (statut d'une réserve, retard).
 - **Hors périmètre** : la facture d'abonnement ArchiOffice (`subscriptionInvoice.ts`),
   émise par la plateforme et non par le cabinet, et les exports Word.
 
+### Charte sobre : documents générés, pas l'interface
+
+La préférence de l'architecte pour le noir, le blanc et les gris, la couleur étant
+réservée aux données qui en ont besoin, vaut pour les **documents générés** (PDF,
+Word, Excel, courriers, exports) et **pas pour le code de l'interface**. L'interface
+reste bleue : ses couleurs passent par les jetons `--tblr-*` (`--tblr-primary`,
+`--tblr-primary-lt`, `--tblr-surface`...), jamais par des `bg-blue-*` / `text-blue-*`
+figés qui ignorent le thème sombre. Les couleurs de statut (vert, ambre, rouge) sont des
+données et restent.
+
+### Onglet DET : décisions d'interface
+
+- **En-tête masqué sous 1024 px** (mobile et tablette) : titre, indicateurs et bouton
+  disparaissent ; « Nouveau compte-rendu » est repris en tête de la liste des
+  comptes-rendus (`lg:hidden`). Les sous-onglets (Comptes-rendus, Observations,
+  Entreprises, OS & situations, Photos) passent par `PillTabs` (rôles ARIA, flèches).
+- **« Diffuser » envoie un e-mail à chaque entreprise et chaque intervenant** : le PDF du
+  compte-rendu en pièce jointe, et dans le corps de CHAQUE message les seules observations
+  qui concernent le destinataire. Voir « Diffusion d'un compte-rendu par e-mail » plus bas.
+- **La reprise en bloc des observations « à lever » en réserves AOR vit dans l'onglet
+  AOR** (`ReprendreObservationsBanner`, au-dessus du suivi des réserves). La reprise
+  d'UNE observation reste sur sa ligne du tableau des observations. Règle commune dans
+  `src/lib/observationsReserves.ts` (testée).
+- **Colonnes masquées du tableau des observations mémorisées par poste**
+  (`obsTable:<filtre>:visibility`, localStorage), comme les largeurs de colonnes.
+- Les contrôles sans libellé visible portent un `aria-label` (chevrons, météo,
+  température) et les chevrons une cible de 44 px.
+
+### Diffusion d'un compte-rendu par e-mail
+
+`DiffusionDialog.tsx` (bouton « Diffuser », « Rediffuser » une fois diffusé) liste les
+destinataires AVANT l'envoi : adresse, rôle, nombre d'observations qui leur sont adressées,
+tous cochés par défaut, ceux sans adresse signalés et non cochables. Le PDF est généré dans le
+navigateur (`exportSiteReportToPDF(..., { download: false })`, photos comprises) puis envoyé en
+multipart à `POST /api/reports/:reportId/diffuse` (`server/routes/siteReportDiffusion.ts`,
+`tests/siteReportDiffusion.test.ts`).
+
+- **Qui reçoit quoi** : `src/lib/crDiffusion.ts` (pur, testé, partagé écran et serveur). Les
+  destinataires sont les entreprises titulaires d'un lot et les intervenants de l'opération qui
+  ont une fiche contact, chacun une fois (une entreprise sur trois lots = un message). Une
+  observation va à l'entreprise de son lot (`lot_id`) ou à la personne désignée (`contact_id`).
+  Un destinataire sans observation reçoit tout de même le compte-rendu, avec la mention explicite.
+- **Le client n'envoie jamais d'adresse** : seulement des identifiants de contacts. Le serveur
+  rejoue `buildDiffusionRecipients` depuis l'opération (lots, intervenants, observations du
+  compte-rendu) et n'écrit qu'à l'adresse de la fiche ; un identifiant étranger est ignoré.
+- **Un message par destinataire**, l'un après l'autre : personne ne voit l'adresse des autres.
+  Le PDF doit commencer par `%PDF-` et peser au plus 20 Mo.
+- **Transport : le SMTP du cabinet**, comme `POST /api/send-email` avec pièce jointe. Les
+  comptes Gmail/Outlook connectés (`sendViaAccount`) n'ont pas encore de chemin d'envoi avec
+  pièce jointe. Expéditeur et `Reply-To` : `resolveEmailSender()` (voir « Expéditeur d'un e-mail »).
+- **Statut** : le compte-rendu ne passe à `diffuse` que si au moins un message est parti. Un
+  échec partiel est rapporté nommément (`failed`) et « Rediffuser » permet de réessayer. Aucun
+  suivi des destinataires n'est stocké (pas de migration) : la trace est le journal d'activité.
+- Hors ligne ou saisie en attente de synchronisation : la diffusion est refusée, le message
+  partirait sans elle.
+
+### Pièces jointes d'un e-mail : jamais relayées brutes à nodemailer
+
+`POST /api/send-email` relayait `attachments` tel que reçu, or nodemailer lit pour une pièce
+jointe `path` (fichier du serveur), `href` (adresse, donc le réseau interne), `raw`,
+`headers`... : toute personne connectée pouvait se faire envoyer `.env` ou une clé du serveur.
+`sanitizeEmailAttachments()` (`server/emailAttachments.ts`, `tests/emailAttachments.test.ts`)
+ne garde que `{ filename, content en base64, contentType }` : nom nettoyé (ni chemin ni
+retour à la ligne), contenu décodé en `Buffer`, type de contenu vérifié, 20 pièces et 25 Mo
+au plus. Tout le reste est retiré, et une pièce jointe sans contenu base64 est refusée en
+400. Tout nouveau chemin qui envoie des pièces jointes venues d'un client doit passer par là,
+ou par un fichier téléversé (`multer`), jamais par un objet nodemailer construit côté client.
+
+### Expéditeur d'un e-mail : adresse de l'agence ou adresse personnelle par cabinet
+
+Un même compte (contact@aazs.fr) exerce dans plusieurs agences et n'y écrit pas avec la même
+adresse, ni avec celle de sa connexion : dans chaque agence, soit l'adresse générale de
+l'agence (`settings.email`), soit son adresse personnelle DANS cette agence
+(`tenant_memberships.sender_email`, `supabase/migrate_membership_sender_email.sql`, une ligne
+par personne × cabinet). Réglée par la personne dans Réglages > « Mes paramètres de
+messagerie » (champ visible quand « Envoyer depuis mon adresse personnelle » est choisi),
+lue et écrite par `GET /api/me` / `PUT /api/team/:id` (`mailSenderEmail`, pour le cabinet ACTIF).
+
+`server/emailSender.ts::resolveEmailSender()` décide pour `POST /api/send-email` et la
+diffusion d'un compte-rendu : le choix de la personne (`profiles.sender_option`), à défaut
+celui du cabinet (`settings.sender_option`). En « personnel » avec une adresse : `from` = cette
+adresse, l'agence en copie, `Reply-To` sur elle. **Sans adresse enregistrée, ou sur une
+instance non migrée, le message part de l'adresse de l'agence**, jamais sans expéditeur.
+
+**L'adresse n'est JAMAIS lue dans la requête d'un client** : `userEmail`, que la route
+acceptait comme expéditeur, est ignoré (n'importe qui de connecté aurait pu écrire au nom de
+n'importe qui). Seule la personne règle sa propre adresse (un administrateur ne le fait pas à
+sa place : 403) et une adresse invalide ou multiple est refusée (400). Tout nouvel envoi par le
+SMTP du cabinet passe par `resolveEmailSender()`. Le SMTP du cabinet doit accepter d'envoyer
+avec une adresse différente de son identifiant de connexion, ce qu'ArchiOffice ne peut pas
+vérifier.
+
 ### Qualifications des entreprises et recherche d'entreprises
 
 `contact_qualifications` (`supabase/migrate_contact_qualifications.sql`) : une ligne par qualification

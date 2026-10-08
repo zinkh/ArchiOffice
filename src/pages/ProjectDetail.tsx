@@ -55,6 +55,7 @@ import { prefetchProjectForOffline, cachedProjectSnapshot } from '../lib/offline
 import { db } from '../db';
 import type { Project, ProjectStakeholder, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
+import { ReprendreObservationsBanner } from '../components/pro/ReprendreObservationsBanner';
 import { RESERVE_STATUSES, reserveStatusKey } from '../components/pro/reserveShared';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
@@ -4872,6 +4873,8 @@ export default function ProjectDetail() {
             )}
             {activeTab === 'AOR' && (
               <div className="space-y-8">
+                <ReprendreObservationsBanner projectId={id || ''} onReservesChanged={fetchReserves} />
+
                 <ReserveTracker
                   projectId={id || ''}
                   apiBase="/api/reserves"

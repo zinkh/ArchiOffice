@@ -137,7 +137,7 @@ export function ObservationRow({ obs, onSave, onUploadPhoto }: {
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        className={cn('order-4 md:order-6 ml-auto md:ml-0 shrink-0 p-1 text-zinc-400 hover:text-blue-500 flex items-center justify-center', TOUCH_TARGET)}
+        className={cn('order-4 md:order-6 ml-auto md:ml-0 shrink-0 p-1 text-zinc-400 hover:text-[var(--tblr-primary)] flex items-center justify-center', TOUCH_TARGET)}
         title="Ajouter une photo"
         aria-label="Ajouter une photo"
       >

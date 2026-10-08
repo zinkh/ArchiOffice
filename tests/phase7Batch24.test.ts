@@ -188,17 +188,21 @@ describe('Send email', () => {
     expect(sendMailMock.mock.calls[0][0]).toMatchObject({ from: 'agence@example.test', cc: undefined, to: 'x@example.test' });
   });
 
-  it('sends from the caller\'s own address, cc\'ing the agency, when senderOption is personal', async () => {
+  it('sends from the caller\'s personal address for THIS agency, cc\'ing the agency, when senderOption is personal', async () => {
     const tenantId = makeTenant();
-    const { token } = makeUser(tenantId);
+    const { userId, token } = makeUser(tenantId);
     fakeSupabaseAdmin.seed('settings', [{
       tenant_id: tenantId, email: 'agence@example.test', sender_option: 'personal',
       smtp_host: 'smtp.tenant.test', smtp_port: '587', smtp_user: 'tenant-user', smtp_pass: 'tenant-pass',
     }]);
+    const membership = fakeSupabaseAdmin.getTable('tenant_memberships').find((m: any) => m.user_id === userId && m.tenant_id === tenantId);
+    if (membership) membership.sender_email = 'perso@example.test';
     sendMailMock.mockClear();
 
+    // userEmail, envoyé par le navigateur, n'est plus cru : l'adresse vient du serveur
+    // (voir tests/emailSender.test.ts pour le détail, dont l'usurpation).
     const res = await request(app).post('/api/send-email').set(authHeader(token))
-      .send({ to: 'x@example.test', subject: 'Test', text: 'Hello', userEmail: 'perso@example.test' });
+      .send({ to: 'x@example.test', subject: 'Test', text: 'Hello', userEmail: 'usurpe@example.test' });
     expect(res.status).toBe(200);
     expect(sendMailMock.mock.calls[0][0]).toMatchObject({ from: 'perso@example.test', cc: 'agence@example.test' });
   });

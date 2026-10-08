@@ -631,6 +631,8 @@ export interface TeamMember {
   showPersonalContacts?: boolean;
   /** Signature de courrier personnelle, ajoutée aux nouveaux messages rédigés dans l'application. */
   mailSignature?: string;
+  /** Adresse d'envoi personnelle dans le cabinet ACTIF (une par cabinet : un même compte n'écrit pas depuis la même adresse dans chaque agence). */
+  mailSenderEmail?: string;
   tenantId?: string | null;
   // Platform back-office access — orthogonal to system_role (see
   // server/superAdminAuth.ts). Only ever set on the current user's own

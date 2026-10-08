@@ -6,7 +6,7 @@ import {
   SANS_AFFECTATION, type DecoupageChantier, type FiltreDecoupage,
 } from '../../lib/chantierDecoupage';
 
-const SELECT = 'px-2.5 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500';
+const SELECT = 'px-2.5 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]';
 
 interface SelectsProps {
   decoupage: DecoupageChantier;
@@ -78,7 +78,7 @@ interface PanelProps {
 }
 
 const nextOrdre = (items: { ordre: number }[]) => items.reduce((m, x) => Math.max(m, x.ordre), -1) + 1;
-const CHAMP = 'px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-800 dark:text-white outline-none focus:ring-1 focus:ring-blue-400';
+const CHAMP = 'px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-800 dark:text-white outline-none focus:ring-1 focus:ring-[var(--tblr-primary)]';
 
 /** Registre des bâtiments et phases du chantier. Retirer un bâtiment ne supprime rien : ses comptes-rendus et observations repassent « sans bâtiment ». */
 export function DecoupagePanelChantier({ decoupage, projectId, onSave, onClose }: PanelProps) {
@@ -129,7 +129,7 @@ export function DecoupagePanelChantier({ decoupage, projectId, onSave, onClose }
     <section>
       <div className="flex items-center justify-between mb-2">
         <h4 className="text-sm font-bold dark:text-white">{titre}</h4>
-        <button type="button" onClick={() => addItem(key)} className="flex items-center gap-1 text-xs font-bold text-blue-600 hover:underline">
+        <button type="button" onClick={() => addItem(key)} className="flex items-center gap-1 text-xs font-bold text-[var(--tblr-primary)] hover:underline">
           <IconPlus size={14} /> Ajouter
         </button>
       </div>
@@ -172,7 +172,7 @@ export function DecoupagePanelChantier({ decoupage, projectId, onSave, onClose }
         {renderList('phases', phases, 'Phases', 'Aucune phase : le chantier est suivi d’un seul tenant.')}
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm font-semibold dark:text-zinc-300">Annuler</button>
-          <button type="button" onClick={() => onSave(sanitizeDecoupage(draft))} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold">Enregistrer</button>
+          <button type="button" onClick={() => onSave(sanitizeDecoupage(draft))} className="px-4 py-2 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-sm font-bold">Enregistrer</button>
         </div>
       </div>
     </div>
