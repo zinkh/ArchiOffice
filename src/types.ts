@@ -1376,6 +1376,8 @@ export interface Observation {
   reserve_number?: number | null;
   urgence?: 'normal' | 'urgent' | 'bloquant';
   photos?: string[];
+  /** Réponse apportée à l'observation (entreprise, maîtrise d'œuvre), saisie dans l'onglet Observations. */
+  reponse?: string | null;
   batiment_id?: string | null;
   phase_id?: string | null;
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */

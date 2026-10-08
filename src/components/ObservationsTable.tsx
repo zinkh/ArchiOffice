@@ -10,7 +10,7 @@ import {
   VisibilityState,
   ColumnSizingState,
 } from '@tanstack/react-table';
-import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconLayoutRows, IconArrowRight } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconChevronRight, IconLayoutRows, IconArrowRight } from '@tabler/icons-react';
 import { useConfirmDialog } from './ui/ConfirmDialog';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -35,6 +35,8 @@ interface Props {
   defaultType?: Observation['type'];
   /** Appelé quand des réserves de l'AOR viennent d'être créées (pour rafraîchir leur liste). */
   onReservesChanged?: () => void;
+  /** Ouvre la vue sur « Ouverts seulement » (revue des observations non levées depuis le compte-rendu). */
+  initialOpenOnly?: boolean;
 }
 
 const TYPE_LABELS: Record<NonNullable<Observation['type']>, string> = {
@@ -64,7 +66,7 @@ const urgenceColors: Record<string, string> = {
 const columnHelper = createColumnHelper<Observation>();
 
 /** Zone de texte qui s'agrandit avec son contenu (retours à la ligne conservés). */
-function AutoTextarea({ value, onCommit, className, placeholder }: { value: string; onCommit: (v: string) => void; className?: string; placeholder?: string }) {
+function AutoTextarea({ value, onCommit, className, placeholder, id }: { value: string; onCommit: (v: string) => void; className?: string; placeholder?: string; id?: string }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fit = useCallback(() => {
     const el = ref.current;
@@ -84,6 +86,7 @@ function AutoTextarea({ value, onCommit, className, placeholder }: { value: stri
   return (
     <textarea
       ref={ref}
+      id={id}
       rows={1}
       className={className}
       defaultValue={value}
@@ -110,7 +113,7 @@ const COLUMN_LABELS: Record<string, string> = {
   actions: '',
 };
 
-export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged }: Props) {
+export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged, initialOpenOnly = false }: Props) {
   const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -120,7 +123,14 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   const [showColumnMenu, setShowColumnMenu] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [lotFilter, setLotFilter] = useState('');
-  const [openOnly, setOpenOnly] = useState(false);
+  const [openOnly, setOpenOnly] = useState(initialOpenOnly);
+  // Observations dont la réponse est dépliée (flèche à gauche de la ligne).
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpanded = useCallback((id: string) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  }), []);
   const [filtreDecoupage, setFiltreDecoupage] = useState<FiltreDecoupage>({ batimentId: '', phaseId: '' });
   const aDecoupage = batimentsActifs(decoupage).length + phasesActives(decoupage).length > 0;
   const [typeSelect, setTypeSelect] = useState('');
@@ -288,6 +298,27 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   }), [observations, typeFilter, typeSelect, openOnly, statusFilter, lotFilter, filtreDecoupage, globalFilter]);
 
   const columns = useMemo(() => [
+    columnHelper.display({
+      id: 'expand',
+      size: 36,
+      cell: info => {
+        const row = info.row.original;
+        const open = expanded.has(row.id);
+        return (
+          <button
+            type="button"
+            aria-expanded={open}
+            aria-label={open ? 'Replier la réponse' : 'Déplier la réponse'}
+            title={row.reponse ? 'Réponse saisie' : 'Saisir une réponse'}
+            onClick={() => toggleExpanded(row.id)}
+            className="flex items-center gap-0.5 p-1.5 rounded text-zinc-400 hover:text-[var(--tblr-primary)]"
+          >
+            <IconChevronRight size={15} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+            {row.reponse ? <span className="h-1.5 w-1.5 rounded-full bg-[var(--tblr-primary)]" aria-hidden="true" /> : null}
+          </button>
+        );
+      },
+    }),
     columnHelper.accessor('number', {
       header: 'N°',
       size: 48,
@@ -510,7 +541,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         </button>
       ),
     }),
-  ], [lots, decoupage, aDecoupage, saveField, updateLocal, deleteRow, reprendreEnReserve]);
+  ], [lots, decoupage, aDecoupage, saveField, updateLocal, deleteRow, reprendreEnReserve, expanded, toggleExpanded]);
 
   const table = useReactTable({
     data: filtered,
@@ -542,7 +573,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
 
   const allColumnIds = columns
     .map(c => ('accessorKey' in c ? String(c.accessorKey) : (c as any).id))
-    .filter(id => id && id !== 'actions' && id !== 'number');
+    .filter(id => id && id !== 'actions' && id !== 'number' && id !== 'expand');
 
   return (
     <div className="space-y-3">
@@ -700,13 +731,33 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
                     </tr>
                   )}
                   {group.rows.map(row => (
-                    <tr key={row.id} className="group/row hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors align-top">
-                      {row.getVisibleCells().map(cell => (
-                        <td key={cell.id} className="p-1" style={{ width: cell.column.getSize() }}>
-                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                        </td>
-                      ))}
-                    </tr>
+                    <Fragment key={row.id}>
+                      <tr className="group/row hover:bg-zinc-50/50 dark:hover:bg-zinc-800/30 transition-colors align-top">
+                        {row.getVisibleCells().map(cell => (
+                          <td key={cell.id} className="p-1" style={{ width: cell.column.getSize() }}>
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                      {expanded.has(row.original.id) && (
+                        <tr className="bg-[var(--tblr-surface-2)]">
+                          <td />
+                          <td colSpan={Math.max(1, table.getVisibleLeafColumns().length - 1)} className="px-3 py-3">
+                            <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 mb-1" htmlFor={`reponse-${row.original.id}`}>Réponse</label>
+                            <AutoTextarea
+                              id={`reponse-${row.original.id}`}
+                              className="w-full p-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 focus:ring-1 focus:ring-[var(--tblr-primary)] rounded text-sm dark:text-white resize-none overflow-hidden whitespace-pre-wrap break-words leading-snug"
+                              value={row.original.reponse || ''}
+                              placeholder="Réponse de l'entreprise ou de la maîtrise d'œuvre..."
+                              onCommit={v => {
+                                updateLocal(row.original.id, { reponse: v });
+                                saveField(row.original.id, 'reponse', v);
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   ))}
                 </Fragment>
               ))

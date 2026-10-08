@@ -11,6 +11,7 @@ import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import { loadPhotoDataUrl } from './planRender';
 import { autoSaveDocument } from './autoSaveDocument';
+import { etiquetteDecoupage, type DecoupageChantier } from './chantierDecoupage';
 import { attendeeStatus, lotPresenceStatus, concernedLabel, pdfOrientation } from './siteReportPresence';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
 
@@ -31,6 +32,8 @@ export interface ObservationsByLot {
 export interface SiteReportExportOptions {
   /** « A · PH1 » : bâtiment et phase visés par le compte-rendu (absent = toute l'opération). */
   decoupageLabel?: string;
+  /** Registre des bâtiments et phases du chantier : sans lui, la colonne « Bât. / phase » des observations n'est pas imprimée. */
+  decoupage?: DecoupageChantier;
   onProgress?: (message: string) => void;
   /** Faux : le PDF n'est pas téléchargé, l'appelant en fait autre chose (diffusion par e-mail). Vrai par défaut. */
   download?: boolean;
@@ -314,6 +317,9 @@ export async function exportSiteReportToPDF(
     doc.addPage('a4', orientation);
     y = drawAgencyHeader(doc, settings, letterhead);
   }
+  // Colonne bâtiment / phase : seulement si le chantier en a un registre ET qu'une observation y est affectée.
+  const showDecoupage = observationsByLot.some(g => g.items.some(o => etiquetteDecoupage(o, opts.decoupage)));
+
   for (const group of observationsByLot) {
     progress(`Lot ${group.title}…`);
     ensureRoom(14);
@@ -323,20 +329,31 @@ export async function exportSiteReportToPDF(
     doc.text(`${group.title}${group.entreprise ? ` — ${group.entreprise}` : ''}`.toUpperCase(), MARGIN + 2, y + 4);
     y += 10;
 
+    const observationColumns = [
+      { head: 'N°', style: { cellWidth: 10 }, cell: (o: Observation) => (o.number != null ? String(o.number) : '') },
+      {
+        head: 'Description', style: {},
+        cell: (o: Observation) => [
+          [OBSERVATION_TYPE_LABELS[o.type || ''] ? `[${OBSERVATION_TYPE_LABELS[o.type || '']}] ` : '', o.texte].join(''),
+          o.reponse ? `Réponse : ${o.reponse}` : '',
+        ].filter(Boolean).join('\n'),
+      },
+      ...(showDecoupage ? [{ head: 'Bât. / phase', style: { cellWidth: 22 }, cell: (o: Observation) => etiquetteDecoupage(o, opts.decoupage) }] : []),
+      {
+        head: 'Origine', style: { cellWidth: 24 },
+        cell: (o: Observation) => [o.created_report_number != null ? `CR n° ${o.created_report_number}` : '', o.resolved_report_number != null ? `Levée au CR n° ${o.resolved_report_number}` : ''].filter(Boolean).join('\n'),
+      },
+      { head: 'Échéance', style: { cellWidth: 20 }, cell: (o: Observation) => fmtDate(o.due_date) },
+      { head: 'Statut', style: { cellWidth: 20, fontStyle: 'bold' as const }, cell: (o: Observation) => o.statut },
+      { head: 'Urgence', style: { cellWidth: 20, fontStyle: 'bold' as const }, cell: (o: Observation) => (o.urgence === 'normal' || !o.urgence ? '' : o.urgence.toUpperCase()) },
+    ];
     autoTable(doc, {
       startY: y,
-      head: [['N°', 'Description', 'Origine', 'Échéance', 'Statut', 'Urgence']],
-      body: group.items.map(o => [
-        o.number != null ? String(o.number) : '',
-        [OBSERVATION_TYPE_LABELS[o.type || ''] ? `[${OBSERVATION_TYPE_LABELS[o.type || '']}] ` : '', o.texte].join(''),
-        [o.created_report_number != null ? `CR n° ${o.created_report_number}` : '', o.resolved_report_number != null ? `Levée au CR n° ${o.resolved_report_number}` : ''].filter(Boolean).join('\n'),
-        fmtDate(o.due_date),
-        o.statut,
-        o.urgence === 'normal' || !o.urgence ? '' : o.urgence.toUpperCase(),
-      ]),
+      head: [observationColumns.map(c => c.head)],
+      body: group.items.map(o => observationColumns.map(c => c.cell(o))),
       styles: { fontSize: 8, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
       headStyles: { fillColor: [90, 90, 90], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-      columnStyles: { 0: { cellWidth: 10 }, 2: { cellWidth: 24 }, 3: { cellWidth: 20 }, 4: { cellWidth: 20, fontStyle: 'bold' }, 5: { cellWidth: 20, fontStyle: 'bold' } },
+      columnStyles: Object.fromEntries(observationColumns.map((c, i) => [i, c.style])),
       margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
     });
     y = (doc as any).lastAutoTable.finalY + 4;
