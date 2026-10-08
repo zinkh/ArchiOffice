@@ -19,6 +19,7 @@ import { sendEmailLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sendViaAccount } from '../mailSend';
 import { sanitizeEmailAttachments } from '../emailAttachments';
+import { resolveEmailSender } from '../emailSender';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -28,10 +29,10 @@ export interface RouteDeps {
 export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.post("/api/send-email", sendEmailLimiter, async (req: any, res: any) => {
     try {
-      const { to, subject, text, html, userEmail } = req.body;
+      const { to, subject, text, html } = req.body;
       const hasCrlf = (v: unknown): boolean =>
         Array.isArray(v) ? v.some(hasCrlf) : typeof v === 'string' && /[\r\n]/.test(v);
-      if (hasCrlf(to) || hasCrlf(subject) || hasCrlf(userEmail)) {
+      if (hasCrlf(to) || hasCrlf(subject)) {
         return res.status(400).json({ error: "Invalid characters in email fields" });
       }
 
@@ -86,13 +87,15 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
         },
       });
 
-      const from = (settings as any).sender_option === 'personal' ? userEmail : (settings as any).email;
-      const cc = (settings as any).sender_option === 'personal' ? (settings as any).email : undefined;
+      // L'expéditeur est résolu côté serveur (server/emailSender.ts) : l'adresse
+      // personnelle propre à CE cabinet, jamais une adresse envoyée par le client.
+      const sender = await resolveEmailSender(supabaseAdmin, { tenantId, userId: req.user.id, settings });
 
       await transporter.sendMail({
-        from,
+        from: sender.from,
         to,
-        cc,
+        cc: sender.cc,
+        replyTo: sender.replyTo,
         subject,
         text,
         html,

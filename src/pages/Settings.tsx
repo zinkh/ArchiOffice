@@ -483,6 +483,7 @@ export default function Settings() {
     avatar: '',
     showPersonalContacts: true,
     mailSignature: '',
+    mailSenderEmail: '',
   });
   const [emailNotice, setEmailNotice] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -584,6 +585,7 @@ export default function Settings() {
         avatar: currentUser.avatar || '',
         showPersonalContacts: currentUser.showPersonalContacts ?? true,
         mailSignature: currentUser.mailSignature || '',
+        mailSenderEmail: currentUser.mailSenderEmail || '',
       });
     }
   }, [currentUser]);
@@ -3342,6 +3344,26 @@ export default function Settings() {
             {t('send_from_personal')}
           </label>
         </div>
+        {userSettings.senderOption === 'personal' && (
+          <div className="space-y-1">
+            <label htmlFor="my-sender-email" className="block text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>
+              {t('my_sender_email_label')}
+            </label>
+            <input
+              id="my-sender-email"
+              type="email"
+              inputMode="email"
+              autoComplete="off"
+              maxLength={254}
+              className="w-full p-2 rounded-lg text-sm"
+              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+              placeholder={t('my_sender_email_placeholder') as string}
+              value={userSettings.mailSenderEmail}
+              onChange={e => setUserSettings({ ...userSettings, mailSenderEmail: e.target.value })}
+            />
+            <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('my_sender_email_help')}</p>
+          </div>
+        )}
         <textarea className="w-full p-2 rounded-lg h-28 text-sm"
           style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           placeholder={t('default_email_template')} value={userSettings.defaultEmailTemplate ?? ''}

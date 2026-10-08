@@ -925,7 +925,7 @@ multipart à `POST /api/reports/:reportId/diffuse` (`server/routes/siteReportDif
   Le PDF doit commencer par `%PDF-` et peser au plus 20 Mo.
 - **Transport : le SMTP du cabinet**, comme `POST /api/send-email` avec pièce jointe. Les
   comptes Gmail/Outlook connectés (`sendViaAccount`) n'ont pas encore de chemin d'envoi avec
-  pièce jointe. Réponses : `Reply-To` sur l'adresse de la personne qui diffuse.
+  pièce jointe. Expéditeur et `Reply-To` : `resolveEmailSender()` (voir « Expéditeur d'un e-mail »).
 - **Statut** : le compte-rendu ne passe à `diffuse` que si au moins un message est parti. Un
   échec partiel est rapporté nommément (`failed`) et « Rediffuser » permet de réessayer. Aucun
   suivi des destinataires n'est stocké (pas de migration) : la trace est le journal d'activité.
@@ -943,6 +943,30 @@ retour à la ligne), contenu décodé en `Buffer`, type de contenu vérifié, 20
 au plus. Tout le reste est retiré, et une pièce jointe sans contenu base64 est refusée en
 400. Tout nouveau chemin qui envoie des pièces jointes venues d'un client doit passer par là,
 ou par un fichier téléversé (`multer`), jamais par un objet nodemailer construit côté client.
+
+### Expéditeur d'un e-mail : adresse de l'agence ou adresse personnelle par cabinet
+
+Un même compte (contact@aazs.fr) exerce dans plusieurs agences et n'y écrit pas avec la même
+adresse, ni avec celle de sa connexion : dans chaque agence, soit l'adresse générale de
+l'agence (`settings.email`), soit son adresse personnelle DANS cette agence
+(`tenant_memberships.sender_email`, `supabase/migrate_membership_sender_email.sql`, une ligne
+par personne × cabinet). Réglée par la personne dans Réglages > « Mes paramètres de
+messagerie » (champ visible quand « Envoyer depuis mon adresse personnelle » est choisi),
+lue et écrite par `GET /api/me` / `PUT /api/team/:id` (`mailSenderEmail`, pour le cabinet ACTIF).
+
+`server/emailSender.ts::resolveEmailSender()` décide pour `POST /api/send-email` et la
+diffusion d'un compte-rendu : le choix de la personne (`profiles.sender_option`), à défaut
+celui du cabinet (`settings.sender_option`). En « personnel » avec une adresse : `from` = cette
+adresse, l'agence en copie, `Reply-To` sur elle. **Sans adresse enregistrée, ou sur une
+instance non migrée, le message part de l'adresse de l'agence**, jamais sans expéditeur.
+
+**L'adresse n'est JAMAIS lue dans la requête d'un client** : `userEmail`, que la route
+acceptait comme expéditeur, est ignoré (n'importe qui de connecté aurait pu écrire au nom de
+n'importe qui). Seule la personne règle sa propre adresse (un administrateur ne le fait pas à
+sa place : 403) et une adresse invalide ou multiple est refusée (400). Tout nouvel envoi par le
+SMTP du cabinet passe par `resolveEmailSender()`. Le SMTP du cabinet doit accepter d'envoyer
+avec une adresse différente de son identifiant de connexion, ce qu'ArchiOffice ne peut pas
+vérifier.
 
 ### Qualifications des entreprises et recherche d'entreprises
 

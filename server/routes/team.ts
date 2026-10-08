@@ -10,6 +10,8 @@ import nodemailer from 'nodemailer';
 import { validateBody } from '../../src/lib/validateRequest';
 import { createTeamMemberSchema, updateTeamMemberRoleSchema } from '../../src/schemas/team.schema';
 import { isSuperAdmin } from '../superAdminAuth';
+import { readMembershipSenderEmail } from '../emailSender';
+import { isValidEmail } from '../../src/lib/crDiffusion';
 import {
   addMembership,
   findMembership,
@@ -106,6 +108,8 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
         jobTitle: data.job_title,
         showPersonalContacts: data.show_personal_contacts,
         mailSignature: data.mail_signature ?? '',
+        // Adresse d'envoi personnelle dans le cabinet ACTIF (une par cabinet, voir server/emailSender.ts).
+        mailSenderEmail: await readMembershipSenderEmail(supabaseAdmin, req.user.id, activeTenantId ?? data.tenant_id),
         // Platform back-office access — an orthogonal, cross-tenant concept
         // from system_role (see server/superAdminAuth.ts). Drives whether the
         // frontend renders the /admin back-office link at all.
@@ -129,9 +133,32 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (!(await findMembership(supabaseAdmin, req.params.id, tenantId))) {
         return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
       }
-      const { name, senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature } = req.body;
+      const { name, senderOption, defaultEmailTemplate, phone, address, jobTitle, department, avatar, showPersonalContacts, mailSignature, mailSenderEmail } = req.body;
       if (name !== undefined && (typeof name !== 'string' || !name.trim())) {
         return res.status(400).json({ error: 'Le nom et prénom ne peut pas être vide' });
+      }
+      // Adresse d'envoi personnelle DANS ce cabinet : propre à la personne, jamais réglée par un
+      // administrateur à sa place (il écrirait au nom de quelqu'un d'autre), et validée avant
+      // d'être enregistrée, donc avant tout autre changement de profil.
+      if (mailSenderEmail !== undefined) {
+        const wanted = typeof mailSenderEmail === 'string' ? mailSenderEmail.trim() : '';
+        if (req.params.id !== req.user.id) {
+          return res.status(403).json({ error: "L'adresse d'envoi ne peut être réglée que par la personne elle-même." });
+        }
+        if (wanted && !isValidEmail(wanted)) {
+          return res.status(400).json({ error: "Adresse d'envoi invalide : une seule adresse e-mail, sans espace." });
+        }
+        const { data: written, error: senderError } = await supabaseAdmin
+          .from('tenant_memberships')
+          .update({ sender_email: wanted || null })
+          .eq('user_id', req.params.id)
+          .eq('tenant_id', tenantId)
+          .select('id');
+        // Colonne absente ou adhésion introuvable (instance non migrée) : on n'invente rien. Vider
+        // le champ n'a rien à effacer, donc ne bloque pas l'enregistrement du reste du profil.
+        if ((senderError || !written?.length) && wanted) {
+          return res.status(503).json({ error: "L'adresse d'envoi ne peut pas être enregistrée : la base doit être mise à jour (migrate_membership_sender_email.sql)." });
+        }
       }
       const { data, error } = await supabaseAdmin.from('profiles').update({
         ...(typeof name === 'string' ? { name: name.trim().slice(0, 120) } : {}),

@@ -17,6 +17,7 @@ import nodemailer from 'nodemailer';
 import { sendEmailLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
+import { resolveEmailSender } from '../emailSender';
 import {
   buildDiffusionMail, buildDiffusionRecipients, MAX_DIFFUSION_RECIPIENTS,
   type DiffusionRecipient,
@@ -117,9 +118,11 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
         auth: { user: smtpUser, pass: smtpPass },
       });
 
-      const personal = settings.sender_option === 'personal';
-      const from = personal ? req.user.email : settings.email;
-      const replyTo = req.user.email || settings.email || undefined;
+      // Même expéditeur que POST /api/send-email : adresse générale de l'agence ou adresse
+      // personnelle de la personne dans CE cabinet (server/emailSender.ts).
+      const sender = await resolveEmailSender(supabaseAdmin, { tenantId, userId: req.user.id, settings });
+      const from = sender.from;
+      const replyTo = sender.replyTo || req.user.email || settings.email || undefined;
       const filename = safeFilename(file.originalname, `CR_${(report as any).report_number}.pdf`);
       const ctx = {
         reportNumber: (report as any).report_number,
