@@ -48,7 +48,7 @@
     "dexie": "^4.4.6",
     "dexie-react-hooks": "^4.4.0",
     "docx": "^9.8.0",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.5",
     "electron-updater": "^6.6.2",
     "embedded-postgres": "^18.4.0-beta.17",
     "exceljs": "^4.4.0",
