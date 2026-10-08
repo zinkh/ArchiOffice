@@ -106,6 +106,7 @@ import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
 import { registerMailDraftRoutes } from "./server/routes/mailDrafts";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
+import { registerSiteReportDiffusionRoutes } from "./server/routes/siteReportDiffusion";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
@@ -1099,6 +1100,7 @@ export async function createApp() {
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext });
+  registerSiteReportDiffusionRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });

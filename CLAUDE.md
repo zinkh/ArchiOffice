@@ -892,9 +892,9 @@ données et restent.
   disparaissent ; « Nouveau compte-rendu » est repris en tête de la liste des
   comptes-rendus (`lg:hidden`). Les sous-onglets (Comptes-rendus, Observations,
   Entreprises, OS & situations, Photos) passent par `PillTabs` (rôles ARIA, flèches).
-- **« Diffuser » ne fait que changer le statut** : aucun e-mail n'est envoyé d'ici. Il est
-  confirmé (`useConfirmDialog`) et suivi d'un toast « Annuler » de 6 s qui repart de la
-  version la plus récente du compte-rendu (`reportsRef`), jamais d'une copie périmée.
+- **« Diffuser » envoie un e-mail à chaque entreprise et chaque intervenant** : le PDF du
+  compte-rendu en pièce jointe, et dans le corps de CHAQUE message les seules observations
+  qui concernent le destinataire. Voir « Diffusion d'un compte-rendu par e-mail » plus bas.
 - **La reprise en bloc des observations « à lever » en réserves AOR vit dans l'onglet
   AOR** (`ReprendreObservationsBanner`, au-dessus du suivi des réserves). La reprise
   d'UNE observation reste sur sa ligne du tableau des observations. Règle commune dans
@@ -903,6 +903,34 @@ données et restent.
   (`obsTable:<filtre>:visibility`, localStorage), comme les largeurs de colonnes.
 - Les contrôles sans libellé visible portent un `aria-label` (chevrons, météo,
   température) et les chevrons une cible de 44 px.
+
+### Diffusion d'un compte-rendu par e-mail
+
+`DiffusionDialog.tsx` (bouton « Diffuser », « Rediffuser » une fois diffusé) liste les
+destinataires AVANT l'envoi : adresse, rôle, nombre d'observations qui leur sont adressées,
+tous cochés par défaut, ceux sans adresse signalés et non cochables. Le PDF est généré dans le
+navigateur (`exportSiteReportToPDF(..., { download: false })`, photos comprises) puis envoyé en
+multipart à `POST /api/reports/:reportId/diffuse` (`server/routes/siteReportDiffusion.ts`,
+`tests/siteReportDiffusion.test.ts`).
+
+- **Qui reçoit quoi** : `src/lib/crDiffusion.ts` (pur, testé, partagé écran et serveur). Les
+  destinataires sont les entreprises titulaires d'un lot et les intervenants de l'opération qui
+  ont une fiche contact, chacun une fois (une entreprise sur trois lots = un message). Une
+  observation va à l'entreprise de son lot (`lot_id`) ou à la personne désignée (`contact_id`).
+  Un destinataire sans observation reçoit tout de même le compte-rendu, avec la mention explicite.
+- **Le client n'envoie jamais d'adresse** : seulement des identifiants de contacts. Le serveur
+  rejoue `buildDiffusionRecipients` depuis l'opération (lots, intervenants, observations du
+  compte-rendu) et n'écrit qu'à l'adresse de la fiche ; un identifiant étranger est ignoré.
+- **Un message par destinataire**, l'un après l'autre : personne ne voit l'adresse des autres.
+  Le PDF doit commencer par `%PDF-` et peser au plus 20 Mo.
+- **Transport : le SMTP du cabinet**, comme `POST /api/send-email` avec pièce jointe. Les
+  comptes Gmail/Outlook connectés (`sendViaAccount`) n'ont pas encore de chemin d'envoi avec
+  pièce jointe. Réponses : `Reply-To` sur l'adresse de la personne qui diffuse.
+- **Statut** : le compte-rendu ne passe à `diffuse` que si au moins un message est parti. Un
+  échec partiel est rapporté nommément (`failed`) et « Rediffuser » permet de réessayer. Aucun
+  suivi des destinataires n'est stocké (pas de migration) : la trace est le journal d'activité.
+- Hors ligne ou saisie en attente de synchronisation : la diffusion est refusée, le message
+  partirait sans elle.
 
 ### Qualifications des entreprises et recherche d'entreprises
 

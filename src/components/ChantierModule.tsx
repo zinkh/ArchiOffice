@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from './ui/Toast';
-import { useConfirmDialog } from './ui/ConfirmDialog';
 import { PillTabs } from './ui/PillTabs';
+import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
+import { buildDiffusionRecipients } from '../lib/crDiffusion';
+import { baseFetchJson } from '../lib/api';
+import { getAccessToken } from '../lib/authToken';
+import { applyTenantHeader } from '../lib/activeTenant';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
@@ -72,7 +76,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     [lotsBruts],
   );
   const { toast, showToast } = useToastWithUndo();
-  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
+  const [diffusionOpen, setDiffusionOpen] = useState(false);
+  const [diffusionBusy, setDiffusionBusy] = useState(false);
+  const [diffusionResult, setDiffusionResult] = useState<DiffusionResult | null>(null);
+  const [diffusionError, setDiffusionError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ChantierTab>('comptes-rendus');
 
   const [reports, setReports] = useState<SiteReport[]>([]);
@@ -148,10 +155,6 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   // local garde la version affichée.
   // Le numéro d'un compte-rendu encore en attente est provisoire : il ne part jamais
   // dans une modification (le serveur le renumérotait, ou refusait un doublon).
-  // Dernière liste connue : l'annulation d'une diffusion repart de la version la plus récente.
-  const reportsRef = useRef(reports);
-  reportsRef.current = reports;
-
   const persistReport = async (
     updated: SiteReport,
     body: Record<string, unknown> = (() => {
@@ -366,30 +369,77 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     }
   };
 
-  // « Diffuser » ne fait que passer le compte-rendu au statut diffusé (aucun
-  // envoi n'est fait d'ici) : on le confirme, puis un toast permet de revenir en arrière.
-  const diffuserCompteRendu = async () => {
-    if (!selectedReport || selectedReport.statut === 'diffuse') return;
-    const precedent = selectedReport.statut || 'brouillon';
-    const ok = await confirmAction({
-      title: `Marquer le compte-rendu n° ${selectedReport.report_number} comme diffusé ?`,
-      message: "Le statut passe à « Diffusé » et le compte-rendu compte dans les indicateurs du chantier. Aucun e-mail n'est envoyé depuis ce bouton : exportez le PDF pour le transmettre aux entreprises.",
-      confirmLabel: 'Marquer comme diffusé',
-      cancelLabel: 'Annuler',
-      tone: 'primary',
-    });
-    if (!ok) return;
-    await updateReportField('statut', 'diffuse');
-    showToast(`Compte-rendu n° ${selectedReport.report_number} marqué comme diffusé.`, 'success', {
-      duration: 6000,
-      action: {
-        label: 'Annuler',
-        onClick: () => {
-          const courant = reportsRef.current.find(r => r.id === selectedReport.id);
-          if (courant) void persistReport({ ...courant, statut: precedent }).catch(() => setSaveError(true));
-        },
-      },
-    });
+  // ── Diffusion par e-mail ────────────────────────────────────────────────────
+  // Le PDF part avec les identifiants des contacts cochés ; le serveur retrouve
+  // lui-même adresses et observations (server/routes/siteReportDiffusion.ts).
+  const diffusionRecipients = useMemo(
+    () => buildDiffusionRecipients({
+      lots: lots_list,
+      stakeholders: project.stakeholders_list || [],
+      contacts,
+      observations: reportObservations,
+    }),
+    [lots_list, project.stakeholders_list, contacts, reportObservations],
+  );
+
+  const openDiffusion = () => {
+    if (!selectedReport) return;
+    if (!navigator.onLine) { showToast('La diffusion nécessite une connexion : reconnectez-vous puis réessayez.', 'error'); return; }
+    // Une saisie encore en attente de synchronisation n'est pas sur le serveur : le message partirait sans elle.
+    if (selectedReport.pendingSync || reportObservations.some(o => o.pendingSync)) {
+      showToast('Des saisies de ce compte-rendu ne sont pas encore synchronisées. Attendez la synchronisation avant de diffuser.', 'error');
+      return;
+    }
+    setDiffusionResult(null);
+    setDiffusionError(null);
+    setDiffusionOpen(true);
+  };
+
+  const sendDiffusion = async (contactIds: string[]) => {
+    if (!selectedReport || contactIds.length === 0) return;
+    if (!settings) { setDiffusionError('Réglages du cabinet non chargés, réessayez dans un instant.'); return; }
+    setDiffusionBusy(true);
+    setDiffusionError(null);
+    try {
+      const { exportSiteReportToPDF } = await import('../lib/siteReportExport');
+      const { blob, filename } = await exportSiteReportToPDF(
+        selectedReport,
+        reportNotes,
+        observationsByLot,
+        { id: project.id, name: project.name, project_code: project.project_code, address: project.address, client: project.client },
+        lots_list,
+        project.stakeholders_list || [],
+        contacts,
+        settings,
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), download: false },
+      );
+      const body = new FormData();
+      body.append('file', blob, filename);
+      body.append('contact_ids', JSON.stringify(contactIds));
+      // Pas d'apiFetch ici : il imposerait un Content-Type JSON, or un envoi multipart doit
+      // laisser le navigateur poser sa propre limite.
+      const headers = new Headers();
+      const token = await getAccessToken();
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      applyTenantHeader(headers);
+      const res = await baseFetchJson<DiffusionResult & { statut?: string }>(`/api/reports/${selectedReport.id}/diffuse`, { method: 'POST', body, headers });
+      setDiffusionResult(res);
+      const diffused = { ...selectedReport, statut: 'diffuse' as SiteReport['statut'] };
+      setReports(prev => prev.map(r => (r.id === diffused.id ? { ...r, statut: diffused.statut } : r)));
+      db.siteReportsCache.put(diffused).catch(() => {});
+      showToast(
+        res.failed.length > 0
+          ? `Diffusé à ${res.sent.length} destinataire${res.sent.length > 1 ? 's' : ''}, ${res.failed.length} échec${res.failed.length > 1 ? 's' : ''}.`
+          : `Compte-rendu diffusé à ${res.sent.length} destinataire${res.sent.length > 1 ? 's' : ''}.`,
+        res.failed.length > 0 ? 'error' : 'success',
+        { duration: 6000 },
+      );
+    } catch (err) {
+      console.error('Diffusion du compte-rendu :', err);
+      setDiffusionError((err as Error).message || 'La diffusion a échoué.');
+    } finally {
+      setDiffusionBusy(false);
+    }
   };
 
   const setAttendance = (index: number, patch: Partial<SiteReportAttendee>) => {
@@ -811,10 +861,9 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-lg text-xs font-bold transition">
                           <IconCopy size={14} /> Dupliquer
                         </button>
-                        <button type="button" onClick={() => void diffuserCompteRendu()}
-                          disabled={selectedReport.statut === 'diffuse'}
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 disabled:opacity-50 text-white rounded-lg text-xs font-bold transition">
-                          <IconSend size={14} /> Diffuser
+                        <button type="button" onClick={openDiffusion}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
+                          <IconSend size={14} /> {selectedReport.statut === 'diffuse' ? 'Rediffuser' : 'Diffuser'}
                         </button>
                       </div>
                     </div>
@@ -1168,7 +1217,17 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       </div>
 
       <Toast toast={toast} />
-      {confirmDialog}
+      <DiffusionDialog
+        open={diffusionOpen}
+        reportNumber={selectedReport?.report_number ?? ''}
+        alreadyDiffused={selectedReport?.statut === 'diffuse'}
+        recipients={diffusionRecipients}
+        busy={diffusionBusy}
+        result={diffusionResult}
+        error={diffusionError}
+        onSend={ids => void sendDiffusion(ids)}
+        onClose={() => setDiffusionOpen(false)}
+      />
 
       {isDecoupageOpen && (
         <DecoupagePanelChantier decoupage={decoupage} projectId={project.id} onSave={saveDecoupage} onClose={() => setIsDecoupageOpen(false)} />
