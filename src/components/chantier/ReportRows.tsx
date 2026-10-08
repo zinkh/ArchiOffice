@@ -2,8 +2,13 @@ import React from 'react';
 import { IconCamera, IconTrash, IconX } from '@tabler/icons-react';
 import { SignedImage } from '../SignedImage';
 import { cn } from '../../lib/utils';
-import type { Observation, SiteReportNote, SiteReport } from '../../types';
-import { TYPE_COLORS, TYPE_LABELS, URGENCE_LABELS } from './chantierConstants';
+import type { Observation, ProjectLot, SiteReportNote, SiteReport } from '../../types';
+import { DecoupageSelects } from './DecoupageFields';
+import { openSignedUrl } from '../../lib/signedStorageUrl';
+import { isReprenable } from '../../lib/observationsReserves';
+import type { DecoupageChantier } from '../../lib/chantierDecoupage';
+import { OBSERVATION_STATUTS, STATUT_COLORS, TYPE_COLORS, TYPE_LABELS } from './chantierConstants';
+import { IconArrowRight } from '@tabler/icons-react';
 import { CommitTextarea, ROW_FIELD, TOUCH_TARGET } from './fields';
 
 // Chaque ligne tient sur UNE rangée à partir de 768 px, et s'empile en carte
@@ -108,14 +113,24 @@ export function DecisionRow({ decision, onChange, onRemove }: {
   );
 }
 
-export function ObservationRow({ obs, onSave, onUploadPhoto }: {
+export function ObservationRow({ obs, lots, decoupage, onSave, onUploadPhoto, onChangeLot, onDelete, onToReserve }: {
   obs: Observation;
+  lots: ProjectLot[];
+  decoupage: DecoupageChantier;
   onSave: (id: string, field: string, value: any) => void;
   onUploadPhoto: (id: string, file: File) => void;
+  onChangeLot: (id: string, lotId: string) => void;
+  onDelete: (id: string) => void;
+  onToReserve: (id: string) => void;
 }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const photos = obs.photos || [];
+  const statut = obs.statut || 'À faire';
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-2 p-2.5 md:p-2 rounded-lg bg-[var(--tblr-surface-2)] group">
+      {obs.number != null && (
+        <span className="order-1 shrink-0 font-mono text-xs text-[var(--tblr-muted)]" title="Numéro de l'observation dans l'opération">#{String(obs.number).padStart(2, '0')}</span>
+      )}
       <select
         aria-label="Nature"
         className={cn('order-1 shrink-0 text-[0.6875rem] font-bold uppercase px-2 py-1.5 rounded border-none cursor-pointer', TYPE_COLORS[obs.type || 'observation'], TOUCH_TARGET)}
@@ -134,12 +149,17 @@ export function ObservationRow({ obs, onSave, onUploadPhoto }: {
       {obs.pendingSync && (
         <span className="order-3 shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
       )}
-      {obs.urgence === 'bloquant' && (
-        <span className="order-3 shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-red-600 text-white">{URGENCE_LABELS.bloquant}</span>
-      )}
+      <select
+        aria-label="Statut"
+        className={cn('order-2 md:order-3 shrink-0 text-[0.6875rem] font-bold uppercase tracking-wider px-2 py-1.5 rounded border-none cursor-pointer', STATUT_COLORS[statut], TOUCH_TARGET)}
+        value={statut}
+        onChange={e => onSave(obs.id, 'statut', e.target.value)}
+      >
+        {OBSERVATION_STATUTS.map(s => <option key={s} value={s}>{s}</option>)}
+      </select>
       <select
         aria-label="Urgence"
-        className={cn('order-2 md:order-4 shrink-0 text-xs px-2 py-1.5 rounded border border-[var(--tblr-border)] bg-transparent', TOUCH_TARGET)}
+        className={cn('order-2 md:order-4 shrink-0 text-xs px-2 py-1.5 rounded border border-[var(--tblr-border)] bg-transparent', obs.urgence === 'bloquant' && 'bg-red-600 text-white border-red-600', TOUCH_TARGET)}
         value={obs.urgence || 'normal'}
         onChange={e => onSave(obs.id, 'urgence', e.target.value)}
       >
@@ -167,9 +187,50 @@ export function ObservationRow({ obs, onSave, onUploadPhoto }: {
       </button>
       <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(obs.id, f); e.target.value = ''; }} />
-      {(obs.photos || []).length > 0 && (
-        <span className="order-7 shrink-0 text-[0.6875rem] text-[var(--tblr-muted)]">{obs.photos!.length} photo{obs.photos!.length > 1 ? 's' : ''}</span>
-      )}
+      <button type="button" aria-label="Supprimer l'observation" title="Supprimer" onClick={() => onDelete(obs.id)}
+        className={cn('order-4 md:order-7 shrink-0 p-1 text-zinc-400 hover:text-red-500 flex items-center justify-center', TOUCH_TARGET)}>
+        <IconTrash size={16} />
+      </button>
+
+      {/* Mêmes informations que les colonnes de l'onglet Observations : lot, bâtiment / phase, CR émis et levé, photos, réserve AOR. */}
+      <div className="order-8 basis-full flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--tblr-muted)]">
+        <select
+          aria-label="Lot"
+          className={cn('text-xs px-2 py-1.5 rounded border border-[var(--tblr-border)] bg-transparent max-w-full', TOUCH_TARGET)}
+          value={obs.lot_id || ''}
+          onChange={e => onChangeLot(obs.id, e.target.value)}
+        >
+          <option value="">Sans lot</option>
+          {lots.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
+        </select>
+        <DecoupageSelects
+          decoupage={decoupage}
+          batimentId={obs.batiment_id}
+          phaseId={obs.phase_id}
+          className="flex flex-wrap gap-2"
+          onChange={patch => {
+            const [champ, valeur] = Object.entries(patch)[0] as [string, string | null];
+            onSave(obs.id, champ, valeur || '');
+          }}
+        />
+        {obs.created_report_number ? <span title="Compte-rendu où l'observation a été émise">CR émis <span className="font-mono">#{String(obs.created_report_number).padStart(2, '0')}</span></span> : null}
+        {obs.resolved_report_number ? <span title="Compte-rendu où l'observation a été levée" className="text-green-600 dark:text-green-400">CR levée <span className="font-mono">#{String(obs.resolved_report_number).padStart(2, '0')}</span></span> : null}
+        {photos.length > 0 && (
+          <button type="button" onClick={() => openSignedUrl(photos[0])} className="text-[var(--tblr-primary)] hover:underline">
+            {photos.length} photo{photos.length > 1 ? 's' : ''}
+          </button>
+        )}
+        {obs.reserve_id ? (
+          <span className="inline-flex items-center gap-1 font-semibold" title="Réserve de l'AOR qui reprend cette observation">
+            <IconArrowRight size={13} /> Réserve AOR n° {obs.reserve_number ?? '—'}
+          </span>
+        ) : isReprenable(obs) && !obs.pendingSync ? (
+          <button type="button" onClick={() => onToReserve(obs.id)} className="inline-flex items-center gap-1 text-[var(--tblr-primary)] hover:underline" title="Reprendre en réserve de l'AOR">
+            <IconArrowRight size={13} /> En réserve
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
+

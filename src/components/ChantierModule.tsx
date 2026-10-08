@@ -33,6 +33,8 @@ import { DraftInput, parseDays } from './chantier/fields';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
+import { useConfirmDialog } from './ui/ConfirmDialog';
+import { apiFetch } from '../lib/api';
 import { CONCERNED_OPTIONS } from '../lib/siteReportPresence';
 
 interface ChantierModuleProps {
@@ -77,6 +79,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     [lotsBruts],
   );
   const { toast, showToast } = useToastWithUndo();
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
   const [diffusionOpen, setDiffusionOpen] = useState(false);
   const [diffusionBusy, setDiffusionBusy] = useState(false);
   const [diffusionResult, setDiffusionResult] = useState<DiffusionResult | null>(null);
@@ -542,6 +545,43 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     try {
       await queuedJsonRequest({ entity: 'siteReportNote', id: crypto.randomUUID(), method: 'DELETE', url: `/api/notes/${noteId}` });
     } catch (err) { console.error('deleteNote failed:', err); }
+  };
+
+  const changeObservationLot = (obsId: string, lotId: string) => {
+    const lot = lots_list.find(l => l.id === lotId);
+    setReportObservations(prev => prev.map(o => (o.id === obsId ? { ...o, lot_id: lotId, lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined } : o)));
+    void saveObservationField(obsId, 'lot_id', lotId);
+  };
+
+  const deleteObservation = async (obsId: string) => {
+    const confirmed = await confirmAction({
+      title: 'Supprimer cette observation ?',
+      message: "Elle disparaît aussi des autres comptes-rendus et de l'onglet Observations.",
+      confirmLabel: 'Supprimer', cancelLabel: 'Annuler', tone: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      await queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'DELETE', url: `/api/observations/${obsId}` });
+      setReportObservations(prev => prev.filter(o => o.id !== obsId));
+      fetchAllObservations().catch(() => {});
+    } catch (err) { console.error(err); showToast("L'observation n'a pas pu être supprimée.", 'error'); }
+  };
+
+  // Reprise en réserve de l'AOR : mêmes confirmation et effet que dans l'onglet Observations.
+  const observationToReserve = async (obsId: string) => {
+    const confirmed = await confirmAction({
+      title: "Reprendre cette observation en réserve de l'AOR ?",
+      message: "Une réserve est créée dans l'onglet Réception (AOR), avec le lot, l'entreprise et le délai de l'observation. L'observation reste dans les comptes-rendus.",
+      confirmLabel: 'Reprendre en réserve', cancelLabel: 'Annuler', tone: 'primary',
+    });
+    if (!confirmed) return;
+    try {
+      const created = await apiFetch<{ reserve_id: string; number: number }>(`/api/observations/${obsId}/to-reserve`, { method: 'POST' });
+      setReportObservations(prev => prev.map(o => (o.id === obsId ? { ...o, reserve_id: created.reserve_id, reserve_number: created.number } : o)));
+      showToast(`Réserve n° ${created.number} créée dans l'AOR.`, 'success');
+      onReservesChanged?.();
+      fetchAllObservations().catch(() => {});
+    } catch (err: any) { showToast(err?.message || 'La reprise en réserve a échoué.', 'error'); }
   };
 
   const uploadNotePhoto = async (noteId: string, file: File) => {
@@ -1192,7 +1232,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           </div>
                           <div className="space-y-1.5">
                             {group.items.map(o => (
-                              <ObservationRow key={o.id} obs={o} onSave={saveObservationField} onUploadPhoto={uploadObservationPhoto} />
+                              <ObservationRow key={o.id} obs={o} lots={lots_list} decoupage={decoupage} onSave={saveObservationField} onUploadPhoto={uploadObservationPhoto} onChangeLot={changeObservationLot} onDelete={deleteObservation} onToReserve={observationToReserve} />
                             ))}
                           </div>
                         </div>
@@ -1268,6 +1308,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       </div>
 
       <Toast toast={toast} />
+      {confirmDialog}
       <DiffusionDialog
         open={diffusionOpen}
         reportNumber={selectedReport?.report_number ?? ''}

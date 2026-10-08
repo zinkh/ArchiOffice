@@ -1726,6 +1726,12 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   La photo ouvre l'appareil (`capture="environment"`) et crée l'observation qui la porte.
 - Libellés : la nature `reserve` s'affiche « À lever » (`chantierConstants.ts`) ; « réserve »
   est réservé à l'AOR.
+- **« Observations par lot » du CR porte les mêmes informations que l'onglet Observations**
+  (`ObservationsTable`) : numéro, nature, texte, statut, urgence, délai, lot (modifiable, l'observation
+  change alors de groupe), bâtiment / phase quand le registre existe, CR émis et levé, photos, reprise
+  en réserve de l'AOR (même confirmation, même route `/to-reserve`) et suppression confirmée. Les
+  statuts et couleurs vivent dans `chantierConstants.ts` ; une nouvelle colonne de l'onglet
+  Observations doit apparaître aussi dans `ObservationRow`.
 
 ### Export PDF du compte-rendu : format, W/D, photos de rubriques
 
