@@ -3106,6 +3106,22 @@ soit la préférence d'envoi de mail de la règle) et les mentions `@` de
 non par cabinet : `profiles.notification_prefs` (`{ muted: [catégories] }`),
 réglé depuis `src/components/PushNotificationsCard.tsx`.
 
+### Icône et écran de lancement de la PWA (Android)
+
+Les icônes de `public/` sont **opaques, fond blanc** : l'ancien PNG transparent
+plein cadre s'affichait sur fond noir au splash Android et, déclaré aussi
+`maskable`, était rogné par le masque (logo trop grand). `icon-192/512.png`
+(« any », logo à 62 %), `icon-maskable-512.png` (logo à 56 %, zone de sécurité)
+et `apple-touch-icon.png` sont régénérés ainsi ; ne pas remettre de
+transparence ni réutiliser l'icône « any » comme `maskable`.
+
+Le nom affiché au splash est celui du manifeste, sans mécanisme de traduction :
+`GET /manifest.webmanifest` (`server.ts`, production) le sert localisé d'après
+`Accept-Language` (`server/manifestLocale.ts`, fr/en, repli anglais, testé).
+Android fige nom et icône à l'installation du WebAPK : un appareil déjà
+installé doit réinstaller l'application, ou attendre la mise à jour que Chrome
+déclenche seul.
+
 ### Écran de démarrage (client Electron)
 
 `electron/splash.html` (+ `electron/splashPreload.cjs`) remplace la fenêtre

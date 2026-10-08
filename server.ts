@@ -143,6 +143,7 @@ import { startNotificationArchiver } from "./server/notificationArchiver";
 import { startLifecycleEmails } from "./server/lifecycleEmails";
 import { startPlanChanges } from "./server/planChanges";
 import { startDunning } from "./server/dunning";
+import { localizeManifest } from "./server/manifestLocale";
 import { PLAN_LIMITS } from "./src/lib/billing";
 
 // Memory storage — files are held in req.file.buffer, uploaded to Supabase Storage
@@ -1238,6 +1239,20 @@ export async function createApp() {
 
   } else {
     // Production serving
+    // Manifeste PWA localisé (nom du splash Android, description) selon la
+    // langue de l'appareil ; avant express.static pour prendre le pas sur le
+    // fichier statique, qui reste le repli s'il est illisible.
+    app.get("/manifest.webmanifest", (req, res, next) => {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(distPath, "manifest.webmanifest"), "utf-8"));
+        res
+          .type("application/manifest+json")
+          .set({ Vary: "Accept-Language", "Cache-Control": "no-cache" })
+          .send(JSON.stringify(localizeManifest(raw, req.headers["accept-language"])));
+      } catch {
+        next();
+      }
+    });
     app.use(express.static(distPath));
 
     // Specifically handle missing assets (like CSS, JS, etc.) to avoid sending index.html and causing loops
