@@ -11,7 +11,7 @@ import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import { loadPhotoDataUrl } from './planRender';
 import { autoSaveDocument } from './autoSaveDocument';
-import { attendeeStatus, lotPresenceStatus } from './siteReportPresence';
+import { attendeeStatus, lotPresenceStatus, concernedLabel, pdfOrientation } from './siteReportPresence';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
 
 export interface SiteReportExportProject {
@@ -34,6 +34,8 @@ export interface SiteReportExportOptions {
   onProgress?: (message: string) => void;
   /** Faux : le PDF n'est pas téléchargé, l'appelant en fait autre chose (diffusion par e-mail). Vrai par défaut. */
   download?: boolean;
+  /** Faux : les photos des rubriques ne sont pas imprimées. Vrai par défaut. */
+  includeRubriquePhotos?: boolean;
 }
 
 export interface SiteReportPdf {
@@ -86,7 +88,8 @@ export async function exportSiteReportToPDF(
   const progress = opts.onProgress || (() => {});
   const contactById = new Map(contacts.map(c => [c.id, c]));
 
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const orientation = pdfOrientation(report.pageFormat);
+  const doc = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
   const logo = await loadLogoDataUrl(settings.logoUrl);
   const letterhead = {
     title: `Compte rendu de chantier n° ${report.report_number}`,
@@ -197,7 +200,7 @@ export async function exportSiteReportToPDF(
 
   // ── Page 2 : tableau des lots ──────────────────────────────────────────
   progress('Tableau des lots…');
-  doc.addPage('a4', 'portrait');
+  doc.addPage('a4', orientation);
   y = drawAgencyHeader(doc, settings, letterhead);
   doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(...GRIS_TEXTE);
   doc.text('Suivi des lots', MARGIN, y + 2);
@@ -206,7 +209,7 @@ export async function exportSiteReportToPDF(
   const tracking = report.lot_tracking || [];
   autoTable(doc, {
     startY: y,
-    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Retard docs (j)', 'Intempéries (j)', 'Convoqué suiv.', 'Lieu', 'Heure']],
+    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Retard docs (j)', 'Intempéries (j)', 'Convoqué suiv.', 'Lieu', 'Heure', 'W/D']],
     body: [...lots].sort((a, b) => a.lot_number.localeCompare(b.lot_number, 'fr', { numeric: true })).map(lot => {
       const t = tracking.find(x => x.lot_id === lot.id);
       const contact = lot.contact_id ? contactById.get(lot.contact_id) : undefined;
@@ -227,14 +230,42 @@ export async function exportSiteReportToPDF(
         t?.convoque_reunion_suivante ? 'Oui' : '',
         t?.lieu ?? 'Sur site',
         t?.heure || '',
+        concernedLabel(t?.concerned),
       ];
     }),
     styles: { fontSize: 7, textColor: GRIS_TEXTE, cellPadding: 1.4, overflow: 'linebreak' },
     headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 6.8 },
     alternateRowStyles: { fillColor: GRIS_FOND },
-    columnStyles: { 0: { cellWidth: 8 }, 4: { fontStyle: 'bold' } },
+    columnStyles: { 0: { cellWidth: 8 }, 4: { fontStyle: 'bold' }, 13: { halign: 'center', fontStyle: 'bold' } },
     margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
   });
+
+  const pageH = () => doc.internal.pageSize.getHeight();
+  const thumbsPerRow = () => Math.max(1, Math.floor((contentW() + THUMB_GAP) / (THUMB_W + THUMB_GAP)));
+  const ensureRoom = (needed: number) => {
+    if (y + needed > pageH() - FOOTER_RESERVE) {
+      doc.addPage('a4', orientation);
+      y = drawAgencyHeader(doc, settings, letterhead);
+    }
+  };
+  /** Planche de vignettes (une photo illisible est ignorée) ; ne bouge pas `y` s'il n'y en a aucune. */
+  const drawThumbnails = async (urls: string[]) => {
+    let col = 0;
+    let drawn = 0;
+    for (const url of urls) {
+      const loaded = await loadPhotoDataUrl(url);
+      if (!loaded) continue;
+      if (col === thumbsPerRow()) { col = 0; y += THUMB_H + 6; }
+      if (col === 0) ensureRoom(THUMB_H + 6);
+      const x = MARGIN + col * (THUMB_W + THUMB_GAP);
+      const ratio = loaded.width / loaded.height;
+      let w = THUMB_W, h = THUMB_W / ratio;
+      if (h > THUMB_H) { h = THUMB_H; w = THUMB_H * ratio; }
+      try { doc.addImage(loaded.dataUrl, 'JPEG', x + (THUMB_W - w) / 2, y + (THUMB_H - h) / 2, w, h); } catch { /* image illisible : ignorée */ }
+      col++; drawn++;
+    }
+    if (drawn > 0) y += THUMB_H + 8;
+  };
 
   // ── Rubriques personnalisées ────────────────────────────────────────────
   const byCategory = new Map<string, SiteReportNote[]>();
@@ -244,12 +275,12 @@ export async function exportSiteReportToPDF(
   }
   if (byCategory.size > 0) {
     progress('Rubriques…');
-    doc.addPage('a4', 'portrait');
+    doc.addPage('a4', orientation);
     y = drawAgencyHeader(doc, settings, letterhead);
     for (const [category, items] of byCategory) {
       const sorted = [...items].sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''));
       if (y > doc.internal.pageSize.getHeight() - FOOTER_RESERVE - 20) {
-        doc.addPage('a4', 'portrait');
+        doc.addPage('a4', orientation);
         y = drawAgencyHeader(doc, settings, letterhead);
       }
       doc.setFillColor(...GRIS_FOND);
@@ -272,23 +303,17 @@ export async function exportSiteReportToPDF(
         columnStyles: { 0: { cellWidth: 20 }, 2: { cellWidth: 28 }, 3: { cellWidth: 22 }, 4: { cellWidth: 20, fontStyle: 'bold' } },
         margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
       });
-      y = (doc as any).lastAutoTable.finalY + 6;
+      y = (doc as any).lastAutoTable.finalY + 4;
+      if (opts.includeRubriquePhotos !== false) await drawThumbnails(sorted.flatMap(n => n.photos || []));
+      y += 2;
     }
   }
 
   // ── Une section par lot (historique daté + photos) ──────────────────────
   if (observationsByLot.length > 0) {
-    doc.addPage('a4', 'portrait');
+    doc.addPage('a4', orientation);
     y = drawAgencyHeader(doc, settings, letterhead);
   }
-  const pageH = () => doc.internal.pageSize.getHeight();
-  const ensureRoom = (needed: number) => {
-    if (y + needed > pageH() - FOOTER_RESERVE) {
-      doc.addPage('a4', 'portrait');
-      y = drawAgencyHeader(doc, settings, letterhead);
-    }
-  };
-
   for (const group of observationsByLot) {
     progress(`Lot ${group.title}…`);
     ensureRoom(14);
@@ -316,23 +341,7 @@ export async function exportSiteReportToPDF(
     });
     y = (doc as any).lastAutoTable.finalY + 4;
 
-    const photoUrls = group.items.flatMap(o => o.photos || []);
-    if (photoUrls.length) {
-      let col = 0;
-      for (const url of photoUrls) {
-        const loaded = await loadPhotoDataUrl(url);
-        if (!loaded) continue;
-        if (col === 4) { col = 0; y += THUMB_H + 6; }
-        if (col === 0) ensureRoom(THUMB_H + 6);
-        const x = MARGIN + col * (THUMB_W + THUMB_GAP);
-        const ratio = loaded.width / loaded.height;
-        let w = THUMB_W, h = THUMB_W / ratio;
-        if (h > THUMB_H) { h = THUMB_H; w = THUMB_H * ratio; }
-        try { doc.addImage(loaded.dataUrl, 'JPEG', x + (THUMB_W - w) / 2, y + (THUMB_H - h) / 2, w, h); } catch { /* image illisible : ignorée */ }
-        col++;
-      }
-      y += THUMB_H + 8;
-    }
+    await drawThumbnails(group.items.flatMap(o => o.photos || []));
 
     doc.setDrawColor(...GRIS_FILET); doc.setLineWidth(0.25);
     doc.line(MARGIN, y, pageW() - MARGIN, y);

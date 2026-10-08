@@ -21,3 +21,22 @@ export function lotPresenceStatus(
   if (row) return attendeeStatus(row);
   return trackingStatus || 'P';
 }
+
+export type LotConcerned = 'W' | 'D' | 'WD';
+
+export const CONCERNED_OPTIONS: { value: LotConcerned | ''; label: string; long: string }[] = [
+  { value: '', label: '', long: 'Aucun' },
+  { value: 'W', label: 'W', long: 'Travaux (W)' },
+  { value: 'D', label: 'D', long: 'Documents (D)' },
+  { value: 'WD', label: 'W/D', long: 'Travaux et documents (W/D)' },
+];
+
+/** Mention « travaux / documents » d'un lot, telle qu'imprimée au tableau de suivi : W, D, W/D ou vide. */
+export function concernedLabel(concerned?: string): string {
+  return CONCERNED_OPTIONS.find(o => o.value === concerned)?.label ?? '';
+}
+
+/** Orientation de la page du PDF : paysage seulement si le compte-rendu le demande. */
+export function pdfOrientation(pageFormat?: string | null): 'portrait' | 'landscape' {
+  return pageFormat === 'landscape' ? 'landscape' : 'portrait';
+}

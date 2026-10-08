@@ -1,5 +1,6 @@
 import React from 'react';
-import { IconCamera, IconTrash } from '@tabler/icons-react';
+import { IconCamera, IconTrash, IconX } from '@tabler/icons-react';
+import { SignedImage } from '../SignedImage';
 import { cn } from '../../lib/utils';
 import type { Observation, SiteReportNote, SiteReport } from '../../types';
 import { TYPE_COLORS, TYPE_LABELS, URGENCE_LABELS } from './chantierConstants';
@@ -11,11 +12,15 @@ import { CommitTextarea, ROW_FIELD, TOUCH_TARGET } from './fields';
 
 const DELETE_BUTTON = cn('p-1 text-zinc-400 hover:text-red-500 flex items-center justify-center', TOUCH_TARGET);
 
-export function RubriqueRow({ note, onSave, onDelete }: {
+export function RubriqueRow({ note, onSave, onDelete, onUploadPhoto, onRemovePhoto }: {
   note: SiteReportNote;
   onSave: (id: string, field: keyof SiteReportNote, value: string) => void;
   onDelete: (id: string) => void;
+  onUploadPhoto: (id: string, file: File) => void;
+  onRemovePhoto: (id: string, url: string) => void;
 }) {
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const photos = note.photos || [];
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-2 p-2.5 md:p-2 rounded-lg bg-[var(--tblr-surface-2)]">
       <input
@@ -48,9 +53,26 @@ export function RubriqueRow({ note, onSave, onDelete }: {
         <option value="open">Ouvert</option>
         <option value="done">Soldé</option>
       </select>
-      <button type="button" aria-label="Supprimer l'entrée" onClick={() => onDelete(note.id)} className={cn('order-3 md:order-5', DELETE_BUTTON)}>
+      <button type="button" aria-label="Ajouter une photo à la rubrique" title="Ajouter une photo" onClick={() => fileInputRef.current?.click()}
+        className={cn('order-3 md:order-5 p-1 text-zinc-400 hover:text-[var(--tblr-primary)] flex items-center justify-center', TOUCH_TARGET)}>
+        <IconCamera size={16} />
+      </button>
+      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(note.id, f); e.target.value = ''; }} />
+      <button type="button" aria-label="Supprimer l'entrée" onClick={() => onDelete(note.id)} className={cn('order-3 md:order-6', DELETE_BUTTON)}>
         <IconTrash size={16} />
       </button>
+      {photos.length > 0 && (
+        <div className="order-6 md:order-7 basis-full flex flex-wrap gap-2">
+          {photos.map((url, i) => (
+            <div key={url} className="relative h-14 w-14 rounded-md overflow-hidden bg-zinc-100 dark:bg-zinc-800">
+              <SignedImage src={url} alt={`Photo ${i + 1} de la rubrique`} className="h-full w-full object-cover" />
+              <button type="button" aria-label={`Retirer la photo ${i + 1}`} onClick={() => onRemovePhoto(note.id, url)}
+                className="absolute right-0 top-0 rounded-bl bg-black/60 p-0.5 text-white"><IconX size={12} /></button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

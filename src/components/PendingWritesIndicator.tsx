@@ -14,6 +14,7 @@ const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
   gpaReservePhoto: 'Photo de réserve GPA',
   observation: 'Observation',
   observationPhoto: 'Photo d\'observation',
+  siteReportNotePhoto: 'Photo de rubrique',
   project: 'Projet',
   siteReport: 'Compte-rendu de chantier',
   siteReportNote: 'Rubrique de compte-rendu',

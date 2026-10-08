@@ -1347,6 +1347,8 @@ export interface SiteReportNote {
   text: string;
   lot_concerne?: string;
   photo_url?: string;
+  /** Photos de la rubrique (URL de stockage privé), incluses ou non au PDF selon le réglage d'export. */
+  photos?: string[];
   position?: { x: number; y: number };
   description?: string;
   statut?: 'A FAIRE' | 'EN COURS' | 'LEVÉE' | 'URGENT';

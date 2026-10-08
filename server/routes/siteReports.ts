@@ -4,6 +4,9 @@
 // from the project's previous report, so a recurring issue doesn't need to
 // be re-entered every week.
 import type { Express } from 'express';
+import { tenantScopedFrom } from '../tenantScopedFrom';
+import { sanitizeFilename } from '../sanitizeFilename';
+import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -11,12 +14,13 @@ export interface RouteDeps {
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   captureWithContext: (error: any, context: Record<string, any>) => void;
+  uploadToStorage?: (bucket: string, storagePath: string, buffer: Buffer, mimetype: string) => Promise<string>;
 }
 
 /** Identifiant de bâtiment/phase du registre du chantier : texte court, sinon ignoré. */
 const cleanRef = (v: unknown): string => (typeof v === 'string' && v.length <= 64 ? v : '');
 
-export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext }: RouteDeps) {
+export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, uploadToStorage }: RouteDeps) {
   app.get("/api/projects/:projectId/reports", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -212,6 +216,53 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     } catch (error) {
       console.error("[PUT /api/notes/:noteId]", error);
       res.status(500).json({ error: "Failed to update note" });
+    }
+  });
+
+  // Photos d'une rubrique : même mécanique que les photos d'observation (tableau d'URL,
+  // id client pour rejouer un envoi hors ligne sans doublon).
+  app.post("/api/notes/:noteId/photos", handleSingleSitePhotoUpload('file'), async (req: any, res: any) => {
+    try {
+      if (!uploadToStorage) return res.status(503).json({ error: "Stockage indisponible" });
+      const tenantId = await getTenantId(req.user.id);
+      const { noteId } = req.params;
+      const file = req.file;
+      if (!file) return res.status(400).json({ error: "No file uploaded" });
+      const sniffedMime = sniffImageMime(file.buffer);
+      if (!sniffedMime) return res.status(400).json({ error: "Type de fichier non autorisé. Formats acceptés : PNG, JPEG, WebP." });
+      const { data: note } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_report_notes').select('photos').eq('id', noteId).maybeSingle();
+      if (!note) return res.status(404).json({ error: "Note not found" });
+      const clientPhotoId = typeof req.body?.id === 'string' && req.body.id ? req.body.id : null;
+      const existing: string[] = (note as any).photos || [];
+      if (clientPhotoId && existing.some(url => url.includes(`/${clientPhotoId}-`))) return res.status(200).json({ photos: existing });
+      const { buffer, mimetype } = await resizeImage(file.buffer, sniffedMime, MEETING_PHOTO_MAX_DIMENSION);
+      const photoId = clientPhotoId || crypto.randomUUID();
+      const file_url = await uploadToStorage('meeting-photos', `${tenantId}/notes/${noteId}/${photoId}-${sanitizeFilename(file.originalname)}`, buffer, mimetype);
+      const photos = [...existing, file_url];
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_report_notes').update({ photos }).eq('id', noteId);
+      if (error) throw error;
+      res.status(201).json({ photos });
+    } catch (error: any) {
+      console.error("[POST /api/notes/:noteId/photos]", error);
+      res.status(500).json({ error: error.message || "Failed to upload photo" });
+    }
+  });
+
+  app.put("/api/notes/:noteId/photos", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { noteId } = req.params;
+      const { data: note } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_report_notes').select('photos').eq('id', noteId).maybeSingle();
+      if (!note) return res.status(404).json({ error: "Note not found" });
+      // Retrait seulement : on ne peut ni ajouter ni réécrire une URL depuis le client.
+      const keep = Array.isArray(req.body?.photos) ? new Set(req.body.photos.filter((u: unknown) => typeof u === 'string')) : new Set<string>();
+      const photos = ((note as any).photos || []).filter((u: string) => keep.has(u));
+      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_report_notes').update({ photos }).eq('id', noteId);
+      if (error) throw error;
+      res.json({ photos });
+    } catch (error) {
+      console.error("[PUT /api/notes/:noteId/photos]", error);
+      res.status(500).json({ error: "Failed to update photos" });
     }
   });
 
