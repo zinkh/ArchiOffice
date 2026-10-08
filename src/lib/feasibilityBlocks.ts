@@ -226,9 +226,49 @@ export function feasibilityFilename(p: ProposalLike, ext: 'pdf' | 'docx'): strin
   return `Etude_faisabilite_${sanitizeFilename(p.reference || '')}_${sanitizeFilename(p.title || '')}.${ext}`.replace(/_+/g, '_');
 }
 
+const compactText = (v: string) => v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Adresse du terrain, sans répéter « code postal ville » quand l'adresse les porte déjà. */
+export function terrainLabel(adresse?: string | null, cpVille?: string | null): string {
+  const a = (adresse || '').trim();
+  const c = (cpVille || '').trim();
+  if (!c) return a;
+  if (!a) return c;
+  return compactText(a).includes(compactText(c)) ? a : `${a}, ${c}`;
+}
+
+export interface InlineRun { text: string; bold?: boolean; italics?: boolean }
+
+/** Découpe un texte en segments gras / italique (`**gras**`, `*italique*`), les marqueurs retirés. */
+export function parseInlineMarkdown(text: string): InlineRun[] {
+  const runs: InlineRun[] = [];
+  const re = /\*\*([^*\n]+)\*\*|\*([^*\s][^*\n]*?)\*/g;
+  let last = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last) runs.push({ text: text.slice(last, m.index) });
+    runs.push(m[1] !== undefined ? { text: m[1], bold: true } : { text: m[2], italics: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) runs.push({ text: text.slice(last) });
+  return runs.length ? runs : [{ text }];
+}
+
+export const stripInlineMarkdown = (text: string): string => parseInlineMarkdown(text).map((r) => r.text).join('');
+
+export type ContentLine = { kind: 'heading' | 'bullet' | 'text'; text: string };
+
+/** Qualifie une ligne de rubrique : titre (`#`), puce (`-`, `*`, `•`) ou paragraphe. */
+export function classifyContentLine(line: string): ContentLine {
+  const h = /^\s*#{1,6}\s+(.*)$/.exec(line);
+  if (h) return { kind: 'heading', text: h[1].trim() };
+  const b = /^\s*[-*•]\s+(.*)$/.exec(line);
+  if (b) return { kind: 'bullet', text: b[1] };
+  return { kind: 'text', text: line.trim() };
+}
+
 /** Lignes d'identification de l'opération sur la page de garde (vides omises). */
 export function feasibilityCoverFields(p: ProposalLike): Array<[string, string]> {
-  const terrain = [p.adresse_terrain, p.cp_ville_terrain].filter(Boolean).join(', ');
+  const terrain = terrainLabel(p.adresse_terrain, p.cp_ville_terrain);
   const client = p.is_entreprise ? (p.nom_societe || p.client_name) : (p.client_name || p.representant);
   const rows: Array<[string, string]> = [
     ['Opération', p.title || ''],
