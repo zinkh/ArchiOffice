@@ -18,3 +18,4 @@ export const URGENCE_LABELS: Record<string, string> = {
   urgent: 'URGENT',
   bloquant: 'BLOQUANT',
 };
+

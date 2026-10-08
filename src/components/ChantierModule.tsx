@@ -33,6 +33,7 @@ import { DraftInput, parseDays } from './chantier/fields';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
+import { countOpenObservations } from '../lib/observationsOpen';
 import { CONCERNED_OPTIONS } from '../lib/siteReportPresence';
 
 interface ChantierModuleProps {
@@ -82,6 +83,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [diffusionResult, setDiffusionResult] = useState<DiffusionResult | null>(null);
   const [diffusionError, setDiffusionError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ChantierTab>('comptes-rendus');
+  // Revue des non levées : le badge du compte-rendu ouvre l'onglet Observations déjà filtré sur « Ouverts seulement ».
+  const [reviewOpenOnly, setReviewOpenOnly] = useState(false);
+  // Lot des observations saisies depuis le compte-rendu (vide = sans lot).
+  const [newObsLotId, setNewObsLotId] = useState('');
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -412,7 +417,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), download: false },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, download: false },
       );
       const body = new FormData();
       body.append('file', blob, filename);
@@ -600,14 +605,20 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     // (file de synchro hors-ligne, src/lib/offlineQueue.ts) ne crée jamais
     // deux observations.
     const id = crypto.randomUUID();
+    const lot = lots_list.find(l => l.id === newObsLotId);
     const body = {
       id, texte: '', statut: 'À faire' as const, type, created_report_id: selectedReportId,
+      lot_id: lot?.id || undefined,
       // Une observation relevée dans un compte-rendu hérite de son bâtiment et de sa phase.
       batiment_id: selectedReport?.batiment_id || null, phase_id: selectedReport?.phase_id || null,
     };
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${project.id}/observations`, body });
-      const newObs: Observation = queued ? { ...body, project_id: project.id, pendingSync: true } : data!;
+      const newObs: Observation = {
+        ...(queued ? { ...body, project_id: project.id, pendingSync: true } : data!),
+        // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
+        ...(lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {}),
+      };
       setReportObservations(prev => [...prev, newObs]);
       fetchAllObservations().catch(() => {});
       return id;
@@ -695,7 +706,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), includeRubriquePhotos: pdfRubriquePhotos },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, includeRubriquePhotos: pdfRubriquePhotos },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -776,7 +787,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         ariaLabel="Sections du chantier"
         tabs={tabs}
         activeId={activeTab}
-        onChange={id => setActiveTab(id as ChantierTab)}
+        onChange={id => { setReviewOpenOnly(false); setActiveTab(id as ChantierTab); }}
       />
 
       {/* Body */}
@@ -1164,12 +1175,27 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     title="Observations par lot"
                     icon={IconClipboardList}
                     action={
-                      <button type="button" onClick={() => addObservation('observation')}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
-                        <IconPlus size={14} /> Ajouter une observation
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select aria-label="Lot de la nouvelle observation" value={newObsLotId} onChange={e => setNewObsLotId(e.target.value)}
+                          className="text-xs px-2 py-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent max-w-[11rem]">
+                          <option value="">Sans lot</option>
+                          {lots_list.map(l => <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>)}
+                        </select>
+                        <button type="button" onClick={() => addObservation('observation')}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--tblr-primary)] hover:brightness-90 text-white rounded-lg text-xs font-bold transition">
+                          <IconPlus size={14} /> Ajouter une observation
+                        </button>
+                      </div>
                     }
                   >
+                    {countOpenObservations(allObservations) > 0 && (
+                      <button type="button" onClick={() => { setReviewOpenOnly(true); setActiveTab('reserves'); }}
+                        className="mb-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-bold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 hover:brightness-95"
+                        title="Ouvrir l'onglet Observations, filtré sur les observations non levées">
+                        <IconAlertTriangle size={14} /> {countOpenObservations(allObservations)} observation{countOpenObservations(allObservations) > 1 ? 's' : ''} non levée{countOpenObservations(allObservations) > 1 ? 's' : ''} sur l'opération
+                        <span aria-hidden="true">→</span>
+                      </button>
+                    )}
                     {saveError && (
                       <div className="flex items-center justify-between gap-3 mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-xs text-amber-700 dark:text-amber-300">
                         <span>Une modification n'a pas pu être enregistrée (connexion interrompue). Rafraîchissez avant de reprendre votre saisie.</span>
@@ -1182,7 +1208,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                       </div>
                     )}
                     {observationsByLot.length === 0 && (
-                      <p className="text-sm text-[var(--tblr-muted)] italic py-4 text-center">Aucune observation pour ce compte-rendu.</p>
+                      <p className="text-sm text-[var(--tblr-muted)] italic py-4 text-center">Aucune observation saisie pour ce compte-rendu.</p>
                     )}
                     <div className="space-y-4">
                       {observationsByLot.map(group => (
@@ -1255,7 +1281,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           )}
 
           {activeTab === 'reserves' && (
-            <ObservationsTable projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} />
+            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly} />
           )}
 
           {activeTab === 'entreprises' && <EntreprisesTab lots_list={lots_list} observations={allObservations} />}

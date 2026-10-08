@@ -113,7 +113,7 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const { lot_id, contact_id, texte, statut, due_date, resolved_report_id, type, urgence, photos } = req.body;
+      const { lot_id, contact_id, texte, statut, due_date, resolved_report_id, type, urgence, photos, reponse } = req.body;
       if (lot_id && !(await assertTenantEntity(supabaseAdmin, 'project_lots', lot_id, tenantId))) {
         return res.status(400).json({ error: "Lot introuvable pour ce cabinet." });
       }
@@ -132,6 +132,7 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       if (type !== undefined) update.type = type;
       if (urgence !== undefined) update.urgence = urgence;
       if (photos !== undefined) update.photos = photos;
+      if (reponse !== undefined) update.reponse = typeof reponse === 'string' ? reponse.slice(0, 5000) : null;
       if (req.body.batiment_id !== undefined) update.batiment_id = cleanRef(req.body.batiment_id) || null;
       if (req.body.phase_id !== undefined) update.phase_id = cleanRef(req.body.phase_id) || null;
       if (statut === 'Levée' && resolved_report_id) update.resolved_report_id = resolved_report_id;

@@ -1726,6 +1726,18 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   La photo ouvre l'appareil (`capture="environment"`) et crée l'observation qui la porte.
 - Libellés : la nature `reserve` s'affiche « À lever » (`chantierConstants.ts`) ; « réserve »
   est réservé à l'AOR.
+- **Deux vues d'une même donnée** : l'onglet **Observations** (`ObservationsTable`) est la vue PAR DÉFAUT
+  de tout l'historique du chantier (statut, nature, urgence, lot, bâtiment / phase, CR émis et levé, photos,
+  reprise en réserve de l'AOR, suppression) ; « Observations par lot » du compte-rendu n'en est qu'un
+  EXTRAIT, celui des observations du jour (`observation_reports`), épuré à l'intitulé, au délai (« Pour le »)
+  et aux photos. On y saisit sur le chantier, avec le lot choisi avant d'ajouter ; tout le reste se règle dans
+  l'onglet Observations. Le badge « N observations non levées sur l'opération » (`countOpenObservations`,
+  `src/lib/observationsOpen.ts`, tout ce qui n'est pas « Levée ») ouvre cet onglet sur « Ouverts seulement »
+  (`initialOpenOnly`) pour la revue.
+- **Réponse** : `observations.reponse` (`supabase/migrate_observations_reponse.sql`), texte libre saisi dans la
+  ligne dépliée de l'onglet Observations (flèche à gauche, point si une réponse existe). L'export PDF du CR
+  l'imprime sous la description, avec la colonne « Bât. / phase » quand le chantier a un registre et
+  qu'une observation y est affectée (`opts.decoupage`).
 
 ### Export PDF du compte-rendu : format, W/D, photos de rubriques
 
