@@ -13,7 +13,26 @@ import {
   resolveSenderMembership,
   alreadyProcessed,
   markProcessed,
+  detectForwardedSms,
 } from '../server/agentMailInbox';
+
+describe('detectForwardedSms', () => {
+  it('reconnaît un SMS et extrait le numéro de l\'objet', () => {
+    expect(detectForwardedSms('SMS from +33 6 12 34 56 78', 'Rdv demain 9h')).toEqual({ isSms: true, phone: '+33 6 12 34 56 78' });
+  });
+
+  it('retrouve un numéro national en tête de corps', () => {
+    expect(detectForwardedSms('Nouveau SMS', '06 84 01 66 33 : Je suis en retard')).toEqual({ isSms: true, phone: '06 84 01 66 33' });
+  });
+
+  it('reconnaît un SMS sans numéro', () => {
+    expect(detectForwardedSms('SMS reçu', 'Bonjour')).toEqual({ isSms: true, phone: null });
+  });
+
+  it('ne prend pas un email ordinaire pour un SMS', () => {
+    expect(detectForwardedSms('Devis villa Martin', 'Bonjour, ci-joint le devis')).toEqual({ isSms: false, phone: null });
+  });
+});
 
 describe('extractTenantSlugFromRecipient', () => {
   it('reconnaît un alias sous-adressé isolé', () => {

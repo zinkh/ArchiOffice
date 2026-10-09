@@ -70,6 +70,7 @@ export function AgentMailInboxCard() {
     <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
       <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('agent_mail_inbox_title')}</h2>
       <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('agent_mail_inbox_explanation')}</p>
+      <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('agent_mail_inbox_sms_help')}</p>
 
       {error && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
 

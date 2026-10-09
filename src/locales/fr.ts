@@ -300,6 +300,7 @@ export default {
       "telegram_connections_error": "Une erreur est survenue.",
       "agent_mail_inbox_title": "Courrier entrant",
       "agent_mail_inbox_explanation": "Transférez un email à l'adresse ci-dessous pour qu'il soit pris en charge par l'agent de triage désigné — l'expéditeur doit être un membre reconnu de ce cabinet, sinon le message est ignoré.",
+      "agent_mail_inbox_sms_help": "SMS : une application de transfert de SMS vers e-mail (par exemple SMS Forwarder sur Android) peut envoyer vos SMS à cette adresse. Le message doit partir de votre adresse e-mail enregistrée dans ArchiOffice, et l'objet doit contenir « SMS ».",
       "agent_mail_inbox_copy": "Copier l'adresse",
       "agent_mail_inbox_triage_label": "Agent de triage :",
       "agent_mail_inbox_triage_none": "Aucun (courrier entrant désactivé)",

@@ -2221,6 +2221,15 @@ pas), un jeton `mail_at_` ne vit que le temps d'UN appel — émis juste avant
 de rappeler l'API interne, marqué consommé dès sa résolution (`used_at`),
 expiré au bout de 5 minutes s'il n'a pas servi.
 
+**SMS transférés par e-mail.** Pas de canal SMS natif : une application de
+transfert SMS vers e-mail (SMS Forwarder sur Android, IFTTT...) envoie le SMS à
+ce même alias, depuis l'adresse de la personne. `detectForwardedSms()` reconnaît
+un objet contenant « SMS » (et le numéro de l'expéditeur, objet ou début de
+corps) pour CADRER le message auprès de l'agent et la notification ; ce n'est
+jamais un critère d'accès, l'expéditeur reste contrôlé par
+`resolveSenderMembership`. Aucun format commun entre applications : un SMS dont
+l'objet ne dit pas « SMS » est traité comme un email ordinaire.
+
 **Idempotence.** `agent_mail_inbox_processed(message_id_header, tenant_id,
 processed_at)` protège contre un double traitement si le flag `\Seen` ne
 tient pas ou si deux relevés se chevauchent — même prudence que

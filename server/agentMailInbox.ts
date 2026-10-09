@@ -93,6 +93,23 @@ export function extractSenderEmail(fromHeader: string): string | null {
   return email.includes('@') ? email : null;
 }
 
+const SMS_SUBJECT_RE = /\b(sms|texto|text message)\b/i;
+const PHONE_RE = /(?:\+|00)\d[\d .-]{7,16}\d|\b0[1-9](?:[ .-]?\d{2}){4}\b/;
+
+/** Reconnaît un SMS relayé par une application de transfert (SMS Forwarder,
+ *  IFTTT, règle du téléphone...) : ces applications écrivent « SMS » dans
+ *  l'objet et, selon l'application, le numéro de l'expéditeur dans l'objet
+ *  ou en tête de corps. Aucune application n'a de format commun : on ne
+ *  s'en sert que pour CADRER le message auprès de l'agent (un SMS est bref,
+ *  sans formule de politesse, et son « expéditeur » est un numéro), jamais
+ *  pour décider d'un droit. Le contrôle d'accès reste resolveSenderMembership. */
+export function detectForwardedSms(subject: string, bodyText: string): { isSms: boolean; phone: string | null } {
+  if (!SMS_SUBJECT_RE.test(subject || '')) return { isSms: false, phone: null };
+  const head = `${subject || ''}\n${(bodyText || '').slice(0, 200)}`;
+  const phone = PHONE_RE.exec(head)?.[0]?.trim() ?? null;
+  return { isSms: true, phone };
+}
+
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -194,12 +211,21 @@ async function processMessage(supabaseAdmin: any, baseUrl: string, connection: I
   const { extractDocumentText, withTextExtractionTimeout, MAX_EXTRACTED_TEXT_CHARS } = await import('@zinkh/archioffice-agents/server');
 
   const bodyRaw = message.bodyText || (message.bodyHtml ? stripHtml(message.bodyHtml) : '') || '';
-  const parts: string[] = [
-    `Email transféré — objet : ${message.subject || '(sans objet)'}`,
-    `De : ${message.from}`,
-    '',
-    bodyRaw.slice(0, MAX_EXTRACTED_TEXT_CHARS),
-  ];
+  const sms = detectForwardedSms(message.subject || '', bodyRaw);
+  const parts: string[] = sms.isSms
+    ? [
+        `SMS transféré par e-mail${sms.phone ? ` — numéro de l'expéditeur du SMS : ${sms.phone}` : ''}`,
+        `Transféré par : ${message.from}`,
+        `Objet : ${message.subject || '(sans objet)'}`,
+        '',
+        bodyRaw.slice(0, MAX_EXTRACTED_TEXT_CHARS),
+      ]
+    : [
+        `Email transféré — objet : ${message.subject || '(sans objet)'}`,
+        `De : ${message.from}`,
+        '',
+        bodyRaw.slice(0, MAX_EXTRACTED_TEXT_CHARS),
+      ];
 
   for (const meta of (message.attachments || []).slice(0, MAX_ATTACHMENTS_PER_MESSAGE)) {
     if (meta.size > MAX_ATTACHMENT_BYTES) {
@@ -237,7 +263,7 @@ async function processMessage(supabaseAdmin: any, baseUrl: string, connection: I
   }
 
   await notifyUsers(supabaseAdmin, tenantId, [userId], {
-    title: `${agent.name} a traité un email transféré`,
+    title: `${agent.name} a traité ${sms.isSms ? 'un SMS transféré' : 'un email transféré'}`,
     body: message.subject || undefined,
     url: `/agents/${agent.id}/chat`,
     category: 'agent_mail_inbox',
