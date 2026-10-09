@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown } from '@tabler/icons-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { launchOriginRef } from '../lib/launchOrigin';
+import { AnimatePresence } from 'motion/react';
+import { ModalShell } from '../components/ui/ModalShell';
 import { formatCurrency, cn } from '../lib/utils';
 import { statusLabel } from '../lib/statusLabel';
 import { fetchJson } from '../lib/api';
@@ -41,56 +41,89 @@ import { FeeDistributionGrid } from '../components/FeeDistributionGrid';
 
 const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
-const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id }: any) => (
-  <div>
-    <label className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
-      {label} {required && <span className="text-red-500">*</span>}
-    </label>
-    {type === "select" ? (
-      <select
-        id={id}
-        required={required}
-        className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-        style={fieldStyle}
-        value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
-        onChange={e => onChange(e.target.value)}
-      >
-        <option value="">Select...</option>
-        {options.map((opt: any) => (
-          <option key={opt.id || opt} value={opt.id || opt}>{opt.name || opt}</option>
-        ))}
-      </select>
-    ) : type === "textarea" ? (
-      <textarea
-        id={id}
-        className="w-full px-3 py-2 rounded-lg outline-none text-sm resize-none h-20"
-        style={fieldStyle}
-        value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
-        onChange={e => onChange(e.target.value)}
-      />
-    ) : type === "checkbox" ? (
-      <div className="flex items-center h-9">
+/** Barre collante des sections : un formulaire de plusieurs écrans se parcourt d'un clic. */
+function SectionNav({ items }: { items: { id: string; label: string }[] }) {
+  const go = (id: string) => {
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    document.getElementById(id)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  };
+  return (
+    <nav
+      aria-label="Sections du formulaire"
+      className="sticky top-0 z-10 -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 py-2 flex gap-1 overflow-x-auto"
+      style={{ background: 'var(--tblr-surface)', borderBottom: '1px solid var(--tblr-border)' }}
+    >
+      {items.map(item => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => go(item.id)}
+          className="btn btn-ghost px-2.5 py-1 text-xs whitespace-nowrap shrink-0"
+        >
+          {item.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+const FormField = ({ label, value, onChange, type = "text", required = false, options = [], id: idProp }: any) => {
+  const { t } = useTranslation();
+  const generatedId = useId();
+  const id = idProp || generatedId;
+  const display = (typeof value === 'number' && isNaN(value)) ? '' : (value ?? '');
+  return (
+    <div>
+      <label htmlFor={id} className="block text-[0.6875rem] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>
+        {label} {required && <span style={{ color: 'var(--tblr-danger)' }} aria-hidden="true">*</span>}
+      </label>
+      {type === "select" ? (
+        <select
+          id={id}
+          required={required}
+          className="w-full px-3 py-2 rounded-lg outline-none text-sm focus:ring-2 focus:ring-[var(--tblr-primary)]"
+          style={fieldStyle}
+          value={display}
+          onChange={e => onChange(e.target.value)}
+        >
+          <option value="">{t('form_select_placeholder')}</option>
+          {options.map((opt: any) => (
+            <option key={opt.id || opt} value={opt.id || opt}>{opt.name || opt}</option>
+          ))}
+        </select>
+      ) : type === "textarea" ? (
+        <textarea
+          id={id}
+          className="w-full px-3 py-2 rounded-lg outline-none text-sm resize-y min-h-20 focus:ring-2 focus:ring-[var(--tblr-primary)]"
+          style={fieldStyle}
+          value={display}
+          onChange={e => onChange(e.target.value)}
+        />
+      ) : type === "checkbox" ? (
+        <div className="flex items-center h-9">
+          <input
+            id={id}
+            type="checkbox"
+            className="w-4 h-4 rounded"
+            checked={!!value}
+            onChange={e => onChange(e.target.checked)}
+          />
+        </div>
+      ) : (
         <input
           id={id}
-          type="checkbox"
-          className="w-4 h-4 rounded"
-          checked={!!value}
-          onChange={e => onChange(e.target.checked)}
+          type={type}
+          required={required}
+          className="w-full px-3 py-2 rounded-lg outline-none text-sm focus:ring-2 focus:ring-[var(--tblr-primary)]"
+          style={fieldStyle}
+          value={display}
+          onChange={e => onChange(e.target.value)}
+          onFocus={type === 'number' ? (e => e.currentTarget.select()) : undefined}
         />
-      </div>
-    ) : (
-      <input
-        id={id}
-        type={type}
-        required={required}
-        className="w-full px-3 py-2 rounded-lg outline-none text-sm"
-        style={fieldStyle}
-        value={(typeof value === 'number' && isNaN(value)) ? '' : (value ?? '')}
-        onChange={e => onChange(e.target.value)}
-      />
-    )}
-  </div>
-);
+      )}
+    </div>
+  );
+};
 
 export default function Proposals() {
   const { t } = useTranslation();
@@ -198,6 +231,19 @@ export default function Proposals() {
   const [costMode, setCostMode] = useState<'manual' | 'ratio'>('manual');
   const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Vrai dès que la personne a saisi quelque chose : fermer demande alors confirmation.
+  // Les remises à jour automatiques (répartition, montants) ne comptent pas.
+  const [formTouched, setFormTouched] = useState(false);
+  // Les panneaux de risques interrogent plusieurs services publics : on attend
+  // la fin de la saisie de l'adresse du terrain plutôt que d'interroger à chaque frappe.
+  const [riskAddress, setRiskAddress] = useState('');
+  useEffect(() => {
+    const value = newProposal.adresse_terrain || '';
+    if (!value) { setRiskAddress(''); return; }
+    const id = setTimeout(() => setRiskAddress(value), 700);
+    return () => clearTimeout(id);
+  }, [newProposal.adresse_terrain]);
   const { settings } = useSettings();
   const mafCost = useMafCost({
     project: newProposal,
@@ -268,7 +314,9 @@ export default function Proposals() {
 
   const handleSubmitProposal = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
     setSubmitError(null);
+    setIsSubmitting(true);
     try {
       const url = editingProposal ? `/api/proposals/${editingProposal.id}` : '/api/proposals';
       const method = editingProposal ? 'PUT' : 'POST';
@@ -286,6 +334,7 @@ export default function Proposals() {
           setProposals([saved, ...proposals]);
         }
         setIsModalOpen(false);
+        setFormTouched(false);
         setEditingProposal(null);
         setNewProposal(initialProposalState);
         setTemplateId('');
@@ -301,6 +350,8 @@ export default function Proposals() {
     } catch (err: any) {
       console.error(err);
       setSubmitError(err.message || 'Erreur réseau');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -309,6 +360,7 @@ export default function Proposals() {
     setNewProposal(proposal);
     setCostMode((proposal.ratio_rehab || proposal.ratio_extension) ? 'ratio' : 'manual');
     setSubmitError(null);
+    setFormTouched(false);
     setIsModalOpen(true);
   };
 
@@ -335,6 +387,7 @@ export default function Proposals() {
     setNewProposal(initialProposalState);
     setCostMode('manual');
     setSubmitError(null);
+    setFormTouched(false);
     setIsModalOpen(true);
   };
 
@@ -733,34 +786,52 @@ export default function Proposals() {
 
       <AnimatePresence>
         {isModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              ref={launchOriginRef}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="rounded-lg shadow-xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[90dvh]"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-            >
-              <div className="p-6 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                <div>
-                  <h2 className="text-base font-semibold" style={{ color: 'var(--tblr-text)' }}>
-                    {editingProposal ? t('proposals_edit_title') : t('proposals_new_title')}
-                  </h2>
-                  <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
-                    {editingProposal ? t('proposals_edit_subtitle') : t('proposals_new_subtitle')}
-                  </p>
-                </div>
-                <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-full transition-colors" style={{ color: 'var(--tblr-muted)' }}>
-                  <IconX size={24} />
-                </button>
+          <ModalShell
+            key="proposal-modal"
+            size="xl"
+            title={editingProposal ? t('proposals_edit_title') : t('proposals_new_title')}
+            subtitle={editingProposal ? t('proposals_edit_subtitle') : t('proposals_new_subtitle')}
+            busy={isSubmitting}
+            dirty={formTouched}
+            onClose={() => { setIsModalOpen(false); setFormTouched(false); }}
+            banner={submitError ? (
+              <div role="alert" className="px-4 sm:px-6 py-3 shrink-0" style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-danger)' }}>
+                <p className="text-xs font-medium" style={{ color: 'var(--tblr-danger)' }}>{submitError}</p>
               </div>
-              
-              <form id="proposal-form" onSubmit={handleSubmitProposal} className="flex-1 min-h-0 overflow-y-auto p-6 pb-64 space-y-8 no-scrollbar">
+            ) : undefined}
+            footer={
+              <>
+                <button type="button" onClick={() => { setIsModalOpen(false); setFormTouched(false); }} disabled={isSubmitting} className="btn btn-secondary">
+                  {t('btn_cancel')}
+                </button>
+                <button type="submit" form="proposal-form" disabled={isSubmitting} className="btn btn-primary disabled:opacity-60">
+                  {isSubmitting ? t('proposals_saving') : (editingProposal ? t('proposals_update_btn') : t('proposals_create_btn'))}
+                </button>
+              </>
+            }
+          >
+              <form
+                id="proposal-form"
+                onSubmit={handleSubmitProposal}
+                onChange={() => setFormTouched(true)}
+                className={cn('p-4 sm:p-6 space-y-8', editingProposal ? 'pb-10' : 'pb-40')}
+              >
+                <SectionNav
+                  items={[
+                    { id: 'prop-sec-01', label: t('proposals_section_general') },
+                    { id: 'prop-sec-02', label: t('proposals_section_client') },
+                    { id: 'prop-sec-03', label: t('proposals_section_project') },
+                    { id: 'prop-sec-04', label: t('proposals_section_terrain') },
+                    { id: 'prop-sec-05', label: t('proposals_section_surfaces') },
+                    ...(riskAddress ? [{ id: 'prop-sec-06', label: t('proposals_section_urban_risks') }] : []),
+                    { id: 'prop-sec-07', label: 'Honoraires' },
+                    { id: 'prop-sec-08', label: t('proposals_section_cotraitants') },
+                  ]}
+                />
                 {/* Section 1: General Info */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">01</span>
+                  <h3 id="prop-sec-01" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">01</span>
                     {t('proposals_section_general')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -788,20 +859,20 @@ export default function Proposals() {
                       <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />
                     </div>
                     <FormField label="Statut" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected'].map(s => ({ id: s, name: statusLabel(s) }))} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
-                    <FormField label="Ind" value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
+                    <FormField label="Indice" value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
                   </div>
                 </div>
 
                 {/* Section 2: Client Details */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">02</span>
+                  <h3 id="prop-sec-02" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">02</span>
                     {t('proposals_section_client')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
-                      <label className="block text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1">
-                        Client Database <span className="text-red-500">*</span>
+                    <div className="p-3 bg-[var(--tblr-primary-lt)] rounded-lg border border-[var(--tblr-border)]">
+                      <label className="block text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider mb-1">
+                        {t('proposals_client_database')} <span aria-hidden="true" style={{ color: 'var(--tblr-danger)' }}>*</span>
                       </label>
                       <ContactAutocomplete 
                         contacts={contacts}
@@ -824,12 +895,14 @@ export default function Proposals() {
                           }
                         }}
                         onAddNew={() => { setContactModalContext({ type: 'client' }); setIsContactModalOpen(true); }}
-                        addNewLabel="Add New Client"
+                        addNewLabel={t('proposals_add_client')}
                       />
                     </div>
                     <FormField label="Entreprise?" type="checkbox" value={newProposal.is_entreprise} onChange={(v: any) => setNewProposal(prev => ({...prev, is_entreprise: v}))} />
+                    {(newProposal.is_entreprise || newProposal.nom_societe || newProposal.rcs || newProposal.representant) && (
+                      <>
                     <CompanyAutocomplete 
-                      label="Nom Société" 
+                      label="Nom de la société" 
                       value={newProposal.nom_societe || ''} 
                       onChange={(val, details) => {
                         if (details) {
@@ -850,6 +923,8 @@ export default function Proposals() {
                     <FormField label="RCS / SIRET" value={newProposal.rcs} onChange={(v: any) => setNewProposal(prev => ({...prev, rcs: v}))} />
                     <FormField label="Représentant" value={newProposal.representant} onChange={(v: any) => setNewProposal(prev => ({...prev, representant: v}))} />
                     <FormField label="Qualité" value={newProposal.qualite} onChange={(v: any) => setNewProposal(prev => ({...prev, qualite: v}))} />
+                      </>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -878,8 +953,8 @@ export default function Proposals() {
 
                 {/* Section 3: Project Specifics */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">03</span>
+                  <h3 id="prop-sec-03" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">03</span>
                     {t('proposals_section_project')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -890,15 +965,15 @@ export default function Proposals() {
 
                 {/* Section 4: Terrain & Technical */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">04</span>
+                  <h3 id="prop-sec-04" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">04</span>
                     {t('proposals_section_terrain')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="md:col-span-3 space-y-4">
                       <AddressAutocomplete 
                         id="terrain-address"
-                        label="Adresse Complète Terrain" 
+                        label="Adresse complète du terrain" 
                         value={newProposal.adresse_terrain || ''} 
                         onChange={(val: string) => {
                           setNewProposal(prev => {
@@ -933,10 +1008,10 @@ export default function Proposals() {
                     <FormField label="Référence Cadastrale" value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal(prev => ({...prev, ref_cadastrale: v}))} />
                     <FormField label="Zone PLU" value={newProposal.zone_plu} onChange={(v: any) => setNewProposal(prev => ({...prev, zone_plu: v}))} />
                     <FormField label="Surface Parcelle" value={newProposal.surface_parcelle} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_parcelle: v}))} />
-                    <FormField label="Nom Etablissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
+                    <FormField label="Nom de l’établissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
                     <FormField label="Avant Travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
                     <FormField label="Après Travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
-                    <FormField label="Type Et Cat" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                    <FormField label="Type et catégorie ERP" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
                     <FormField label="Type" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
                     <FormField label="Catégorie" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
                     <FormField
@@ -965,49 +1040,49 @@ export default function Proposals() {
 
                 {/* Section 5: Surfaces & Capacity */}
                 <div className="space-y-4">
-                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">05</span>
+                  <h3 id="prop-sec-05" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">05</span>
                     {t('proposals_section_surfaces')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <FormField label="Surf. Plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
-                    <FormField label="Surf. Extension" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher_ext: v}))} />
+                    <FormField label="Surface plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
+                    <FormField label="Surface extension" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher_ext: v}))} />
                     <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
                     <FormField label="Surf. ERT" value={newProposal.surface_ert} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_ert: v}))} />
                     <FormField label="Effectif Public" value={newProposal.effectif_public} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_public: v}))} />
                     <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
-                    <FormField label="Date Modif." value={newProposal.date_modification} onChange={(v: any) => setNewProposal(prev => ({...prev, date_modification: v}))} />
+                    <FormField label="Date de modification" value={newProposal.date_modification} onChange={(v: any) => setNewProposal(prev => ({...prev, date_modification: v}))} />
                   </div>
                 </div>
 
                 {/* Section 06: Risques */}
-                {newProposal.adresse_terrain && (
-                  <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
-                    <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">06</span>
+                {riskAddress && (
+                  <div className="space-y-4 border-t border-[var(--tblr-border)] pt-6">
+                    <h3 id="prop-sec-06" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">06</span>
                       {t('proposals_section_urban_risks')}
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <InfoPanelBoundary label="RNB"><RNBInfo address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="RNB"><RNBInfo address={riskAddress} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="BDNB">
                         <BDNBInfo
-                          address={newProposal.adresse_terrain || ''}
+                          address={riskAddress}
                           banId={newProposal.ban_id_terrain}
                           cityCode={newProposal.city_code_terrain}
                         />
                       </InfoPanelBoundary>
-                      <InfoPanelBoundary label="Cadastre"><CadastreDownload address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={newProposal.adresse_terrain || ''} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={newProposal.adresse_terrain || ''} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={newProposal.adresse_terrain || ''} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Cadastre"><CadastreDownload address={riskAddress} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={riskAddress} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={riskAddress} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={riskAddress} /></InfoPanelBoundary>
                     </div>
 
                     <div className="space-y-4">
-                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
-                      <div className="rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative shadow-sm h-[28rem] md:h-[34rem]">
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
+                      <div className="rounded-lg overflow-hidden border border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] relative shadow-sm h-[28rem] md:h-[34rem]">
                         <InfoPanelBoundary label="Cadastre">
                           <GeoportailMap
-                            address={newProposal.adresse_terrain || ''}
+                            address={riskAddress}
                             banId={newProposal.ban_id_terrain}
                             onSelectionChange={(parcels: CadastreParcel[]) => {
                               setSelectedParcelGeometry(selectionGeometry(parcels));
@@ -1027,25 +1102,25 @@ export default function Proposals() {
                 )}
 
                 {/* Section 07: Honoraires */}
-                <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
-                  <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">07</span>
+                <div className="space-y-4 border-t border-[var(--tblr-border)] pt-6">
+                  <h3 id="prop-sec-07" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">07</span>
                     Honoraires
                   </h3>
                   {/* Mode selector for Montant des travaux */}
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Montant des travaux :</span>
+                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant des travaux :</span>
                     <button
                       type="button"
                       onClick={() => setCostMode('manual')}
-                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-[var(--tblr-primary)] text-white' : 'bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'}`}
                     >
                       Saisie manuelle
                     </button>
                     <button
                       type="button"
                       onClick={() => setCostMode('ratio')}
-                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'}`}
+                      className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-[var(--tblr-primary)] text-white' : 'bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'}`}
                     >
                       Calcul par ratio
                     </button>
@@ -1054,12 +1129,12 @@ export default function Proposals() {
                     <button
                       type="button"
                       onClick={() => setIsMiqcpWizardOpen(true)}
-                      className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                      className="text-[0.6875rem] flex items-center gap-1 text-[var(--tblr-primary)] hover:opacity-80 font-bold uppercase tracking-wider bg-[var(--tblr-primary-lt)] px-2 py-1 rounded"
                     >
                       {t('miqcp_wizard_open_btn')}
                     </button>
                     {miqcpAssessment && (
-                      <span className="text-[0.6875rem] text-zinc-500 dark:text-zinc-400">
+                      <span className="text-[0.6875rem] text-[var(--tblr-muted)]">
                         {t('miqcp_wizard_summary', {
                           cc: miqcpAssessment.coefficientComplexite.toFixed(2),
                           taux: miqcpAssessment.tauxReference.toFixed(2),
@@ -1074,16 +1149,16 @@ export default function Proposals() {
                       <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
                     </div>
                   ) : (
-                    <div className="space-y-3 p-3 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-900/30">
-                      <p className="text-[0.6875rem] text-blue-600 dark:text-blue-400 font-medium">
+                    <div className="space-y-3 p-3 bg-[var(--tblr-primary-lt)] rounded-lg border border-[var(--tblr-border)]">
+                      <p className="text-[0.6875rem] text-[var(--tblr-primary)] font-medium">
                         Montant des travaux = Surface existante × Ratio réhabilitation + Surface extension/neuf × Ratio extension
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface existante (m²)</label>
-                          <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface existante (m²)</label>
+                          <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
                             {newProposal.surface_plancher || '0'} m²
-                            <span className="text-[0.6875rem] text-zinc-400 ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
                           </div>
                         </div>
                         <FormField
@@ -1093,10 +1168,10 @@ export default function Proposals() {
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_rehab: Number(v)}))}
                         />
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Surface extension/neuf (m²)</label>
-                          <div className="px-2 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs font-mono text-zinc-700 dark:text-zinc-300">
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface extension/neuf (m²)</label>
+                          <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
                             {newProposal.surface_plancher_ext || '0'} m²
-                            <span className="text-[0.6875rem] text-zinc-400 ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
                           </div>
                         </div>
                         <FormField
@@ -1107,12 +1182,12 @@ export default function Proposals() {
                         />
                       </div>
                       <div className="flex items-center gap-3 mt-1">
-                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-zinc-500">Montant des travaux calculé :</span>
-                        <span className="text-sm font-bold text-blue-700 dark:text-blue-400">
+                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant des travaux calculé :</span>
+                        <span className="text-sm font-bold text-[var(--tblr-primary)]">
                           {(newProposal.construction_cost || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €
                         </span>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-blue-100 dark:border-blue-900/30">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-[var(--tblr-border)]">
                         <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
                         <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
                       </div>
@@ -1121,14 +1196,14 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
-                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
+                      <div className="px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm font-medium text-[var(--tblr-text)]">
                         {calculatedExePercent.toFixed(2)} %
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
-                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('proposals_pct_with_complementary')}</label>
+                      <div className="px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm font-medium text-[var(--tblr-text)]">
                         {calculatedTotalPercent.toFixed(2)} %
                       </div>
                     </div>
@@ -1136,14 +1211,14 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <FormField label="Taux de TVA (%)" type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TVA (€)</label>
-                      <div className="px-3 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm font-medium text-zinc-900 dark:text-white">
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Montant TVA (€)</label>
+                      <div className="px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm font-medium text-[var(--tblr-text)]">
                         {formatCurrency(vatAmount)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Montant TTC (€)</label>
-                      <div className="px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-400">
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Montant TTC (€)</label>
+                      <div className="px-3 py-2 bg-[var(--tblr-primary-lt)] border border-[var(--tblr-border)] rounded-lg text-sm font-bold text-[var(--tblr-primary)]">
                         {formatCurrency(totalTTC)}
                       </div>
                     </div>
@@ -1151,38 +1226,38 @@ export default function Proposals() {
                 </div>
 
                 {/* Section 08: Cotraitants / Spécialités */}
-                <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
+                <div className="space-y-4 border-t border-[var(--tblr-border)] pt-6">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">08</span>
+                    <h3 id="prop-sec-08" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">08</span>
                       {t('proposals_section_cotraitants')}
                     </h3>
                     <button
                       type="button"
                       onClick={addSpecialtyRow}
-                      className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider"
+                      className="text-xs flex items-center gap-1 text-[var(--tblr-primary)] hover:opacity-80 font-bold uppercase tracking-wider"
                     >
                       <IconPlus size={14} /> {t('proposals_add_specialty')}
                     </button>
                   </div>
                   
-                  <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-visible bg-white dark:bg-zinc-900/50">
+                  <div className="border border-[var(--tblr-border)] rounded-lg overflow-visible bg-[var(--tblr-surface)]">
                     <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
+                      <thead className="bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)]">
                         <tr>
-                          <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">{t('proposals_specialty_col')}</th>
-                          <th className="px-4 py-3 text-left font-bold text-zinc-500 uppercase tracking-wider">{t('proposals_contact_col')}</th>
-                          <th className="px-4 py-3 text-right font-bold text-zinc-500 uppercase tracking-wider w-10"></th>
+                          <th className="px-4 py-3 text-left font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('proposals_specialty_col')}</th>
+                          <th className="px-4 py-3 text-left font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('proposals_contact_col')}</th>
+                          <th className="px-4 py-3 text-right font-bold text-[var(--tblr-muted)] uppercase tracking-wider w-10"></th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+                      <tbody className="divide-y divide-[var(--tblr-border)]">
                         {newProposal.specialties_list?.map((spec, idx) => {
                           return (
                           <tr key={spec.id || idx}>
                             <td className="px-4 py-3">
                               <input 
                                 placeholder="Ex: BET Structure"
-                                className="w-full bg-transparent outline-none focus:ring-2 focus:ring-blue-500/20 rounded-lg px-2 py-1 text-zinc-900 dark:text-white"
+                                className="w-full bg-transparent outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] rounded-lg px-2 py-1 text-[var(--tblr-text)]"
                                 value={spec.specialty_name || ''}
                                 onChange={e => updateSpecialty(idx, 'specialty_name', e.target.value)}
                               />
@@ -1209,7 +1284,7 @@ export default function Proposals() {
                         })}
                         {(!newProposal.specialties_list || newProposal.specialties_list.length === 0) && (
                           <tr>
-                            <td colSpan={3} className="px-4 py-8 text-center text-zinc-400 italic">
+                            <td colSpan={3} className="px-4 py-8 text-center text-[var(--tblr-muted)] italic">
                               {t('proposals_no_cotraitants')}
                             </td>
                           </tr>
@@ -1220,22 +1295,22 @@ export default function Proposals() {
                 </div>
 
                 {/* Section 10: Répartition des Honoraires */}
-                <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
+                <div className="space-y-4 border-t border-[var(--tblr-border)] pt-6">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">10</span>
+                    <h3 id="prop-sec-10" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">10</span>
                       {t('proposals_section_fee_distribution')}
                     </h3>
                     <div className="flex items-center gap-4">
-                      <div className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                        <label className="text-[0.6875rem] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Décimales</label>
+                      <div className="flex items-center gap-2 bg-[var(--tblr-surface-2)] px-2 py-1 rounded-lg border border-[var(--tblr-border)]">
+                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Décimales</label>
                         <input 
                           type="number" 
                           min="0" 
                           max="4" 
                           value={(typeof newProposal.decimal_precision === 'number' && isNaN(newProposal.decimal_precision)) ? '' : (newProposal.decimal_precision ?? '')} 
                           onChange={(e) => setNewProposal(prev => ({ ...prev, decimal_precision: Number(e.target.value) }))}
-                          className="w-10 bg-transparent text-xs font-bold text-zinc-900 dark:text-white outline-none"
+                          className="w-10 bg-transparent text-xs font-bold text-[var(--tblr-text)] outline-none"
                         />
                       </div>
                       <button 
@@ -1248,7 +1323,7 @@ export default function Proposals() {
                       <button
                         type="button"
                         onClick={handleLoadMiqcpPhaseRepartition}
-                        className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-[var(--tblr-primary)] hover:opacity-80 font-bold uppercase tracking-wider bg-[var(--tblr-primary-lt)] px-2 py-1 rounded"
                       >
                         {t('miqcp_wizard_load_phase_repartition_btn')}
                       </button>
@@ -1260,7 +1335,7 @@ export default function Proposals() {
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
-                        className="text-[0.6875rem] flex items-center gap-1 text-blue-600 hover:text-blue-700 font-bold uppercase tracking-wider bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded"
+                        className="text-[0.6875rem] flex items-center gap-1 text-[var(--tblr-primary)] hover:opacity-80 font-bold uppercase tracking-wider bg-[var(--tblr-primary-lt)] px-2 py-1 rounded"
                       >
                         <IconPlus size={12} /> {t('proposals_mission_base')}
                       </button>
@@ -1290,7 +1365,7 @@ export default function Proposals() {
                       </button>
                     </div>
                   </div>
-                  <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 bg-white dark:bg-zinc-900/50 min-h-[400px]">
+                  <div className="overflow-x-auto border border-[var(--tblr-border)] rounded-lg p-2 bg-[var(--tblr-surface)] min-h-[400px]">
                     <FeeDistributionGrid
                       doc={newProposal}
                       milestoneEntityField="proposal_id"
@@ -1311,9 +1386,9 @@ export default function Proposals() {
 
                 {/* Section 09: Milestones */}
                 {editingProposal && (
-                  <div className="space-y-4 border-t border-zinc-100 dark:border-zinc-800 pt-6">
-                    <h3 className="text-sm font-bold text-blue-600 dark:text-blue-400 flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-[0.6875rem]">09</span>
+                  <div className="space-y-4 border-t border-[var(--tblr-border)] pt-6">
+                    <h3 id="prop-sec-09" className="scroll-mt-16 text-sm font-bold text-[var(--tblr-primary)] flex items-center gap-2">
+                      <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">09</span>
                       {t('proposals_section_schedule')}
                     </h3>
                     <MilestoneGantt 
@@ -1334,7 +1409,7 @@ export default function Proposals() {
               </form>
 
               {editingProposal && (
-                <div className={`px-6 shrink-0 ${feasibilityOpen ? 'pb-4 max-h-[60dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                <div className={`px-4 sm:px-6 ${feasibilityOpen ? 'pb-4' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <button
                     type="button"
                     onClick={toggleFeasibility}
@@ -1360,7 +1435,7 @@ export default function Proposals() {
               )}
 
               {editingProposal && (
-                <div className={`px-6 shrink-0 ${meetingsOpen ? 'pb-4 max-h-[40dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                <div className={`px-4 sm:px-6 ${meetingsOpen ? 'pb-4' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <button
                     type="button"
                     onClick={() => setMeetingsOpen(open => !open)}
@@ -1379,7 +1454,7 @@ export default function Proposals() {
               )}
 
               {editingProposal && (
-                <div className={`px-6 shrink-0 ${correspondenceOpen ? 'pb-6 max-h-[45dvh] overflow-y-auto' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                <div className={`px-4 sm:px-6 ${correspondenceOpen ? 'pb-6' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
                   <button
                     type="button"
                     onClick={toggleCorrespondence}
@@ -1396,31 +1471,7 @@ export default function Proposals() {
                 </div>
               )}
 
-              {submitError && (
-                <div className="px-6 py-3 shrink-0 bg-red-50 dark:bg-red-900/20 border-t border-red-200 dark:border-red-800">
-                  <p className="text-xs text-red-600 dark:text-red-400 font-medium">⚠ {submitError}</p>
-                </div>
-              )}
-              <div className="p-4 sm:p-6 flex gap-3 shrink-0" style={{ borderTop: '1px solid var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold press"
-                  style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
-                >
-                  {t('btn_cancel')}
-                </button>
-                <button
-                  type="submit"
-                  form="proposal-form"
-                  className="flex-1 px-4 py-2.5 rounded-lg font-semibold press"
-                  style={{ background: 'var(--tblr-primary)', color: '#fff' }}
-                >
-                  {editingProposal ? t('proposals_update_btn') : t('proposals_create_btn')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
+          </ModalShell>
         )}
       </AnimatePresence>
 
