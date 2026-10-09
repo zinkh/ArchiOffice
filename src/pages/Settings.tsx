@@ -1568,8 +1568,11 @@ export default function Settings() {
                   className="w-full p-2 rounded-lg text-sm font-mono"
                   style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
                   placeholder="123456"
-                  value={storageForm.baseUrl.replace('https://connect.drive.infomaniak.com/', '').replace(/\/$/, '')}
-                  onChange={e => setStorageForm({ ...storageForm, baseUrl: `https://connect.drive.infomaniak.com/${e.target.value.trim()}/` })}
+                  value={storageForm.baseUrl.match(/^https:\/\/(\d+)\.connect\.kdrive\.infomaniak\.com/)?.[1] ?? ''}
+                  onChange={e => {
+                    const id = e.target.value.replace(/\D/g, '');
+                    setStorageForm({ ...storageForm, baseUrl: id ? `https://${id}.connect.kdrive.infomaniak.com/` : '' });
+                  }}
                 />
                 <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
                   Le numéro de votre kDrive, visible dans l'adresse de kdrive.infomaniak.com. L'hôte, lui, est toujours le même.
