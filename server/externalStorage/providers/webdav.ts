@@ -5,7 +5,7 @@
 // saisie côté Réglages (`webdav_flavor`). Rien ici ne distingue les deux :
 //
 //   Nextcloud : https://<hôte>/remote.php/dav/files/<utilisateur>/
-//   kDrive    : https://connect.drive.infomaniak.com/<identifiant kDrive>/
+//   kDrive    : https://<identifiant kDrive>.connect.kdrive.infomaniak.com/
 //
 // Aucune dépendance npm ajoutée : `fetch` accepte les verbes PROPFIND et MKCOL,
 // ce qui suffit pour les cinq opérations dont l'interface a besoin. Une
@@ -107,8 +107,11 @@ class WebdavProvider implements ExternalStorageProvider {
       });
     } catch (err: any) {
       if (err?.status) throw err; // erreur du garde SSRF, déjà typée
+      // undici ne dit que « fetch failed » : la vraie raison (ENOTFOUND,
+      // ECONNREFUSED, certificat...) est dans `cause`.
+      const cause = err?.cause?.code || err?.cause?.message;
       throw new ExternalStorageError(
-        `Serveur de stockage injoignable : ${err?.message || err}`,
+        `Serveur de stockage injoignable : ${err?.message || err}${cause ? ` (${cause})` : ''}`,
         'unreachable',
         502,
       );

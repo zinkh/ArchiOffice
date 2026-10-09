@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { buildWebdavUrl, normalizeBaseUrl } from '../server/externalStorage/providers/webdav';
 
 const NEXTCLOUD = 'https://cloud.aazs.test/remote.php/dav/files/khaldoun/';
-const KDRIVE = 'https://connect.drive.infomaniak.com/123456/';
+const KDRIVE = 'https://123456.connect.kdrive.infomaniak.com/';
 
 describe('normalizeBaseUrl', () => {
   it('impose exactement une barre oblique finale', () => {
