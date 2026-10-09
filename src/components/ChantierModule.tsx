@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from './ui/Toast';
 import { PillTabs } from './ui/PillTabs';
+import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
 import { buildDiffusionRecipients } from '../lib/crDiffusion';
 import { baseFetchJson } from '../lib/api';
@@ -11,7 +12,7 @@ import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
   IconBuilding, IconTools, IconPhoto, IconClipboardList, IconAlertTriangle,
-  IconRefresh, IconListDetails,
+  IconRefresh, IconListDetails, IconDots,
 } from '@tabler/icons-react';
 import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
@@ -478,6 +479,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     else setAttendanceStatus(idx, status);
   };
   const isDesktop = useMediaQuery('(min-width: 768px)');
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
 
   // Présence des intervenants du projet (MOA/AMO/MOE/CT/CSPS...), distincte
   // de la présence des lots ci-dessus : même tableau `attendance`, ligne
@@ -733,6 +735,23 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     { id: 'photos', label: 'Photos', icon: IconPhoto },
   ];
 
+  // Sous 768 px, cinq onglets dépassaient la largeur : les deux sections du
+  // quotidien restent en barre, les autres passent sous « Plus » (feuille en liste).
+  const MOBILE_TAB_COUNT = 2;
+  const MORE_TAB_ID = '__more';
+  const primaryTabs = tabs.slice(0, MOBILE_TAB_COUNT);
+  const overflowTabs = tabs.slice(MOBILE_TAB_COUNT);
+  const activeOverflowTab = overflowTabs.find(tab => tab.id === activeTab);
+  const openObservationsCount = countOpenObservations(allObservations);
+  const mobileTabs = [
+    ...primaryTabs.map(tab => ({
+      id: tab.id as string,
+      label: tab.label,
+      badge: tab.id === 'reserves' && openObservationsCount > 0 ? String(openObservationsCount) : undefined,
+    })),
+    { id: MORE_TAB_ID, label: activeOverflowTab?.label ?? 'Plus', icon: IconDots, title: 'Autres sections du chantier' },
+  ];
+
   return (
     <div className="space-y-4">
       {/* Header */}
@@ -783,12 +802,43 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       </div>
 
       {/* Tabs */}
-      <PillTabs
-        ariaLabel="Sections du chantier"
-        tabs={tabs}
-        activeId={activeTab}
-        onChange={id => { setReviewOpenOnly(false); setActiveTab(id as ChantierTab); }}
-      />
+      {isDesktop ? (
+        <PillTabs
+          ariaLabel="Sections du chantier"
+          tabs={tabs}
+          activeId={activeTab}
+          onChange={id => { setReviewOpenOnly(false); setActiveTab(id as ChantierTab); }}
+        />
+      ) : (
+        <>
+          <PillTabs
+            className="w-full"
+            ariaLabel="Sections du chantier"
+            tabs={mobileTabs}
+            activeId={activeOverflowTab ? MORE_TAB_ID : activeTab}
+            onChange={id => {
+              if (id === MORE_TAB_ID) { setMoreSheetOpen(true); return; }
+              setReviewOpenOnly(false);
+              setActiveTab(id as ChantierTab);
+            }}
+          />
+          <BottomSheet open={moreSheetOpen} onClose={() => setMoreSheetOpen(false)} title="Autres sections du chantier">
+            {overflowTabs.map(tab => {
+              const Icon = tab.icon;
+              return (
+                <SheetOption
+                  key={tab.id}
+                  selected={tab.id === activeTab}
+                  onSelect={() => { setMoreSheetOpen(false); setReviewOpenOnly(false); setActiveTab(tab.id); }}
+                >
+                  <Icon size={18} />
+                  {tab.label}
+                </SheetOption>
+              );
+            })}
+          </BottomSheet>
+        </>
+      )}
 
       {/* Body */}
       <div>
