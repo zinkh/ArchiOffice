@@ -34,6 +34,10 @@ import {
 import { genererPVOuverture } from '../lib/actNegociationExport';
 import MarcheDocumentsPanel, { type OperationMarche } from './act/MarcheDocumentsPanel';
 import type { ParametresMarche } from '../lib/actMarche';
+import { useConsultationDepot } from '../hooks/useConsultationDepot';
+import DepotsRecusPanel from './act/DepotsRecusPanel';
+import DepotSettingsDialog from './act/DepotSettingsDialog';
+import InviterDepotDialog from './act/InviterDepotDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -228,6 +232,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
   const entrepriseContacts = useMemo(() => allContacts.filter(isEntrepriseContact), [allContacts]);
 
   const { parContactId: qualificationsParContact, reload: rechargerQualifications } = useQualifications();
+
+  // Espace de dépôt des offres : lecture de l'éligibilité et des remises reçues,
+  // invitation d'une entreprise (lien personnel) et réglages de la consultation.
+  const depot = useConsultationDepot(projectId);
+  const [inviterPour, setInviterPour] = useState<string | null>(null);
+  const [reglagesDepotOuverts, setReglagesDepotOuverts] = useState(false);
   const [rechercheOuverte, setRechercheOuverte] = useState(false);
   // Formulaire d'ajout au-dessus du tableau, et ligne à mettre en avant une fois classée.
   const [ajoutOuvert, setAjoutOuvert] = useState(false);
@@ -715,6 +725,9 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
               miseEnAvant={miseEnAvant}
               projectName={projectName}
               lots={lots}
+              depot={{ actif: !!depot.eligibilite?.eligible, indisponible: depot.eligibilite?.message }}
+              depotRecuLe={depot.depotRecuLe}
+              onInviterDepot={e => setInviterPour(e.id)}
               entreprises={consultation.entreprises}
               onChange={next => update({ ...consultation, entreprises: next as EntrepriseConsultee[] })}
               dcePieces={dcePieces}
@@ -979,6 +992,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
       {/* ── Phase 4 : Collecte des offres ─────────────────────────────── */}
       {phase === 'collecte' && (
         <div className="space-y-6">
+          <DepotsRecusPanel
+            projectId={projectId}
+            depot={depot}
+            lots={lots}
+            contacts={allContacts}
+            consultation={consultation as any}
+            onChangeConsultation={next => update(next as Consultation)}
+            onImporterActe={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
+            onOpenSettings={() => setReglagesDepotOuverts(true)}
+          />
           {lots.map(lot => {
             const entreprisesLot = consultation.entreprises.filter(e => e.lots_ids.includes(lot.id));
             return (
@@ -1489,6 +1512,23 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
           Phase suivante <IconChevronRight size={14} />
         </button>
       </div>
+
+      {inviterPour && (() => {
+        const e = consultation.entreprises.find(x => x.id === inviterPour);
+        return e ? (
+          <InviterDepotDialog
+            projectId={projectId} projectName={projectName} lots={lots}
+            entreprise={{ id: e.id, nom: e.nom, email: e.email, contact_id: e.contact_id, lots_ids: e.lots_ids }}
+            deadlineAt={depot.deadlineAt}
+            onOpenSettings={() => { setInviterPour(null); setReglagesDepotOuverts(true); }}
+            onClose={() => setInviterPour(null)}
+          />
+        ) : null;
+      })()}
+
+      {reglagesDepotOuverts && (
+        <DepotSettingsDialog projectId={projectId} onClose={() => setReglagesDepotOuverts(false)} onSaved={() => void depot.reload()} />
+      )}
 
       {contactModalFor && (
         <ContactModal

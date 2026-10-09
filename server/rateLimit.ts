@@ -104,3 +104,35 @@ export const billingWebhookLimiter = rateLimit({
   keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
   message: { error: 'Too many requests' },
 });
+
+// Portail public de dépôt des offres (/api/public/depot/*) : atteint par des
+// entreprises sans compte, le jeton du lien étant la seule barrière. Deux
+// plafonds distincts, tous deux par IP :
+//   - lectures (contexte, pièces du DCE) : confortable pour un usage normal,
+//     mais borne le sondage de jetons au hasard ;
+//   - dépôts : chaque envoi sollicite le drive du cabinet et remplit sa
+//     boîte de réception, donc nettement plus serré.
+// Les plafonds se règlent par l'environnement pour que les tests puissent à la
+// fois traverser un long scénario et vérifier que le limiteur coupe bien.
+const limiteDepot = (nom: string, defaut: number): number => {
+  const v = Number(process.env[nom]);
+  return Number.isFinite(v) && v > 0 ? v : defaut;
+};
+
+export const depotReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: limiteDepot('DEPOT_READ_LIMIT', 120),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de requêtes. Veuillez réessayer dans quelques minutes.' },
+});
+
+export const depotWriteLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: limiteDepot('DEPOT_WRITE_LIMIT', 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de dépôts en peu de temps. Veuillez réessayer dans quelques minutes.' },
+});

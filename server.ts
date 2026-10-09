@@ -51,6 +51,8 @@ import { registerTenderReferenceRoutes } from "./server/routes/tenderReferences"
 import { registerTenderMethodologyRoutes } from "./server/routes/tenderMethodology";
 import { registerTenderActivityNoteRoutes } from "./server/routes/tenderActivityNotes";
 import { registerTenderAiRoutes } from "./server/routes/tenderAi";
+import { registerConsultationDepotRoutes } from "./server/routes/consultationDepots";
+import { registerConsultationDepotPublicRoutes } from "./server/routes/consultationDepotPublic";
 import { registerProposalFeasibilityRoutes } from "./server/routes/proposalFeasibility";
 import { registerProposalFeasibilityAiRoutes } from "./server/routes/proposalFeasibilityAi";
 import { loadFeasibilitySiteData } from "./server/feasibilitySiteData";
@@ -1050,6 +1052,10 @@ export async function createApp() {
   registerTenderMethodologyRoutes(app, { supabaseAdmin, getTenantId });
   registerTenderActivityNoteRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerTenderAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  // Espace de dépôt des offres (ACT) : réglages et traitement côté cabinet, puis
+  // portail public par jeton (préfixe /api/public, exempté de l'authentification).
+  registerConsultationDepotRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan });
+  registerConsultationDepotPublicRoutes(app, { supabaseAdmin, getTenantPlan });
   registerProposalFeasibilityRoutes(app, { supabaseAdmin, getTenantId, loadSiteData: loadFeasibilitySiteData });
   registerProposalFeasibilityAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents, loadSiteData: loadFeasibilitySiteData });
   registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });

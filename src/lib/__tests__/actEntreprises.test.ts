@@ -30,6 +30,23 @@ describe('statutEntreprise', () => {
   });
 });
 
+describe('statutEntreprise : remise déposée sur le portail', () => {
+  it('« Offre déposée » tant que l’architecte ne l’a pas traitée', () => {
+    expect(statutEntreprise(ent({ dce_transmis_le: '2026-09-20', depot_recu_le: '2026-10-01T09:00:00Z' }), TODAY)).toBe('offre_deposee');
+  });
+  it('passe avant « À relancer » : une entreprise qui a répondu ne se relance pas', () => {
+    expect(statutEntreprise(ent({ dce_transmis_le: '2026-09-20', relance_le: '2026-09-25', depot_recu_le: '2026-10-01T09:00:00Z' }), TODAY)).toBe('offre_deposee');
+  });
+  it('« Offre reçue » l’emporte une fois l’offre intégrée, « Ne répond pas » reste prioritaire', () => {
+    expect(statutEntreprise(ent({ offre_recue_le: '2026-10-02', depot_recu_le: '2026-10-01T09:00:00Z' }), TODAY)).toBe('offre_recue');
+    expect(statutEntreprise(ent({ ne_repond_pas: true, depot_recu_le: '2026-10-01T09:00:00Z' }), TODAY)).toBe('sans_reponse');
+  });
+  it('apparaît dans le résumé', () => {
+    const r = resumeSuivi([ent({ id: '1', depot_recu_le: '2026-10-01T09:00:00Z' })], TODAY);
+    expect(r.parStatut.offre_deposee).toBe(1);
+  });
+});
+
 describe('resumeSuivi', () => {
   it('compte chaque statut', () => {
     const r = resumeSuivi([ent({ id: '1' }), ent({ id: '2', offre_recue_le: '2026-09-30' }), ent({ id: '3', ne_repond_pas: true })], TODAY);

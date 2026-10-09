@@ -20,6 +20,11 @@ interface Props {
   entreprises?: Entreprise[];
   onClose: () => void;
   onConfirm: (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => Promise<void> | void;
+  /** Fichier déjà en main (bordereau remis sur le portail de dépôt) : évite de le re-sélectionner. */
+  fichierInitial?: File;
+  /** Entreprise connue d'avance (celle du lien de dépôt) et date de réception réelle. */
+  entrepriseInitiale?: { id?: string; nom: string };
+  dateReceptionInitiale?: string;
 }
 
 type Etape = 'fichier' | 'rapprochement';
@@ -33,12 +38,15 @@ const CONFIANCE_LABEL: Record<string, string> = {
   exacte: 'Référence', haute: 'Sûr', basse: 'À confirmer',
 };
 
-export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau', entreprises = [], onClose, onConfirm }) => {
+export const OffreImportDialog: React.FC<Props> = ({
+  doc, docLabel = 'bordereau', entreprises = [], onClose, onConfirm,
+  fichierInitial, entrepriseInitiale, dateReceptionInitiale,
+}) => {
   const [etape, setEtape] = useState<Etape>('fichier');
-  const [fichier, setFichier] = useState<File | null>(null);
-  const [entrepriseNom, setEntrepriseNom] = useState('');
-  const [entrepriseId, setEntrepriseId] = useState<string | undefined>();
-  const [dateReception, setDateReception] = useState(new Date().toISOString().slice(0, 10));
+  const [fichier, setFichier] = useState<File | null>(fichierInitial ?? null);
+  const [entrepriseNom, setEntrepriseNom] = useState(entrepriseInitiale?.nom ?? '');
+  const [entrepriseId, setEntrepriseId] = useState<string | undefined>(entrepriseInitiale?.id);
+  const [dateReception, setDateReception] = useState(dateReceptionInitiale ?? new Date().toISOString().slice(0, 10));
   const [resultat, setResultat] = useState<ResultatImport | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
   const [analyse, setAnalyse] = useState(false);
@@ -200,8 +208,8 @@ export const OffreImportDialog: React.FC<Props> = ({ doc, docLabel = 'bordereau'
               <label className={label}>{docLabel[0].toUpperCase() + docLabel.slice(1)} chiffré renvoyé par l'entreprise</label>
               <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-300 rounded-lg p-8 cursor-pointer hover:border-blue-400 transition-colors">
                 <IconUpload size={22} className="text-zinc-400" />
-                <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Choisir un fichier .xlsx, .xls ou .csv'}</span>
-                <input type="file" accept=".xlsx,.xls,.csv" className="hidden"
+                <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Choisir un fichier .xlsx, .ods, .xls ou .csv'}</span>
+                <input type="file" accept=".xlsx,.ods,.xls,.csv" className="hidden"
                        onChange={e => { setFichier(e.target.files?.[0] ?? null); setErreur(null); }} />
               </label>
               <p className="mt-2 text-[0.6875rem] text-zinc-400">

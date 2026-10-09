@@ -13,6 +13,12 @@ export interface EntrepriseSuivi {
   relance_le?: string;
   offre_recue_le?: string;
   ne_repond_pas?: boolean;
+  /**
+   * Date d'une remise faite sur l'espace de dépôt et pas encore traitée. Jamais
+   * enregistrée avec la consultation : elle se déduit des remises reçues
+   * (consultation_depots) et ne sert qu'au statut affiché.
+   */
+  depot_recu_le?: string;
 }
 
 export interface LotSuivi {
@@ -30,6 +36,7 @@ export type StatutEntreprise =
   | 'a_envoyer'
   | 'dce_envoye'
   | 'a_relancer'
+  | 'offre_deposee'
   | 'offre_recue'
   | 'sans_reponse'
   | 'hors_envoi';
@@ -38,6 +45,7 @@ export const STATUT_LABELS: Record<StatutEntreprise, string> = {
   a_envoyer: 'DCE à envoyer',
   dce_envoye: 'DCE envoyé',
   a_relancer: 'À relancer',
+  offre_deposee: 'Offre déposée',
   offre_recue: 'Offre reçue',
   sans_reponse: 'Ne répond pas',
   hors_envoi: 'DCE non prévu',
@@ -45,7 +53,7 @@ export const STATUT_LABELS: Record<StatutEntreprise, string> = {
 
 /** Ordre d'affichage dans les filtres : ce qui demande une action d'abord. */
 export const STATUT_ORDER: StatutEntreprise[] = [
-  'a_envoyer', 'a_relancer', 'dce_envoye', 'offre_recue', 'sans_reponse', 'hors_envoi',
+  'a_envoyer', 'offre_deposee', 'a_relancer', 'dce_envoye', 'offre_recue', 'sans_reponse', 'hors_envoi',
 ];
 
 /** Date du jour au format AAAA-MM-JJ, en heure locale (pas UTC : un envoi à 0 h 30 reste du jour). */
@@ -56,11 +64,14 @@ export function todayIso(now: Date = new Date()): string {
 
 /**
  * Statut déduit des dates et cases déjà saisies : rien de plus à renseigner.
- * Une relance dont la date est atteinte, sans offre reçue, passe à « À relancer ».
+ * Une relance dont la date est atteinte, sans offre reçue ni déposée, passe à « À relancer ».
  */
 export function statutEntreprise(e: EntrepriseSuivi, today: string = todayIso()): StatutEntreprise {
   if (e.ne_repond_pas) return 'sans_reponse';
   if (e.offre_recue_le) return 'offre_recue';
+  // Une remise déposée par l'entreprise attend l'intégration de l'architecte :
+  // c'est ce qui demande une action, avant même une relance.
+  if (e.depot_recu_le) return 'offre_deposee';
   if (e.dce_transmis_le) return e.relance_le && e.relance_le <= today ? 'a_relancer' : 'dce_envoye';
   return e.envoyer_dce ? 'a_envoyer' : 'hors_envoi';
 }
