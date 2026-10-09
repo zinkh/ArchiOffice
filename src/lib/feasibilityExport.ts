@@ -7,7 +7,7 @@ import type { Proposal } from '../types';
 
 type ProposalForExport = Partial<Proposal>;
 import type { AgencySettings } from './proposalExport';
-import { feasibilityCoverFields, feasibilityFilename, type FeasibilitySection } from './feasibilityBlocks';
+import { classifyContentLine, feasibilityCoverFields, feasibilityFilename, parseInlineMarkdown, stripInlineMarkdown, type FeasibilitySection } from './feasibilityBlocks';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { compressImage, type CompressedImage } from './imageCompression';
@@ -98,8 +98,9 @@ export async function exportFeasibilityPdf(p: ProposalForExport, sections: Feasi
     const paragraphs = (s.content || '').split(/\n/);
     for (const para of paragraphs) {
       if (!para.trim()) { y += 2.5; continue; }
-      const isBullet = /^\s*-\s+/.test(para);
-      const text = isBullet ? para.replace(/^\s*-\s+/, '') : para;
+      const line0 = classifyContentLine(para);
+      const isBullet = line0.kind === 'bullet';
+      const text = stripInlineMarkdown(line0.text);
       const indent = isBullet ? 5 : 0;
       const wrapped = pdf.splitTextToSize(text, contentW - indent) as string[];
       for (const [li, line] of wrapped.entries()) {
@@ -202,12 +203,15 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
     }));
     for (const para of (s.content || '').split(/\n/)) {
       if (!para.trim()) continue;
-      const isBullet = /^\s*-\s+/.test(para);
-      const text = isBullet ? para.replace(/^\s*-\s+/, '') : para;
+      const line = classifyContentLine(para);
+      const runs = parseInlineMarkdown(line.text).map((r) => new TextRun({
+        text: r.text, bold: r.bold || line.kind === 'heading', italics: r.italics, size: line.kind === 'heading' ? 22 : 20, color: '111827',
+      }));
       body.push(new Paragraph({
-        spacing: { after: 100 },
-        ...(isBullet ? { bullet: { level: 0 } } : {}),
-        children: [new TextRun({ text, size: 20, color: '111827' })],
+        spacing: { before: line.kind === 'heading' ? 160 : 0, after: line.kind === 'bullet' ? 60 : 100 },
+        alignment: line.kind === 'text' ? AlignmentType.JUSTIFIED : AlignmentType.LEFT,
+        ...(line.kind === 'bullet' ? { bullet: { level: 0 } } : {}),
+        children: runs,
       }));
     }
     for (const ill of s.illustrations) {
@@ -222,6 +226,13 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
   }
 
   const doc = new Document({
+    styles: {
+      default: {
+        document: { run: { font: 'Arial', size: 20, color: '111827' }, paragraph: { spacing: { line: 276 } } },
+        heading1: { run: { font: 'Arial', bold: true, size: 28, color: '111827' } },
+        title: { run: { font: 'Arial', bold: true, size: 44, color: '111827' } },
+      },
+    },
     sections: [{
       properties: {},
       headers: { default: new Header({ children: headerChildren }) },

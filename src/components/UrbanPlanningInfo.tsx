@@ -38,33 +38,36 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
     if (initialCoords) setCoords(initialCoords);
   }, [initialInsee, initialCoords]);
 
+  // Le code commune suit l'adresse saisie : on géocode à chaque changement (avec
+  // un délai anti-rebond) au lieu de figer le premier résultat, qui pouvait
+  // venir d'une saisie partielle et désigner une autre commune.
   useEffect(() => {
-    if (!address || insee) return;
+    if (initialInsee || !address || address.trim().length < 5) return;
 
-    const geocode = async () => {
-      setLoading(true);
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.features?.length > 0) {
-            const feature = data.features[0];
-            setInsee(feature.properties.citycode);
-            setCoords({
-              lat: feature.geometry.coordinates[1],
-              lon: feature.geometry.coordinates[0]
-            });
-          }
+        const res = await fetch(`/api/address-search?q=${encodeURIComponent(address)}`, { signal: controller.signal });
+        if (!res.ok) return;
+        const data = await res.json();
+        const feature = data.features?.[0];
+        if (feature?.properties?.citycode) {
+          setInsee(feature.properties.citycode);
+          setCoords({
+            lat: feature.geometry.coordinates[1],
+            lon: feature.geometry.coordinates[0]
+          });
         }
       } catch (e) {
-        console.error("Geocoding failed for UrbanPlanningInfo", e);
-      } finally {
-        setLoading(false);
+        if ((e as Error).name !== 'AbortError') console.error("Geocoding failed for UrbanPlanningInfo", e);
       }
-    };
+    }, 500);
 
-    geocode();
-  }, [address, insee]);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [address, initialInsee]);
 
   useEffect(() => {
     if (!insee && !geometry) return;
@@ -149,7 +152,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
     };
 
     fetchUrbanPlanning();
-  }, [insee]);
+  }, [insee, geometry]);
 
   if (!insee) return null;
 

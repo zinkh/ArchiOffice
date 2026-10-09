@@ -86,7 +86,10 @@ export default defineConfig(({mode}) => {
           icons: [
             { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
             { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
-            { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+            // Icône masquable dédiée : fond blanc opaque et logo dans la zone de
+            // sécurité (≈ 56 %). Réutiliser l'icône « any » transparente la faisait
+            // rogner par le masque Android et laissait un fond noir au splash.
+            { src: '/icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
           ],
         },
         workbox: {
