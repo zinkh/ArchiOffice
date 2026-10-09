@@ -1821,9 +1821,11 @@ export default function ProjectDetail() {
         canConfigure={['admin', 'manager', 'pm'].includes(currentUser?.system_role ?? '')}
         onClose={() => setPhaseToCheck(null)}
         onComplete={() => { setPhaseToCheck(null); void fetchPhaseHistory(); void fetchProjectActivity(); setViewedPhase(null); }} />}
-      {/* Compact topbar */}
+      {/* Compact topbar : réservée au bureau. Sur téléphone, l'affaire est déjà
+          nommée par ses onglets, et suppression comme changement de phase se
+          font au bureau ; l'état d'enregistrement passe dans la barre de section. */}
       <div
-        className="shrink-0 flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
+        className="shrink-0 hidden md:flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 border-b"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
       >
         <button
@@ -1908,6 +1910,7 @@ export default function ProjectDetail() {
           onChange={setActiveTab}
           isChantier={!!project.is_chantier}
           chantierTabState={chantierTabState}
+          mobileTrailing={<AutosaveIndicator status={autosaveStatus} onRetry={() => { void saveNow(); }} />}
         />
       </div>
 
