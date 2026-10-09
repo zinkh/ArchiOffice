@@ -8,6 +8,7 @@ import { replayPendingWrites } from '../lib/offlineQueue';
 const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
   meeting: 'Réunion',
   meetingPhoto: 'Photo de réunion',
+  meetingAttendee: 'Intervenant de réunion',
   reserve: 'Réserve',
   reservePhoto: 'Photo de réserve',
   gpaReserve: 'Réserve GPA',

@@ -1763,6 +1763,12 @@ comptes-rendus et le tableau des observations se filtrent par bâtiment, phase o
 « sans affectation », l'export PDF porte la ligne « Bâtiment / phase ». Rien n'apparaît
 tant que le registre est vide.
 
+### Réunions hors ligne : notes et intervenants
+
+- **Les notes ne dépendent plus de la perte de focus.** `Reunions.tsx` garde chaque frappe dans un brouillon local (`meeting-notes-draft:<id>`, synchrone) et écrit 1 s après la dernière frappe, au changement de réunion et à `pagehide`. L'écriture en file a un id STABLE (`notes:<id>`) : les enregistrements successifs se remplacent, un seul PUT part. À la réouverture, brouillon non parti > écriture en file > valeur du serveur (`resolveMeetingNotes`), et un brouillon retrouvé est renvoyé.
+- **Reconnexion** : `offlineQueue.ts` traite 401, 502, 503 et 504 comme le réseau absent (écriture gardée, rejeu plus tard), jamais comme un refus définitif. Une session pas encore renouvelée au retour du réseau ne fait plus perdre une saisie.
+- **Intervenants hors ligne** (`src/lib/meetingAttendeesOffline.ts`, entité de file `meetingAttendee`, cache Dexie `meetingAttendeesCache`, v9) : ajout d'un contact existant ou d'un nouveau contact, changement de rôle, retrait. Les identifiants (intervenant, fiche contact) sont générés par l'appareil ; `POST /api/meetings/:id/attendees` et `/new-contact` les acceptent et rejouent sans doublon (200 au rejeu). La liste affichée = cache ou serveur + écritures en file rejouées par-dessus (`applyPendingAttendeeWrites`, testé). Les contacts viennent du cache `db.contacts` sans réseau.
+
 ### Compte-rendu de chantier au téléphone
 
 `ChantierModule.tsx` (onglet Comptes-rendus) est le premier écran du chantier : ses
