@@ -1,7 +1,6 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
-import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconX, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
+import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
 import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../types';
@@ -23,6 +22,9 @@ import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { ProjectCardSkeletonGrid, ErrorState } from '../components/DataState';
 import { Link } from 'react-router-dom';
 import { Pagination } from '../components/ui/Pagination';
+import { ModalShell } from '../components/ui/ModalShell';
+import { Toast } from '../components/ui/Toast';
+import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { usePagination } from '../hooks/usePagination';
 
 type SortType = 'text' | 'number' | 'date';
@@ -105,6 +107,15 @@ const PROJECT_STATUS_KEYS: Record<string, string> = {
   'On Hold': 'projects_status_on_hold',
 };
 
+// Champs de la fenêtre d'affaire : jetons du thème, jamais de gris ou de bleu figés.
+const FIELD_CLS = 'w-full rounded-lg p-2 text-sm outline-none bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] text-[var(--tblr-text)] focus:ring-2 focus:ring-[var(--tblr-primary)] aria-[invalid=true]:border-[var(--tblr-danger)]';
+
+// Une date absente ou illisible s'affiche « --- », jamais « Invalid Date ».
+const fmtDate = (value?: string | null): string => {
+  const d = value ? new Date(value) : null;
+  return d && !isNaN(d.getTime()) ? d.toLocaleDateString('fr-FR') : '---';
+};
+
 export default function Projects() {
   const { t } = useTranslation();
   const projectStatusLabel = (status: string) => {
@@ -131,6 +142,8 @@ export default function Projects() {
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState<{ name?: boolean; client?: boolean }>({});
+  const { toast, showToast } = useToastWithUndo();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
   const [filterCategory, setFilterCategory] = useState<string>('All');
@@ -194,7 +207,7 @@ export default function Projects() {
       setEditForm(prev => prev ? ({ ...prev, image_url: optimizedBase64 }) : null);
     } catch (err) {
       console.error('Failed to optimize image:', err);
-      alert(t('projects_image_process_failed'));
+      showToast(t('projects_image_process_failed'), 'error');
     }
   };
 
@@ -527,9 +540,10 @@ export default function Projects() {
 
     // Basic validation
     if (!editForm.name.trim() || !editForm.client.trim()) {
-      alert(t('projects_name_client_required'));
+      setFormErrors({ name: !editForm.name.trim(), client: !editForm.client.trim() });
       return;
     }
+    setFormErrors({});
 
     setIsSaving(true);
     const isNew = !projects.some(p => p.id === editForm.id);
@@ -574,17 +588,35 @@ export default function Projects() {
         }
       } catch (err) {
         console.error('Failed to save project:', err);
-        alert(t('projects_save_server_failed'));
+        showToast(t('projects_save_server_failed'), 'error');
       }
     } else {
       // 3. Queue for sync — rejouée par src/lib/offlineQueue.ts au retour du
       // réseau (l'ancienne db.syncQueue n'était jamais relue par personne).
       await queuedJsonRequest({ entity: 'project', id: editForm.id, method, url, body: editForm });
-      alert(t('projects_save_offline'));
+      showToast(t('projects_save_offline'));
       setIsEditing(false);
       if (isNew) setIsModalOpen(false);
     }
     setIsSaving(false);
+  };
+
+  const isNewProject = !!editForm && !projects.some(p => p.id === editForm.id);
+
+  const closeProjectModal = () => {
+    setIsModalOpen(false);
+    setIsEditing(false);
+    setFormErrors({});
+  };
+
+  const handleCancelEdit = () => {
+    if (isNewProject) {
+      closeProjectModal();
+      return;
+    }
+    setEditForm(selectedProject);
+    setIsEditing(false);
+    setFormErrors({});
   };
 
   const handleAddCategory = async (e: FormEvent) => {
@@ -629,11 +661,11 @@ export default function Projects() {
       } else {
         const errorData = await res.json();
         console.error('Delete failed:', errorData.error);
-        window.alert(t('projects_delete_failed', { error: errorData.error || '' }));
+        showToast(t('projects_delete_failed', { error: errorData.error || '' }), 'error');
       }
     } catch (err) {
       console.error('Failed to delete project:', err);
-      window.alert(t('projects_delete_failed_retry'));
+      showToast(t('projects_delete_failed_retry'), 'error');
     } finally {
       setIsDeletingProject(false);
     }
@@ -969,40 +1001,71 @@ export default function Projects() {
 
       <AnimatePresence>
         {isModalOpen && selectedProject && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              ref={launchOriginRef}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90dvh] overflow-hidden flex flex-col"
-            >
-              <div className="relative h-48 bg-zinc-100 dark:bg-zinc-800 shrink-0">
-                <img 
-                  src={selectedProject.image_url || `https://picsum.photos/seed/${selectedProject.id}/800/400`} 
-                  alt={selectedProject.name} 
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute top-4 left-4">
-                  <span className="px-3 py-1 rounded-full text-xs font-mono font-bold bg-black/50 text-white backdrop-blur-md border border-white/10">
-                    {t('projects_code_label')} {selectedProject.project_code || '---'}
-                  </span>
-                </div>
-                <button 
-                  onClick={() => setIsModalOpen(false)}
-                  className="absolute top-4 right-4 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full transition-colors backdrop-blur-md"
-                >
-                  <IconX size={20} />
-                </button>
+          <ModalShell
+            key="project-modal"
+            size="lg"
+            title={(isEditing ? editForm?.name : selectedProject.name) || t('projects_name_placeholder')}
+            subtitle={`${t('projects_code_label')} ${selectedProject.project_code || '---'}`}
+            busy={isSaving}
+            dirty={isEditing && JSON.stringify(editForm) !== JSON.stringify(selectedProject)}
+            onClose={closeProjectModal}
+            banner={selectedProject.image_url ? (
+              <div className="h-40 shrink-0 bg-[var(--tblr-surface-2)]">
+                <img src={selectedProject.image_url} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               </div>
-
-              <div className="p-6 overflow-y-auto flex-1">
+            ) : undefined}
+            footer={isEditing ? (
+              <>
+                <button type="button" onClick={handleCancelEdit} disabled={isSaving} className="btn btn-secondary">
+                  {t('btn_cancel')}
+                </button>
+                <button type="button" onClick={handleSave} disabled={isSaving} className="btn btn-primary disabled:opacity-60">
+                  {isSaving ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" aria-hidden="true" />
+                      {t('saving')}
+                    </>
+                  ) : (
+                    <>
+                      <IconDeviceFloppy size={18} aria-hidden="true" />
+                      {t('btn_save')}
+                    </>
+                  )}
+                </button>
+              </>
+            ) : (
+              <>
+                {currentUser?.system_role === 'admin' && (
+                  <button
+                    type="button"
+                    onClick={() => { setDeleteTarget(selectedProject); setDeleteConfirmInput(''); }}
+                    className="btn btn-ghost mr-auto hover:!text-[var(--tblr-danger)]"
+                  >
+                    <IconTrash size={18} aria-hidden="true" />
+                    {t('btn_delete')}
+                  </button>
+                )}
+                <Link to={`/projects/${selectedProject.id}`} className="btn btn-secondary">
+                  <IconExternalLink size={18} aria-hidden="true" />
+                  {t('projects_open_full_page')}
+                </Link>
+                <button type="button" onClick={() => setIsEditing(true)} className="btn btn-primary">
+                  {t('btn_edit')}
+                </button>
+              </>
+            )}
+          >
+              <div className="p-4 sm:p-6">
+                {((formErrors.name && !editForm?.name.trim()) || (formErrors.client && !editForm?.client.trim())) && (
+                  <p role="alert" className="mb-4 px-3 py-2 rounded-lg text-sm font-medium bg-[var(--tblr-surface-2)] border border-[var(--tblr-danger)] text-[var(--tblr-danger)]">
+                    {t('projects_name_client_required')}
+                  </p>
+                )}
                 {isEditing && !projects.some(p => p.id === editForm?.id) && (
-                  <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
-                    <label className="block text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">{t('projects_use_template')}</label>
+                  <div className="mb-6 p-4 bg-[var(--tblr-primary-lt)] rounded-lg border border-[var(--tblr-border)]">
+                    <label className="block text-sm font-medium text-[var(--tblr-text)] mb-2">{t('projects_use_template')}</label>
                     <select
-                      className="w-full p-2 border rounded bg-white dark:bg-zinc-800"
+                      className={FIELD_CLS}
                       value={editForm?.template_id ?? ''}
                       onChange={e => {
                         const template = templates.find(t => t.id === e.target.value);
@@ -1031,7 +1094,7 @@ export default function Projects() {
                       const chosen = templates.find(tpl => tpl.id === editForm?.template_id);
                       const summary = chosen ? summarizeTemplate(chosen) : '';
                       return summary ? (
-                        <p className="mt-2 text-xs text-blue-900 dark:text-blue-100">{t('ptpl_applied_label', { summary })}</p>
+                        <p className="mt-2 text-xs text-[var(--tblr-text)]">{t('ptpl_applied_label', { summary })}</p>
                       ) : null;
                     })()}
                   </div>
@@ -1040,13 +1103,16 @@ export default function Projects() {
                   <div>
                     {isEditing ? (
                       <input 
-                        className="text-2xl font-bold text-zinc-900 dark:text-white bg-transparent border-b border-zinc-300 dark:border-zinc-700 focus:border-blue-500 outline-none w-full"
+                        className="text-2xl font-bold text-[var(--tblr-text)] bg-transparent border-b border-[var(--tblr-border)] focus:border-[var(--tblr-primary)] outline-none w-full"
                         value={editForm?.name ?? ''}
                         placeholder={t('projects_name_placeholder')}
+                        aria-label={t('projects_name_placeholder')}
+                        aria-required="true"
+                        aria-invalid={formErrors.name && !editForm?.name.trim() ? 'true' : undefined}
                         onChange={e => setEditForm(prev => prev ? ({...prev, name: e.target.value}) : null)}
                       />
                     ) : (
-                      <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{selectedProject.name}</h2>
+                      <h2 className="text-2xl font-bold text-[var(--tblr-text)]">{selectedProject.name}</h2>
                     )}
                     {isEditing ? (
                       <ContactAutocomplete 
@@ -1059,10 +1125,10 @@ export default function Projects() {
                           }
                         }}
                         onAddNew={() => { setContactModalCategory(CONTACT_CATEGORY_CLIENT); setIsContactModalOpen(true); }}
-                        addNewLabel="Add New Client"
+                        addNewLabel={t('projects_add_client')}
                       />
                     ) : (
-                      <p className="text-zinc-500 dark:text-zinc-400">{selectedProject.client}</p>
+                      <p className="text-[var(--tblr-muted)]">{selectedProject.client}</p>
                     )}
                     {isEditing ? (
                       <div className="mt-1">
@@ -1076,59 +1142,14 @@ export default function Projects() {
                       <p className="text-xs text-zinc-400 mt-1">{selectedProject.address}</p>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    {currentUser?.system_role === 'admin' && !isEditing && (
-                      <button
-                        onClick={() => { setDeleteTarget(selectedProject); setDeleteConfirmInput(''); }}
-                        className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                        title={t('projects_delete_title')}
-                      >
-                        <IconTrash size={20} />
-                      </button>
-                    )}
-                    <button 
-                      disabled={isSaving}
-                      onClick={() => isEditing ? handleSave() : setIsEditing(true)}
-                      className={cn(
-                        "px-4 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2",
-                        isEditing 
-                          ? "bg-blue-600 text-white hover:bg-blue-700" 
-                          : "bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white hover:bg-zinc-200 dark:hover:bg-zinc-700",
-                        isSaving && "opacity-50 cursor-not-allowed"
-                      )}
-                    >
-                      {isSaving ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          {t('saving')}
-                        </>
-                      ) : isEditing ? (
-                        <>
-                          <IconDeviceFloppy size={18} />
-                          {t('btn_save')}
-                        </>
-                      ) : (
-                        t('btn_edit')
-                      )}
-                    </button>
-                    {!isEditing && (
-                      <Link 
-                        to={`/projects/${selectedProject.id}`}
-                        className="p-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                        title="Open Full Page"
-                      >
-                        <IconExternalLink size={20} />
-                      </Link>
-                    )}
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-8">
                   {isEditing && (
-                    <div className="col-span-2 space-y-2">
-                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_image_label')}</label>
+                    <div className="sm:col-span-2 space-y-2">
+                      <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_image_label')}</label>
                       <div className="flex items-center gap-4">
-                        <div className="w-24 h-24 rounded-lg bg-zinc-100 dark:bg-zinc-800 border-2 border-dashed border-zinc-200 dark:border-zinc-700 overflow-hidden flex items-center justify-center shrink-0">
+                        <div className="w-24 h-24 rounded-lg bg-zinc-100 dark:bg-zinc-800 border-2 border-dashed border-[var(--tblr-border)] overflow-hidden flex items-center justify-center shrink-0">
                           {editForm?.image_url ? (
                             <img src={editForm.image_url} alt="Preview" className="w-full h-full object-cover" />
                           ) : (
@@ -1136,7 +1157,7 @@ export default function Projects() {
                           )}
                         </div>
                         <div className="flex-1">
-                          <label className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white rounded-lg cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors border border-zinc-200 dark:border-zinc-700 text-sm font-medium">
+                          <label className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-text)] rounded-lg cursor-pointer hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors border border-[var(--tblr-border)] text-sm font-medium">
                             <IconUpload size={18} />
                             {t('projects_upload_image')}
                             <input 
@@ -1146,16 +1167,16 @@ export default function Projects() {
                               onChange={handleImageUpload}
                             />
                           </label>
-                          <p className="text-[0.6875rem] text-zinc-500 mt-2">{t('projects_image_hint')}</p>
+                          <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-2">{t('projects_image_hint')}</p>
                         </div>
                       </div>
                     </div>
                   )}
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('status')}</label>
+                    <label htmlFor="pf-1" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('status')}</label>
                     {isEditing ? (
-                      <select 
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      <select id="pf-1" 
+                        className={FIELD_CLS}
                         value={editForm?.status || 'Planning'}
                         onChange={e => setEditForm(prev => prev ? ({...prev, status: e.target.value as any}) : null)}
                       >
@@ -1176,10 +1197,10 @@ export default function Projects() {
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_domain_label')}</label>
+                    <label htmlFor="pf-2" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_domain_label')}</label>
                     {isEditing ? (
-                      <select
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      <select id="pf-2"
+                        className={FIELD_CLS}
                         value={editForm?.category || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, category: e.target.value}) : null)}
                       >
@@ -1189,110 +1210,126 @@ export default function Projects() {
                         ))}
                       </select>
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.category || t('projects_uncategorized')}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.category || t('projects_uncategorized')}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('budget')}</label>
+                    <label htmlFor="pf-3" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('budget')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-3" 
                         type="number"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        min={0}
+                        onFocus={e => e.currentTarget.select()}
+                        className={FIELD_CLS}
                         value={editForm?.budget || 0}
                         onChange={e => setEditForm(prev => prev ? ({...prev, budget: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.budget)}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{formatCurrency(selectedProject.budget)}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_start_date')}</label>
+                    <label htmlFor="pf-4" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_start_date')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-4" 
                         type="date"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        className={FIELD_CLS}
                         value={editForm?.start_date || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, start_date: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.start_date).toLocaleDateString('fr-FR')}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{fmtDate(selectedProject.start_date)}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('deadline')}</label>
+                    <label htmlFor="pf-5" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('deadline')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-5" 
                         type="date"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        className={FIELD_CLS}
                         value={editForm?.end_date || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, end_date: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{new Date(selectedProject.end_date).toLocaleDateString('fr-FR')}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{fmtDate(selectedProject.end_date)}</p>
                     )}
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_surface_m2')}</label>
+                    <label htmlFor="pf-6" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_surface_m2')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-6" 
                         type="number"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        min={0}
+                        onFocus={e => e.currentTarget.select()}
+                        className={FIELD_CLS}
                         value={editForm?.surface || 0}
                         onChange={e => setEditForm(prev => prev ? ({...prev, surface: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.surface || 0} m²</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.surface || 0} m²</p>
                     )}
                   </div>
 
+                  {!isNewProject && (
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_construction_cost_eur')}</label>
+                    <label htmlFor="pf-7" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_construction_cost_eur')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-7" 
                         type="number"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        min={0}
+                        onFocus={e => e.currentTarget.select()}
+                        className={FIELD_CLS}
                         value={editForm?.construction_cost || 0}
                         onChange={e => setEditForm(prev => prev ? ({...prev, construction_cost: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.construction_cost)}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{formatCurrency(selectedProject.construction_cost)}</p>
                     )}
                   </div>
+                  )}
 
+                  {!isNewProject && (
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_remuneration_eur')}</label>
+                    <label htmlFor="pf-8" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_remuneration_eur')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-8" 
                         type="number"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        min={0}
+                        onFocus={e => e.currentTarget.select()}
+                        className={FIELD_CLS}
                         value={editForm?.remuneration || 0}
                         onChange={e => setEditForm(prev => prev ? ({...prev, remuneration: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{formatCurrency(selectedProject.remuneration)}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{formatCurrency(selectedProject.remuneration)}</p>
                     )}
                   </div>
+                  )}
 
+                  {!isNewProject && (
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_progression_pct')}</label>
+                    <label htmlFor="pf-9" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_progression_pct')}</label>
                     {isEditing ? (
-                      <input 
+                      <input id="pf-9" 
                         type="number"
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        min={0}
+                        onFocus={e => e.currentTarget.select()}
+                        className={FIELD_CLS}
                         value={editForm?.progression || 0}
                         onChange={e => setEditForm(prev => prev ? ({...prev, progression: Number(e.target.value)}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.progression || 0}%</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.progression || 0}%</p>
                     )}
                   </div>
+                  )}
 
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_manager_label')}</label>
+                    <label htmlFor="pf-10" className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_manager_label')}</label>
                     {isEditing ? (
-                      <select
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                      <select id="pf-10"
+                        className={FIELD_CLS}
                         value={editForm?.project_manager || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, project_manager: e.target.value}) : null)}
                       >
@@ -1302,31 +1339,31 @@ export default function Projects() {
                         ))}
                       </select>
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.project_manager || '---'}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.project_manager || '---'}</p>
                     )}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4 mb-8">
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_cotraitants_table')}</label>
-                    <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                    <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_cotraitants_table')}</label>
+                    <div className="border border-[var(--tblr-border)] rounded-lg overflow-hidden">
                       <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
+                        <thead className="bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)]">
                           <tr>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_specialty_label')}</th>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_cotraitant_label')}</th>
-                            {isEditing && <th className="px-3 py-2 text-right font-medium text-zinc-500 w-10"></th>}
+                            <th className="px-3 py-2 text-left font-medium text-[var(--tblr-muted)]">{t('projects_specialty_label')}</th>
+                            <th className="px-3 py-2 text-left font-medium text-[var(--tblr-muted)]">{t('projects_cotraitant_label')}</th>
+                            {isEditing && <th className="px-3 py-2 text-right font-medium text-[var(--tblr-muted)] w-10"></th>}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+                        <tbody className="divide-y divide-[var(--tblr-border)]">
                           {(isEditing ? editForm?.cotraitants_list : selectedProject.cotraitants_list)?.map((cot, idx) => (
                             <tr key={cot.id || idx}>
                               <td className="px-3 py-2">
                                 {isEditing ? (
                                   <input 
-                                    className="w-full bg-transparent outline-none focus:ring-1 focus:ring-blue-500 rounded px-1"
+                                    className="w-full bg-transparent outline-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded px-1"
                                     value={cot.specialty || ''}
                                     onChange={e => {
                                       const newList = [...(editForm?.cotraitants_list || [])];
@@ -1395,48 +1432,48 @@ export default function Projects() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_cotraitants_freetext')}</label>
+                    <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_cotraitants_freetext')}</label>
                     {isEditing ? (
                       <input 
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        className={FIELD_CLS}
                         value={editForm?.cotraitants || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, cotraitants: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.cotraitants || '---'}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.cotraitants || '---'}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_intervenants')}</label>
+                    <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_intervenants')}</label>
                     {isEditing ? (
                       <input 
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        className={FIELD_CLS}
                         value={editForm?.external_intervenants || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, external_intervenants: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.external_intervenants || '---'}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.external_intervenants || '---'}</p>
                     )}
                   </div>
                   <div className="space-y-1">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_entreprises')}</label>
+                    <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_entreprises')}</label>
                     {isEditing ? (
                       <input
-                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                        className={FIELD_CLS}
                         value={editForm?.entreprises || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, entreprises: e.target.value}) : null)}
                       />
                     ) : (
-                      <p className="text-zinc-900 dark:text-white font-medium">{selectedProject.entreprises || '---'}</p>
+                      <p className="text-[var(--tblr-text)] font-medium">{selectedProject.entreprises || '---'}</p>
                     )}
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('description')}</label>
+                  <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('description')}</label>
                   {isEditing ? (
                     <textarea 
-                      className="w-full h-32 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-900 dark:text-white"
+                      className="w-full h-32 bg-zinc-50 dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] resize-none text-[var(--tblr-text)]"
                       value={editForm?.description || ''}
                       onChange={e => setEditForm(prev => prev ? ({...prev, description: e.target.value}) : null)}
                     />
@@ -1451,7 +1488,7 @@ export default function Projects() {
                   <input 
                     type="checkbox"
                     id="is_complete_mission"
-                    className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
+                    className="w-4 h-4 text-blue-600 bg-zinc-100 border-zinc-300 rounded focus:ring-[var(--tblr-primary)] dark:focus:ring-blue-600 dark:ring-offset-zinc-800 focus:ring-2 dark:bg-zinc-700 dark:border-zinc-600"
                     checked={isEditing ? !!editForm?.is_complete_mission : !!selectedProject.is_complete_mission}
                     disabled={!isEditing}
                     onChange={e => setEditForm(prev => prev ? ({...prev, is_complete_mission: e.target.checked}) : null)}
@@ -1463,10 +1500,10 @@ export default function Projects() {
 
                 <div className="grid grid-cols-1 gap-6 mt-4">
                   <div className="space-y-2">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_studies_label')}</label>
+                    <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_studies_label')}</label>
                     {isEditing ? (
                       <textarea 
-                        className="w-full h-24 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-900 dark:text-white"
+                        className="w-full h-24 bg-zinc-50 dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] resize-none text-[var(--tblr-text)]"
                         value={editForm?.etudes_notes || ''}
                         onChange={e => setEditForm(prev => prev ? ({...prev, etudes_notes: e.target.value}) : null)}
                       />
@@ -1479,10 +1516,10 @@ export default function Projects() {
 
                   {(isEditing ? editForm?.is_complete_mission : selectedProject.is_complete_mission) && (
                     <div className="space-y-2">
-                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_construction_label')}</label>
+                      <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_construction_label')}</label>
                       {isEditing ? (
                         <textarea 
-                          className="w-full h-24 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none text-zinc-900 dark:text-white"
+                          className="w-full h-24 bg-zinc-50 dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] resize-none text-[var(--tblr-text)]"
                           value={editForm?.chantier_notes || ''}
                           onChange={e => setEditForm(prev => prev ? ({...prev, chantier_notes: e.target.value}) : null)}
                         />
@@ -1498,7 +1535,7 @@ export default function Projects() {
                 {(isEditing ? editForm?.is_complete_mission : selectedProject.is_complete_mission) && (
                   <div className="space-y-2 mt-4">
                     <div className="flex items-center justify-between">
-                      <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{t('projects_lots_enterprises')}</label>
+                      <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider">{t('projects_lots_enterprises')}</label>
                       {isEditing && (
                         <button
                           type="button"
@@ -1512,24 +1549,24 @@ export default function Projects() {
                         </button>
                       )}
                     </div>
-                    <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden">
+                    <div className="border border-[var(--tblr-border)] rounded-lg overflow-hidden">
                       <div className="overflow-x-auto">
                       <table className="min-w-full text-sm">
-                        <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-700">
+                        <thead className="bg-[var(--tblr-surface-2)] border-b border-[var(--tblr-border)]">
                           <tr>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500 w-16">{t('projects_num_short')}</th>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_lot_label')}</th>
-                            <th className="px-3 py-2 text-left font-medium text-zinc-500">{t('projects_enterprise_label')}</th>
-                            {isEditing && <th className="px-3 py-2 text-right font-medium text-zinc-500 w-10"></th>}
+                            <th className="px-3 py-2 text-left font-medium text-[var(--tblr-muted)] w-16">{t('projects_num_short')}</th>
+                            <th className="px-3 py-2 text-left font-medium text-[var(--tblr-muted)]">{t('projects_lot_label')}</th>
+                            <th className="px-3 py-2 text-left font-medium text-[var(--tblr-muted)]">{t('projects_enterprise_label')}</th>
+                            {isEditing && <th className="px-3 py-2 text-right font-medium text-[var(--tblr-muted)] w-10"></th>}
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-700">
+                        <tbody className="divide-y divide-[var(--tblr-border)]">
                           {(isEditing ? editForm?.lots_list : selectedProject.lots_list)?.map((lot, idx) => (
                             <tr key={lot.id || idx}>
                               <td className="px-3 py-2">
                                 {isEditing ? (
                                   <input 
-                                    className="w-full bg-transparent outline-none focus:ring-1 focus:ring-blue-500 rounded px-1"
+                                    className="w-full bg-transparent outline-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded px-1"
                                     value={lot.lot_number || ''}
                                     onChange={e => {
                                       const newList = [...(editForm?.lots_list || [])];
@@ -1544,7 +1581,7 @@ export default function Projects() {
                               <td className="px-3 py-2">
                                 {isEditing ? (
                                   <input 
-                                    className="w-full bg-transparent outline-none focus:ring-1 focus:ring-blue-500 rounded px-1"
+                                    className="w-full bg-transparent outline-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded px-1"
                                     value={lot.lot_title || ''}
                                     onChange={e => {
                                       const newList = [...(editForm?.lots_list || [])];
@@ -1594,7 +1631,7 @@ export default function Projects() {
                           ))}
                           {((isEditing ? editForm?.lots_list : selectedProject.lots_list) || []).length === 0 && (
                             <tr>
-                              <td colSpan={isEditing ? 4 : 3} className="px-3 py-4 text-center text-zinc-500 italic">
+                              <td colSpan={isEditing ? 4 : 3} className="px-3 py-4 text-center text-[var(--tblr-muted)] italic">
                                 {t('projects_no_lots')}
                               </td>
                             </tr>
@@ -1615,8 +1652,8 @@ export default function Projects() {
 
                 {(selectedProject.address || (isEditing && editForm?.address)) && (
                   <div className="mt-6">
-                    <label className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2 block">{t('projects_location_label')}</label>
-                    <div className="rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 relative h-[400px]">
+                    <label className="text-xs font-medium text-[var(--tblr-muted)] uppercase tracking-wider mb-2 block">{t('projects_location_label')}</label>
+                    <div className="rounded-xl overflow-hidden border border-[var(--tblr-border)] bg-zinc-100 dark:bg-zinc-800 relative h-[400px]">
                       <InfoPanelBoundary label="Cadastre">
                         <GeoportailMap
                           address={isEditing ? editForm?.address || '' : selectedProject.address || ''}
@@ -1637,7 +1674,7 @@ export default function Projects() {
 
                 <div className="mt-8 pt-8 border-t border-zinc-100 dark:border-zinc-800">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">{t('projects_milestones_title')}</h3>
+                    <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider">{t('projects_milestones_title')}</h3>
                     <button
                       onClick={() => setIsAddingMilestone(!isAddingMilestone)}
                       className="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
@@ -1652,7 +1689,7 @@ export default function Projects() {
                         <div className="col-span-2">
                           <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_milestone_title_label')}</label>
                           <input
-                            className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                            className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] text-[var(--tblr-text)]"
                             placeholder={t('projects_milestone_example')}
                             value={newMilestoneTitle}
                             onChange={e => setNewMilestoneTitle(e.target.value)}
@@ -1662,7 +1699,7 @@ export default function Projects() {
                           <label className="text-[0.6875rem] font-bold text-zinc-400 uppercase mb-1 block">{t('projects_due_date_label')}</label>
                           <input 
                             type="date"
-                            className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-white"
+                            className="w-full px-3 py-1.5 bg-white dark:bg-zinc-800 border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] text-[var(--tblr-text)]"
                             value={newMilestoneDate}
                             onChange={e => setNewMilestoneDate(e.target.value)}
                           />
@@ -1710,13 +1747,13 @@ export default function Projects() {
                             <div>
                               <p className={cn(
                                 "text-sm font-medium",
-                                milestone.completed ? "text-zinc-500 line-through" : "text-zinc-900 dark:text-white"
+                                milestone.completed ? "text-[var(--tblr-muted)] line-through" : "text-[var(--tblr-text)]"
                               )}>
                                 {milestone.title}
                               </p>
                               <div className="flex items-center gap-1 text-[0.6875rem] text-zinc-400">
                                 <IconCalendar size={10} />
-                                <span>{t('due')} {new Date(milestone.due_date).toLocaleDateString('fr-FR')}</span>
+                                <span>{t('due')} {fmtDate(milestone.due_date)}</span>
                               </div>
                             </div>
                           </div>
@@ -1731,119 +1768,112 @@ export default function Projects() {
                     ) : (
                       <div className="text-center py-8 bg-zinc-50 dark:bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-200 dark:border-zinc-800">
                         <IconCalendar className="mx-auto text-zinc-300 mb-2" size={24} />
-                        <p className="text-xs text-zinc-500">{t('projects_no_milestones_defined')}</p>
+                        <p className="text-xs text-[var(--tblr-muted)]">{t('projects_no_milestones_defined')}</p>
                       </div>
                     )}
                   </div>
                 </div>
               </div>
-            </motion.div>
-          </div>
+          </ModalShell>
         )}
       </AnimatePresence>
 
       {/* Category Management Modal */}
       <AnimatePresence>
         {isCategoryModalOpen && (
-          <motion.div key="project-category-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div 
-              ref={launchOriginRef}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md max-h-[90dvh] overflow-hidden flex flex-col"
-            >
-              <div className="p-6 border-b border-zinc-200 dark:border-zinc-700 flex justify-between items-center">
-                <h3 className="text-xl font-bold text-zinc-900 dark:text-white">{t('projects_manage_domains_title')}</h3>
-                <button onClick={() => setIsCategoryModalOpen(false)} className="text-zinc-500 hover:text-zinc-900 dark:hover:text-white">
-                  ✕
-                </button>
-              </div>
-              <div className="p-6 flex-1 overflow-y-auto">
-                <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
-                  <input 
-                    className="flex-1 px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-zinc-900 dark:text-white"
-                    placeholder={t('projects_new_domain_placeholder')}
-                    value={newCategoryName}
-                    onChange={e => setNewCategoryName(e.target.value)}
-                  />
-                  <button 
-                    type="submit"
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          <ModalShell
+            key="project-category-modal"
+            size="md"
+            title={t('projects_manage_domains_title')}
+            onClose={() => setIsCategoryModalOpen(false)}
+            bodyClassName="p-4 sm:p-6"
+          >
+            <form onSubmit={handleAddCategory} className="flex gap-2 mb-6">
+              <input
+                aria-label={t('projects_new_domain_placeholder')}
+                className={FIELD_CLS}
+                placeholder={t('projects_new_domain_placeholder')}
+                value={newCategoryName}
+                onChange={e => setNewCategoryName(e.target.value)}
+              />
+              <button type="submit" className="btn btn-primary shrink-0">
+                {t('btn_add')}
+              </button>
+            </form>
+            <ul className="space-y-2">
+              {categories.map(cat => (
+                <li key={cat.id} className="flex items-center justify-between p-3 rounded-lg bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)]">
+                  <span className="text-[var(--tblr-text)]">{cat.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteCategory(cat.id)}
+                    aria-label={`${t('btn_delete')} ${cat.name}`}
+                    className="btn btn-ghost p-1.5 hover:!text-[var(--tblr-danger)]"
                   >
-                    {t('btn_add')}
+                    <IconTrash size={16} />
                   </button>
-                </form>
-                <div className="space-y-2">
-                  {categories.map(cat => (
-                    <div key={cat.id} className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-900/50 rounded-lg border border-zinc-100 dark:border-zinc-700/50">
-                      <span className="text-zinc-700 dark:text-zinc-300">{cat.name}</span>
-                      <button 
-                        onClick={() => handleDeleteCategory(cat.id)}
-                        className="text-zinc-400 hover:text-red-500 transition-colors"
-                      >
-                        <IconTrash size={16} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
+                </li>
+              ))}
+            </ul>
+          </ModalShell>
         )}
       </AnimatePresence>
 
       {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
       <AnimatePresence>
         {deleteTarget && (
-          <motion.div key="project-delete-modal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-            <motion.div
-              ref={launchOriginRef}
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 shadow-xl w-full max-w-md overflow-hidden"
-            >
-              <div className="p-6 border-b border-zinc-200 dark:border-zinc-700">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">{t('projects_delete_confirm_title')}</h3>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
-                  {t('projects_delete_confirm_body', { name: deleteTarget.name })}
-                </p>
-                <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">
-                  {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
-                </p>
-                <input
-                  autoFocus
-                  className="mt-3 w-full px-3 py-2 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-zinc-900 dark:text-white"
-                  value={deleteConfirmInput}
-                  onChange={e => setDeleteConfirmInput(e.target.value)}
-                  placeholder={deleteConfirmWord}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
-                      handleDeleteProject(deleteTarget.id);
-                    }
-                  }}
-                />
-              </div>
-              <div className="p-6 pt-4 flex justify-end gap-2">
+          <ModalShell
+            key="project-delete-modal"
+            size="md"
+            title={t('projects_delete_confirm_title')}
+            busy={isDeletingProject}
+            onClose={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
+            bodyClassName="p-4 sm:p-6"
+            footer={
+              <>
                 <button
+                  type="button"
                   onClick={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
+                  disabled={isDeletingProject}
+                  className="btn btn-secondary"
                 >
                   {t('btn_cancel')}
                 </button>
                 <button
+                  type="button"
                   disabled={deleteConfirmInput.trim().toLowerCase() !== deleteConfirmWord.toLowerCase() || isDeletingProject}
                   onClick={() => handleDeleteProject(deleteTarget.id)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="btn btn-danger disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
                 </button>
-              </div>
-            </motion.div>
-          </motion.div>
+              </>
+            }
+          >
+            <p className="text-sm text-[var(--tblr-muted)]">
+              {t('projects_delete_confirm_body', { name: deleteTarget.name })}
+            </p>
+            <label htmlFor="project-delete-confirm" className="block text-sm text-[var(--tblr-muted)] mt-3">
+              {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
+            </label>
+            <input
+              id="project-delete-confirm"
+              autoFocus
+              className={FIELD_CLS + ' mt-2'}
+              value={deleteConfirmInput}
+              onChange={e => setDeleteConfirmInput(e.target.value)}
+              placeholder={deleteConfirmWord}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
+                  handleDeleteProject(deleteTarget.id);
+                }
+              }}
+            />
+          </ModalShell>
         )}
       </AnimatePresence>
+
+      <Toast toast={toast} />
 
       <ContactModal
         isOpen={isContactModalOpen}
