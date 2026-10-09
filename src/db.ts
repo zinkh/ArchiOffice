@@ -1,6 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import type { SiteReport, SiteReportNote } from './types';
-import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, Reserve, GpaReserve, Observation } from './types';
+import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, MeetingAttendee, Reserve, GpaReserve, Observation } from './types';
 
 /**
  * Une écriture (POST/PUT/PATCH) différée faute de réseau, rejouée par
@@ -21,7 +21,7 @@ export interface PendingWrite {
   blobFieldName?: string;
   blobFilename?: string;
   extraFields?: Record<string, string>;
-  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'siteReportNotePhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem';
+  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'siteReportNotePhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem' | 'meetingAttendee';
   status: 'pending' | 'error';
   attempts: number;
   lastError?: string;
@@ -46,6 +46,7 @@ export class AppDatabase extends Dexie {
   // (un projet, un devis...) — sinon consulter les réunions d'une affaire
   // effacerait le cache de toutes les autres.
   meetingsCache!: Table<Meeting>;
+  meetingAttendeesCache!: Table<MeetingAttendee>;
   reservesCache!: Table<Reserve>;
   gpaReservesCache!: Table<GpaReserve>;
   observationsCache!: Table<Observation>;
@@ -122,6 +123,11 @@ export class AppDatabase extends Dexie {
     this.version(8).stores({
       siteReportsCache: 'id, project_id',
       siteReportNotesCache: 'id, report_id',
+    });
+    // v9 : intervenants d'une réunion, pour les afficher et les modifier hors
+    // ligne (voir src/lib/meetingAttendeesOffline.ts).
+    this.version(9).stores({
+      meetingAttendeesCache: 'id, meeting_id',
     });
   }
 }

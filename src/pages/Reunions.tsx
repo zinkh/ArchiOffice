@@ -33,6 +33,7 @@ import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useProjectGroupement } from '../hooks/useActiveGroupement';
 import { queuedJsonRequest, queuedMultipartRequest, listPendingWrites, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { cachedListFirst } from '../lib/offlineReadCache';
+import { attendeesUrl, toAttendeeContact, loadContactsForAttendees, loadMeetingAttendees } from '../lib/meetingAttendeesOffline';
 import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
@@ -46,6 +47,40 @@ type ParentKind = 'project' | 'proposal' | 'tender';
 function formatDate(iso: string) {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// ── Brouillon des notes ──────────────────────────────────────────────────────
+// Les notes sont enregistrées au fil de la frappe, mais une page rechargée ou
+// une session renouvelée en pleine saisie ne doit rien perdre : le texte est
+// aussi gardé localement, de façon synchrone, jusqu'à ce que l'écriture soit
+// partie (ou mise en file).
+const NOTES_DRAFT_PREFIX = 'meeting-notes-draft:';
+const NOTES_AUTOSAVE_DELAY_MS = 1000;
+
+function readNotesDraft(meetingId: string): string | null {
+  try { return localStorage.getItem(NOTES_DRAFT_PREFIX + meetingId); } catch { return null; }
+}
+function writeNotesDraft(meetingId: string, value: string) {
+  try { localStorage.setItem(NOTES_DRAFT_PREFIX + meetingId, value); } catch { /* stockage indisponible */ }
+}
+function clearNotesDraft(meetingId: string) {
+  try { localStorage.removeItem(NOTES_DRAFT_PREFIX + meetingId); } catch { /* stockage indisponible */ }
+}
+const notesWriteId = (meetingId: string) => `notes:${meetingId}`;
+
+/** Dernières notes encore en file pour cette réunion (écriture pas encore partie). */
+async function pendingMeetingNotes(meetingId: string): Promise<string | undefined> {
+  const writes = (await listPendingWrites('meeting'))
+    .filter(w => w.method === 'PUT' && w.url === `/api/meetings/${meetingId}` && typeof w.jsonBody?.notes === 'string');
+  return writes.length ? writes[writes.length - 1].jsonBody.notes : undefined;
+}
+
+/** Notes à afficher : brouillon non enregistré > écriture en file > valeur connue. */
+async function resolveMeetingNotes(meetingId: string, known: string | undefined): Promise<{ notes: string; fromDraft: boolean }> {
+  const draft = readNotesDraft(meetingId);
+  if (draft !== null) return { notes: draft, fromDraft: true };
+  const pending = await pendingMeetingNotes(meetingId);
+  return { notes: pending ?? known ?? '', fromDraft: false };
 }
 
 function contactDisplayName(c: MeetingAttendee['contact']) {
@@ -75,9 +110,23 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState('');
 
+  // Cache d'abord, écritures en file rejouées par-dessus : les intervenants se
+  // lisent et se modifient sans réseau (src/lib/meetingAttendeesOffline.ts).
   useEffect(() => {
-    apiFetch<MeetingAttendee[]>(`/api/meetings/${meetingId}/attendees`).then(setAttendees).catch(() => {});
-    apiFetch<Contact[]>('/api/contacts').then(setContacts).catch(() => {});
+    let cancelled = false;
+    const load = async () => {
+      const all = await loadContactsForAttendees();
+      if (cancelled) return;
+      setContacts(all);
+      const list = await loadMeetingAttendees(meetingId, all, a => { if (!cancelled) setAttendees(a); });
+      if (!cancelled) setAttendees(list);
+    };
+    void load();
+    const onSynced = (e: Event) => {
+      if ((e as CustomEvent).detail?.entity === 'meetingAttendee') void load();
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => { cancelled = true; window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced); };
   }, [meetingId]);
 
   const alreadyAdded = new Set(attendees.map(a => a.contact_id));
@@ -95,10 +144,12 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
   }).slice(0, 8);
 
   const addExisting = async (contact: Contact) => {
-    const att = await apiFetch<MeetingAttendee>(`/api/meetings/${meetingId}/attendees`, {
-      method: 'POST',
-      body: JSON.stringify({ contact_id: contact.id, role: '' }),
-    });
+    const id = crypto.randomUUID();
+    const body = { id, contact_id: contact.id, role: '' };
+    const { queued, data } = await queuedJsonRequest<MeetingAttendee>({ entity: 'meetingAttendee', id, method: 'POST', url: attendeesUrl(meetingId), body });
+    const att: MeetingAttendee = queued || !data
+      ? { id, meeting_id: meetingId, contact_id: contact.id, role: '', contact: toAttendeeContact(contact) }
+      : data;
     setAttendees(prev => [...prev, att]);
     setQuery('');
     setMode(null);
@@ -106,13 +157,22 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
 
   const createAndAdd = async () => {
     if (!newFirst.trim() && !newLast.trim()) return;
-    const att = await apiFetch<MeetingAttendee>(`/api/meetings/${meetingId}/attendees/new-contact`, {
-      method: 'POST',
-      body: JSON.stringify({
-        first_name: newFirst, last_name: newLast, company_name: newCompany,
-        job_title: newJob, phone_mobile: newPhone, email: newEmail, role: newRole,
-      }),
+    const id = crypto.randomUUID();
+    const contactId = crypto.randomUUID();
+    const body = {
+      id, contact_id: contactId,
+      first_name: newFirst, last_name: newLast, company_name: newCompany,
+      job_title: newJob, phone_mobile: newPhone, email: newEmail, role: newRole,
+    };
+    const { queued, data } = await queuedJsonRequest<MeetingAttendee>({
+      entity: 'meetingAttendee', id, method: 'POST', url: `${attendeesUrl(meetingId)}/new-contact`, body,
     });
+    const att: MeetingAttendee = queued || !data
+      ? {
+          id, meeting_id: meetingId, contact_id: contactId, role: newRole,
+          contact: toAttendeeContact({ id: contactId, first_name: newFirst, last_name: newLast, company_name: newCompany, job_title: newJob, phone_mobile: newPhone, phone: newPhone, email: newEmail }),
+        }
+      : data;
     setAttendees(prev => [...prev, att]);
     setNewFirst(''); setNewLast(''); setNewCompany(''); setNewJob('');
     setNewPhone(''); setNewEmail(''); setNewRole('');
@@ -120,15 +180,13 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
   };
 
   const removeAttendee = async (id: string) => {
-    await apiFetch(`/api/meetings/${meetingId}/attendees/${id}`, { method: 'DELETE' });
+    await queuedJsonRequest({ entity: 'meetingAttendee', id: `delete:${id}`, method: 'DELETE', url: `${attendeesUrl(meetingId)}/${id}` });
     setAttendees(prev => prev.filter(a => a.id !== id));
   };
 
   const saveRole = async (id: string) => {
-    await apiFetch(`/api/meetings/${meetingId}/attendees/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ role: roleValue }),
-    });
+    // Id stable : plusieurs corrections du rôle hors ligne n'en gardent qu'une.
+    await queuedJsonRequest({ entity: 'meetingAttendee', id: `role:${id}`, method: 'PATCH', url: `${attendeesUrl(meetingId)}/${id}`, body: { role: roleValue } });
     setAttendees(prev => prev.map(a => a.id === id ? { ...a, role: roleValue } : a));
     setEditingRole(null);
   };
@@ -489,9 +547,12 @@ export default function Reunions() {
       // le serveur ni dans le cache : sans les relire dans la file, un
       // rechargement de la page (ou une reconnexion) les faisait disparaître
       // de l'écran alors qu'elles attendaient toujours d'être envoyées.
-      const pending = (await listPendingWrites('meeting'))
+      const pending = (await Promise.all((await listPendingWrites('meeting'))
         .filter(w => w.method === 'POST' && w.jsonBody)
-        .map(w => ({ ...w.jsonBody, created_at: new Date(w.createdAt).toISOString(), photos: [], pendingSync: true } as Meeting))
+        .map(async w => {
+          const { notes } = await resolveMeetingNotes(w.jsonBody.id, w.jsonBody.notes);
+          return { ...w.jsonBody, notes, created_at: new Date(w.createdAt).toISOString(), photos: [], pendingSync: true } as Meeting;
+        })))
         .filter(scopeFilter);
       const withPending = (list: Meeting[]) => [...pending.filter(p => !list.some(m => m.id === p.id)), ...list];
       const { hadLocalData, synced } = await cachedListFirst(db.meetingsCache, scopeFilter, url, list => setMeetings(withPending(list)));
@@ -615,22 +676,30 @@ export default function Reunions() {
   const loadMeetingDetail = async (meeting: Meeting) => {
     setLoadingDetail(true);
     setSelectedMeeting(null);
+    let restoredDraft: string | null = null;
     try {
       const data = await apiFetch<Meeting>(`/api/meetings/${meeting.id}`);
-      setSelectedMeeting(data);
-      setNotesValue(data.notes || '');
+      const { notes, fromDraft } = await resolveMeetingNotes(meeting.id, data.notes);
+      setSelectedMeeting({ ...data, notes });
+      setNotesValue(notes);
+      if (fromDraft) restoredDraft = notes;
     } catch {
       // Réunion pas encore sur le serveur (créée hors-ligne) : on remet
       // ses photos en file, avec un aperçu local, plutôt qu'une fiche vide.
       const queuedPhotos = (await listPendingWrites('meetingPhoto'))
         .filter(w => w.method === 'POST' && w.blob && w.url === `/api/meetings/${meeting.id}/photos`)
         .map(w => ({ id: w.id, meeting_id: meeting.id, file_url: '', uploaded_at: new Date(w.createdAt).toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(w.blob!) } as MeetingPhoto));
-      const restored = { ...meeting, photos: [...(meeting.photos || []), ...queuedPhotos] };
+      const { notes, fromDraft } = await resolveMeetingNotes(meeting.id, meeting.notes);
+      const restored = { ...meeting, notes, photos: [...(meeting.photos || []), ...queuedPhotos] };
       setSelectedMeeting(restored);
-      setNotesValue(meeting.notes || '');
+      setNotesValue(notes);
+      if (fromDraft) restoredDraft = notes;
     } finally {
       setLoadingDetail(false);
     }
+    // Saisie interrompue (page rechargée, session renouvelée) : on la remet
+    // en route au lieu de la laisser dans le brouillon local.
+    if (restoredDraft !== null) void persistNotes(meeting.id, restoredDraft, meeting);
     setMobileView('detail');
   };
 
@@ -704,24 +773,65 @@ export default function Reunions() {
     if (selectedMeeting?.id === id) setSelectedMeeting(null);
   };
 
+  // Écrit les notes (ou les met en file hors ligne). Id stable par réunion :
+  // les enregistrements successifs se remplacent dans la file, il n'en part
+  // qu'un, avec le dernier texte.
+  const persistNotes = async (meetingId: string, value: string, base: Pick<Meeting, 'title' | 'date'>) => {
+    await queuedJsonRequest({
+      entity: 'meeting', id: notesWriteId(meetingId), method: 'PUT', url: `/api/meetings/${meetingId}`,
+      body: { title: base.title, date: base.date, notes: value },
+    });
+    // Le brouillon n'est libéré que si rien n'a été tapé entre-temps.
+    if (readNotesDraft(meetingId) === value) clearNotesDraft(meetingId);
+    setSelectedMeeting(prev => prev && prev.id === meetingId ? { ...prev, notes: value } : prev);
+    setMeetings(prev => prev.map(m => m.id === meetingId ? { ...m, notes: value } : m));
+  };
+
+  const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unsavedNotesRef = useRef<{ meeting: Meeting; value: string } | null>(null);
+  const flushNotes = () => {
+    if (notesTimerRef.current) { clearTimeout(notesTimerRef.current); notesTimerRef.current = null; }
+    const unsaved = unsavedNotesRef.current;
+    unsavedNotesRef.current = null;
+    if (unsaved) void persistNotes(unsaved.meeting.id, unsaved.value, unsaved.meeting).catch(() => { /* le brouillon local reste */ });
+  };
+
   const saveNotes = async () => {
     if (!selectedMeeting) return;
+    if (notesTimerRef.current) { clearTimeout(notesTimerRef.current); notesTimerRef.current = null; }
+    unsavedNotesRef.current = null;
     setSavingNotes(true);
     try {
-      await queuedJsonRequest({
-        entity: 'meeting', id: crypto.randomUUID(), method: 'PUT', url: `/api/meetings/${selectedMeeting.id}`,
-        body: { title: selectedMeeting.title, date: selectedMeeting.date, notes: notesValue },
-      });
-      setSelectedMeeting(prev => prev ? { ...prev, notes: notesValue } : prev);
-      setMeetings(prev => prev.map(m => m.id === selectedMeeting.id ? { ...m, notes: notesValue } : m));
+      await persistNotes(selectedMeeting.id, notesValue, selectedMeeting);
     } finally {
       setSavingNotes(false);
     }
   };
 
+  const handleNotesChange = (value: string) => {
+    setNotesValue(value);
+    if (!selectedMeeting) return;
+    const meeting = selectedMeeting;
+    writeNotesDraft(meeting.id, value);
+    unsavedNotesRef.current = { meeting, value };
+    if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
+    notesTimerRef.current = setTimeout(flushNotes, NOTES_AUTOSAVE_DELAY_MS);
+  };
+
+  // Changer de réunion ou quitter l'écran : la saisie en attente part tout de
+  // suite plutôt que d'attendre le délai.
+  useEffect(() => {
+    window.addEventListener('pagehide', flushNotes);
+    return () => {
+      window.removeEventListener('pagehide', flushNotes);
+      flushNotes();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMeeting?.id]);
+
   const getAttendeesForExport = async (): Promise<MeetingAttendee[]> => {
     if (!selectedMeeting) return [];
-    try { return await apiFetch<MeetingAttendee[]>(`/api/meetings/${selectedMeeting.id}/attendees`); }
+    try { return await loadMeetingAttendees(selectedMeeting.id, await loadContactsForAttendees()); }
     catch { return []; }
   };
 
@@ -1340,13 +1450,7 @@ export default function Reunions() {
                 <IconUsers size={16} />
                 Intervenants
               </h2>
-              {selectedMeeting.pendingSync ? (
-                <p className="text-sm italic" style={{ color: 'var(--tblr-muted)' }}>
-                  Disponible une fois la réunion synchronisée (en attente d'envoi).
-                </p>
-              ) : (
-                <AttendeesPanel meetingId={selectedMeeting.id} />
-              )}
+              <AttendeesPanel meetingId={selectedMeeting.id} />
             </div>
 
             <hr className="mb-8" style={{ borderColor: 'var(--tblr-border)' }} />
@@ -1359,7 +1463,7 @@ export default function Reunions() {
               </h2>
               <textarea
                 value={notesValue}
-                onChange={e => setNotesValue(e.target.value)}
+                onChange={e => handleNotesChange(e.target.value)}
                 onBlur={saveNotes}
                 placeholder="Saisissez vos notes de réunion ici..."
                 rows={10}
@@ -1367,7 +1471,7 @@ export default function Reunions() {
                 style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
               />
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mt-2 gap-2">
-                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Sauvegarde automatique à la perte de focus</p>
+                <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Sauvegarde automatique pendant la saisie, même hors ligne</p>
                 <button
                   onClick={saveNotes}
                   disabled={savingNotes}

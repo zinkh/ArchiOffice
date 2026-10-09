@@ -10,6 +10,16 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
 }
 
+const CONTACT_COLUMNS = 'id, first_name, last_name, company_name, job_title, phone_mobile, phone_work, phone, email, email_work, email_home';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Un intervenant ajouté hors ligne arrive avec les identifiants générés par
+// l'appareil (voir src/lib/meetingAttendeesOffline.ts) : rejouer la même
+// écriture ne doit jamais créer un second intervenant ni un second contact.
+function clientId(value: unknown): string {
+  return typeof value === 'string' && UUID_RE.test(value) ? value : crypto.randomUUID();
+}
+
 export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.get("/api/meetings/:id/attendees", async (req: any, res: any) => {
     try {
@@ -22,7 +32,7 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
       if (!attendees?.length) return res.json([]);
       const contactIds = attendees.map((a: any) => a.contact_id);
       const { data: contacts } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-        .select('id, first_name, last_name, company_name, job_title, phone_mobile, phone_work, phone, email, email_work, email_home')
+        .select(CONTACT_COLUMNS)
         .in('id', contactIds);
       const contactMap: Record<string, any> = {};
       (contacts || []).forEach((c: any) => { contactMap[c.id] = c; });
@@ -41,6 +51,20 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
       if (!(await assertTenantEntity(supabaseAdmin, 'contacts', contact_id, tenantId))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
       }
+      const attendeeId = clientId(req.body.id);
+      const loadContact = async () => {
+        const { data: contact } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
+          .select(CONTACT_COLUMNS)
+          .eq('id', contact_id)
+          .single();
+        return contact;
+      };
+      // Rejeu d'une écriture déjà reçue : on rend l'intervenant existant.
+      const { data: sameId } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
+        .select('id, contact_id, role')
+        .eq('id', attendeeId)
+        .maybeSingle();
+      if (sameId) return res.status(200).json({ ...sameId, contact: await loadContact() });
       // Check no duplicate
       const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
         .select('id')
@@ -48,15 +72,10 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
         .eq('contact_id', contact_id)
         .maybeSingle();
       if (existing) return res.status(409).json({ error: "Already added" });
-      const attendeeId = crypto.randomUUID();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
         .insert({ id: attendeeId, meeting_id: id, contact_id, role: role || null });
       if (error) throw error;
-      const { data: contact } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-        .select('id, first_name, last_name, company_name, job_title, phone_mobile, phone_work, phone, email, email_work, email_home')
-        .eq('id', contact_id)
-        .single();
-      res.status(201).json({ id: attendeeId, contact_id, role, contact });
+      res.status(201).json({ id: attendeeId, contact_id, role, contact: await loadContact() });
     } catch (e: any) {
       console.error("[POST /api/meetings/:id/attendees]", e); res.status(500).json({ error: e.message }); }
   });
@@ -68,9 +87,24 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
       const { id } = req.params;
       const { first_name, last_name, company_name, job_title, phone_mobile, email, role } = req.body;
       if (!first_name && !last_name) return res.status(400).json({ error: "Nom requis" });
-      const contactId = crypto.randomUUID();
+      const contactId = clientId(req.body.contact_id);
+      const attendeeId = clientId(req.body.id);
       const created_at = new Date().toISOString();
-      const { error: ce } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({
+      const contact = { id: contactId, first_name, last_name, company_name, job_title, phone_mobile, phone: phone_mobile || '', email, email_work: null, email_home: null, phone_work: null };
+      // Rejeu d'une écriture déjà reçue (envoi en file après une coupure) :
+      // rien n'est recréé, ni l'intervenant ni le contact.
+      const { data: sameId } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
+        .select('id, contact_id, role')
+        .eq('id', attendeeId)
+        .maybeSingle();
+      if (sameId) return res.status(200).json({ ...sameId, contact });
+      // Une première tentative a pu créer le contact sans aller jusqu'à
+      // l'intervenant : on le réutilise au lieu d'échouer sur son identifiant.
+      const { data: sameContact } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
+        .select('id')
+        .eq('id', contactId)
+        .maybeSingle();
+      const { error: ce } = sameContact ? { error: null } : await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({
         id: contactId,
         first_name: first_name || '',
         last_name: last_name || '',
@@ -85,7 +119,6 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
         created_at, created_by: req.user.id
       });
       if (ce) throw ce;
-      const attendeeId = crypto.randomUUID();
       const { error: ae } = await tenantScopedFrom(supabaseAdmin, tenantId, 'meeting_attendees')
         .insert({ id: attendeeId, meeting_id: id, contact_id: contactId, role: role || null });
       if (ae) throw ae;
@@ -114,7 +147,6 @@ export function registerMeetingAttendeeRoutes(app: Express, { supabaseAdmin, get
         }
       }
 
-      const contact = { id: contactId, first_name, last_name, company_name, job_title, phone_mobile, phone: phone_mobile || '', email, email_work: null, email_home: null, phone_work: null };
       res.status(201).json({ id: attendeeId, contact_id: contactId, role, contact });
     } catch (e: any) {
       console.error("[POST /api/meetings/:id/attendees/new-contact]", e); res.status(500).json({ error: e.message }); }

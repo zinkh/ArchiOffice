@@ -235,6 +235,42 @@ describe('Meeting Attendees', () => {
     expect(fakeSupabaseAdmin.getTable('meeting_attendees').find(a => a.id === res.body.id)?.tenant_id).toBe(tenantId);
   });
 
+  it('accepts client-generated ids and replays an offline write without duplicating anything', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('contacts', [{ id: 'contact-off', tenant_id: tenantId, first_name: 'Paul', last_name: 'Durand' }]);
+    const attendeeId = '11111111-1111-4111-8111-111111111111';
+    const body = { id: attendeeId, contact_id: 'contact-off', role: 'MOE' };
+
+    const first = await request(app).post('/api/meetings/m-off/attendees').set(authHeader(token)).send(body);
+    expect(first.status).toBe(201);
+    expect(first.body.id).toBe(attendeeId);
+
+    const replay = await request(app).post('/api/meetings/m-off/attendees').set(authHeader(token)).send(body);
+    expect(replay.status).toBe(200);
+    expect(replay.body.id).toBe(attendeeId);
+    expect(fakeSupabaseAdmin.getTable('meeting_attendees').filter(a => a.id === attendeeId)).toHaveLength(1);
+  });
+
+  it('replays a new-contact attendee created offline without duplicating the contact or the attendee', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const body = {
+      id: '22222222-2222-4222-8222-222222222222',
+      contact_id: '33333333-3333-4333-8333-333333333333',
+      first_name: 'Claire', last_name: 'Petit', role: 'BET',
+    };
+
+    const first = await request(app).post('/api/meetings/m-off2/attendees/new-contact').set(authHeader(token)).send(body);
+    expect(first.status).toBe(201);
+    expect(first.body.contact_id).toBe(body.contact_id);
+
+    const replay = await request(app).post('/api/meetings/m-off2/attendees/new-contact').set(authHeader(token)).send(body);
+    expect(replay.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('contacts').filter(c => c.id === body.contact_id)).toHaveLength(1);
+    expect(fakeSupabaseAdmin.getTable('meeting_attendees').filter(a => a.id === body.id)).toHaveLength(1);
+  });
+
   it('attaches a contact created from a project meeting as a project stakeholder too', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);

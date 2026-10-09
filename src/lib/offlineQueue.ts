@@ -48,9 +48,22 @@ export interface QueuedResult<T = any> {
   data?: T;
 }
 
-/** Erreur réseau (hors-ligne, coupure en cours de requête) — jamais une réponse HTTP d'erreur. */
+/**
+ * Réponses HTTP qui ne disent rien de la validité de l'écriture : session pas
+ * encore renouvelée au retour du réseau (401), passerelle ou serveur qui
+ * redémarre (502-504). Les traiter en erreur définitive faisait perdre la
+ * saisie faite hors ligne pile au moment de la reconnexion.
+ */
+const TRANSIENT_HTTP_STATUSES = new Set([401, 502, 503, 504]);
+
+/**
+ * Erreur réseau (hors-ligne, coupure en cours de requête) ou réponse HTTP
+ * transitoire : l'écriture n'a pas été jugée, on la garde pour plus tard.
+ */
 function isNetworkError(error: unknown): boolean {
-  return error instanceof TypeError;
+  if (error instanceof TypeError) return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && TRANSIENT_HTTP_STATUSES.has(status);
 }
 
 async function parseJsonResponse(response: Response): Promise<any> {
