@@ -3284,7 +3284,7 @@ export default function ProjectDetail() {
 
               </div>
             )}
-            {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} />}
+            {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} projectName={project?.name} projectCode={project?.project_code || project?.reference || undefined} />}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
             {activeTab === 'NOTICES' && project && (
               <ProjectNoticesTab project={project} phases={missionPhases} currentPhase={actualCurrentPhase} />
