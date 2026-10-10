@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconArrowLeft, IconCheck, IconExternalLink, IconLayoutGrid, IconLink,
+  IconArrowLeft, IconCheck, IconExternalLink, IconFileTypePdf, IconLayoutGrid, IconLink,
   IconLoader2, IconPhoto, IconPlus, IconUpload, IconX,
 } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, queuedMultipartRequest } from '../../lib/offlineQueue';
 import { SignedImage } from '../SignedImage';
+import { fetchAgencySettings } from '../../lib/pdfLetterhead';
+import { exportInspirationBoardToPDF } from '../../lib/inspirationExport';
 import type {
   InspirationBoard, InspirationBoardItem, InspirationItem, InspirationPhase,
 } from '../../types';
@@ -34,7 +36,7 @@ function itemImage(item: InspirationItem, alt: string) {
   return <div className="h-full w-full flex items-center justify-center text-[var(--tblr-muted)]"><IconPhoto size={28} /></div>;
 }
 
-export function InspirationBoards({ projectId }: { projectId: string }) {
+export function InspirationBoards({ projectId, projectName, projectCode }: { projectId: string; projectName?: string; projectCode?: string }) {
   const { t } = useTranslation();
   const uploadRef = useRef<HTMLInputElement>(null);
   const previewUrls = useRef<string[]>([]);
@@ -51,6 +53,7 @@ export function InspirationBoards({ projectId }: { projectId: string }) {
   const [boardPhase, setBoardPhase] = useState<InspirationPhase>('ESQ');
   const [urlDraft, setUrlDraft] = useState('');
   const [showUrlForm, setShowUrlForm] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -340,6 +343,25 @@ export function InspirationBoards({ projectId }: { projectId: string }) {
     }
   };
 
+  const exportPdf = async () => {
+    if (!activeBoard || exporting) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const settings = await fetchAgencySettings();
+      await exportInspirationBoardToPDF(
+        activeBoard,
+        boardItems,
+        { name: projectName || '', project_code: projectCode },
+        settings,
+      );
+    } catch (err: any) {
+      setError(err?.message || t('inspiration_export_failed'));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const coverForBoard = (boardId: string) => {
     const placement = placements.find(p => p.board_id === boardId);
     return placement ? items.find(item => item.id === placement.item_id) || null : null;
@@ -409,6 +431,16 @@ export function InspirationBoards({ projectId }: { projectId: string }) {
           >
             <IconLink size={16} /> {t('inspiration_add_url')}
           </button>
+          {activeBoard && (
+            <button
+              type="button"
+              onClick={() => void exportPdf()}
+              disabled={busy || exporting}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-[var(--tblr-surface)] border border-[var(--tblr-border)] text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] disabled:opacity-50"
+            >
+              {exporting ? <IconLoader2 size={16} className="animate-spin" /> : <IconFileTypePdf size={16} />} {t(exporting ? 'inspiration_exporting' : 'inspiration_export_pdf')}
+            </button>
+          )}
           {!activeBoard && (
             <button
               type="button"

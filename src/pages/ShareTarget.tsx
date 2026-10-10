@@ -92,6 +92,17 @@ function shareText(share: PendingShare): string {
   return [share.title, share.text, share.url].filter(Boolean).join('\n').trim();
 }
 
+// Android place presque toujours le lien dans `text` (pas dans `url`), parfois
+// entouré de texte. Les liens doivent figurer dans le MESSAGE envoyé à l'agent :
+// son outil fetch_url n'est autorisé que sur une URL donnée par l'utilisateur
+// dans la conversation, pas sur celle qui dort dans un fichier joint.
+function sharedLinks(share: PendingShare): string[] {
+  const found = [share.url, share.text, share.title]
+    .filter(Boolean)
+    .flatMap(v => v.match(/https?:\/\/[^\s<>"')]+/gi) ?? []);
+  return [...new Set(found)];
+}
+
 function materializeFiles(share: PendingShare): File[] {
   const files = share.files.map(file => new File(
     [file.blob],
@@ -212,9 +223,14 @@ export default function ShareTarget() {
 
       await deletePendingShare(pendingShare.id);
 
+      const links = pendingShare ? sharedLinks(pendingShare) : [];
+      const intro = links.length > 0
+        ? `Voici un lien partagé depuis Android, lis-le avec fetch_url : ${links.join(' ')} `
+        : 'Voici le contenu partagé depuis Android. ';
+
       openChat(
         undefined,
-        'Voici le contenu partagé depuis Android. ',
+        intro,
         attachedDocuments,
         projectId || undefined,
       );
