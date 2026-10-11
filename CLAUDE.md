@@ -2634,6 +2634,25 @@ l'autosave du document n'efface pas un import fait entre-temps.
 par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
 se marchent pas dessus dans le même index d'idempotence.
 
+### Localisations et illustrations des articles de CCTP
+
+Deux aides de la fiche d'un article (`CCTPEditor.tsx`), qui s'enrichissent à mesure
+qu'on renseigne le document, sans migration (tout vit dans le jsonb du DPGF) :
+
+- **Localisation** : le champ reste du texte libre, mais propose les localisations déjà
+  saisies dans tout le document (`localisationsConnues`, `src/lib/cctpImages.ts`, testé :
+  les plus fréquentes d'abord, casse et espaces fusionnés, sous-articles compris), par un
+  `<datalist>`. Plus on en saisit, plus la liste est riche.
+- **Illustrations** : `Ligne.images` (`ImageArticle` : `documentId`, `fileUrl`, `legende`).
+  Chaque image est réduite côté navigateur (JPEG, 1600 px) puis déposée comme document de
+  l'affaire, catégorie « CCTP - illustrations » (`cctpImagesUpload.ts`, `POST /api/documents`) ;
+  l'article n'en garde que la référence, lue par `SignedImage`. La légende d'une nouvelle image
+  reprend la localisation de l'article. Retirer une image la détache de l'article **sans
+  supprimer le document** : une duplication d'article partage la même référence, la supprimer
+  casserait la copie. Les exports PDF et Word du CCTP (`cctpExport.ts`) impriment les images
+  sous le texte de l'article, avec leur légende, y compris dans l'export par bâtiment ;
+  `planRender` (pdf.js) n'est chargé que si une image existe.
+
 ### Le CCTP n'est pas un document séparé
 
 Le codebase a longtemps porté trois chemins parallèles pour le CCTP, dont

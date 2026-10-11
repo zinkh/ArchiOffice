@@ -6,7 +6,8 @@
 //   - un CCTP par bâtiment : seuls ses articles (`cctpPourBatiment`).
 // Charte du cabinet : en-tête avec logo, pied de page avec adresse et mentions,
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
-import type { Batiment, DPGF, Ligne } from '../types/dpgf';
+import type { Batiment, DPGF, ImageArticle, Ligne } from '../types/dpgf';
+import { imagesDeLigne } from './cctpImages';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
@@ -18,6 +19,8 @@ export interface CctpBloc {
   titre: string;
   texte: string;
   localisation?: string;
+  /** Illustrations de l'article, imprimées sous son texte. */
+  images?: ImageArticle[];
   /** Bâtiments concernés (opération complète seulement). */
   batiments?: string[];
 }
@@ -56,6 +59,7 @@ export function cctpBlocs(doc: DPGF, batimentId?: string): CctpBloc[] {
     blocs.push({
       niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription),
       localisation: texte(l.localisation) || undefined,
+      images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
       batiments: batiments?.length ? batiments : undefined,
     });
     if (enfants) articles(l.children!, niveau + 1, l.batimentId ?? herite);
@@ -84,6 +88,28 @@ export function cctpNomFichier(opts: Pick<CctpExportOptions, 'projectName' | 'ba
 const SOUS_TITRE = 'Cahier des clauses techniques particulières';
 const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
 const GRIS_DOUX: [number, number, number] = [107, 114, 128];
+
+// ── Illustrations ────────────────────────────────────────────────────────────
+// Chargées une fois avant la mise en page (réduites à 1000 px : assez pour une
+// vignette de 70 mm). Une image illisible est sautée, jamais bloquante.
+type ImageChargee = { dataUrl: string; width: number; height: number };
+
+async function chargerImages(blocs: CctpBloc[]): Promise<Map<string, ImageChargee>> {
+  const urls = [...new Set(blocs.flatMap(b => (b.images ?? []).map(i => i.fileUrl)))];
+  if (!urls.length) return new Map();
+  // Chargé à la demande : planRender embarque pdf.js, inutile à un CCTP sans image.
+  const { loadPhotoDataUrl } = await import('./planRender');
+  const charges = await Promise.all(urls.map(async u => [u, await loadPhotoDataUrl(u, 1000)] as const));
+  return new Map(charges.filter((c): c is readonly [string, ImageChargee] => !!c[1]));
+}
+
+const LARGEUR_IMAGE_MM = 70;
+const HAUTEUR_IMAGE_MAX_MM = 80;
+
+function dimensionsImage(img: ImageChargee, largeurMax: number, hauteurMax: number): { w: number; h: number } {
+  const echelle = Math.min(largeurMax / img.width, hauteurMax / img.height);
+  return { w: img.width * echelle, h: img.height * echelle };
+}
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
 
@@ -130,7 +156,9 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     y += apres;
   };
 
-  for (const b of cctpBlocs(doc, opts.batiment?.id)) {
+  const blocsPdf = cctpBlocs(doc, opts.batiment?.id);
+  const images = await chargerImages(blocsPdf);
+  for (const b of blocsPdf) {
     const retrait = Math.max(0, b.niveau - 3) * 4;
     if (b.niveau === 1) { place(16); y += 4; ecrire(`${b.numero}  ${b.titre}`, 13, 'bold', GRIS_TEXTE, 0, 2); }
     else if (b.niveau === 2) { place(12); y += 2; ecrire(`${b.numero}  ${b.titre}`, 11, 'bold', GRIS_TEXTE, 0, 1.5); }
@@ -138,6 +166,16 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     if (b.batiments) ecrire(`Bâtiments concernés : ${b.batiments.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.texte) ecrire(b.texte, 9.5, 'normal', GRIS_TEXTE, retrait, 2.5);
+    for (const illustration of b.images ?? []) {
+      const img = images.get(illustration.fileUrl);
+      if (!img) continue;
+      const { w, h } = dimensionsImage(img, Math.min(LARGEUR_IMAGE_MM, largeur - retrait), HAUTEUR_IMAGE_MAX_MM);
+      place(h + (illustration.legende ? 8 : 2));
+      pdf.addImage(img.dataUrl, 'JPEG', margin + retrait, y, w, h);
+      y += h + 1.5;
+      if (illustration.legende) ecrire(illustration.legende, 8.5, 'italic', GRIS_DOUX, retrait, 2.5);
+      else y += 1;
+    }
   }
 
   drawAgencyFooters(pdf, opts.settings, letterhead);
@@ -194,7 +232,9 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   const sousTitre = [opts.projectName, opts.batiment ? libelleBatiment(opts.batiment) : ''].filter(Boolean).join(' · ');
   if (sousTitre) body.push(new Paragraph({ spacing: { after: 360 }, children: [new TextRun({ text: sousTitre, size: 24, color: '6B7280' })] }));
 
-  for (const b of cctpBlocs(doc, opts.batiment?.id)) {
+  const blocsWord = cctpBlocs(doc, opts.batiment?.id);
+  const images = await chargerImages(blocsWord);
+  for (const b of blocsWord) {
     const heading = b.niveau === 1 ? HeadingLevel.HEADING_1 : b.niveau === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
     const taille = b.niveau === 1 ? 26 : b.niveau === 2 ? 22 : 20;
     body.push(new Paragraph({
@@ -214,6 +254,21 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
         indent: retrait(b.niveau), spacing: { after: 80 },
         ...(puce ? { bullet: { level: 0 } } : {}),
         children: [new TextRun({ text: puce ? para.replace(/^\s*[-•]\s+/, '') : para, size: 19, color: '111827' })],
+      }));
+    }
+    for (const illustration of b.images ?? []) {
+      const img = images.get(illustration.fileUrl);
+      if (!img) continue;
+      // 265 px de large au plus (environ 7 cm), même proportion que le PDF.
+      const echelle = Math.min(265 / img.width, 300 / img.height);
+      const data = Uint8Array.from(atob(img.dataUrl.split(',')[1]), c => c.charCodeAt(0));
+      body.push(new Paragraph({
+        indent: retrait(b.niveau), spacing: { before: 60, after: illustration.legende ? 20 : 120 }, keepNext: !!illustration.legende,
+        children: [new ImageRun({ type: 'jpg', data, transformation: { width: Math.round(img.width * echelle), height: Math.round(img.height * echelle) } })],
+      }));
+      if (illustration.legende) body.push(new Paragraph({
+        indent: retrait(b.niveau), spacing: { after: 120 },
+        children: [new TextRun({ text: illustration.legende, italics: true, size: 17, color: '6B7280' })],
       }));
     }
   }

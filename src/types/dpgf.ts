@@ -60,6 +60,20 @@ export interface QuantiteDetail {
   note?: string;
 }
 
+/**
+ * Illustration d'un article de CCTP (photo de l'existant, détail, plan).
+ * Le fichier est un document de l'affaire (catégorie « CCTP - illustrations ») :
+ * l'article n'en garde que la référence, pas les octets.
+ */
+export interface ImageArticle {
+  id: string;
+  /** documents.id, pour retrouver la pièce dans l'onglet Documents. */
+  documentId?: string;
+  /** Référence de stockage, lue par URL signée (SignedImage). */
+  fileUrl: string;
+  legende: string;
+}
+
 export interface Ligne extends DecoupageNoeud {
   /** Quantités propres à chaque bâtiment ; une table vide signifie sans affectation. */
   quantitesBatiments?: Record<string, number>;
@@ -87,6 +101,8 @@ export interface Ligne extends DecoupageNoeud {
    * ferait ressaisir chaque projet dans un vocabulaire qui n'est pas le sien.
    */
   localisation?: string;
+  /** Illustrations du CCTP ; imprimées sous le texte de l'article. */
+  images?: ImageArticle[];
   /**
    * Moteur qui a proposé l'article (« Générer le CCTP » : IA de la plateforme
    * ou Nomic). Repère de provenance comme `articleTypeId` : un texte rédigé
