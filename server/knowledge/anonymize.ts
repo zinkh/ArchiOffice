@@ -30,7 +30,7 @@ export function anonymizeTechnicalText(source: string): AnonymizationPreview {
   replace(/\b(?:SIRET\s*[:\-]?\s*)?\d{3}[ .]?\d{3}[ .]?\d{3}[ .]?\d{5}\b/gi, 'SIRET');
   replace(/\b(?:\+33[ .-]?[1-9]|0[1-9])(?:[ .-]?\d{2}){4}\b/g, 'TELEPHONE');
   replace(/\b\d{1,4}\s+(?:rue|avenue|boulevard|allée|impasse|chemin|place|route|quai|passage)\s+[^,\n;.]{3,80}/gi, 'ADRESSE');
-  replace(/\b\d{5}\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ' -]{2,40}\b/g, 'LOCALISATION');
+  replace(/\b\d{5}\s+[\p{L}][\p{L}'’ -]{2,60}(?=[,.;\n]|$)/gu, 'LOCALISATION');
   replace(/\b(?:\d{1,3}[\s\u00a0]?){1,4}\d{3}(?:[,.]\d{2})?\s?(?:€|EUR|euros)\b/gi, 'MONTANT');
   replace(/\b(?:\d{1,3}[,.]\d{4,})\s?[,;]?\s?(?:N|E|°)\b/gi, 'COORDONNEES');
 
