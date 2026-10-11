@@ -79,12 +79,18 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     if (logged.error) throw logged.error;
     if (!optedIn) {
       // Outbox marked atomically by a DB trigger when consent is withdrawn.
-      const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50);
+      let deletedNow = 0;
+      try {
+        deletedNow = (await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50)).deleted;
+      } catch {
+        // Consent withdrawal has already been committed. Never make its
+        // success appear contingent on Mistral availability.
+      }
       const remaining = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
         .select('id', { count: 'exact', head: true }).neq('state', 'deleted');
       if (remaining.error) throw remaining.error;
       return res.status((remaining.count || 0) ? 202 : 200).json({
-        opted_in: false, pending_deletions: remaining.count || 0, deleted_now: result.deleted,
+        opted_in: false, pending_deletions: remaining.count || 0, deleted_now: deletedNow,
       });
     }
     res.json({ opted_in: true });
@@ -299,8 +305,14 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
       .delete().eq('id', req.params.id);
     if (error) throw error;
-    const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 30);
-    res.status(result.pending ? 202 : 200).json({ success: true, pending_deletions: result.pending });
+    try {
+      const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 30);
+      res.status(result.pending ? 202 : 200).json({ success: true, pending_deletions: result.pending });
+    } catch {
+      // Durable deletion intent was recorded by trigger even if the provider
+      // is unavailable; the retry worker will complete the erasure later.
+      res.status(202).json({ success: true, remote_deletion_retry_scheduled: true });
+    }
   }));
 
   // Background deletion retries survive the original request and run even
