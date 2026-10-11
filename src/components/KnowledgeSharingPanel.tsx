@@ -51,8 +51,12 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
   const checkMistral = async () => {
     setMistralStatus('Vérification en cours…');
     try {
-      const result = await apiFetch<{ connected: boolean; name?: string }>('/api/knowledge-sharing/mistral/status');
-      setMistralStatus(result.connected ? 'Bibliothèque Mistral accessible' + (result.name ? ' : ' + result.name : '') : 'Bibliothèque inaccessible');
+      const result = await apiFetch<{ connected: boolean; name?: string; visible_documents_on_first_page?: number | null }>('/api/knowledge-sharing/mistral/status');
+      setMistralStatus(result.connected
+        ? 'Bibliothèque Mistral accessible' + (result.name ? ' : ' + result.name : '') +
+          (typeof result.visible_documents_on_first_page === 'number'
+            ? ' — ' + result.visible_documents_on_first_page + ' document(s) visibles sur la première page (lecture seule).' : '')
+        : 'Bibliothèque inaccessible');
     } catch { setMistralStatus('Connexion Mistral non disponible. Vérifiez la clé et les droits de la bibliothèque.'); }
   };
   const consent = async (enabled: boolean) => {
