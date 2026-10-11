@@ -54,6 +54,7 @@ export function makeMistralLibraryClient(
     async findByName(remoteName: string): Promise<MistralRemoteDocument | null> {
       // Never assume a missing entry on the first page means an upload failed.
       let token: string | undefined;
+      let matched: MistralRemoteDocument | null = null;
       const seen = new Set<string>();
       for (let page = 0; page < 100; page++) {
         const query = new URLSearchParams({ page_size: '100' });
@@ -63,11 +64,14 @@ export function makeMistralLibraryClient(
           data?: MistralRemoteDocument[];
           next_page_token?: string | null;
         };
-        const matches = (pageData.data ?? []).filter(d => d.name === remoteName && d.library_id === libraryId);
-        if (matches.length > 1) throw new Error('Plusieurs copies distantes correspondent au même extrait : examen requis.');
-        if (matches[0]) return matches[0];
+        if (!Array.isArray(pageData.data)) throw new Error('Liste Mistral incohérente.');
+        const matches = pageData.data.filter(d => d.name === remoteName && d.library_id === libraryId);
+        if (matches.length > 1 || (matched && matches.length > 0)) {
+          throw new Error('Plusieurs copies distantes correspondent au même extrait : examen requis.');
+        }
+        if (matches[0]) matched = matches[0];
         token = pageData.next_page_token || undefined;
-        if (!token) return null;
+        if (!token) return matched;
         if (seen.has(token)) throw new Error('Pagination Mistral incohérente.');
         seen.add(token);
       }
