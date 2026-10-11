@@ -84,7 +84,7 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
   app.post('/api/knowledge-sharing/drafts', guarded(async (req, res, tenantId) => {
     if (!(await getPreference(tenantId))) return res.status(403).json({ error: 'Contribution désactivée pour ce cabinet.' });
     const documentId = typeof req.body?.document_id === 'string' ? req.body.document_id : '';
-    if (!/^[0-9a-f-]{36}$/i.test(documentId)) return res.status(400).json({ error: 'Document invalide.' });
+    if (!documentId || documentId.length > 255 || /[\u0000-\u001f\u007f]/.test(documentId)) return res.status(400).json({ error: 'Document invalide.' });
     const doc = await getDocument(tenantId, documentId);
     if (!doc) return res.status(404).json({ error: 'Document absent de ce cabinet.' });
     if (!isOwnStorageRef(doc.file_url, 'documents')) {
