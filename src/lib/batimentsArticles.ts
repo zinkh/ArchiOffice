@@ -10,7 +10,7 @@
 // chaîne vide dans `batimentId` veut dire « aucun bâtiment », sans héritage.
 //
 // Toutes les fonctions rendent un arbre neuf.
-import type { DPGF, Ligne, Lot, Chapitre } from '../types/dpgf';
+import type { DPGF, Ligne, Lot, Chapitre, DecoupageNoeud } from '../types/dpgf';
 import { parseRowKey, recomputeLot } from '../components/pro/treeOps';
 import { ligneAtPath } from '../components/pro/hierarchyOps';
 
@@ -110,12 +110,57 @@ export function feuillesSelectionnees(lots: Lot[], keys: Iterable<string>): Feui
   return [...out.values()];
 }
 
-/** Coché pour tous, pour certains ou pour aucun des articles sélectionnés. */
+/** Bâtiments d'un lot ou d'un chapitre : sa liste propre si elle existe, sinon `batimentId`, sinon l'héritage. */
+export function batimentsDuNoeud(noeud: DecoupageNoeud, herite: string[] = []): string[] {
+  if (noeud.batimentsIds !== undefined) return noeud.batimentsIds;
+  if (noeud.batimentId === '') return [];
+  return noeud.batimentId ? [noeud.batimentId] : herite;
+}
+
+/** Lot (sans chapitre) ou chapitre (sans article) : il n'a pas d'article pour porter ses bâtiments. */
+interface CibleVide { lotIdx: number; chapIdx: number | null; noeud: DecoupageNoeud; herite: string[] }
+
+function ciblesVides(lots: Lot[], keys: Iterable<string>): CibleVide[] {
+  const out = new Map<string, CibleVide>();
+  for (const key of keys) {
+    const s = parseRowKey(key);
+    const lot = s && lots[s.lotIdx];
+    if (!s || !lot || s.kind === 'ligne') continue;
+    const heriteLot = batimentsDuNoeud(lot);
+    if (!lot.chapitres.length) {
+      if (s.kind === 'lot') out.set(`${s.lotIdx}`, { lotIdx: s.lotIdx, chapIdx: null, noeud: lot, herite: [] });
+      continue;
+    }
+    lot.chapitres.forEach((c, ci) => {
+      if (c.lignes.length || (s.kind === 'chapitre' && s.chapIdx !== ci)) return;
+      out.set(`${s.lotIdx}-${ci}`, { lotIdx: s.lotIdx, chapIdx: ci, noeud: c, herite: heriteLot });
+    });
+  }
+  return [...out.values()];
+}
+
+/** Coché pour tous, pour certains ou pour aucun des articles et éléments vides sélectionnés. */
 export function etatBatimentSelection(lots: Lot[], keys: Iterable<string>, id: string): 'tous' | 'certains' | 'aucun' {
-  const feuilles = feuillesSelectionnees(lots, keys);
-  if (!feuilles.length) return 'aucun';
-  const n = feuilles.filter(f => batimentsDeLigne(f.ligne, f.herite).includes(id)).length;
-  return n === 0 ? 'aucun' : n === feuilles.length ? 'tous' : 'certains';
+  const cles = [...keys];
+  const feuilles = feuillesSelectionnees(lots, cles);
+  const vides = ciblesVides(lots, cles);
+  const total = feuilles.length + vides.length;
+  if (!total) return 'aucun';
+  const n = feuilles.filter(f => batimentsDeLigne(f.ligne, f.herite).includes(id)).length
+    + vides.filter(v => batimentsDuNoeud(v.noeud, v.herite).includes(id)).length;
+  return n === 0 ? 'aucun' : n === total ? 'tous' : 'certains';
+}
+
+/** Vrai s'il y a quelque chose à cocher : un article, ou un lot ou chapitre vide. */
+export function aDesCiblesBatiments(lots: Lot[], keys: Iterable<string>): boolean {
+  const cles = [...keys];
+  return feuillesSelectionnees(lots, cles).length > 0 || ciblesVides(lots, cles).length > 0;
+}
+
+function basculerNoeud(noeud: DecoupageNoeud, herite: string[], id: string, actif: boolean) {
+  const actuels = batimentsDuNoeud(noeud, herite);
+  const next = actif ? [...actuels.filter(b => b !== id), id] : actuels.filter(b => b !== id);
+  return { ...noeud, batimentsIds: next, batimentId: undefined };
 }
 
 function remplacerLigne(lignes: Ligne[], path: number[], fn: (l: Ligne) => Ligne): Ligne[] {
@@ -149,14 +194,23 @@ export function modifierFeuilles(lots: Lot[], feuilles: Feuille[], fn: (f: Feuil
 
 /** Coche ou décoche un bâtiment sur tous les articles de la sélection. */
 export function basculerBatimentEnMasse(lots: Lot[], keys: Iterable<string>, id: string, actif: boolean): Lot[] {
-  const feuilles = feuillesSelectionnees(lots, keys);
-  return modifierFeuilles(lots, feuilles, f => basculerBatiment(f.ligne, id, actif, f.herite));
+  const cles = [...keys];
+  const feuilles = feuillesSelectionnees(lots, cles);
+  let next = modifierFeuilles(lots, feuilles, f => basculerBatiment(f.ligne, id, actif, f.herite));
+  for (const v of ciblesVides(lots, cles)) {
+    const maj = basculerNoeud(v.noeud, v.herite, id, actif);
+    next = next.map((lot, li) => li !== v.lotIdx ? lot
+      : v.chapIdx === null ? { ...lot, ...maj }
+        : { ...lot, chapitres: lot.chapitres.map((c, ci) => ci === v.chapIdx ? { ...c, ...maj } : c) });
+  }
+  return next;
 }
 
 // ── CCTP d'un bâtiment ───────────────────────────────────────────────────────
 
 const aDesArticles = (lignes: Ligne[]): boolean => lignes.length > 0;
-const neutreOuEgal = (batimentId: string | undefined, id: string) => !batimentId || batimentId === id;
+/** Sans bâtiment, un élément vide vaut pour tous. */
+const concerne = (ids: string[], id: string) => !ids.length || ids.includes(id);
 
 /**
  * Le CCTP d'un seul bâtiment : ses articles seulement, sans quantité. Un
@@ -181,12 +235,12 @@ export function cctpPourBatiment(doc: DPGF, id: string): DPGF {
     const avaitDesArticles = lot.chapitres.some(c => aDesArticles(c.lignes));
     const chapitres: Chapitre[] = lot.chapitres.flatMap(c => {
       const herite = c.batimentId ?? lot.batimentId;
-      if (!aDesArticles(c.lignes)) return neutreOuEgal(herite, id) ? [c] : [];
+      if (!aDesArticles(c.lignes)) return concerne(batimentsDuNoeud(c, batimentsDuNoeud(lot)), id) ? [c] : [];
       const lignes = filtrer(c.lignes, herite);
       return lignes.length ? [{ ...c, lignes }] : [];
     });
     const garde = chapitres.some(c => aDesArticles(c.lignes))
-      || (!avaitDesArticles && neutreOuEgal(lot.batimentId, id));
+      || (!avaitDesArticles && concerne(batimentsDuNoeud(lot), id));
     return garde ? [{ ...lot, chapitres }] : [];
   });
   return { ...doc, lots };

@@ -46,6 +46,12 @@ export interface DecoupageDocument {
 /** Attributs de découpage portés par un lot, un chapitre ou un article. */
 export interface DecoupageNoeud {
   batimentId?: string;
+  /**
+   * Bâtiments d'un lot ou d'un chapitre SANS article (prescriptions générales) :
+   * un article les porte par `quantitesBatiments`, un nœud vide n'a pas où le
+   * faire. Absent ou vide : l'ancien `batimentId`, puis aucun (vaut pour tous).
+   */
+  batimentsIds?: string[];
   phaseId?: string;
 }
 

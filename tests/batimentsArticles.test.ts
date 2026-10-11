@@ -124,3 +124,21 @@ describe('contenu du CCTP exporté', async () => {
       .toBe('CCTP_26014_Villa_Martin_Preau.pdf');
   });
 });
+
+describe('chapitre sans article', () => {
+  it('se coche et se décoche sans article, et filtre le CCTP par bâtiment', () => {
+    const d = doc();
+    expect(etatBatimentSelection(d.lots, ['chap-0-0'], 'P')).toBe('aucun');
+    const lots = basculerBatimentEnMasse(d.lots, ['chap-0-0'], 'P', true);
+    expect(lots[0].chapitres[0].batimentsIds).toEqual(['P']);
+    expect(etatBatimentSelection(lots, ['chap-0-0'], 'P')).toBe('tous');
+    const lots2 = basculerBatimentEnMasse(lots, ['chap-0-0'], 'A', true);
+    expect(lots2[0].chapitres[0].batimentsIds).toEqual(['P', 'A']);
+    const sansA = basculerBatimentEnMasse(lots2, ['chap-0-0'], 'A', false);
+    expect(sansA[0].chapitres[0].batimentsIds).toEqual(['P']);
+    const cctpA = cctpPourBatiment({ ...d, lots: sansA }, 'A');
+    expect(cctpA.lots[0].chapitres.map(c => c.id)).toEqual(['c1']);
+    const cctpP = cctpPourBatiment({ ...d, lots: sansA }, 'P');
+    expect(cctpP.lots[0].chapitres.map(c => c.id)).toContain('c0');
+  });
+});
