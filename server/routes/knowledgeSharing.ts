@@ -161,6 +161,24 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     res.json({ ...data, publication_active: false });
   }));
 
+  // Sandbox connectivity check: no customer document is transferred.
+  app.get('/api/knowledge-sharing/mistral/status', guarded(async (_req, res) => {
+    const apiKey = process.env.MISTRAL_API_KEY;
+    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID || '01a12a77-dd1c-77eb-84b0-25cac8adccf4';
+    if (!apiKey) return res.status(503).json({ connected: false, error: 'Mistral API key not configured.' });
+    try {
+      const response = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId), {
+        headers: { Authorization: 'Bearer ' + apiKey },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) return res.status(502).json({ connected: false, error: 'Mistral library unavailable or inaccessible.', upstream_status: response.status });
+      const library = await response.json() as { id?: string; name?: string };
+      res.json({ connected: library.id === libraryId, library_id: libraryId, name: library.name || null, publication_active: false });
+    } catch {
+      res.status(502).json({ connected: false, error: 'Unable to contact Mistral.' });
+    }
+  }));
+
   app.delete('/api/knowledge-sharing/contributions/:id', guarded(async (req, res, tenantId) => {
     const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
       .delete().eq('id', req.params.id);
