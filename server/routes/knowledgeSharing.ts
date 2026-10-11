@@ -179,6 +179,33 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     }
   }));
 
+  // Explicit, per-contribution publication; never upload the original document.
+  // Production remains opt-in and gated until privacy and deletion workflows are approved.
+  app.post('/api/knowledge-sharing/contributions/:id/publish', guarded(async (req, res, tenantId) => {
+    if (process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED !== 'true') {
+      return res.status(403).json({ error: 'Publication externe désactivée sur cette instance.' });
+    }
+    if (!(await getPreference(tenantId))) return res.status(403).json({ error: 'Consentement du cabinet absent.' });
+    if (req.body?.confirmed_external_transfer !== true) {
+      return res.status(400).json({ error: 'Confirmez explicitement le transfert vers Mistral.' });
+    }
+    const { data: contribution, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
+      .select('id,status,sanitized_text').eq('id', req.params.id).maybeSingle();
+    if (error) throw error;
+    if (!contribution || contribution.status !== 'reviewed') {
+      return res.status(409).json({ error: 'Seuls les extraits anonymisés et relus peuvent être publiés.' });
+    }
+    const key = process.env.MISTRAL_API_KEY;
+    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID;
+    if (!key || !libraryId) return res.status(503).json({ error: 'Bibliothèque Mistral non configurée.' });
+    // Safety: avoid accidental disclosure if the reviewed text was altered outside the review flow.
+    const check = anonymizeTechnicalText(contribution.sanitized_text);
+    if (check.text !== contribution.sanitized_text || check.warnings.length) {
+      return res.status(409).json({ error: 'Une nouvelle vérification humaine de l’anonymisation est nécessaire.' });
+    }
+    return res.status(501).json({ error: 'Publication suspendue : finaliser le suivi des identifiants distants et la suppression garantie avant activation.' });
+  }));
+
   app.delete('/api/knowledge-sharing/contributions/:id', guarded(async (req, res, tenantId) => {
     const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
       .delete().eq('id', req.params.id);
