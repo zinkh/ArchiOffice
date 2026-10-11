@@ -63,7 +63,7 @@ describe('Mémoire documentaire : consentement', () => {
     const on = await request(app).put('/api/knowledge-sharing/consent').set(authHeader(mine.token)).send({ opted_in: true });
     expect(on.body).toEqual({ opted_in: true });
     const off = await request(app).put('/api/knowledge-sharing/consent').set(authHeader(mine.token)).send({ opted_in: false });
-    expect(off.body).toEqual({ opted_in: false });
+    expect(off.body).toMatchObject({ opted_in: false, pending_deletions: 0 });
 
     const rows = fakeSupabaseAdmin.getTable('knowledge_contributions');
     expect(rows.filter((r: any) => r.tenant_id === mine.tenantId)).toHaveLength(0);
@@ -169,7 +169,7 @@ describe('Mémoire documentaire : brouillons', () => {
     const { token, tenantId } = seedCabinet();
     const draft = seedDraft(tenantId, { status: 'reviewed' });
     const res = await request(app).delete(`/api/knowledge-sharing/contributions/${draft.id}`).set(authHeader(token));
-    expect(res.body).toEqual({ success: true });
+    expect(res.body).toMatchObject({ success: true, pending_deletions: 0 });
     expect(fakeSupabaseAdmin.getTable('knowledge_contributions').find((r: any) => r.id === draft.id)).toBeUndefined();
   });
 });
