@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS public.knowledge_sharing_preferences (
 CREATE TABLE IF NOT EXISTS public.knowledge_contributions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
-  document_id uuid NOT NULL REFERENCES public.documents(id) ON DELETE CASCADE,
+  document_id text NOT NULL REFERENCES public.documents(id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','reviewed')),
   sanitized_text text NOT NULL DEFAULT '',
   warnings jsonb NOT NULL DEFAULT '[]'::jsonb,
@@ -38,6 +38,27 @@ CREATE INDEX IF NOT EXISTS idx_knowledge_contributions_tenant_status
 ALTER TABLE public.knowledge_sharing_preferences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.knowledge_contributions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.knowledge_sharing_events ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.knowledge_sharing_preferences FROM anon, authenticated;
-REVOKE ALL ON public.knowledge_contributions FROM anon, authenticated;
-REVOKE ALL ON public.knowledge_sharing_events FROM anon, authenticated;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON public.knowledge_sharing_preferences FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON public.knowledge_sharing_preferences FROM authenticated;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON public.knowledge_contributions FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON public.knowledge_contributions FROM authenticated;
+  END IF;
+END $$;
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON public.knowledge_sharing_events FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON public.knowledge_sharing_events FROM authenticated;
+  END IF;
+END $$;
