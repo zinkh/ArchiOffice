@@ -40,6 +40,7 @@ export default {
   "pro_buildings": "Bâtiments",
   "pro_buildings_none": "Aucun",
   "pro_buildings_none_declared": "Déclarer les bâtiments…",
+  "pro_buildings_no_article": "Aucun article dans cet élément : ajoutez un article pour lui affecter des bâtiments.",
   "pro_buildings_of": "Bâtiments de {{numero}}",
   "pro_cctp_export_whole": "Opération complète",
   "pro_cctp_export_each_pdf": "Un PDF par bâtiment",

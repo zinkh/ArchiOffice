@@ -40,6 +40,7 @@ export default {
   "pro_buildings": "Buildings",
   "pro_buildings_none": "None",
   "pro_buildings_none_declared": "Declare buildings…",
+  "pro_buildings_no_article": "No article in this item: add an article to assign buildings to it.",
   "pro_buildings_of": "Buildings of {{numero}}",
   "pro_cctp_export_whole": "Whole project",
   "pro_cctp_export_each_pdf": "One PDF per building",

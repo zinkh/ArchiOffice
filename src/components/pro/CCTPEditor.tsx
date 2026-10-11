@@ -12,7 +12,7 @@ import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { hierarchyKey } from './hierarchyOps';
 import { useSettings } from '../../hooks/useSettings';
-import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection } from '../../lib/batimentsArticles';
+import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees } from '../../lib/batimentsArticles';
 import { exportCctpDocx, exportCctpPdf } from '../../lib/cctpExport';
 import type { ProNotify } from './DPGFWorkspace';
 import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall } from '@tabler/icons-react';
@@ -354,7 +354,12 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     for (const b of batimentsCctp) await exporter(format, b.id);
     if (orphelins) notify?.(t('pro_cctp_export_unassigned', { count: orphelins }), { type: 'error' });
   };
-  const batimentEntries = (key: string): ToolbarMenuEntry[] => batimentsCctp.map(b => {
+  const batimentEntries = (key: string): ToolbarMenuEntry[] => {
+    // Les bâtiments se portent par les articles : sans article, cocher ne ferait rien.
+    if (!feuillesSelectionnees(dpgf.lots, [key]).length) {
+      return [{ id: 'bat-no-article', label: t('pro_buildings_no_article'), disabled: true, onClick: () => {} }];
+    }
+    return batimentsCctp.map(b => {
     const etat = etatBatimentSelection(dpgf.lots, [key], b.id);
     return {
       id: `bat-${b.id}`, label: b.libelle ? `${b.code} · ${b.libelle}` : b.code, keepOpen: true,
@@ -365,7 +370,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         onChange({ ...dpgf, lots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
       },
     };
-  });
+    });
+  };
   const resumeBatiments = (key: string) => {
     const etats = batimentsCctp.map(b => [b.code, etatBatimentSelection(dpgf.lots, [key], b.id)] as const);
     const codes = etats.filter(([, e]) => e === 'tous').map(([c]) => c);
