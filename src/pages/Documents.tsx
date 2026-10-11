@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { KnowledgeSharingPanel } from '../components/KnowledgeSharingPanel';
 import {
   IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX,
   IconUpload, IconCloudOff, IconCloud, IconChevronDown, IconChevronRight, IconFolder,
@@ -446,6 +447,7 @@ export default function Documents() {
 
       {/* Main content */}
       <div className="flex-1 space-y-4 min-w-0">
+        <KnowledgeSharingPanel documents={documents} />
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <button

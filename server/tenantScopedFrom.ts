@@ -13,6 +13,7 @@ export interface TenantScopedTable {
   update: (payload: Record<string, unknown>) => any;
   delete: () => any;
   insert: (payload: Record<string, unknown> | Record<string, unknown>[]) => any;
+  upsert: (payload: Record<string, unknown> | Record<string, unknown>[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) => any;
 }
 
 export function tenantScopedFrom(supabaseAdmin: any, tenantId: string, table: string): TenantScopedTable {
@@ -34,5 +35,12 @@ export function tenantScopedFrom(supabaseAdmin: any, tenantId: string, table: st
       supabaseAdmin.from(table).insert(
         Array.isArray(payload) ? payload.map(row => ({ ...row, tenant_id: tenantId })) : { ...payload, tenant_id: tenantId },
       ),
+    upsert: (payload: Record<string, unknown> | Record<string, unknown>[], opts?: { onConflict?: string; ignoreDuplicates?: boolean }) => {
+      // Never allow an upsert conflict target that can match another tenant's row.
+      const conflictColumns = (opts?.onConflict || '').split(',').map(s => s.trim());
+      if (!conflictColumns.includes('tenant_id')) throw new Error('Tenant-scoped upsert requires tenant_id in onConflict');
+      const scoped = (row: Record<string, unknown>) => ({ ...row, tenant_id: tenantId });
+      return supabaseAdmin.from(table).upsert(Array.isArray(payload) ? payload.map(scoped) : scoped(payload), opts);
+    },
   };
 }
