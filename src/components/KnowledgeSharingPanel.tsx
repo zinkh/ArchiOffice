@@ -18,6 +18,7 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
   const [confirmedAnonymity, setConfirmedAnonymity] = useState(false);
   const [confirmedRights, setConfirmedRights] = useState(false);
   const [error, setError] = useState('');
+  const [mistralStatus, setMistralStatus] = useState('');
 
   const refresh = async () => {
     const data = await apiFetch<State>('/api/knowledge-sharing');
@@ -37,6 +38,13 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
     try { await action(); await refresh(); }
     catch (e: any) { setError(e.message || 'Erreur'); }
     finally { setBusy(false); }
+  };
+  const checkMistral = async () => {
+    setMistralStatus('Vérification en cours…');
+    try {
+      const result = await apiFetch<{ connected: boolean; name?: string }>('/api/knowledge-sharing/mistral/status');
+      setMistralStatus(result.connected ? 'Bibliothèque Mistral accessible' + (result.name ? ' : ' + result.name : '') : 'Bibliothèque inaccessible');
+    } catch { setMistralStatus('Connexion Mistral non disponible. Vérifiez la clé et les droits de la bibliothèque.'); }
   };
   const consent = async (enabled: boolean) => {
     if (!enabled && !window.confirm('Retirer l’autorisation et effacer tous les extraits préparés ?')) return;
@@ -82,6 +90,10 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
       <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
         Vos documents restent privés par défaut. Contribution commune facultative, sans envoi à Mistral pendant cette phase pilote.
       </p>
+    </div>
+    <div className="flex flex-wrap items-center gap-2 text-sm">
+      <button type="button" onClick={() => void checkMistral()} className="rounded border px-3 py-2 text-sm">Vérifier la bibliothèque Mistral</button>
+      {mistralStatus && <span role="status">{mistralStatus}</span>}
     </div>
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     {state && <>
