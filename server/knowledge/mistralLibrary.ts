@@ -46,7 +46,7 @@ export function makeMistralLibraryClient(
       form.append('file', new Blob([content], { type: 'text/plain;charset=utf-8' }), name);
       const response = await call('/documents', { method: 'POST', body: form });
       const doc = await response.json() as MistralRemoteDocument;
-      if (!doc?.id || doc.library_id !== libraryId) {
+      if (!doc?.id || doc.library_id !== libraryId || doc.name !== name) {
         throw new Error('Réponse de téléversement Mistral inattendue. Rapprochement requis.');
       }
       return doc;
