@@ -111,14 +111,25 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     if (!source?.trim()) return res.status(422).json({ error: 'Aucun texte extractible. Vérifiez le PDF ou la numérisation.' });
     const preview = anonymizeTechnicalText(source);
     if (!preview.text) return res.status(422).json({ error: 'Aucun contenu exploitable.' });
-    const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
-      .upsert({
-        tenant_id: tenantId, document_id: documentId, status: 'draft',
-        sanitized_text: preview.text, warnings: preview.warnings, updated_by: req.user.id,
-        reviewed_at: null, updated_at: new Date().toISOString(),
-      }, { onConflict: 'tenant_id,document_id' }).select().single();
-    if (error) throw error;
-    res.status(201).json(data);
+    const payload = {
+      document_id: documentId, status: 'draft', sanitized_text: preview.text,
+      warnings: preview.warnings, updated_by: req.user.id,
+      reviewed_at: null, updated_at: new Date().toISOString(),
+    };
+    // Do not upsert: a concurrent review could otherwise be overwritten and
+    // silently revert a validated contribution back to draft.
+    if (existing.data) {
+      const updated = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
+        .update(payload).eq('document_id', documentId).eq('status', 'draft').select().maybeSingle();
+      if (updated.error) throw updated.error;
+      if (!updated.data) return res.status(409).json({ error: 'Contribution validée entre-temps.' });
+      return res.status(201).json(updated.data);
+    }
+    const inserted = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
+      .insert(payload).select().single();
+    if (inserted.error?.code === '23505') return res.status(409).json({ error: 'Contribution créée simultanément : actualisez la liste.' });
+    if (inserted.error) throw inserted.error;
+    res.status(201).json(inserted.data);
   }));
 
   app.put('/api/knowledge-sharing/drafts/:id', guarded(async (req, res, tenantId) => {
