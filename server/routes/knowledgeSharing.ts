@@ -197,37 +197,107 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     }
   }));
 
-  // Explicit, per-contribution publication; never upload the original document.
-  // Production remains opt-in and gated until privacy and deletion workflows are approved.
+  // A unique database reservation precedes every remote upload. No originals.
   app.post('/api/knowledge-sharing/contributions/:id/publish', guarded(async (req, res, tenantId) => {
     if (process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED !== 'true') {
       return res.status(403).json({ error: 'Publication externe désactivée sur cette instance.' });
     }
-    if (!(await getPreference(tenantId))) return res.status(403).json({ error: 'Consentement du cabinet absent.' });
     if (req.body?.confirmed_external_transfer !== true) {
       return res.status(400).json({ error: 'Confirmez explicitement le transfert vers Mistral.' });
     }
+    if (!(await getPreference(tenantId))) return res.status(403).json({ error: 'Consentement du cabinet absent.' });
     const { data: contribution, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
       .select('id,status,sanitized_text').eq('id', req.params.id).maybeSingle();
     if (error) throw error;
     if (!contribution || contribution.status !== 'reviewed') {
-      return res.status(409).json({ error: 'Seuls les extraits anonymisés et relus peuvent être publiés.' });
+      return res.status(409).json({ error: 'Seuls les extraits relus peuvent être publiés.' });
+    }
+    const checked = anonymizeTechnicalText(contribution.sanitized_text);
+    if (!contribution.sanitized_text.trim() || checked.text !== contribution.sanitized_text) {
+      return res.status(409).json({ error: 'L’extrait nécessite une nouvelle anonymisation et relecture.' });
     }
     const key = process.env.MISTRAL_API_KEY;
-    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID;
-    if (!key || !libraryId) return res.status(503).json({ error: 'Bibliothèque Mistral non configurée.' });
-    // Safety: avoid accidental disclosure if the reviewed text was altered outside the review flow.
-    const check = anonymizeTechnicalText(contribution.sanitized_text);
-    if (check.text !== contribution.sanitized_text || check.warnings.length) {
-      return res.status(409).json({ error: 'Une nouvelle vérification humaine de l’anonymisation est nécessaire.' });
+    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID || DEFAULT_KNOWLEDGE_LIBRARY_ID;
+    if (!key) return res.status(503).json({ error: 'Clé API Mistral absente.' });
+    const remoteName = 'archioffice-' + contribution.id + '.txt';
+    const hash = createHash('sha256').update(contribution.sanitized_text).digest('hex');
+
+    // UNIQUE(contribution_id) and a DB trigger protect against concurrent
+    // sends, cross-tenant access and consent-withdrawal races.
+    const reserved = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
+      .insert({ contribution_id: contribution.id, library_id: libraryId, remote_name: remoteName,
+        content_sha256: hash, state: 'uploading' }).select().single();
+    if (reserved.error?.code === '23505') {
+      return res.status(409).json({ error: 'Transfert déjà réservé, envoyé ou en rapprochement. Aucun doublon créé.' });
     }
-    return res.status(501).json({ error: 'Publication suspendue : finaliser le suivi des identifiants distants et la suppression garantie avant activation.' });
+    if (reserved.error?.code === '23514') {
+      return res.status(409).json({ error: 'Consentement retiré ou contribution non validée.' });
+    }
+    if (reserved.error) throw reserved.error;
+    const job = reserved.data;
+    const scope = tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents');
+    const current = await scope.select('deletion_requested_at').eq('id', job.id).single();
+    if (current.error) throw current.error;
+    if (current.data?.deletion_requested_at || !(await getPreference(tenantId))) {
+      const cancelled = await scope.update({ state: 'deleted', deleted_at: new Date().toISOString() })
+        .eq('id', job.id).eq('state', 'uploading');
+      if (cancelled.error) throw cancelled.error;
+      return res.status(409).json({ error: 'Transfert annulé : consentement retiré.' });
+    }
+
+    let remote: { id: string };
+    try {
+      remote = await makeMistralLibraryClient(key, libraryId).upload(contribution.sanitized_text, contribution.id);
+    } catch {
+      // Remote success with a lost response is possible: do NOT retry upload.
+      const uncertain = await scope.update({
+        state: 'uncertain', last_error: 'Transfert non confirmé, rapprochement requis.',
+        updated_at: new Date().toISOString(),
+      }).eq('id', job.id).eq('state', 'uploading');
+      if (uncertain.error) throw uncertain.error;
+      return res.status(502).json({ error: 'Transfert Mistral non confirmé : vérification distante nécessaire.' });
+    }
+    const saved = await scope.update({
+      remote_document_id: remote.id, state: 'published',
+      published_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+    }).eq('id', job.id).eq('state', 'uploading').select().maybeSingle();
+    if (saved.error || !saved.data) {
+      return res.status(503).json({ error: 'Envoi distant réalisé, enregistrement local non confirmé. Ne pas réessayer le transfert.' });
+    }
+    const stillAuthorized = await getPreference(tenantId);
+    if (!stillAuthorized || saved.data.deletion_requested_at) {
+      const queued = await scope.update({
+        deletion_requested_at: new Date().toISOString(), updated_at: new Date().toISOString(),
+      }).eq('id', job.id).neq('state', 'deleted').select().single();
+      if (queued.error) throw queued.error;
+      const removed = await processRemoteDeletion(supabaseAdmin, queued.data);
+      return res.status(removed ? 200 : 202).json({
+        published: false, deletion_pending: !removed, remote_document_id: remote.id,
+      });
+    }
+    res.status(201).json({ published: true, remote_document_id: remote.id });
+  }));
+
+  // Admin-initiated retry of pending remote deletions (no new uploads).
+  app.post('/api/knowledge-sharing/mistral/reconcile', guarded(async (_req, res, tenantId) => {
+    const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50);
+    res.json(result);
   }));
 
   app.delete('/api/knowledge-sharing/contributions/:id', guarded(async (req, res, tenantId) => {
     const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
       .delete().eq('id', req.params.id);
     if (error) throw error;
-    res.json({ success: true });
+    const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 30);
+    res.status(result.pending ? 202 : 200).json({ success: true, pending_deletions: result.pending });
   }));
+
+  // Background deletion retries survive the original request and run even
+  // when publishing is disabled. Never log excerpts, secrets or remote bodies.
+  if (process.env.MISTRAL_API_KEY) {
+    const interval = setInterval(() => {
+      void flushPendingMistralDeletions(supabaseAdmin, undefined, 30).catch(() => {});
+    }, 60_000);
+    interval.unref?.();
+  }
 }
