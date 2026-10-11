@@ -9,11 +9,15 @@ interface Contribution {
 interface Publication {
   contribution_id: string; remote_document_id: string | null;
   state: string; deletion_requested_at: string | null; deleted_at: string | null;
+  delete_attempts?: number;
 }
 interface State {
   opted_in: boolean; contributions: Contribution[]; publications: Publication[];
   publication_active: boolean;
 }
+
+/** Aligné sur ALERT_AFTER_ATTEMPTS (server/knowledge/mistralLifecycle.ts). */
+const REPEATED_FAILURE_ATTEMPTS = 6;
 
 export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocument[] }) {
   const [state, setState] = useState<State | null>(null);
@@ -129,6 +133,10 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
     </div>
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     {notice && <p role="status" className="text-sm">{notice}</p>}
+    {state?.publications?.some(p => p.state !== 'deleted' && (p.delete_attempts ?? 0) >= REPEATED_FAILURE_ATTEMPTS) &&
+      <p role="alert" className="text-sm text-red-600">
+        Une suppression chez Mistral échoue de façon répétée. Les tentatives automatiques s'espacent ; relancez la vérification ci-dessous, puis contactez le support si le message persiste.
+      </p>}
     {state?.publications?.some(p => (p.state !== 'deleted' && p.deletion_requested_at) || p.state === 'uncertain') && <div className="text-sm border rounded p-2 space-y-2">
       <p>Des transferts ou suppressions distantes restent à confirmer. Le suivi est conservé pour éviter les doublons.</p>
       <button type="button" disabled={busy} onClick={() => void retryDeletions()}

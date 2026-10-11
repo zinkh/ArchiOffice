@@ -34,30 +34,75 @@ describe('Mistral Libraries — transport sécurisé (API simulée)', () => {
     await expect(client.upload('Extrait fictif', contribution)).rejects.toThrow(/Réponse de téléversement/);
   });
 
-  it('ne considère pas le début de page vide comme une absence complète', async () => {
+  const name = 'archioffice-' + contribution + '.txt';
+  const page = (data: unknown[], hasMore: boolean, current = 0) => new Response(JSON.stringify({
+    data, pagination: { total_items: 0, total_pages: 0, current_page: current, page_size: 100, has_more: hasMore },
+  }), { status: 200 });
+  const other = (n: number) => Array.from({ length: n }, (_, i) => ({ id: 'o' + i, library_id: lib, name: 'manuel-' + i + '.pdf' }));
+
+  it('parcourt les pages (page, has_more) et retrouve un document hors de la première page', async () => {
     const mock = vi.fn(async (url: string) => {
-      if (!url.includes('page_token=')) {
-        return new Response(JSON.stringify({ data: [{ id: 'other', library_id: lib, name: 'manuel.pdf' }],
-          next_page_token: 'page-2' }), { status: 200 });
-      }
-      return new Response(JSON.stringify({
-        data: [{ id: doc, library_id: lib, name: 'archioffice-' + contribution + '.txt' }],
-        next_page_token: null,
-      }), { status: 200 });
+      const n = Number(new URL(url).searchParams.get('page'));
+      if (n === 0) return page(other(100), true, 0);
+      if (n === 1) return page(other(100), true, 1);
+      return page([{ id: doc, library_id: lib, name }], false, 2);
     });
-    const found = await makeMistralLibraryClient('key', lib, mock as typeof fetch)
-      .findByName('archioffice-' + contribution + '.txt');
+    const found = await makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name);
+    expect(found?.id).toBe(doc);
+    const pages = mock.mock.calls.map(c => new URL(c[0] as string).searchParams.get('page'));
+    expect(pages).toEqual(['0', '1', '2']);
+  });
+
+  it('envoie page_size et page, jamais un jeton de page', async () => {
+    const mock = vi.fn(async (_url: string) => page([{ id: doc, library_id: lib, name }], false));
+    await makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name);
+    const first = new URL(mock.mock.calls[0][0] as string).searchParams;
+    expect(first.get('page_size')).toBe('100');
+    expect(first.get('page')).toBe('0');
+    expect(first.get('search')).toBe(name);
+    expect(first.has('page_token')).toBe(false);
+  });
+
+  it('confirme l’absence par un parcours complet quand la recherche ne trouve rien', async () => {
+    const mock = vi.fn(async (url: string) => {
+      const q = new URL(url).searchParams;
+      // `search` ne renvoie rien (sémantique incertaine) alors que le document existe.
+      if (q.get('search')) return page([], false);
+      return page([{ id: doc, library_id: lib, name }], false);
+    });
+    const found = await makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name);
     expect(found?.id).toBe(doc);
     expect(mock).toHaveBeenCalledTimes(2);
   });
 
+  it('ne conclut à l’absence qu’après avoir lu toute la bibliothèque', async () => {
+    const mock = vi.fn(async (url: string) => {
+      const n = Number(new URL(url).searchParams.get('page'));
+      return page(other(100), n < 2, n);
+    });
+    const found = await makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name);
+    expect(found).toBeNull();
+    // recherche (3 pages) puis parcours complet de confirmation (3 pages)
+    expect(mock).toHaveBeenCalledTimes(6);
+  });
+
+  it('échoue fermé sans indicateur de pagination : jamais d’absence affirmée à tort', async () => {
+    const mock = vi.fn(async () => new Response(JSON.stringify({ data: other(3) }), { status: 200 }));
+    await expect(makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name))
+      .rejects.toThrow(/incohérente/);
+  });
+
+  it('refuse d’arbitrer quand plusieurs copies portent le même nom', async () => {
+    const mock = vi.fn(async () => page([
+      { id: doc, library_id: lib, name }, { id: 'autre', library_id: lib, name },
+    ], false));
+    await expect(makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name))
+      .rejects.toThrow(/Plusieurs copies/);
+  });
+
   it('ne supprime jamais un document de test existant lors du rapprochement', async () => {
-    const mock = vi.fn(async () => new Response(JSON.stringify({
-      data: [{ id: doc, library_id: lib, name: 'fiche-test-utilisateur.pdf' }],
-      next_page_token: null,
-    }), { status: 200 }));
-    const found = await makeMistralLibraryClient('key', lib, mock as typeof fetch)
-      .findByName('archioffice-' + contribution + '.txt');
+    const mock = vi.fn(async () => page([{ id: doc, library_id: lib, name: 'fiche-test-utilisateur.pdf' }], false));
+    const found = await makeMistralLibraryClient('key', lib, mock as typeof fetch).findByName(name);
     expect(found).toBeNull();
   });
 

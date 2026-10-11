@@ -12,6 +12,9 @@ export interface RemotePublication {
   deletion_requested_at: string | null;
   created_at?: string | null;
   updated_at: string;
+  /** Absents tant que supabase/migrate_knowledge_zz_remote_retry_backoff.sql n'est pas passée. */
+  delete_attempts?: number | null;
+  next_attempt_at?: string | null;
 }
 
 /** Au-delà, un envoi sans document distant retrouvé est considéré comme n'ayant jamais abouti. */
@@ -20,6 +23,16 @@ export const ABANDON_AFTER_MS = 24 * 60 * 60 * 1000;
 export const RECONCILE_RETRY_MS = 5 * 60 * 1000;
 /** Un envoi plus récent peut encore être en vol : le délai d'attente d'une requête Mistral est de 25 s. */
 export const IN_FLIGHT_MS = 60_000;
+
+/** Délai avant la prochaine suppression : 2 min, 4 min, 8 min... plafonné à 6 h. */
+export const BACKOFF_BASE_MS = 60_000;
+export const BACKOFF_MAX_MS = 6 * 60 * 60 * 1000;
+/** À partir de ce nombre d'échecs, la ligne est signalée comme demandant une intervention. */
+export const ALERT_AFTER_ATTEMPTS = 6;
+export const backoffMs = (attempts: number) =>
+  Math.min(BACKOFF_BASE_MS * 2 ** Math.max(1, attempts), BACKOFF_MAX_MS);
+const IS_MISSING_COLUMN = (error: any) =>
+  error?.code === '42703' || error?.code === 'PGRST204' || /delete_attempts|next_attempt_at/.test(error?.message || '');
 
 const elapsedMs = (iso: string | null | undefined) => iso ? Date.now() - new Date(iso).getTime() : 0;
 const IS_MISSING_TABLE = (error: any) =>
@@ -146,28 +159,54 @@ export async function processRemoteDeletion(db: any, original: RemotePublication
     return true;
   } catch {
     // Keep the durable ID even when Mistral or database is unavailable.
-    const pending = await scope.update({
-      state: 'delete_pending', last_error: 'Suppression distante à réessayer.',
+    // Délai croissant et compteur : une panne durable ne martèle plus Mistral
+    // chaque minute, et un échec répété est signalé au lieu de rester silencieux.
+    const attempts = (row.delete_attempts ?? 0) + 1;
+    const base = {
+      state: 'delete_pending',
+      last_error: attempts >= ALERT_AFTER_ATTEMPTS
+        ? 'Suppression distante en échec répété : intervention requise.'
+        : 'Suppression distante à réessayer.',
       updated_at: new Date().toISOString(),
+    };
+    let pending = await scope.update({
+      ...base, delete_attempts: attempts, next_attempt_at: new Date(Date.now() + backoffMs(attempts)).toISOString(),
     }).eq('id', row.id).neq('state', 'deleted');
+    // Instance dont la migration n'est pas passée : on retombe sur l'ancien comportement.
+    if (pending.error && IS_MISSING_COLUMN(pending.error)) {
+      pending = await scope.update(base).eq('id', row.id).neq('state', 'deleted');
+    }
     if (pending.error) throw pending.error;
+    if (attempts === ALERT_AFTER_ATTEMPTS) {
+      // Ni extrait ni nom de fichier dans le journal : seulement des identifiants internes.
+      console.error(`[mistral] suppression distante en échec répété (cabinet ${row.tenant_id}, ligne ${row.id}) : intervention requise.`);
+    }
     return false;
   }
 }
 
-/** Process bounded batches; safe across multiple App Platform instances. */
-export async function flushPendingMistralDeletions(db: any, tenantId?: string, limit = 20) {
+/**
+ * Process bounded batches; safe across multiple App Platform instances.
+ * Les lignes dont la prochaine tentative n'est pas échue sont laissées de côté
+ * (sauf `ignoreBackoff`, pour le geste manuel d'un administrateur).
+ */
+export async function flushPendingMistralDeletions(
+  db: any, tenantId?: string, limit = 20, options: { ignoreBackoff?: boolean } = {},
+) {
   let query = db.from('knowledge_remote_documents')
     .select('*').not('deletion_requested_at', 'is', null)
     .neq('state', 'deleted').order('updated_at', { ascending: true }).limit(limit);
   if (tenantId) query = query.eq('tenant_id', tenantId);
   const { data, error } = await query;
   if (error) throw error;
+  const rows = (data || []) as RemotePublication[];
+  const now = new Date().toISOString();
+  const due = options.ignoreBackoff ? rows : rows.filter(r => !r.next_attempt_at || r.next_attempt_at <= now);
   let deleted = 0;
-  for (const row of (data || []) as RemotePublication[]) {
+  for (const row of due) {
     if (await processRemoteDeletion(db, row)) deleted++;
   }
-  return { attempted: (data || []).length, deleted, pending: (data || []).length - deleted };
+  return { attempted: due.length, deleted, pending: rows.length - deleted, waiting: rows.length - due.length };
 }
 
 /**
