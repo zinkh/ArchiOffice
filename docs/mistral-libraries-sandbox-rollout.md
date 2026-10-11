@@ -10,7 +10,7 @@ MISTRAL_KNOWLEDGE_LIBRARY_ID=01a12a77-dd1c-77eb-84b0-25cac8adccf4
 MISTRAL_KNOWLEDGE_PUBLISH_ENABLED=false
 ```
 
-Do not commit or expose the API key. Deploy `supabase/migrate_knowledge_mistral_publications.sql` **before** deploying the API changes. Publishing remains disabled until explicitly enabled and privacy/security review completed.
+Do not commit or expose the API key. Deploy `supabase/migrate_knowledge_z_mistral_publications.sql` **before** deploying the API changes. Publishing remains disabled until explicitly enabled and privacy/security review completed.
 
 ## Workflow
 
