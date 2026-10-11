@@ -26,6 +26,14 @@ describe('Mistral Libraries — transport sécurisé (API simulée)', () => {
     expect(mock).toHaveBeenCalledTimes(1);
   });
 
+  it('refuse une déduplication Mistral qui pointerait vers un fichier ajouté manuellement', async () => {
+    const mock = vi.fn(async () => new Response(JSON.stringify({
+      id: doc, library_id: lib, name: 'donnees-de-test-client.txt',
+    }), { status: 200 }));
+    const client = makeMistralLibraryClient('key', lib, mock as typeof fetch);
+    await expect(client.upload('Extrait fictif', contribution)).rejects.toThrow(/Réponse de téléversement/);
+  });
+
   it('ne considère pas le début de page vide comme une absence complète', async () => {
     const mock = vi.fn(async (url: string) => {
       if (!url.includes('page_token=')) {
