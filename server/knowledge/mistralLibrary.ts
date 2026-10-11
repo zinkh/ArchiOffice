@@ -46,6 +46,32 @@ export function makeMistralLibraryClient(
     }
     return response;
   };
+  // GET /documents est paginé par `page` (à partir de 0) et `page_size`, la
+  // réponse porte `pagination.has_more` (et non un jeton de page).
+  const PAGE_SIZE = 100;
+  const MAX_PAGES = 50;
+  const listByName = async (remoteName: string, search?: string): Promise<MistralRemoteDocument[]> => {
+    const matches: MistralRemoteDocument[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const query = new URLSearchParams({
+        page_size: String(PAGE_SIZE), page: String(page), sort_by: 'created_at', sort_order: 'desc',
+      });
+      if (search) query.set('search', search);
+      const response = await call('/documents?' + query.toString());
+      const body = await response.json() as {
+        data?: MistralRemoteDocument[];
+        pagination?: { has_more?: boolean };
+      };
+      // Échec fermé : sans indicateur de pagination fiable, on ne peut pas affirmer
+      // avoir tout lu, donc on ne conclut jamais à l'absence d'un document.
+      if (!Array.isArray(body.data) || typeof body.pagination?.has_more !== 'boolean') {
+        throw new Error('Liste Mistral incohérente.');
+      }
+      matches.push(...body.data.filter(d => d.name === remoteName && d.library_id === libraryId));
+      if (!body.pagination.has_more) return matches;
+    }
+    throw new Error('Bibliothèque trop volumineuse : rapprochement incomplet.');
+  };
   return {
     async upload(sanitizedText: string, contributionId: string): Promise<MistralRemoteDocument> {
       const name = 'archioffice-' + contributionId + '.txt';
@@ -62,30 +88,16 @@ export function makeMistralLibraryClient(
       return doc;
     },
     async findByName(remoteName: string): Promise<MistralRemoteDocument | null> {
-      // Never assume a missing entry on the first page means an upload failed.
-      let token: string | undefined;
-      let matched: MistralRemoteDocument | null = null;
-      const seen = new Set<string>();
-      for (let page = 0; page < 100; page++) {
-        const query = new URLSearchParams({ page_size: '100' });
-        if (token) query.set('page_token', token);
-        const response = await call('/documents?' + query.toString());
-        const pageData = await response.json() as {
-          data?: MistralRemoteDocument[];
-          next_page_token?: string | null;
-        };
-        if (!Array.isArray(pageData.data)) throw new Error('Liste Mistral incohérente.');
-        const matches = pageData.data.filter(d => d.name === remoteName && d.library_id === libraryId);
-        if (matches.length > 1 || (matched && matches.length > 0)) {
-          throw new Error('Plusieurs copies distantes correspondent au même extrait : examen requis.');
-        }
-        if (matches[0]) matched = matches[0];
-        token = pageData.next_page_token || undefined;
-        if (!token) return matched;
-        if (seen.has(token)) throw new Error('Pagination Mistral incohérente.');
-        seen.add(token);
+      // Un nom absent de la première page ne prouve rien : on parcourt toutes les
+      // pages. `search` restreint d'abord la liste ; son comportement exact n'étant
+      // pas garanti, une recherche sans résultat est confirmée par un parcours
+      // complet avant de conclure à l'absence (jamais d'abandon sur un faux négatif).
+      let matches = await listByName(remoteName, remoteName);
+      if (matches.length === 0) matches = await listByName(remoteName);
+      if (matches.length > 1) {
+        throw new Error('Plusieurs copies distantes correspondent au même extrait : examen requis.');
       }
-      throw new Error('Bibliothèque trop volumineuse : rapprochement incomplet.');
+      return matches[0] ?? null;
     },
     async remove(remoteDocumentId: string): Promise<void> {
       if (!UUID_RE.test(remoteDocumentId)) throw new Error('Identifiant distant invalide.');

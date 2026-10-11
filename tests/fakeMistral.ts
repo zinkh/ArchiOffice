@@ -10,6 +10,8 @@ export interface FakeMistral {
   calls: string[];
   failDelete: boolean;
   failUpload: boolean;
+  /** Simule un `search` qui ne filtre rien (comportement non garanti par l'API). */
+  ignoreSearch?: boolean;
   /** Ajoute un doublon du même nom pour simuler une ambiguïté. */
   duplicateName?: string;
 }
@@ -38,10 +40,22 @@ export function installFakeMistral(initial: { name: string }[] = []): FakeMistra
       return new Response(JSON.stringify(doc), { status: 200 });
     }
     if (String(url).includes('/documents')) {
-      const data = mistral.duplicateName
+      const query = new URL(String(url)).searchParams;
+      const pageSize = Number(query.get('page_size') ?? 100);
+      const page = Number(query.get('page') ?? 0);
+      const search = query.get('search');
+      let all = mistral.duplicateName
         ? [...mistral.docs, { id: crypto.randomUUID(), library_id: lib, name: mistral.duplicateName }]
-        : mistral.docs;
-      return new Response(JSON.stringify({ data, next_page_token: null }), { status: 200 });
+        : [...mistral.docs];
+      if (search && !mistral.ignoreSearch) all = all.filter(d => d.name.includes(search));
+      const totalPages = Math.max(1, Math.ceil(all.length / pageSize));
+      return new Response(JSON.stringify({
+        data: all.slice(page * pageSize, (page + 1) * pageSize),
+        pagination: {
+          total_items: all.length, total_pages: totalPages, current_page: page,
+          page_size: pageSize, has_more: page + 1 < totalPages,
+        },
+      }), { status: 200 });
     }
     return new Response(JSON.stringify({ id: lib, name: 'Bac à sable' }), { status: 200 });
   }));

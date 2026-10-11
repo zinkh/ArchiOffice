@@ -213,4 +213,26 @@ describe('Rapprochement à la demande', () => {
     expect(res.body).toMatchObject({ abandoned_uploads: 1 });
     expect(remoteRows(tenantId)[0].state).toBe('deleted');
   });
+
+  it('passe outre le délai croissant : le geste manuel retente tout de suite', async () => {
+    const { token, tenantId } = cabinet();
+    const contribution = crypto.randomUUID();
+    const remoteName = `archioffice-${contribution}.txt`;
+    const remoteId = crypto.randomUUID();
+    fakeSupabaseAdmin.seed('knowledge_remote_documents', [{
+      id: crypto.randomUUID(), tenant_id: tenantId, contribution_id: contribution, library_id: FAKE_MISTRAL_LIBRARY,
+      remote_name: remoteName, remote_document_id: remoteId, content_sha256: 'x', state: 'delete_pending',
+      deletion_requested_at: new Date().toISOString(), delete_attempts: 4,
+      next_attempt_at: new Date(Date.now() + 3 * 3600_000).toISOString(),
+      created_at: new Date(Date.now() - 3600_000).toISOString(), updated_at: new Date(Date.now() - 600_000).toISOString(),
+    }]);
+    const mistral = installFakeMistral();
+    mistral.docs.push({ id: remoteId, library_id: FAKE_MISTRAL_LIBRARY, name: remoteName });
+
+    const res = await request(app).post('/api/knowledge-sharing/mistral/reconcile').set(authHeader(token));
+
+    expect(res.body).toMatchObject({ deleted: 1, pending: 0 });
+    expect(remoteRows(tenantId)[0].state).toBe('deleted');
+    expect(mistral.docs).toHaveLength(0);
+  });
 });

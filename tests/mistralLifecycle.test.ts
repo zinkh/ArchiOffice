@@ -3,7 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeSupabaseAdmin } from './fakeSupabaseAdmin';
 import {
-  ABANDON_AFTER_MS, processRemoteDeletion, reconcileStalePublications, settleRemoteDocumentsBeforePurge,
+  ABANDON_AFTER_MS, ALERT_AFTER_ATTEMPTS, BACKOFF_MAX_MS, backoffMs, flushPendingMistralDeletions,
+  processRemoteDeletion, reconcileStalePublications, settleRemoteDocumentsBeforePurge,
 } from '../server/knowledge/mistralLifecycle';
 import { purgeExpiredTenants } from '../server/tenantPurge';
 import { installFakeMistral, FAKE_MISTRAL_LIBRARY as LIB, type FakeMistral } from './fakeMistral';
@@ -225,5 +226,143 @@ describe('purgeExpiredTenants : documents Mistral', () => {
 
     expect(mistral.docs).toHaveLength(0);
     expect(db.getTable('tenants').some(t => t.id === TENANT)).toBe(false);
+  });
+});
+
+
+describe('Grande bibliothèque : le rapprochement lit toutes les pages', () => {
+  const filler = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `document-existant-${i}.pdf` }));
+
+  it('retrouve un envoi situé bien au-delà de la première page de 100 documents', async () => {
+    const row = seedPublication();
+    const mistral = installFakeMistral([...filler(250), { name: row.remote_name as string }]);
+    mistral.ignoreSearch = true; // le parcours doit suffire, même si `search` ne filtre rien
+
+    const summary = await reconcileStalePublications(db as any, TENANT);
+
+    expect(summary.reconciled).toBe(1);
+    expect(rowOf(row.id)).toMatchObject({ state: 'published' });
+  });
+
+  it('n’abandonne pas à tort une ligne dont le document existe hors de la première page', async () => {
+    const row = seedPublication({ created_at: iso(ABANDON_AFTER_MS + MINUTE) });
+    const mistral = installFakeMistral([...filler(250), { name: row.remote_name as string }]);
+    mistral.ignoreSearch = true;
+
+    const summary = await reconcileStalePublications(db as any, TENANT);
+
+    expect(summary).toMatchObject({ reconciled: 1, abandoned: 0 });
+    expect(rowOf(row.id).state).toBe('published');
+    expect(deletes(mistral)).toHaveLength(0);
+  });
+});
+
+describe('Suppressions distantes : délai croissant et alerte', () => {
+  const stuck = (overrides: Record<string, unknown> = {}) => seedPublication({
+    state: 'delete_pending', deletion_requested_at: iso(MINUTE), remote_document_id: crypto.randomUUID(), ...overrides,
+  });
+
+  it('espace les tentatives : 2 min, 4 min, 8 min, plafonné à 6 h', () => {
+    expect(backoffMs(1)).toBe(2 * MINUTE);
+    expect(backoffMs(2)).toBe(4 * MINUTE);
+    expect(backoffMs(3)).toBe(8 * MINUTE);
+    expect(backoffMs(30)).toBe(BACKOFF_MAX_MS);
+  });
+
+  it('compte chaque échec et fixe la prochaine tentative', async () => {
+    const row = stuck();
+    installFakeMistral().failDelete = true;
+
+    expect(await processRemoteDeletion(db as any, row as any)).toBe(false);
+    const first = rowOf(row.id);
+    expect(first).toMatchObject({ state: 'delete_pending', delete_attempts: 1 });
+    expect(new Date(first.next_attempt_at).getTime() - Date.now()).toBeGreaterThan(MINUTE);
+
+    await processRemoteDeletion(db as any, rowOf(row.id) as any);
+    expect(rowOf(row.id).delete_attempts).toBe(2);
+    expect(rowOf(row.id).last_error).toMatch(/à réessayer/);
+  });
+
+  it('signale un échec répété une seule fois, sans rien de sensible dans le journal', async () => {
+    const row = stuck({ delete_attempts: ALERT_AFTER_ATTEMPTS - 1 });
+    installFakeMistral().failDelete = true;
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    await processRemoteDeletion(db as any, row as any);
+
+    expect(rowOf(row.id).last_error).toMatch(/intervention requise/);
+    expect(log).toHaveBeenCalledTimes(1);
+    const message = String(log.mock.calls[0][0]);
+    expect(message).toContain(row.id);
+    expect(message).not.toContain(row.remote_name);
+    expect(message).not.toContain(row.remote_document_id);
+
+    await processRemoteDeletion(db as any, rowOf(row.id) as any);
+    expect(log).toHaveBeenCalledTimes(1);
+    log.mockRestore();
+  });
+
+  it('laisse de côté une ligne dont la prochaine tentative n’est pas échue', async () => {
+    const row = stuck({ delete_attempts: 3, next_attempt_at: new Date(Date.now() + 30 * MINUTE).toISOString() });
+    const mistral = installFakeMistral([]);
+    mistral.docs.push({ id: row.remote_document_id, library_id: LIB, name: row.remote_name });
+
+    const result = await flushPendingMistralDeletions(db as any, TENANT);
+
+    expect(result).toMatchObject({ attempted: 0, deleted: 0, pending: 1, waiting: 1 });
+    expect(deletes(mistral)).toHaveLength(0);
+    expect(rowOf(row.id).state).toBe('delete_pending');
+  });
+
+  it('retente une ligne échue et la supprime', async () => {
+    const row = stuck({ delete_attempts: 3, next_attempt_at: iso(MINUTE) });
+    const mistral = installFakeMistral([]);
+    mistral.docs.push({ id: row.remote_document_id, library_id: LIB, name: row.remote_name });
+
+    const result = await flushPendingMistralDeletions(db as any, TENANT);
+
+    expect(result).toMatchObject({ attempted: 1, deleted: 1, pending: 0, waiting: 0 });
+    expect(rowOf(row.id).state).toBe('deleted');
+    expect(mistral.docs).toHaveLength(0);
+  });
+
+  it('le geste manuel d’un administrateur passe outre le délai', async () => {
+    const row = stuck({ delete_attempts: 3, next_attempt_at: new Date(Date.now() + 5 * 60 * MINUTE).toISOString() });
+    const mistral = installFakeMistral([]);
+    mistral.docs.push({ id: row.remote_document_id, library_id: LIB, name: row.remote_name });
+
+    const result = await flushPendingMistralDeletions(db as any, TENANT, 20, { ignoreBackoff: true });
+
+    expect(result.deleted).toBe(1);
+    expect(rowOf(row.id).state).toBe('deleted');
+  });
+
+  it('reste compatible avec une instance dont la migration n’est pas passée', async () => {
+    const row = stuck();
+    installFakeMistral().failDelete = true;
+    const missingColumn = () => {
+      const chain: any = new Proxy({}, {
+        get: (_t, prop) => prop === 'then'
+          ? (resolve: any) => Promise.resolve({ data: null, error: { code: '42703', message: 'column "delete_attempts" does not exist' } }).then(resolve)
+          : () => chain,
+      });
+      return chain;
+    };
+    const legacyDb = {
+      from: (table: string) => {
+        const real: any = db.from(table);
+        if (table !== 'knowledge_remote_documents') return real;
+        return new Proxy(real, {
+          get: (target, prop) => prop === 'update'
+            ? (payload: any) => ('delete_attempts' in payload ? missingColumn() : target.update(payload))
+            : target[prop].bind(target),
+        });
+      },
+    };
+
+    expect(await processRemoteDeletion(legacyDb as any, row as any)).toBe(false);
+
+    expect(rowOf(row.id)).toMatchObject({ state: 'delete_pending' });
+    expect(rowOf(row.id).last_error).toMatch(/à réessayer/);
   });
 });

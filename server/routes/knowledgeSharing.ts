@@ -41,15 +41,23 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     return data?.opted_in === true;
   }
 
+  // `delete_attempts` n'existe qu'une fois la migration de reprise passée : sans
+  // elle, on relit sans cette colonne plutôt que de casser tout l'écran.
+  const PUBLICATION_COLUMNS = 'contribution_id,remote_document_id,state,deletion_requested_at,deleted_at,created_at';
+  async function listPublications(tenantId: string) {
+    const read = (columns: string) => tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
+      .select(columns).order('created_at', { ascending: false }).limit(200);
+    const withAttempts = await read(PUBLICATION_COLUMNS + ',delete_attempts');
+    return withAttempts.error ? read(PUBLICATION_COLUMNS) : withAttempts;
+  }
+
   app.get('/api/knowledge-sharing', guarded(async (_req, res, tenantId) => {
     const [preference, contributions, publications] = await Promise.all([
       getPreference(tenantId),
       tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
         .select('id,document_id,status,sanitized_text,warnings,reviewed_at,created_at')
         .order('created_at', { ascending: false }).limit(100),
-      tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
-        .select('contribution_id,remote_document_id,state,deletion_requested_at,deleted_at,created_at')
-        .order('created_at', { ascending: false }).limit(200),
+      listPublications(tenantId),
     ]);
     if (contributions.error) throw contributions.error;
     if (publications.error) throw publications.error;
@@ -325,7 +333,7 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
   // nom opaque (jamais de nouvel envoi) puis rejoue les suppressions en attente.
   app.post('/api/knowledge-sharing/mistral/reconcile', guarded(async (_req, res, tenantId) => {
     const uploads = await reconcileStalePublications(supabaseAdmin, tenantId, 20, 0);
-    const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50);
+    const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50, { ignoreBackoff: true });
     res.json({
       ...result, reconciled_uploads: uploads.reconciled,
       uncertain_uploads: uploads.uncertain + uploads.errors, abandoned_uploads: uploads.abandoned,
