@@ -8,6 +8,8 @@ Sandbox library: `01a12a77-dd1c-77eb-84b0-25cac8adccf4`
 ```env
 MISTRAL_KNOWLEDGE_LIBRARY_ID=01a12a77-dd1c-77eb-84b0-25cac8adccf4
 MISTRAL_KNOWLEDGE_PUBLISH_ENABLED=false
+# Facultatif : modèle de la relecture IA du partage automatique (défaut mistral-large-latest)
+MISTRAL_KNOWLEDGE_REVIEW_MODEL=mistral-large-latest
 ```
 
 `MISTRAL_KNOWLEDGE_LIBRARY_ID` est **obligatoire** : il n'existe aucun identifiant par défaut. Sans lui (ou s'il n'est pas un UUID), la publication répond 503 sans rien réserver ni envoyer. Une instance de production doit pointer sur sa propre bibliothèque, jamais sur le bac à sable.
@@ -57,3 +59,7 @@ All operations are tenant-admin protected. The outbox and notes are service-role
 - `DELETE /v1/libraries/{library_id}/documents/{document_id}`
 
 Docs: https://docs.mistral.ai/api/endpoint/beta/libraries/documents
+
+## Partage automatique
+
+Voir `docs/knowledge-sharing.md` (étape 3). Tant que `MISTRAL_KNOWLEDGE_PUBLISH_ENABLED` n'est pas `true`, aucun texte n'est analysé par Mistral ni envoyé. Migration à passer avant le déploiement : `supabase/migrate_knowledge_zzz_auto_sharing.sql`.

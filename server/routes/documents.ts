@@ -10,6 +10,7 @@
 // (Google Drive, Dropbox, Nextcloud, kDrive). C'est elle aussi qui porte
 // désormais le contrôle de quota, qui était appelé ici avant même qu'on sache
 // où le fichier irait.
+import { enqueueAutoContribution } from '../knowledge/autoContribution';
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { safeSegment } from '../storageKey';
@@ -172,6 +173,11 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const { error: e1 } = await supabaseAdmin.from('documents').insert({ id, tenant_id: tenantId, project_id: projectIdVal, resource_type: resourceType, resource_id: resourceIdVal, name, category, phase: phaseVal, version: 1, file_url, storage_backend: stored.storageBackend, mime_type: file.mimetype, size_bytes: stored.sizeBytes, uploaded_by, uploaded_at, description, indice: indice || 'A', doc_statut: 'en_cours', emetteur: emetteur || null, doc_type: doc_type || null, contact_id: contact_id || null, contact_name: contact_name || null, validation_status: 'pending' });
       if (e1) throw e1;
       await supabaseAdmin.from('document_versions').insert({ id: crypto.randomUUID(), tenant_id: tenantId, document_id: id, version: 1, file_url, storage_backend: stored.storageBackend, uploaded_by, uploaded_at, description, size_bytes: stored.sizeBytes });
+      // Partage automatique (si le cabinet l'a demandé pour ce type de document) : en
+      // arrière-plan et sans jamais retarder ni faire échouer le dépôt.
+      void enqueueAutoContribution(supabaseAdmin, tenantId, {
+        id, name, file_url, size_bytes: stored.sizeBytes, mime_type: file.mimetype, doc_type: doc_type || null,
+      });
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id, file_url, size_bytes: stored.sizeBytes, uploaded_at });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }

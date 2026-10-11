@@ -35,3 +35,57 @@ tenants : `publication_active=false` est contractuel pour cette étape.
 
 Migration : `supabase/migrate_knowledge_sharing_review.sql`. Ne pas déployer
 l'interface avant d'avoir appliqué la migration et vérifié RLS.
+
+## Partage automatique (étape 3)
+
+Le cabinet peut choisir des **types de documents** (CCTP, Note technique, DPGF, BPU, DQE,
+Rapport : liste blanche, jamais un contrat, un devis, un ordre de service, un compte
+rendu ou un plan) dont les nouveaux documents sont partagés sans validation manuelle.
+C'est une **seconde autorisation**, distincte de la contribution anonymisée : elle
+couvre l'analyse du texte par Mistral avant toute relecture humaine. Elle est
+enregistrée avec son auteur et sa date, retombe à « désactivé » si la contribution est
+retirée, et ne reprend jamais seule.
+
+Chemin d'un document (`server/knowledge/autoContribution.ts`), en tâche de fond, toutes les
+minutes, et seulement si `MISTRAL_KNOWLEDGE_PUBLISH_ENABLED=true` :
+
+1. **Mise en file** au dépôt (`POST /api/documents`) si le type est choisi ; jamais un
+   fichier hors du stockage du cabinet ni de plus de 15 Mo. « Traiter aussi les documents
+   déjà présents » est un geste explicite, jamais fait à l'activation.
+2. **Lecture** du texte (même extracteur que le partage manuel, jamais le parseur Nomic).
+3. **Valeurs du cabinet** (`tenantIdentifiers.ts`) : contacts, clients, affaires, adresses,
+   équipe, agence, lues dans SA base et masquées localement (casse, accents et espaces
+   ignorés, valeurs de moins de 4 caractères et mots du métier exclus). Une lecture qui
+   échoue interrompt le traitement : jamais de liste incomplète sans que personne le sache.
+4. **Règles** (`anonymize.ts`) : e-mails, téléphones, SIRET, adresses (abréviations
+   comprises), codes postaux, communes, parcelles, permis, coordonnées GPS, montants,
+   « M. Dupont », « X SAS », lignes étiquetées (« Maître d'ouvrage : ... » jusqu'à la fin
+   de la phrase).
+5. **Relecture IA** (`aiReview.ts`, `MISTRAL_KNOWLEDGE_REVIEW_MODEL`, `mistral-large-latest`
+   par défaut) du texte déjà masqué, par lots. Le modèle ne réécrit rien : il désigne des
+   passages exacts que le code masque lui-même ; un passage absent du texte est ignoré, une
+   réponse illisible fait échouer le lot (nouvel essai, jamais d'envoi sans relecture).
+   Le coût est porté par le compte Mistral de l'opérateur et n'est pas refacturé.
+6. **Tri par paragraphe** : un paragraphe est retenu (non envoyé) si l'IA signale un risque
+   d'identifiants non désignés ou si un nom propre probable ou un numéro long subsiste.
+   Sous 200 caractères partageables, tout est retenu.
+7. **Envoi** de l'extrait propre, avec le mécanisme de réservation, de rapprochement et de
+   suppression de `publishContribution.ts`, dans la limite de 25 envois par cabinet et par 24 h.
+
+L'écran (Documents > Mémoire technique collective) montre le parcours, demande les deux
+autorisations avec leur portée, et tient un **journal** : état de chaque document en toutes
+lettres, bilan (paragraphes envoyés, retenus, éléments masqués par catégorie), texte exact
+transmis avec les passages masqués en évidence, paragraphes retenus et leur raison, retrait
+en un clic.
+
+Migration : `supabase/migrate_knowledge_zzz_auto_sharing.sql` (réglage du cabinet, origine,
+mode de relecture, paragraphes retenus, rapport d'analyse, nouveaux états `queued`,
+`analyzing`, `held`). Le code reste compatible avec une base où elle n'est pas passée : le
+partage automatique y est simplement désactivé.
+
+**Limites** : aucune détection n'est parfaite ; une IA et des règles ne garantissent pas
+l'anonymat, d'où le tri par paragraphe et le retrait en un clic. La suppression d'un texte
+dans la bibliothèque n'efface pas ce qui en aurait déjà été déduit chez le fournisseur.
+Les clients, entreprises et personnes cités n'ont pas consenti à ce partage : le cabinet
+en répond. Le contrat de traitement des données avec Mistral doit couvrir la relecture
+d'un texte non validé.

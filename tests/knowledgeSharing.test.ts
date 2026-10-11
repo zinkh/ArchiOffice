@@ -11,7 +11,8 @@ describe('prévisualisation anonymisée — base commune', () => {
     expect(result.text).not.toContain('06 12 34 56 78');
     expect(result.text).not.toContain('23 boulevard');
     expect(result.text).toContain('Bardage vertical');
-    expect(result.replacements).toBeGreaterThanOrEqual(3);
+    expect(result.replacements).toBeGreaterThanOrEqual(1);
+    expect(result.text).toContain('Contact :');
   });
 
   it('ne traite pas un champ vide comme une contribution sûre', () => {
@@ -27,21 +28,21 @@ describe('prévisualisation anonymisée — base commune', () => {
   });
 
 
-  it('masque une commune avec ligature dans un CCTP fictif, mais signale les noms non détectés', () => {
+  it('masque une commune avec ligature et les mentions étiquetées, et garde la prescription technique', () => {
     const result = anonymizeTechnicalText(
-      'OPÉRATION : Résidence Les Tilleuls, 23 boulevard de l’Europe, 54500 Vandœuvre-lès-Nancy.\\n' +
-      'Maître d\'ouvrage : SCI Bellevue.\\nEntreprise : SAS Martin Façades.\\n' +
-      'Contact : Sophie Lambert, sophie.lambert@example.fr, 06 12 34 56 78.\\n' +
-      'Montant du lot : 125 000 euros.\\n' +
+      'OPÉRATION : Résidence Les Tilleuls, 23 boulevard de l’Europe, 54500 Vandœuvre-lès-Nancy.\n' +
+      'Maître d\'ouvrage : SCI Bellevue.\nEntreprise : SAS Martin Façades.\n' +
+      'Contact : Sophie Lambert, sophie.lambert@example.fr, 06 12 34 56 78.\n' +
+      'Montant du lot : 125 000 euros.\n' +
       'LOT 04 - FACADES : bardage vertical bois douglas, pare-pluie HPV, supports entraxe 600 mm.',
     );
     expect(result.text).not.toContain('Vandœuvre');
     expect(result.text).not.toContain('sophie.lambert@example.fr');
-    expect(result.text).toContain('[LOCALISATION]');
+    expect(result.text).not.toContain('Sophie Lambert');
+    expect(result.text).not.toContain('Bellevue');
+    expect(result.text).not.toContain('Martin Façades');
+    expect(result.text).not.toContain('125 000');
     expect(result.text).toContain('600 mm');
-    // Un nom de personne, un nom de résidence et un nom de société ne sont
-    // pas automatiquement masqués ; il faut une revue humaine.
-    expect(result.text).toContain('Sophie Lambert');
     expect(result.warnings.join(' ')).toContain('Contrôle humain obligatoire');
   });
 
