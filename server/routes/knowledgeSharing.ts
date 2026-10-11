@@ -1,13 +1,13 @@
 /**
- * Circuit de contribution à une base de connaissances commune, désactivé par défaut.
- *
- * IMPORTANT : la phase pilote s'arrête à une revue humaine interne.
- * Aucun extrait, fichier ou métadonnée n'est envoyé à Mistral ou rendu visible
- * aux autres cabinets tant qu'une intégration externe et son audit RGPD ne sont
- * pas approuvés. Les documents de projet restent dans leur stockage privé.
+ * Contributions volontaires, anonymisées, revues et confirmées avant publication.
+ * Les fichiers originaux restent privés. Un journal durable permet la suppression
+ * distante même après suppression locale ou retrait du consentement.
  */
 import type { Express } from 'express';
 import * as XLSX from 'xlsx';
+import { createHash } from 'node:crypto';
+import { DEFAULT_KNOWLEDGE_LIBRARY_ID, makeMistralLibraryClient } from '../knowledge/mistralLibrary';
+import { flushPendingMistralDeletions, processRemoteDeletion } from '../knowledge/mistralLifecycle';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { anonymizeTechnicalText, MAX_SHARED_EXCERPT_CHARS } from '../knowledge/anonymize';
@@ -41,14 +41,22 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
   }
 
   app.get('/api/knowledge-sharing', guarded(async (_req, res, tenantId) => {
-    const [preference, contributions] = await Promise.all([
+    const [preference, contributions, publications] = await Promise.all([
       getPreference(tenantId),
       tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
         .select('id,document_id,status,sanitized_text,warnings,reviewed_at,created_at')
         .order('created_at', { ascending: false }).limit(100),
+      tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
+        .select('contribution_id,remote_document_id,state,deletion_requested_at,deleted_at,created_at')
+        .order('created_at', { ascending: false }).limit(200),
     ]);
     if (contributions.error) throw contributions.error;
-    res.json({ opted_in: preference, contributions: contributions.data || [], publication_active: false });
+    if (publications.error) throw publications.error;
+    res.json({
+      opted_in: preference, contributions: contributions.data || [],
+      publications: publications.data || [],
+      publication_active: process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED === 'true',
+    });
   }));
 
   app.put('/api/knowledge-sharing/consent', guarded(async (req, res, tenantId) => {
@@ -69,7 +77,17 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     const logged = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_sharing_events')
       .insert({ tenant_id: tenantId, actor_id: req.user.id, action: optedIn ? 'opt_in' : 'opt_out' });
     if (logged.error) throw logged.error;
-    res.json({ opted_in: optedIn });
+    if (!optedIn) {
+      // Outbox marked atomically by a DB trigger when consent is withdrawn.
+      const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50);
+      const remaining = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
+        .select('id', { count: 'exact', head: true }).neq('state', 'deleted');
+      if (remaining.error) throw remaining.error;
+      return res.status((remaining.count || 0) ? 202 : 200).json({
+        opted_in: false, pending_deletions: remaining.count || 0, deleted_now: result.deleted,
+      });
+    }
+    res.json({ opted_in: true });
   }));
 
   async function getDocument(tenantId: string, id: string) {
@@ -164,7 +182,7 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
   // Sandbox connectivity check: no customer document is transferred.
   app.get('/api/knowledge-sharing/mistral/status', guarded(async (_req, res) => {
     const apiKey = process.env.MISTRAL_API_KEY;
-    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID || '01a12a77-dd1c-77eb-84b0-25cac8adccf4';
+    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID || DEFAULT_KNOWLEDGE_LIBRARY_ID;
     if (!apiKey) return res.status(503).json({ connected: false, error: 'Mistral API key not configured.' });
     try {
       const response = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId), {
