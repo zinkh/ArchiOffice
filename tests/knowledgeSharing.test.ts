@@ -26,6 +26,25 @@ describe('prévisualisation anonymisée — base commune', () => {
     expect(result.warnings.join(' ')).toMatch(/entreprises|projets/i);
   });
 
+
+  it('masque une commune avec ligature dans un CCTP fictif, mais signale les noms non détectés', () => {
+    const result = anonymizeTechnicalText(
+      'OPÉRATION : Résidence Les Tilleuls, 23 boulevard de l’Europe, 54500 Vandœuvre-lès-Nancy.\\n' +
+      'Maître d\'ouvrage : SCI Bellevue.\\nEntreprise : SAS Martin Façades.\\n' +
+      'Contact : Sophie Lambert, sophie.lambert@example.fr, 06 12 34 56 78.\\n' +
+      'Montant du lot : 125 000 euros.\\n' +
+      'LOT 04 - FACADES : bardage vertical bois douglas, pare-pluie HPV, supports entraxe 600 mm.',
+    );
+    expect(result.text).not.toContain('Vandœuvre');
+    expect(result.text).not.toContain('sophie.lambert@example.fr');
+    expect(result.text).toContain('[LOCALISATION]');
+    expect(result.text).toContain('600 mm');
+    // Un nom de personne, un nom de résidence et un nom de société ne sont
+    // pas automatiquement masqués ; il faut une revue humaine.
+    expect(result.text).toContain('Sophie Lambert');
+    expect(result.warnings.join(' ')).toContain('Contrôle humain obligatoire');
+  });
+
   it('borne la taille des extraits avant leur stockage', () => {
     const result = anonymizeTechnicalText('a'.repeat(MAX_SHARED_EXCERPT_CHARS + 50));
     expect(result.text.length).toBe(MAX_SHARED_EXCERPT_CHARS);
