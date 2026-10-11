@@ -7,7 +7,7 @@ import type { Express } from 'express';
 import * as XLSX from 'xlsx';
 import { createHash } from 'node:crypto';
 import { DEFAULT_KNOWLEDGE_LIBRARY_ID, makeMistralLibraryClient } from '../knowledge/mistralLibrary';
-import { flushPendingMistralDeletions, processRemoteDeletion } from '../knowledge/mistralLifecycle';
+import { flushPendingMistralDeletions, processRemoteDeletion, reconcileRemotePublication } from '../knowledge/mistralLifecycle';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { anonymizeTechnicalText, MAX_SHARED_EXCERPT_CHARS } from '../knowledge/anonymize';
@@ -295,10 +295,23 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     res.status(201).json({ published: true, remote_document_id: remote.id });
   }));
 
-  // Admin-initiated retry of pending remote deletions (no new uploads).
+  // Admin-initiated, read-only reconciliation: NEVER automatically retry
+  // uncertain uploads; search by the unique name to prevent duplicates.
   app.post('/api/knowledge-sharing/mistral/reconcile', guarded(async (_req, res, tenantId) => {
+    const pending = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
+      .select('*').eq('state', 'uncertain').is('remote_document_id', null).limit(20);
+    if (pending.error) throw pending.error;
+    let resolved = 0;
+    for (const job of pending.data || []) {
+      try {
+        const result = await reconcileRemotePublication(supabaseAdmin, job);
+        if (result.remote_document_id) resolved++;
+      } catch {
+        // Unresolved uploads stay durable and cannot be re-sent blindly.
+      }
+    }
     const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50);
-    res.json(result);
+    res.json({ ...result, reconciled_uploads: resolved, uncertain_uploads: (pending.data || []).length - resolved });
   }));
 
   app.delete('/api/knowledge-sharing/contributions/:id', guarded(async (req, res, tenantId) => {
