@@ -103,6 +103,7 @@ import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
 import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
+import { registerKnowledgeSharingRoutes } from "./server/routes/knowledgeSharing";
 import { registerInspirationRoutes } from "./server/routes/inspirations";
 import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
@@ -1101,6 +1102,7 @@ export async function createApp() {
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
+  registerKnowledgeSharingRoutes(app, { supabaseAdmin, requireTenantAdmin });
   registerInspirationRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
