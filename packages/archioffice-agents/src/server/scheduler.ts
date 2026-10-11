@@ -16,7 +16,7 @@
 import type { AgentRow } from '../types.js';
 import { buildAgentContext } from './context.js';
 import { buildAgentSystemPrompt } from './systemPrompts.js';
-import { resolveLlmProvider, getPlatformAiConfig, LlmNotConfiguredError } from './llm/index.js';
+import { resolveLlmProvider, getTenantAiConfig, LlmNotConfiguredError } from './llm/index.js';
 
 const DEFAULT_TICK_MINUTES = 15;
 const RUN_TIMEOUT_MS = 120_000;
@@ -164,7 +164,7 @@ export async function runSchedule(
       "Réponds par un compte rendu écrit, autonome et daté, qui puisse être lu tel quel par l'architecte : " +
       "constat, points d'attention, actions recommandées. Si une information manque, dis-le au lieu de la supposer.";
 
-    const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+    const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, schedule.tenant_id));
     const result = await withTimeout(
       provider.chat({ system: systemPrompt, messages: [{ role: 'user', content: schedule.prompt }], tools: [] }),
       RUN_TIMEOUT_MS

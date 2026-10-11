@@ -378,7 +378,7 @@ export async function executeMailReview(
     if (mails.length === 0) return done({ status: 'ok', items: [], reviewed: 0 });
 
     const { buildAgentContext, buildAgentSystemPrompt } = await import('@zinkh/archioffice-agents/server');
-    const { resolveLlmProvider, getPlatformAiConfig, LlmNotConfiguredError } = await import('@zinkh/archioffice-agents/server/llm');
+    const { resolveLlmProvider, getTenantAiConfig, LlmNotConfiguredError } = await import('@zinkh/archioffice-agents/server/llm');
     try {
       const ctx = await buildAgentContext(
         supabaseAdmin, review.tenant_id, review.user_id, (agent as any).id,
@@ -386,7 +386,7 @@ export async function executeMailReview(
       );
       // `false` explicite : la revue n'a aucun outil, recherche web comprise.
       const system = `${buildAgentSystemPrompt(agent as any, ctx, false)}\n\n${reviewInstructions(mails.length, review.max_mails)}`;
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, review.tenant_id));
       const result = await withTimeout(
         provider.chat({ system, messages: [{ role: 'user', content: formatMailsForModel(mails) }], tools: [] }),
         RUN_TIMEOUT_MS,

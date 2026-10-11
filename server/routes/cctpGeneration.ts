@@ -204,8 +204,8 @@ export function registerCctpGenerationRoutes(app: Express, deps: RouteDeps) {
       }
       if (!combined.trim()) return res.status(400).json({ error: 'Impossible d\'extraire le contenu des pièces sélectionnées.', ignored });
 
-      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
       const prompt = `${context}
 
 Contenu des pièces :

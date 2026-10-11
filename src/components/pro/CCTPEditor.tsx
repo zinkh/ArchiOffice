@@ -18,13 +18,17 @@ import type { ProNotify } from './DPGFWorkspace';
 import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall } from '@tabler/icons-react';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
-import { DPGF, Chapitre, Ligne } from '../../types/dpgf';
+import { DPGF, Chapitre, Ligne, type ImageArticle } from '../../types/dpgf';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { CctpGenerateDialog } from './CctpGenerateDialog';
 import { IconArrowUp, IconArrowDown } from '@tabler/icons-react';
 import { lotsDepuisGeneration, type CctpGenerationEngine, type GeneratedLot } from '../../lib/cctpGeneration';
+import { SignedImage } from '../SignedImage';
+import { IconPhotoPlus, IconX } from '@tabler/icons-react';
+import { legendeImage, localisationsConnues, nouvelleImage, retirerImage } from '../../lib/cctpImages';
+import { envoyerIllustration } from '../../lib/cctpImagesUpload';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
@@ -238,6 +242,35 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     mutateDPGF(d => {
       ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)!.localisation = localisation;
     });
+  };
+
+  // ── Illustrations de l'article ────────────────────────────────────────────
+  const [envoiImages, setEnvoiImages] = useState(false);
+  const [erreurImages, setErreurImages] = useState<string | null>(null);
+  const localisations = localisationsConnues(dpgf);
+
+  const mutateImages = (fn: (ligne: Ligne) => void) => {
+    if (!selection || selection.kind !== 'ligne') return;
+    mutateDPGF(d => fn(ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath)!));
+  };
+  const ajouterImages = async (fichiers: FileList | null) => {
+    if (!fichiers?.length || !selection || selection.kind !== 'ligne') return;
+    const ligne = ligneAtPath(dpgf.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath);
+    if (!ligne) return;
+    setEnvoiImages(true);
+    setErreurImages(null);
+    const ajoutees: ImageArticle[] = [];
+    try {
+      for (const fichier of Array.from(fichiers)) {
+        ajoutees.push(nouvelleImage(await envoyerIllustration(dpgf.projectId, fichier), ligne));
+      }
+    } catch (e: any) {
+      setErreurImages(e?.message || "Échec de l'envoi de l'image.");
+    } finally {
+      // Les images déjà envoyées sont gardées même si une suivante échoue.
+      if (ajoutees.length) mutateImages(l => { l.images = [...(l.images ?? []), ...ajoutees]; });
+      setEnvoiImages(false);
+    }
   };
 
   // ── Derive selected data ──────────────────────────────────────────────────
@@ -690,9 +723,14 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                           type="text"
                           value={selData.ligne.localisation || ''}
                           onChange={e => updateLocalisation(e.target.value)}
+                          list="cctp-localisations"
+                          autoComplete="off"
                           placeholder="Ex : SdB étage, façade nord…"
                           className="px-2 py-1 text-xs border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-800 outline-none focus:ring-1 focus:ring-blue-400"
                         />
+                        <datalist id="cctp-localisations">
+                          {localisations.map(loc => <option key={loc} value={loc} />)}
+                        </datalist>
                       </div>
                     )}
                   </div>
@@ -715,6 +753,61 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   Ce texte apparaît uniquement dans le document CCTP, pas dans le DPGF.
                 </p>
               </div>
+
+              {/* Illustrations de l'article */}
+              {selection.kind === 'ligne' && selData.ligne && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
+                      Illustrations
+                    </span>
+                    <label className={`inline-flex items-center gap-1.5 h-8 px-3 rounded border text-xs cursor-pointer hover:bg-[var(--tblr-surface-2)] ${envoiImages ? 'opacity-60 pointer-events-none' : ''}`} style={{ borderColor: 'var(--tblr-border)' }}>
+                      <IconPhotoPlus size={14} aria-hidden />
+                      {envoiImages ? 'Envoi…' : 'Ajouter des images'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="sr-only"
+                        onChange={e => { void ajouterImages(e.target.files); e.target.value = ''; }}
+                      />
+                    </label>
+                  </div>
+                  {erreurImages && <p className="text-xs text-red-600" role="alert">{erreurImages}</p>}
+                  {(selData.ligne.images ?? []).length > 0 ? (
+                    <ul className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {(selData.ligne.images ?? []).map(img => (
+                        <li key={img.id} className="relative rounded border p-1.5 space-y-1.5" style={{ borderColor: 'var(--tblr-border)' }}>
+                          <SignedImage src={img.fileUrl} alt={img.legende || 'Illustration'} className="w-full h-28 object-cover rounded" />
+                          <input
+                            type="text"
+                            value={img.legende}
+                            onChange={e => mutateImages(l => { l.images = legendeImage(l.images, img.id, e.target.value); })}
+                            placeholder="Légende"
+                            aria-label="Légende de l'illustration"
+                            className="w-full px-1.5 py-1 text-xs border border-zinc-300 dark:border-zinc-600 rounded bg-white dark:bg-zinc-800 outline-none focus:ring-1 focus:ring-blue-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => mutateImages(l => { l.images = retirerImage(l.images, img.id); })}
+                            aria-label="Retirer l'illustration"
+                            className="absolute top-2.5 right-2.5 w-6 h-6 inline-flex items-center justify-center rounded-full bg-black/60 text-white outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                          >
+                            <IconX size={12} aria-hidden />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-[0.6875rem] text-zinc-400">
+                      Photos de l'existant, détails ou plans : elles sont imprimées sous le texte de l'article, avec leur légende.
+                    </p>
+                  )}
+                  <p className="text-[0.6875rem] text-zinc-400">
+                    Les fichiers sont aussi rangés dans les documents de l'affaire (catégorie « CCTP - illustrations »).
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

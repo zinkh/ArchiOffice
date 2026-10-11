@@ -8,7 +8,7 @@ import { FakeSupabaseAdmin } from './fakeSupabaseAdmin';
 const chat = vi.fn();
 vi.mock('@zinkh/archioffice-agents/server/llm', () => ({
   resolveLlmProvider: () => ({ id: 'test', model: 'test-model', chat }),
-  getPlatformAiConfig: async () => ({}),
+  getTenantAiConfig: async () => ({}),
   LlmNotConfiguredError: class extends Error {},
 }));
 

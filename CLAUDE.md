@@ -1686,6 +1686,8 @@ Conversation state is held by the caller, not by an SDK chat object, because eve
 
 `describeLlmSelection()` resolves the pair from **one** source rather than field by field: a provider from one place and a model from another produce an invalid pair (Claude asked for a Gemini model). A source naming only a provider falls through to that provider's own default model.
 
+**Un fournisseur par cabinet.** `tenants.ai_provider` / `ai_model` (`supabase/migrate_tenant_ai_provider.sql`, NULL = suit la plateforme) surchargent le réglage plateforme pour UN cabinet. Tous les appels qui savent pour quel cabinet ils tournent passent par `getTenantAiConfig(supabaseAdmin, tenantId)` (`llm/config.ts`) et non plus par `getPlatformAiConfig`, qui ne sert plus qu'à l'écran plateforme. Un cabinet avec un fournisseur mais sans modèle reçoit le modèle par défaut de CE fournisseur, jamais le modèle plateforme. Réglé par `GET/PUT /api/admin/tenants/:id/ai-provider` (mêmes refus que le réglage plateforme : fournisseur inconnu, modèle hors catalogue, clé absente ; `provider: null` rend le cabinet à la plateforme) depuis la fiche cabinet de `/admin`. La dictée et la synthèse vocale gardent leur repli Gemini quand le fournisseur du cabinet ne sait pas lire ou produire de l'audio.
+
 API keys are never part of this. They stay in the environment, and `PUT /api/admin/ai-provider` refuses a provider whose key is missing rather than let an operator switch the platform onto a 503.
 
 **Two invariants worth keeping:**
@@ -2631,6 +2633,25 @@ l'autosave du document n'efface pas un import fait entre-temps.
 (`` `dpgf:<offreId>:<ligneId>` `` vs `` `bpu:<offreId>:<ligneId>` ``, porté
 par `sourceKind` dans `remonterPrixOffre()`) pour que les deux documents ne
 se marchent pas dessus dans le même index d'idempotence.
+
+### Localisations et illustrations des articles de CCTP
+
+Deux aides de la fiche d'un article (`CCTPEditor.tsx`), qui s'enrichissent à mesure
+qu'on renseigne le document, sans migration (tout vit dans le jsonb du DPGF) :
+
+- **Localisation** : le champ reste du texte libre, mais propose les localisations déjà
+  saisies dans tout le document (`localisationsConnues`, `src/lib/cctpImages.ts`, testé :
+  les plus fréquentes d'abord, casse et espaces fusionnés, sous-articles compris), par un
+  `<datalist>`. Plus on en saisit, plus la liste est riche.
+- **Illustrations** : `Ligne.images` (`ImageArticle` : `documentId`, `fileUrl`, `legende`).
+  Chaque image est réduite côté navigateur (JPEG, 1600 px) puis déposée comme document de
+  l'affaire, catégorie « CCTP - illustrations » (`cctpImagesUpload.ts`, `POST /api/documents`) ;
+  l'article n'en garde que la référence, lue par `SignedImage`. La légende d'une nouvelle image
+  reprend la localisation de l'article. Retirer une image la détache de l'article **sans
+  supprimer le document** : une duplication d'article partage la même référence, la supprimer
+  casserait la copie. Les exports PDF et Word du CCTP (`cctpExport.ts`) impriment les images
+  sous le texte de l'article, avec leur légende, y compris dans l'export par bâtiment ;
+  `planRender` (pdf.js) n'est chargé que si une image existe.
 
 ### Le CCTP n'est pas un document séparé
 

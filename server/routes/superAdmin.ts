@@ -580,6 +580,77 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
     }
   });
 
+  // ─── Fournisseur IA d'un cabinet ────────────────────────────────────────
+  // Surcharge du réglage plateforme pour UN cabinet (tenants.ai_provider /
+  // ai_model). `provider: null` rend le cabinet au réglage plateforme. Mêmes
+  // refus que le réglage plateforme : fournisseur inconnu, modèle hors
+  // catalogue, fournisseur sans clé d'API.
+  app.get('/api/admin/tenants/:id/ai-provider', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const { data: tenant, error } = await supabaseAdmin
+        .from('tenants').select('id, ai_provider, ai_model').eq('id', id).maybeSingle();
+      if (error) throw error;
+      if (!tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
+
+      const { listProviderAvailability, describeLlmSelection, getPlatformAiConfig } =
+        await import('@zinkh/archioffice-agents/server/llm');
+      const platform = describeLlmSelection(await getPlatformAiConfig(supabaseAdmin));
+      const override = (tenant as any).ai_provider
+        ? { provider: (tenant as any).ai_provider as string, model: (tenant as any).ai_model as string | null }
+        : null;
+      res.json({
+        override,
+        platform: { provider: platform.provider, model: platform.model },
+        effective: override
+          ? describeLlmSelection({ provider: override.provider, model: override.model ?? undefined })
+          : platform,
+        providers: listProviderAvailability(),
+      });
+    } catch (e: any) {
+      console.error('[GET /api/admin/tenants/:id/ai-provider]', e); res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.put('/api/admin/tenants/:id/ai-provider', requireSuperAdmin, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const { provider, model } = req.body ?? {};
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('id, name').eq('id', id).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Cabinet introuvable' });
+
+      let update: { ai_provider: string | null; ai_model: string | null };
+      if (provider === null || provider === undefined || provider === '') {
+        update = { ai_provider: null, ai_model: null };
+      } else {
+        if (typeof provider !== 'string') return res.status(400).json({ error: 'provider invalide' });
+        const { listProviderAvailability } = await import('@zinkh/archioffice-agents/server/llm');
+        const target = listProviderAvailability().find(p => p.provider === provider);
+        if (!target) return res.status(400).json({ error: `Fournisseur inconnu : ${provider}` });
+        if (model !== undefined && model !== null && model !== '') {
+          if (typeof model !== 'string' || !target.models.some(m => m.model === model)) {
+            return res.status(400).json({ error: `Modèle inconnu pour ${target.label} : ${String(model)}` });
+          }
+        }
+        if (!target.configured) {
+          return res.status(400).json({
+            error: `Aucune clé API configurée pour ${target.label}. Renseignez ${target.envKey} avant de l'attribuer.`,
+          });
+        }
+        update = { ai_provider: provider, ai_model: model || target.defaultModel };
+      }
+
+      const { error } = await supabaseAdmin.from('tenants').update(update).eq('id', id);
+      if (error) throw error;
+      await logAdminAction(supabaseAdmin, req.user, 'tenant.ai_provider_changed', id, {
+        provider: update.ai_provider, model: update.ai_model,
+      });
+      res.json({ ok: true, ...update });
+    } catch (e: any) {
+      console.error('[PUT /api/admin/tenants/:id/ai-provider]', e); res.status(500).json({ error: e.message });
+    }
+  });
+
   // ─── Moteur de lecture des documents ────────────────────────────────────
   // Local (pdf-parse + Tesseract) ou Nomic Parse, pour toute la plateforme :
   // pièces jointes des agents, analyse du DCE, génération du CCTP. Même

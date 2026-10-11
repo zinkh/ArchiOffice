@@ -62,8 +62,8 @@ export function registerProposalFeasibilityAiRoutes(app: Express, deps: RouteDep
   const { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents, loadSiteData } = deps;
 
   async function runModel(tenantId: string, userId: string, prompt: string): Promise<{ text: string } | { noCredit: true }> {
-    const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-    const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+    const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+    const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
     const reservedCents = await estimateReserveCents(provider.id, provider.model, Math.ceil(prompt.length / 4));
     if (!(await reserveAiCredit(tenantId, reservedCents))) return { noCredit: true };
     let result;

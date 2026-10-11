@@ -6,7 +6,7 @@ import {
   IconArrowLeft, IconLoader2, IconUsers, IconBuildingSkyscraper,
   IconCoin, IconNotes, IconDeviceFloppy, IconHistory, IconReceipt,
   IconLogin, IconMessageCircle, IconMail, IconX, IconSend, IconShieldCheck,
-  IconLock, IconLockOpen, IconDatabase, IconDownload, IconRestore,
+  IconLock, IconLockOpen, IconDatabase, IconDownload, IconRestore, IconRobot,
 } from '@tabler/icons-react';
 import { PLAN_LABELS, PlanSelect } from './AdminDashboard';
 
@@ -39,6 +39,7 @@ const AUDIT_ACTION_LABELS: Record<string, string> = {
   'tenant.deleted': 'Cabinet supprimé',
   'tenant.impersonated': 'Connexion en tant que…',
   'tenant.admin_appointed': 'Administrateur nommé',
+  'tenant.ai_provider_changed': 'Fournisseur IA modifié',
   'tenant.suspended': 'Cabinet suspendu',
   'tenant.unsuspended': 'Suspension levée',
   'tenant.backup_created': 'Sauvegarde lancée',
@@ -89,6 +90,122 @@ function fmtBytes(n: number): string {
   if (n < 1024) return `${n} o`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} Ko`;
   return `${(n / (1024 * 1024)).toFixed(1)} Mo`;
+}
+
+interface TenantAiState {
+  override: { provider: string; model: string | null } | null;
+  platform: { provider: string; model: string };
+  effective: { provider: string; model: string };
+  providers: { provider: string; label: string; envKey: string; configured: boolean; defaultModel: string; models: { model: string; label: string }[] }[];
+}
+
+// Fournisseur IA propre au cabinet. « Réglage plateforme » (valeur vide) le
+// fait suivre le choix global de /admin ; sinon le fournisseur et le modèle
+// choisis ici s'appliquent à tous les appels IA de ce cabinet.
+function TenantAiProviderCard({ tenantId }: { tenantId: string }) {
+  const [state, setState] = useState<TenantAiState | null>(null);
+  const [provider, setProvider] = useState('');
+  const [model, setModel] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await apiFetch<TenantAiState>(`/api/admin/tenants/${tenantId}/ai-provider`);
+      setState(data);
+      setProvider(data.override?.provider ?? '');
+      setModel(data.override?.model ?? '');
+    } catch (e: any) {
+      setError(e.message ?? 'Erreur de chargement');
+    }
+  }, [tenantId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const def = state?.providers.find(p => p.provider === provider);
+  const dirty = !!state && (provider !== (state.override?.provider ?? '') || (provider !== '' && model !== (state.override?.model ?? '')));
+
+  function pickProvider(next: string) {
+    setProvider(next);
+    setModel(state?.providers.find(p => p.provider === next)?.defaultModel ?? '');
+    setSaved(false);
+  }
+
+  async function save() {
+    setSaving(true); setError(null); setSaved(false);
+    try {
+      await apiFetch(`/api/admin/tenants/${tenantId}/ai-provider`, {
+        method: 'PUT',
+        body: JSON.stringify({ provider: provider || null, model: provider ? model : null }),
+      });
+      setSaved(true);
+      await load();
+    } catch (e: any) {
+      setError(e.message ?? "Erreur lors de l'enregistrement");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fieldStyle = { background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' };
+  return (
+    <Card title="Fournisseur IA" icon={<IconRobot size={16} style={{ color: 'var(--tblr-primary)' }} />}>
+      {!state ? (
+        error ? <p className="text-sm text-red-600">{error}</p> : <IconLoader2 size={16} className="animate-spin" />
+      ) : (
+        <div className="space-y-3">
+          <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+            Actuellement : <strong>{state.effective.provider} / {state.effective.model}</strong>
+            {state.override ? ' (attribué à ce cabinet)' : ` (réglage plateforme)`}.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
+              Fournisseur
+              <select
+                value={provider}
+                onChange={e => pickProvider(e.target.value)}
+                className="w-full rounded border px-2 py-1.5 text-sm"
+                style={fieldStyle}
+              >
+                <option value="">Réglage plateforme ({state.platform.provider})</option>
+                {state.providers.map(p => (
+                  <option key={p.provider} value={p.provider} disabled={!p.configured && p.provider !== state.override?.provider}>
+                    {p.label}{p.configured ? '' : ` (clé ${p.envKey} absente)`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
+              Modèle
+              <select
+                value={model}
+                onChange={e => { setModel(e.target.value); setSaved(false); }}
+                disabled={!def}
+                className="w-full rounded border px-2 py-1.5 text-sm disabled:opacity-50"
+                style={fieldStyle}
+              >
+                {!def && <option value="">Modèle de la plateforme</option>}
+                {def?.models.map(m => <option key={m.model} value={m.model}>{m.label}</option>)}
+              </select>
+            </label>
+          </div>
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={save}
+              disabled={!dirty || saving}
+              className="px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-50"
+              style={{ background: 'var(--tblr-primary)' }}
+            >
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+            {saved && <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>Enregistré.</span>}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
 }
 
 // Sauvegardes du cabinet : nocturnes, prises à la suspension et à la demande
@@ -543,6 +660,8 @@ export default function AdminTenantDetail() {
           Enregistrer
         </button>
       </Card>
+
+      <TenantAiProviderCard tenantId={tenant.id} />
 
       <TenantBackupsCard tenantId={tenant.id} />
 
