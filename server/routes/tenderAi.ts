@@ -109,8 +109,8 @@ export function registerTenderAiRoutes(app: Express, deps: RouteDeps) {
       }
       if (!combinedText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents DCE (scan illisible ou format non supporté)." });
 
-      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
 
       const prompt = `Tu es un assistant pour un cabinet d'architecture français qui répond à un appel d'offres.
 Voici des extraits du dossier de consultation des entreprises (DCE) de l'affaire "${tender.title}" (client : ${tender.client}) :
@@ -197,8 +197,8 @@ N'invente rien : ne liste que les pièces réellement mentionnées dans le texte
       }
       if (!combinedText.trim()) return res.status(400).json({ error: "Impossible d'extraire le texte des documents DCE (scan illisible ou format non supporté)." });
 
-      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
 
       const prompt = `Tu es un assistant pour un cabinet d'architecture français qui répond à un appel d'offres.
 Voici des extraits du dossier de consultation des entreprises (DCE) de l'affaire "${tender.title}" (client : ${tender.client}) :
@@ -285,8 +285,8 @@ Si aucun montant d'honoraires n'est explicitement annoncé, réponds avec envelo
       const { data: agencyDocs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('name, file_url').eq('resource_type', 'agency_library').eq('resource_id', tenantId);
       const agencyText = agencyDocs?.length ? await extractCombinedText(supabaseAdmin, tenantId, agencyDocs as any) : '';
 
-      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
 
       const prompt = `Tu rédiges une note méthodologique (mémoire technique) pour la candidature d'un cabinet d'architecture français à un appel d'offres.
 Affaire : "${tender.title}" — client : ${tender.client}${tender.type ? ` — type de marché : ${tender.type}` : ''}.
@@ -351,8 +351,8 @@ Rédige le contenu de la section "${note.title}" de cette note méthodologique :
       if (docs?.length) {
         const combinedText = await extractCombinedText(supabaseAdmin, tenantId, docs as any);
         if (combinedText.trim()) {
-          const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-          const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+          const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+          const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
 
           const prompt = `Tu prépares le sommaire d'une note méthodologique (mémoire technique) pour la candidature d'un cabinet d'architecture français à un appel d'offres.
 Affaire : "${tender.title}" — client : ${tender.client}${tender.type ? ` — type de marché : ${tender.type}` : ''}.

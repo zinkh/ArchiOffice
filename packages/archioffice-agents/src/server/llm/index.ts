@@ -211,6 +211,7 @@ export {
 } from './pricing.js';
 export {
   getPlatformAiConfig,
+  getTenantAiConfig,
   setPlatformAiConfig,
   invalidatePlatformAiConfigCache,
   parseStoredConfig,

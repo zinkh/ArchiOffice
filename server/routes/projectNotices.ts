@@ -111,8 +111,8 @@ export function registerProjectNoticeRoutes(app: Express, deps: RouteDeps) {
   } = deps;
 
   async function runModel(tenantId: string, userId: string, prompt: string) {
-    const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-    const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+    const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+    const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
     const reservedCents = await estimateReserveCents(provider.id, provider.model, Math.ceil(prompt.length / 4));
     if (!(await reserveAiCredit(tenantId, reservedCents))) return { noCredit: true as const };
 

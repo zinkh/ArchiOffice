@@ -42,8 +42,8 @@ export function registerAiSuggestionRoutes(app: Express, { supabaseAdmin, getTen
       // only loaded when an AI route actually runs. The platform setting
       // chosen in /admin wins over AI_PROVIDER/AI_MODEL; its lookup is
       // cached, so this is not a database round trip per call.
-      const { resolveLlmProvider, getPlatformAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
 
       // Refresh monthly allowance if needed, then check balance
       const { plan } = await getTenantPlan(tenantId);

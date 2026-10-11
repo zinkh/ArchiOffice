@@ -126,3 +126,41 @@ export async function setPlatformAiConfig(
   if (error) throw error;
   invalidatePlatformAiConfigCache();
 }
+
+/**
+ * Le fournisseur et le modèle effectifs d'UN cabinet : celui que l'opérateur
+ * lui a attribué (tenants.ai_provider / ai_model) s'il y en a un, sinon le
+ * réglage plateforme. À utiliser à la place de getPlatformAiConfig() partout
+ * où l'on sait pour quel cabinet le modèle tourne.
+ *
+ * Un cabinet avec un fournisseur mais sans modèle reçoit le modèle par défaut
+ * de CE fournisseur (describeLlmSelection, qui résout le couple d'une seule
+ * source) : surtout pas le modèle plateforme, qui peut appartenir à un autre
+ * fournisseur. Une base sans les colonnes (migration non jouée) ou une erreur
+ * de lecture retombent sur le réglage plateforme plutôt que de couper l'IA.
+ */
+export async function getTenantAiConfig(
+  supabaseAdmin: any,
+  tenantId: string | null | undefined,
+): Promise<PlatformAiConfig> {
+  if (tenantId) {
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('tenants')
+        .select('ai_provider, ai_model')
+        .eq('id', tenantId)
+        .maybeSingle();
+      if (error) {
+        console.warn(`[ai config] tenant ${tenantId} unreadable, using platform setting: ${error.message}`);
+      } else if (typeof data?.ai_provider === 'string' && data.ai_provider) {
+        return {
+          provider: data.ai_provider,
+          ...(typeof data.ai_model === 'string' && data.ai_model ? { model: data.ai_model } : {}),
+        };
+      }
+    } catch (e: any) {
+      console.warn(`[ai config] tenant ${tenantId} lookup failed, using platform setting: ${e?.message}`);
+    }
+  }
+  return getPlatformAiConfig(supabaseAdmin);
+}

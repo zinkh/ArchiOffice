@@ -7,7 +7,7 @@ import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
 import { loadAgencyIdentity } from './agencyIdentity.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
-import { resolveLlmProvider, resolveTranscriptionProvider, resolveSpeechProvider, getPlatformAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
+import { resolveLlmProvider, resolveTranscriptionProvider, resolveSpeechProvider, getTenantAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
 
 type GetTenantId = (userId: string) => Promise<string>;
 type GetTenantPlan = (tenantId: string) => Promise<{ plan: string; trial_ends_at: string | null; is_expired: boolean }>;
@@ -438,7 +438,7 @@ export function registerAgentRoutes(
           return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
         }
 
-        const provider = resolveTranscriptionProvider(await getPlatformAiConfig(supabaseAdmin));
+        const provider = resolveTranscriptionProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
         if (!provider.transcribe) {
           // resolveTranscriptionProvider ne rend qu'un fournisseur capable ;
           // ce garde-fou n'existe que pour que le type soit sûr ici.
@@ -514,7 +514,7 @@ export function registerAgentRoutes(
         return res.status(402).json({ error: 'Crédit IA épuisé. Veuillez recharger votre compte.', code: 'NO_TOKENS' });
       }
 
-      const provider = resolveSpeechProvider(await getPlatformAiConfig(supabaseAdmin));
+      const provider = resolveSpeechProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
       if (!provider.speak) {
         // resolveSpeechProvider ne rend qu'un fournisseur capable ; ce
         // garde-fou n'existe que pour que le type soit sûr ici.
@@ -634,7 +634,7 @@ export function registerAgentRoutes(
       // Resolved BEFORE buildAgentContext: whether an attached photo or
       // scanned PDF goes to the model as a real image or as OCR text depends
       // on this provider's vision support (see supportsVision, context.ts).
-      const provider = resolveLlmProvider(await getPlatformAiConfig(supabaseAdmin));
+      const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
 
       const contextStart = Date.now();
       const caps = capabilitiesFromAgent(agent as AgentRow);

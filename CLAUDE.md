@@ -1686,6 +1686,8 @@ Conversation state is held by the caller, not by an SDK chat object, because eve
 
 `describeLlmSelection()` resolves the pair from **one** source rather than field by field: a provider from one place and a model from another produce an invalid pair (Claude asked for a Gemini model). A source naming only a provider falls through to that provider's own default model.
 
+**Un fournisseur par cabinet.** `tenants.ai_provider` / `ai_model` (`supabase/migrate_tenant_ai_provider.sql`, NULL = suit la plateforme) surchargent le réglage plateforme pour UN cabinet. Tous les appels qui savent pour quel cabinet ils tournent passent par `getTenantAiConfig(supabaseAdmin, tenantId)` (`llm/config.ts`) et non plus par `getPlatformAiConfig`, qui ne sert plus qu'à l'écran plateforme. Un cabinet avec un fournisseur mais sans modèle reçoit le modèle par défaut de CE fournisseur, jamais le modèle plateforme. Réglé par `GET/PUT /api/admin/tenants/:id/ai-provider` (mêmes refus que le réglage plateforme : fournisseur inconnu, modèle hors catalogue, clé absente ; `provider: null` rend le cabinet à la plateforme) depuis la fiche cabinet de `/admin`. La dictée et la synthèse vocale gardent leur repli Gemini quand le fournisseur du cabinet ne sait pas lire ou produire de l'audio.
+
 API keys are never part of this. They stay in the environment, and `PUT /api/admin/ai-provider` refuses a provider whose key is missing rather than let an operator switch the platform onto a 503.
 
 **Two invariants worth keeping:**
