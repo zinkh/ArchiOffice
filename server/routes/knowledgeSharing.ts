@@ -191,7 +191,18 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
       });
       if (!response.ok) return res.status(502).json({ connected: false, error: 'Mistral library unavailable or inaccessible.', upstream_status: response.status });
       const library = await response.json() as { id?: string; name?: string };
-      res.json({ connected: library.id === libraryId, library_id: libraryId, name: library.name || null, publication_active: false });
+      if (library.id !== libraryId) return res.status(502).json({ connected: false, error: 'Identifiant de bibliothèque inattendu.' });
+      // Read-only listing: show whether the user-provided sandbox test files
+      // are visible without fetching file contents or exposing their names.
+      const listing = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId) + '/documents?page_size=100', {
+        headers: { Authorization: 'Bearer ' + apiKey }, signal: AbortSignal.timeout(10000),
+      });
+      const visible = listing.ok ? await listing.json() as { data?: unknown[] } : null;
+      res.json({
+        connected: true, library_id: libraryId, name: library.name || null,
+        visible_documents_on_first_page: Array.isArray(visible?.data) ? visible.data.length : null,
+        publication_active: process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED === 'true',
+      });
     } catch {
       res.status(502).json({ connected: false, error: 'Unable to contact Mistral.' });
     }
