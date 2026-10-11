@@ -10,8 +10,20 @@ export interface RemotePublication {
   remote_document_id: string | null;
   state: 'uploading' | 'uncertain' | 'published' | 'delete_pending' | 'deleting' | 'deleted';
   deletion_requested_at: string | null;
+  created_at?: string | null;
   updated_at: string;
 }
+
+/** Au-delà, un envoi sans document distant retrouvé est considéré comme n'ayant jamais abouti. */
+export const ABANDON_AFTER_MS = 24 * 60 * 60 * 1000;
+/** Délai minimal entre deux rapprochements d'une même ligne (limite les parcours de la bibliothèque). */
+export const RECONCILE_RETRY_MS = 5 * 60 * 1000;
+/** Un envoi plus récent peut encore être en vol : le délai d'attente d'une requête Mistral est de 25 s. */
+export const IN_FLIGHT_MS = 60_000;
+
+const elapsedMs = (iso: string | null | undefined) => iso ? Date.now() - new Date(iso).getTime() : 0;
+const IS_MISSING_TABLE = (error: any) =>
+  error?.code === '42P01' || error?.code === 'PGRST205' || /does not exist|schema cache/i.test(error?.message || '');
 
 export function remoteLibrary(row: RemotePublication) {
   if (!process.env.MISTRAL_API_KEY) throw new Error('Clé Mistral manquante.');
@@ -35,6 +47,61 @@ export async function reconcileRemotePublication(db: any, row: RemotePublication
 }
 
 /**
+ * Clôt une réservation dont aucun document distant n'a été retrouvé après
+ * ABANDON_AFTER_MS : il n'y a rien à supprimer chez Mistral, et la ligne ne doit
+ * pas bloquer indéfiniment un retrait de consentement ou la fermeture du cabinet.
+ * Pour republier, le cabinet supprime l'extrait puis le prépare de nouveau.
+ */
+export async function abandonNeverSent(db: any, row: RemotePublication): Promise<boolean> {
+  const now = new Date().toISOString();
+  const result = await tenantScopedFrom(db, row.tenant_id, 'knowledge_remote_documents')
+    .update({
+      state: 'deleted', deleted_at: now, updated_at: now,
+      last_error: 'Envoi abandonné : aucun document distant retrouvé après 24 h.',
+    })
+    .eq('id', row.id).is('remote_document_id', null).in('state', ['uploading', 'uncertain', 'delete_pending'])
+    .select().maybeSingle();
+  if (result.error) throw result.error;
+  return !!result.data;
+}
+
+/**
+ * Reprend les réservations restées sans issue (arrêt du serveur entre la
+ * réservation et l'enregistrement, réponse perdue) : cherche le document par son
+ * nom opaque, jamais de nouvel envoi. Introuvable avant ABANDON_AFTER_MS : la
+ * ligne reste `uncertain` ; après : elle est abandonnée.
+ */
+export async function reconcileStalePublications(
+  db: any, tenantId?: string, limit = 20, minAgeMs = RECONCILE_RETRY_MS,
+) {
+  const before = new Date(Date.now() - Math.max(minAgeMs, IN_FLIGHT_MS)).toISOString();
+  let query = db.from('knowledge_remote_documents')
+    .select('*').in('state', ['uploading', 'uncertain']).is('remote_document_id', null)
+    .is('deletion_requested_at', null).lt('updated_at', before)
+    .order('updated_at', { ascending: true }).limit(limit);
+  if (tenantId) query = query.eq('tenant_id', tenantId);
+  const { data, error } = await query;
+  if (error) throw error;
+  const summary = { checked: 0, reconciled: 0, abandoned: 0, uncertain: 0, errors: 0 };
+  for (const row of (data || []) as RemotePublication[]) {
+    summary.checked++;
+    try {
+      const result = await reconcileRemotePublication(db, row);
+      if (result.remote_document_id) summary.reconciled++;
+      else if (elapsedMs(row.created_at ?? row.updated_at) >= ABANDON_AFTER_MS && await abandonNeverSent(db, result)) summary.abandoned++;
+      else summary.uncertain++;
+    } catch {
+      summary.errors++;
+      // Surface le blocage (ex. plusieurs copies distantes) et repousse la prochaine tentative.
+      await tenantScopedFrom(db, row.tenant_id, 'knowledge_remote_documents')
+        .update({ last_error: 'Rapprochement impossible : examen manuel requis.', updated_at: new Date().toISOString() })
+        .eq('id', row.id).is('remote_document_id', null);
+    }
+  }
+  return summary;
+}
+
+/**
  * Idempotent deletion attempt. If an upload response was lost, resolve the
  * remote ID first; "not found" is NOT proof of deletion (upload may still run).
  * Pending failures are retained for retry by the background sweeper.
@@ -51,7 +118,12 @@ export async function processRemoteDeletion(db: any, original: RemotePublication
       const ageMs = Date.now() - new Date(row.updated_at).getTime();
       if (row.state === 'uploading' && ageMs < 60_000) return false;
       row = await reconcileRemotePublication(db, row) as RemotePublication;
-      if (!row.remote_document_id) return false; // preserve uncertainty, no silent orphan
+      if (!row.remote_document_id) {
+        // Pas d'orphelin silencieux tant que l'envoi peut encore avoir abouti ; passé
+        // le délai, il n'y a plus rien à supprimer et la ligne ne doit pas bloquer.
+        if (elapsedMs(row.created_at ?? row.updated_at) < ABANDON_AFTER_MS) return false;
+        return abandonNeverSent(db, row);
+      }
     }
     if (row.state === 'deleting') {
       const retryBefore = new Date(Date.now() - 90_000).toISOString();
@@ -96,4 +168,26 @@ export async function flushPendingMistralDeletions(db: any, tenantId?: string, l
     if (await processRemoteDeletion(db, row)) deleted++;
   }
   return { attempted: (data || []).length, deleted, pending: (data || []).length - deleted };
+}
+
+/**
+ * Avant la purge d'un cabinet : exige que plus aucun document ne subsiste chez
+ * Mistral. La clé étrangère vers `tenants` est en RESTRICT, la suppression du
+ * cabinet échouerait sinon, et la perdre effacerait la trace d'une obligation de
+ * suppression. Échec fermé : tant qu'il reste des lignes, la purge est reportée.
+ */
+export async function settleRemoteDocumentsBeforePurge(db: any, tenantId: string) {
+  const scope = () => tenantScopedFrom(db, tenantId, 'knowledge_remote_documents');
+  const marked = await scope()
+    .update({ deletion_requested_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .is('deletion_requested_at', null).neq('state', 'deleted');
+  if (marked.error) {
+    if (IS_MISSING_TABLE(marked.error)) return { ok: true, remaining: 0 }; // instance non migrée
+    throw marked.error;
+  }
+  await flushPendingMistralDeletions(db, tenantId, 100).catch(() => undefined);
+  const left = await scope().select('id').neq('state', 'deleted');
+  if (left.error) throw left.error;
+  const remaining = (left.data || []).length;
+  return { ok: remaining === 0, remaining };
 }

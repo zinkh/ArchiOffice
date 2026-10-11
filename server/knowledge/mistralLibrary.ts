@@ -2,7 +2,17 @@
  * Mistral Libraries transport. No originals or client metadata leave ArchiOffice.
  * API reference: https://docs.mistral.ai/api/endpoint/beta/libraries/documents
  */
-export const DEFAULT_KNOWLEDGE_LIBRARY_ID = '01a12a77-dd1c-77eb-84b0-25cac8adccf4';
+const UUID_RE = /^[0-9a-f-]{36}$/i;
+
+/**
+ * Bibliothèque cible de la mutualisation. Volontairement SANS valeur par défaut :
+ * un repli sur la bibliothèque de test ferait publier les extraits d'une
+ * instance de production mal configurée dans le bac à sable.
+ */
+export function resolveKnowledgeLibraryId(env: NodeJS.ProcessEnv = process.env): string | null {
+  const id = env.MISTRAL_KNOWLEDGE_LIBRARY_ID?.trim();
+  return id && UUID_RE.test(id) ? id : null;
+}
 
 export interface MistralRemoteDocument {
   id: string;
@@ -22,7 +32,7 @@ export function makeMistralLibraryClient(
   libraryId: string,
   request: typeof fetch = fetch,
 ) {
-  if (!apiKey || !/^[0-9a-f-]{36}$/i.test(libraryId)) throw new Error('Mistral Libraries non configuré.');
+  if (!apiKey || !UUID_RE.test(libraryId)) throw new Error('Mistral Libraries non configuré.');
   const base = 'https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId);
   const call = async (path: string, options: RequestInit = {}) => {
     const response = await request(base + path, {
@@ -78,7 +88,7 @@ export function makeMistralLibraryClient(
       throw new Error('Bibliothèque trop volumineuse : rapprochement incomplet.');
     },
     async remove(remoteDocumentId: string): Promise<void> {
-      if (!/^[0-9a-f-]{36}$/i.test(remoteDocumentId)) throw new Error('Identifiant distant invalide.');
+      if (!UUID_RE.test(remoteDocumentId)) throw new Error('Identifiant distant invalide.');
       try {
         await call('/documents/' + encodeURIComponent(remoteDocumentId), { method: 'DELETE' });
       } catch (error) {

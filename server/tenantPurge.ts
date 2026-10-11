@@ -9,6 +9,7 @@
 // Same setInterval-on-boot pattern as server/tenderRssPoller.ts.
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { listUsersOnlyIn } from './tenantMemberships';
+import { settleRemoteDocumentsBeforePurge } from './knowledge/mistralLifecycle';
 
 const GRACE_PERIOD_DAYS = 30;
 const DEFAULT_CHECK_INTERVAL_HOURS = 24;
@@ -40,6 +41,21 @@ async function purgeStorageForTenant(supabaseAdmin: SupabaseClient, tenantId: st
 }
 
 async function purgeTenant(supabaseAdmin: SupabaseClient, tenantId: string): Promise<void> {
+  // Les extraits publiés chez Mistral (mutualisation) doivent d'abord y être
+  // supprimés : sinon la clé étrangère en RESTRICT bloque la suppression du
+  // cabinet, et perdre le suivi laisserait des données chez un tiers. Rien n'est
+  // détruit ici tant que ce n'est pas fait : la purge sera retentée au prochain cycle.
+  try {
+    const settled = await settleRemoteDocumentsBeforePurge(supabaseAdmin, tenantId);
+    if (!settled.ok) {
+      console.error(`[tenantPurge] Tenant ${tenantId} : ${settled.remaining} document(s) Mistral à supprimer avant la purge, reportée.`);
+      return;
+    }
+  } catch (e: any) {
+    console.error(`[tenantPurge] Tenant ${tenantId} : suppression Mistral impossible, purge reportée :`, e?.message);
+    return;
+  }
+
   // Seuls les comptes dont c'est le SEUL cabinet sont supprimés : une
   // personne qui exerce aussi ailleurs garde le sien, sinon fermer une
   // structure la déconnecterait de l'autre (server/tenantMemberships.ts).
