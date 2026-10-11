@@ -38,7 +38,7 @@ export function anonymizeTechnicalText(source: string): AnonymizationPreview {
   if (/\b(?:SARL|SAS|SCI|SA|EURL|SIREN|RCS|maître d'ouvrage|MOA|parcelle|cadastre|architecte|signataire)\b/i.test(text)) {
     warnings.push('Des noms de sociétés, acteurs ou références foncières peuvent subsister.');
   }
-  if (/\b(?:monsieur|madame|m\.|mme|entreprise|société|chantier|projet)\s+[A-ZÀ-Ý]/.test(text)) {
+  if (/\b(?:monsieur|madame|m\.|mme|entreprise|société|chantier|projet)\s+[A-ZÀ-Ý]/i.test(text) || /\bentreprise\s+[\p{L}]/iu.test(text)) {
     warnings.push('Des personnes, entreprises ou projets peuvent encore être identifiables.');
   }
   warnings.push('Contrôle humain obligatoire : les noms, plans, tableaux et recoupements indirects ne sont pas fiabilisés automatiquement.');
