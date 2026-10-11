@@ -10,6 +10,8 @@ MISTRAL_KNOWLEDGE_LIBRARY_ID=01a12a77-dd1c-77eb-84b0-25cac8adccf4
 MISTRAL_KNOWLEDGE_PUBLISH_ENABLED=false
 ```
 
+`MISTRAL_KNOWLEDGE_LIBRARY_ID` est **obligatoire** : il n'existe aucun identifiant par défaut. Sans lui (ou s'il n'est pas un UUID), la publication répond 503 sans rien réserver ni envoyer. Une instance de production doit pointer sur sa propre bibliothèque, jamais sur le bac à sable.
+
 Do not commit or expose the API key. Deploy `supabase/migrate_knowledge_z_mistral_publications.sql` **before** deploying the API changes. Publishing remains disabled until explicitly enabled and privacy/security review completed.
 
 ## Workflow
@@ -27,10 +29,18 @@ All operations are tenant-admin protected. The outbox and notes are service-role
 
 **Important operational limitations:** Do not enable production client publication until anonymization is assessed per data category, the Mistral data processing agreement and permissions are verified, retention/deletion and incident response are reviewed, and a live sandbox upload/delete smoke test is completed. An unknown upload outcome can remain pending manual reconciliation; it must never be treated as confirmed erased. API availability and the success of remote deletion are not guaranteed while Mistral is offline. Check the outbox until there are no pending deletion tasks.
 
+## Envois sans issue et fermeture d'un cabinet
+
+- Une réservation restée sans identifiant distant (`uploading` après un arrêt du serveur, `uncertain` après une réponse perdue) est reprise toutes les 5 minutes par la tâche de fond, et à la demande par **Vérifier les transferts et suppressions Mistral** : le document est cherché par son nom opaque, jamais renvoyé.
+- Introuvable avant 24 h : la ligne reste `uncertain`. Au-delà, elle est abandonnée (`deleted`, trace dans `last_error`) : il n'y a rien à supprimer chez Mistral, et elle ne bloque plus ni un retrait de consentement ni la fermeture du cabinet. Pour republier, supprimer l'extrait puis le préparer de nouveau.
+- Une ambiguïté (plusieurs copies distantes) n'est jamais tranchée automatiquement : `last_error` indique « examen manuel requis ».
+- **Fermeture d'un cabinet** (`server/tenantPurge.ts`) : la purge demande d'abord la suppression de tous ses documents chez Mistral et ne supprime rien tant que l'un d'eux subsiste (clé étrangère en `RESTRICT`). Elle est retentée au cycle suivant.
+- Le diagnostic détaillé de la bibliothèque (nom, documents visibles) est réservé au super-administrateur : `GET /api/admin/knowledge-library/status`. Le cabinet ne voit qu'un « liaison opérationnelle ».
+
 ## Sandbox acceptance tests
 
 - Confirm the existing test files are still present in Mistral.
-- Click **Vérifier la bibliothèque Mistral** to validate key/library access.
+- Click **Vérifier la bibliothèque Mistral** to validate key/library access (tenant admin), and call `GET /api/admin/knowledge-library/status` as super-admin to see the library name and visible documents.
 - Run the unit tests in `tests/mistralLibrary.test.ts`.
 - Opt in in a test tenant; create a fictional PDF/DOCX/XLSX draft, review it, confirm publication.
 - Verify its opaque filename, ID and library in the outbox; repeat publish and confirm it refuses a second upload.

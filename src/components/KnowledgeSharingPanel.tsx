@@ -51,12 +51,9 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
   const checkMistral = async () => {
     setMistralStatus('Vérification en cours…');
     try {
-      const result = await apiFetch<{ connected: boolean; name?: string; visible_documents_on_first_page?: number | null }>('/api/knowledge-sharing/mistral/status');
-      setMistralStatus(result.connected
-        ? 'Bibliothèque Mistral accessible' + (result.name ? ' : ' + result.name : '') +
-          (typeof result.visible_documents_on_first_page === 'number'
-            ? ' — ' + result.visible_documents_on_first_page + ' document(s) visibles sur la première page (lecture seule).' : '')
-        : 'Bibliothèque inaccessible');
+      const result = await apiFetch<{ connected: boolean; configured: boolean }>('/api/knowledge-sharing/mistral/status');
+      setMistralStatus(result.connected ? 'Liaison avec la bibliothèque Mistral opérationnelle.'
+        : result.configured ? 'Bibliothèque Mistral inaccessible.' : 'Bibliothèque Mistral non configurée sur cette instance.');
     } catch { setMistralStatus('Connexion Mistral non disponible. Vérifiez la clé et les droits de la bibliothèque.'); }
   };
   const consent = async (enabled: boolean) => {
@@ -107,10 +104,11 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
       : 'Consentement retiré pendant l’envoi ; suppression distante en cours.');
   });
   const retryDeletions = async () => run(async () => {
-    const result = await apiFetch<{ pending: number; reconciled_uploads: number; uncertain_uploads: number }>('/api/knowledge-sharing/mistral/reconcile', { method: 'POST' });
+    const result = await apiFetch<{ pending: number; reconciled_uploads: number; uncertain_uploads: number; abandoned_uploads?: number }>('/api/knowledge-sharing/mistral/reconcile', { method: 'POST' });
     setNotice((result.pending ? 'Des suppressions restent en attente. ' : '') +
       (result.uncertain_uploads ? result.uncertain_uploads + ' transfert(s) non confirmé(s) nécessitent une vérification. '
-        : '') + result.reconciled_uploads + ' transfert(s) retrouvé(s) dans Mistral.');
+        : '') + (result.abandoned_uploads ? result.abandoned_uploads + ' envoi(s) abandonné(s) faute de document distant ; supprimez l’extrait pour le republier. ' : '') +
+      result.reconciled_uploads + ' transfert(s) retrouvé(s) dans Mistral.');
   });
   const remove = async () => run(async () => {
     if (!current || !window.confirm('Supprimer cet extrait préparé ?')) return;

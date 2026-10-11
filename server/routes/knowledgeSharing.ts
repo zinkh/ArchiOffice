@@ -6,8 +6,9 @@
 import type { Express } from 'express';
 import * as XLSX from 'xlsx';
 import { createHash } from 'node:crypto';
-import { DEFAULT_KNOWLEDGE_LIBRARY_ID, makeMistralLibraryClient } from '../knowledge/mistralLibrary';
-import { flushPendingMistralDeletions, processRemoteDeletion, reconcileRemotePublication } from '../knowledge/mistralLifecycle';
+import { makeMistralLibraryClient, resolveKnowledgeLibraryId } from '../knowledge/mistralLibrary';
+import { flushPendingMistralDeletions, processRemoteDeletion, reconcileStalePublications } from '../knowledge/mistralLifecycle';
+import { isSuperAdmin } from '../superAdminAuth';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { anonymizeTechnicalText, MAX_SHARED_EXCERPT_CHARS } from '../knowledge/anonymize';
@@ -185,34 +186,58 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     res.json({ ...data, publication_active: false });
   }));
 
-  // Sandbox connectivity check: no customer document is transferred.
+  const publishEnabled = () => process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED === 'true';
+
+  async function fetchLibrary(apiKey: string, libraryId: string) {
+    const response = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId), {
+      headers: { Authorization: 'Bearer ' + apiKey }, signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) return { ok: false as const, status: response.status };
+    const library = await response.json() as { id?: string; name?: string };
+    return { ok: library.id === libraryId, library, status: response.status };
+  }
+
+  // Côté cabinet : un simple « la liaison fonctionne ». Ni l'identifiant, ni le
+  // nom, ni le contenu de la bibliothèque commune de la plateforme ne sont
+  // exposés à un administrateur de cabinet.
   app.get('/api/knowledge-sharing/mistral/status', guarded(async (_req, res) => {
     const apiKey = process.env.MISTRAL_API_KEY;
-    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID || DEFAULT_KNOWLEDGE_LIBRARY_ID;
-    if (!apiKey) return res.status(503).json({ connected: false, error: 'Mistral API key not configured.' });
+    const libraryId = resolveKnowledgeLibraryId();
+    const base = { publication_active: publishEnabled() };
+    if (!apiKey || !libraryId) return res.json({ ...base, configured: false, connected: false });
     try {
-      const response = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId), {
-        headers: { Authorization: 'Bearer ' + apiKey },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!response.ok) return res.status(502).json({ connected: false, error: 'Mistral library unavailable or inaccessible.', upstream_status: response.status });
-      const library = await response.json() as { id?: string; name?: string };
-      if (library.id !== libraryId) return res.status(502).json({ connected: false, error: 'Identifiant de bibliothèque inattendu.' });
-      // Read-only listing: show whether the user-provided sandbox test files
-      // are visible without fetching file contents or exposing their names.
+      const result = await fetchLibrary(apiKey, libraryId);
+      res.json({ ...base, configured: true, connected: result.ok });
+    } catch {
+      res.json({ ...base, configured: true, connected: false });
+    }
+  }));
+
+  // Côté plateforme : diagnostic détaillé de la bibliothèque, pour l'opérateur seul.
+  app.get('/api/admin/knowledge-library/status', async (req: any, res: any) => {
+    if (!(await isSuperAdmin(supabaseAdmin, req.user))) {
+      return res.status(403).json({ error: 'Accès réservé au super-administrateur' });
+    }
+    const apiKey = process.env.MISTRAL_API_KEY;
+    const libraryId = resolveKnowledgeLibraryId();
+    if (!apiKey) return res.status(503).json({ connected: false, error: 'Clé Mistral absente.' });
+    if (!libraryId) return res.status(503).json({ connected: false, error: 'MISTRAL_KNOWLEDGE_LIBRARY_ID absent ou invalide.' });
+    try {
+      const result = await fetchLibrary(apiKey, libraryId);
+      if (!result.ok) return res.status(502).json({ connected: false, upstream_status: result.status });
       const listing = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId) + '/documents?page_size=100', {
         headers: { Authorization: 'Bearer ' + apiKey }, signal: AbortSignal.timeout(10000),
       });
       const visible = listing.ok ? await listing.json() as { data?: unknown[] } : null;
       res.json({
-        connected: true, library_id: libraryId, name: library.name || null,
+        connected: true, library_id: libraryId, name: result.library?.name || null,
         visible_documents_on_first_page: Array.isArray(visible?.data) ? visible.data.length : null,
-        publication_active: process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED === 'true',
+        publication_active: publishEnabled(),
       });
     } catch {
-      res.status(502).json({ connected: false, error: 'Unable to contact Mistral.' });
+      res.status(502).json({ connected: false, error: 'Mistral injoignable.' });
     }
-  }));
+  });
 
   // A unique database reservation precedes every remote upload. No originals.
   app.post('/api/knowledge-sharing/contributions/:id/publish', guarded(async (req, res, tenantId) => {
@@ -234,8 +259,9 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
       return res.status(409).json({ error: 'L’extrait nécessite une nouvelle anonymisation et relecture.' });
     }
     const key = process.env.MISTRAL_API_KEY;
-    const libraryId = process.env.MISTRAL_KNOWLEDGE_LIBRARY_ID || DEFAULT_KNOWLEDGE_LIBRARY_ID;
+    const libraryId = resolveKnowledgeLibraryId();
     if (!key) return res.status(503).json({ error: 'Clé API Mistral absente.' });
+    if (!libraryId) return res.status(503).json({ error: 'Bibliothèque Mistral non configurée sur cette instance.' });
     const remoteName = 'archioffice-' + contribution.id + '.txt';
     const hash = createHash('sha256').update(contribution.sanitized_text).digest('hex');
 
@@ -245,7 +271,7 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
       .insert({ contribution_id: contribution.id, library_id: libraryId, remote_name: remoteName,
         content_sha256: hash, state: 'uploading' }).select().single();
     if (reserved.error?.code === '23505') {
-      return res.status(409).json({ error: 'Transfert déjà réservé, envoyé ou en rapprochement. Aucun doublon créé.' });
+      return res.status(409).json({ error: 'Un transfert existe déjà pour cet extrait (envoyé, en rapprochement ou abandonné). Pour le republier, supprimez l’extrait puis préparez-le de nouveau.' });
     }
     if (reserved.error?.code === '23514') {
       return res.status(409).json({ error: 'Consentement retiré ou contribution non validée.' });
@@ -295,23 +321,15 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     res.status(201).json({ published: true, remote_document_id: remote.id });
   }));
 
-  // Admin-initiated, read-only reconciliation: NEVER automatically retry
-  // uncertain uploads; search by the unique name to prevent duplicates.
+  // Rapprochement à la demande : cherche les envois restés sans issue par leur
+  // nom opaque (jamais de nouvel envoi) puis rejoue les suppressions en attente.
   app.post('/api/knowledge-sharing/mistral/reconcile', guarded(async (_req, res, tenantId) => {
-    const pending = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
-      .select('*').eq('state', 'uncertain').is('remote_document_id', null).limit(20);
-    if (pending.error) throw pending.error;
-    let resolved = 0;
-    for (const job of pending.data || []) {
-      try {
-        const result = await reconcileRemotePublication(supabaseAdmin, job);
-        if (result.remote_document_id) resolved++;
-      } catch {
-        // Unresolved uploads stay durable and cannot be re-sent blindly.
-      }
-    }
+    const uploads = await reconcileStalePublications(supabaseAdmin, tenantId, 20, 0);
     const result = await flushPendingMistralDeletions(supabaseAdmin, tenantId, 50);
-    res.json({ ...result, reconciled_uploads: resolved, uncertain_uploads: (pending.data || []).length - resolved });
+    res.json({
+      ...result, reconciled_uploads: uploads.reconciled,
+      uncertain_uploads: uploads.uncertain + uploads.errors, abandoned_uploads: uploads.abandoned,
+    });
   }));
 
   app.delete('/api/knowledge-sharing/contributions/:id', guarded(async (req, res, tenantId) => {
@@ -332,7 +350,10 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
   // when publishing is disabled. Never log excerpts, secrets or remote bodies.
   if (process.env.MISTRAL_API_KEY) {
     const interval = setInterval(() => {
-      void flushPendingMistralDeletions(supabaseAdmin, undefined, 30).catch(() => {});
+      void (async () => {
+        await flushPendingMistralDeletions(supabaseAdmin, undefined, 30);
+        await reconcileStalePublications(supabaseAdmin, undefined, 20);
+      })().catch(() => {});
     }, 60_000);
     interval.unref?.();
   }

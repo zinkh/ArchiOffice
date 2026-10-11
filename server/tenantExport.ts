@@ -43,6 +43,10 @@ export const EXPORT_TABLES: readonly string[] = Array.from(new Set([
   // L'espace de stockage branché par le cabinet et le cache d'arborescence qui
   // va avec — jetons et mots de passe masqués plus bas.
   'external_storage_connections', 'external_storage_folders',
+  // Mutualisation documentaire : choix de contribution, extraits préparés et
+  // suivi de leur publication chez Mistral (état, identifiant distant).
+  'knowledge_sharing_preferences', 'knowledge_contributions',
+  'knowledge_sharing_events', 'knowledge_remote_documents',
 ]));
 
 // Pure junction tables with no tenant_id/id column of their own (composite
