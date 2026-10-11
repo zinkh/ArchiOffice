@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS public.knowledge_remote_documents (
   library_id text NOT NULL,
   remote_name text NOT NULL,
   remote_document_id text,
+  content_sha256 text NOT NULL,
   state text NOT NULL DEFAULT 'uploading'
     CHECK (state IN ('uploading','uncertain','published','delete_pending','deleting','deleted')),
   deletion_requested_at timestamptz,
