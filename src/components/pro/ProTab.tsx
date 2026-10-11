@@ -43,6 +43,8 @@ type SubTab = 'LOTS' | 'CCTP' | 'DPGF' | 'ESTIMATION' | 'BPU' | 'DQE';
 interface DpgfVersion { id: string; label: string; phase?: string; version?: string; created_at: string }
 
 interface ProTabProps {
+  /** Données de l'opération pour les textes automatiques du CCTP. */
+  contexte?: import('../../lib/cctpVariables').ContexteCctp;
   projectId: string;
   projectName?: string;
   /** Rappelé après création/suppression d'un lot, pour que la fiche projet (qui en garde une copie dans `lots_list`) se resynchronise. */
@@ -89,7 +91,7 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsChanged }) => {
+export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte, onLotsChanged }) => {
   const { t } = useTranslation();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
   const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
@@ -829,7 +831,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, onLotsCh
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} notify={notify} />
+              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
             ) : null}
           </div>
           {splitView && (

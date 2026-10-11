@@ -3285,7 +3285,15 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} projectName={project?.name} projectCode={project?.project_code || project?.reference || undefined} />}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} onLotsChanged={fetchProject} /></div>}
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} contexte={project ? {
+              operation: project.name,
+              reference: project.project_code,
+              adresse: [project.adresse_terrain || project.address, project.cp_ville_terrain].filter(Boolean).join(', ') || undefined,
+              maitreOuvrage: project.nom_societe || project.client,
+              parcelle: project.ref_cadastrale,
+              zonePlu: project.zone_plu,
+              surface: project.surface ? `${project.surface} m²` : undefined,
+            } : undefined} onLotsChanged={fetchProject} /></div>}
             {activeTab === 'NOTICES' && project && (
               <ProjectNoticesTab project={project} phases={missionPhases} currentPhase={actualCurrentPhase} />
             )}

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
 import { LotTitleInput } from './LotTitleInput';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown, IconTag, IconBuildingStore,
   IconBuildingCommunity, IconSparkles, IconCopy, IconStackPush, IconRowInsertBottom,
@@ -12,10 +12,11 @@ import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { hierarchyKey } from './hierarchyOps';
 import { useSettings } from '../../hooks/useSettings';
-import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection } from '../../lib/batimentsArticles';
+import { VARIABLES_CCTP, jeton, type ContexteCctp } from '../../lib/cctpVariables';
+import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, aDesCiblesBatiments } from '../../lib/batimentsArticles';
 import { exportCctpDocx, exportCctpPdf } from '../../lib/cctpExport';
 import type { ProNotify } from './DPGFWorkspace';
-import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall } from '@tabler/icons-react';
+import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall, IconVariable } from '@tabler/icons-react';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { DPGF, Chapitre, Ligne, type ImageArticle } from '../../types/dpgf';
@@ -40,6 +41,8 @@ interface CCTPEditorProps {
   /** Drop cross-panel : appelé quand une ligne est déposée depuis le panneau droit. */
   onDropExternal?: (ligne: Ligne) => void;
   projectName?: string;
+  /** Données de l'opération pour les textes automatiques ({{adresse}}...). */
+  contexte?: ContexteCctp;
   notify?: ProNotify;
 }
 
@@ -55,7 +58,7 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, notify }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
   const isMobile = useMediaQuery('(max-width: 767px)');
@@ -338,11 +341,12 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     else deleteCCTPLigne(selection.lotIdx, selection.chapIdx, selection.lignePath);
   };
   // ── Export du CCTP et bâtiments ────────────────────────────────────────────
+  const contexteComplet: ContexteCctp = { operation: projectName, agence: settings?.agencyName, ...contexte };
   const batimentsCctp = dpgf.multiBatiments ? batimentsParOrdre(dpgf.batiments) : [];
   const exporter = async (format: 'pdf' | 'docx', batimentId?: string) => {
     const batiment = batimentsCctp.find(b => b.id === batimentId);
     try {
-      const opts = { projectName, settings: settings ?? {}, batiment };
+      const opts = { projectName, settings: settings ?? {}, batiment, contexte: contexteComplet };
       await (format === 'pdf' ? exportCctpPdf(dpgf, opts) : exportCctpDocx(dpgf, opts));
     } catch (e) {
       notify?.(t('pro_cctp_export_failed', { error: e instanceof Error ? e.message : String(e) }), { type: 'error' });
@@ -354,7 +358,12 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     for (const b of batimentsCctp) await exporter(format, b.id);
     if (orphelins) notify?.(t('pro_cctp_export_unassigned', { count: orphelins }), { type: 'error' });
   };
-  const batimentEntries = (key: string): ToolbarMenuEntry[] => batimentsCctp.map(b => {
+  const batimentEntries = (key: string): ToolbarMenuEntry[] => {
+    // Les bâtiments se portent par les articles : sans article, cocher ne ferait rien.
+    if (!aDesCiblesBatiments(dpgf.lots, [key])) {
+      return [{ id: 'bat-no-article', label: t('pro_buildings_no_article'), disabled: true, onClick: () => {} }];
+    }
+    return batimentsCctp.map(b => {
     const etat = etatBatimentSelection(dpgf.lots, [key], b.id);
     return {
       id: `bat-${b.id}`, label: b.libelle ? `${b.code} · ${b.libelle}` : b.code, keepOpen: true,
@@ -365,7 +374,30 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         onChange({ ...dpgf, lots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
       },
     };
-  });
+    });
+  };
+  // ── Textes automatiques ────────────────────────────────────────────────────
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const insererVariable = (cle: string) => {
+    const el = descriptionRef.current;
+    const actuel = selData?.description ?? '';
+    const debut = el?.selectionStart ?? actuel.length;
+    const fin = el?.selectionEnd ?? actuel.length;
+    updateDescription(actuel.slice(0, debut) + jeton(cle) + actuel.slice(fin));
+    const pos = debut + jeton(cle).length;
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); });
+  };
+  const GROUPES_VARIABLES = [
+    ['operation', 'pro_cctp_variables_operation'],
+    ['arbre', 'pro_cctp_variables_tree'],
+    ['divers', 'pro_cctp_variables_other'],
+  ] as const;
+  const variableEntries = (): ToolbarMenuEntry[] => GROUPES_VARIABLES.flatMap(([groupe, cleTitre]) => [
+    { id: `var-h-${groupe}`, heading: t(cleTitre) } as ToolbarMenuEntry,
+    ...VARIABLES_CCTP.filter(v => v.groupe === groupe).map(v => ({
+      id: `var-${v.cle}`, label: v.libelle, shortcut: jeton(v.cle), onClick: () => insererVariable(v.cle),
+    })),
+  ]);
   const resumeBatiments = (key: string) => {
     const etats = batimentsCctp.map(b => [b.code, etatBatimentSelection(dpgf.lots, [key], b.id)] as const);
     const codes = etats.filter(([, e]) => e === 'tous').map(([c]) => c);
@@ -739,10 +771,23 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
 
               {/* Description CCTP */}
               <div className="space-y-2">
-                <label className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
-                  Description technique
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="cctp-description" className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
+                    Description technique
+                  </label>
+                  <ToolbarMenu
+                    entries={variableEntries}
+                    onSelect={entry => entry.onClick()}
+                    ariaLabel={t('pro_cctp_variables')}
+                    triggerClassName="inline-flex items-center gap-1 h-7 px-2 rounded border text-xs outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                    triggerStyle={{ borderColor: 'var(--tblr-border)' }}
+                    align="end"
+                    trigger={<><IconVariable size={14} aria-hidden />{t('pro_cctp_variables')}<IconChevronDownSmall size={12} aria-hidden /></>}
+                  />
+                </div>
                 <textarea
+                  id="cctp-description"
+                  ref={descriptionRef}
                   value={selData.description}
                   onChange={e => updateDescription(e.target.value)}
                   rows={16}
@@ -750,7 +795,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   className="w-full px-4 py-3 text-sm border border-zinc-200 dark:border-zinc-700 rounded-xl bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y leading-relaxed font-sans"
                 />
                 <p className="text-[0.6875rem] text-zinc-400">
-                  Ce texte apparaît uniquement dans le document CCTP, pas dans le DPGF.
+                  Ce texte apparaît uniquement dans le document CCTP, pas dans le DPGF. Les variables {'{{…}}'} sont remplacées à l'export.
                 </p>
               </div>
 

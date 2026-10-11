@@ -11,7 +11,8 @@ import { imagesDeLigne } from './cctpImages';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
-import { batimentsDeLigne, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
+import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
+import { resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
 
 export interface CctpBloc {
   niveau: number;          // 1 lot, 2 chapitre, 3+ article et sous-articles
@@ -30,6 +31,8 @@ export interface CctpExportOptions {
   settings: AgencySettings;
   /** CCTP d'un seul bâtiment ; absent, l'opération complète. */
   batiment?: Batiment;
+  /** Données de l'opération pour les textes automatiques ({{operation}}, {{adresse}}...). */
+  contexte?: ContexteCctp;
 }
 
 const libelleBatiment = (b: Batiment) => (b.libelle ? `${b.code} ${b.libelle}` : b.code);
@@ -40,36 +43,52 @@ const libelleBatiment = (b: Batiment) => (b.libelle ? `${b.code} ${b.libelle}` :
  * plusieurs bâtiments : dans le CCTP d'un bâtiment, la mention serait redite
  * à chaque article.
  */
-export function cctpBlocs(doc: DPGF, batimentId?: string): CctpBloc[] {
+export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp = {}): CctpBloc[] {
   const source = batimentId ? cctpPourBatiment(doc, batimentId) : doc;
   const mention = !batimentId && !!doc.multiBatiments;
   const parId = new Map((doc.batiments ?? []).map(b => [b.id, b]));
   const ordre = new Map(batimentsParOrdre(doc.batiments).map((b, i) => [b.id, i]));
   const blocs: CctpBloc[] = [];
-  const texte = (v?: string) => (v ?? '').trim();
+  const date = new Date();
+  const texte = (v: string | undefined, n: NoeudCctp) => resoudreVariables((v ?? '').trim(), contexte, n, date);
+  const libelles = (ids: string[]) => ids
+    .filter(id => parId.has(id))
+    .sort((a, b) => (ordre.get(a) ?? 0) - (ordre.get(b) ?? 0))
+    .map(id => libelleBatiment(parId.get(id)!));
 
-  const articles = (lignes: Ligne[], niveau: number, herite?: string) => lignes.forEach(l => {
+  const batimentCible = batimentId && parId.has(batimentId) ? [libelleBatiment(parId.get(batimentId)!)] : undefined;
+  const concernes = (ids: string[]) => batimentCible ?? libelles(ids);
+
+  const articles = (lignes: Ligne[], niveau: number, noeud: NoeudCctp, herite?: string) => lignes.forEach(l => {
     const enfants = !!l.children?.length;
-    const batiments = mention && !enfants
-      ? batimentsDeLigne(l, herite)
-        .filter(id => parId.has(id))
-        .sort((a, b) => (ordre.get(a) ?? 0) - (ordre.get(b) ?? 0))
-        .map(id => libelleBatiment(parId.get(id)!))
-      : undefined;
+    const ids = batimentsDeLigne(l, herite);
+    const n: NoeudCctp = { ...noeud, articleNumero: l.numero, articleDesignation: l.designation, localisation: l.localisation, batiments: concernes(ids) };
     blocs.push({
-      niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription),
-      localisation: texte(l.localisation) || undefined,
+      niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription, n),
+      localisation: texte(l.localisation, n) || undefined,
       images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
-      batiments: batiments?.length ? batiments : undefined,
+      batiments: mention && !enfants && libelles(ids).length ? libelles(ids) : undefined,
     });
-    if (enfants) articles(l.children!, niveau + 1, l.batimentId ?? herite);
+    if (enfants) articles(l.children!, niveau + 1, noeud, l.batimentId ?? herite);
   });
 
   for (const lot of source.lots) {
-    blocs.push({ niveau: 1, numero: lot.numero, titre: lot.titre, texte: texte((lot as { cctpDescription?: string }).cctpDescription) });
+    const idsLot = batimentsDuNoeud(lot);
+    const nLot: NoeudCctp = { lotNumero: lot.numero, lotTitre: lot.titre, batiments: concernes(idsLot) };
+    // Un lot sans chapitre porte ses bâtiments lui-même.
+    blocs.push({
+      niveau: 1, numero: lot.numero, titre: lot.titre, texte: texte((lot as { cctpDescription?: string }).cctpDescription, nLot),
+      batiments: mention && !lot.chapitres.length && libelles(idsLot).length ? libelles(idsLot) : undefined,
+    });
     for (const chap of lot.chapitres) {
-      blocs.push({ niveau: 2, numero: chap.numero, titre: chap.titre, texte: texte(chap.cctpDescription) });
-      articles(chap.lignes, 3, chap.batimentId ?? lot.batimentId);
+      const idsChap = batimentsDuNoeud(chap, idsLot);
+      const nChap: NoeudCctp = { ...nLot, chapitreNumero: chap.numero, chapitreTitre: chap.titre, batiments: concernes(idsChap) };
+      blocs.push({
+        niveau: 2, numero: chap.numero, titre: chap.titre, texte: texte(chap.cctpDescription, nChap),
+        // Un chapitre sans article (prescriptions générales) porte ses bâtiments lui-même.
+        batiments: mention && !chap.lignes.length && libelles(idsChap).length ? libelles(idsChap) : undefined,
+      });
+      articles(chap.lignes, 3, nChap, chap.batimentId ?? lot.batimentId);
     }
   }
   return blocs;
@@ -156,7 +175,7 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     y += apres;
   };
 
-  const blocsPdf = cctpBlocs(doc, opts.batiment?.id);
+  const blocsPdf = cctpBlocs(doc, opts.batiment?.id, opts.contexte);
   const images = await chargerImages(blocsPdf);
   for (const b of blocsPdf) {
     const retrait = Math.max(0, b.niveau - 3) * 4;
@@ -232,7 +251,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   const sousTitre = [opts.projectName, opts.batiment ? libelleBatiment(opts.batiment) : ''].filter(Boolean).join(' · ');
   if (sousTitre) body.push(new Paragraph({ spacing: { after: 360 }, children: [new TextRun({ text: sousTitre, size: 24, color: '6B7280' })] }));
 
-  const blocsWord = cctpBlocs(doc, opts.batiment?.id);
+  const blocsWord = cctpBlocs(doc, opts.batiment?.id, opts.contexte);
   const images = await chargerImages(blocsWord);
   for (const b of blocsWord) {
     const heading = b.niveau === 1 ? HeadingLevel.HEADING_1 : b.niveau === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
