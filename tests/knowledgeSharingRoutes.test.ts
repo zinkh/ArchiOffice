@@ -95,8 +95,13 @@ describe('Mémoire documentaire : brouillons', () => {
     fakeSupabaseAdmin.seed('documents', [{
       id: DOC_ID, tenant_id: other.tenantId, name: 'cctp.pdf', file_url: 'x', mime_type: 'application/pdf', size_bytes: 10,
     }]);
-    const bad = await request(app).post('/api/knowledge-sharing/drafts').set(authHeader(mine.token)).send({ document_id: 'abc' });
-    expect(bad.status).toBe(400);
+    // documents.id est un TEXT : seuls vide, trop long ou contenant un caractère de contrôle sont invalides.
+    for (const document_id of ['', 'x'.repeat(256), 'doc\u0000id', 42]) {
+      const bad = await request(app).post('/api/knowledge-sharing/drafts').set(authHeader(mine.token)).send({ document_id });
+      expect(bad.status).toBe(400);
+    }
+    const unknown = await request(app).post('/api/knowledge-sharing/drafts').set(authHeader(mine.token)).send({ document_id: 'doc-texte-inconnu' });
+    expect(unknown.status).toBe(404);
     const foreign = await request(app).post('/api/knowledge-sharing/drafts').set(authHeader(mine.token)).send({ document_id: DOC_ID });
     expect(foreign.status).toBe(404);
   });
