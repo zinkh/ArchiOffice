@@ -107,9 +107,10 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
       : 'Consentement retiré pendant l’envoi ; suppression distante en cours.');
   });
   const retryDeletions = async () => run(async () => {
-    const result = await apiFetch<{ pending: number }>('/api/knowledge-sharing/mistral/reconcile', { method: 'POST' });
-    setNotice(result.pending ? 'Des suppressions sont encore en attente chez Mistral.'
-      : 'Vérification des suppressions demandées terminée.');
+    const result = await apiFetch<{ pending: number; reconciled_uploads: number; uncertain_uploads: number }>('/api/knowledge-sharing/mistral/reconcile', { method: 'POST' });
+    setNotice((result.pending ? 'Des suppressions restent en attente. ' : '') +
+      (result.uncertain_uploads ? result.uncertain_uploads + ' transfert(s) non confirmé(s) nécessitent une vérification. '
+        : '') + result.reconciled_uploads + ' transfert(s) retrouvé(s) dans Mistral.');
   });
   const remove = async () => run(async () => {
     if (!current || !window.confirm('Supprimer cet extrait préparé ?')) return;
@@ -130,10 +131,10 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
     </div>
     {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
     {notice && <p role="status" className="text-sm">{notice}</p>}
-    {state?.publications?.some(p => p.state !== 'deleted' && p.deletion_requested_at) && <div className="text-sm border rounded p-2 space-y-2">
-      <p>Des suppressions distantes restent à confirmer. Leur suivi est conservé pour les tentatives automatiques.</p>
+    {state?.publications?.some(p => (p.state !== 'deleted' && p.deletion_requested_at) || p.state === 'uncertain') && <div className="text-sm border rounded p-2 space-y-2">
+      <p>Des transferts ou suppressions distantes restent à confirmer. Le suivi est conservé pour éviter les doublons.</p>
       <button type="button" disabled={busy} onClick={() => void retryDeletions()}
-        className="rounded border px-3 py-2">Réessayer les suppressions Mistral</button>
+        className="rounded border px-3 py-2">Vérifier les transferts et suppressions Mistral</button>
     </div>}
     {state && <>
       <label className="flex items-start gap-2 text-sm">
