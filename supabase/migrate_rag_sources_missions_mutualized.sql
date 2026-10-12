@@ -84,6 +84,7 @@ WITH permitted AS (
   WHERE r.library_id=p_library_id AND r.state='published'
     AND r.deletion_requested_at IS NULL AND r.remote_document_id IS NOT NULL
     AND char_length(c.sanitized_text)>=40
+    AND r.content_sha256 = encode(sha256(convert_to(c.sanitized_text,'UTF8')),'hex')
 )
 SELECT p.remote_document_id, p.contribution_id AS citation_id,
        LEFT(p.sanitized_text,2400) AS content,
