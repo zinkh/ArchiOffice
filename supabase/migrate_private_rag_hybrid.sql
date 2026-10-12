@@ -142,10 +142,10 @@ WITH visible AS MATERIALIZED (
   LIMIT 60
 ), semantic AS (
   SELECT v.chunk_id, row_number() OVER
-    (ORDER BY v.embedding <=> p_embedding, v.ordinal) AS r
+    (ORDER BY v.embedding OPERATOR(extensions.<=>) p_embedding, v.ordinal) AS r
   FROM visible v
   WHERE p_embedding IS NOT NULL AND v.embedding IS NOT NULL
-  ORDER BY v.embedding <=> p_embedding, v.ordinal LIMIT 60
+  ORDER BY v.embedding OPERATOR(extensions.<=>) p_embedding, v.ordinal LIMIT 60
 ), scores AS (
   SELECT COALESCE(l.chunk_id,s.chunk_id) AS chunk_id,
      COALESCE(1.0/(60+l.r),0.0) + COALESCE(1.0/(60+s.r),0.0) AS score
