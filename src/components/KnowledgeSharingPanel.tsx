@@ -1,42 +1,36 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
+import type { Contribution, Publication } from '../lib/knowledgeSharingView';
+import { REPEATED_FAILURE_ATTEMPTS } from '../lib/knowledgeSharingView';
+import { HowItWorks } from './knowledgeSharing/HowItWorks';
+import { AutoSettings, type AutoState } from './knowledgeSharing/AutoSettings';
+import { Journal } from './knowledgeSharing/Journal';
+import { ManualShare } from './knowledgeSharing/ManualShare';
 
 interface CandidateDocument { id: string; name: string }
-interface Contribution {
-  id: string; document_id: string; status: 'draft' | 'reviewed';
-  sanitized_text: string; warnings: string[]; created_at: string;
-}
-interface Publication {
-  contribution_id: string; remote_document_id: string | null;
-  state: string; deletion_requested_at: string | null; deleted_at: string | null;
-  delete_attempts?: number;
-}
 interface State {
   opted_in: boolean; contributions: Contribution[]; publications: Publication[];
-  publication_active: boolean;
+  publication_active: boolean; auto: AutoState;
 }
 
-/** Aligné sur ALERT_AFTER_ATTEMPTS (server/knowledge/mistralLifecycle.ts). */
-const REPEATED_FAILURE_ATTEMPTS = 6;
+const NO_AUTO: AutoState = { enabled: false, categories: [], available: [], daily_cap: 25 };
 
+/**
+ * Mémoire technique collective. L'écran dit d'abord ce qui se passe (parcours d'un
+ * document), demande deux autorisations distinctes, puis tient un journal de chaque
+ * document avec le texte exact qui part et un retrait en un clic.
+ */
 export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocument[] }) {
   const [state, setState] = useState<State | null>(null);
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [selectedId, setSelectedId] = useState('');
-  const [current, setCurrent] = useState<Contribution | null>(null);
-  const [text, setText] = useState('');
-  const [confirmedAnonymity, setConfirmedAnonymity] = useState(false);
-  const [confirmedRights, setConfirmedRights] = useState(false);
-  const [confirmedExternal, setConfirmedExternal] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [mistralStatus, setMistralStatus] = useState('');
 
   const refresh = async () => {
     const data = await apiFetch<State>('/api/knowledge-sharing');
-    setState(data);
-    return data;
+    setState({ ...data, auto: data.auto ?? NO_AUTO });
   };
   useEffect(() => {
     refresh().catch((e: any) => {
@@ -44,6 +38,13 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
       else setError('Bibliothèque commune indisponible : ' + e.message);
     });
   }, []);
+  // Tant que des documents sont en cours de traitement, l'écran se met à jour seul.
+  const working = !!state?.contributions.some(c => c.status === 'queued' || c.status === 'analyzing');
+  useEffect(() => {
+    if (!working) return;
+    const timer = setInterval(() => { refresh().catch(() => undefined); }, 15000);
+    return () => clearInterval(timer);
+  }, [working]);
   if (hidden) return null;
 
   const run = async (action: () => Promise<void>) => {
@@ -52,6 +53,54 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
     catch (e: any) { setError(e.message || 'Erreur'); }
     finally { setBusy(false); }
   };
+
+  const consent = (enabled: boolean) => {
+    if (!enabled && !window.confirm('Retirer l’autorisation ? Les extraits non envoyés seront effacés et ceux déjà envoyés retirés de Mistral.')) return;
+    void run(async () => {
+      const response = await apiFetch<{ pending_deletions?: number }>('/api/knowledge-sharing/consent', {
+        method: 'PUT', body: JSON.stringify({ opted_in: enabled }),
+      });
+      setNotice(enabled ? '' : response.pending_deletions
+        ? response.pending_deletions + ' suppression(s) distante(s) en attente de confirmation chez Mistral.'
+        : 'Autorisation retirée ; aucune suppression distante en attente.');
+    });
+  };
+  const enableAuto = (categories: string[]) => void run(async () => {
+    await apiFetch('/api/knowledge-sharing/auto', {
+      method: 'PUT', body: JSON.stringify({ enabled: true, categories, confirmed_ai_review: true }),
+    });
+    setNotice('Partage automatique activé pour : ' + categories.join(', ') + '. Les prochains documents de ces types seront traités.');
+  });
+  const disableAuto = () => {
+    if (!window.confirm('Désactiver le partage automatique ? Ce qui n’est pas encore parti sera supprimé.')) return;
+    void run(async () => {
+      await apiFetch('/api/knowledge-sharing/auto', { method: 'PUT', body: JSON.stringify({ enabled: false }) });
+      setNotice('Partage automatique désactivé.');
+    });
+  };
+  const backfill = () => void run(async () => {
+    const result = await apiFetch<{ examined: number; queued: number }>('/api/knowledge-sharing/auto/backfill', { method: 'POST' });
+    setNotice(result.queued + ' document(s) mis en file sur ' + result.examined + ' examiné(s).');
+  });
+  const remove = (c: Contribution) => {
+    const name = documents.find(d => d.id === c.document_id)?.name || 'ce document';
+    const sent = state?.publications.some(p => p.contribution_id === c.id);
+    if (!window.confirm(sent ? `Retirer de la bibliothèque Mistral le texte issu de « ${name} » ?` : `Supprimer l’extrait préparé de « ${name} » ?`)) return;
+    void run(async () => {
+      const result = await apiFetch<{ pending_deletions?: number }>('/api/knowledge-sharing/contributions/' + c.id, { method: 'DELETE' });
+      setNotice(result.pending_deletions ? 'Retrait en cours chez Mistral ; il est retenté automatiquement.' : 'Extrait supprimé.');
+    });
+  };
+  const retry = () => void run(async () => {
+    const result = await apiFetch<{ pending: number; reconciled_uploads: number; uncertain_uploads: number; abandoned_uploads?: number }>(
+      '/api/knowledge-sharing/mistral/reconcile', { method: 'POST' });
+    setNotice([
+      result.pending ? 'Des suppressions restent en attente.' : '',
+      result.uncertain_uploads ? result.uncertain_uploads + ' transfert(s) non confirmé(s) nécessitent une vérification.' : '',
+      result.abandoned_uploads ? result.abandoned_uploads + ' envoi(s) abandonné(s) faute de document distant ; supprimez l’extrait pour le republier.' : '',
+      result.reconciled_uploads + ' transfert(s) retrouvé(s) dans Mistral.',
+    ].filter(Boolean).join(' '));
+  });
   const checkMistral = async () => {
     setMistralStatus('Vérification en cours…');
     try {
@@ -60,152 +109,52 @@ export function KnowledgeSharingPanel({ documents }: { documents: CandidateDocum
         : result.configured ? 'Bibliothèque Mistral inaccessible.' : 'Bibliothèque Mistral non configurée sur cette instance.');
     } catch { setMistralStatus('Connexion Mistral non disponible. Vérifiez la clé et les droits de la bibliothèque.'); }
   };
-  const consent = async (enabled: boolean) => {
-    if (!enabled && !window.confirm('Retirer l’autorisation et effacer tous les extraits préparés ?')) return;
-    await run(async () => {
-      const response = await apiFetch<{ pending_deletions?: number }>('/api/knowledge-sharing/consent', {
-        method: 'PUT', body: JSON.stringify({ opted_in: enabled }),
-      });
-      if (!enabled) {
-        setCurrent(null); setText('');
-        setNotice(response.pending_deletions
-          ? response.pending_deletions + ' suppression(s) distante(s) en attente de confirmation chez Mistral.'
-          : 'Consentement retiré ; aucune suppression distante en attente.');
-      } else setNotice('');
-    });
-  };
-  const draft = async () => run(async () => {
-    const row = await apiFetch<Contribution>('/api/knowledge-sharing/drafts', {
-      method: 'POST', body: JSON.stringify({ document_id: selectedId }),
-    });
-    setCurrent(row); setText(row.sanitized_text);
-    setConfirmedAnonymity(false); setConfirmedRights(false); setConfirmedExternal(false);
-  });
-  const save = async () => run(async () => {
-    if (!current) return;
-    const row = await apiFetch<Contribution>('/api/knowledge-sharing/drafts/' + current.id, {
-      method: 'PUT', body: JSON.stringify({ sanitized_text: text }),
-    });
-    setCurrent(row); setText(row.sanitized_text);
-    setConfirmedAnonymity(false); setConfirmedRights(false);
-  });
-  const review = async () => run(async () => {
-    if (!current) return;
-    const row = await apiFetch<Contribution>('/api/knowledge-sharing/drafts/' + current.id + '/review', {
-      method: 'POST',
-      body: JSON.stringify({ confirmed_anonymity: confirmedAnonymity, confirmed_rights: confirmedRights }),
-    });
-    setCurrent(row);
-  });
-  const publish = async () => run(async () => {
-    if (!current || !confirmedExternal) return;
-    const result = await apiFetch<{ published: boolean; deletion_pending?: boolean }>(
-      '/api/knowledge-sharing/contributions/' + current.id + '/publish',
-      { method: 'POST', body: JSON.stringify({ confirmed_external_transfer: true }) },
-    );
-    setConfirmedExternal(false);
-    setNotice(result.published ? 'Extrait anonymisé envoyé à Mistral Libraries.'
-      : 'Consentement retiré pendant l’envoi ; suppression distante en cours.');
-  });
-  const retryDeletions = async () => run(async () => {
-    const result = await apiFetch<{ pending: number; reconciled_uploads: number; uncertain_uploads: number; abandoned_uploads?: number }>('/api/knowledge-sharing/mistral/reconcile', { method: 'POST' });
-    setNotice((result.pending ? 'Des suppressions restent en attente. ' : '') +
-      (result.uncertain_uploads ? result.uncertain_uploads + ' transfert(s) non confirmé(s) nécessitent une vérification. '
-        : '') + (result.abandoned_uploads ? result.abandoned_uploads + ' envoi(s) abandonné(s) faute de document distant ; supprimez l’extrait pour le republier. ' : '') +
-      result.reconciled_uploads + ' transfert(s) retrouvé(s) dans Mistral.');
-  });
-  const remove = async () => run(async () => {
-    if (!current || !window.confirm('Supprimer cet extrait préparé ?')) return;
-    await apiFetch('/api/knowledge-sharing/contributions/' + current.id, { method: 'DELETE' });
-    setCurrent(null); setText('');
-  });
 
-  return <section className="rounded-xl border p-4 space-y-3" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}>
+  const nameOf = (id: string) => documents.find(d => d.id === id)?.name || 'Document supprimé de la GED';
+  const needsCheck = !!state?.publications.some(p => (p.state !== 'deleted' && p.deletion_requested_at) || p.state === 'uncertain');
+  const stuck = !!state?.publications.some(p => p.state !== 'deleted' && (p.delete_attempts ?? 0) >= REPEATED_FAILURE_ATTEMPTS);
+  const held = state?.contributions.filter(c => c.status === 'held').length ?? 0;
+
+  return <section className="rounded-xl border p-4 space-y-4" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}>
     <div>
-      <h2 className="font-semibold">Mémoire technique collective — confidentialité</h2>
+      <h2 className="font-semibold">Mémoire technique collective</h2>
       <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
-        Vos documents restent privés par défaut. Les originaux ne sont jamais envoyés. Chaque extrait nécessite une anonymisation, une relecture et une autorisation explicite avant transfert.
+        Partagez, de façon anonyme, les prescriptions techniques de vos CCTP et notices avec les autres cabinets.
+        Vos documents d’origine restent privés.
       </p>
     </div>
-    <div className="flex flex-wrap items-center gap-2 text-sm">
-      <button type="button" onClick={() => void checkMistral()} className="rounded border px-3 py-2 text-sm">Vérifier la bibliothèque Mistral</button>
-      {mistralStatus && <span role="status">{mistralStatus}</span>}
-    </div>
-    {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
+
+    {error && <p role="alert" className="text-sm" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
     {notice && <p role="status" className="text-sm">{notice}</p>}
-    {state?.publications?.some(p => p.state !== 'deleted' && (p.delete_attempts ?? 0) >= REPEATED_FAILURE_ATTEMPTS) &&
-      <p role="alert" className="text-sm text-red-600">
-        Une suppression chez Mistral échoue de façon répétée. Les tentatives automatiques s'espacent ; relancez la vérification ci-dessous, puis contactez le support si le message persiste.
-      </p>}
-    {state?.publications?.some(p => (p.state !== 'deleted' && p.deletion_requested_at) || p.state === 'uncertain') && <div className="text-sm border rounded p-2 space-y-2">
-      <p>Des transferts ou suppressions distantes restent à confirmer. Le suivi est conservé pour éviter les doublons.</p>
-      <button type="button" disabled={busy} onClick={() => void retryDeletions()}
-        className="rounded border px-3 py-2">Vérifier les transferts et suppressions Mistral</button>
-    </div>}
+    {stuck && <p role="alert" className="text-sm" style={{ color: 'var(--tblr-danger)' }}>
+      Une suppression chez Mistral échoue de façon répétée. Les tentatives automatiques s’espacent ; relancez la vérification, puis contactez le support si le message persiste.
+    </p>}
+
     {state && <>
-      <label className="flex items-start gap-2 text-sm">
-        <input aria-label="Autoriser la préparation de contributions anonymisées" type="checkbox"
-          checked={state.opted_in} disabled={busy} onChange={e => void consent(e.target.checked)} />
-        <span>J’autorise la préparation d’extraits techniques anonymisés pour la base commune (choix indépendant des CGU).</span>
-      </label>
+      <HowItWorks publicationActive={state.publication_active} />
+      <AutoSettings optedIn={state.opted_in} auto={state.auto} busy={busy}
+        onConsent={consent} onEnableAuto={enableAuto} onDisableAuto={disableAuto} onBackfill={backfill} />
+
       {state.opted_in && <>
-        <div className="flex flex-wrap gap-2">
-          <select aria-label="Document à préparer" value={selectedId} onChange={e => setSelectedId(e.target.value)}
-            className="flex-1 min-w-52 rounded border p-2 text-sm">
-            <option value="">Choisir un document existant</option>
-            {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
-          <button type="button" disabled={!selectedId || busy} onClick={() => void draft()}
-            className="rounded bg-blue-600 text-white px-3 py-2 text-sm disabled:opacity-50">
-            Préparer une version anonymisée
-          </button>
-        </div>
-        {state.contributions.length > 0 && <div className="flex flex-wrap gap-2 text-xs">
-          {state.contributions.map(c => <button type="button" key={c.id} onClick={() => {
-            setCurrent(c); setText(c.sanitized_text); setConfirmedAnonymity(false); setConfirmedRights(false); setConfirmedExternal(false);
-          }} className="rounded border px-2 py-1">
-            {documents.find(d => d.id === c.document_id)?.name || 'Document'} : {c.status === 'draft' ? 'à relire' :
-              state.publications?.find(p => p.contribution_id === c.id)?.state === 'published' ? 'publié chez Mistral' :
-              state.publications?.some(p => p.contribution_id === c.id) ? 'transfert en cours / à vérifier' : 'validé (non publié)'}
-          </button>)}
-        </div>}
-        {current && <div className="space-y-2">
-          <p className="text-sm font-medium">Extrait préparé — à vérifier intégralement avant toute mutualisation</p>
-          {current.warnings?.map((w, i) => <p key={i} className="text-xs text-amber-700">{w}</p>)}
-          <textarea aria-label="Extrait technique anonymisé" rows={9} value={text}
-            readOnly={current.status !== 'draft'} onChange={e => setText(e.target.value)}
-            className="w-full rounded border p-2 text-sm font-mono" />
-          {current.status === 'draft' && <>
-            <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmedAnonymity}
-              onChange={e => setConfirmedAnonymity(e.target.checked)} />
-              J’ai relu l’extrait et contrôlé le risque de réidentification.</label>
-            <label className="flex gap-2 text-sm"><input type="checkbox" checked={confirmedRights}
-              onChange={e => setConfirmedRights(e.target.checked)} />
-              Je confirme disposer des droits et autorisations pour partager ce contenu.</label>
-            <div className="flex gap-2 flex-wrap">
-              <button type="button" onClick={() => void save()} disabled={busy}
-                className="rounded border px-3 py-2 text-sm">Enregistrer les corrections</button>
-              <button type="button" onClick={() => void review()}
-                disabled={busy || text !== current.sanitized_text || !confirmedAnonymity || !confirmedRights}
-                className="rounded bg-blue-600 text-white px-3 py-2 text-sm disabled:opacity-50">
-                Valider pour une future publication
-              </button>
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-medium text-sm">Documents analysés et partagés</h3>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              {held > 0 && <span style={{ color: 'var(--tblr-muted)' }}>{held} retenu{held > 1 ? 's' : ''}</span>}
+              {needsCheck && <button type="button" className="btn btn-secondary" disabled={busy} onClick={retry}>Vérifier les transferts et suppressions Mistral</button>}
             </div>
-          </>}
-          {current.status === 'reviewed' && state.publication_active &&
-            !state.publications?.some(p => p.contribution_id === current.id) && <>
-              <label className="flex gap-2 text-sm">
-                <input type="checkbox" checked={confirmedExternal} onChange={e => setConfirmedExternal(e.target.checked)} />
-                Je confirme avoir vérifié que cet extrait ne contient aucune donnée client identifiable et j’autorise son transfert à Mistral Libraries.
-              </label>
-              <button type="button" disabled={busy || !confirmedExternal} onClick={() => void publish()}
-                className="rounded bg-blue-600 text-white px-3 py-2 text-sm disabled:opacity-50">
-                Publier cet extrait anonymisé vers Mistral
-              </button>
-            </>}
-          <button type="button" onClick={() => void remove()} disabled={busy}
-            className="rounded border border-red-400 text-red-700 px-3 py-2 text-sm">Supprimer cette contribution</button>
-        </div>}
+          </div>
+          <Journal contributions={state.contributions} publications={state.publications} nameOf={nameOf}
+            publicationActive={state.publication_active} busy={busy} onRemove={remove} />
+        </div>
+
+        <ManualShare documents={documents} contributions={state.contributions} publications={state.publications}
+          publicationActive={state.publication_active} busy={busy} run={run} setNotice={setNotice} />
+
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <button type="button" className="btn btn-ghost" onClick={() => void checkMistral()}>Vérifier la liaison avec Mistral</button>
+          {mistralStatus && <span role="status">{mistralStatus}</span>}
+        </div>
       </>}
     </>}
   </section>;

@@ -4,21 +4,24 @@
  * distante même après suppression locale ou retrait du consentement.
  */
 import type { Express } from 'express';
-import * as XLSX from 'xlsx';
-import { createHash } from 'node:crypto';
-import { makeMistralLibraryClient, resolveKnowledgeLibraryId } from '../knowledge/mistralLibrary';
-import { flushPendingMistralDeletions, processRemoteDeletion, reconcileStalePublications } from '../knowledge/mistralLifecycle';
+import { resolveKnowledgeLibraryId } from '../knowledge/mistralLibrary';
+import { extractDocumentSource, MAX_SOURCE_BYTES } from '../knowledge/documentSource';
+import { publishContribution, publishEnabled } from '../knowledge/publishContribution';
+import { flushPendingMistralDeletions, reconcileStalePublications } from '../knowledge/mistralLifecycle';
 import { isSuperAdmin } from '../superAdminAuth';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { anonymizeTechnicalText, MAX_SHARED_EXCERPT_CHARS } from '../knowledge/anonymize';
+import {
+  AUTO_SHARE_DAILY_CAP, enqueueAutoContribution, getAutoSharePrefs, runAutoSharingCycle, SHAREABLE_DOC_TYPES,
+} from '../knowledge/autoContribution';
+import { makeMistralReviewer } from '../knowledge/aiReview';
 
 export interface KnowledgeSharingDeps {
   supabaseAdmin: any;
   requireTenantAdmin: (userId: string) => Promise<string>;
 }
 
-const MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 
 export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeSharingDeps) {
   const { supabaseAdmin, requireTenantAdmin } = deps;
@@ -43,7 +46,7 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
 
   // `delete_attempts` n'existe qu'une fois la migration de reprise passée : sans
   // elle, on relit sans cette colonne plutôt que de casser tout l'écran.
-  const PUBLICATION_COLUMNS = 'contribution_id,remote_document_id,state,deletion_requested_at,deleted_at,created_at';
+  const PUBLICATION_COLUMNS = 'contribution_id,remote_document_id,state,deletion_requested_at,deleted_at,created_at,published_at';
   async function listPublications(tenantId: string) {
     const read = (columns: string) => tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
       .select(columns).order('created_at', { ascending: false }).limit(200);
@@ -51,21 +54,93 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     return withAttempts.error ? read(PUBLICATION_COLUMNS) : withAttempts;
   }
 
+  // Colonnes ajoutées par supabase/migrate_knowledge_zzz_auto_sharing.sql : sans
+  // elles, on relit les colonnes d'origine plutôt que de casser tout l'écran.
+  const CONTRIBUTION_COLUMNS = 'id,document_id,status,sanitized_text,warnings,reviewed_at,created_at';
+  async function listContributions(tenantId: string) {
+    const read = (columns: string) => tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
+      .select(columns).order('created_at', { ascending: false }).limit(100);
+    const extended = await read(CONTRIBUTION_COLUMNS + ',origin,review_mode,withheld,analysis,updated_at');
+    return extended.error ? read(CONTRIBUTION_COLUMNS) : extended;
+  }
+
+  /** Nombre de documents du cabinet par type partageable, pour que le choix soit éclairé. */
+  async function countShareableTypes(tenantId: string) {
+    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('doc_type').limit(10000);
+    const counts = new Map<string, number>();
+    for (const row of data || []) if (row.doc_type) counts.set(row.doc_type, (counts.get(row.doc_type) || 0) + 1);
+    return SHAREABLE_DOC_TYPES.map(name => ({ name, count: counts.get(name) || 0 }));
+  }
+
   app.get('/api/knowledge-sharing', guarded(async (_req, res, tenantId) => {
-    const [preference, contributions, publications] = await Promise.all([
+    const [preference, contributions, publications, auto, types] = await Promise.all([
       getPreference(tenantId),
-      tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
-        .select('id,document_id,status,sanitized_text,warnings,reviewed_at,created_at')
-        .order('created_at', { ascending: false }).limit(100),
+      listContributions(tenantId),
       listPublications(tenantId),
+      getAutoSharePrefs(supabaseAdmin, tenantId),
+      countShareableTypes(tenantId),
     ]);
     if (contributions.error) throw contributions.error;
     if (publications.error) throw publications.error;
     res.json({
       opted_in: preference, contributions: contributions.data || [],
       publications: publications.data || [],
-      publication_active: process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED === 'true',
+      publication_active: publishEnabled(),
+      auto: { enabled: auto.enabled, categories: auto.categories, available: types, daily_cap: AUTO_SHARE_DAILY_CAP },
     });
+  }));
+
+  // Partage automatique : un consentement DISTINCT, car il couvre l'analyse du texte
+  // par une IA avant toute relecture humaine, puis l'envoi sans validation.
+  app.put('/api/knowledge-sharing/auto', guarded(async (req, res, tenantId) => {
+    if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'Le choix doit être explicite (true ou false).' });
+    if (!(await getPreference(tenantId))) return res.status(403).json({ error: 'Autorisez d’abord la contribution anonymisée.' });
+    const enabled: boolean = req.body.enabled;
+    const requested = Array.isArray(req.body.categories) ? req.body.categories : [];
+    const categories = [...new Set(requested.filter((c: unknown): c is string => typeof c === 'string'))] as string[];
+    if (categories.some(c => !(SHAREABLE_DOC_TYPES as readonly string[]).includes(c))) {
+      return res.status(400).json({ error: 'Type de document non partageable : ' + SHAREABLE_DOC_TYPES.join(', ') + '.' });
+    }
+    if (enabled) {
+      if (!categories.length) return res.status(400).json({ error: 'Choisissez au moins un type de document.' });
+      if (req.body.confirmed_ai_review !== true) {
+        return res.status(400).json({ error: 'Confirmez que le texte sera analysé par Mistral avant tout envoi.' });
+      }
+    }
+    const patch: Record<string, unknown> = enabled
+      ? { auto_share_enabled: true, auto_share_categories: categories, auto_share_consented_at: new Date().toISOString(), auto_share_consented_by: req.user.id }
+      : { auto_share_enabled: false, ...(requested.length ? { auto_share_categories: categories } : {}) };
+    const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_sharing_preferences')
+      .upsert({ tenant_id: tenantId, opted_in: true, updated_by: req.user.id, updated_at: new Date().toISOString(), ...patch },
+        { onConflict: 'tenant_id' });
+    if (error) throw error;
+    if (!enabled) {
+      // Ce qui n'est pas encore parti ne partira pas : file d'attente, relu en attente d'envoi, retenu.
+      const { data: auto } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
+        .select('id').eq('origin', 'auto').in('status', ['queued', 'analyzing', 'reviewed', 'held']);
+      const ids = (auto || []).map((c: any) => c.id);
+      if (ids.length) {
+        const { data: sent } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
+          .select('contribution_id').in('contribution_id', ids);
+        const published = new Set((sent || []).map((r: any) => r.contribution_id));
+        const unsent = ids.filter((id: string) => !published.has(id));
+        if (unsent.length) await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions').delete().in('id', unsent);
+      }
+    }
+    res.json({ enabled, categories });
+  }));
+
+  // Met aussi en file les documents déjà présents des types choisis : geste explicite,
+  // jamais fait d'office à l'activation.
+  app.post('/api/knowledge-sharing/auto/backfill', guarded(async (_req, res, tenantId) => {
+    const prefs = await getAutoSharePrefs(supabaseAdmin, tenantId);
+    if (!prefs.enabled || !prefs.categories.length) return res.status(403).json({ error: 'Le partage automatique n’est pas activé.' });
+    const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents')
+      .select('id,name,file_url,mime_type,size_bytes,doc_type').in('doc_type', prefs.categories).limit(200);
+    if (error) throw error;
+    let queued = 0;
+    for (const doc of data || []) if (await enqueueAutoContribution(supabaseAdmin, tenantId, doc)) queued++;
+    res.json({ examined: (data || []).length, queued });
   }));
 
   app.put('/api/knowledge-sharing/consent', guarded(async (req, res, tenantId) => {
@@ -73,9 +148,15 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
       return res.status(400).json({ error: 'Le choix doit être explicite (true ou false).' });
     }
     const optedIn = req.body.opted_in;
-    const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_sharing_preferences')
-      .upsert({ tenant_id: tenantId, opted_in: optedIn, updated_by: req.user.id, updated_at: new Date().toISOString() },
-        { onConflict: 'tenant_id' });
+    const row = { tenant_id: tenantId, opted_in: optedIn, updated_by: req.user.id, updated_at: new Date().toISOString() };
+    const prefs = () => tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_sharing_preferences');
+    // Retirer l'autorisation arrête aussi le partage automatique : il ne doit pas
+    // reprendre tout seul si le cabinet la redonne plus tard. (Colonne ajoutée par
+    // la migration du partage automatique : repli sans elle si elle n'est pas passée.)
+    let { error } = await prefs().upsert(optedIn ? row : { ...row, auto_share_enabled: false }, { onConflict: 'tenant_id' });
+    if (error && !optedIn && (error.code === '42703' || error.code === 'PGRST204')) {
+      ({ error } = await prefs().upsert(row, { onConflict: 'tenant_id' }));
+    }
     if (error) throw error;
     // Désactivation d'abord : la lecture de ce flag reste le verrou de
     // publication, même si l'effacement des brouillons rencontre une erreur.
@@ -129,18 +210,9 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     if (existing.error) throw existing.error;
     if (existing.data?.status === 'reviewed') return res.status(409).json({ error: 'Cette contribution a déjà été validée.' });
 
-    // Ne jamais utiliser le parseur Nomic : son moteur optionnel est externe.
-    const { extractKnowledgeDocText, readStorageObject } = await import('@zinkh/archioffice-agents/server');
-    let source: string | null;
-    if (/\.xlsx?$/i.test(doc.name)) {
-      const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
-      if (!fetched || fetched.buffer.length > MAX_SOURCE_BYTES) return res.status(422).json({ error: 'Fichier illisible.' });
-      const workbook = XLSX.read(fetched.buffer, { type: 'buffer' });
-      source = workbook.SheetNames.slice(0, 10)
-        .map((sheet) => XLSX.utils.sheet_to_csv(workbook.Sheets[sheet]).slice(0, 12000)).join('\n');
-    } else {
-      source = await extractKnowledgeDocText(supabaseAdmin, tenantId, doc, false);
-    }
+    const extracted = await extractDocumentSource(supabaseAdmin, tenantId, doc);
+    if (extracted.unreadable) return res.status(422).json({ error: 'Fichier illisible.' });
+    const source = extracted.text;
     if (!source?.trim()) return res.status(422).json({ error: 'Aucun texte extractible. Vérifiez le PDF ou la numérisation.' });
     const preview = anonymizeTechnicalText(source);
     if (!preview.text) return res.status(422).json({ error: 'Aucun contenu exploitable.' });
@@ -193,8 +265,6 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
     // Toujours PAS de publication externe : une étape distincte sera requise.
     res.json({ ...data, publication_active: false });
   }));
-
-  const publishEnabled = () => process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED === 'true';
 
   async function fetchLibrary(apiKey: string, libraryId: string) {
     const response = await fetch('https://api.mistral.ai/v1/libraries/' + encodeURIComponent(libraryId), {
@@ -249,84 +319,14 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
 
   // A unique database reservation precedes every remote upload. No originals.
   app.post('/api/knowledge-sharing/contributions/:id/publish', guarded(async (req, res, tenantId) => {
-    if (process.env.MISTRAL_KNOWLEDGE_PUBLISH_ENABLED !== 'true') {
+    if (!publishEnabled()) {
       return res.status(403).json({ error: 'Publication externe désactivée sur cette instance.' });
     }
     if (req.body?.confirmed_external_transfer !== true) {
       return res.status(400).json({ error: 'Confirmez explicitement le transfert vers Mistral.' });
     }
-    if (!(await getPreference(tenantId))) return res.status(403).json({ error: 'Consentement du cabinet absent.' });
-    const { data: contribution, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_contributions')
-      .select('id,status,sanitized_text').eq('id', req.params.id).maybeSingle();
-    if (error) throw error;
-    if (!contribution || contribution.status !== 'reviewed') {
-      return res.status(409).json({ error: 'Seuls les extraits relus peuvent être publiés.' });
-    }
-    const checked = anonymizeTechnicalText(contribution.sanitized_text);
-    if (!contribution.sanitized_text.trim() || checked.text !== contribution.sanitized_text) {
-      return res.status(409).json({ error: 'L’extrait nécessite une nouvelle anonymisation et relecture.' });
-    }
-    const key = process.env.MISTRAL_API_KEY;
-    const libraryId = resolveKnowledgeLibraryId();
-    if (!key) return res.status(503).json({ error: 'Clé API Mistral absente.' });
-    if (!libraryId) return res.status(503).json({ error: 'Bibliothèque Mistral non configurée sur cette instance.' });
-    const remoteName = 'archioffice-' + contribution.id + '.txt';
-    const hash = createHash('sha256').update(contribution.sanitized_text).digest('hex');
-
-    // UNIQUE(contribution_id) and a DB trigger protect against concurrent
-    // sends, cross-tenant access and consent-withdrawal races.
-    const reserved = await tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents')
-      .insert({ contribution_id: contribution.id, library_id: libraryId, remote_name: remoteName,
-        content_sha256: hash, state: 'uploading' }).select().single();
-    if (reserved.error?.code === '23505') {
-      return res.status(409).json({ error: 'Un transfert existe déjà pour cet extrait (envoyé, en rapprochement ou abandonné). Pour le republier, supprimez l’extrait puis préparez-le de nouveau.' });
-    }
-    if (reserved.error?.code === '23514') {
-      return res.status(409).json({ error: 'Consentement retiré ou contribution non validée.' });
-    }
-    if (reserved.error) throw reserved.error;
-    const job = reserved.data;
-    const scope = tenantScopedFrom(supabaseAdmin, tenantId, 'knowledge_remote_documents');
-    const current = await scope.select('deletion_requested_at').eq('id', job.id).single();
-    if (current.error) throw current.error;
-    if (current.data?.deletion_requested_at || !(await getPreference(tenantId))) {
-      const cancelled = await scope.update({ state: 'deleted', deleted_at: new Date().toISOString() })
-        .eq('id', job.id).eq('state', 'uploading');
-      if (cancelled.error) throw cancelled.error;
-      return res.status(409).json({ error: 'Transfert annulé : consentement retiré.' });
-    }
-
-    let remote: { id: string };
-    try {
-      remote = await makeMistralLibraryClient(key, libraryId).upload(contribution.sanitized_text, contribution.id);
-    } catch {
-      // Remote success with a lost response is possible: do NOT retry upload.
-      const uncertain = await scope.update({
-        state: 'uncertain', last_error: 'Transfert non confirmé, rapprochement requis.',
-        updated_at: new Date().toISOString(),
-      }).eq('id', job.id).eq('state', 'uploading');
-      if (uncertain.error) throw uncertain.error;
-      return res.status(502).json({ error: 'Transfert Mistral non confirmé : vérification distante nécessaire.' });
-    }
-    const saved = await scope.update({
-      remote_document_id: remote.id, state: 'published',
-      published_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-    }).eq('id', job.id).eq('state', 'uploading').select().maybeSingle();
-    if (saved.error || !saved.data) {
-      return res.status(503).json({ error: 'Envoi distant réalisé, enregistrement local non confirmé. Ne pas réessayer le transfert.' });
-    }
-    const stillAuthorized = await getPreference(tenantId);
-    if (!stillAuthorized || saved.data.deletion_requested_at) {
-      const queued = await scope.update({
-        deletion_requested_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-      }).eq('id', job.id).neq('state', 'deleted').select().single();
-      if (queued.error) throw queued.error;
-      const removed = await processRemoteDeletion(supabaseAdmin, queued.data);
-      return res.status(removed ? 200 : 202).json({
-        published: false, deletion_pending: !removed, remote_document_id: remote.id,
-      });
-    }
-    res.status(201).json({ published: true, remote_document_id: remote.id });
+    const outcome = await publishContribution(supabaseAdmin, tenantId, req.params.id);
+    res.status(outcome.status).json(outcome.body);
   }));
 
   // Rapprochement à la demande : cherche les envois restés sans issue par leur
@@ -361,6 +361,9 @@ export function registerKnowledgeSharingRoutes(app: Express, deps: KnowledgeShar
       void (async () => {
         await flushPendingMistralDeletions(supabaseAdmin, undefined, 30);
         await reconcileStalePublications(supabaseAdmin, undefined, 20);
+        // Partage automatique : analyse de la file puis envoi. Inactif tant que
+        // l'instance n'autorise pas la publication (voir runAutoSharingCycle).
+        await runAutoSharingCycle(supabaseAdmin, { review: makeMistralReviewer() });
       })().catch(() => {});
     }, 60_000);
     interval.unref?.();
