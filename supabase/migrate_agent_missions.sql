@@ -1,5 +1,5 @@
 -- Missions agentiques persistantes, cloisonnées par cabinet.
--- Déploiement : appliquer cette migration avant d'activer AGENT_MISSIONS_ENABLED.
+-- Déploiement : appliquer aussi migrate_agent_mission_preferences.sql pour les préférences par cabinet.
 CREATE TABLE IF NOT EXISTS public.agent_missions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id UUID NOT NULL REFERENCES public.tenants(id) ON DELETE CASCADE,
