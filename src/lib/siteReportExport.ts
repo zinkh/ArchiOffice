@@ -11,6 +11,7 @@ import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import { loadPhotoDataUrl } from './planRender';
 import { autoSaveDocument } from './autoSaveDocument';
+import { appendAttachments } from './pdfAttachments';
 import { etiquetteDecoupage, type DecoupageChantier } from './chantierDecoupage';
 import { attendeeStatus, lotPresenceStatus, concernedLabel, pdfOrientation } from './siteReportPresence';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
@@ -39,6 +40,8 @@ export interface SiteReportExportOptions {
   download?: boolean;
   /** Faux : les photos des rubriques ne sont pas imprimées. Vrai par défaut. */
   includeRubriquePhotos?: boolean;
+  /** Documents (PDF, JPEG, PNG) ajoutés à la suite du compte-rendu, par exemple un compte rendu OPC. */
+  attachments?: File[];
 }
 
 export interface SiteReportPdf {
@@ -383,8 +386,15 @@ export async function exportSiteReportToPDF(
   progress('Finalisation…');
   drawAgencyFooters(doc, settings, letterhead);
   const filename = `CR_${report.report_number}_${sanitize(project.name)}.pdf`;
-  if (opts.download !== false) doc.save(filename);
-  const blob: Blob = doc.output('blob');
+  let blob: Blob = doc.output('blob');
+  if (opts.attachments?.length) {
+    progress('Ajout des documents joints…');
+    blob = await appendAttachments(blob, opts.attachments);
+  }
+  if (opts.download !== false) {
+    const { saveAs } = await import('file-saver');
+    saveAs(blob, filename);
+  }
   await autoSaveDocument({
     blob,
     filename,

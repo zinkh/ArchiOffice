@@ -6,13 +6,14 @@ import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
 import { buildDiffusionRecipients } from '../lib/crDiffusion';
 import { baseFetchJson } from '../lib/api';
+import { checkAttachment, MAX_ATTACHMENTS } from '../lib/pdfAttachments';
 import { getAccessToken } from '../lib/authToken';
 import { applyTenantHeader } from '../lib/activeTenant';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
   IconBuilding, IconTools, IconPhoto, IconClipboardList, IconAlertTriangle,
-  IconRefresh, IconListDetails, IconDots,
+  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX,
 } from '@tabler/icons-react';
 import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
@@ -66,6 +67,8 @@ const STATUT_CR_COLORS: Record<string, string> = {
 };
 
 const WEATHER_ALERT_KEYWORDS = ['pluie', 'neige', 'intemp', 'orage', 'gel', 'vent fort'];
+/** Plafond du serveur pour le PDF diffusé (server/routes/siteReportDiffusion.ts). */
+const MAX_DIFFUSION_PDF_BYTES = 20 * 1024 * 1024;
 
 function isBadWeather(meteo?: string) {
   if (!meteo) return false;
@@ -419,8 +422,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, download: false },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, download: false, attachments: pdfAttachments },
       );
+      if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
+        setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
+        return;
+      }
       const body = new FormData();
       body.append('file', blob, filename);
       body.append('contact_ids', JSON.stringify(contactIds));
@@ -596,6 +603,29 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     try { localStorage.setItem('chantier:pdf:rubriquePhotos', value ? '1' : '0'); } catch { /* préférence non mémorisée */ }
   };
 
+  // Documents joints à l'export PDF (compte rendu OPC, notice...), par compte-rendu et pour la session :
+  // les fichiers choisis sur le poste ne sont pas enregistrés avec le compte-rendu.
+  const [pdfAttachmentsByReport, setPdfAttachmentsByReport] = useState<Record<string, File[]>>({});
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
+  const pdfAttachments = selectedReport ? pdfAttachmentsByReport[selectedReport.id] ?? [] : [];
+  const addPdfAttachments = (picked: FileList | null) => {
+    if (!selectedReport || !picked) return;
+    const reportId = selectedReport.id;
+    const kept = [...(pdfAttachmentsByReport[reportId] ?? [])];
+    const errors: string[] = [];
+    for (const file of Array.from(picked)) {
+      const check = checkAttachment(file, kept.length);
+      if (check.ok) kept.push(file); else if (check.error) errors.push(check.error);
+    }
+    setPdfAttachmentsByReport(prev => ({ ...prev, [reportId]: kept }));
+    if (errors.length > 0) showToast(errors.join(' '), 'error', { duration: 6000 });
+  };
+  const removePdfAttachment = (index: number) => {
+    if (!selectedReport) return;
+    const reportId = selectedReport.id;
+    setPdfAttachmentsByReport(prev => ({ ...prev, [reportId]: (prev[reportId] ?? []).filter((_, i) => i !== index) }));
+  };
+
   const rubriquesByCategory = useMemo(() => {
     const groups = new Map<string, SiteReportNote[]>();
     reportNotes.forEach(n => {
@@ -725,10 +755,11 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, includeRubriquePhotos: pdfRubriquePhotos },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
+      showToast(error instanceof Error ? error.message : 'Le PDF n\'a pas pu être généré.', 'error', { duration: 6000 });
     } finally {
       setIsGeneratingPdf(false);
     }
@@ -1007,6 +1038,24 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         <input type="checkbox" checked={pdfRubriquePhotos} onChange={e => changePdfRubriquePhotos(e.target.checked)} />
                         Photos des rubriques dans le PDF
                       </label>
+                      <span className="flex flex-wrap items-center gap-1.5 text-xs">
+                        <input ref={attachmentInputRef} type="file" multiple hidden
+                          accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
+                          onChange={e => { addPdfAttachments(e.target.files); e.target.value = ''; }} />
+                        <button type="button" onClick={() => attachmentInputRef.current?.click()}
+                          disabled={pdfAttachments.length >= MAX_ATTACHMENTS}
+                          title="Ajouter à la suite du PDF un document : compte rendu OPC, notice, planning... (PDF, JPEG ou PNG)"
+                          className="inline-flex items-center gap-1 text-[var(--tblr-primary)] hover:underline disabled:opacity-50 disabled:no-underline">
+                          <IconPaperclip size={13} /> Joindre un document au PDF
+                        </button>
+                        {pdfAttachments.map((file, i) => (
+                          <span key={`${file.name}-${i}`} className="inline-flex items-center gap-1 rounded border border-[var(--tblr-border)] px-1.5 py-0.5">
+                            <span className="max-w-[12rem] truncate" title={file.name}>{file.name}</span>
+                            <button type="button" aria-label={`Retirer ${file.name}`} onClick={() => removePdfAttachment(i)}
+                              className="text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]"><IconX size={12} /></button>
+                          </span>
+                        ))}
+                      </span>
                       <button
                         onClick={() => refreshWeather(selectedReport)}
                         disabled={weatherLoading || !project.address}
