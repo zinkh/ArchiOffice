@@ -81,7 +81,7 @@ export function RagSettingsCard() {
         <strong className="text-sm">Référentiel technique mutualisé</strong>
         <p className="text-xs" style={{color:'var(--tblr-muted)'}}>
           Consulte uniquement les extraits anonymisés, approuvés et publiés dans la bibliothèque Mistral.
-          L'accès est facultatif, sans transmission de votre question à Mistral. Les documents confidentiels restent privés.
+          Cette autorisation de lecture n'envoie rien à Mistral. Si la recherche sémantique est activée séparément, celle-ci transmet vos questions pour calculer les vecteurs. Les documents confidentiels restent privés.
         </p>
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={state.shared_knowledge_enabled} disabled={busy}
