@@ -21,7 +21,7 @@ describe('hiérarchie PRO', () => {
     const group = result.lots[0].chapitres[0].lignes[0];
     expect(group).toMatchObject({ id: 'group', type: 'titre' });
     expect(group.children?.map(l => [l.id, l.prixTotal, l.numero])).toEqual([
-      ['a', 20, '01.1.1.1'], ['b', 30, '01.1.1.2'],
+      ['a', 20, '1.1.1'], ['b', 30, '1.1.2'],
     ]);
     expect(result.selection).toEqual({ kind: 'ligne', lotIdx: 0, chapIdx: 0, lignePath: [0, 1] });
     expect(result.lots[0].sousTotal).toBe(50);
@@ -35,7 +35,7 @@ describe('hiérarchie PRO', () => {
     expect(result.lots[0].chapitres).toHaveLength(1);
     const group = result.lots[0].chapitres[0].lignes[2];
     expect(group).toMatchObject({ id: 'chap-2', designation: 'Élévation', type: 'titre', batimentId: 'B', cctpDescription: 'Texte technique' });
-    expect(group.children?.[0]).toMatchObject({ id: 'c', numero: '01.1.3.1', prixTotal: 20 });
+    expect(group.children?.[0]).toMatchObject({ id: 'c', numero: '1.3.1', prixTotal: 20 });
     expect(result.lots[0].sousTotal).toBe(70);
     expect(result.selection).toEqual({ kind: 'ligne', lotIdx: 0, chapIdx: 0, lignePath: [2] });
     const restored = promoteHierarchy(result.lots, result.selection, () => 'unused');
@@ -76,7 +76,7 @@ describe('hiérarchie PRO', () => {
     expect(canDemote(lots, selection)).toBe(true);
     const result = demoteHierarchy(lots, selection, () => 'unused');
     const moved = result.lots[0].chapitres[0].lignes[0].children![0].children![0].children![0].children![1];
-    expect(moved).toMatchObject({ id: 'selected', numero: '01.1.1.1.1.1.b' });
+    expect(moved).toMatchObject({ id: 'selected', numero: '1.1.1.1.1.b' });
     expect(result.selection).toEqual({ ...selection, lignePath: [0, 0, 0, 0, 1] });
     expect(canDemote(result.lots, result.selection)).toBe(false);
   });
