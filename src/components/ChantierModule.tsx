@@ -31,6 +31,7 @@ import type { AgencySettings } from '../lib/proposalExport';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Section } from './chantier/Section';
 import { DraftInput, parseDays } from './chantier/fields';
+import { upsertById } from '../lib/observationsLocal';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
@@ -637,7 +638,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
         ...(lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {}),
       };
-      setReportObservations(prev => [...prev, newObs]);
+      setReportObservations(prev => upsertById(prev, newObs));
       fetchAllObservations().catch(() => {});
       return id;
     } catch (err) { console.error(err); return undefined; }
@@ -1352,7 +1353,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           )}
 
           {activeTab === 'reserves' && (
-            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly} />
+            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly}
+              onChanged={() => { fetchAllObservations().catch(() => {}); fetchReportObservations().catch(() => {}); }} />
           )}
 
           {activeTab === 'entreprises' && <EntreprisesTab lots_list={lots_list} observations={allObservations} />}

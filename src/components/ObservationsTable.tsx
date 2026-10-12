@@ -15,6 +15,7 @@ import { useConfirmDialog } from './ui/ConfirmDialog';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
+import { reconcileRemote, upsertById } from '../lib/observationsLocal';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { SANS_AFFECTATION, DECOUPAGE_VIDE, batimentsActifs, phasesActives, correspondDecoupage, type DecoupageChantier, type FiltreDecoupage } from '../lib/chantierDecoupage';
 import { DecoupageFilters, DecoupageSelects } from './chantier/DecoupageFields';
@@ -35,6 +36,8 @@ interface Props {
   defaultType?: Observation['type'];
   /** Appelé quand des réserves de l'AOR viennent d'être créées (pour rafraîchir leur liste). */
   onReservesChanged?: () => void;
+  /** Appelé après un ajout ou une suppression : les autres vues du chantier relisent leurs observations. */
+  onChanged?: () => void;
   /** Ouvre la vue sur « Ouverts seulement » (revue des observations non levées depuis le compte-rendu). */
   initialOpenOnly?: boolean;
 }
@@ -113,7 +116,7 @@ const COLUMN_LABELS: Record<string, string> = {
   actions: '',
 };
 
-export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged, initialOpenOnly = false }: Props) {
+export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged, onChanged, initialOpenOnly = false }: Props) {
   const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -168,9 +171,18 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     [reportId, projectId],
   );
 
+  // Lignes supprimées / créées ici : une relecture partie avant l'action et revenue après
+  // ne doit ni faire réapparaître une suppression ni faire disparaître une création.
+  const observationsRef = useRef<Observation[]>([]);
+  observationsRef.current = observations;
+  const supprimesRef = useRef(new Set<string>());
+  const creeesRef = useRef(new Set<string>());
+
   const fetchObservations = useCallback(() => {
     setLoadError(false);
-    cachedListFirst(db.observationsCache, scopeFilter, endpoint, setObservations)
+    const appliquer = (liste: Observation[]) =>
+      setObservations(prev => reconcileRemote(liste, prev, supprimesRef.current, creeesRef.current));
+    cachedListFirst(db.observationsCache, scopeFilter, endpoint, appliquer)
       .then(({ hadLocalData, synced }) => { if (!hadLocalData && !synced) setLoadError(true); })
       .catch(err => { console.error(err); setLoadError(true); });
   }, [endpoint, scopeFilter]);
@@ -228,11 +240,24 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
       batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
       phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
     };
+    // La ligne apparaît tout de suite (en attente) : sans cela, on re-clique et on en crée deux.
+    const provisoire: Observation = { ...body, project_id: projectId, pendingSync: true };
+    creeesRef.current.add(id);
+    setObservations(prev => upsertById(prev, provisoire));
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${projectId}/observations`, body });
-      const newObs: Observation = queued ? { ...body, project_id: projectId, pendingSync: true } : data!;
-      setObservations(prev => [...prev, newObs]);
-    } catch (err) { console.error(err); }
+      if (!queued && data) {
+        setObservations(prev => upsertById(prev, data));
+        db.observationsCache.put(data).catch(() => {});
+        creeesRef.current.delete(id);
+      }
+      onChanged?.();
+    } catch (err) {
+      console.error(err);
+      creeesRef.current.delete(id);
+      setObservations(prev => prev.filter(o => o.id !== id));
+      setSaveError(true);
+    }
   };
 
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
@@ -245,13 +270,23 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
       tone: 'danger',
     });
     if (!confirmed) return;
+    // Suppression immédiate à l'écran et dans le cache hors-ligne ; la requête suit.
+    const retiree = observationsRef.current.find(o => o.id === id);
+    supprimesRef.current.add(id);
+    creeesRef.current.delete(id);
+    setObservations(prev => prev.filter(o => o.id !== id));
+    db.observationsCache.delete(id).catch(() => {});
     try {
       await queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'DELETE', url: `/api/observations/${id}` });
-      setObservations(prev => prev.filter(o => o.id !== id));
+      onChanged?.();
     } catch (err) {
       console.error(err);
+      // Refus du serveur : la ligne revient à sa place, avec un message.
+      supprimesRef.current.delete(id);
+      if (retiree) { const r = retiree; setObservations(prev => upsertById(prev, r)); db.observationsCache.put(r).catch(() => {}); }
+      setSaveError(true);
     }
-  }, [confirmAction, t]);
+  }, [confirmAction, t, onChanged]);
 
   // Reprise en réserve de l'AOR (OPR) : l'observation reste en place et affiche
   // le numéro de sa réserve. En ligne seulement : la numérotation est tenue par le serveur.

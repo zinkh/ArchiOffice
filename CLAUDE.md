@@ -1824,6 +1824,13 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   l'onglet Observations. Le badge « N observations non levées sur l'opération » (`countOpenObservations`,
   `src/lib/observationsOpen.ts`, tout ce qui n'est pas « Levée ») ouvre cet onglet sur « Ouverts seulement »
   (`initialOpenOnly`) pour la revue.
+- **Ajout et suppression immédiats, sans doublon** (`ObservationsTable.tsx`, `src/lib/observationsLocal.ts`, testé) :
+  une observation ajoutée apparaît tout de suite (« en attente ») au lieu d'attendre le serveur, ce qui évitait de
+  re-cliquer et d'en créer deux ; une suppression retire la ligne de l'écran ET du cache hors-ligne avant la requête
+  (la ligne revient avec un message si le serveur refuse). Une relecture partie avant l'action et revenue après ne
+  ressuscite pas une ligne supprimée et ne fait pas disparaître une création (`reconcileRemote`), et un identifiant
+  n'est jamais présent deux fois (`upsertById`, aussi dans `ChantierModule`). Après un ajout ou une suppression, le
+  tableau prévient le compte-rendu (`onChanged`), dont les listes se relisent.
 - **Réponse** : `observations.reponse` (`supabase/migrate_observations_reponse.sql`), texte libre saisi dans la
   ligne dépliée de l'onglet Observations (flèche à gauche, point si une réponse existe). L'export PDF du CR
   l'imprime sous la description, avec la colonne « Bât. / phase » quand le chantier a un registre et
