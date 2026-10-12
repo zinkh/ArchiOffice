@@ -1860,6 +1860,19 @@ défaut) et non dans `lot_tracking` (`lotPresenceStatus`, `src/lib/siteReportPre
   (`localStorage`, `chantier:pdf:rubriquePhotos`, coché par défaut) et passe par
   `includeRubriquePhotos`. Les rubriques reportées d'un CR au suivant ne reprennent pas les photos.
 
+### Intervenants d'une affaire (agents et MCP)
+
+Les intervenants (`project_stakeholders`, liste « Intervenants » de la fiche) ne sont pas une
+ressource de `AGENT_RESOURCES` : ils vivent dans la fiche affaire (`stakeholders_list`) et
+s'écrivent par `PUT /api/projects/:id/stakeholders`, qui REMPLACE toute la liste. Un agent
+n'avait donc aucun moyen d'y toucher et créait une tâche « mettre à jour les intervenants » à la
+place. `manage_project_stakeholders` (`projectStakeholdersTool.ts`, scope `projects`, exposé au
+MCP) fait `list`, `add` et `remove` : il relit la liste (`/full`), y applique la demande et
+renvoie l'ensemble. Une ligne existante garde son identifiant (les présences de compte rendu s'y
+rattachent), un doublon (même contact, même rôle) est ignoré, un contact se désigne par
+`contact_id` ou par son nom exact (plusieurs fiches homonymes : refus et liste des candidats),
+un rôle est obligatoire. `remove` passe par la confirmation en deux temps de `delete_record`.
+
 ### Import de notes dans un CR de chantier (agents et MCP)
 
 `import_site_report_notes` (`packages/archioffice-agents/src/server/siteReportNotesTool.ts`) range

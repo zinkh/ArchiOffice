@@ -11,6 +11,7 @@ import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
 import { IMPORT_SITE_REPORT_NOTES_TOOL, IMPORT_SITE_REPORT_NOTES_TOOL_NAME, importSiteReportNotes } from './siteReportNotesTool.js';
+import { MANAGE_PROJECT_STAKEHOLDERS_TOOL, MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME, manageProjectStakeholders } from './projectStakeholdersTool.js';
 
 export type { FunctionDeclarationLike };
 
@@ -64,6 +65,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
       },
     });
     tools.push(IMPORT_SITE_REPORT_NOTES_TOOL);
+    tools.push(MANAGE_PROJECT_STAKEHOLDERS_TOOL);
   }
 
   if (creatable.length > 0) {
@@ -425,6 +427,12 @@ export async function executeAgentAction(
     if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return importSiteReportNotes(baseUrl, auth, args);
+  }
+
+  if (name === MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME) {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return manageProjectStakeholders(baseUrl, auth, args);
   }
 
   if (name === 'add_site_report_observation') {
