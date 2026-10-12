@@ -1,5 +1,6 @@
 import type { Express } from 'express';
-import { embedTexts, tenantAllowsRemoteEmbeddings, vectorLiteral } from '../rag/embeddings';
+import { tenantAllowsRemoteEmbeddings } from '../rag/embeddings';
+import { retrieveRag, isSharedKnowledgeEnabled } from '../rag/retrieval';
 
 interface RagRouteDeps {
   db: any;
@@ -11,11 +12,12 @@ export function registerRagRoutes(app: Express,{db,getTenantId,requireRole}: Rag
     try {
       const tenantId=await getTenantId(req.user.id);
       const enabled=await tenantAllowsRemoteEmbeddings(db,tenantId);
+      const sharedEnabled=await isSharedKnowledgeEnabled(db,tenantId);
       const {data,error}=await db.from('rag_documents').select('status').eq('tenant_id',tenantId).limit(5000);
       if(error) throw error;
       const statuses={queued:0,processing:0,indexed:0,failed:0};
       for(const item of data||[]) if(item.status in statuses) (statuses as any)[item.status]++;
-      res.json({external_embeddings_enabled:enabled, provider_configured:!!process.env.MISTRAL_API_KEY,documents:statuses});
+      res.json({external_embeddings_enabled:enabled, shared_knowledge_enabled:sharedEnabled, provider_configured:!!process.env.MISTRAL_API_KEY,documents:statuses});
     }catch(e:any){res.status(500).json({error:e?.message||'Index indisponible.'});}
   });
 
@@ -33,6 +35,51 @@ export function registerRagRoutes(app: Express,{db,getTenantId,requireRole}: Rag
       if(error) throw error;
       res.json({external_embeddings_enabled:await tenantAllowsRemoteEmbeddings(db,tenantId)});
     }catch(e:any){res.status(500).json({error:e?.message||'Réglage impossible.'});}
+  });
+
+  app.patch('/api/rag/shared-settings', requireRole('admin'), async(req:any,res:any)=>{
+    try {
+      const enabled=req.body?.shared_knowledge_enabled;
+      if(typeof enabled!=='boolean') return res.status(400).json({error:'Booléen requis.'});
+      const tenantId=await getTenantId(req.user.id);
+      const {error}=await db.from('tenants').update({rag_shared_knowledge_enabled:enabled})
+        .eq('id',tenantId);
+      if(error) throw error;
+      res.json({shared_knowledge_enabled:await isSharedKnowledgeEnabled(db,tenantId)});
+    }catch(e:any){res.status(500).json({error:e?.message||'Réglage impossible.'});}
+  });
+
+  // A stable passage reference never exposes the storage URL. Re-check
+  // tenant, source document version, and current indexing status on every
+  // request; invalidated citations return 404 after a version change.
+  app.get('/api/rag/source/:chunkId',async(req:any,res:any)=>{
+    try {
+      const tenantId=await getTenantId(req.user.id);
+      const id=String(req.params.chunkId||'');
+      if(!/^[0-9a-f-]{36}$/i.test(id))return res.status(400).json({error:'Référence invalide.'});
+      const {data:chunk,error}=await db.from('rag_chunks')
+        .select('id,rag_document_id,ordinal,page_number,section_title,content')
+        .eq('id',id).eq('tenant_id',tenantId).maybeSingle();
+      if(error) throw error;
+      if(!chunk)return res.status(404).json({error:'Source introuvable.'});
+      const {data:index}=await db.from('rag_documents')
+        .select('document_id,indexed_version,status')
+        .eq('id',chunk.rag_document_id).eq('tenant_id',tenantId).maybeSingle();
+      if(!index||index.status!=='indexed') return res.status(404).json({error:'Source périmée.'});
+      const {data:doc}=await db.from('documents')
+        .select('id,name,version,project_id,phase,resource_type,resource_id')
+        .eq('id',index.document_id).eq('tenant_id',tenantId).maybeSingle();
+      if(!doc||index.indexed_version!==Number(doc.version||1)) return res.status(404).json({error:'Version périmée.'});
+      // Agent knowledge is private to that agent even within the same tenant:
+      // the owner is never inferred from a chunk UUID supplied by a user.
+      if(doc.resource_type==='agents')return res.status(403).json({error:'Source réservée à la bibliothèque de l’agent.'});
+      res.json({
+        source:'cabinet',document_id:doc.id,document_name:doc.name,version:doc.version,
+        project_id:doc.project_id,phase:doc.phase,chunk_id:chunk.id,
+        ordinal:chunk.ordinal,page_number:chunk.page_number,
+        section_title:chunk.section_title,excerpt:chunk.content,
+      });
+    }catch(e:any){res.status(503).json({error:e?.message||'Source indisponible.'});}
   });
 
   app.post('/api/rag/reindex',requireRole('admin'),async(req:any,res:any)=>{
@@ -78,27 +125,12 @@ export function registerRagRoutes(app: Express,{db,getTenantId,requireRole}: Rag
         if(!agent) return res.status(403).json({error:'Lecture documentaire désactivée pour cet agent.'});
       }
 
-      const externalAllowed=await tenantAllowsRemoteEmbeddings(db,tenantId);
-      let vector:string|null=null;
-      if(externalAllowed && process.env.MISTRAL_API_KEY) {
-        try { vector=vectorLiteral((await embedTexts([query]))[0]); }
-        catch(e:any) { console.warn('[rag] semantic search fallback:',e?.message); }
-      }
-      const {data,error}=await db.rpc('rag_search_private',{
-        p_tenant_id:tenantId,p_query:query,p_project_id:projectId,
-        p_phase:phase,p_agent_id:agentId,p_embedding:vector,
-        p_limit:Math.min(12,Math.max(1,Number(req.body?.limit)||8)),
+      const matches=await retrieveRag(db,{
+        tenantId,query,projectId,phase,agentId,
+        limit:Math.min(12,Math.max(1,Number(req.body?.limit)||8)),
+        includeShared:req.body?.include_shared===true,
       });
-      if(error) throw error;
-      res.json({
-        results:(data||[]).map((d:any)=>({
-          document_id:d.document_id,document_name:d.document_name,
-          project_id:d.project_id,phase:d.phase,version:d.document_version,
-          chunk_id:d.chunk_id,ordinal:d.ordinal,page_number:d.page_number,
-          section_title:d.section_title,excerpt:d.content,score:d.score,
-        })),
-        mode:vector?'hybrid':'lexical',
-      });
+      res.json(matches);
     }catch(e:any){res.status(503).json({error:e?.message||'Recherche indisponible.'});}
   });
 }
