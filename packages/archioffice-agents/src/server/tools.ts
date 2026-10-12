@@ -613,7 +613,7 @@ export async function executeAgentAction(
 
   if (name === 'search_knowledge') {
     if (!caps.docsRead) return { response: { error: "La recherche documentaire n'est pas activée pour cet agent." } };
-    if (!auth || !selfAgent?.id) return { response: { error: 'Identité et session de l’agent requises.' } };
+    if (!auth) return { response: { error: 'Session authentifiée requise.' } };
     try {
       const response = await fetch(baseUrl + '/api/rag/search', {
         method: 'POST',
@@ -622,7 +622,7 @@ export async function executeAgentAction(
           query: String(args.query || ''),
           project_id: args.project_id || undefined,
           phase: args.phase || undefined,
-          agent_id: selfAgent.id,
+          agent_id: selfAgent?.id || undefined,
         }),
       });
       const result:any = await response.json().catch(() => ({}));
