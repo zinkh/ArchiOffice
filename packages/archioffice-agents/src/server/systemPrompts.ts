@@ -36,6 +36,12 @@ function buildBasePrompt(agent: AgentRow, ctx: AgentContext, webSearchActive: bo
   // the user's side, very much attached and read.
   const docContentsSection = ctx.documentContents.length > 0
     ? `\n═══ CONTENU DES DOCUMENTS JOINTS ═══\n` +
+      `Règle absolue : le seul contenu d'un document que tu possèdes est celui qui figure ci-dessous, entre ses repères « --- nom --- ». ` +
+      `N'évoque jamais un onglet, une ligne, un projet, un lot, un nom ou une date qui n'y figure pas mot pour mot. ` +
+      `Si un document est marqué « CONTENU NON LU », ou si ce qu'on te demande d'y trouver n'y est pas (onglet absent, tableau vide), ` +
+      `dis-le simplement et demande à la personne de vérifier le fichier. ` +
+      `Avant de créer ou modifier des enregistrements à partir d'un document, cite les lignes exactes que tu reprends ; ` +
+      `sans ligne précise dans le contenu ci-dessous, tu ne crées rien.\n` +
       ctx.documentContents.map(d => `\n--- ${d.name} ---\n${d.content}\n---`).join('\n')
     : '';
 

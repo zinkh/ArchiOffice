@@ -12,6 +12,7 @@ import mammoth from 'mammoth';
 import { parseWithActiveEngine } from './documentParser.js';
 import { ocrDocument, isOcrCandidate, OCR_IMAGE_EXTENSIONS, rasterizePdf, visionMimeType, ocrMaxPages, OCR_MIN_TEXT_CHARS } from './ocr.js';
 import { readExternalFile } from './externalFiles.js';
+import { isSpreadsheetName, spreadsheetToText } from './spreadsheetText.js';
 
 const MAX_DOC_BYTES = 80_000; // ~80KB per document injected into context
 
@@ -469,6 +470,20 @@ export async function buildAgentContext(
       .eq('tenant_id', tenantId)
       .in('id', attachedDocumentIds);
 
+    // Un document joint dont le contenu n'a pas pu être lu ne doit JAMAIS
+    // disparaître en silence : le modèle sait qu'un fichier est joint (le
+    // message de la personne le dit), et sans cette mention il en décrit le
+    // contenu de tête — un suivi de réserves lu comme « 5 réserves AOR »
+    // inventées, puis des tâches créées dessus. La mention dit le fait, et
+    // la règle du prompt (systemPrompts.ts) interdit d'en deviner le contenu.
+    const markUnread = (doc: any, reason: string) => {
+      ctx.documentContents.push({
+        id: doc.id,
+        name: doc.name,
+        content: `[CONTENU NON LU : ${reason}. Tu n'as reçu AUCUNE donnée de ce fichier. Dis-le explicitement à l'utilisateur, ne décris rien de son contenu et ne crée aucun enregistrement à partir de lui.]`,
+      });
+    };
+
     const contentFetches = ((docs as any[]) || []).map((doc: any) => {
       const docStart = Date.now();
       return withTimeout((async () => {
@@ -487,7 +502,10 @@ export async function buildAgentContext(
         // bypasses the bucket's privacy the same way a table query bypasses
         // RLS — no signed URL needed.
         const fetched = await readStorageObject(supabaseAdmin, tenantId, doc.file_url);
-        if (!fetched) return;
+        if (!fetched) {
+          markUnread(doc, 'le fichier est introuvable ou inaccessible dans le stockage');
+          return;
+        }
         const { buffer, contentType } = fetched;
 
         // Une photo (carte de visite, panneau, véhicule d'entreprise...) part
@@ -536,12 +554,17 @@ export async function buildAgentContext(
           text = (await pdfParse(buffer)).text;
         } else if (lowerName.endsWith('.docx')) {
           text = (await mammoth.extractRawText({ buffer })).value;
+        } else if (isSpreadsheetName(lowerName)) {
+          // Classeur Excel / ODS : chaque onglet est rendu ligne à ligne, le
+          // nom des onglets en tête, pour que l'agent sache ce qui existe.
+          text = spreadsheetToText(buffer, MAX_DOC_BYTES);
         } else if (contentType.includes('text') || contentType.includes('json') || contentType.includes('csv') || contentType.includes('xml')) {
           // Everything else without a dedicated extractor above (images,
-          // spreadsheets, legacy .doc...) — only inject text-based content,
-          // never binary bytes as if they were readable text.
+          // legacy .doc...) — only inject text-based content, never binary
+          // bytes as if they were readable text.
           text = buffer.toString('utf8');
         } else if (!OCR_IMAGE_EXTENSIONS.some(ext => lowerName.endsWith(ext))) {
+          markUnread(doc, `le format de « ${doc.name} » n'est pas pris en charge pour la lecture`);
           return;
         }
 
@@ -587,7 +610,10 @@ export async function buildAgentContext(
           }
         }
 
-        if (!text || !text.trim()) return;
+        if (!text || !text.trim()) {
+          markUnread(doc, 'le fichier ne contient aucun texte exploitable');
+          return;
+        }
         ctx.documentContents.push({
           id: doc.id,
           name: doc.name,
@@ -600,11 +626,13 @@ export async function buildAgentContext(
         // here was previously invisible, indistinguishable from "the
         // document just has no useful content".
         console.log(`[agent context] document "${doc.name}" extraction failed after ${Date.now() - docStart}ms: ${e?.message}`);
+        markUnread(doc, 'la lecture du fichier a échoué (fichier corrompu ou protégé)');
       }
     })(), isOcrLikely(doc.name) ? OCR_EXTRACTION_TIMEOUT_MS : DOC_EXTRACTION_TIMEOUT_MS).catch(() => {
       // Timed out (or any other rejection) — skip this document, same as an
       // extraction error above.
       console.log(`[agent context] document "${doc.name}" extraction timed out after ${Date.now() - docStart}ms`);
+      markUnread(doc, 'la lecture du fichier a dépassé le délai imparti');
     });
     });
 

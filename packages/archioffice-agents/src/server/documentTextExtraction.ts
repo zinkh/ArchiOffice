@@ -9,6 +9,7 @@ import pdfParse from 'pdf-parse';
 import mammoth from 'mammoth';
 import { ocrDocument, isOcrCandidate } from './ocr.js';
 import { parseWithActiveEngine } from './documentParser.js';
+import { isSpreadsheetName, spreadsheetToText } from './spreadsheetText.js';
 
 // Un devis ou une notice technique dépasse vite quelques milliers de
 // caractères — 20000 reste un ordre de grandeur raisonnable pour un document
@@ -52,6 +53,8 @@ export async function extractDocumentText(filename: string, mimeType: string, bu
     text = (await pdfParse(buffer)).text;
   } else if (lower.endsWith('.docx') || mimeType.includes('wordprocessingml')) {
     text = (await mammoth.extractRawText({ buffer })).value;
+  } else if (isSpreadsheetName(lower) || mimeType.includes('spreadsheetml') || mimeType === 'application/vnd.ms-excel') {
+    text = spreadsheetToText(buffer, MAX_EXTRACTED_TEXT_CHARS);
   } else if (mimeType.includes('text') || mimeType.includes('json') || mimeType.includes('csv') || mimeType.includes('xml')) {
     text = buffer.toString('utf8');
   }
