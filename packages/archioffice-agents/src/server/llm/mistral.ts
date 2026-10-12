@@ -125,7 +125,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
     // fournisseur ; web_search_enabled reste sans effet tant qu'un cabinet
     // fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
-    async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, timeoutMs }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
         headers: {
@@ -133,7 +133,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
           Accept: 'application/json',
           Authorization: `Bearer ${opts.apiKey}`,
         },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT_MS),
         body: JSON.stringify({
           model,
           max_tokens: MAX_TOKENS,

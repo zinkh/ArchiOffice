@@ -45,6 +45,9 @@ const MAX_DOCUMENTS = 10;
 const MAX_SOURCE_CHARS = 60_000; // borne le coût d'un appel, comme MAX_DCE_CHARS
 const MAX_INSTRUCTIONS_CHARS = 2_000;
 const NOMIC_EXTRACT_TIMEOUT_MS = 170_000;
+// Un CCTP complet est un long JSON (jusqu'à 16 000 jetons) : le délai de 120 s
+// du chat ne suffit pas à Mistral. Reste sous les 300 s usuels d'un proxy.
+const LLM_GENERATION_TIMEOUT_MS = 270_000;
 const MAX_LOTS = 40;
 const MAX_CHAPITRES = 40;
 const MAX_ARTICLES = 80;
@@ -220,7 +223,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
       }
       let result;
       try {
-        result = await provider.chat({ system: SYSTEM_PROMPT, messages: [{ role: 'user', content: prompt }] });
+        result = await provider.chat({ system: SYSTEM_PROMPT, messages: [{ role: 'user', content: prompt }], timeoutMs: LLM_GENERATION_TIMEOUT_MS });
       } catch (e) {
         await refundAiCredit(tenantId, reservedCents).catch(() => {});
         throw e;

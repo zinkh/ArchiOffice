@@ -84,6 +84,10 @@ export interface LlmChatParams {
    *  (LlmProvider.supportsWebSearch) — voir mistral.ts pour pourquoi Mistral
    *  n'est pas de ceux-là. */
   webSearch?: boolean;
+  /** Délai maximal de cet appel, en ms, pour le fournisseur qui en impose un
+   *  (Mistral). Par défaut celui du chat ; une rédaction longue (CCTP) le
+   *  relève. */
+  timeoutMs?: number;
 }
 
 export interface LlmChatResult {
