@@ -60,14 +60,28 @@ export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, ge
       if (sourceType === 'document') {
         sourceRef = String(req.body?.document_id || '');
         const { data: doc } = await db.from('documents')
-          .select('id,name,description,project_id,category,phase').eq('id', sourceRef)
+          .select('id,name,project_id,file_url,mime_type,size_bytes').eq('id', sourceRef)
           .eq('tenant_id', tenantId).maybeSingle();
         if (!doc) return res.status(404).json({ error: 'Document introuvable dans ce cabinet.' });
+        if (!doc.file_url || Number(doc.size_bytes || 0) > 25 * 1024 * 1024) {
+          return res.status(422).json({ error: 'Document indisponible ou trop volumineux pour une lecture agentique.' });
+        }
         projectId = doc.project_id || null;
-        // Never pretend that document metadata is its actual parsed content.
-        source = 'Métadonnées du document : ' + (doc.name || '') + '; catégorie : ' +
-          (doc.category || '') + '; phase : ' + (doc.phase || '') +
-          '; description : ' + (doc.description || '');
+        // A document mission must read ACTUAL bytes; file name / metadata
+        // cannot support conclusions about contents or citations.
+        const { readStorageObject, extractDocumentText, withTextExtractionTimeout } =
+          await import('@zinkh/archioffice-agents/server');
+        const file = await readStorageObject(db, tenantId, doc.file_url);
+        if (!file || file.buffer.length > 25 * 1024 * 1024) {
+          return res.status(422).json({ error: 'Contenu du document inaccessible ou trop volumineux.' });
+        }
+        const parsed = await withTextExtractionTimeout(
+          extractDocumentText(doc.name || '', doc.mime_type || file.contentType, file.buffer)
+        );
+        if (!parsed.text?.trim()) {
+          return res.status(422).json({ error: 'Aucun texte exploitable extrait du document ; mission non créée.' });
+        }
+        source = parsed.text.slice(0, 12000);
       }
       if (projectId) {
         const { data: project } = await db.from('projects').select('id')
