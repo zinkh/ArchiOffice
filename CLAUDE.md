@@ -1856,6 +1856,18 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   l'imprime sous la description, avec la colonne « Bât. / phase » quand le chantier a un registre et
   qu'une observation y est affectée (`opts.decoupage`).
 
+### Documents joints à l'export PDF du compte-rendu
+
+« Joindre un document au PDF » (en-tête du compte-rendu, `ChantierModule.tsx`) ajoute à la suite du
+PDF un compte rendu OPC, une notice, un planning... : PDF repris page par page (texte et vecteurs
+conservés), image JPEG ou PNG posée sur une page A4. Logique dans `src/lib/pdfAttachments.ts`
+(`checkAttachment`, `appendAttachments` sur `pdf-lib`, testée) ; `exportSiteReportToPDF` reçoit
+`attachments`. Cinq documents au plus, 15 Mo chacun. Le même PDF fusionné sert au téléchargement et à la
+diffusion par e-mail (plafond serveur de 20 Mo vérifié avant l'envoi). Les fichiers sont choisis sur le
+poste et gardés pour la session seulement, par compte-rendu : rien n'est enregistré avec lui. Un PDF
+protégé ou corrompu fait échouer l'export en nommant le fichier, jamais d'envoi amputé. La pagination
+« P1|2 » ne compte que les pages du compte-rendu lui-même.
+
 ### Observations : export PDF, impression, menu collant
 
 `src/lib/observationsExport.ts` exporte la liste telle qu'affichée (filtres, regroupement par lot, colonnes visibles) en PDF paysage à la charte (`exportObservationsToPDF`), téléchargé ou imprimé (`telechargerPdf`, `imprimerPdf`) ; seule une échéance dépassée est en rouge. Les boutons « Exporter PDF » et « Imprimer » sont dans la barre d'outils de `ObservationsTable`. Le menu des sections du chantier (`ChantierModule.tsx`) est `sticky top-0` : il reste visible au défilement.
