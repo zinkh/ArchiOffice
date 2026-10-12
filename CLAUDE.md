@@ -1840,6 +1840,7 @@ défaut) et non dans `lot_tracking` (`lotPresenceStatus`, `src/lib/siteReportPre
   orientation ; les planches de vignettes s'adaptent à la largeur (`thumbsPerRow`).
 - **W/D** : `lot_tracking[].concerned` (`W`, `D`, `WD`, jsonb, aucune migration), saisi par lot
   (tableau et cartes mobiles) et imprimé en dernière colonne du suivi des lots.
+- **Renommer une rubrique** : le nom de la rubrique (catégorie des entrées) se modifie en place dans l'en-tête de son groupe (`renameRubrique`, `ChantierModule.tsx`). Toutes ses entrées du compte-rendu passent sous le nouveau nom (un nom déjà utilisé les fusionne avec cette rubrique) ; une écriture en file par entrée, `PUT /api/notes/:id` n'écrit que les champs fournis et refuse un nom vide (400).
 - **Photos de rubriques** : `site_report_notes.photos` (`supabase/migrate_site_report_note_photos.sql`,
   tableau d'URL du bucket privé `meeting-photos`), `POST /api/notes/:id/photos` (id client
   idempotent, file hors ligne `siteReportNotePhoto`) et `PUT /api/notes/:id/photos` qui ne sait

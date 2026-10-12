@@ -210,7 +210,16 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const tenantId = await getTenantId(req.user.id);
       const { noteId } = req.params;
       const { category, responsible_company, text, status, due_date, realization_date } = req.body;
-      const { error } = await supabaseAdmin.from('site_report_notes').update({ category, responsible_company, text, status, due_date, realization_date }).eq('id', noteId).eq('tenant_id', tenantId);
+      if (category !== undefined && (typeof category !== 'string' || !category.trim())) {
+        return res.status(400).json({ error: "Le nom de la rubrique ne peut pas être vide" });
+      }
+      // Seuls les champs fournis sont écrits : renommer une rubrique n'envoie que `category`.
+      const patch = Object.fromEntries(Object.entries({
+        category: typeof category === 'string' ? category.trim() : category,
+        responsible_company, text, status, due_date, realization_date,
+      }).filter(([, v]) => v !== undefined));
+      if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
+      const { error } = await supabaseAdmin.from('site_report_notes').update(patch).eq('id', noteId).eq('tenant_id', tenantId);
       if (error) throw error;
       res.json({ success: true });
     } catch (error) {

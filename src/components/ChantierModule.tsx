@@ -511,6 +511,22 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     await addRubriqueEntry(category);
   };
 
+  // Renomme une rubrique : toutes ses entrées du compte-rendu passent sous le nouveau nom
+  // (un nom déjà utilisé les fusionne avec cette rubrique).
+  const renameRubrique = (ancien: string, brut: string) => {
+    const category = brut.trim();
+    if (!category || category === ancien) return;
+    const ids = reportNotes.filter(n => n.category === ancien).map(n => n.id);
+    setReportNotes(prev => prev.map(n => (n.category === ancien ? { ...n, category } : n)));
+    ids.forEach(id => { db.siteReportNotesCache.update(id, { category }).catch(() => {}); });
+    void Promise.all(ids.map(id => queuedJsonRequest({
+      entity: 'siteReportNote', id: crypto.randomUUID(), method: 'PUT', url: `/api/notes/${id}`, body: { category },
+    }))).catch(err => {
+      console.error('renameRubrique failed:', err);
+      showToast('La rubrique n\'a pas pu être renommée.', 'error');
+    });
+  };
+
   const addRubriqueEntry = async (category: string) => {
     if (!selectedReportId) return;
     // Id côté client : la création peut être mise en file hors ligne et rejouée sans doublon.
@@ -1204,7 +1220,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                       {rubriquesByCategory.map(([category, items]) => (
                         <div key={category}>
                           <div className="flex items-center justify-between gap-2 mb-2">
-                            <span className="text-sm font-bold uppercase tracking-wide text-[var(--tblr-text)]">{category}</span>
+                            <DraftInput
+                              aria-label={`Nom de la rubrique ${category}`}
+                              title="Modifier le nom de la rubrique"
+                              className="min-w-0 flex-1 bg-transparent border-b border-transparent hover:border-[var(--tblr-border)] focus:border-[var(--tblr-primary)] outline-none text-sm font-bold uppercase tracking-wide text-[var(--tblr-text)] pointer-coarse:min-h-11"
+                              value={category}
+                              onCommit={v => renameRubrique(category, v)} />
                             <button type="button" onClick={() => addRubriqueEntry(category)}
                               className="text-xs font-semibold text-[var(--tblr-primary)] hover:underline">
                               + Entrée
