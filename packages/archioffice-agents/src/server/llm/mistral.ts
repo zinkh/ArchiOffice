@@ -15,6 +15,7 @@ import type {
   LlmProvider,
   LlmToolCall,
 } from './types.js';
+import { prependCachePrefix } from './cachePrefix.js';
 
 export const DEFAULT_MISTRAL_MODEL = 'mistral-large-latest';
 
@@ -125,7 +126,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
     // fournisseur ; web_search_enabled reste sans effet tant qu'un cabinet
     // fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
-    async chat({ system, messages, tools, timeoutMs }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, timeoutMs, cachePrefix }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
         headers: {
@@ -137,7 +138,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
         body: JSON.stringify({
           model,
           max_tokens: MAX_TOKENS,
-          messages: toMistralMessages(system, messages),
+          messages: toMistralMessages(system, prependCachePrefix(messages, cachePrefix)),
           ...(tools && tools.length > 0
             ? {
                 tools: tools.map(t => ({

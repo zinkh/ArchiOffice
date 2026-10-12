@@ -40,6 +40,17 @@ export const aiGenerationLimiter = rateLimit({
   message: { error: 'Trop de requêtes IA. Veuillez patienter avant de réessayer.' },
 });
 
+// Génération du CCTP lot par lot : un appel par lot (jusqu'à 40) enchaînés par
+// le navigateur, trop pour aiGenerationLimiter. Le plafond reste par personne.
+export const cctpLotLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de requêtes IA. Veuillez patienter avant de réessayer.' },
+});
+
 // Relais de tuiles IGN de l'étude de faisabilité (/api/feasibility/map-tile) :
 // un extrait de carte en demande une cinquantaine (fond + parcellaire), et
 // chaque réglage changé le recompose. Le plafond laisse une composition

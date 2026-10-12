@@ -88,6 +88,15 @@ export interface LlmChatParams {
    *  (Mistral). Par défaut celui du chat ; une rédaction longue (CCTP) le
    *  relève. */
   timeoutMs?: number;
+  /** Début STABLE du premier message utilisateur (pièces d'une affaire, par
+   *  exemple), à faire mettre en cache par le fournisseur quand plusieurs
+   *  appels successifs le partagent : il est placé devant `content` du premier
+   *  message. Claude le marque `cache_control` (lecture à 10 % du prix) ;
+   *  Gemini met en cache implicitement un préfixe identique ; Mistral n'a pas
+   *  de cache à ce jour et reçoit le texte tel quel. Pour que le cache serve,
+   *  `system`, `tools` et ce préfixe doivent rester identiques d'un appel à
+   *  l'autre, la partie qui varie allant dans `content`. */
+  cachePrefix?: string;
 }
 
 export interface LlmChatResult {

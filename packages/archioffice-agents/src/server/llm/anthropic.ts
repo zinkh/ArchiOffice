@@ -84,6 +84,23 @@ function toAnthropicMessages(messages: LlmMessage[]): any[] {
   return out;
 }
 
+/** Pose le préfixe stable en tête du premier message utilisateur, dans un bloc
+ *  marqué `cache_control` : tout ce qui précède (system, tools, préfixe) est
+ *  alors mis en cache. Sans effet en dessous du minimum du modèle (1 024 jetons
+ *  et plus) : l'appel passe simplement sans cache. */
+function withCacheBreakpoint(messages: any[], prefix?: string): any[] {
+  if (!prefix) return messages;
+  const first = messages.findIndex(m => m.role === 'user' && typeof m.content === 'string');
+  if (first < 0) return messages;
+  return messages.map((m, i) => i !== first ? m : {
+    role: 'user',
+    content: [
+      { type: 'text', text: prefix, cache_control: { type: 'ephemeral' } },
+      ...(m.content ? [{ type: 'text', text: m.content }] : []),
+    ],
+  });
+}
+
 export function createAnthropicProvider(opts: { apiKey: string; model?: string }): LlmProvider {
   const model = opts.model || DEFAULT_ANTHROPIC_MODEL;
   let client: any;
@@ -100,7 +117,7 @@ export function createAnthropicProvider(opts: { apiKey: string; model?: string }
     // (`type` custom implicite) dans le même appel.
     supportsWebSearch: true,
 
-    async chat({ system, messages, tools, webSearch }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, webSearch, cachePrefix }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {
         const { default: Anthropic } = await import('@anthropic-ai/sdk');
         client = new Anthropic({ apiKey: opts.apiKey });
@@ -119,12 +136,17 @@ export function createAnthropicProvider(opts: { apiKey: string; model?: string }
         model,
         max_tokens: MAX_TOKENS,
         ...(system ? { system } : {}),
-        messages: toAnthropicMessages(messages),
+        messages: withCacheBreakpoint(toAnthropicMessages(messages), cachePrefix),
         ...(anthropicTools.length > 0 ? { tools: anthropicTools } : {}),
       });
 
+      // Les jetons mis en cache sont comptés à part par Claude : écriture à
+      // 125 % et lecture à 10 % du prix d'entrée. Ils sont ramenés ici en
+      // jetons d'entrée équivalents pour que la facturation suive le coût réel.
+      const cacheWrite = response.usage?.cache_creation_input_tokens ?? 0;
+      const cacheRead = response.usage?.cache_read_input_tokens ?? 0;
       const usage = {
-        inputTokens: response.usage?.input_tokens ?? 0,
+        inputTokens: Math.ceil((response.usage?.input_tokens ?? 0) + cacheWrite * 1.25 + cacheRead * 0.1),
         outputTokens: response.usage?.output_tokens ?? 0,
       };
 
