@@ -107,7 +107,9 @@ export function minimalRagReferences(items: RagReference[]): Array<Record<string
     document_name: r.document_name, version: r.version,
     chunk_id: r.chunk_id, page_number: r.page_number,
     section_title: r.section_title, remote_document_id: r.remote_document_id,
-    excerpt: r.excerpt.slice(0, 450),
+    // Shared text must never become a durable cross-tenant copy: source consent
+    // can be revoked after the mission was recorded. Store only its opaque ID.
+    excerpt: r.source === 'cabinet' ? r.excerpt.slice(0, 450) : undefined,
     source_url: r.source_url || null,
   }));
 }
