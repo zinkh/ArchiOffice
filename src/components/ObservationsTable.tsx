@@ -10,12 +10,13 @@ import {
   VisibilityState,
   ColumnSizingState,
 } from '@tanstack/react-table';
-import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconChevronRight, IconLayoutRows, IconArrowRight } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconChevronRight, IconLayoutRows, IconArrowRight, IconFileTypePdf, IconPrinter } from '@tabler/icons-react';
 import { useConfirmDialog } from './ui/ConfirmDialog';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import { reconcileRemote, upsertById } from '../lib/observationsLocal';
+import { fetchAgencySettings } from '../lib/pdfLetterhead';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { SANS_AFFECTATION, DECOUPAGE_VIDE, batimentsActifs, phasesActives, correspondDecoupage, type DecoupageChantier, type FiltreDecoupage } from '../lib/chantierDecoupage';
 import { DecoupageFilters, DecoupageSelects } from './chantier/DecoupageFields';
@@ -38,6 +39,8 @@ interface Props {
   onReservesChanged?: () => void;
   /** Appelé après un ajout ou une suppression : les autres vues du chantier relisent leurs observations. */
   onChanged?: () => void;
+  /** Affaire : nom et code imprimés sur l'export PDF et l'impression. */
+  project?: { name: string; project_code?: string; address?: string; client?: string };
   /** Ouvre la vue sur « Ouverts seulement » (revue des observations non levées depuis le compte-rendu). */
   initialOpenOnly?: boolean;
 }
@@ -116,7 +119,7 @@ const COLUMN_LABELS: Record<string, string> = {
   actions: '',
 };
 
-export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged, onChanged, initialOpenOnly = false }: Props) {
+export default function ObservationsTable({ projectId, lots, decoupage = DECOUPAGE_VIDE, reportId, currentReportId, typeFilter, defaultType, onReservesChanged, onChanged, project, initialOpenOnly = false }: Props) {
   const { t } = useTranslation();
   const [observations, setObservations] = useState<Observation[]>([]);
   const [loadError, setLoadError] = useState(false);
@@ -610,6 +613,36 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     .map(c => ('accessorKey' in c ? String(c.accessorKey) : (c as any).id))
     .filter(id => id && id !== 'actions' && id !== 'number' && id !== 'expand');
 
+  // Export PDF / impression : la liste telle qu'affichée (filtres, regroupement par lot).
+  const [exporting, setExporting] = useState<'pdf' | 'print' | null>(null);
+  const titreExport = typeFilter === 'reserve' || (!typeFilter && defaultType === 'reserve') ? 'Liste des réserves à lever' : 'Liste des observations';
+  const lancerExport = async (mode: 'pdf' | 'print') => {
+    const groupes = groupByLot && lotGroups.length > 0
+      ? lotGroups.map(g => ({ label: g.label, items: g.rows.map(r => r.original) }))
+      : [{ label: '', items: table.getRowModel().rows.map(r => r.original) }];
+    if (groupes.every(g => g.items.length === 0)) { setSaveError(false); setAorMessage({ tone: 'error', text: 'Aucune ligne à exporter avec les filtres actuels.' }); return; }
+    const filtres: string[] = [];
+    if (globalFilter.trim()) filtres.push(`Recherche : ${globalFilter.trim()}`);
+    const lotF = lots.find(l => l.id === lotFilter);
+    if (lotF) filtres.push(`Lot : ${lotF.lot_number} ${lotF.lot_title}`);
+    if (typeSelect) filtres.push(`Nature : ${TYPE_LABELS[typeSelect as keyof typeof TYPE_LABELS] || typeSelect}`);
+    if (statusFilter) filtres.push(`Statut : ${statusFilter}`);
+    if (openOnly) filtres.push('Ouvertes seulement');
+    setExporting(mode);
+    try {
+      const [{ exportObservationsToPDF, telechargerPdf, imprimerPdf }, settings] = await Promise.all([
+        import('../lib/observationsExport'), fetchAgencySettings(),
+      ]);
+      const pdf = await exportObservationsToPDF(groupes, project ?? { name: '' }, settings, { title: titreExport, filtres, decoupage });
+      if (mode === 'print') imprimerPdf(pdf); else telechargerPdf(pdf);
+    } catch (err) {
+      console.error('[ObservationsTable] export', err);
+      setAorMessage({ tone: 'error', text: "L'export n'a pas pu être généré." });
+    } finally {
+      setExporting(null);
+    }
+  };
+
   return (
     <div className="space-y-3">
       {/* Toolbar */}
@@ -658,7 +691,16 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         {Object.keys(columnSizing).length > 0 && (
           <button type="button" onClick={() => setColumnSizing({})} className="text-xs text-zinc-500 hover:underline">Réinitialiser les largeurs</button>
         )}
-        <div className="ml-auto relative" ref={columnMenuRef}>
+        <div className="ml-auto flex items-center gap-2">
+        <button type="button" onClick={() => void lancerExport('pdf')} disabled={exporting !== null}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">
+          <IconFileTypePdf size={15} /> {exporting === 'pdf' ? 'Génération…' : 'Exporter PDF'}
+        </button>
+        <button type="button" onClick={() => void lancerExport('print')} disabled={exporting !== null}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors disabled:opacity-50">
+          <IconPrinter size={15} /> {exporting === 'print' ? 'Préparation…' : 'Imprimer'}
+        </button>
+        <div className="relative" ref={columnMenuRef}>
           <button
             onClick={() => setShowColumnMenu(v => !v)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-800 dark:text-white hover:bg-zinc-50 dark:hover:bg-zinc-700 transition-colors"
@@ -686,6 +728,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
               })}
             </div>
           )}
+        </div>
         </div>
       </div>
 

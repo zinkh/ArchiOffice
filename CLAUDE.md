@@ -1836,6 +1836,10 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   l'imprime sous la description, avec la colonne « Bât. / phase » quand le chantier a un registre et
   qu'une observation y est affectée (`opts.decoupage`).
 
+### Observations : export PDF, impression, menu collant
+
+`src/lib/observationsExport.ts` exporte la liste telle qu'affichée (filtres, regroupement par lot, colonnes visibles) en PDF paysage à la charte (`exportObservationsToPDF`), téléchargé ou imprimé (`telechargerPdf`, `imprimerPdf`) ; seule une échéance dépassée est en rouge. Les boutons « Exporter PDF » et « Imprimer » sont dans la barre d'outils de `ObservationsTable`. Le menu des sections du chantier (`ChantierModule.tsx`) est `sticky top-0` : il reste visible au défilement.
+
 ### Export PDF du compte-rendu : format, W/D, photos de rubriques
 
 `exportSiteReportToPDF` (`src/lib/siteReportExport.ts`) suit ce qui est saisi à l'écran. La

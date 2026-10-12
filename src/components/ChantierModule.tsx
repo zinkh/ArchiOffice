@@ -818,7 +818,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs : restent visibles au défilement (collés en haut du conteneur qui défile) */}
+      <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-[var(--tblr-bg,var(--tblr-surface))]">
       {isDesktop ? (
         <PillTabs
           ariaLabel="Sections du chantier"
@@ -856,6 +857,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           </BottomSheet>
         </>
       )}
+      </div>
 
       {/* Body */}
       <div>
@@ -1353,7 +1355,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           )}
 
           {activeTab === 'reserves' && (
-            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly}
+            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} project={{ name: project.name, project_code: project.project_code, address: project.address, client: project.client }} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly}
               onChanged={() => { fetchAllObservations().catch(() => {}); fetchReportObservations().catch(() => {}); }} />
           )}
 
