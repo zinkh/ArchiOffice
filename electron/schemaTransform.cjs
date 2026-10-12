@@ -156,6 +156,7 @@ function transformSql(sql) {
     // rather than pretending a lexical match is semantic similarity.
     .map((stmt) => stmt
       .replace(/\bextensions\.vector\(1024\)/gi, 'text')
+      .replace(/\bvector\(1024\)/gi, 'text')
       .replace(/\bextensions\.vector\b/gi, 'text')
       .replace(/v\.embedding\s+OPERATOR\(extensions\.<=>\)\s+p_embedding/g, '0::double precision')
       .replace(/p_embedding IS NOT NULL AND v\.embedding IS NOT NULL/g, 'false'))
