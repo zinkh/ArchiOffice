@@ -28,6 +28,7 @@ import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
 import { AgentMailReviewCard } from '../components/AgentMailReviewCard';
 import { AgentMissionsCard } from '../components/AgentMissionsCard';
+import { RagSettingsCard } from '../components/RagSettingsCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
 import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
 import { SwapText } from '../components/ui/SwapText';
@@ -3442,6 +3443,7 @@ export default function Settings() {
       <AgentMailReviewCard />
       {/* Missions persistantes et validation humaine des tâches proposées. */}
       <AgentMissionsCard />
+      <RagSettingsCard />
         </>
       )}
         </div>
