@@ -27,6 +27,7 @@ import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
 import { AgentMailReviewCard } from '../components/AgentMailReviewCard';
+import { AgentMissionsCard } from '../components/AgentMissionsCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
 import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
 import { SwapText } from '../components/ui/SwapText';
@@ -3439,6 +3440,8 @@ export default function Settings() {
       {/* Revue matinale des mails par un agent (server/agentMailReview.ts) :
           réglage personnel, une boîte mail l'étant. */}
       <AgentMailReviewCard />
+      {/* Missions persistantes et validation humaine des tâches proposées. */}
+      <AgentMissionsCard />
         </>
       )}
         </div>
