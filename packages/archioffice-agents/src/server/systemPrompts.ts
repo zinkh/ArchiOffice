@@ -23,6 +23,17 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext, webSe
   return buildBasePrompt(agent, ctx, webSearchActive) + activeProjectNote(ctx);
 }
 
+// Règle commune, posée aussi sous un system_prompt_override : elle décrit un
+// contrôle réellement appliqué par le serveur (provenance.ts), pas un conseil.
+const SOURCE_RULE = `
+
+═══ PAS DE CRÉATION SANS SOURCE ═══
+Chaque création (create_record, create_site_report, add_site_report_observation, import_site_report_notes) exige un paramètre source: { type, citation }. La citation est un passage EXACT, copié de ce que tu as réellement reçu : le message de l'utilisateur, le contenu d'un document joint ou lu, le résultat d'un outil de lecture. Le serveur vérifie la citation mot pour mot et REFUSE l'écriture sinon.
+- Si l'information vient d'un fichier ou d'un mail, lis-le d'abord ; s'il est marqué « CONTENU NON LU » ou ne contient pas ce qu'on te demande, n'écris rien et dis-le.
+- Ne cite jamais ce que toi-même as écrit plus haut : seule la parole de l'utilisateur et les données reçues comptent.
+- Une création par enregistrement, chacune avec SA citation : jamais une liste fabriquée « d'exemples » ou « par défaut ».
+- Un refus SOURCE_NON_VERIFIEE n'est pas un obstacle à contourner : n'invente pas une autre citation, dis à l'utilisateur que la source manque.`;
+
 function buildBasePrompt(agent: AgentRow, ctx: AgentContext, webSearchActive: boolean): string {
   // Attached-document text and firm-knowledge data reach the model only
   // through this prompt — unlike write actions (whose field schema also
@@ -193,7 +204,8 @@ ${cctpExcerptsText}
     const learningNote = canLearn
       ? "\n\nSi l'utilisateur corrige une réponse que tu viens de donner, si tu identifies qu'une capacité te manque pour bien répondre, ou si tu apprends une règle utile du cabinet en tâche, utilise suggerer_amelioration(kind, titre, contenu) — jamais pour une information déjà connue. Cette proposition reste en attente jusqu'à validation par l'architecte ; ne la traite jamais comme acquise avant ça."
       : '';
-    return `${base}${webFetchNote}${mailNote}${webSearchNote}${schemaNote}${colleaguesNote}${notifyNote}${learningNote}${docContentsSection}${docImagesSection}${firmKnowledgeSection}${knowledgeSection}${learningMemorySection}`;
+    const sourceNote = overrideActionScopes.length > 0 ? SOURCE_RULE : '';
+    return `${base}${webFetchNote}${mailNote}${webSearchNote}${schemaNote}${sourceNote}${colleaguesNote}${notifyNote}${learningNote}${docContentsSection}${docImagesSection}${firmKnowledgeSection}${knowledgeSection}${learningMemorySection}`;
   }
 
   const projectsList = ctx.projects.length > 0
@@ -240,8 +252,9 @@ Règles :
 9. Pour une mise à jour ou une suppression, si tu ne connais pas l'identifiant, retrouve-le avec search_records avant d'appeler update_record/delete_record. Si plusieurs résultats sont plausibles, demande lequel plutôt que de choisir au hasard.
 10. Ne prétends jamais avoir créé, modifié ou supprimé quoi que ce soit sans avoir réellement appelé l'outil correspondant.
 11. Ne supprime (delete_record) que sur demande explicite et non ambiguë portant sur un enregistrement précis.
-12. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le au lieu d'improviser avec une autre ressource — voir la règle sur les collègues du cabinet, plus bas dans ce prompt. Exemple : un « appel d'offres » (candidature du cabinet à une consultation de maîtrise d'œuvre, qu'il soit public ou privé) est la ressource tenders, jamais un projet, un contact ou une tâche. Si tenders n'est pas autorisée, ne crée rien d'autre à la place : dis que tu n'as pas accès aux appels d'offres et invite l'utilisateur à activer cette ressource dans les réglages de l'agent.
-13. Pour tout champ date déduit d'une expression relative ou partielle (ex. "lundi 17 août", "la semaine prochaine", sans année précisée), calcule-le toujours à partir de la date du jour indiquée en haut de ce prompt (Date du jour) — ne déduis jamais une année à partir du jour de la semaine mentionné, cette correspondance n'est valable que pour une année précise et n'a aucune raison de coïncider avec l'année en cours. Si l'outil renvoie un date_warning après un create_record/update_record, corrige immédiatement l'enregistrement avant de répondre à l'utilisateur.\n`
+12. Toute création exige une source vérifiée par le serveur (voir PAS DE CRÉATION SANS SOURCE plus bas) : sans passage exact de l'utilisateur, d'un document ou d'un résultat de lecture, tu ne crées rien.
+12 bis. Si une ressource nécessaire n'est pas dans la liste ci-dessus, dis-le au lieu d'improviser avec une autre ressource — voir la règle sur les collègues du cabinet, plus bas dans ce prompt. Exemple : un « appel d'offres » (candidature du cabinet à une consultation de maîtrise d'œuvre, qu'il soit public ou privé) est la ressource tenders, jamais un projet, un contact ou une tâche. Si tenders n'est pas autorisée, ne crée rien d'autre à la place : dis que tu n'as pas accès aux appels d'offres et invite l'utilisateur à activer cette ressource dans les réglages de l'agent.
+13. Pour tout champ date déduit d'une expression relative ou partielle (ex. "lundi 17 août", "la semaine prochaine", sans année précisée), calcule-le toujours à partir de la date du jour indiquée en haut de ce prompt (Date du jour) — ne déduis jamais une année à partir du jour de la semaine mentionné, cette correspondance n'est valable que pour une année précise et n'a aucune raison de coïncider avec l'année en cours. Si l'outil renvoie un date_warning après un create_record/update_record, corrige immédiatement l'enregistrement avant de répondre à l'utilisateur.\n${SOURCE_RULE}\n`
     : '';
 
   const caps = capabilitiesFromAgent(agent);

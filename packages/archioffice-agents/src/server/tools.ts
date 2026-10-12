@@ -10,6 +10,7 @@ import { buildLearningTools, executeLearningTool, LEARNING_TOOL_NAMES } from './
 import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
+import { SOURCE_PARAMETER_SCHEMA, SOURCE_REQUIRED_TOOLS, checkSource, type SourceCorpus } from './provenance.js';
 import { IMPORT_SITE_REPORT_NOTES_TOOL, IMPORT_SITE_REPORT_NOTES_TOOL_NAME, importSiteReportNotes } from './siteReportNotesTool.js';
 
 export type { FunctionDeclarationLike };
@@ -45,8 +46,9 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
           project_id: { type: 'string', description: "Identifiant de l'opération concernée" },
           date: { type: 'string', description: 'Date de la réunion au format YYYY-MM-DD' },
           confirm: { type: 'boolean', description: "Laisser vide au premier appel. Mettre true seulement après confirmation explicite de l'utilisateur de créer un second CR à la même date." },
+          source: SOURCE_PARAMETER_SCHEMA,
         },
-        required: ['project_id', 'date'],
+        required: ['project_id', 'date', 'source'],
       },
     });
     tools.push({
@@ -59,8 +61,9 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
           texte: { type: 'string', description: "Observation complète à inscrire dans le CR, y compris le nom de l'entreprise si fourni" },
           report_id: { type: 'string', description: 'Identifiant du brouillon DET, si connu' },
           lot: { type: 'string', description: 'Numéro, intitulé ou entreprise du lot, si connu ; ne pas inventer' },
+          source: SOURCE_PARAMETER_SCHEMA,
         },
-        required: ['project_id', 'texte'],
+        required: ['project_id', 'texte', 'source'],
       },
     });
     tools.push(IMPORT_SITE_REPORT_NOTES_TOOL);
@@ -85,8 +88,9 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
             description:
               "Laisser vide/false lors du premier essai. Ne mettre à true que dans un appel ultérieur, après qu'un précédent appel a renvoyé needs_confirmation ET que l'utilisateur a explicitement confirmé vouloir créer un nouvel enregistrement malgré le doublon potentiel détecté.",
           },
+          source: SOURCE_PARAMETER_SCHEMA,
         },
-        required: ['resource', 'data'],
+        required: ['resource', 'data', 'source'],
       },
     });
   }
@@ -415,11 +419,20 @@ export async function executeAgentAction(
    *  (pour poster sous son propre nom, voir notifyTools.ts), mais il vit ici
    *  plutôt que dans un paramètre à part pour rester au même niveau que
    *  `caps` dans la signature. */
-  selfAgent?: { id: string; name: string }
+  selfAgent?: { id: string; name: string },
+  /** Ce que l'agent a réellement reçu pendant ce tour (provenance.ts). Absent
+   *  (liaison MCP) : aucune vérification de source. */
+  sourceCorpus?: SourceCorpus
 ): Promise<AgentActionResult> {
   const name = call.name;
   const args = call.args || {};
   const actionScopes = caps.actionScopes;
+
+  // Pas de création sans source : refusée AVANT toute lecture ou écriture.
+  if ((SOURCE_REQUIRED_TOOLS as readonly string[]).includes(String(name))) {
+    const check = checkSource(args, sourceCorpus);
+    if (!check.ok) return { response: check.response! };
+  }
 
   if (name === IMPORT_SITE_REPORT_NOTES_TOOL_NAME) {
     if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };

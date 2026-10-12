@@ -16,6 +16,7 @@
 import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
+import { SOURCE_PARAMETER_SCHEMA } from './provenance.js';
 
 export const IMPORT_SITE_REPORT_NOTES_TOOL_NAME = 'import_site_report_notes';
 
@@ -39,6 +40,7 @@ export const IMPORT_SITE_REPORT_NOTES_TOOL: FunctionDeclarationLike = {
     type: 'object',
     properties: {
       project_id: { type: 'string', description: "Identifiant de l'opération" },
+      source: SOURCE_PARAMETER_SCHEMA,
       report_id: { type: 'string', description: 'Identifiant du brouillon DET, si connu' },
       rubriques: {
         type: 'array',
@@ -84,7 +86,7 @@ export const IMPORT_SITE_REPORT_NOTES_TOOL: FunctionDeclarationLike = {
       },
       meeting_notes: { type: 'string', description: "Notes libres de réunion, ajoutées à la suite de celles déjà saisies" },
     },
-    required: ['project_id'],
+    required: ['project_id', 'source'],
   },
 };
 
