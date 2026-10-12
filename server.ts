@@ -1164,7 +1164,7 @@ export async function createApp() {
     notifyTenantAdmins,
   });
   registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
-  registerAgentMissionRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
+  registerAgentMissionRoutes(app, { supabaseAdmin, getTenantId, requireRole, baseUrl: `http://127.0.0.1:${PORT}` });
   // Revue matinale des mails : la boucle locale est la même que celle du
   // relevé de messagerie entrante (voir startAgentBackgroundJobs).
   registerAgentMailReviewRoutes(app, {

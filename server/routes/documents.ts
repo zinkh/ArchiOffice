@@ -11,6 +11,7 @@
 // désormais le contrôle de quota, qui était appelé ici avant même qu'on sache
 // où le fichier irait.
 import { enqueueAutoContribution } from '../knowledge/autoContribution';
+import { isAgentMissionEnabled } from '../agentMissionSettings';
 import type { Express } from 'express';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { safeSegment } from '../storageKey';
@@ -180,8 +181,8 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       });
       // Explicit per-upload opt-in. Analyse actual uploaded bytes, not a
       // guessed summary from the file name. A failure must not undo storage.
-      if (process.env.AGENT_MISSIONS_ENABLED === 'true' &&
-          String(req.body.analyze_with_agents || '') === 'true') {
+      if (String(req.body.analyze_with_agents || '') === 'true' &&
+          await isAgentMissionEnabled(supabaseAdmin, tenantId)) {
         try {
           const agentId = String(req.body.mission_agent_id || '');
           const { data: agent } = await supabaseAdmin.from('agents')
