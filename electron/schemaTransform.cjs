@@ -117,6 +117,11 @@ const DROP_PATTERNS = [
   // Postgres, which never has that schema — or its jwt()/role()/uid()
   // functions — at all.
   /\bauth\.(users|uid|role|jwt)\b/i,
+  // Hosted Supabase roles do not exist in vanilla desktop Postgres.
+  /^\s*(GRANT|REVOKE)\b[\s\S]*\b(anon|authenticated|service_role)\b/i,
+  // pgvector is a managed Supabase extension and absent from the bundled
+  // vanilla Postgres. Desktop RAG uses the lexical-only fallback below.
+  /^\s*CREATE\s+EXTENSION\s+IF\s+NOT\s+EXISTS\s+vector\b/i,
 ];
 
 /** Strips full-line `--` comments so DROP_PATTERNS can match the real leading keyword. */
@@ -146,6 +151,14 @@ function transformSql(sql) {
     // `extensions.` both fail there. Installing into the default (public)
     // schema and calling the function unqualified works the same locally.
     .map((stmt) => stmt.replace(/\s+WITH\s+SCHEMA\s+extensions\b/gi, '').replace(/\bextensions\.(?=\w+\()/gi, ''))
+    // Portable fallback: keep document/chunk tables and FTS search on desktop
+    // even without pgvector. The semantic CTE is intentionally disabled
+    // rather than pretending a lexical match is semantic similarity.
+    .map((stmt) => stmt
+      .replace(/\bextensions\.vector\(1024\)/gi, 'text')
+      .replace(/\bextensions\.vector\b/gi, 'text')
+      .replace(/v\.embedding\s+OPERATOR\(extensions\.<=>\)\s+p_embedding/g, '0::double precision')
+      .replace(/p_embedding IS NOT NULL AND v\.embedding IS NOT NULL/g, 'false'))
     .filter((stmt) => withoutCommentLines(stmt).length > 0)
     .filter((stmt) => !DROP_PATTERNS.some((re) => re.test(withoutCommentLines(stmt))));
 }
