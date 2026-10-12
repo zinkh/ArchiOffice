@@ -13,7 +13,8 @@
 // rattachent), un doublon (même contact et même rôle) est ignoré, rejouer est sans risque.
 // Retirer un intervenant passe par la même confirmation en deux temps que delete_record.
 import type { FunctionDeclarationLike } from './toolTypes.js';
-import { internalHeaders, type InternalAuth } from './internalApi.js';
+import type { InternalAuth } from './internalApi.js';
+import { createContactResolver, makeRequest, norm, text, type Json } from './toolRequest.js';
 import { buildRecordUrl } from './recordLinks.js';
 
 export const MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME = 'manage_project_stakeholders';
@@ -54,13 +55,6 @@ export const MANAGE_PROJECT_STAKEHOLDERS_TOOL: FunctionDeclarationLike = {
   },
 };
 
-type Json = Record<string, any>;
-const norm = (v: unknown) => String(v ?? '').trim().toLocaleLowerCase();
-const text = (v: unknown) => String(v ?? '').trim();
-
-const contactLabel = (c: Json): string =>
-  text(c.company_name) || [text(c.first_name), text(c.last_name)].filter(Boolean).join(' ');
-
 const view = (s: Json) => ({ id: s.id, nom: s.name, role: s.role, contact_id: s.contact_id || null });
 
 export async function manageProjectStakeholders(baseUrl: string, auth: InternalAuth, args: Json): Promise<{ response: Json; summary?: string }> {
@@ -71,11 +65,7 @@ export async function manageProjectStakeholders(baseUrl: string, auth: InternalA
   const items: Json[] = Array.isArray(args.intervenants) ? args.intervenants.filter(x => x && typeof x === 'object').slice(0, MAX_ITEMS) : [];
   if (action !== 'list' && !items.length) return { response: { error: 'intervenants est requis pour add et remove.' } };
 
-  const request = async (path: string, method = 'GET', body?: Json) => {
-    const res = await fetch(baseUrl + path, { method, headers: internalHeaders(auth, body ? { 'Content-Type': 'application/json' } : undefined), body: body ? JSON.stringify(body) : undefined });
-    const json: any = await res.json().catch(() => null);
-    return { res, json };
-  };
+  const request = makeRequest(baseUrl, auth);
 
   try {
     const projectPath = `/api/projects/${encodeURIComponent(projectId)}`;
@@ -88,30 +78,7 @@ export async function manageProjectStakeholders(baseUrl: string, auth: InternalA
       return { response: { project_id: projectId, intervenants: current.map(view), record_url: recordUrl } };
     }
 
-    // Les contacts ne sont lus que si un nom est à résoudre ou un contact_id à vérifier.
-    let contacts: Json[] | null = null;
-    const loadContacts = async (): Promise<Json[]> => {
-      if (contacts) return contacts;
-      const { res, json } = await request('/api/contacts');
-      contacts = res.ok && Array.isArray(json) ? json : [];
-      return contacts;
-    };
-
-    // Résout une demande vers (contact_id, nom) ; `ambigu` liste les candidats quand le nom correspond à plusieurs fiches.
-    const resolve = async (it: Json): Promise<{ contact_id: string | null; name: string; ambigu?: Json[]; inconnu?: boolean }> => {
-      const id = text(it.contact_id);
-      const nom = text(it.nom);
-      const all = await loadContacts();
-      if (id) {
-        const c = all.find(x => String(x.id) === id);
-        return c ? { contact_id: id, name: contactLabel(c) } : { contact_id: null, name: nom, inconnu: true };
-      }
-      if (!nom) return { contact_id: null, name: '' };
-      const matches = all.filter(c => norm(contactLabel(c)) === norm(nom) || norm(c.company_name) === norm(nom));
-      if (matches.length === 1) return { contact_id: String(matches[0].id), name: contactLabel(matches[0]) };
-      if (matches.length > 1) return { contact_id: null, name: nom, ambigu: matches.map(m => ({ id: m.id, nom: contactLabel(m) })) };
-      return { contact_id: null, name: nom };
-    };
+    const resolve = createContactResolver(request);
 
     const same = (s: Json, contactId: string | null, name: string, role?: string) =>
       (contactId ? s.contact_id === contactId : norm(s.name) === norm(name)) && (!role || norm(s.role) === norm(role));

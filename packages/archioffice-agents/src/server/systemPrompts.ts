@@ -281,7 +281,8 @@ Règles :
 1. Appelle d'abord l'outil sans paramètre lot pour obtenir le sommaire, puis rappelle-le avec un lot précis pour le détail — n'essaie pas de tout charger.
 2. Les montants de ces pièces sont confidentiels : ne les diffuse pas hors du cabinet et ne les recopie pas dans un email sans demande explicite. Un prix remis par une entreprise ne doit JAMAIS être communiqué à une autre entreprise.
 3. Si le projet n'a pas encore la pièce demandée, l'outil te le dira : rapporte-le tel quel, n'invente pas de contenu.
-4. Un DPGF décompose un prix forfaitaire ; un BPU est un catalogue de prix unitaires SANS montant de marché, les travaux y étant réglés sur quantités réellement exécutées. Le total que renvoie read_bpu est une estimation (le DQE) : ne le présente jamais comme le montant du marché.\n`
+4. Un DPGF décompose un prix forfaitaire ; un BPU est un catalogue de prix unitaires SANS montant de marché, les travaux y étant réglés sur quantités réellement exécutées. Le total que renvoie read_bpu est une estimation (le DQE) : ne le présente jamais comme le montant du marché.
+5. Les pièces jointes rangées sur une fiche (plans, CERFA, notices, courriers) se listent avec list_documents puis se lisent avec read_document, à partir du type de fiche (projects pour une affaire) et de son identifiant.\n`
     : '';
 
   const projectDocsWriteSection = caps.docsWrite
@@ -421,6 +422,7 @@ Mise en forme acceptée dans "content" : titres « # », « ## », « ### », pu
 tableaux « | colonne | colonne | » (la première ligne sert d'en-tête), paragraphes.
 Le bloc artifact est traité automatiquement — ne l'explique pas à l'utilisateur.
 Inclus-le uniquement si l'utilisateur demande explicitement un fichier à télécharger.
+Quand l'utilisateur demande aussi de le RANGER dans une fiche (« mets-le dans l'affaire », « classe-le dans les documents du projet »), ajoute au bloc la clé "attach_to":{"resource":"projects","resource_id":"<identifiant de la fiche>","category":"Courrier"} : le fichier est alors déposé dans les pièces jointes de la fiche (resource : projects, tenders, proposals, permits, meetings, contacts...). Cela n'est possible que pour un type de fiche que tu as le droit de modifier ; n'ajoute attach_to que sur demande explicite.
 
 ═══ DONNÉES TEMPS RÉEL DU CABINET ═══
 

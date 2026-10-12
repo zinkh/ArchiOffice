@@ -1873,6 +1873,32 @@ rattachent), un doublon (même contact, même rôle) est ignoré, un contact se 
 `contact_id` ou par son nom exact (plusieurs fiches homonymes : refus et liste des candidats),
 un rôle est obligatoire. `remove` passe par la confirmation en deux temps de `delete_record`.
 
+### Couverture des agents : outils d'opération, documents, Markdown
+
+Au-delà des ressources CRUD de `AGENT_RESOURCES`, des outils écrits à la main couvrent ce que la
+fiche affaire porte en listes ou en routes imbriquées (`projectWorkTools.ts`, scope `projects` ou
+`meetings`, exposés au MCP) : `manage_project_lots`, `manage_project_cotraitants`,
+`manage_project_members`, `manage_project_journal` (phase en cours et notes de phase),
+`manage_observations`, `manage_meeting_attendees`. Même règle partout : rejouer est sans risque,
+retirer passe par `needs_confirmation` puis `confirm: true`. **Le changement de phase reste un
+geste humain** (checklist de contrôles, `POST /api/projects/:id/phase`). Réglages, équipe et
+facturation restent hors des agents.
+
+`AGENT_RESOURCES` gagne `rfis`, `avenants_moe`, `gpa_reserves`, `time_entries` et quatre sous-éléments
+d'appel d'offres (`tender_*`). Deux drapeaux : `listParam` (liste lue par parent, `parent_id` dans
+`search_records`/`get_record`) et `mergeOnUpdate` : le PUT de ces routes remet à null ou à zéro les
+colonnes absentes du corps (notes d'une réunion, valeur et surface d'un appel d'offres...), donc
+`update_record` relit l'enregistrement et renvoie TOUTES ses colonnes avec les champs fournis par-dessus.
+À ne pas activer sur une route qui reprend le corps tel quel (`...req.body`) ou valide un schéma strict.
+
+`documentTools.ts` : `list_documents` et `read_document` pour le chat (capacité `docsRead`), et
+`attach_to` dans un bloc `artifact` pour ranger le fichier généré sur une fiche (seulement un type de
+fiche du périmètre d'écriture de l'agent, jeton de la personne). Le MCP garde ses propres versions.
+
+**Réponses d'agent en Markdown** : `client/chatMarkdown.ts` (analyse pure, testée) puis
+`ChatMarkdown.tsx` rendent titres, listes, tableaux, gras et liens sans HTML brut. Seuls http(s),
+mailto, tel et les chemins relatifs sont des liens ; un lien vers l'application navigue sans recharger.
+
 ### Import de notes dans un CR de chantier (agents et MCP)
 
 `import_site_report_notes` (`packages/archioffice-agents/src/server/siteReportNotesTool.ts`) range

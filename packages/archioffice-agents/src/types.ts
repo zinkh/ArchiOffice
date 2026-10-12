@@ -56,6 +56,19 @@ export interface AgentResourceDef {
    * champ réel est aussi fourni, c'est lui qui gagne.
    */
   fieldAliases?: Record<string, string>;
+  /**
+   * Ressource dont la liste se lit PAR PARENT (GET basePath?<listParam>=<id>) et non pour tout
+   * le cabinet (pièces d'un appel d'offres, concurrents...). search_records, get_record et la
+   * lecture avant modification exigent alors parent_id ; sans lui l'agent ne pourrait ni
+   * retrouver l'identifiant d'une ligne ni la supprimer.
+   */
+  listParam?: string;
+  /**
+   * Le PUT de la route réécrit les colonnes absentes du corps (à null ou à leur défaut).
+   * update_record relit alors l'enregistrement et fusionne les champs fournis par-dessus, pour
+   * que « ne modifier qu'un champ » reste vrai.
+   */
+  mergeOnUpdate?: boolean;
 }
 
 export const AGENT_RESOURCES: AgentResourceDef[] = [
@@ -83,6 +96,9 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
       // Maître d'ouvrage
       'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client',
       'client_siret', 'client_vat_number', 'is_public_client', 'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite',
+      // Fiche : identification, suivi, ERP
+      'is_chantier', 'is_complete_mission', 'reference', 'project_code', 'project_manager', 'surface', 'progression',
+      'nom_etablissement', 'type_et_cat', 'surface_erp', 'effectif_public', 'effectif_personnel',
     ],
     required: ['name', 'client'],
     enums: { status: ['Planning', 'In Progress', 'Completed', 'On Hold'] },
@@ -96,15 +112,17 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
       'Terrain : adresse_terrain, cp_ville_terrain, ban_id_terrain, city_code_terrain, surface_parcelle, surface_plancher, surface_plancher_ext, zone_plu, secteur_abf. ' +
       'Opération : programme, type_projet, categorie_projet, num_permis_construire, date_depot_pc (AAAA-MM-JJ). ' +
       "Maître d'ouvrage : adresse_client, cp_client, ville_client, telephone, portable, email_client (alias accepté : client_email), client_siret, client_vat_number, is_public_client, is_entreprise, nom_societe, rcs, representant, qualite. " +
+      "Fiche : is_chantier (l'opération est au stade chantier), is_complete_mission, reference, project_code, project_manager, surface, progression, nom_etablissement, type_et_cat, surface_erp, effectif_public, effectif_personnel. " +
+      "Les listes rattachées ne passent pas par update_record : lots (manage_project_lots), intervenants (manage_project_stakeholders), cotraitants (manage_project_cotraitants), équipe (manage_project_members). Les montants d'honoraires et le coût des travaux viennent du contrat MOE lié (contrats_moe). " +
       "Une mise à jour (update_record) ne touche que les champs fournis : pas besoin de renvoyer name/client pour ne changer qu'un seul champ." },
-  { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, identityField: 'name',
+  { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'name',
     knownFields: ['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status', 'description', 'location', 'start_date', 'project_manager', 'construction_cost', 'remuneration', 'fee_rate', 'progression'],
     required: ['name'],
     enums: { status: ['Completed', 'In Progress', 'Planning'] },
     defaults: { status: 'Completed' },
     fields: 'name*, client, category, end_date, surface, budget, status (Completed/In Progress/Planning), description, location, start_date, project_manager, construction_cost, remuneration, fee_rate, progression. ' +
       'À utiliser quand l\'utilisateur demande d\'ajouter une "référence" (réalisation passée pour la page Références, sans suivi de tâches/factures) — PAS la ressource "projects", réservée aux projets actifs suivis par le cabinet.' },
-  { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'tenders', label: "Appels d'offres", basePath: '/api/tenders', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['title', 'client', 'submission_deadline', 'status', 'description', 'notes', 'value', 'type', 'ville_execution'],
     required: ['title', 'client', 'submission_deadline'],
     enums: { status: ['Draft', 'Submitted', 'Won', 'Lost'] },
@@ -145,11 +163,11 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     // assignee_id.
     defaults: { status: 'todo', priority: 'normal', start_date: '@today', end_date: '@today+14' },
     fields: 'title*, description, start_date (défaut : aujourd\'hui), end_date (défaut : dans 14 jours), due_date, project_id (laisser vide pour une tâche interne au cabinet), status (todo/in_progress/review/done), priority (low/normal/high/urgent), assignee_id (identifiant d\'un membre de l\'équipe)' },
-  { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['title', 'due_date', 'project_id', 'status'],
     required: ['title', 'due_date'],
     fields: 'title*, due_date*, project_id, status' },
-  { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'meetings', label: 'Réunions', basePath: '/api/meetings', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['title', 'date', 'type', 'project_id', 'proposal_id', 'tender_id', 'notes'],
     required: ['title', 'date'],
     enums: { type: ['projet', 'visite_candidature', 'visite_proposition'] },
@@ -158,23 +176,24 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     // pas dans meetings. L'outil create_site_report les crée explicitement.
     fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes. Réunion classique uniquement : pour une réunion/visite de chantier ou un CR dans l'onglet DET, utiliser create_site_report." },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
-    knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero'],
+    knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero', 'missions_list'],
     enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
     defaults: { status: 'Brouillon' },
-    fields: 'intitule_projet, client_id, project_id, type_contrat, type_moa, montant_honoraires, status (Brouillon/Envoyé/Signé/Résilié), adresse_travaux, notes' },
-  { key: 'ordres_de_service', label: 'Ordres de service', basePath: '/api/ordres_de_service', create: true, update: true, delete: true, list: true, identityField: 'title',
+    fields: 'intitule_projet, client_id, project_id, type_contrat, type_moa, montant_honoraires, status (Brouillon/Envoyé/Signé/Résilié), adresse_travaux, notes, ' +
+      "missions_list (tableau complet des missions : [{id, name, pct (part des honoraires en %), incluse (true/false), category (base/exe/complementaire)}] ; il REMPLACE la liste existante, relis-la d'abord avec get_record)" },
+  { key: 'ordres_de_service', label: 'Ordres de service', basePath: '/api/ordres_de_service', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['os_number', 'title', 'date', 'project_id', 'description', 'lot', 'entreprise', 'objet', 'type', 'status'],
     required: ['os_number', 'title', 'date'],
     fields: 'os_number*, title*, date*, project_id, description, lot, entreprise, objet' },
-  { key: 'visas', label: 'Visas', basePath: '/api/visas', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'visas', label: 'Visas', basePath: '/api/visas', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['title', 'date', 'project_id'],
     required: ['title', 'date'],
     fields: 'title*, date*, project_id' },
-  { key: 'receptions', label: 'Réceptions', basePath: '/api/receptions', create: true, update: true, delete: true, list: true,
+  { key: 'receptions', label: 'Réceptions', basePath: '/api/receptions', create: true, update: true, delete: true, list: true, mergeOnUpdate: true,
     knownFields: ['date', 'type', 'project_id', 'has_reserves', 'reserves_count'],
     required: ['date', 'type'],
     fields: 'date*, type*, project_id' },
-  { key: 'reserves', label: 'Réserves', basePath: '/api/reserves', create: true, update: true, delete: true, list: true, identityField: 'title',
+  { key: 'reserves', label: 'Réserves', basePath: '/api/reserves', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['title', 'project_id', 'reception_id', 'batiment', 'local', 'status', 'lots', 'entreprises', 'due_date'],
     required: ['title'],
     defaults: { status: 'A faire' },
@@ -191,13 +210,58 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
   // GET /api/permits?project_id=... est filtré par projet côté client, mais
   // renvoie bien la liste complète du cabinet sans le paramètre (list: true) —
   // nécessaire pour search_records et la détection de doublons.
-  { key: 'permits', label: 'Permis (PC/DP/AT)', basePath: '/api/permits', create: true, update: true, delete: true, list: true, identityField: 'reference',
+  { key: 'permits', label: 'Permis (PC/DP/AT)', basePath: '/api/permits', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'reference',
     knownFields: ['project_id', 'type', 'reference', 'submission_date', 'decision_date', 'status', 'notes'],
     required: ['project_id', 'type'],
     enums: { type: ['PC', 'DP', 'AT'], status: ['en_instruction', 'accorde', 'refuse', 'recours'] },
     defaults: { status: 'en_instruction' },
     fields: 'project_id*, type* (PC/DP/AT), reference (numéro de permis), submission_date, decision_date, status (en_instruction/accorde/refuse/recours), notes. ' +
       "Utilise cette ressource pour le numéro, la date de dépôt/décision et le statut d'un permis — jamais la description du projet, qui n'est pas exploitable ailleurs dans l'application." },
+  // ── Suivi d'opération et sous-éléments d'un appel d'offres ───────────────────
+  // Ces ressources n'avaient aucune entrée : un agent ne pouvait ni consigner une demande
+  // d'information, ni saisir un temps passé, ni tenir à jour les pièces d'un appel d'offres.
+  { key: 'rfis', label: "Demandes d'information (RFI)", basePath: '/api/rfis', create: true, update: true, delete: true, list: true, identityField: 'question', mergeOnUpdate: true,
+    knownFields: ['project_id', 'question', 'asked_by', 'asked_date', 'due_date', 'status', 'answer', 'answered_date'],
+    required: ['project_id', 'question'],
+    enums: { status: ['en_attente', 'repondu'] },
+    defaults: { status: 'en_attente', asked_date: '@today' },
+    fields: 'project_id*, question*, asked_by (qui pose la question), asked_date (défaut : aujourd\'hui), due_date (réponse attendue le), status (en_attente/repondu), answer, answered_date. Pour répondre à une RFI : update_record avec answer, status repondu et answered_date.' },
+  { key: 'avenants_moe', label: 'Avenants MOE', basePath: '/api/avenants_moe', create: true, update: true, delete: true, list: true, identityField: 'title',
+    knownFields: ['project_id', 'contrat_moe_id', 'os_number', 'title', 'date', 'description', 'status', 'origine_demande', 'objet', 'date_signature', 'delai_execution', 'montant_devis_presente', 'montant_devis_accepte'],
+    required: ['contrat_moe_id', 'title'],
+    enums: { status: ['draft', 'submitted', 'approved', 'rejected'] },
+    defaults: { status: 'draft', date: '@today' },
+    fields: 'contrat_moe_id* (contrat MOE de l\'affaire, search_records sur contrats_moe), title*, project_id, os_number, date, objet, description, origine_demande, status (draft/submitted/approved/rejected), date_signature, delai_execution (jours), montant_devis_presente, montant_devis_accepte (€ HT)' },
+  { key: 'gpa_reserves', label: 'Réserves GPA (parfait achèvement)', basePath: '/api/gpa-reserves', create: true, update: true, delete: true, list: true, identityField: 'title', mergeOnUpdate: true,
+    knownFields: ['title', 'project_id', 'reception_id', 'batiment', 'local', 'status', 'lots', 'entreprises', 'due_date', 'description'],
+    required: ['title', 'project_id'],
+    defaults: { status: 'A faire' },
+    fields: 'title*, project_id*, reception_id, batiment, local, status (A faire/En cours/Levée/Refusée par l\'entreprise/Quitus Transmis/Levée refusée par le MOE), lots, entreprises, due_date, description. Réserves de la garantie de parfait achèvement, distinctes des réserves de réception (resource "reserves").' },
+  { key: 'time_entries', label: 'Temps passés', basePath: '/api/time_entries', create: true, update: true, delete: true, list: true, identityField: 'description', mergeOnUpdate: true,
+    knownFields: ['entry_date', 'start_time', 'end_time', 'project_id', 'description'],
+    required: ['entry_date', 'start_time', 'end_time'],
+    fields: "entry_date* (AAAA-MM-JJ), start_time* et end_time* (date-heure locale AAAA-MM-JJTHH:MM:SS, fin après début), project_id, description. Ce sont les temps de la personne connectée, jamais ceux d'un autre membre." },
+  { key: 'tender_pieces', label: "Pièces d'un appel d'offres", basePath: '/api/tender-pieces', create: true, update: false, delete: true, list: true, identityField: 'label', listParam: 'tender_id',
+    knownFields: ['tender_id', 'section', 'label', 'obligatoire', 'quantity_required', 'status', 'source_hint', 'document_id'],
+    required: ['tender_id', 'label'],
+    enums: { section: ['candidature', 'offre_technique', 'offre_financiere'], status: ['a_fournir', 'fournie', 'detectee_ia'] },
+    defaults: { section: 'candidature', status: 'a_fournir' },
+    fields: "tender_id*, label*, section (candidature/offre_technique/offre_financiere), obligatoire (true par défaut), quantity_required, status (a_fournir/fournie), source_hint, document_id. Lecture : search_records avec parent_id = identifiant de l'appel d'offres." },
+  { key: 'tender_competitors', label: "Concurrents d'un appel d'offres", basePath: '/api/tender-competitors', create: true, update: false, delete: true, list: true, identityField: 'name', listParam: 'tender_id',
+    knownFields: ['tender_id', 'name', 'info', 'risk_level'],
+    required: ['tender_id', 'name'],
+    enums: { risk_level: ['faible', 'moyen', 'eleve'] },
+    defaults: { risk_level: 'moyen' },
+    fields: "tender_id*, name*, info, risk_level (faible/moyen/eleve). Lecture : search_records avec parent_id = identifiant de l'appel d'offres." },
+  { key: 'tender_partner_solicitations', label: "Sollicitations de partenaires (appel d'offres)", basePath: '/api/tender-partner-solicitations', create: true, update: true, delete: true, list: true, identityField: 'specialty_name', listParam: 'tender_id',
+    knownFields: ['tender_id', 'specialty_name', 'contact_id', 'status', 'response_notes'],
+    required: ['tender_id', 'specialty_name', 'contact_id'],
+    enums: { status: ['a_solliciter', 'sollicite', 'relance', 'accepte', 'decline'] },
+    fields: "tender_id*, specialty_name* (spécialité recherchée), contact_id* (fiche contact du partenaire), status (a_solliciter/accepte/decline à la main ; sollicite et relance ne se posent que par l'envoi réel d'un e-mail), response_notes. Lecture : search_records avec parent_id = identifiant de l'appel d'offres." },
+  { key: 'tender_activity_notes', label: "Notes d'activité (appel d'offres)", basePath: '/api/tender-activity-notes', create: true, update: false, delete: true, list: true, identityField: 'content', listParam: 'tender_id',
+    knownFields: ['tender_id', 'content'],
+    required: ['tender_id', 'content'],
+    fields: "tender_id*, content*. Journal libre de l'appel d'offres (échange avec l'acheteur, décision de répondre...). Lecture : search_records avec parent_id = identifiant de l'appel d'offres." },
 ];
 
 // Périmètre d'écriture par défaut d'un métier, appliqué quand un cabinet
@@ -207,8 +271,8 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
   'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits', 'tenders'],
-  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits', 'tenders'],
-  'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits', 'tenders', 'rfis', 'avenants_moe'],
+  'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'gpa_reserves', 'rfis', 'marches_entreprises'],
   'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
   'juridique':           ['contrats_moe', 'ordres_de_service', 'tenders'],
