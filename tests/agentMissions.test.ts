@@ -90,7 +90,7 @@ describe('mission runner — persistence and agent handoff', () => {
     db = new FakeSupabaseAdmin();
     mockChat.mockReset();
     db.seed('profiles', [{ id: 'user-1', tenant_id: 'tenant-1' }]);
-    db.seed('tenants', [{ id: 'tenant-1', agent_billing_mode: 'prepaid', ai_credit_balance_eur_cents: 100 }]);
+    db.seed('tenants', [{ id: 'tenant-1', agent_billing_mode: 'prepaid', ai_credit_balance_eur_cents: 100, agent_missions_enabled: true, agent_missions_capture_mail: false, agent_missions_capture_mail_review: false }]);
     db.seed('agents', [
       { id: 'agent-1', tenant_id: 'tenant-1', name: 'Sophie', role_title: 'Coordinatrice', delegate_enabled: true, is_active: true },
       { id: 'specialist-1', tenant_id: 'tenant-1', name: 'Karim', role_title: 'DET', is_active: true },
@@ -125,6 +125,14 @@ describe('mission runner — persistence and agent handoff', () => {
     expect(db.getTable('agent_mission_events').map(e => e.kind)).toEqual(['handoff', 'specialist']);
     expect(mockChat).toHaveBeenCalledTimes(2);
     expect(mockChat.mock.calls.every(call => call[0].tools?.length === 0)).toBe(true);
+  });
+
+  it('une mission en attente ne consomme aucun crédit quand le cabinet désactive l’autonomie', async () => {
+    db.getTable('tenants')[0].agent_missions_enabled = false;
+    const first = { ...db.getTable('agent_missions')[0] };
+    expect(await runAgentMission(db as any, first, deps)).toBe(false);
+    expect(db.getTable('agent_missions')[0].status).toBe('queued');
+    expect(mockChat).not.toHaveBeenCalled();
   });
 
   it('une mission déjà revendiquée ne se traite pas deux fois', async () => {
