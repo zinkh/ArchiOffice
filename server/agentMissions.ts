@@ -2,6 +2,7 @@
 // External effects are NEVER executed here: an authenticated human approves a
 // proposed task through server/routes/agentMissions.ts and the existing /api/tasks.
 import { resolveLlmProvider, getTenantAiConfig } from '@zinkh/archioffice-agents/server/llm';
+import { findMembership } from './tenantMemberships';
 
 export type MissionSource = 'manual' | 'forwarded_email' | 'document';
 export interface MissionInput {
@@ -221,9 +222,9 @@ export async function runAgentMission(db: any, candidate: any, deps: MissionDeps
     if (!agent) throw new Error('Agent coordinateur inactif ou introuvable.');
     // A deleted/revoked tenant membership must not leave a service role
     // executing a job using an old user's former authority.
-    const { data: member } = await db.from('tenant_memberships').select('user_id')
-      .eq('tenant_id', row.tenant_id).eq('user_id', row.created_by).maybeSingle();
-    if (!member) throw new Error('Le demandeur ne fait plus partie du cabinet.');
+    if (!(await findMembership(db, row.created_by, row.tenant_id))) {
+      throw new Error('Le demandeur ne fait plus partie du cabinet.');
+    }
     const { data: colleagues } = await db.from('agents')
       .select('id,name,role_title,is_active')
       .eq('tenant_id', row.tenant_id).eq('is_active', true);
