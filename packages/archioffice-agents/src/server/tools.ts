@@ -215,6 +215,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
           query: { type: 'string', description: 'Question précise ou termes recherchés' },
           project_id: { type: 'string', description: "Filtre sur l'affaire courante si la question s'y rapporte" },
           phase: { type: 'string', description: 'Filtre de phase facultatif (PRO, DET...)' },
+          include_shared: { type: 'boolean', description: 'Chercher aussi dans le référentiel mutualisé anonymisé, uniquement si le cabinet l’a autorisé' },
         },
         required: ['query'],
       },
@@ -623,6 +624,7 @@ export async function executeAgentAction(
           project_id: args.project_id || undefined,
           phase: args.phase || undefined,
           agent_id: selfAgent?.id || undefined,
+          include_shared: args.include_shared === true,
         }),
       });
       const result:any = await response.json().catch(() => ({}));

@@ -3,6 +3,7 @@ import { apiFetch } from '../lib/api';
 
 interface Status {
   external_embeddings_enabled: boolean;
+  shared_knowledge_enabled: boolean;
   provider_configured: boolean;
   documents: { queued: number; processing: number; indexed: number; failed: number };
 }
@@ -22,6 +23,19 @@ export function RagSettingsCard() {
         body:JSON.stringify({external_embeddings_enabled:enabled,confirm_external_transfer:enabled&&consent}),
       });
       setConsent(false);setNotice(enabled?'Recherche sémantique autorisée pour le cabinet.':'Transfert désactivé et vecteurs locaux purgés.');
+      await refresh();
+    }catch(e:any){setError(e.message||'Réglage impossible.');}
+    finally{setBusy(false);}
+  };
+  const toggleShared=async(enabled:boolean)=>{
+    setBusy(true);setError('');setNotice('');
+    try {
+      await apiFetch('/api/rag/shared-settings',{
+        method:'PATCH',body:JSON.stringify({shared_knowledge_enabled:enabled}),
+      });
+      setNotice(enabled
+        ? 'Consultation du référentiel mutualisé autorisée pour ce cabinet.'
+        : 'Consultation du référentiel mutualisé désactivée.');
       await refresh();
     }catch(e:any){setError(e.message||'Réglage impossible.');}
     finally{setBusy(false);}
@@ -62,6 +76,18 @@ export function RagSettingsCard() {
         {state.external_embeddings_enabled&&<button type="button" disabled={busy} onClick={()=>void toggle(false)}
           className="rounded-lg px-3 py-2 text-xs disabled:opacity-50" style={{border:'1px solid var(--tblr-border)'}}>
           Révoquer le transfert et supprimer les vecteurs</button>}
+      </div>
+      <div className="rounded-lg p-3 space-y-2" style={{background:'var(--tblr-surface-2)'}}>
+        <strong className="text-sm">Référentiel technique mutualisé</strong>
+        <p className="text-xs" style={{color:'var(--tblr-muted)'}}>
+          Consulte uniquement les extraits anonymisés, approuvés et publiés dans la bibliothèque Mistral.
+          Cette autorisation de lecture n'envoie rien à Mistral. Si la recherche sémantique est activée séparément, celle-ci transmet vos questions pour calculer les vecteurs. Les documents confidentiels restent privés.
+        </p>
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={state.shared_knowledge_enabled} disabled={busy}
+            onChange={e=>void toggleShared(e.target.checked)}/>
+          Autoriser les agents de ce cabinet à consulter les connaissances mutualisées
+        </label>
       </div>
       <button type="button" disabled={busy} onClick={()=>void reindex()} className="rounded-lg px-3 py-2 text-xs disabled:opacity-50"
         style={{border:'1px solid var(--tblr-border)'}}>Réindexer les documents du cabinet</button>
