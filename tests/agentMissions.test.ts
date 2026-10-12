@@ -127,6 +127,52 @@ describe('mission runner — persistence and agent handoff', () => {
     expect(mockChat.mock.calls.every(call => call[0].tools?.length === 0)).toBe(true);
   });
 
+  it('coordination et spécialiste consultent uniquement leurs passages autorisés, puis gardent leurs références', async () => {
+    db.getTable('agents').find(x=>x.id==='agent-1')!.docs_read_enabled=true;
+    db.getTable('agents').find(x=>x.id==='specialist-1')!.docs_read_enabled=true;
+    const calls:string[]=[];
+    const rpc=db.rpc;
+    db.rpc=async (name:string, params:any) => {
+      if(name==='rag_search_private_v2') {
+        calls.push(params.p_agent_id);
+        return {data:[{
+          document_id:'cctp-1',document_name:'CCTP',document_version:2,
+          project_id:null,phase:'DET',chunk_id:'123e4567-e89b-12d3-a456-426614174000',
+          ordinal:0,page_number:null,section_title:'Couverture',
+          content:'Un support de couverture doit être confirmé avant exécution.',
+          score:0.15,
+        }],error:null};
+      }
+      return rpc.call(db,name,params);
+    };
+    mockChat.mockResolvedValueOnce({
+      text:withTask(),usage:{inputTokens:120,outputTokens:60},toolCalls:[],
+    }).mockResolvedValueOnce({
+      text:'Avis spécialisé sous réserve de vérification.',usage:{inputTokens:75,outputTokens:30},toolCalls:[],
+    });
+    try {
+      expect(await runAgentMission(db as any,{...db.getTable('agent_missions')[0]},deps)).toBe(true);
+      const delegated=db.getTable('agent_missions')[0];
+      expect(delegated.task_proposal.evidence).toContain('maîtrise d');
+      expect(delegated.rag_references).toHaveLength(1);
+      expect(delegated.rag_references[0].version).toBe(2);
+      expect(mockChat.mock.calls[0][0].messages[0].content).toContain('CCTP');
+      expect(await runAgentMission(db as any,{...delegated},deps)).toBe(true);
+      expect(db.getTable('agent_missions')[0].specialist_rag_references).toHaveLength(1);
+      expect(calls).toEqual(['agent-1','specialist-1']);
+      expect(db.getTable('tasks')).toHaveLength(0);
+    }finally{db.rpc=rpc;}
+  });
+
+  it('sans droit de lecture documentaire, aucun passage RAG ne quitte le moteur vers le modèle', async () => {
+    mockChat.mockResolvedValue({
+      text:withTask(),usage:{inputTokens:120,outputTokens:60},toolCalls:[],
+    });
+    expect(await runAgentMission(db as any,{...db.getTable('agent_missions')[0]},deps)).toBe(true);
+    expect(mockChat.mock.calls[0][0].messages[0].content).not.toContain('EXTRAITS DOCUMENTAIRES');
+    expect(db.getTable('agent_missions')[0].rag_references).toEqual([]);
+  });
+
   it('une mission en attente ne consomme aucun crédit quand le cabinet désactive l’autonomie', async () => {
     db.getTable('tenants')[0].agent_missions_enabled = false;
     const first = { ...db.getTable('agent_missions')[0] };
