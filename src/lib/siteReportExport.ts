@@ -278,22 +278,36 @@ export async function exportSiteReportToPDF(
   }
   if (byCategory.size > 0) {
     progress('Rubriques…');
+    // Une seule entête de colonnes pour toutes les rubriques, redessinée en haut de chaque page
+    // de cette section (les tableaux de rubrique n'ont pas la leur, mais les mêmes largeurs).
+    const RUBRIQUE_COLS = [20, contentW() - 90, 28, 22, 20];
+    const RUBRIQUE_HEAD = ['Date', 'Texte', 'Société', 'Échéance', 'Statut'];
+    const RUBRIQUE_HEAD_H = 6.5;
+    const drawRubriquesHead = (top: number): number => {
+      doc.setFillColor(90, 90, 90);
+      doc.rect(MARGIN, top, contentW(), RUBRIQUE_HEAD_H, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(255, 255, 255);
+      let x = MARGIN;
+      RUBRIQUE_HEAD.forEach((label, i) => { doc.text(label, x + 1.6, top + 4.5); x += RUBRIQUE_COLS[i]; });
+      return top + RUBRIQUE_HEAD_H + 3;
+    };
     doc.addPage('a4', orientation);
-    y = drawAgencyHeader(doc, settings, letterhead);
+    y = drawRubriquesHead(drawAgencyHeader(doc, settings, letterhead));
     for (const [category, items] of byCategory) {
       const sorted = [...items].sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || ''));
       if (y > doc.internal.pageSize.getHeight() - FOOTER_RESERVE - 20) {
         doc.addPage('a4', orientation);
-        y = drawAgencyHeader(doc, settings, letterhead);
+        y = drawRubriquesHead(drawAgencyHeader(doc, settings, letterhead));
       }
       doc.setFillColor(...GRIS_FOND);
       doc.rect(MARGIN, y - 1, contentW(), 7, 'F');
       doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GRIS_TEXTE);
       doc.text(category.toUpperCase(), MARGIN + 2, y + 4);
       y += 10;
+      const startPage = doc.getCurrentPageInfo().pageNumber;
       autoTable(doc, {
         startY: y,
-        head: [['Date', 'Texte', 'Société', 'Échéance', 'Statut']],
+        showHead: 'never',
         body: sorted.map(n => [
           fmtDate(n.issue_date),
           [n.lot_concerne ? `Lot : ${n.lot_concerne}` : '', n.text || n.description || ''].filter(Boolean).join('\n'),
@@ -302,9 +316,10 @@ export async function exportSiteReportToPDF(
           n.statut || n.status,
         ]),
         styles: { fontSize: 8, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
-        headStyles: { fillColor: [90, 90, 90], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-        columnStyles: { 0: { cellWidth: 20 }, 2: { cellWidth: 28 }, 3: { cellWidth: 22 }, 4: { cellWidth: 20, fontStyle: 'bold' } },
-        margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
+        columnStyles: { 0: { cellWidth: RUBRIQUE_COLS[0] }, 2: { cellWidth: RUBRIQUE_COLS[2] }, 3: { cellWidth: RUBRIQUE_COLS[3] }, 4: { cellWidth: RUBRIQUE_COLS[4], fontStyle: 'bold' } },
+        // Haut de page de continuation : la place de l'entête globale (dessinée par willDrawPage).
+        margin: { left: MARGIN, right: MARGIN, top: 10 + RUBRIQUE_HEAD_H + 3, bottom: FOOTER_RESERVE },
+        willDrawPage: data => { if (data.pageNumber > startPage) drawRubriquesHead(10); },
       });
       y = (doc as any).lastAutoTable.finalY + 4;
       if (opts.includeRubriquePhotos !== false) await drawThumbnails(sorted.flatMap(n => n.photos || []));
