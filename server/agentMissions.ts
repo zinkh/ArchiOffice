@@ -3,6 +3,7 @@
 // proposed task through server/routes/agentMissions.ts and the existing /api/tasks.
 import { resolveLlmProvider, getTenantAiConfig } from '@zinkh/archioffice-agents/server/llm';
 import { findMembership } from './tenantMemberships';
+import { isAgentMissionEnabled, isAgentMissionSchemaReady } from './agentMissionSettings';
 
 export type MissionSource = 'manual' | 'forwarded_email' | 'document';
 export interface MissionInput {
@@ -94,6 +95,7 @@ export async function missionEvent(db: any, row: any, kind: string, detail = '',
 }
 
 export async function enqueueAgentMission(db: any, input: MissionInput) {
+  if (!(await isAgentMissionEnabled(db, input.tenantId))) throw new Error('Missions autonomes désactivées pour ce cabinet.');
   const excerpt = missionExcerpt(input.sourceExcerpt);
   const instruction = String(input.instruction || '').trim().slice(0, 1000);
   if (!excerpt || !instruction) throw new Error('Une source et une consigne sont nécessaires.');
@@ -213,6 +215,7 @@ async function changeMission(db: any, row: any, changes: Record<string, unknown>
 
 /** One durable checkpoint per call: a restart resumes at the missing stage. */
 export async function runAgentMission(db: any, candidate: any, deps: MissionDeps = {}) {
+  if (!(await isAgentMissionEnabled(db, candidate.tenant_id))) return false;
   const row = await claimMission(db, candidate);
   if (!row) return false;
   try {
@@ -305,14 +308,21 @@ export async function runDueAgentMissions(db: any, deps: MissionDeps = {}, now =
 }
 
 export function startAgentMissions(db: any, deps: MissionDeps = {}) {
-  // Opt-in: deployments must apply the migration and consent to usage costs.
-  if (process.env.AGENT_MISSIONS_ENABLED !== 'true') return;
+  // No env flag: startup and each tick tolerate a database not yet migrated.
+  let schemaWarned = false;
   let busy = false;
   const tick = async () => {
     if (busy) return;
     busy = true;
-    try { await runDueAgentMissions(db, deps); }
-    catch (e: any) { console.error('[agentMissions]', e?.message); }
+    try {
+      if (!(await isAgentMissionSchemaReady(db))) {
+        if (!schemaWarned) console.warn('[agentMissions] Schéma absent : migration Supabase requise, worker en attente.');
+        schemaWarned = true;
+        return;
+      }
+      schemaWarned = false;
+      await runDueAgentMissions(db, deps);
+    } catch (e: any) { console.error('[agentMissions]', e?.message); }
     finally { busy = false; }
   };
   void tick();
