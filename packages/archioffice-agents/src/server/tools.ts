@@ -11,6 +11,10 @@ import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
 import { IMPORT_SITE_REPORT_NOTES_TOOL, IMPORT_SITE_REPORT_NOTES_TOOL_NAME, importSiteReportNotes } from './siteReportNotesTool.js';
+import { buildBusinessTools, executeBusinessTool, BUSINESS_TOOL_NAMES, BUSINESS_TOOL_SCOPES } from './businessTools.js';
+import { PROJECT_WORK_TOOLS, PROJECT_WORK_TOOL_NAMES, MEETING_WORK_TOOLS, MEETING_WORK_TOOL_NAMES, executeProjectWorkTool } from './projectWorkTools.js';
+import { buildDocumentReadTools, executeDocumentReadTool, DOCUMENT_READ_TOOL_NAMES } from './documentTools.js';
+import { MANAGE_PROJECT_STAKEHOLDERS_TOOL, MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME, manageProjectStakeholders } from './projectStakeholdersTool.js';
 
 export type { FunctionDeclarationLike };
 
@@ -64,7 +68,12 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
       },
     });
     tools.push(IMPORT_SITE_REPORT_NOTES_TOOL);
+    tools.push(MANAGE_PROJECT_STAKEHOLDERS_TOOL);
+    tools.push(...PROJECT_WORK_TOOLS);
   }
+
+  if (actionScopes.includes('meetings')) tools.push(...MEETING_WORK_TOOLS);
+  tools.push(...buildBusinessTools(actionScopes));
 
   if (creatable.length > 0) {
     tools.push({
@@ -100,6 +109,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
         properties: {
           resource: { type: 'string', enum: updatable, description: 'Type de ressource à modifier' },
           id: { type: 'string', description: "Identifiant de l'enregistrement à modifier" },
+          parent_id: { type: 'string', description: "Seulement pour les ressources lues par parent (appel d'offres) : identifiant du parent" },
           data: { type: 'object', description: 'Champs à mettre à jour' },
         },
         required: ['resource', 'id', 'data'],
@@ -118,6 +128,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
         properties: {
           resource: { type: 'string', enum: deletable, description: 'Type de ressource à supprimer' },
           id: { type: 'string', description: "Identifiant de l'enregistrement à supprimer" },
+          parent_id: { type: 'string', description: "Seulement pour les ressources lues par parent (appel d'offres) : identifiant du parent" },
           confirm: {
             type: 'boolean',
             description:
@@ -141,6 +152,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
         properties: {
           resource: { type: 'string', enum: searchable, description: 'Type de ressource dans laquelle chercher' },
           query: { type: 'string', description: 'Mot-clé à rechercher (nom, société, titre...)' },
+          parent_id: { type: 'string', description: "Seulement pour les ressources lues par parent (pièces, concurrents, sollicitations, notes d'un appel d'offres) : identifiant du parent (l'appel d'offres)" },
           fields: { type: 'array', items: { type: 'string' }, description: "Optionnel — colonnes à joindre à chaque résultat (ex. [\"email\", \"phone\", \"address\"] pour un contact). Sans ce paramètre, seule l'identité est rendue ; pour tout le détail d'un enregistrement, utilise get_record." },
         },
         required: ['resource', 'query'],
@@ -161,6 +173,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
         properties: {
           resource: { type: 'string', enum: readable, description: 'Type de ressource à lire' },
           id: { type: 'string', description: "Identifiant de l'enregistrement" },
+          parent_id: { type: 'string', description: "Seulement pour les ressources lues par parent (appel d'offres) : identifiant du parent" },
           fields: { type: 'array', items: { type: 'string' }, description: 'Optionnel — colonnes à renvoyer (défaut : tous les champs, hors images base64)' },
         },
         required: ['resource', 'id'],
@@ -188,7 +201,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   if (caps.mailRead) tools.push(...buildMailTools(caps.mailSend));
   if (caps.mailAttachments) tools.push(...buildMailAttachmentTools());
   if (caps.geo) tools.push(...buildGeoTools());
-  if (caps.docsRead) tools.push(...buildProjectDocTools());
+  if (caps.docsRead) tools.push(...buildProjectDocTools(), ...buildDocumentReadTools());
   if (caps.docsWrite) tools.push(...buildWriteProjectDocTools());
   if (caps.delegate) tools.push(...buildDelegateTools());
   if (caps.notifyUsers) tools.push(...buildNotifyTools());
@@ -374,10 +387,13 @@ function getRecordIdentity(resourceKey: string, resource: AgentResourceDef, reco
   return field && record[field] ? String(record[field]).trim() : '';
 }
 
-async function fetchResourceList(baseUrl: string, auth: InternalAuth, resource: AgentResourceDef): Promise<Record<string, unknown>[]> {
+async function fetchResourceList(baseUrl: string, auth: InternalAuth, resource: AgentResourceDef, parentId?: string): Promise<Record<string, unknown>[]> {
   if (!resource.list) return [];
+  // Une liste lue par parent (pièces d'un AO...) n'existe que pour un parent donné.
+  if (resource.listParam && !parentId) return [];
   try {
-    const res = await fetch(baseUrl + resource.basePath, { headers: internalHeaders(auth) });
+    const query = resource.listParam ? `?${resource.listParam}=${encodeURIComponent(String(parentId))}` : '';
+    const res = await fetch(baseUrl + resource.basePath + query, { headers: internalHeaders(auth) });
     if (!res.ok) return [];
     const json = await res.json().catch(() => []);
     return Array.isArray(json) ? json : [];
@@ -425,6 +441,30 @@ export async function executeAgentAction(
     if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return importSiteReportNotes(baseUrl, auth, args);
+  }
+
+  if (name && (PROJECT_WORK_TOOL_NAMES as readonly string[]).includes(name)) {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeProjectWorkTool(baseUrl, auth, name, args);
+  }
+
+  if (name && BUSINESS_TOOL_NAMES.includes(name)) {
+    if (!actionScopes.includes(BUSINESS_TOOL_SCOPES[name])) return { response: { error: "Cet outil n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeBusinessTool(baseUrl, auth, name, args);
+  }
+
+  if (name && (MEETING_WORK_TOOL_NAMES as readonly string[]).includes(name)) {
+    if (!actionScopes.includes('meetings')) return { response: { error: "L'accès aux réunions n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeProjectWorkTool(baseUrl, auth, name, args);
+  }
+
+  if (name === MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME) {
+    if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return manageProjectStakeholders(baseUrl, auth, args);
   }
 
   if (name === 'add_site_report_observation') {
@@ -544,6 +584,12 @@ export async function executeAgentAction(
     return executeProjectDocTool(baseUrl, auth, name, args);
   }
 
+  if (name && DOCUMENT_READ_TOOL_NAMES.includes(name)) {
+    if (!caps.docsRead) return { response: { error: "La lecture des documents n'est pas activée pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeDocumentReadTool(baseUrl, auth, name, args);
+  }
+
   if (name && PROJECT_DOC_WRITE_TOOL_NAMES.includes(name)) {
     if (!caps.docsWrite) return { response: { error: "L'écriture du CCTP et du DPGF n'est pas activée pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
@@ -586,7 +632,9 @@ export async function executeAgentAction(
     }
     const q = String(args.query || '').toLowerCase().trim();
     if (!q) return { response: { error: 'query est requis.' } };
-    const list = await fetchResourceList(baseUrl, auth, resource);
+    const parentId = String(args.parent_id || '').trim();
+    if (resource.listParam && !parentId) return { response: { error: `parent_id est requis pour « ${resource.label} » : l'identifiant du parent (${resource.listParam}).` } };
+    const list = await fetchResourceList(baseUrl, auth, resource, parentId);
     const wanted = parseFieldList(args.fields);
     const matches = list
       .map(r => ({ row: r, id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
@@ -600,7 +648,9 @@ export async function executeAgentAction(
     if (!resource.list) return { response: { error: `Lecture non disponible pour "${resourceKey}".` } };
     const id = String(args.id || '');
     if (!id) return { response: { error: 'id est requis.' } };
-    const list = await fetchResourceList(baseUrl, auth, resource);
+    const parentId = String(args.parent_id || '').trim();
+    if (resource.listParam && !parentId) return { response: { error: `parent_id est requis pour « ${resource.label} » : l'identifiant du parent (${resource.listParam}).` } };
+    const list = await fetchResourceList(baseUrl, auth, resource, parentId);
     const record = list.find(r => String((r as any).id) === id);
     if (!record) return { response: { error: `Aucun enregistrement "${id}" dans « ${resource.label} ».` } };
     return { response: { record: slimRecord(record, parseFieldList(args.fields)) } };
@@ -630,7 +680,7 @@ export async function executeAgentAction(
     const hasIdentity = resourceKey === 'contacts' || !!resource.identityField;
     const identity = getRecordIdentity(resourceKey, resource, body);
     if (resource.list && hasIdentity && identity && args.confirm !== true) {
-      const list = await fetchResourceList(baseUrl, auth, resource);
+      const list = await fetchResourceList(baseUrl, auth, resource, resource.listParam ? String(body[resource.listParam] || '') : undefined);
       const duplicates = list
         .map(r => ({ id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
         .filter(r => r.identity && r.identity.toLowerCase() === identity.toLowerCase())
@@ -658,6 +708,19 @@ export async function executeAgentAction(
     // en poser d'autres écraserait des valeurs que l'utilisateur n'a pas visées.
     prepared = prepareRecord(resource, (args.data as Record<string, unknown>) || {}, { applyDefaults: false });
     body = prepared.data;
+    if (resource.mergeOnUpdate) {
+      // Le PUT de cette route réécrit les colonnes absentes : on renvoie l'enregistrement
+      // actuel avec, par-dessus, les seuls champs fournis.
+      const current = (await fetchResourceList(baseUrl, auth, resource, String(args.parent_id || ''))).find(r => String((r as any).id) === id);
+      if (!current) return { response: { error: `Aucun enregistrement "${id}" dans « ${resource.label} ».` } };
+      // Toutes les colonnes lues, pas seulement knownFields : ces routes lisent aussi des colonnes que
+      // l'agent n'écrit jamais (archived, surface, mandatory_visit...) et les remettraient à zéro.
+      const merged: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(current)) {
+        if (!['id', 'tenant_id', 'created_at', 'updated_at'].includes(key) && value !== undefined) merged[key] = value;
+      }
+      body = { ...merged, ...body };
+    }
   } else if (name === 'delete_record') {
     if (!resource.delete) return { response: { error: `Suppression non supportée pour "${resourceKey}".` } };
     const id = String(args.id || '');
@@ -669,7 +732,7 @@ export async function executeAgentAction(
       // explicit go-ahead before the DELETE actually fires.
       let identity = id;
       if (resource.list) {
-        const list = await fetchResourceList(baseUrl, auth, resource);
+        const list = await fetchResourceList(baseUrl, auth, resource, String(args.parent_id || ''));
         const match = list.find(r => String((r as any).id) === id);
         if (match) identity = getRecordIdentity(resourceKey, resource, match) || id;
       }
@@ -733,7 +796,7 @@ export async function executeAgentAction(
       // just what it asked to save.
       const recordId = name === 'update_record' ? String(args.id) : String(json?.id || '');
       if (recordId) {
-        const list = await fetchResourceList(baseUrl, auth, resource);
+        const list = await fetchResourceList(baseUrl, auth, resource, String(args.parent_id || (resource.listParam ? (body as any)?.[resource.listParam] : '') || ''));
         savedRecord = list.find(r => String((r as any).id) === recordId);
       }
       dateWarning = checkSuspiciousDate(resourceKey, savedRecord || body || {});

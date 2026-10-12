@@ -8,6 +8,8 @@ import { apiFetch } from '@/src/lib/api';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
 import { useDictation } from './useDictation.js';
 import { useSpeech } from './useSpeech.js';
+import { ChatMarkdown } from './ChatMarkdown.js';
+import { markdownToPlainText } from './chatMarkdown.js';
 import type { Speech } from './useSpeech.js';
 import type { CopilotSuggestion, CopilotSuggestionRaw } from '@/src/lib/copilotSuggestions';
 import type { Agent, AgentMessage, AgentArtifact } from '../types.js';
@@ -138,19 +140,19 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
       )}
       <div className="max-w-[82%] group">
         <div
-          className="px-3 py-2 rounded-xl text-[13px] leading-relaxed whitespace-pre-wrap"
+          className={`px-3 py-2 rounded-xl text-[13px] leading-relaxed ${isUser ? 'whitespace-pre-wrap' : ''}`}
           style={
             isUser
               ? { background: 'var(--tblr-primary)', color: 'white' }
               : { background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)' }
           }
         >
-          {msg.content}
+          {isUser ? msg.content : <ChatMarkdown content={msg.content} />}
         </div>
         {msg.artifact && <ArtifactCard artifact={msg.artifact} onPreview={onPreviewArtifact} />}
         {!isUser && msg.content && (
           <button
-            onClick={() => speech.toggle(msg.id, msg.content)}
+            onClick={() => speech.toggle(msg.id, markdownToPlainText(msg.content))}
             className="mt-1 p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
             style={{ color: isSpeaking ? 'var(--tblr-primary)' : 'var(--tblr-muted)', opacity: isSpeaking ? 1 : undefined }}
             title="Lire à voix haute"

@@ -36,6 +36,7 @@ import { extractDocumentText, MAX_EXTRACTED_TEXT_CHARS, withTextExtractionTimeou
 import { fetchBinaryUrlSafely } from '../webFetch.js';
 import { slimRecord } from '../tools.js';
 import { issueUploadUrl } from './uploadUrl.js';
+import { DOCUMENT_RESOURCE_TYPES, toSummary, fetchAttachedDocuments, depositDocument, downloadAttachedDocumentBytes } from '../documentTools.js';
 
 async function callApi(baseUrl: string, auth: InternalAuth, method: string, path: string, body?: unknown) {
   try {
@@ -67,103 +68,16 @@ function errorResult(message: string) {
 // aller chercher les octets derrière une URL signée plutôt que de renvoyer
 // un enregistrement.
 //
-// Copie à la main de server/routes/documents.ts's ATTACHABLE_RESOURCE_TYPES
-// — ce paquet n'importe rien du serveur hôte (voir externalFiles.ts), donc
-// pas de source commune possible. Les deux listes doivent rester alignées.
-const DOCUMENT_RESOURCE_TYPES = [
-  'projects', 'contacts', 'proposals', 'tenders', 'permits', 'meetings',
-  'receptions', 'reserves', 'contrats_moe', 'ordres_de_service', 'visas',
-  'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones',
-];
-
+// Les helpers de dépôt et de lecture de pièces jointes (DOCUMENT_RESOURCE_TYPES, depositDocument,
+// fetchAttachedDocuments, downloadAttachedDocumentBytes) vivent dans ../documentTools.ts : le chat
+// des agents internes s'en sert aussi (list_documents, read_document, dépôt d'un fichier généré).
+// MAX_MCP_FILE_BYTES reste ici : il tient au transport MCP (base64 dans la requête JSON-RPC).
 // Volontairement plus bas que la limite serveur (50 Mo, server/documentUpload.ts) :
 // un appel MCP porte le fichier encodé en base64 dans la requête JSON-RPC
 // elle-même, environ un tiers plus volumineux que l'original — mieux vaut
 // une limite annoncée et tenue que de laisser filer un appel qui échouera
 // de toute façon plus loin dans la chaîne.
 const MAX_MCP_FILE_BYTES = 25 * 1024 * 1024;
-
-interface DocumentSummary {
-  id: string;
-  file_name: string;
-  mime_type: string | null;
-  category: string | null;
-  size: number | null;
-  uploaded_at: string;
-}
-
-function toSummary(doc: any): DocumentSummary {
-  return {
-    id: String(doc.id),
-    file_name: doc.name,
-    mime_type: doc.mime_type ?? null,
-    category: doc.category ?? null,
-    size: doc.size_bytes ?? null,
-    uploaded_at: doc.uploaded_at,
-  };
-}
-
-async function fetchAttachedDocuments(baseUrl: string, auth: InternalAuth, resource: string, resourceId: string): Promise<any[]> {
-  const res = await fetch(
-    `${baseUrl}/api/documents?resource_type=${encodeURIComponent(resource)}&resource_id=${encodeURIComponent(resourceId)}`,
-    { headers: internalHeaders(auth) },
-  );
-  if (!res.ok) return [];
-  const data = await res.json().catch(() => []);
-  return Array.isArray(data) ? data : [];
-}
-
-interface DepositResult {
-  id: string;
-  file_name: string;
-  mime_type: string;
-  size: number;
-  uploaded_at: string;
-}
-
-// POST /api/documents, factorisé hors de upload_document (ci-dessous) pour
-// que import_email_attachment fasse le même dépôt sans le base64 : la pièce
-// jointe est déjà un Buffer téléchargé depuis la messagerie, jamais
-// ré-encodée pour transiter par le modèle.
-async function depositDocument(
-  baseUrl: string,
-  auth: InternalAuth,
-  params: { resource: string; resourceId: string; fileName: string; buffer: Buffer; mimeType: string; category?: string; description?: string }
-): Promise<DepositResult | { error: string }> {
-  const form = new FormData();
-  form.append('file', new Blob([params.buffer], { type: params.mimeType }), params.fileName);
-  form.append('resource_type', params.resource);
-  form.append('resource_id', params.resourceId);
-  form.append('name', params.fileName);
-  form.append('category', params.category || 'Autre');
-  if (params.description) form.append('description', params.description);
-  try {
-    const res = await fetch(`${baseUrl}/api/documents`, { method: 'POST', headers: internalHeaders(auth), body: form as any });
-    const data: any = await res.json().catch(() => null);
-    if (!res.ok) return { error: data?.error || `Échec du dépôt (${res.status}).` };
-    return { id: data.id, file_name: params.fileName, mime_type: params.mimeType, size: data.size_bytes ?? params.buffer.length, uploaded_at: data.uploaded_at };
-  } catch (e: any) {
-    return { error: e?.message || 'Dépôt impossible.' };
-  }
-}
-
-// Retélécharge les octets d'une pièce déjà attachée à une fiche, en passant
-// par la même URL signée que l'ouverture côté écran — factorisé hors de
-// get_document pour que read_document en extraie le texte sans dupliquer ce
-// détour.
-async function downloadAttachedDocumentBytes(baseUrl: string, auth: InternalAuth, doc: any): Promise<Buffer | { error: string }> {
-  try {
-    const signedRes = await fetch(`${baseUrl}/api/storage/signed-url?url=${encodeURIComponent(doc.file_url)}`, { headers: internalHeaders(auth) });
-    const signed: any = await signedRes.json().catch(() => null);
-    if (!signedRes.ok || !signed?.url) return { error: signed?.error || 'Impossible de résoudre le fichier.' };
-    const fileRes = await fetch(signed.url.startsWith('http') ? signed.url : `${baseUrl}${signed.url}`);
-    if (!fileRes.ok) return { error: `Fichier indisponible (${fileRes.status}).` };
-    const arrayBuffer = await fileRes.arrayBuffer();
-    return Buffer.from(arrayBuffer);
-  } catch (e: any) {
-    return { error: e?.message || 'Téléchargement impossible.' };
-  }
-}
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif',
@@ -686,6 +600,7 @@ function genericTools(): FunctionDeclarationLike[] {
   const schema = describeAuthorizedResources(MCP_CAPS.actionScopes);
   return buildAgentTools(MCP_CAPS)
     .filter(t => t.name !== 'delete_record') // jamais depuis une liaison externe, quel que soit le connecteur
+    .filter(t => !DOCUMENT_TOOL_NAMES.includes(t.name)) // list_documents / read_document : la version MCP (DOCUMENT_TOOLS) fait foi
     .map(t => (
       ['create_record', 'update_record', 'search_records', 'get_record'].includes(t.name)
         ? { ...t, description: `${t.description}\n\nSCHÉMA DES RESSOURCES :\n${schema}` }

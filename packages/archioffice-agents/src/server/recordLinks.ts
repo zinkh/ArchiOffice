@@ -85,6 +85,21 @@ export function buildRecordPath(resourceKey: string, record: Record<string, unkn
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=DET` : null;
     case 'notes_honoraires':
       return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=HONOS` : null;
+    // Demandes d'information et réserves GPA : onglets DET et AOR de la fiche.
+    case 'rfis':
+      return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=DET` : null;
+    case 'gpa_reserves':
+      return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=AOR` : null;
+    case 'avenants_moe':
+      return projectId ? `/projects/${encodeURIComponent(projectId)}?tab=HONOS` : null;
+    case 'time_entries':
+      return '/team?tab=temps';
+    // Sous-éléments d'un appel d'offres : la fiche de l'appel d'offres (tender_id).
+    case 'tender_pieces':
+    case 'tender_competitors':
+    case 'tender_partner_solicitations':
+    case 'tender_activity_notes':
+      return record?.tender_id != null ? `/tenders/${encodeURIComponent(String(record.tender_id))}` : null;
 
     default:
       return null;

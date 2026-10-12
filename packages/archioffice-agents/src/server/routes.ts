@@ -5,6 +5,8 @@ import { AGENT_DEFAULT_ACTION_SCOPES, capabilitiesFromAgent } from '../types.js'
 import { buildAgentSystemPrompt } from './systemPrompts.js';
 import { buildAgentContext } from './context.js';
 import { parseArtifactFromText, generateArtifact } from './artifacts.js';
+import { attachArtifactToRecord } from './documentTools.js';
+import { buildRecordUrl } from './recordLinks.js';
 import { loadAgencyIdentity } from './agencyIdentity.js';
 import { buildAgentTools, executeAgentAction } from './tools.js';
 import { resolveLlmProvider, resolveTranscriptionProvider, resolveSpeechProvider, getTenantAiConfig, LlmNotConfiguredError, type LlmMessage, type LlmToolResult } from './llm/index.js';
@@ -847,7 +849,7 @@ export function registerAgentRoutes(
       const finalText = cleanText.trim() || (actionSummaries.length > 0
         ? "Je me suis arrêtée après ces étapes sans pouvoir conclure, et je n'ai pas réussi à préciser pourquoi. Pouvez-vous reformuler votre demande ?"
         : "Je n'ai pas pu produire de réponse. Pouvez-vous reformuler votre demande ?");
-      const reply = actionSummaries.length > 0
+      let reply = actionSummaries.length > 0
         ? actionSummaries.map(s => `✅ ${s}`).join('\n') + '\n\n' + finalText
         : finalText;
       // Le fichier porte l'en-tête et le pied de page du cabinet (voir
@@ -861,6 +863,19 @@ export function registerAgentRoutes(
           console.error(`[agent chat] artifact generation failed conv=${convId}: ${artifactErr?.message}`);
           Sentry.captureException(artifactErr, { tags: { feature: 'agent-artifact', agent_id: agentId } });
         }
+      }
+      // « Range-le dans l'affaire » : le fichier est aussi déposé sur la fiche demandée, avec le
+      // jeton de la personne (mêmes droits que l'écran) et seulement si l'agent peut modifier
+      // ce type de fiche. Le résultat est ajouté à la réponse, jamais une erreur de la requête.
+      const attachAuthorization = req.headers.authorization as string | undefined;
+      if (artifact && spec?.attach_to && billing?.baseUrl && attachAuthorization) {
+        const target = spec.attach_to;
+        const attached = await attachArtifactToRecord(
+          billing.baseUrl, { authorization: attachAuthorization, tenantId: req.activeTenantId ?? tenantId },
+          caps.actionScopes, artifact, target,
+          buildRecordUrl(String(target.resource || ''), { id: target.resource_id }),
+        );
+        reply = `${reply}\n\n${attached.note}`;
       }
 
       let newBalance = balance;

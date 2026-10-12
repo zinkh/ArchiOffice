@@ -45,7 +45,7 @@ describe('périmètre des outils selon les capacités', () => {
     expect(toolNames({ geo_enabled: true })).toEqual(
       ['search_address', 'get_parcelle_cadastrale', 'get_zone_plu', 'get_risques', 'get_monuments_historiques']
     );
-    expect(toolNames({ docs_read_enabled: true })).toEqual(['read_cctp', 'read_dpgf', 'read_bpu']);
+    expect(toolNames({ docs_read_enabled: true })).toEqual(['read_cctp', 'read_dpgf', 'read_bpu', 'list_documents', 'read_document']);
   });
 
   it('refuse un appel dont la capacité est éteinte, même si le modèle le tente', async () => {
@@ -806,5 +806,90 @@ describe('alertes : qualification d\'une entreprise consultée', () => {
     expect(detect('qualification_expiree', snapshot({ projects: [projet], qualifications: q, consultations: consultation([{ contact_id: 'c1', ne_repond_pas: true }]) }))).toHaveLength(0);
     expect(detect('qualification_expiree', snapshot({ projects: [projet], qualifications: q, consultations: consultation([{ nom: 'Sans fiche' }]) }))).toHaveLength(0);
     expect(detect('qualification_expiree', snapshot({ projects: [{ ...projet, status: 'Completed' }], qualifications: q, consultations: consultation([{ contact_id: 'c1' }]) }))).toHaveLength(0);
+  });
+});
+
+describe('intervenants d\'une opération (manage_project_stakeholders)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const caps = () => capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['projects'] });
+  const auth = { authorization: 'Bearer x' };
+  const contacts = [
+    { id: 'c-bio', company_name: 'BIOTOPE', first_name: '', last_name: '' },
+    { id: 'c-th', company_name: '', first_name: 'Thomas', last_name: 'ROUSSEL' },
+    { id: 'c-d1', company_name: 'DUPONT', first_name: '', last_name: '' },
+    { id: 'c-d2', company_name: 'DUPONT', first_name: '', last_name: '' },
+  ];
+  const stub = (existing: any[] = []) => {
+    const fetchMock = vi.fn(async (url: string, init?: any) => {
+      const method = init?.method || 'GET';
+      let json: any = [];
+      if (url.endsWith('/projects/p1/full')) json = { id: 'p1', stakeholders_list: existing };
+      else if (url.endsWith('/api/contacts')) json = contacts;
+      else if (method === 'PUT') json = { stakeholders: JSON.parse(init.body).stakeholders };
+      return { ok: true, status: 200, json: async () => json };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+  const run = (args: any) => executeAgentAction('http://localhost', auth, caps(), { name: 'manage_project_stakeholders', args }) as Promise<{ response: any }>;
+  const put = (m: ReturnType<typeof stub>) => JSON.parse(m.mock.calls.find(c => c[1]?.method === 'PUT')![1].body).stakeholders;
+
+  it("n'est proposé qu'aux agents ayant accès aux opérations, et exposé au MCP", async () => {
+    expect(buildAgentTools(caps()).map(t => t.name)).toContain('manage_project_stakeholders');
+    expect(buildAgentTools(capabilitiesFromAgent({ ...NO_CAPS, action_scopes: ['contacts'] })).map(t => t.name)).not.toContain('manage_project_stakeholders');
+    const { MCP_TOOL_NAMES } = await import('../packages/archioffice-agents/src/server/mcp/tools');
+    expect(MCP_TOOL_NAMES).toContain('manage_project_stakeholders');
+  });
+
+  it('ajoute des intervenants sans toucher aux existants et lie les contacts', async () => {
+    const existing = [{ id: 's-1', name: 'MOA', role: 'Maître d\'ouvrage', contact_id: 'c-d1' }];
+    const m = stub(existing);
+    const result = await run({ project_id: 'p1', action: 'add', intervenants: [
+      { contact_id: 'c-bio', role: 'Écologue' }, { nom: 'Thomas ROUSSEL', role: 'Écologue' },
+    ] });
+    expect(result.response).toMatchObject({ success: true });
+    expect(result.response.ajoutes).toHaveLength(2);
+    const sent = put(m);
+    expect(sent[0]).toMatchObject({ id: 's-1', role: 'Maître d\'ouvrage', contact_id: 'c-d1' });
+    expect(sent.slice(1)).toMatchObject([{ name: 'BIOTOPE', contact_id: 'c-bio', role: 'Écologue' }, { name: 'Thomas ROUSSEL', contact_id: 'c-th', role: 'Écologue' }]);
+  });
+
+  it('ignore un doublon (même contact et même rôle) sans écrire', async () => {
+    const m = stub([{ id: 's-1', name: 'BIOTOPE', role: 'Écologue', contact_id: 'c-bio' }]);
+    const result = await run({ project_id: 'p1', action: 'add', intervenants: [{ contact_id: 'c-bio', role: 'écologue' }] });
+    expect(result.response.deja_presents).toHaveLength(1);
+    expect(m.mock.calls.some(c => c[1]?.method === 'PUT')).toBe(false);
+  });
+
+  it('refuse un rôle absent, un contact inconnu et un nom ambigu', async () => {
+    const m = stub();
+    const result = await run({ project_id: 'p1', action: 'add', intervenants: [
+      { contact_id: 'c-bio' }, { contact_id: 'inconnu', role: 'BET' }, { nom: 'DUPONT', role: 'BET' },
+    ] });
+    expect(result.response.error).toContain("Aucun intervenant");
+    expect(result.response.non_traites.map((n: any) => n.raison)).toEqual([
+      'rôle requis', expect.stringContaining('introuvable'), expect.stringContaining('plusieurs contacts'),
+    ]);
+    expect(m.mock.calls.some(c => c[1]?.method === 'PUT')).toBe(false);
+  });
+
+  it('retire en deux temps : confirmation puis écriture', async () => {
+    const existing = [
+      { id: 's-1', name: 'BIOTOPE', role: 'Écologue', contact_id: 'c-bio' },
+      { id: 's-2', name: 'Thomas ROUSSEL', role: 'Écologue', contact_id: 'c-th' },
+    ];
+    const m = stub(existing);
+    const first = await run({ project_id: 'p1', action: 'remove', intervenants: [{ contact_id: 'c-bio' }] });
+    expect(first.response.needs_confirmation).toBe(true);
+    expect(m.mock.calls.some(c => c[1]?.method === 'PUT')).toBe(false);
+    const second = await run({ project_id: 'p1', action: 'remove', intervenants: [{ contact_id: 'c-bio' }], confirm: true });
+    expect(second.response).toMatchObject({ success: true });
+    expect(put(m).map((s: any) => s.id)).toEqual(['s-2']);
+  });
+
+  it('liste les intervenants actuels', async () => {
+    stub([{ id: 's-1', name: 'BIOTOPE', role: 'Écologue', contact_id: 'c-bio' }]);
+    const result = await run({ project_id: 'p1', action: 'list' });
+    expect(result.response.intervenants).toEqual([{ id: 's-1', nom: 'BIOTOPE', role: 'Écologue', contact_id: 'c-bio' }]);
   });
 });

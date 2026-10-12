@@ -23,6 +23,8 @@ export interface ArtifactSpec {
   sheets?: { name: string; rows: any[][] }[];
   rows?: any[][];
   content?: string;
+  /** Range aussi le fichier sur une fiche du cabinet (pièces jointes de l'affaire, de l'appel d'offres...). */
+  attach_to?: { resource: string; resource_id: string; category?: string };
 }
 
 const ARTIFACT_RE = /```artifact\n([\s\S]*?)\n```/g;
