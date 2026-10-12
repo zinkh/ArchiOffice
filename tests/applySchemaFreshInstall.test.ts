@@ -50,6 +50,22 @@ describe.skipIf(!hasPostgres)('applyLocalSchema — installation neuve contre un
         // de CI pour savoir laquelle a échoué.
         throw new Error(`${err.message}\n${logLines.join('\n')}`);
       }
+      // v2 excludes stale versions; mutualized documents must match the
+      // actual published SHA-256 and the live author + reader consents.
+      const defs = await client.query(
+        "SELECT proname,pg_get_functiondef(oid) AS definition FROM pg_proc WHERE proname IN ('rag_search_private_v2','rag_search_mutualized')"
+      );
+      const privateFn = defs.rows.find((r: any)=>r.proname==='rag_search_private_v2')?.definition || '';
+      const mutualFn = defs.rows.find((r: any)=>r.proname==='rag_search_mutualized')?.definition || '';
+      expect(privateFn).toContain('indexed_version');
+      expect(privateFn).toContain('doc.version');
+      expect(mutualFn).toContain('content_sha256');
+      expect(mutualFn).toContain('deletion_requested_at');
+      expect(mutualFn).toContain('rag_shared_knowledge_enabled');
+      // No direct reads from the original Mistral documents, only explicitly
+      // published-and-reviewed sanitized text held in local DB.
+      expect(mutualFn).toContain('sanitized_text');
+
       // Test réel de la transaction : une erreur de tâche doit annuler aussi
       // la fermeture de phase et l'audit. Le faux Supabase ne prouve pas cela.
       const tenantId = '00000000-0000-4000-8000-000000000001';
