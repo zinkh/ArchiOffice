@@ -1759,6 +1759,26 @@ existants, quantités et prix à 0, chaque article marqué `genereParIa` (badge
 l'enregistrement habituel. Seules les pièces dont `project_id` est l'affaire
 visée sont lues.
 
+**Moteur « llm » : un lot à la fois.** Un seul appel pour tout le CCTP produisait un
+JSON de plusieurs milliers de jetons, plus long que les délais des fournisseurs
+(120 s chez Mistral) et des proxys. `CctpGenerateDialog` enchaîne donc, dans le
+navigateur : `POST .../cctp/plan` (liste des lots, sans chapitres) puis
+`POST .../cctp/generate-lot` par lot, trois à la fois (`cctpLotLimiter`, 60 par
+minute et par personne). Chaque appel est facturé séparément (réserve → exécute →
+règle) ; un lot en échec n'emporte pas les autres (« Réessayer les lots en
+échec », « Insérer les lots obtenus »). Nomic reste sur `POST .../cctp/generate`.
+**Cache de prompt** : les pièces (`cachePrefix`, `LlmChatParams`) sont placées en
+tête de chaque appel, identiques du plan au dernier lot, avec le même `system`.
+Claude les marque `cache_control` (écriture à 125 %, lecture à 10 %, ramenées en
+jetons d'entrée équivalents dans `usage`) ; Gemini met en cache implicitement un
+préfixe identique ; Mistral reçoit `prompt_cache_key` (`cacheKey`, condensé SHA-256
+de cabinet, affaire et pièces, jamais de donnée en clair) et facture les jetons
+servis par le cache (`usage.prompt_tokens_details.cached_tokens`) à 10 % : succès
+possible mais jamais garanti, blocs de 64 jetons. Le
+plan, lancé seul avant les lots, écrit le cache que les lots lisent ensuite. Le
+texte extrait des pièces est gardé 15 min en mémoire (`sourceCache`) pour ne pas
+relire ni réOCRiser les plans à chaque lot.
+
 ### Chantier hors ligne, en plusieurs bâtiments et phases
 
 **Comptes-rendus hors ligne.** `GET /api/projects/:id/reports` n'était lu ni mis en

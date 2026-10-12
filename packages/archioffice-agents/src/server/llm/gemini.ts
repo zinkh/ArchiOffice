@@ -19,6 +19,7 @@ import type {
   LlmTranscriptionParams,
   LlmTranscriptionResult,
 } from './types.js';
+import { prependCachePrefix } from './cachePrefix.js';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 // Un modèle de chat ordinaire ne produit pas d'audio en sortie : la synthèse
@@ -186,7 +187,7 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
     // notre charge (voir geminiTools plus bas, dans chat()).
     supportsWebSearch: true,
 
-    async chat({ system, messages, tools, webSearch }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, webSearch, cachePrefix }: LlmChatParams): Promise<LlmChatResult> {
       if (!client) {
         const { GoogleGenAI } = await import('@google/genai');
         client = new GoogleGenAI({ apiKey: opts.apiKey });
@@ -199,7 +200,7 @@ export function createGeminiProvider(opts: { apiKey: string; model?: string }): 
 
       const response = await client.models.generateContent({
         model,
-        contents: toGeminiContents(messages),
+        contents: toGeminiContents(prependCachePrefix(messages, cachePrefix)),
         config: {
           ...(system ? { systemInstruction: system } : {}),
           ...(geminiTools.length > 0 ? { tools: geminiTools } : {}),

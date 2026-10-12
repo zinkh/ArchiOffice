@@ -15,6 +15,7 @@ import type {
   LlmProvider,
   LlmToolCall,
 } from './types.js';
+import { prependCachePrefix } from './cachePrefix.js';
 
 export const DEFAULT_MISTRAL_MODEL = 'mistral-large-latest';
 
@@ -125,7 +126,7 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
     // fournisseur ; web_search_enabled reste sans effet tant qu'un cabinet
     // fait tourner ses agents sur Mistral plutôt que sur Gemini ou Claude.
 
-    async chat({ system, messages, tools }: LlmChatParams): Promise<LlmChatResult> {
+    async chat({ system, messages, tools, timeoutMs, cachePrefix, cacheKey }: LlmChatParams): Promise<LlmChatResult> {
       const res = await fetch(ENDPOINT, {
         method: 'POST',
         headers: {
@@ -133,11 +134,12 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
           Accept: 'application/json',
           Authorization: `Bearer ${opts.apiKey}`,
         },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs ?? REQUEST_TIMEOUT_MS),
         body: JSON.stringify({
           model,
           max_tokens: MAX_TOKENS,
-          messages: toMistralMessages(system, messages),
+          ...(cacheKey ? { prompt_cache_key: cacheKey } : {}),
+          messages: toMistralMessages(system, prependCachePrefix(messages, cachePrefix)),
           ...(tools && tools.length > 0
             ? {
                 tools: tools.map(t => ({
@@ -169,11 +171,17 @@ export function createMistralProvider(opts: { apiKey: string; model?: string }):
         args: parseArgs(c.function?.arguments),
       }));
 
+      // prompt_tokens compte TOUS les jetons du prompt, ceux servis par le cache
+      // compris (usage.prompt_tokens_details.cached_tokens, facturés à 10 %) :
+      // ramenés en jetons d'entrée équivalents pour que la facture suive.
+      const promptTokens = json?.usage?.prompt_tokens ?? 0;
+      const cached = Math.min(promptTokens, json?.usage?.prompt_tokens_details?.cached_tokens ?? 0);
+
       return {
         text: typeof message.content === 'string' ? message.content : '',
         toolCalls,
         usage: {
-          inputTokens: json?.usage?.prompt_tokens ?? 0,
+          inputTokens: Math.ceil(promptTokens - cached + cached * 0.1),
           outputTokens: json?.usage?.completion_tokens ?? 0,
         },
       };

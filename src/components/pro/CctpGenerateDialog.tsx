@@ -22,6 +22,12 @@ interface Props {
   onGenerated: (lots: GeneratedLot[], engine: CctpGenerationEngine) => void;
 }
 
+interface PlannedLot { titre: string; perimetre: string }
+
+// Lots rédigés en parallèle : le plan a déjà mis les pièces en cache chez le
+// fournisseur, quelques appels simultanés en profitent sans saturer la limite.
+const LOT_CONCURRENCY = 3;
+
 const LISIBLES = /\.(pdf|docx|pptx|xlsx|png|jpe?g|tiff?|webp|txt|csv)$/i;
 
 export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGenerated }) => {
@@ -32,6 +38,9 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
   const [instructions, setInstructions] = useState('');
   const [running, setRunning] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number; current: string[] } | null>(null);
+  // Reprise après un échec partiel : plan et lots déjà rédigés.
+  const [partial, setPartial] = useState<{ plan: PlannedLot[]; results: (GeneratedLot | null)[] } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -51,24 +60,100 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
     const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s;
   });
 
+  const body = () => ({ document_ids: [...selected], instructions });
+  const base = `/api/projects/${encodeURIComponent(projectId)}/cctp`;
+
+  // Rédige les lots d'`indexes`, LOT_CONCURRENCY à la fois, en gardant leur place.
+  const redigerLots = async (plan: PlannedLot[], results: (GeneratedLot | null)[], indexes: number[]) => {
+    const queue = [...indexes];
+    const enCours = new Set<string>();
+    let done = results.filter(Boolean).length;
+    const maj = () => setProgress({ done, total: plan.length, current: [...enCours] });
+    maj();
+    const worker = async () => {
+      for (let i = queue.shift(); i !== undefined; i = queue.shift()) {
+        const lot = plan[i];
+        enCours.add(lot.titre); maj();
+        try {
+          const res = await apiFetch<{ lot: GeneratedLot }>(`${base}/generate-lot`, {
+            method: 'POST',
+            body: JSON.stringify({ ...body(), lot, other_lots: plan.map(l => l.titre) }),
+          });
+          results[i] = res.lot;
+          done++;
+        } catch {
+          results[i] = null;
+        } finally {
+          enCours.delete(lot.titre); maj();
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(LOT_CONCURRENCY, queue.length) }, worker));
+  };
+
+  const terminer = (plan: PlannedLot[], results: (GeneratedLot | null)[]) => {
+    const manquants = plan.filter((_, i) => !results[i]).map(l => l.titre);
+    if (manquants.length === 0) {
+      setPartial(null);
+      onGenerated(results.filter((l): l is GeneratedLot => !!l), 'llm');
+      return;
+    }
+    setPartial({ plan, results });
+    setErreur(`${manquants.length} lot(s) n'ont pas pu être rédigés : ${manquants.join(', ')}. Réessayez-les ou insérez ceux qui ont abouti.`);
+  };
+
   const generer = async () => {
     setRunning(true);
     setErreur(null);
+    setPartial(null);
     try {
-      const res = await apiFetch<{ lots: GeneratedLot[]; ignored?: string[] }>(`/api/projects/${encodeURIComponent(projectId)}/cctp/generate`, {
-        method: 'POST',
-        body: JSON.stringify({ document_ids: [...selected], engine, instructions }),
-      });
-      if (!res.lots?.length) {
+      if (engine === 'nomic') {
+        const res = await apiFetch<{ lots: GeneratedLot[]; ignored?: string[] }>(`${base}/generate`, {
+          method: 'POST',
+          body: JSON.stringify({ ...body(), engine }),
+        });
+        if (!res.lots?.length) {
+          setErreur("Aucun ouvrage n'a pu être déduit des pièces sélectionnées.");
+          return;
+        }
+        onGenerated(res.lots, engine);
+        return;
+      }
+      // Moteur IA : plan (liste des lots), puis un appel court par lot.
+      setProgress({ done: 0, total: 0, current: ['Lecture des pièces et plan des lots'] });
+      const { lots: plan } = await apiFetch<{ lots: PlannedLot[] }>(`${base}/plan`, { method: 'POST', body: JSON.stringify(body()) });
+      if (!plan?.length) {
         setErreur("Aucun ouvrage n'a pu être déduit des pièces sélectionnées.");
         return;
       }
-      onGenerated(res.lots, engine);
+      const results: (GeneratedLot | null)[] = plan.map(() => null);
+      await redigerLots(plan, results, plan.map((_, i) => i));
+      terminer(plan, results);
     } catch (e: any) {
       setErreur(e.message ?? 'Échec de la génération');
     } finally {
       setRunning(false);
+      setProgress(null);
     }
+  };
+
+  const reessayer = async () => {
+    if (!partial) return;
+    setRunning(true);
+    setErreur(null);
+    try {
+      const results = [...partial.results];
+      await redigerLots(partial.plan, results, partial.plan.map((_, i) => i).filter(i => !results[i]));
+      terminer(partial.plan, results);
+    } finally {
+      setRunning(false);
+      setProgress(null);
+    }
+  };
+
+  const insererObtenus = () => {
+    if (!partial) return;
+    onGenerated(partial.results.filter((l): l is GeneratedLot => !!l), 'llm');
   };
 
   const label = 'block text-[0.6875rem] font-semibold text-zinc-500 uppercase tracking-wide mb-1';
@@ -155,6 +240,20 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
             />
           </div>
 
+          {running && progress && (
+            <div role="status" className="text-xs text-zinc-600 dark:text-zinc-300">
+              {progress.total > 0 && (
+                <>
+                  <div className="h-1.5 rounded bg-zinc-200 dark:bg-zinc-700 overflow-hidden mb-1">
+                    <div className="h-full bg-blue-600 transition-all" style={{ width: `${(progress.done / progress.total) * 100}%` }} />
+                  </div>
+                  <div>Lot{progress.done > 1 ? 's' : ''} rédigé{progress.done > 1 ? 's' : ''} : {progress.done} sur {progress.total}</div>
+                </>
+              )}
+              {progress.current.length > 0 && <div className="text-zinc-500 truncate">En cours : {progress.current.join(' · ')}</div>}
+            </div>
+          )}
+
           <p className="text-[0.6875rem] text-zinc-500">
             Les lots proposés s'ajoutent à la suite du CCTP existant, marqués « IA ». Relisez-les avant d'enregistrer :
             quantités et prix restent à renseigner.
@@ -163,13 +262,18 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
 
         <div className="flex justify-end gap-2 px-5 py-3 border-t border-zinc-200 dark:border-zinc-700">
           <button onClick={onClose} disabled={running} className="px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-xs">Annuler</button>
+          {partial && !running && (
+            <button onClick={insererObtenus} className="px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-xs">
+              Insérer les lots obtenus
+            </button>
+          )}
           <button
-            onClick={generer}
+            onClick={partial ? reessayer : generer}
             disabled={running || selected.size === 0}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded text-xs font-semibold"
           >
             {running ? <IconLoader2 size={14} className="animate-spin" /> : <IconSparkles size={14} />}
-            {running ? 'Génération en cours…' : 'Générer'}
+            {running ? 'Génération en cours…' : partial ? 'Réessayer les lots en échec' : 'Générer'}
           </button>
         </div>
       </div>
