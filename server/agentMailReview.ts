@@ -1,3 +1,9 @@
+import { getAgentMissionSettings } from './agentMissionSettings';
+
+async function isMailReviewCaptureEnabled(db: any, tenantId: string): Promise<boolean> {
+  const settings = await getAgentMissionSettings(db, tenantId);
+  return settings.enabled && settings.capture_mail_review;
+}
 // ── Revue matinale des mails par un agent ───────────────────────────────────
 // Chaque matin, l'agent désigné par la personne (Sophie) relit sa boîte,
 // repère les mails qui attendent une réponse et lui envoie une notification
@@ -405,8 +411,7 @@ export async function executeMailReview(
       // Optional, tenant-scoped mission capture for email exchanges, not only
       // explicit forwards. The review already selected actionable messages;
       // source_refs make repeated daily reviews idempotent.
-      if (process.env.AGENT_MISSIONS_ENABLED === 'true' &&
-          process.env.AGENT_MISSIONS_CAPTURE_MAIL_REVIEW === 'true') {
+      if (await isMailReviewCaptureEnabled(supabaseAdmin, review.tenant_id)) {
         const { enqueueAgentMission } = await import('./agentMissions');
         for (const item of items) {
           const original = mails.find(m => m.id === item.id && m.accountEmail === item.accountEmail);
