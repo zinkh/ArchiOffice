@@ -11,6 +11,7 @@ import type { FunctionDeclarationLike } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 import { buildRecordUrl } from './recordLinks.js';
 import { IMPORT_SITE_REPORT_NOTES_TOOL, IMPORT_SITE_REPORT_NOTES_TOOL_NAME, importSiteReportNotes } from './siteReportNotesTool.js';
+import { buildBusinessTools, executeBusinessTool, BUSINESS_TOOL_NAMES, BUSINESS_TOOL_SCOPES } from './businessTools.js';
 import { PROJECT_WORK_TOOLS, PROJECT_WORK_TOOL_NAMES, MEETING_WORK_TOOLS, MEETING_WORK_TOOL_NAMES, executeProjectWorkTool } from './projectWorkTools.js';
 import { buildDocumentReadTools, executeDocumentReadTool, DOCUMENT_READ_TOOL_NAMES } from './documentTools.js';
 import { MANAGE_PROJECT_STAKEHOLDERS_TOOL, MANAGE_PROJECT_STAKEHOLDERS_TOOL_NAME, manageProjectStakeholders } from './projectStakeholdersTool.js';
@@ -72,6 +73,7 @@ export function buildAgentTools(caps: AgentCapabilities): FunctionDeclarationLik
   }
 
   if (actionScopes.includes('meetings')) tools.push(...MEETING_WORK_TOOLS);
+  tools.push(...buildBusinessTools(actionScopes));
 
   if (creatable.length > 0) {
     tools.push({
@@ -445,6 +447,12 @@ export async function executeAgentAction(
     if (!actionScopes.includes('projects')) return { response: { error: "L'accès aux opérations n'est pas activé pour cet agent." } };
     if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
     return executeProjectWorkTool(baseUrl, auth, name, args);
+  }
+
+  if (name && BUSINESS_TOOL_NAMES.includes(name)) {
+    if (!actionScopes.includes(BUSINESS_TOOL_SCOPES[name])) return { response: { error: "Cet outil n'est pas activé pour cet agent." } };
+    if (!auth) return { response: { error: 'Session non authentifiée — action impossible.' } };
+    return executeBusinessTool(baseUrl, auth, name, args);
   }
 
   if (name && (MEETING_WORK_TOOL_NAMES as readonly string[]).includes(name)) {

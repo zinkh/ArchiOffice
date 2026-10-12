@@ -1895,6 +1895,22 @@ colonnes absentes du corps (notes d'une réunion, valeur et surface d'un appel d
 `attach_to` dans un bloc `artifact` pour ranger le fichier généré sur une fiche (seulement un type de
 fiche du périmètre d'écriture de l'agent, jeton de la personne). Le MCP garde ses propres versions.
 
+`businessTools.ts` couvre les modules sans route de collection à plat, chacun protégé par un scope
+existant (`BUSINESS_TOOL_SCOPES`, aucune migration) : `manage_situations` (scope
+`marches_entreprises` : cumul présenté/admis, période déduite, certify/reopen/mark_paid ; il ne
+calcule JAMAIS retenue, révision, TVA ni net à payer, et refuse une situation saisie ligne par ligne),
+`manage_project_notices` (list/read/write/generate, remplacer un texte rédigé passe par
+confirmation, les notices réglementaires restent des brouillons), `manage_consultation` (entreprises
+consultées de l'ACT : écrit la consultation ENTIÈRE en ne changeant que `entreprises`, jamais d'envoi
+de DCE), `create_invoice_from_note` (scope `invoices`, montants confirmés avant génération) et
+`manage_calendar` (scope `meetings` : agenda agrégé réunions + jalons + tâches + Google, création,
+déplacement et suppression d'événements Google). Les événements Google passent par
+`POST/PATCH/DELETE /api/google-calendar/events` (`server/googleCalendarEvent.ts`, pur et testé :
+fuseau Europe/Paris, jour entier à fin exclusive) ; ce sont des événements propres, que
+« Synchroniser » (jalons et tâches) ne reprend ni ne supprime. La ressource `invoices` accepte
+maintenant les lignes (`items`) et se supprime tant qu'elle est en brouillon (le serveur refuse le
+reste) ; le numéro n'est jamais écrit par un agent.
+
 **Réponses d'agent en Markdown** : `client/chatMarkdown.ts` (analyse pure, testée) puis
 `ChatMarkdown.tsx` rendent titres, listes, tableaux, gras et liens sans HTML brut. Seuls http(s),
 mailto, tel et les chemins relatifs sont des liens ; un lien vers l'application navigue sans recharger.

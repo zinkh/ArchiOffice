@@ -31,6 +31,7 @@ import { resolveCalendarConnection, resolveWriteCalendar, listReadCalendars, ref
 import { calendarAccessTokenCache } from '../mailTokenCache';
 import { getGoogleCalendarAccessToken } from '../mailOAuthTokens';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
+import { buildGoogleEventBody, parseCalendarEventId } from '../googleCalendarEvent';
 import { encryptSecret } from '../secretsCrypto';
 
 export interface RouteDeps {
@@ -288,6 +289,9 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
               id: `google-${cal.id}-${ev.id}`,
               title: ev.summary || '(Sans titre)',
               date,
+              start: ev.start?.dateTime || null,
+              end: ev.end?.dateTime || null,
+              location: ev.location || null,
               calendarId: cal.id,
               color: cal.color || null,
             });
@@ -300,6 +304,68 @@ export function registerGoogleCalendarSyncRoutes(app: Express, { supabaseAdmin, 
       res.status(500).json({ error: error.message || 'Échec de la récupération du calendrier Google' });
     }
   });
+
+  // Création, modification et suppression d'un événement par un client (agent, écran).
+  // Création : toujours dans le calendrier désigné comme défaut. Modification et suppression :
+  // un événement de n'importe lequel des calendriers de l'utilisateur, désigné par l'id rendu
+  // par GET /events. Rien ne passe par les liens de synchro (calendar_event_links) : ce sont
+  // des événements propres, que « Synchroniser » ne reprend ni ne supprime.
+  app.post('/api/google-calendar/events', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { body, error } = buildGoogleEventBody(req.body || {});
+      if (!body) return res.status(400).json({ error });
+      const calendar = await resolveWriteCalendar(supabaseAdmin, tenantId, req.user.id);
+      if (!calendar) return res.status(400).json({ error: 'Aucun calendrier par défaut — connectez Google Calendar et choisissez un calendrier cible.' });
+      const connection = await getConnection(tenantId, req.user.id, calendar.connection_id);
+      if (!connection) return res.status(400).json({ error: 'Google Calendar non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      const resp = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendar.external_calendar_id)}/events`, {
+        method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const created: any = await resp.json().catch(() => ({}));
+      if (!resp.ok) return res.status(502).json({ error: created?.error?.message || 'Google Calendar a refusé la création.' });
+      res.status(201).json({ id: `google-${calendar.id}-${created.id}`, calendarId: calendar.id, title: created.summary, link: created.htmlLink || null });
+    } catch (e: any) {
+      console.error('[POST /api/google-calendar/events]', e.message);
+      res.status(500).json({ error: e.message || "Création de l'événement impossible" });
+    }
+  });
+
+  const withOwnEvent = async (req: any, res: any, run: (ctx: { url: string; headers: Record<string, string> }) => Promise<void>) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const parsed = parseCalendarEventId(String(req.params.id));
+      if (!parsed) return res.status(400).json({ error: "Identifiant d'événement invalide : utilise celui rendu par la lecture de l'agenda." });
+      const { data: calendar } = await tenantScopedFrom(supabaseAdmin, tenantId, 'calendar_calendars').select('*').eq('id', parsed.calendarId).eq('user_id', req.user.id).maybeSingle();
+      if (!calendar) return res.status(404).json({ error: 'Calendrier introuvable.' });
+      const connection = await getConnection(tenantId, req.user.id, (calendar as any).connection_id);
+      if (!connection) return res.status(400).json({ error: 'Google Calendar non connecté.' });
+      const accessToken = await getAccessToken(connection);
+      await run({
+        url: `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent((calendar as any).external_calendar_id)}/events/${encodeURIComponent(parsed.eventId)}`,
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      });
+    } catch (e: any) {
+      console.error('[google-calendar event]', e.message);
+      res.status(500).json({ error: e.message || "Opération sur l'événement impossible" });
+    }
+  };
+
+  app.patch('/api/google-calendar/events/:id', (req: any, res: any) => withOwnEvent(req, res, async ({ url, headers }) => {
+    const { body, error } = buildGoogleEventBody(req.body || {}, true);
+    if (!body) { res.status(400).json({ error }); return; }
+    const resp = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify(body) });
+    const updated: any = await resp.json().catch(() => ({}));
+    if (!resp.ok) { res.status(502).json({ error: updated?.error?.message || 'Google Calendar a refusé la modification.' }); return; }
+    res.json({ success: true, id: req.params.id, title: updated.summary });
+  }));
+
+  app.delete('/api/google-calendar/events/:id', (req: any, res: any) => withOwnEvent(req, res, async ({ url, headers }) => {
+    const resp = await fetch(url, { method: 'DELETE', headers });
+    if (!resp.ok && resp.status !== 410 && resp.status !== 404) { res.status(502).json({ error: 'Google Calendar a refusé la suppression.' }); return; }
+    res.json({ success: true });
+  }));
 
   // POST /api/google-calendar/sync — push only (ArchiOffice → Google), on
   // demand, toujours vers le calendrier désigné comme défaut

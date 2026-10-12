@@ -114,6 +114,8 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
       "Maître d'ouvrage : adresse_client, cp_client, ville_client, telephone, portable, email_client (alias accepté : client_email), client_siret, client_vat_number, is_public_client, is_entreprise, nom_societe, rcs, representant, qualite. " +
       "Fiche : is_chantier (l'opération est au stade chantier), is_complete_mission, reference, project_code, project_manager, surface, progression, nom_etablissement, type_et_cat, surface_erp, effectif_public, effectif_personnel. " +
       "Les listes rattachées ne passent pas par update_record : lots (manage_project_lots), intervenants (manage_project_stakeholders), cotraitants (manage_project_cotraitants), équipe (manage_project_members). Les montants d'honoraires et le coût des travaux viennent du contrat MOE lié (contrats_moe). " +
+      "Fiche : is_chantier (l'opération est au stade chantier), is_complete_mission, reference, project_code, project_manager, surface, progression, nom_etablissement, type_et_cat, surface_erp, effectif_public, effectif_personnel. " +
+      "Les listes rattachées ne passent pas par update_record : lots (manage_project_lots), intervenants (manage_project_stakeholders), cotraitants (manage_project_cotraitants), équipe (manage_project_members). Les montants d'honoraires et le coût des travaux viennent du contrat MOE lié (contrats_moe). " +
       "Une mise à jour (update_record) ne touche que les champs fournis : pas besoin de renvoyer name/client pour ne changer qu'un seul champ." },
   { key: 'references', label: 'Références (portfolio, hors projets actifs)', basePath: '/api/references/custom', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'name',
     knownFields: ['name', 'client', 'category', 'end_date', 'surface', 'budget', 'status', 'description', 'location', 'start_date', 'project_manager', 'construction_cost', 'remuneration', 'fee_rate', 'progression'],
@@ -128,11 +130,16 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     enums: { status: ['Draft', 'Submitted', 'Won', 'Lost'] },
     defaults: { status: 'Draft' },
     fields: "title*, client*, submission_deadline*, status (Draft/Submitted/Won/Lost), description, notes, value, ville_execution" },
-  { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: false, list: true,
-    knownFields: ['status', 'title', 'project_id', 'client_id', 'amount', 'due_date', 'issue_date', 'description'],
-    enums: { status: ['Draft', 'Sent', 'Paid', 'Overdue'] },
+  // Seul un brouillon se supprime (le serveur refuse le reste : une facture envoyée s'annule par un avoir)
+  // et le numéro n'est jamais écrit par l'agent : il est attribué par le système ou par le connecteur comptable.
+  { key: 'invoices', label: 'Factures', basePath: '/api/invoices', create: true, update: true, delete: true, list: true,
+    knownFields: ['status', 'title', 'project_id', 'client_id', 'amount', 'tax_amount', 'total_amount', 'due_date', 'issue_date', 'description', 'vat_rate', 'invoice_type', 'mission_id', 'mission_name', 'advancement_pct', 'phases', 'items'],
+    enums: { status: ['Draft', 'Sent', 'Paid', 'Overdue'], invoice_type: ['standard', 'acompte'] },
     defaults: { status: 'Draft' },
-    fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id, amount, due_date, issue_date, description' },
+    fields: 'status (Draft/Sent/Paid/Overdue), title, project_id, client_id (Maître d\'ouvrage, fiche contact), amount (total HT), tax_amount, total_amount (TTC), vat_rate (%), due_date, issue_date (AAAA-MM-JJ ; échéance calculée d\'après le délai de paiement du cabinet si absente), description, ' +
+      "invoice_type (standard/acompte), mission_name et advancement_pct (acompte sur une mission), " +
+      "items ([{description, quantity, unit_price (HT), vat_rate}] : les lignes de la facture), phases ([{phase_id, phase_name, avancement_pct, montant_phase}]). " +
+      "Une facture générée depuis une note d'honoraires passe par create_invoice_from_note. Une facture déjà envoyée ou numérotée par le connecteur comptable ne se modifie ni ne se supprime ; ne passe jamais un numéro de facture." },
   { key: 'articles_type', label: "Bibliothèque d'ouvrages", basePath: '/api/price-library', create: true, update: true, delete: true, list: true, identityField: 'designation',
     // La ressource 'specifications' (anciennes fiches CCTP, table et route
     // /api/specifications) a été retirée du système — voir CLAUDE.md, « Le

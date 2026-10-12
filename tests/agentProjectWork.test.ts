@@ -215,3 +215,31 @@ describe('documents dans le chat des agents', () => {
     expect(m.mock.calls).toHaveLength(1);
   });
 });
+
+describe('modification partielle : les colonnes non fournies ne sont pas remises à zéro', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it("une réunion dont on ne change que le titre garde ses notes", async () => {
+    const m = stub({
+      'GET /api/meetings': [{ id: 'm1', title: 'Ancien', date: '2026-10-20', notes: 'Notes importantes', project_id: 'p1', tenant_id: 't', created_at: 'x' }],
+      'PUT /api/meetings/m1': { success: true },
+    });
+    await run(['meetings'], 'update_record', { resource: 'meetings', id: 'm1', data: { title: 'Nouveau' } });
+    expect(sent(m, 'PUT', '/api/meetings/m1')[0]).toEqual({ title: 'Nouveau', date: '2026-10-20', notes: 'Notes importantes', project_id: 'p1' });
+  });
+
+  it("un appel d'offres dont on change le statut garde sa valeur, sa surface et son archivage", async () => {
+    const m = stub({
+      'GET /api/tenders': [{ id: 't1', title: 'AO', client: 'Ville', submission_deadline: '2026-12-01', status: 'Draft', value: 120000, surface: 800, archived: true, mandatory_visit: true }],
+      'PUT /api/tenders/t1': { success: true },
+    });
+    await run(['tenders'], 'update_record', { resource: 'tenders', id: 't1', data: { status: 'Submitted' } });
+    expect(sent(m, 'PUT', '/api/tenders/t1')[0]).toMatchObject({ status: 'Submitted', value: 120000, surface: 800, archived: true, mandatory_visit: true });
+  });
+
+  it('refuse de modifier un enregistrement introuvable plutôt que de tout écraser', async () => {
+    stub({ 'GET /api/meetings': [] });
+    const r = await run(['meetings'], 'update_record', { resource: 'meetings', id: 'absent', data: { title: 'x' } });
+    expect(r.response.error).toContain('Aucun enregistrement');
+  });
+});
