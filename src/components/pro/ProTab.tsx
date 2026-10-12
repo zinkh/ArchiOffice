@@ -311,7 +311,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
   const synchroniserLots = useCallback((lotsProjet: LotProjet[]) => {
     setProjectLots(lotsProjet);
     if (lotsProjet.length) {
-      if (dpgf) setDpgf(lotsDivergent(dpgf, lotsProjet) ? appliquerTitresLots(dpgf, lotsProjet) : appliquerOrdreLots(dpgf, lotsProjet));
+      if (dpgf) setDpgf(lotsDivergent(dpgf, lotsProjet) ? appliquerTitresLots(dpgf, lotsProjet) : appliquerOrdreLots(dpgf, lotsProjet, { chapitresParDefaut: true }));
       if (bpuTouched && bpu) setBpu(lotsDivergent(bpu, lotsProjet) ? appliquerTitresLots(bpu, lotsProjet) : appliquerOrdreLots(bpu, lotsProjet));
     }
     onLotsChanged?.();
@@ -324,7 +324,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
     if (dpgfLoading || !dpgf || !projectLotsLoaded) return;
     if (lotsAlignesPour.current === projectId) return;
     lotsAlignesPour.current = projectId;
-    if (projectLots.length && !lotsDivergent(dpgf, projectLots)) setDpgf(appliquerOrdreLots(dpgf, projectLots));
+    if (projectLots.length && !lotsDivergent(dpgf, projectLots)) setDpgf(appliquerOrdreLots(dpgf, projectLots, { chapitresParDefaut: true }));
   }, [dpgfLoading, dpgf, projectLotsLoaded, projectLots, projectId, setDpgf]);
   useEffect(() => { lotsAlignesPour.current = null; }, [projectId]);
 
@@ -349,7 +349,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
         .sort((a, b) => comparerNumerosDeLot(a.lot_number, b.lot_number));
       const lie = { ...dpgf, lots: dpgf.lots.map(l => ({ ...l, projectLotId: rattachement.get(l.id) ?? l.projectLotId })) };
       setProjectLots(lotsProjet);
-      setDpgf(appliquerOrdreLots(lie, lotsProjet));
+      setDpgf(appliquerOrdreLots(lie, lotsProjet, { chapitresParDefaut: true }));
       if (bpuTouched && bpu && !lotsDivergent(bpu, lotsProjet)) setBpu(appliquerOrdreLots(bpu, lotsProjet));
       setLotsVersion(v => v + 1);
       onLotsChanged?.();
@@ -361,7 +361,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
   /** Sens liste → document : le document reprend exactement la liste (lots hors liste retirés après confirmation). */
   const alignerDocumentSurListe = useCallback(async () => {
     if (!dpgf) return;
-    const apres = appliquerOrdreLots(dpgf, projectLots, { rapprocher: true, retirerHorsProjet: true });
+    const apres = appliquerOrdreLots(dpgf, projectLots, { rapprocher: true, retirerHorsProjet: true, chapitresParDefaut: true });
     const perdus = dpgf.lots.length - apres.lots.filter(l => dpgf.lots.some(x => x.id === l.id)).length;
     const avecContenu = dpgf.lots.filter(l => !apres.lots.some(x => x.id === l.id) && (l.chapitres ?? []).some(c => c.lignes?.length || (c.cctpDescription ?? '').trim()));
     const detail = avecContenu.length

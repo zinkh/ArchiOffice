@@ -24,13 +24,20 @@ describe('numéros de lot libres', () => {
     expect(listed.body.map((l: any) => l.lot_number)).toEqual(['00', '01A']);
   });
 
+  it('accepte un numéro avec un point (01.1)', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const res = await request(app).post('/api/projects/p1/lots').set(authHeader(token)).send({ lot_number: '01.1', lot_title: 'Sous-lot' });
+    expect(res.status).toBe(201);
+  });
+
   it('refuse un numéro en double (409) et un numéro invalide (400)', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId);
     seedLots(tenantId, ['01']);
     const dup = await request(app).post('/api/projects/p1/lots').set(authHeader(token)).send({ lot_number: '01', lot_title: 'Autre' });
     expect(dup.status).toBe(409);
-    const bad = await request(app).post('/api/projects/p1/lots').set(authHeader(token)).send({ lot_number: '01.1', lot_title: 'Autre' });
+    const bad = await request(app).post('/api/projects/p1/lots').set(authHeader(token)).send({ lot_number: '01 A', lot_title: 'Autre' });
     expect(bad.status).toBe(400);
   });
 

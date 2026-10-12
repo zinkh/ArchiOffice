@@ -7,6 +7,8 @@
  * accès réseau, pour rester testables.
  */
 
+import { chapitresParDefaut, numeroDeChapitre } from './chapitresParDefaut';
+
 export interface LotProjet { id: string; lot_number: string; lot_title: string }
 
 /** Numéro attribué au rang `index` (0-based) : « 01 » à « 99 », puis « 100 ». */
@@ -18,13 +20,15 @@ export type NumeroLotValide = { ok: true; numero: string } | { ok: false; error:
 
 /**
  * Un numéro de lot est libre : « 00 », « 01 », « 01A », « 01B » (lot scindé en
- * deux)... Le point est refusé (il sépare le lot de ses chapitres : « 01A.1 »).
+ * deux), « 01.1 »... Les chapitres sont numérotés « 1 », « 2 » dans chaque lot et
+ * ne reprennent pas le numéro du lot : le point n'y est donc plus ambigu.
  */
 export function validerNumeroDeLot(brut: unknown): NumeroLotValide {
   const numero = typeof brut === 'string' ? brut.trim() : '';
   if (!numero) return { ok: false, error: 'Le numéro du lot ne peut pas être vide.' };
   if (numero.length > NUMERO_LOT_MAX) return { ok: false, error: `Le numéro du lot est limité à ${NUMERO_LOT_MAX} caractères.` };
-  if (/[.\s/\\]/.test(numero)) return { ok: false, error: 'Le numéro du lot ne peut contenir ni point, ni espace, ni barre oblique.' };
+  if (/\s|[/\\]/.test(numero)) return { ok: false, error: 'Le numéro du lot ne peut contenir ni espace, ni barre oblique.' };
+  if (/^\.|\.$|\.\./.test(numero)) return { ok: false, error: 'Le point sépare des niveaux : « 01.1 » est valide, « .01 », « 01. » et « 01..1 » ne le sont pas.' };
   return { ok: true, numero };
 }
 
@@ -33,15 +37,25 @@ export const numeroDeLotPris = (numero: string, lots: { id: string; lot_number: 
   lots.some(l => l.id !== sauf && (l.lot_number ?? '').trim().toLowerCase() === numero.trim().toLowerCase());
 
 /**
- * Numéros après un changement d'ordre : la série de numéros existante est
- * conservée (« 00 », « 01A », « 01B », « 02 »...) et redistribuée dans le
- * nouvel ordre, de sorte qu'une numérotation personnalisée n'est jamais
- * écrasée. Série incomplète ou en double : retour à « 01 », « 02 »...
+ * Numéros après un changement d'ordre (monter / descendre un lot).
+ * - Numérotation standard (que des nombres : « 00 », « 01 », « 02 »...) :
+ *   automatique, le premier numéro de la série est conservé (« 00 » reste le
+ *   premier) et les suivants se renumérotent à la suite, sans trou.
+ * - Dès qu'un numéro est personnalisé (« 01A », « 01.2 »...) : la série
+ *   existante est redistribuée telle quelle dans le nouvel ordre, rien n'est
+ *   écrasé.
+ * Série incomplète ou en double : retour à « 01 », « 02 »...
  */
 export function numerosPourOrdre(lots: { id: string; lot_number: string }[], idsOrdre: string[]): Map<string, string> {
   const serie = lots.map(l => (l.lot_number ?? '').trim());
   const exploitable = serie.every(Boolean) && new Set(serie.map(n => n.toLowerCase())).size === serie.length;
-  const pool = exploitable ? [...serie].sort(comparerNumerosDeLot) : idsOrdre.map((_, i) => numeroDeLot(i));
+  let pool: string[];
+  if (!exploitable) pool = idsOrdre.map((_, i) => numeroDeLot(i));
+  else if (serie.every(n => /^\d+$/.test(n))) {
+    const debut = Math.min(...serie.map(Number));
+    const largeur = Math.max(2, ...serie.map(n => n.length));
+    pool = idsOrdre.map((_, i) => String(debut + i).padStart(largeur, '0'));
+  } else pool = [...serie].sort(comparerNumerosDeLot);
   return new Map(idsOrdre.map((id, i) => [id, pool[i]]));
 }
 
@@ -92,6 +106,8 @@ export interface OptionsAlignement {
   rapprocher?: boolean;
   /** Retire les lots du document absents du projet (geste explicite, jamais par défaut). */
   retirerHorsProjet?: boolean;
+  /** Un lot créé dans le document reçoit les trois chapitres par défaut (CCTP / DPGF, pas le bordereau). */
+  chapitresParDefaut?: boolean;
 }
 
 /**
@@ -138,7 +154,7 @@ export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet
     if (!l) {
       ordonnes.push({
         id: nouvelId(), numero, titre: p.lot_title, projectLotId: p.id,
-        chapitres: [], sousTotal: 0,
+        chapitres: opts.chapitresParDefaut ? chapitresParDefaut(nouvelId) : [], sousTotal: 0,
       } as LotDocument);
       continue;
     }
@@ -147,11 +163,12 @@ export function appliquerOrdreLots<D extends { lots: any[] }>(doc: D, lotsProjet
       projectLotId: p.id,
       numero,
       titre: p.lot_title || l.titre,
-      chapitres: l.chapitres?.map(c => ({
-        ...c,
-        numero: changerPrefixe(c.numero, l.numero, numero),
-        lignes: renumeroterLignes(c.lignes, l.numero, numero),
-      })),
+      // Chapitres « 1 », « 2 »... propres au lot, jamais préfixés par son numéro ;
+      // un document ancien (« 01.1 ») est ramené à cette forme, articles compris.
+      chapitres: l.chapitres?.map((c, ci) => {
+        const nouveau = numeroDeChapitre(ci);
+        return { ...c, numero: nouveau, lignes: renumeroterLignes(c.lignes, c.numero ?? '', nouveau) };
+      }),
     });
   }
   const horsProjet = opts.retirerHorsProjet ? [] : restants.filter(l => !pris.has(l.id));

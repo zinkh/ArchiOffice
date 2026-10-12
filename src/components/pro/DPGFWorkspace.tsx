@@ -1,3 +1,4 @@
+import { chapitresParDefaut, numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, type HierarchySelection } from './hierarchyOps';
 import React, { useState, useRef } from 'react';
@@ -194,7 +195,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       id: newLotId,
       numero: String(newLotIdx + 1).padStart(2, '0'),
       titre: 'Nouveau lot',
-      chapitres: [],
+      chapitres: chapitresParDefaut(uid),
       sousTotal: 0,
     };
     mutateLots(lots => [...lots, newLot]);
@@ -218,7 +219,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const chapIdx = lot.chapitres.length;
     const newChapId = uid();
     mutateLots(lots => lots.map((l, i) => i !== lotIdx ? l : {
-      ...l, chapitres: [...l.chapitres, { id: newChapId, numero: `${l.numero}.${l.chapitres.length + 1}`, titre: 'Nouveau chapitre', lignes: [] }],
+      ...l, chapitres: [...l.chapitres, { id: newChapId, numero: numeroDeChapitre(l.chapitres.length), titre: 'Nouveau chapitre', lignes: [] }],
     }));
     setExpandedLots(prev => new Set([...prev, lot.id]));
     setExpandedChaps(prev => new Set([...prev, newChapId]));

@@ -1,4 +1,5 @@
 import type { Lot, Ligne } from '../../types/dpgf';
+import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { MAX_ARTICLE_DEPTH, type ParsedRowKey, moveLigneSibling, renumeroterLignes, takeLigneAtPath, insertLigneAtPath, mutateLigneAtPath, recomputeLot } from './treeOps';
 
 export type HierarchySelection = NonNullable<ParsedRowKey>;
@@ -23,7 +24,7 @@ export function canMove(lots: Lot[], s: ParsedRowKey, direction: -1 | 1): boolea
 }
 function renumber<L extends Lot>(lot: L): L {
   return recomputeLot({ ...lot, chapitres: lot.chapitres.map((chapter, i) => {
-    const numero = `${lot.numero}.${i + 1}`;
+    const numero = numeroDeChapitre(i);
     return { ...chapter, numero, lignes: renumeroterLignes(chapter.lignes, numero) };
   }) });
 }
