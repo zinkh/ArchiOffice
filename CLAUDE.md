@@ -702,9 +702,31 @@ impression).
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
 pointeur (`startPressDrag`, poignée à gauche de chaque ligne). Pas de colonne
-de rang : `PUT /api/projects/:projectId/lots/order` reçoit les ids dans leur
-nouvel ordre et renumérote `lot_number` en « 01 », « 02 »... ; le numéro EST
-l'ordre (`GET` trie par numéro naturel). Aucune migration SQL.
+de rang : le numéro EST l'ordre (`GET` trie par numéro naturel). **Le numéro
+est libre et modifiable en place** (`LotNumberInput`) : « 00 », « 01 », « 01A »
+et « 01B » pour scinder un lot, « 01.1 » et « 01.2 », jusqu'à 12 caractères, sans
+espace, unique dans le projet sans tenir compte de la casse (409 sinon ;
+`validerNumeroDeLot`, `numeroDeLotPris`, `src/lib/lotsOrder.ts`, partagés écran /
+serveur). Monter ou descendre un lot (`PUT /api/projects/:projectId/lots/order`,
+`numerosPourOrdre`) : numérotation **automatique** tant que la série est standard
+(que des nombres, le premier numéro est gardé : « 00 » reste premier, les suivants
+suivent sans trou) ; dès qu'un numéro est personnalisé (« 01A », « 01.2 »), la
+série existante est redistribuée telle quelle, jamais écrasée. Série incomplète ou
+en double : retour à « 01 », « 02 »... Aucune migration SQL.
+
+**Chapitres : « 1 », « 2 », « 3 » dans chaque lot**, jamais préfixés par le numéro du
+lot (`numeroDeChapitre`, `src/lib/chapitresParDefaut.ts`) ; les articles suivent
+(« 1.1 », « 1.1.1 »). C'est ce qui rend le point admis dans un numéro de lot.
+`appliquerOrdreLots` ramène un document ancien (« 01.1 ») à cette forme, articles
+compris. Contrepartie : un numéro d'article n'est plus unique dans le document, donc
+l'import d'une offre rapproche plus souvent par intitulé que par numéro (la passe
+« numéro » exige l'unicité) ; les références `#...` des classeurs exportés ne changent pas.
+**Trois chapitres par défaut dans chaque lot créé** du CCTP / DPGF (`chapitresParDefaut`,
+option `chapitresParDefaut` d'`appliquerOrdreLots`, aussi à la création d'un lot dans
+le DPGF, pas dans le bordereau) : « PRESCRIPTIONS GENERALES » et « PRESCRIPTIONS
+TECHNIQUES » (`cctpOnly`, donc masqués du DPGF) et « DESCRIPTION DES OUVRAGES ». Tous
+modifiables ; la case « Visible dans le DPGF » de l'éditeur du CCTP lève le masquage.
+Les lots déjà existants ne reçoivent pas ces chapitres.
 `src/lib/lotsOrder.ts::appliquerOrdreLots()` reporte ensuite cet ordre et ces
 numéros sur le DPGF (donc le CCTP, même document) et le bordereau, chapitres
 et articles compris (seul le préfixe « ancien. » est remplacé, un code de

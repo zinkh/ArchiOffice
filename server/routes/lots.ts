@@ -1,6 +1,7 @@
 // Phase 7 extraction — moved out of server.ts's Lots section (project_lots
 // table — market trade packages like Gros œuvre, Charpente, Électricité).
 import type { Express } from 'express';
+import { validerNumeroDeLot, numeroDeLotPris, numerosPourOrdre } from '../../src/lib/lotsOrder';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -26,7 +27,13 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { id: bodyId, lot_number, lot_title } = req.body;
+      const { id: bodyId, lot_title } = req.body;
+      const numero = validerNumeroDeLot(req.body?.lot_number);
+      if (!numero.ok) return res.status(400).json({ error: numero.error });
+      const lot_number = numero.numero;
+      const { data: autres, error: lecture } = await supabaseAdmin.from('project_lots').select('id, lot_number').eq('project_id', projectId).eq('tenant_id', tenantId);
+      if (lecture) throw lecture;
+      if (numeroDeLotPris(lot_number, autres ?? [])) return res.status(409).json({ error: `Le numéro « ${lot_number} » est déjà utilisé par un autre lot du projet.` });
       const lotId = bodyId || crypto.randomUUID();
       const { error } = await supabaseAdmin.from('project_lots').insert({ id: lotId, tenant_id: tenantId, project_id: projectId, lot_number, lot_title });
       if (error) throw error;
@@ -42,7 +49,17 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
     try {
       const tenantId = await getTenantId(req.user.id);
       const patch: Record<string, string> = {};
-      if (typeof req.body?.lot_number === 'string') patch.lot_number = req.body.lot_number.trim();
+      if (req.body?.lot_number !== undefined) {
+        const numero = validerNumeroDeLot(req.body.lot_number);
+        if (!numero.ok) return res.status(400).json({ error: numero.error });
+        const { data: lot, error: lotErr } = await supabaseAdmin.from('project_lots').select('id, project_id').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+        if (lotErr) throw lotErr;
+        if (!lot) return res.status(404).json({ error: 'Lot introuvable' });
+        const { data: autres, error: lecture } = await supabaseAdmin.from('project_lots').select('id, lot_number').eq('project_id', lot.project_id).eq('tenant_id', tenantId);
+        if (lecture) throw lecture;
+        if (numeroDeLotPris(numero.numero, autres ?? [], lot.id)) return res.status(409).json({ error: `Le numéro « ${numero.numero} » est déjà utilisé par un autre lot du projet.` });
+        patch.lot_number = numero.numero;
+      }
       if (typeof req.body?.lot_title === 'string') patch.lot_title = req.body.lot_title.trim();
       if (patch.lot_title !== undefined && !patch.lot_title) return res.status(400).json({ error: "Le titre du lot ne peut pas être vide" });
       if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
@@ -56,7 +73,8 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
   });
 
   // Réorganise les lots d'un projet : `ids` donne le nouvel ordre, les numéros
-  // sont réattribués automatiquement (01, 02, ...). Aucune colonne de rang :
+  // sont redistribués dans cet ordre en gardant la série existante (00, 01A,
+  // 01B, 02...), ou 01, 02... si elle est incomplète. Aucune colonne de rang :
   // le numéro est l'ordre.
   app.put("/api/projects/:projectId/lots/order", async (req: any, res: any) => {
     try {
@@ -66,15 +84,16 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
       if (!Array.isArray(ids) || ids.some((i: unknown) => typeof i !== 'string') || new Set(ids).size !== ids.length) {
         return res.status(400).json({ error: "ids doit être une liste d'identifiants distincts" });
       }
-      const { data: existing, error } = await supabaseAdmin.from('project_lots').select('id').eq('project_id', projectId).eq('tenant_id', tenantId);
+      const { data: existing, error } = await supabaseAdmin.from('project_lots').select('id, lot_number').eq('project_id', projectId).eq('tenant_id', tenantId);
       if (error) throw error;
       const known = new Set((existing ?? []).map((l: any) => l.id));
+      const numeros = numerosPourOrdre(existing ?? [], ids);
       if (ids.length !== known.size || ids.some((i: string) => !known.has(i))) {
         return res.status(400).json({ error: "La liste doit contenir exactement les lots du projet" });
       }
       for (const [index, id] of ids.entries()) {
         const { error: upErr } = await supabaseAdmin.from('project_lots')
-          .update({ lot_number: String(index + 1).padStart(2, '0') })
+          .update({ lot_number: numeros.get(id) })
           .eq('id', id).eq('tenant_id', tenantId).eq('project_id', projectId);
         if (upErr) throw upErr;
       }

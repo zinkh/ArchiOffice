@@ -1,3 +1,4 @@
+import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
@@ -228,7 +229,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     mutateLots(lots => lots.map(lot => lot.id !== selectedLotId ? lot : {
       ...lot,
       chapitres: [...lot.chapitres, {
-        id, numero: `${lot.numero}.${lot.chapitres.length + 1}`,
+        id, numero: numeroDeChapitre(lot.chapitres.length),
         titre: 'Nouveau chapitre', lignes: [],
       } as BPUChapitre],
     }));

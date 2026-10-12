@@ -1,9 +1,10 @@
 import { LotTitleInput } from './LotTitleInput';
+import { LotNumberInput } from './LotNumberInput';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { IconTrash, IconPlus, IconRefresh, IconGripVertical } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { startPressDrag } from '../../lib/pressDrag';
-import { comparerNumerosDeLot, type LotProjet } from '../../lib/lotsOrder';
+import { comparerNumerosDeLot, numerosPourOrdre, numeroDeLotPris, validerNumeroDeLot, type LotProjet } from '../../lib/lotsOrder';
 import { useConfirmDialog } from '../ui/ConfirmDialog';
 
 interface Lot {
@@ -35,6 +36,17 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
       await apiFetch(`/api/lots/${id}`, { method: 'PUT', body: JSON.stringify({ lot_title: title }) });
       notifier(await fetchLots());
     } catch (e) { setError(e instanceof Error ? e.message : 'Échec du renommage'); }
+  };
+  const renumber = async (id: string, brut: string): Promise<boolean> => {
+    setError('');
+    const numero = validerNumeroDeLot(brut);
+    if (!numero.ok) { setError(numero.error); return false; }
+    if (numeroDeLotPris(numero.numero, lots, id)) { setError(`Le numéro « ${numero.numero} » est déjà utilisé par un autre lot.`); return false; }
+    try {
+      await apiFetch(`/api/lots/${id}`, { method: 'PUT', body: JSON.stringify({ lot_number: numero.numero }) });
+      notifier(await fetchLots());
+      return true;
+    } catch (e) { setError(e instanceof Error ? e.message : 'Échec du changement de numéro'); return false; }
   };
   const [loading, setLoading] = useState(false);
   const [newLot, setNewLot] = useState({ number: '', title: '' });
@@ -95,7 +107,8 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
         const [tenu] = next.splice(de, 1);
         next.splice(vers, 0, tenu);
         // Numéros affichés en direct, l'enregistrement se fait au relâché.
-        setLots(next.map((l, i) => ({ ...l, lot_number: String(i + 1).padStart(2, '0') })));
+        const numeros = numerosPourOrdre(courant, next.map(l => l.id));
+        setLots(next.map(l => ({ ...l, lot_number: numeros.get(l.id) ?? l.lot_number })));
       },
       onEnd: ({ cancelled }) => {
         setDraggingId(null);
@@ -110,6 +123,10 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
 
   const handleAddLot = async () => {
     if (!newLot.number || !newLot.title) return;
+    setError('');
+    const numero = validerNumeroDeLot(newLot.number);
+    if (!numero.ok) { setError(numero.error); return; }
+    if (numeroDeLotPris(numero.numero, lots)) { setError(`Le numéro « ${numero.numero} » est déjà utilisé par un autre lot.`); return; }
     try {
       await apiFetch(`/api/projects/${projectId}/lots`, {
         method: 'POST',
@@ -118,7 +135,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
       setNewLot({ number: '', title: '' });
       notifier(await fetchLots());
     } catch (err) {
-      console.error('Failed to add lot:', err);
+      setError(err instanceof Error ? err.message : "Échec de l'ajout du lot");
     }
   };
 
@@ -147,7 +164,8 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
       { number: '03', title: 'Électricité CFO/CFA' },
     ];
     try {
-      for (const lot of defaults) {
+      // Un numéro déjà pris (par exemple « 01A » saisi à la main) n'est pas recréé.
+      for (const lot of defaults.filter(d => !numeroDeLotPris(d.number, lots))) {
         await apiFetch(`/api/projects/${projectId}/lots`, {
           method: 'POST',
           body: JSON.stringify({ lot_number: lot.number, lot_title: lot.title }),
@@ -155,7 +173,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
       }
       notifier(await fetchLots());
     } catch (err) {
-      console.error('Failed to generate default lots:', err);
+      setError(err instanceof Error ? err.message : 'Échec de la création des lots par défaut');
     }
   };
 
@@ -202,14 +220,14 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
                     type="button"
                     data-no-drag
                     aria-label={`Déplacer le lot ${lot.lot_title}`}
-                    title="Glisser pour réorganiser (renumérotation automatique)"
+                    title="Glisser pour réorganiser (les numéros suivent la position)"
                     onPointerDown={e => startReorder(e, lot.id)}
                     className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 cursor-grab active:cursor-grabbing touch-none"
                   >
                     <IconGripVertical size={18} />
                   </button>
                 </td>
-                <td className="p-4 text-sm font-medium">{lot.lot_number}</td>
+                <td className="p-4 text-sm font-medium w-28"><LotNumberInput value={lot.lot_number} onCommit={numero => renumber(lot.id, numero)} /></td>
                 <td className="p-4 text-sm"><LotTitleInput value={lot.lot_title} onCommit={title => void rename(lot.id, title)} /></td>
                 <td className="p-4 text-right">
                   <button
@@ -233,7 +251,8 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
               <td className="p-4">
                 <input
                   type="text"
-                  placeholder="N°"
+                  placeholder="N° (ex : 01A)"
+                  aria-label="Numéro du nouveau lot"
                   value={newLot.number}
                   onChange={(e) => setNewLot({ ...newLot, number: e.target.value })}
                   onKeyDown={e => e.key === 'Enter' && void handleAddLot()}

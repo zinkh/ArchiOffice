@@ -30,6 +30,7 @@ import { SignedImage } from '../SignedImage';
 import { IconPhotoPlus, IconX } from '@tabler/icons-react';
 import { legendeImage, localisationsConnues, nouvelleImage, retirerImage } from '../../lib/cctpImages';
 import { envoyerIllustration } from '../../lib/cctpImagesUpload';
+import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
@@ -101,7 +102,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     const lot = dpgf.lots[lotIdx];
     const newChap: Chapitre = {
       id: uid(),
-      numero: `${lot.numero}.${lot.chapitres.length + 1}`,
+      numero: numeroDeChapitre(lot.chapitres.length),
       titre: 'Nouveau chapitre',
       lignes: [],
       cctpOnly: false,

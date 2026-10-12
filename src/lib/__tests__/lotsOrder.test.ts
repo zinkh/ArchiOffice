@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { appliquerOrdreLots, lotsDivergent, numeroDeLot, planImportLots } from '../lotsOrder';
+import { appliquerOrdreLots, lotsDivergent, numeroDeLot, planImportLots, validerNumeroDeLot, numeroDeLotPris, numerosPourOrdre, comparerNumerosDeLot } from '../lotsOrder';
 
 const doc = (): { lots: any[] } => ({
   lots: [
@@ -26,13 +26,13 @@ describe('lotsOrder', () => {
     expect(r.lots.map(l => l.id)).toEqual(['b', 'a', 'c']);
     expect(r.lots[0].numero).toBe('01');
     expect(r.lots[0].projectLotId).toBe('p2');
-    expect(r.lots[0].chapitres![0].numero).toBe('01.1');
-    expect(r.lots[0].chapitres![0].lignes![0].numero).toBe('01.1.1');
+    expect(r.lots[0].chapitres![0].numero).toBe('1');
+    expect(r.lots[0].chapitres![0].lignes![0].numero).toBe('1.1');
     const gros = r.lots[1];
     expect(gros.numero).toBe('02');
-    expect(gros.chapitres![0].numero).toBe('02.1');
-    expect(gros.chapitres![0].lignes![0].numero).toBe('02.1.1');
-    expect(gros.chapitres![0].lignes![0].children![0].numero).toBe('02.1.1.1');
+    expect(gros.chapitres![0].numero).toBe('1');
+    expect(gros.chapitres![0].lignes![0].numero).toBe('1.1');
+    expect(gros.chapitres![0].lignes![0].children![0].numero).toBe('1.1.1');
     expect(gros.chapitres![0].lignes![1].numero).toBe('CODE-BIB');
   });
   it('crée les lots absents, ne supprime rien par défaut, rapproche et retire seulement sur demande', () => {
@@ -68,5 +68,46 @@ describe('lotsOrder', () => {
       { lotDocId: 'y', projectLotId: 'p2', numero: '02', titre: 'CHARPENTE BOIS' },
       { lotDocId: 'z', projectLotId: undefined, numero: '03', titre: 'COUVERTURE' },
     ]);
+  });
+});
+
+describe('numéros de lot libres', () => {
+  it('accepte 00 et un lot scindé 01A / 01B', () => {
+    expect(validerNumeroDeLot(' 00 ')).toEqual({ ok: true, numero: '00' });
+    expect(validerNumeroDeLot('01A')).toEqual({ ok: true, numero: '01A' });
+    expect(validerNumeroDeLot('01.1')).toEqual({ ok: true, numero: '01.1' });
+  });
+  it('refuse vide, point, espace et trop long', () => {
+    for (const v of ['', '  ', '.01', '01.', '01..1', '01 A', '01/A', 'x'.repeat(13), 42]) expect(validerNumeroDeLot(v).ok).toBe(false);
+  });
+  it('trie 00 < 01A < 01B < 02 < 10', () => {
+    expect(['10', '02', '01B', '00', '01A'].sort(comparerNumerosDeLot)).toEqual(['00', '01A', '01B', '02', '10']);
+  });
+  it('détecte un numéro déjà pris sans tenir compte de la casse, hors le lot lui-même', () => {
+    const lots = [{ id: 'a', lot_number: '01A' }, { id: 'b', lot_number: '02' }];
+    expect(numeroDeLotPris('01a', lots)).toBe(true);
+    expect(numeroDeLotPris('01a', lots, 'a')).toBe(false);
+    expect(numeroDeLotPris('03', lots)).toBe(false);
+  });
+  it('conserve la série personnalisée au changement d\'ordre', () => {
+    const lots = [{ id: 'a', lot_number: '00' }, { id: 'b', lot_number: '01A' }, { id: 'c', lot_number: '01B' }];
+    const m = numerosPourOrdre(lots, ['c', 'a', 'b']);
+    expect([m.get('c'), m.get('a'), m.get('b')]).toEqual(['00', '01A', '01B']);
+  });
+  it('renumérote automatiquement une série standard en gardant son premier numéro', () => {
+    const lots = [{ id: 'a', lot_number: '00' }, { id: 'b', lot_number: '01' }, { id: 'c', lot_number: '02' }];
+    const m = numerosPourOrdre(lots, ['b', 'c', 'a']);
+    expect([m.get('b'), m.get('c'), m.get('a')]).toEqual(['00', '01', '02']);
+  });
+  it('un lot créé reçoit les trois chapitres par défaut, deux masqués du DPGF', () => {
+    const r = appliquerOrdreLots({ lots: [] as any[] }, [{ id: 'p', lot_number: '01', lot_title: 'Gros œuvre' }], { chapitresParDefaut: true });
+    const chap = r.lots[0].chapitres;
+    expect(chap.map((c: any) => [c.numero, c.titre, !!c.cctpOnly])).toEqual([
+      ['1', 'PRESCRIPTIONS GENERALES', true], ['2', 'PRESCRIPTIONS TECHNIQUES', true], ['3', 'DESCRIPTION DES OUVRAGES', false],
+    ]);
+  });
+  it('retombe sur 01, 02... si la série est incomplète ou en double', () => {
+    const m = numerosPourOrdre([{ id: 'a', lot_number: '' }, { id: 'b', lot_number: '01' }], ['b', 'a']);
+    expect([m.get('b'), m.get('a')]).toEqual(['01', '02']);
   });
 });
