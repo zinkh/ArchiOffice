@@ -402,6 +402,32 @@ export async function executeMailReview(
       }
 
       const items = buildReviewItems(parseReviewJson(result.text || ''), mails, review.max_mails);
+      // Optional, tenant-scoped mission capture for email exchanges, not only
+      // explicit forwards. The review already selected actionable messages;
+      // source_refs make repeated daily reviews idempotent.
+      if (process.env.AGENT_MISSIONS_ENABLED === 'true' &&
+          process.env.AGENT_MISSIONS_CAPTURE_MAIL_REVIEW === 'true') {
+        const { enqueueAgentMission } = await import('./agentMissions');
+        for (const item of items) {
+          const original = mails.find(m => m.id === item.id && m.accountEmail === item.accountEmail);
+          if (!original) continue;
+          try {
+            await enqueueAgentMission(supabaseAdmin, {
+              tenantId: review.tenant_id, userId: review.user_id,
+              agentId: review.agent_id, sourceType: 'forwarded_email',
+              sourceRef: 'review:' + (original.accountEmail || '') + ':' + original.id,
+              sourceExcerpt: [
+                'De : ' + original.from,
+                'Objet : ' + original.subject,
+                'Contenu : ' + original.content,
+              ].join('\n'),
+              instruction: 'Examiner cet échange, identifier une action justifiée et proposer une tâche à valider.',
+            });
+          } catch (e: any) {
+            console.error('[agentMissions] capture revue des mails:', e?.message);
+          }
+        }
+      }
       await createReplyDrafts(supabaseAdmin, review, deps, items);
       await notifyReview(supabaseAdmin, review, (agent as any).name || 'Votre agent', items, mails.length);
       return done({ status: 'ok', items, reviewed: mails.length });

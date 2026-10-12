@@ -137,6 +137,8 @@ import { startTenderRssPolling } from "./server/tenderRssPoller";
 import { startAgentAlerts } from "./server/agentAlerts";
 import { startAgentMailInbox } from "./server/agentMailInbox";
 import { startAgentMailReview } from "./server/agentMailReview";
+import { registerAgentMissionRoutes } from "./server/routes/agentMissions";
+import { startAgentMissions } from "./server/agentMissions";
 import { registerAgentMailReviewRoutes } from "./server/routes/agentMailReview";
 import { notifyTenantAdmins } from "./server/mailer";
 import { registerAgentAlertRoutes } from "./server/routes/agentAlerts";
@@ -1162,6 +1164,7 @@ export async function createApp() {
     notifyTenantAdmins,
   });
   registerAgentAlertRoutes(app, { supabaseAdmin, getTenantId });
+  registerAgentMissionRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   // Revue matinale des mails : la boucle locale est la même que celle du
   // relevé de messagerie entrante (voir startAgentBackgroundJobs).
   registerAgentMailReviewRoutes(app, {
@@ -1284,6 +1287,9 @@ export async function createApp() {
   // de fond, qui ne doivent pas tourner avant que la boucle locale réponde).
   const startAgentBackgroundJobs = () => {
     startAgentAlerts(supabaseAdmin);
+    startAgentMissions(supabaseAdmin, {
+      deductAiCredit, reserveAiCredit, estimateReserveCents, settleAiCredit, refundAiCredit,
+    });
     startAgentMailInbox(supabaseAdmin, `http://127.0.0.1:${PORT}`);
     startAgentMailReview(supabaseAdmin, { baseUrl: `http://127.0.0.1:${PORT}`, deductAiCredit });
     import('@zinkh/archioffice-agents/server')
