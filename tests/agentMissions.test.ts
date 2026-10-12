@@ -131,8 +131,10 @@ describe('mission runner — persistence and agent handoff', () => {
     mockChat.mockResolvedValue({
       text: withTask(), usage: { inputTokens: 1, outputTokens: 1 }, toolCalls: [],
     });
-    const job = db.getTable('agent_missions')[0];
+    const job = { ...db.getTable('agent_missions')[0] };
     expect(await runAgentMission(db as any, job, deps)).toBe(true);
+    // Simule un second worker qui conserve l'état queued obsolète.
+    // La transition CAS doit refuser cette seconde revendication.
     expect(await runAgentMission(db as any, job, deps)).toBe(false);
     expect(mockChat).toHaveBeenCalledTimes(1);
   });
