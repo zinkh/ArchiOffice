@@ -12,6 +12,39 @@ export interface LotProjet { id: string; lot_number: string; lot_title: string }
 /** Numéro attribué au rang `index` (0-based) : « 01 » à « 99 », puis « 100 ». */
 export const numeroDeLot = (index: number): string => String(index + 1).padStart(2, '0');
 
+export const NUMERO_LOT_MAX = 12;
+
+export type NumeroLotValide = { ok: true; numero: string } | { ok: false; error: string };
+
+/**
+ * Un numéro de lot est libre : « 00 », « 01 », « 01A », « 01B » (lot scindé en
+ * deux)... Le point est refusé (il sépare le lot de ses chapitres : « 01A.1 »).
+ */
+export function validerNumeroDeLot(brut: unknown): NumeroLotValide {
+  const numero = typeof brut === 'string' ? brut.trim() : '';
+  if (!numero) return { ok: false, error: 'Le numéro du lot ne peut pas être vide.' };
+  if (numero.length > NUMERO_LOT_MAX) return { ok: false, error: `Le numéro du lot est limité à ${NUMERO_LOT_MAX} caractères.` };
+  if (/[.\s/\\]/.test(numero)) return { ok: false, error: 'Le numéro du lot ne peut contenir ni point, ni espace, ni barre oblique.' };
+  return { ok: true, numero };
+}
+
+/** Un autre lot du projet porte déjà ce numéro (sans tenir compte de la casse : « 01a » = « 01A »). */
+export const numeroDeLotPris = (numero: string, lots: { id: string; lot_number: string }[], sauf?: string): boolean =>
+  lots.some(l => l.id !== sauf && (l.lot_number ?? '').trim().toLowerCase() === numero.trim().toLowerCase());
+
+/**
+ * Numéros après un changement d'ordre : la série de numéros existante est
+ * conservée (« 00 », « 01A », « 01B », « 02 »...) et redistribuée dans le
+ * nouvel ordre, de sorte qu'une numérotation personnalisée n'est jamais
+ * écrasée. Série incomplète ou en double : retour à « 01 », « 02 »...
+ */
+export function numerosPourOrdre(lots: { id: string; lot_number: string }[], idsOrdre: string[]): Map<string, string> {
+  const serie = lots.map(l => (l.lot_number ?? '').trim());
+  const exploitable = serie.every(Boolean) && new Set(serie.map(n => n.toLowerCase())).size === serie.length;
+  const pool = exploitable ? [...serie].sort(comparerNumerosDeLot) : idsOrdre.map((_, i) => numeroDeLot(i));
+  return new Map(idsOrdre.map((id, i) => [id, pool[i]]));
+}
+
 /** Tri naturel par numéro (« 2 » avant « 10 »), utilisé quand aucun ordre explicite n'existe. */
 export const comparerNumerosDeLot = (a: string, b: string): number =>
   (a ?? '').localeCompare(b ?? '', 'fr', { numeric: true });

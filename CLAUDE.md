@@ -702,9 +702,15 @@ impression).
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
 pointeur (`startPressDrag`, poignée à gauche de chaque ligne). Pas de colonne
-de rang : `PUT /api/projects/:projectId/lots/order` reçoit les ids dans leur
-nouvel ordre et renumérote `lot_number` en « 01 », « 02 »... ; le numéro EST
-l'ordre (`GET` trie par numéro naturel). Aucune migration SQL.
+de rang : le numéro EST l'ordre (`GET` trie par numéro naturel). **Le numéro
+est libre et modifiable en place** (`LotNumberInput`) : « 00 », « 01 », « 01A »
+et « 01B » pour scinder un lot, jusqu'à 12 caractères, sans point (il sépare le
+lot de ses chapitres), unique dans le projet sans tenir compte de la casse
+(409 sinon ; `validerNumeroDeLot`, `numeroDeLotPris`, `src/lib/lotsOrder.ts`,
+partagés écran / serveur). `PUT /api/projects/:projectId/lots/order` reçoit les
+ids dans leur nouvel ordre et y redistribue la série de numéros EXISTANTE
+(`numerosPourOrdre`) : une numérotation personnalisée n'est jamais écrasée ; série
+incomplète ou en double, retour à « 01 », « 02 »... Aucune migration SQL.
 `src/lib/lotsOrder.ts::appliquerOrdreLots()` reporte ensuite cet ordre et ces
 numéros sur le DPGF (donc le CCTP, même document) et le bordereau, chapitres
 et articles compris (seul le préfixe « ancien. » est remplacé, un code de
