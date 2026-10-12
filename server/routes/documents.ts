@@ -178,6 +178,33 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       void enqueueAutoContribution(supabaseAdmin, tenantId, {
         id, name, file_url, size_bytes: stored.sizeBytes, mime_type: file.mimetype, doc_type: doc_type || null,
       });
+      // Explicit per-upload opt-in. Analyse actual uploaded bytes, not a
+      // guessed summary from the file name. A failure must not undo storage.
+      if (process.env.AGENT_MISSIONS_ENABLED === 'true' &&
+          String(req.body.analyze_with_agents || '') === 'true') {
+        try {
+          const agentId = String(req.body.mission_agent_id || '');
+          const { data: agent } = await supabaseAdmin.from('agents')
+            .select('id').eq('tenant_id', tenantId).eq('id', agentId)
+            .eq('is_active', true).maybeSingle();
+          if (!agent) throw new Error('Agent de mission introuvable ou inactif.');
+          const { extractDocumentText, withTextExtractionTimeout } =
+            await import('@zinkh/archioffice-agents/server');
+          const extracted = await withTextExtractionTimeout(
+            extractDocumentText(file.originalname, file.mimetype, file.buffer)
+          );
+          if (!extracted.text?.trim()) throw new Error('Document sans texte exploitable pour cette mission.');
+          const { enqueueAgentMission } = await import('../agentMissions');
+          await enqueueAgentMission(supabaseAdmin, {
+            tenantId, userId: req.user.id, agentId: agent.id,
+            projectId: projectIdVal, sourceType: 'document', sourceRef: id,
+            sourceExcerpt: extracted.text,
+            instruction: String(req.body.mission_instruction || 'Identifier les décisions et tâches à prévoir à partir de ce document.'),
+          });
+        } catch (missionError: any) {
+          console.error('[agentMissions] Document déposé mais mission non créée:', missionError?.message);
+        }
+      }
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id, file_url, size_bytes: stored.sizeBytes, uploaded_at });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
