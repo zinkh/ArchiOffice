@@ -206,8 +206,8 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // le template reste la source, cette table n'intervient que s'il arrive vide,
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
-  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits'],
-  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits'],
+  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits', 'tenders'],
+  'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits', 'tenders'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'marches_entreprises'],
   'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],
   'comptable':           ['invoices', 'notes_honoraires', 'contrats_moe'],
