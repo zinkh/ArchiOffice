@@ -31,6 +31,7 @@ import type { AgencySettings } from '../lib/proposalExport';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { Section } from './chantier/Section';
 import { DraftInput, parseDays } from './chantier/fields';
+import { upsertById } from '../lib/observationsLocal';
 import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows';
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
@@ -637,7 +638,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
         ...(lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {}),
       };
-      setReportObservations(prev => [...prev, newObs]);
+      setReportObservations(prev => upsertById(prev, newObs));
       fetchAllObservations().catch(() => {});
       return id;
     } catch (err) { console.error(err); return undefined; }
@@ -817,7 +818,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Tabs : restent visibles au défilement (collés en haut du conteneur qui défile) */}
+      <div className="sticky top-0 z-20 -mx-1 px-1 py-2 bg-[var(--tblr-bg,var(--tblr-surface))]">
       {isDesktop ? (
         <PillTabs
           ariaLabel="Sections du chantier"
@@ -855,6 +857,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           </BottomSheet>
         </>
       )}
+      </div>
 
       {/* Body */}
       <div>
@@ -1352,7 +1355,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           )}
 
           {activeTab === 'reserves' && (
-            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly} />
+            <ObservationsTable key={reviewOpenOnly ? 'open' : 'all'} projectId={project.id} lots={lots_list} decoupage={decoupage} project={{ name: project.name, project_code: project.project_code, address: project.address, client: project.client }} defaultType="reserve" onReservesChanged={onReservesChanged} initialOpenOnly={reviewOpenOnly}
+              onChanged={() => { fetchAllObservations().catch(() => {}); fetchReportObservations().catch(() => {}); }} />
           )}
 
           {activeTab === 'entreprises' && <EntreprisesTab lots_list={lots_list} observations={allObservations} />}

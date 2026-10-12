@@ -28,6 +28,16 @@ export interface RouteDeps {
 /** Identifiant de bâtiment/phase du registre du chantier : texte court, sinon ignoré. */
 const cleanRef = (v: unknown): string => (typeof v === 'string' && v.length <= 64 ? v : '');
 
+// Verrou par opération (un seul processus) : sérialise l'attribution du numéro d'observation.
+const numberLocks = new Map<string, Promise<unknown>>();
+async function withProjectNumberLock<T>(projectId: string, task: () => Promise<T>): Promise<T> {
+  const previous = numberLocks.get(projectId) ?? Promise.resolve();
+  const run = previous.catch(() => undefined).then(task);
+  const tail = run.catch(() => undefined);
+  numberLocks.set(projectId, tail);
+  try { return await run; } finally { if (numberLocks.get(projectId) === tail) numberLocks.delete(projectId); }
+}
+
 export function registerObservationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, uploadToStorage }: RouteDeps) {
   app.get("/api/projects/:projectId/observations", async (req: any, res: any) => {
     try {
@@ -86,17 +96,23 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
         const { data: report } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').select('project_id').eq('id', created_report_id).maybeSingle();
         if (!report || (report as any).project_id !== projectId) return res.status(400).json({ error: "Compte rendu introuvable pour cette opération." });
       }
-      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
-      const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
       const id = bodyId || `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert({
-        id, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
-        texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
-        created_report_id: created_report_id || null, number,
-        type: type || 'observation', urgence: urgence || 'normal',
-        batiment_id: batimentId || null, phase_id: phaseId || null,
-      }).select().single();
-      if (error) throw error;
+      // Le numéro (max + 1) est attribué sous verrou par opération : deux créations
+      // simultanées ne lisent plus le même maximum et ne prennent plus le même numéro.
+      const created = await withProjectNumberLock(projectId, async () => {
+        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
+        const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
+        const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert({
+          id, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
+          texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
+          created_report_id: created_report_id || null, number,
+          type: type || 'observation', urgence: urgence || 'normal',
+          batiment_id: batimentId || null, phase_id: phaseId || null,
+        }).select().single();
+        if (error) throw error;
+        return { data, number };
+      });
+      const { data, number } = created;
       if (created_report_id) {
         await supabaseAdmin.from('observation_reports').insert({ observation_id: id, report_id: created_report_id });
       }
