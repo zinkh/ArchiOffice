@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../lib/api';
 
 interface Agent { id: string; name: string; is_active: boolean }
+interface MissionPreferences { enabled: boolean; capture_mail: boolean; capture_mail_review: boolean }
 interface MissionTask { title: string; description: string; priority: string; due_date: string | null; evidence: string }
 interface Mission {
   id: string; status: string; instruction: string; source_type: string;
@@ -27,23 +28,38 @@ export function AgentMissionsCard() {
   const [missions, setMissions] = useState<Mission[]>([]);
   const [detail, setDetail] = useState<MissionDetail | null>(null);
   const [enabled, setEnabled] = useState(false);
+  const [preferences, setPreferences] = useState<MissionPreferences | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
   async function refresh() {
-    const [agentsList, list] = await Promise.all([
+    const [agentsList, list, settings] = await Promise.all([
       apiFetch<Agent[]>('/api/agents'),
       apiFetch<{ missions: Mission[]; processing_enabled: boolean }>('/api/agent-missions'),
+      apiFetch<MissionPreferences>('/api/agent-missions/settings'),
     ]);
     const active = agentsList.filter(a => a.is_active);
     setAgents(active);
     setAgentId(prev => prev || active[0]?.id || '');
     setMissions(list.missions);
     setEnabled(list.processing_enabled);
+    setPreferences(settings);
   }
   useEffect(() => { void refresh().catch(e => setError(e.message || 'Lecture impossible')); }, []);
 
+  async function togglePreference(key: keyof MissionPreferences, value: boolean) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await apiFetch<MissionPreferences>('/api/agent-missions/settings', {
+        method: 'PATCH', body: JSON.stringify({ [key]: value }),
+      });
+      setPreferences(result);
+      setEnabled(result.enabled);
+      setNotice('Préférences du cabinet enregistrées.');
+    } catch (e: any) { setError(e.message || 'Impossible de modifier le réglage.'); }
+    finally { setBusy(false); }
+  }
   async function choose(id: string) {
     try {
       setError('');
@@ -85,9 +101,25 @@ export function AgentMissionsCard() {
           Une mission conserve sa source, les étapes entre agents et une proposition de tâche. Seule votre validation crée la tâche.
         </p>
         {!enabled && <p className="mt-2 text-xs" style={{ color: 'var(--tblr-warning)' }}>
-          Le traitement automatique n'est pas activé sur ce serveur. Les missions enregistrées resteront en attente.
+          L'autonomie est désactivée pour ce cabinet. Les missions existantes sont conservées et mises en attente.
         </p>}
       </div>
+      {preferences && <div className="space-y-2 rounded-lg p-3" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+        <h3 className="text-sm font-semibold">Autonomie du cabinet</h3>
+        {([
+          { key: 'enabled', label: 'Activer le traitement autonome des missions', detail: 'Actif par défaut. Les agents analysent les sources sans agir à votre place.' },
+          { key: 'capture_mail', label: 'Analyser les emails transférés à un agent', detail: 'Désactivé par défaut. Requiert une boîte de réception configurée.' },
+          { key: 'capture_mail_review', label: 'Créer des missions depuis les revues de mails', detail: 'Désactivé par défaut. Ne modifie pas la programmation des revues existantes.' },
+        ] as const).map(item => <label key={item.key} className="flex items-start gap-3 cursor-pointer text-xs">
+          <input type="checkbox" className="mt-0.5" checked={preferences[item.key]} disabled={busy}
+            onChange={e => void togglePreference(item.key, e.target.checked)} />
+          <span><span className="font-medium">{item.label}</span>
+            <span className="block mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{item.detail}</span></span>
+        </label>)}
+        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          Aucune tâche n'est créée sans votre validation. L'analyse d'un document déposé nécessite toujours votre accord explicite.
+        </p>
+      </div>}
       {error && <p role="alert" className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
       {notice && <p role="status" className="text-xs">{notice}</p>}
       <div className="space-y-2">
