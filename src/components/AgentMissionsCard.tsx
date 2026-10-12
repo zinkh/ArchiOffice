@@ -12,7 +12,16 @@ interface Mission {
   error_message: string | null; created_task_id: string | null;
 }
 interface MissionEvent { id: string; kind: string; detail: string; created_at: string }
-interface MissionDetail extends Mission { events: MissionEvent[] }
+interface MissionReference {
+  source: 'cabinet'|'mutualized'; document_name: string; version?: number;
+  chunk_id?: string; section_title?: string|null; page_number?: number|null;
+  excerpt?: string; remote_document_id?: string; source_url?: string|null;
+}
+interface MissionDetail extends Mission {
+  events: MissionEvent[];
+  rag_references?: MissionReference[];
+  specialist_rag_references?: MissionReference[];
+}
 
 const STATUS: Record<string, string> = {
   queued: 'En attente', running: 'Analyse en cours', delegated: 'Transmis au spécialiste',
@@ -32,6 +41,7 @@ export function AgentMissionsCard() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const [sourceProof,setSourceProof] = useState<string>('');
 
   async function refresh() {
     const [agentsList, list, settings] = await Promise.all([
@@ -62,9 +72,17 @@ export function AgentMissionsCard() {
   }
   async function choose(id: string) {
     try {
-      setError('');
+      setError(''); setSourceProof('');
       setDetail(await apiFetch<MissionDetail>('/api/agent-missions/' + encodeURIComponent(id)));
     } catch (e: any) { setError(e.message || 'Lecture impossible'); }
+  }
+  async function verifySource(ref: MissionReference) {
+    if(!ref.source_url)return;
+    setError('');setSourceProof('');
+    try {
+      const current=await apiFetch<{document_name:string;version:number;excerpt:string;section_title:string|null}>(ref.source_url);
+      setSourceProof(`Source vérifiée : ${current.document_name} v${current.version}${current.section_title?' — '+current.section_title:''}\n\n${current.excerpt}`);
+    }catch(e:any){setError(e.message||'Cette source est indisponible ou remplacée par une autre version.');}
   }
   async function create() {
     if (!agentId || !source.trim() || !instruction.trim()) return;
@@ -166,6 +184,21 @@ export function AgentMissionsCard() {
             <p className="text-xs whitespace-pre-wrap">{detail.task_proposal.description}</p>
             <p className="text-xs">Source : « {detail.task_proposal.evidence} »</p>
             <p className="text-xs">Priorité : {detail.task_proposal.priority} · Échéance : {detail.task_proposal.due_date || 'non précisée'}</p>
+          </div>}
+          {([...(detail.rag_references||[]),...(detail.specialist_rag_references||[])]).length>0 && <div className="space-y-1">
+            <h3 className="text-xs font-bold">Références documentaires consultées</h3>
+            {([...(detail.rag_references||[]),...(detail.specialist_rag_references||[])]).map((ref,i)=><div key={i} className="text-xs rounded p-2" style={{background:'var(--tblr-surface-2)'}}>
+              <div className="font-medium">
+                {ref.document_name}{ref.version!=null?` · version ${ref.version}`:''}
+                {ref.page_number?` · page ${ref.page_number}`:''}
+                {ref.section_title?` · ${ref.section_title}`:''}
+              </div>
+              <p className="whitespace-pre-wrap mt-1">{ref.excerpt}</p>
+              {ref.source_url&&<button type="button" onClick={()=>void verifySource(ref)}
+                className="underline mt-1">Vérifier la version et le passage</button>}
+            </div>)}
+            {sourceProof&&<p role="status" className="text-xs whitespace-pre-wrap rounded p-2"
+              style={{border:'1px solid var(--tblr-border)'}}>{sourceProof}</p>}
           </div>}
           <div className="flex flex-wrap gap-2">
             {detail.status === 'review' && <button disabled={busy} onClick={() => void action('approve-task')}
