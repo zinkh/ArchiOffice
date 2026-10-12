@@ -1,3 +1,4 @@
+import { SourceCorpus } from './provenance.js';
 import express from 'express';
 import * as Sentry from '@sentry/node';
 import type { AgentRow } from '../types.js';
@@ -771,6 +772,13 @@ export function registerAgentRoutes(
       // create_contact then create_proposal with the returned id) before it
       // produces a final natural-language reply.
       const actionSummaries: string[] = [];
+      // Ce que l'agent a réellement reçu ce tour-ci : base du garde-fou « pas de
+      // création sans source » (provenance.ts). Les messages de l'agent lui-même
+      // n'y entrent pas — une invention précédente ne doit pas se citer.
+      const sourceCorpus = new SourceCorpus();
+      for (const m of messages) if (m.role === 'user' && typeof m.content === 'string') sourceCorpus.addUserText(m.content);
+      for (const d of ctx.documentContents) sourceCorpus.addDocumentText(d.content);
+      sourceCorpus.hasImages = ctx.documentImages.length > 0;
       // Collègues effectivement consultés pendant ce tour (consulter_agent) —
       // remonté au client pour qu'il ouvre leur conversation (voir la fin de
       // cette route et AgentChat.tsx). Dédupliqué par id : consulter deux fois
@@ -792,7 +800,8 @@ export function registerAgentRoutes(
           messages.push({ role: 'assistant', content: result.text, toolCalls: result.toolCalls, raw: result.raw });
           const results: LlmToolResult[] = [];
           for (const call of result.toolCalls) {
-            const { response, summary, consulted } = await executeAgentAction(billing.baseUrl, auth, caps, call, { id: agentId, name: (agent as any).name });
+            const { response, summary, consulted } = await executeAgentAction(billing.baseUrl, auth, caps, call, { id: agentId, name: (agent as any).name }, sourceCorpus);
+            sourceCorpus.addToolResult(call.name, response);
             if (summary) actionSummaries.push(summary);
             if (consulted) consultedAgents.set(consulted.id, consulted.name);
             results.push({ id: call.id, name: call.name, response });

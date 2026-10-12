@@ -2168,6 +2168,39 @@ que l'architecte a vu la demande, activer la capacité reste un geste
 volontaire distinct depuis `/agents/:id/edit` — jamais l'écran de revue lui-
 même.
 
+### Pièce jointe illisible : jamais passée sous silence
+
+Incident du 12 octobre 2026 : un `.xls` de suivi de réserves (Stenay) joint au chat de Sophie n'avait
+aucun extracteur, `buildAgentContext` l'écartait sans rien dire, et le modèle, qui savait qu'un fichier
+était joint, en a inventé le contenu (cinq « réserves AOR » d'un autre projet) puis a créé des tâches
+dessus. Trois garde-fous, à ne pas défaire :
+
+- **Les tableurs sont lus** (`spreadsheetText.ts` : `.xls`, `.xlsx`, `.xlsm`, `.ods`, un bloc par onglet,
+  noms d'onglets en tête, troncature annoncée), dans le chat (`context.ts`) comme dans
+  `extractDocumentText` (outils MCP, pièces jointes de mail).
+- **Un document joint non lu est TOUJOURS signalé** : `markUnread()` (`context.ts`) pose « CONTENU NON LU »
+  dans `documentContents` pour un fichier introuvable, un format non pris en charge, un fichier vide,
+  une erreur de lecture ou un délai dépassé. Plus aucun `return` muet dans cette boucle.
+- **Règle de prompt** (`systemPrompts.ts`, `docContentsSection`, valable même avec
+  `system_prompt_override`) : seul le contenu présent entre les repères existe, un onglet ou une ligne
+  absents se disent, et on cite les lignes exactes reprises avant toute création d'enregistrement.
+
+### Pas de création sans source (tous les agents)
+
+Le prompt seul n'arrête pas un modèle qui hallucine : le contrôle est fait par le SERVEUR
+(`packages/archioffice-agents/src/server/provenance.ts`, `tests/provenance.test.ts`). `create_record`,
+`create_site_report`, `add_site_report_observation` et `import_site_report_notes` exigent
+`source: { type, citation }` ; `executeAgentAction` refuse la création (`SOURCE_NON_VERIFIEE`, avant tout
+appel réseau) si la citation (12 caractères utiles au moins) ne figure pas, hors casse, accents et
+ponctuation, dans le `SourceCorpus` du tour : messages de la PERSONNE (historique compris), contenu des
+documents joints lus, résultats des outils de LECTURE. Exclus : les messages de l'agent lui-même, les
+résultats d'outils d'écriture et `consulter_agent`, pour qu'une invention ne puisse pas se citer.
+
+Limites assumées : une image jointe ne se vérifie pas par texte (`image_jointe` accepté tant qu'une image
+est jointe) ; une citation exacte prouve que la source existe, pas que l'enregistrement la reprend
+fidèlement ; la liaison MCP (conversation hors de ce serveur) n'est pas contrôlée ; `update_record` n'est
+pas couvert. La règle est aussi posée dans le prompt (`SOURCE_RULE`), même sous `system_prompt_override`.
+
 ### Lecture des pièces jointes de messagerie par les agents
 
 `read_email` (`mail_enabled`) rapportait déjà les pièces jointes d'un
