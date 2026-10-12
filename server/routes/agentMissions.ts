@@ -2,13 +2,15 @@
 // mission creator. Approval deliberately reuses POST /api/tasks and its schema.
 import type { Express } from 'express';
 import { enqueueAgentMission, missionEvent } from '../agentMissions';
+import { getAgentMissionSettings, isAgentMissionEnabled } from '../agentMissionSettings';
 
 export interface MissionRouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   baseUrl: string;
+  requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
-export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, getTenantId, baseUrl }: MissionRouteDeps) {
+export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, getTenantId, baseUrl, requireRole }: MissionRouteDeps) {
   async function owned(req: any) {
     const tenantId = await getTenantId(req.user.id);
     const { data, error } = await db.from('agent_missions').select('*')
@@ -18,6 +20,35 @@ export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, ge
     return { tenantId, mission: data };
   }
 
+  // Admin-only preferences: never accept client-supplied tenant IDs or roles.
+  app.get('/api/agent-missions/settings', requireRole('admin'), async (req: any, res: any) => {
+    try {
+      res.json(await getAgentMissionSettings(db, await getTenantId(req.user.id)));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.patch('/api/agent-missions/settings', requireRole('admin'), async (req: any, res: any) => {
+    try {
+      const map: Record<string, string> = {
+        enabled: 'agent_missions_enabled',
+        capture_mail: 'agent_missions_capture_mail',
+        capture_mail_review: 'agent_missions_capture_mail_review',
+      };
+      const payload = req.body || {};
+      const keys = Object.keys(payload);
+      if (!keys.length || keys.some(key => !(key in map) || typeof payload[key] !== 'boolean')) {
+        return res.status(400).json({ error: 'Réglages invalides : booléens attendus.' });
+      }
+      const tenantId = await getTenantId(req.user.id);
+      const patch = Object.fromEntries(keys.map(key => [map[key], payload[key]]));
+      const { data, error } = await db.from('tenants').update(patch)
+        .eq('id', tenantId).select('id').maybeSingle();
+      if (error) throw error;
+      if (!data) return res.status(404).json({ error: 'Cabinet introuvable.' });
+      res.json(await getAgentMissionSettings(db, tenantId));
+    } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
   app.get('/api/agent-missions', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -26,7 +57,7 @@ export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, ge
         .eq('tenant_id', tenantId).eq('created_by', req.user.id)
         .order('created_at', { ascending: false }).limit(100);
       if (error) throw error;
-      res.json({ missions: data || [], processing_enabled: process.env.AGENT_MISSIONS_ENABLED === 'true' });
+      res.json({ missions: data || [], processing_enabled: await isAgentMissionEnabled(db, tenantId) });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
@@ -48,6 +79,7 @@ export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, ge
   app.post('/api/agent-missions', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      if (!(await isAgentMissionEnabled(db, tenantId))) return res.status(409).json({ error: 'Missions autonomes désactivées pour ce cabinet.' });
       const agentId = String(req.body?.agent_id || '');
       const { data: agent } = await db.from('agents').select('id').eq('id', agentId)
         .eq('tenant_id', tenantId).eq('is_active', true).maybeSingle();
@@ -94,7 +126,7 @@ export function registerAgentMissionRoutes(app: Express, { supabaseAdmin: db, ge
         sourceType, sourceRef, sourceExcerpt: source,
         instruction: String(req.body?.instruction || 'Repérer les actions à prévoir et proposer une tâche.'),
       });
-      res.status(created ? 201 : 200).json({ mission, created, processing_enabled: process.env.AGENT_MISSIONS_ENABLED === 'true' });
+      res.status(created ? 201 : 200).json({ mission, created, processing_enabled: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
