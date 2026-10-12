@@ -92,11 +92,17 @@ export interface LlmChatParams {
    *  exemple), à faire mettre en cache par le fournisseur quand plusieurs
    *  appels successifs le partagent : il est placé devant `content` du premier
    *  message. Claude le marque `cache_control` (lecture à 10 % du prix) ;
-   *  Gemini met en cache implicitement un préfixe identique ; Mistral n'a pas
-   *  de cache à ce jour et reçoit le texte tel quel. Pour que le cache serve,
-   *  `system`, `tools` et ce préfixe doivent rester identiques d'un appel à
-   *  l'autre, la partie qui varie allant dans `content`. */
+   *  Gemini met en cache implicitement un préfixe identique ; Mistral le
+   *  cherche en cache (lecture à 10 %) grâce à `cacheKey`. Pour que le cache
+   *  serve, `system`, `tools` et ce préfixe doivent rester identiques d'un
+   *  appel à l'autre, la partie qui varie allant dans `content`. */
   cachePrefix?: string;
+  /** Identifiant stable des appels qui partagent un préfixe (flux de travail,
+   *  conversation), transmis à Mistral comme `prompt_cache_key` : il augmente
+   *  la chance d'un succès de cache sans la garantir. Jamais de secret ni de
+   *  donnée sensible dedans (un condensé suffit). Ignoré des autres
+   *  fournisseurs. */
+  cacheKey?: string;
 }
 
 export interface LlmChatResult {

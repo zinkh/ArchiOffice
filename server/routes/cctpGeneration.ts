@@ -19,6 +19,7 @@
 // l'architecte comme n'importe quelle saisie.
 import type { Express } from 'express';
 import * as Sentry from '@sentry/node';
+import { createHash } from 'crypto';
 import { aiGenerationLimiter, cctpLotLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 
@@ -338,11 +339,11 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
     }
     if (!entry.combined.trim()) return { status: 400, error: 'Impossible d\'extraire le contenu des pièces sélectionnées.', ignored: entry.ignored };
     // Préfixe identique d'un appel à l'autre : contexte puis pièces.
-    return { prefix: `${context}\n\nContenu des pièces :\n${entry.combined}`, ignored: entry.ignored, read: entry.read };
+    return { cacheKey: `cctp-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`, prefix: `${context}\n\nContenu des pièces :\n${entry.combined}`, ignored: entry.ignored, read: entry.read };
   }
 
   /** Un appel au modèle, facturé réserve → exécute → règle comme les autres. */
-  async function callModel(tenantId: string, userId: string, prefix: string, task: string): Promise<{ text: string } | { status: number; error: string; code?: string }> {
+  async function callModel(tenantId: string, userId: string, prefix: string, cacheKey: string, task: string): Promise<{ text: string } | { status: number; error: string; code?: string }> {
     const { resolveLlmProvider, getTenantAiConfig } = await import('@zinkh/archioffice-agents/server/llm');
     const provider = resolveLlmProvider(await getTenantAiConfig(supabaseAdmin, tenantId));
     const reservedCents = await estimateReserveCents(provider.id, provider.model, Math.ceil((prefix.length + task.length + SYSTEM_PROMPT.length) / 4));
@@ -354,6 +355,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
       result = await provider.chat({
         system: SYSTEM_PROMPT,
         cachePrefix: prefix,
+        cacheKey,
         messages: [{ role: 'user', content: task }],
         timeoutMs: LLM_GENERATION_TIMEOUT_MS,
       });
@@ -385,7 +387,7 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
 
 Réponds UNIQUEMENT avec un JSON valide (sans markdown) conforme à ce schéma :
 ${JSON.stringify(PLAN_SCHEMA)}`;
-      const out = await callModel(tenantId, req.user.id, sources.prefix, task);
+      const out = await callModel(tenantId, req.user.id, sources.prefix, sources.cacheKey, task);
       if ('error' in out) return res.status(out.status).json({ error: out.error, code: out.code });
       const lots = normalizePlannedLots(parseJsonObject(out.text));
       if (!lots.length) return res.status(502).json({ error: 'Réponse IA invalide.' });
@@ -409,7 +411,7 @@ ${JSON.stringify(PLAN_SCHEMA)}`;
 
 Réponds UNIQUEMENT avec un JSON valide (sans markdown) conforme à ce schéma, avec ce seul lot dans « lots » :
 ${JSON.stringify(CCTP_SCHEMA)}`;
-      const out = await callModel(tenantId, req.user.id, sources.prefix, task);
+      const out = await callModel(tenantId, req.user.id, sources.prefix, sources.cacheKey, task);
       if ('error' in out) return res.status(out.status).json({ error: out.error, code: out.code });
       const lot = normalizeGeneratedCctp(parseJsonObject(out.text))[0];
       if (!lot) return res.status(502).json({ error: 'Réponse IA invalide.' });

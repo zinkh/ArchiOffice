@@ -1771,7 +1771,10 @@ règle) ; un lot en échec n'emporte pas les autres (« Réessayer les lots en
 tête de chaque appel, identiques du plan au dernier lot, avec le même `system`.
 Claude les marque `cache_control` (écriture à 125 %, lecture à 10 %, ramenées en
 jetons d'entrée équivalents dans `usage`) ; Gemini met en cache implicitement un
-préfixe identique ; Mistral n'a pas de cache et reçoit le texte tel quel. Le
+préfixe identique ; Mistral reçoit `prompt_cache_key` (`cacheKey`, condensé SHA-256
+de cabinet, affaire et pièces, jamais de donnée en clair) et facture les jetons
+servis par le cache (`usage.prompt_tokens_details.cached_tokens`) à 10 % : succès
+possible mais jamais garanti, blocs de 64 jetons. Le
 plan, lancé seul avant les lots, écrit le cache que les lots lisent ensuite. Le
 texte extrait des pièces est gardé 15 min en mémoire (`sourceCache`) pour ne pas
 relire ni réOCRiser les plans à chaque lot.

@@ -62,6 +62,22 @@ describe('adaptateur Anthropic et cache de prompt', () => {
   });
 });
 
+describe('adaptateur Mistral et cache de prompt', () => {
+  it('envoie prompt_cache_key et compte les jetons en cache à 10 %', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{}' } }],
+      usage: { prompt_tokens: 1013, completion_tokens: 30, prompt_tokens_details: { cached_tokens: 1008 } },
+    }), { status: 200 }));
+    const { createMistralProvider } = await import('../packages/archioffice-agents/src/server/llm/mistral');
+    const res = await createMistralProvider({ apiKey: 'k' }).chat({ cacheKey: 'cctp-abc', cachePrefix: 'Pièces', messages: [{ role: 'user', content: 'Lot 1' }] });
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as any).body);
+    expect(body.prompt_cache_key).toBe('cctp-abc');
+    expect(body.messages[0].content).toBe('Pièces\n\nLot 1');
+    expect(res.usage.inputTokens).toBe(Math.ceil(5 + 1008 * 0.1)); // 106
+    fetchMock.mockRestore();
+  });
+});
+
 describe('normalizePlannedLots', () => {
   it('écarte les lots sans titre et les doublons', () => {
     expect(normalizePlannedLots({ lots: [{ titre: 'Gros œuvre', perimetre: 'x' }, { titre: 'gros œuvre' }, { perimetre: 'y' }, { titre: 'Charpente' }] }))
