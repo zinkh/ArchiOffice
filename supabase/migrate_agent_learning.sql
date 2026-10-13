@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS agent_learning_suggestions (
   id                    TEXT PRIMARY KEY,
   tenant_id             UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   agent_id              UUID REFERENCES agents(id) ON DELETE CASCADE NOT NULL,
-  kind                  TEXT NOT NULL CHECK (kind IN ('correction', 'missing_capability', 'knowledge_note')),
+  kind                  TEXT NOT NULL CHECK (kind IN ('correction', 'note', 'improvement', 'missing_capability', 'knowledge_note')),
   title                 TEXT NOT NULL,
   content               TEXT NOT NULL,
   suggested_capability  TEXT,
