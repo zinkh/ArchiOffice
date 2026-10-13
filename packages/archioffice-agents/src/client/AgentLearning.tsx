@@ -7,7 +7,7 @@ import { apiFetch } from '@/src/lib/api';
 interface SuggestionRow {
   id: string;
   agent_id: string;
-  kind: 'correction' | 'missing_capability' | 'knowledge_note';
+  kind: 'correction' | 'note' | 'improvement' | 'missing_capability' | 'knowledge_note';
   title: string;
   content: string;
   suggested_capability: string | null;
@@ -18,6 +18,8 @@ interface SuggestionRow {
 
 const KIND_LABELS: Record<SuggestionRow['kind'], string> = {
   correction: 'Correction à retenir',
+  note: 'Note à retenir',
+  improvement: 'Amélioration',
   missing_capability: 'Capacité manquante',
   knowledge_note: 'Note pour la bibliothèque',
 };
