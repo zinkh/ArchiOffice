@@ -97,7 +97,7 @@
     "tsx": "^4.23.15",
     "web-push": "^3.6.7",
     "xlsx": "^0.18.5",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
