@@ -29,7 +29,19 @@ async function loadIllustration(fileUrl: string): Promise<CompressedImage | null
 
 // ── PDF ──────────────────────────────────────────────────────────────────────
 
-export async function exportFeasibilityPdf(p: ProposalForExport, sections: FeasibilitySection[], settings: AgencySettings): Promise<void> {
+export interface FeasibilityExportOptions {
+  /** Indice de révision du document (A, B, C...). */
+  indice?: string;
+  /** Date de diffusion, au format AAAA-MM-JJ. */
+  issueDate?: string;
+}
+
+function formatIssueDate(iso?: string): string {
+  const d = iso ? new Date(`${iso}T12:00:00`) : new Date();
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+export async function exportFeasibilityPdf(p: ProposalForExport, sections: FeasibilitySection[], settings: AgencySettings, _options: FeasibilityExportOptions = {}): Promise<void> {
   const { default: jsPDF } = await import('jspdf');
   const pdf = new jsPDF('p', 'mm', 'a4');
   const pageW = pdf.internal.pageSize.getWidth();
@@ -141,15 +153,16 @@ export async function exportFeasibilityPdf(p: ProposalForExport, sections: Feasi
 // docx mesure les images en pixels (96 dpi) : 170 mm ≈ 642 px.
 const DOCX_IMAGE_W = 642;
 
-export async function exportFeasibilityDocx(p: ProposalForExport, sections: FeasibilitySection[], settings: AgencySettings): Promise<void> {
+export async function exportFeasibilityDocx(p: ProposalForExport, sections: FeasibilitySection[], settings: AgencySettings, options: FeasibilityExportOptions = {}): Promise<void> {
   const {
     Document, Packer, Paragraph, TextRun, ImageRun, Header, Footer, PageNumber, AlignmentType, HeadingLevel, BorderStyle,
-    Table, TableRow, TableCell, WidthType, TabStopType, TabStopPosition,
+    TabStopType, TabStopPosition,
   } = await import('docx');
 
   // En-tête de la première page : logo à gauche, repère du document à droite, filet noir.
   // Les pages suivantes n'ont pas de logo : seul le repère, en gris, sous un filet.
-  const repere = [p.reference, DOC_TITLE].filter(Boolean).join(' | ');
+  const indice = (options.indice || '').trim();
+  const repere = [p.reference, DOC_TITLE, indice ? `Indice ${indice}` : ''].filter(Boolean).join(' | ');
   const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 600, 400, 0.92) : null;
   const firstHeaderChildren: InstanceType<typeof Paragraph>[] = [
     new Paragraph({
@@ -191,32 +204,25 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
     }),
   ];
 
-  const gris = { style: BorderStyle.SINGLE, size: 4, color: '9CA3AF' };
-  const cellBorders = { top: gris, bottom: gris, left: gris, right: gris };
-  const body: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [
+  const body: InstanceType<typeof Paragraph>[] = [
     new Paragraph({ heading: HeadingLevel.TITLE, spacing: { before: 200, after: 80 }, children: [new TextRun({ text: DOC_TITLE.toUpperCase(), bold: true, size: 44, color: '111827' })] }),
   ];
   if (p.title) body.push(new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: p.title, size: 26, color: '6B7280' })] }));
-  const fields = feasibilityCoverFields(p);
-  if (fields.length) {
-    body.push(new Table({
-      width: { size: 100, type: WidthType.PERCENTAGE },
-      columnWidths: [2400, 6626],
-      rows: fields.map(([k, v]) => new TableRow({
-        children: [
-          new TableCell({
-            width: { size: 2400, type: WidthType.DXA }, borders: cellBorders,
-            margins: { top: 60, bottom: 60, left: 100, right: 100 },
-            children: [new Paragraph({ children: [new TextRun({ text: k, bold: true, size: 20, color: '111827' })] })],
-          }),
-          new TableCell({
-            width: { size: 6626, type: WidthType.DXA }, borders: cellBorders,
-            margins: { top: 60, bottom: 60, left: 100, right: 100 },
-            children: [new Paragraph({ children: [new TextRun({ text: v, size: 20, color: '111827' })] })],
-          }),
-        ],
-      })),
-    }));
+  const fields: Array<[string, string]> = [
+    ...feasibilityCoverFields(p),
+    ...(indice ? [['Indice', indice] as [string, string]] : []),
+    ['Date de diffusion', formatIssueDate(options.issueDate)],
+  ];
+  for (const [k, v] of fields) {
+    if (!v) continue;
+    body.push(new Paragraph({ spacing: { after: 60 }, children: [
+      new TextRun({ text: `${k} : `, bold: true, size: 19, color: '6B7280' }),
+      new TextRun({ text: v, size: 20, color: '111827' }),
+    ] }));
+  }
+  if (sections.length) {
+    body.push(new Paragraph({ spacing: { before: 400, after: 120 }, children: [new TextRun({ text: 'Sommaire', bold: true, size: 24, color: '111827' })] }));
+    sections.forEach((s, i) => body.push(new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: `${i + 1}. ${s.title}`, size: 20 })] })));
   }
 
   // Les rubriques s'enchaînent à la suite de la page de garde, sans saut de page.
