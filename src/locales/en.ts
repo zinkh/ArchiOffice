@@ -2036,6 +2036,8 @@ export default {
       "send_feedback": "Send feedback",
       "sending": "Sending...",
       "agent_feedback_error": "Unable to send feedback. Please try again.",
+      "agent_feedback_sent": "Feedback sent. It will apply once an administrator has approved it.",
+      "agent_learning_admin_only": "Only an administrator can approve or reject a suggestion.",
       "close": "Close",
       "title": "Title",
       "details": "Details",

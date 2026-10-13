@@ -526,6 +526,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [feedbackTitle, setFeedbackTitle] = useState('');
   const [feedbackContent, setFeedbackContent] = useState('');
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [feedbackNotice, setFeedbackNotice] = useState(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -845,6 +846,13 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setAttachedDocs([]);
   };
 
+  // Le message de confirmation disparaît seul
+  useEffect(() => {
+    if (!feedbackNotice) return;
+    const timer = setTimeout(() => setFeedbackNotice(false), 6000);
+    return () => clearTimeout(timer);
+  }, [feedbackNotice]);
+
   // Feedback handlers
   const handleFeedback = useCallback((messageId: string, kind: FeedbackKind) => {
     setFeedbackMessageId(messageId);
@@ -871,6 +879,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       setFeedbackMessageId(null);
       setFeedbackTitle('');
       setFeedbackContent('');
+      setFeedbackNotice(true);
     } catch (e: any) {
       console.error('Feedback submission failed:', e);
       setErrorMsg(e?.message || t('agent_feedback_error'));
@@ -1167,6 +1176,14 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               {errorMsg && errorMsg !== 'enterprise' && errorMsg !== 'tokens' && (
                 <div className="mx-2 p-3 rounded-lg border text-[12px]" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
                   {errorMsg}
+                </div>
+              )}
+              {feedbackNotice && (
+                <div role="status" className="mx-2 p-3 rounded-lg border text-[12px] flex items-center justify-between gap-2" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+                  <span>{t('agent_feedback_sent')}</span>
+                  <button onClick={() => setFeedbackNotice(false)} aria-label={t('close')} className="p-0.5 rounded hover:bg-[var(--tblr-surface)]">
+                    <IconX size={12} />
+                  </button>
                 </div>
               )}
               <div ref={bottomRef} />

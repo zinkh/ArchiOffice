@@ -2180,6 +2180,8 @@ export default {
       "send_feedback": "Envoyer le retour",
       "sending": "Envoi en cours...",
       "agent_feedback_error": "Impossible d'envoyer le retour. Veuillez réessayer.",
+      "agent_feedback_sent": "Retour envoyé. Il sera pris en compte une fois validé par un administrateur.",
+      "agent_learning_admin_only": "Seul un administrateur peut valider ou rejeter une proposition.",
       "close": "Fermer",
       "title": "Titre",
       "details": "Détails",

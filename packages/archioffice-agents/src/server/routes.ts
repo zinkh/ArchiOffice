@@ -107,13 +107,23 @@ async function transcriptionVocabulary(supabaseAdmin: any, tenantId: string): Pr
   }
 }
 
+/** Garde de rôle du serveur hôte (`requireRole` de server.ts), injectée comme pour les missions et le RAG. */
+export type RequireRole = (...roles: string[]) => (req: any, res: any, next: any) => unknown;
+
 export function registerAgentRoutes(
   app: any,
   supabaseAdmin: any,
   getTenantId: GetTenantId,
   getTenantPlan: GetTenantPlan,
-  billing?: BillingHelpers
+  billing?: BillingHelpers,
+  requireRole?: RequireRole
 ): void {
+  // Valider une proposition d'apprentissage change durablement le prompt de
+  // l'agent pour tout le cabinet : réservé aux administrateurs. Sans garde
+  // injectée, la route se ferme plutôt que de s'ouvrir à tous.
+  const adminOnly = requireRole
+    ? requireRole('admin')
+    : (_req: any, res: any) => res.status(403).json({ error: 'Vérification du rôle indisponible.' });
 
   // GET /api/agent-templates
   app.get('/api/agent-templates', async (req: any, res: any) => {
@@ -270,7 +280,7 @@ export function registerAgentRoutes(
   // (learningTools.ts) et par les boutons de retour du chat : rien ne s'applique
   // jamais tout seul, voir migrate_agent_learning.sql. GET liste pour l'écran de
   // revue (/agents/learning), POST dépose une proposition (as_agent_id),
-  // PUT approuve ou rejette.
+  // PUT approuve ou rejette (administrateur uniquement).
 
   // GET /api/agent-learning-suggestions?status=pending
   app.get('/api/agent-learning-suggestions', async (req: any, res: any) => {
@@ -326,7 +336,7 @@ export function registerAgentRoutes(
   });
 
   // PUT /api/agent-learning-suggestions/:id — { action: 'approve' | 'reject' }
-  app.put('/api/agent-learning-suggestions/:id', async (req: any, res: any) => {
+  app.put('/api/agent-learning-suggestions/:id', adminOnly, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;

@@ -2184,8 +2184,18 @@ Sous chaque réponse d'un agent qui a `learning_enabled`, trois boutons ouvrent
 une proposition `pending` par le MÊME `POST /api/agent-learning-suggestions` que
 l'outil (`as_agent_id` revalidé, `learning_enabled` exigé) : une seule file, un
 seul écran de revue, aucune seconde route. Les boutons n'apparaissent pas pour un
-agent qui n'apprend pas. Une instance qui avait joué l'ancienne migration porte
-l'ancienne contrainte sur `kind` : la migration complémentaire la remplace.
+agent qui n'apprend pas ; l'envoi est confirmé par un message qui rappelle que la
+proposition attend la validation d'un administrateur. Une instance qui avait joué
+l'ancienne migration porte l'ancienne contrainte sur `kind` : la migration
+complémentaire la remplace.
+
+**Seul un administrateur valide.** `PUT /api/agent-learning-suggestions/:id` passe par
+`requireRole('admin')`, injecté en dernier paramètre de `registerAgentRoutes` (comme
+pour les missions et le RAG) ; sans garde injectée la route répond 403 plutôt que de
+s'ouvrir. N'importe quel membre peut en revanche DÉPOSER une proposition : elle reste
+`pending` et n'atteint le prompt qu'une fois approuvée. L'écran `/agents/apprentissage`
+masque les boutons de validation aux autres rôles
+(`tests/agentLearningGuard.test.ts`).
 
 **Une file d'attente, pas une écriture définitive.** L'outil dépose la
 proposition dans `agent_learning_suggestions`, statut `pending` — jamais dans

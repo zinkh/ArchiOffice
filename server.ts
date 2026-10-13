@@ -1157,7 +1157,7 @@ export async function createApp() {
     maybeRefreshMonthlyCredits,
     PLAN_AI_MONTHLY_CREDIT_CENTS,
     baseUrl: `http://127.0.0.1:${PORT}`,
-  });
+  }, requireRole);
   // Exécutions planifiées d'agents (lecture seule) et alertes métier : la
   // partie autonome du système d'agents, celle qui n'attend pas qu'on lui
   // pose la question.

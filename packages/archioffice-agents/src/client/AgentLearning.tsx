@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconBulb, IconCheck, IconX, IconSettings } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
+import { useUser } from '@/src/UserContext';
 
 interface SuggestionRow {
   id: string;
@@ -38,6 +39,8 @@ function formatDate(value: string): string {
 // /agents/:id/edit, jamais déclenché par cet écran.
 export default function AgentLearning() {
   const { t } = useTranslation();
+  const { currentUser } = useUser() as any;
+  const isAdmin = currentUser?.system_role === 'admin';
   const [suggestions, setSuggestions] = useState<SuggestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -103,6 +106,7 @@ export default function AgentLearning() {
         <h2 className="font-semibold text-[14px]" style={{ color: 'var(--tblr-text)' }}>
           {t('agent_learning_pending')} ({pending.length})
         </h2>
+        {!isAdmin && <p className="text-[12px]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_learning_admin_only')}</p>}
         {pending.length === 0 && <p className="text-[13px]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_learning_none')}</p>}
         <div className="space-y-2">
           {pending.map(s => (
@@ -125,14 +129,14 @@ export default function AgentLearning() {
                     </Link>
                   )}
                 </div>
-                <div className="flex gap-1 shrink-0">
+                {isAdmin && <div className="flex gap-1 shrink-0">
                   <button onClick={() => review(s.id, 'approve')} title={t('agent_learning_approve')} className="p-1.5 rounded border" style={cardStyle}>
                     <IconCheck size={14} style={{ color: '#2fb344' }} />
                   </button>
                   <button onClick={() => review(s.id, 'reject')} title={t('agent_learning_reject')} className="p-1.5 rounded border" style={cardStyle}>
                     <IconX size={14} style={{ color: '#c92a2a' }} />
                   </button>
-                </div>
+                </div>}
               </div>
             </div>
           ))}
