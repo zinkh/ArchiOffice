@@ -3,7 +3,6 @@ import { SourceCorpus, checkSource, normalizeForMatch } from '../packages/archio
 import { executeAgentAction } from '../packages/archioffice-agents/src/server/tools.js';
 
 const caps: any = { actionScopes: ['tasks'] };
-const location = 'Ligne 12 du fichier Excel joint';
 const doc = 'Maçonnerie / Gros œuvre | Extérieurs / Cheminement extérieur | Escalier non conforme : absence de bande d\'éveil';
 
 function corpus() {
@@ -19,28 +18,25 @@ describe('pas de création sans source', () => {
   });
 
   it('accepte une citation exacte du document lu', () => {
-    const r = checkSource({ source: { type: 'document_joint', citation: "escalier non conforme : absence de bande d'éveil", location } }, corpus());
+    const r = checkSource({ source: { type: 'document_joint', citation: "escalier non conforme : absence de bande d'éveil" } }, corpus());
     expect(r.ok).toBe(true);
   });
 
   it('refuse une citation inventée (le cas Sophie)', () => {
-    const r = checkSource({ source: { type: 'document_joint', citation: 'Levée de réserve - Électricité : Remplacement des interrupteurs défectueux', location } }, corpus());
+    const r = checkSource({ source: { type: 'document_joint', citation: 'Levée de réserve - Électricité : Remplacement des interrupteurs défectueux' } }, corpus());
     expect(r.ok).toBe(false);
     expect((r.response as any).code).toBe('SOURCE_NON_VERIFIEE');
   });
 
-  it('refuse une source sans localisation valide (10 à 200 caractères)', () => {
+  it('accepte une source sans location : le champ est facultatif et jamais vérifié', () => {
     const citation = "escalier non conforme : absence de bande d'éveil";
-    for (const location of [undefined, '', 'court', 'x'.repeat(201)]) {
-      const r = checkSource({ source: { type: 'document_joint', citation, location } }, corpus());
-      expect(r.ok).toBe(false);
-      expect((r.response as any).code).toBe('SOURCE_NON_VERIFIEE');
-    }
+    expect(checkSource({ source: { type: 'document_joint', citation } }, corpus()).ok).toBe(true);
+    expect(checkSource({ source: { type: 'document_joint', citation, location: 'x' } }, corpus()).ok).toBe(true);
   });
 
   it('refuse l\'absence de source et les citations trop courtes', () => {
     expect(checkSource({}, corpus()).ok).toBe(false);
-    expect(checkSource({ source: { type: 'demande_utilisateur', citation: 'Gros œuvre', location } }, corpus()).ok).toBe(false);
+    expect(checkSource({ source: { type: 'demande_utilisateur', citation: 'Gros œuvre' } }, corpus()).ok).toBe(false);
   });
 
   it('ne laisse pas l\'agent se citer lui-même ni citer un résultat d\'écriture', () => {
@@ -54,9 +50,9 @@ describe('pas de création sans source', () => {
 
   it('image_jointe n\'est acceptée que si une image est jointe', () => {
     const c = corpus();
-    expect(checkSource({ source: { type: 'image_jointe', citation: '', location } }, c).ok).toBe(false);
+    expect(checkSource({ source: { type: 'image_jointe', citation: '' } }, c).ok).toBe(false);
     c.hasImages = true;
-    expect(checkSource({ source: { type: 'image_jointe', citation: '', location } }, c).ok).toBe(true);
+    expect(checkSource({ source: { type: 'image_jointe', citation: '' } }, c).ok).toBe(true);
   });
 
   it('sans corpus (liaison MCP) aucun contrôle', () => {
@@ -65,7 +61,7 @@ describe('pas de création sans source', () => {
 
   it('executeAgentAction refuse la création avant tout appel réseau', async () => {
     const res = await executeAgentAction('http://127.0.0.1:1', { authorization: 'x', tenantId: 't' } as any, caps,
-      { name: 'create_record', args: { resource: 'tasks', data: { title: 'x' }, source: { type: 'document_joint', citation: 'phrase totalement inventée ici', location } } } as any,
+      { name: 'create_record', args: { resource: 'tasks', data: { title: 'x' }, source: { type: 'document_joint', citation: 'phrase totalement inventée ici' } } } as any,
       undefined, corpus());
     expect((res.response as any).code).toBe('SOURCE_NON_VERIFIEE');
   });
