@@ -8,6 +8,7 @@
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
 import type { Batiment, DPGF, ImageArticle, Ligne } from '../types/dpgf';
 import { imagesDeLigne } from './cctpImages';
+import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
@@ -33,6 +34,8 @@ export interface CctpExportOptions {
   batiment?: Batiment;
   /** Données de l'opération pour les textes automatiques ({{operation}}, {{adresse}}...). */
   contexte?: ContexteCctp;
+  /** Destination du fichier ; absente, il est téléchargé. */
+  sortie?: Sortie;
 }
 
 const libelleBatiment = (b: Batiment) => (b.libelle ? `${b.code} ${b.libelle}` : b.code);
@@ -198,7 +201,7 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   }
 
   drawAgencyFooters(pdf, opts.settings, letterhead);
-  pdf.save(cctpNomFichier(opts, 'pdf'));
+  await enregistrerPdf(pdf, cctpNomFichier(opts, 'pdf'), opts.sortie);
 }
 
 // ── Word ─────────────────────────────────────────────────────────────────────
@@ -301,6 +304,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     }],
   });
   const blob = await Packer.toBlob(document_);
+  if (opts.sortie) { await opts.sortie(cctpNomFichier(opts, 'docx'), blob); return; }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = cctpNomFichier(opts, 'docx');

@@ -11,13 +11,11 @@ import {
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { hierarchyKey } from './hierarchyOps';
-import { useSettings } from '../../hooks/useSettings';
 import { VARIABLES_CCTP, jeton, type ContexteCctp } from '../../lib/cctpVariables';
-import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, aDesCiblesBatiments } from '../../lib/batimentsArticles';
-import { exportCctpDocx, exportCctpPdf } from '../../lib/cctpExport';
+import { basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, aDesCiblesBatiments } from '../../lib/batimentsArticles';
 import type { ProNotify } from './DPGFWorkspace';
 import { IconFileImport } from '@tabler/icons-react';
-import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall, IconVariable } from '@tabler/icons-react';
+import { IconChevronDown as IconChevronDownSmall, IconVariable } from '@tabler/icons-react';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { DPGF, Chapitre, Ligne, type ImageArticle } from '../../types/dpgf';
@@ -64,7 +62,6 @@ type Selection = HierarchySelection;
 
 export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument }) => {
   const { t } = useTranslation();
-  const { settings } = useSettings();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
   const showTree = showTreeProp ?? localShowTree;
@@ -344,24 +341,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     if (selection.kind === 'chapitre') deleteCCTPChapitre(selection.lotIdx, selection.chapIdx);
     else deleteCCTPLigne(selection.lotIdx, selection.chapIdx, selection.lignePath);
   };
-  // ── Export du CCTP et bâtiments ────────────────────────────────────────────
-  const contexteComplet: ContexteCctp = { operation: projectName, agence: settings?.agencyName, ...contexte };
+  // ── Bâtiments du CCTP ──────────────────────────────────────────────────────
   const batimentsCctp = dpgf.multiBatiments ? batimentsParOrdre(dpgf.batiments) : [];
-  const exporter = async (format: 'pdf' | 'docx', batimentId?: string) => {
-    const batiment = batimentsCctp.find(b => b.id === batimentId);
-    try {
-      const opts = { projectName, settings: settings ?? {}, batiment, contexte: contexteComplet };
-      await (format === 'pdf' ? exportCctpPdf(dpgf, opts) : exportCctpDocx(dpgf, opts));
-    } catch (e) {
-      notify?.(t('pro_cctp_export_failed', { error: e instanceof Error ? e.message : String(e) }), { type: 'error' });
-    }
-  };
-  const exporterParBatiment = async (format: 'pdf' | 'docx') => {
-    // Un article chiffrable sans bâtiment n'entre dans aucun CCTP de bâtiment : on le dit.
-    const orphelins = articlesSansBatiment(dpgf).length;
-    for (const b of batimentsCctp) await exporter(format, b.id);
-    if (orphelins) notify?.(t('pro_cctp_export_unassigned', { count: orphelins }), { type: 'error' });
-  };
   const batimentEntries = (key: string): ToolbarMenuEntry[] => {
     // Les bâtiments se portent par les articles : sans article, cocher ne ferait rien.
     if (!aDesCiblesBatiments(dpgf.lots, [key])) {
@@ -422,23 +403,6 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     { kind: 'button', id: 'cctp-import', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
     { kind: 'button', id: 'cctp-library', label: t('pro_library'), icon: <IconBuildingStore size={16} />, pressed: showLibrary, onClick: () => setShowLibrary(v => !v) },
     { kind: 'button', id: 'cctp-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v) },
-    {
-      kind: 'menu', id: 'cctp-export', label: t('pro_export'), icon: <IconDownload size={16} />,
-      entries: [
-        ...(batimentsCctp.length ? [{ id: 'cctp-export-all', heading: t('pro_cctp_export_whole') } as ToolbarMenuEntry] : []),
-        { id: 'cctp-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exporter('pdf') },
-        { id: 'cctp-docx', label: t('pro_export_word'), icon: <IconFileTypeDoc size={16} />, onClick: () => exporter('docx') },
-        ...(batimentsCctp.length ? [
-          { id: 'cctp-export-each', heading: t('pro_export_by_building') } as ToolbarMenuEntry,
-          { id: 'cctp-pdf-each', label: t('pro_cctp_export_each_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exporterParBatiment('pdf') },
-          { id: 'cctp-docx-each', label: t('pro_cctp_export_each_word'), icon: <IconFileTypeDoc size={16} />, onClick: () => exporterParBatiment('docx') },
-          ...batimentsCctp.flatMap(b => [
-            { id: `cctp-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exporter('pdf', b.id) },
-            { id: `cctp-docx-${b.id}`, label: `${b.code} · ${t('pro_export_word')}`, icon: <IconFileTypeDoc size={16} />, onClick: () => exporter('docx', b.id) },
-          ]),
-        ] : []),
-      ],
-    },
   ]);
   const selectionActions: SelectionAction[] = [
     { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: !canMove(dpgf.lots, selection, -1) },

@@ -7,11 +7,10 @@ import {
   IconChevronRight, IconChevronDown, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconFileImport, IconScale, IconBuildingCommunity, IconArrowUp, IconArrowDown,
-  IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconDownload, IconLayoutSidebarLeftCollapse,
+  IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
   IconSubtask,
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
-import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -29,7 +28,6 @@ import {
   basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
   heritagePour, modifierFeuilles, quantitesParBatiment,
 } from '../../lib/batimentsArticles';
-import { DpgfExportDialog, type FormatExportDpgf } from './DpgfExportDialog';
 
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
@@ -99,7 +97,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
-  const [showExport, setShowExport] = useState(false);
   const [groupement, setGroupement] = useState<GroupementDpgf>('lot');
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
@@ -696,21 +693,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setDragState(null);
   };
 
-  // Export sans prix, éventuellement limité à des lots, bâtiments ou phases :
-  // le périmètre vient de la fenêtre d'export, le classement de l'écran.
-  const exporterDpgf = async (format: FormatExportDpgf, document: DPGF, perimetre: string): Promise<boolean> => {
-    const doc = perimetre ? { ...document, titre: `${dpgf.titre} - ${perimetre}` } : document;
-    const titre = perimetre ? `${projectName ?? dpgf.titre} (${perimetre})` : projectName;
-    try {
-      if (format === 'pdf') await exportDPGFtoPDF(doc, titre, groupement, settings ?? {});
-      else await exportDPGFtoExcel(doc, titre, groupement, settings ?? {});
-      return true;
-    } catch {
-      notify?.(t('pro_export_dialog_error'), { type: 'error' });
-      return false;
-    }
-  };
-
   // ── Barre d'outils (ligne des sous-onglets de ProTab) ───────────────────────
   const editable = groupement === 'lot';
   const targetChap = dpgf.lots[targetLotIdx]?.chapitres[targetChapIdx];
@@ -739,10 +721,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         { id: 'dpgf-import-offer', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'dpgf-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
       ],
-    },
-    {
-      kind: 'button', id: 'dpgf-export', label: t('pro_export'), icon: <IconDownload size={16} />,
-      onClick: () => setShowExport(true),
     },
   ]);
 
@@ -1213,14 +1191,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           />
         )}
       </div>
-      )}
-      {showExport && (
-        <DpgfExportDialog
-          open
-          dpgf={dpgf}
-          onClose={() => setShowExport(false)}
-          onExport={exporterDpgf}
-        />
       )}
     </div>
   );

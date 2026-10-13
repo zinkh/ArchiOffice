@@ -2,9 +2,9 @@ import { LotTitleInput } from './LotTitleInput';
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
+  IconChevronRight, IconChevronDown,
   IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
-  IconRefresh, IconX, IconMapPin, IconArrowUp, IconArrowDown, IconDownload, IconReceiptTax,
+  IconRefresh, IconX, IconMapPin, IconArrowUp, IconArrowDown, IconReceiptTax,
 } from '@tabler/icons-react';
 import { DPGF } from '../../types/dpgf';
 import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
@@ -12,8 +12,6 @@ import { totauxDocument } from './selectionOps';
 import { useProToolbar } from './toolbar/proToolbar';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
-import { exportEstimationtoPDF, exportEstimationtoExcel } from '../../lib/proExport';
-import { useSettings } from '../../hooks/useSettings';
 import { formatCurrency } from '../../lib/utils';
 import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
 
@@ -62,7 +60,6 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   dpgf, onChange, projectName, externalDrop, onDragStart,
   showTree: showTreeProp, onToggleTree,
 }) => {
-  const { settings } = useSettings();
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -201,13 +198,6 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
       entries: [20, 10, 5.5, 2.1, 0].map(rate => ({
         id: `est-tva-${rate}`, label: `${fmtTaux(rate)} %`, checked: dpgf.TVA === rate, onClick: () => setTVA(rate),
       })),
-    },
-    {
-      kind: 'menu', id: 'est-export', label: t('pro_export'), icon: <IconDownload size={16} />,
-      entries: [
-        { id: 'est-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportEstimationtoPDF(dpgf, projectName, settings ?? {}) },
-        { id: 'est-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportEstimationtoExcel(dpgf, projectName, settings ?? {}) },
-      ],
     },
   ]);
   const selectedLigne = selectedRow ? (() => {

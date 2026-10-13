@@ -6,6 +6,7 @@
 // SheetJS (xlsx) ne sait ni styler une cellule ni placer une image : ces
 // exports passent donc par ExcelJS, chargé à la demande comme jsPDF.
 import { saveAs } from 'file-saver';
+import type { Sortie } from './exportSortie';
 import type { Workbook, Worksheet, Alignment, Fill } from 'exceljs';
 import type { AgencySettings } from './proposalExport';
 import { agencyFooterLine, loadLogoDataUrl, resolvePartnerLogos, type LetterheadOptions } from './pdfLetterhead';
@@ -302,12 +303,11 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
 }
 
 /** Écrit le classeur et le propose au téléchargement. */
-export async function enregistrerClasseur(wb: Workbook, nomFichier: string): Promise<void> {
+export async function enregistrerClasseur(wb: Workbook, nomFichier: string, sortie?: Sortie): Promise<void> {
   const buf = await wb.xlsx.writeBuffer();
-  saveAs(
-    new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    nomFichier,
-  );
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  if (sortie) await sortie(nomFichier, blob);
+  else saveAs(blob, nomFichier);
 }
 
 export interface ColonneListe extends Colonne {

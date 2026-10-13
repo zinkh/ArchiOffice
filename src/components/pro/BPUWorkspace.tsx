@@ -4,7 +4,7 @@ import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy,
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard,
-  IconFileTypePdf, IconTable, IconChevronRight, IconChevronDown,
+  IconChevronRight, IconChevronDown,
   IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
   IconBuildingStore, IconFileImport, IconFileExport,
@@ -64,8 +64,6 @@ interface BPUWorkspaceProps {
   onImportOffre?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce bordereau (les lignes absentes deviennent des articles). */
   onImportDocument?: () => void;
-  onExportPdf?: (colSet: ColSet) => void;
-  onExportExcel?: (colSet: ColSet, vierge: boolean) => void;
   onPushToAct?: () => void;
 }
 
@@ -122,7 +120,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   bpu, onChange, mode, projectName, offres = [], projectLots = [], notify,
   showTree: showTreeProp, onToggleTree, onDragStart, onDropExternal,
   onInitFromDpgf, onPushToDpgf, onOpenLibrary, onPushToLibrary,
-  onImportOffre, onImportDocument, onExportPdf, onExportExcel, onPushToAct,
+  onImportOffre, onImportDocument, onPushToAct,
 }) => {
   const [colSet, setColSet] = useState<ColSet>(mode);
   // Le même atelier sert les onglets BPU et DQE : changer d'onglet change de colonnes.
@@ -623,10 +621,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     {
       kind: 'menu', id: 'bpu-exchange', label: t('pro_import_export'), icon: <IconFileExport size={16} />,
       entries: [
-        { id: 'bpu-exchange-out', heading: t('pro_bpu_to_companies') },
-        { id: 'bpu-xls-blank', label: t('pro_bpu_excel_blank'), icon: <IconTable size={16} />, onClick: () => onExportExcel?.(colSet, true), disabled: !onExportExcel },
-        { id: 'bpu-xls-priced', label: t('pro_bpu_excel_priced'), icon: <IconTable size={16} />, onClick: () => onExportExcel?.(colSet, false), disabled: !onExportExcel },
-        { id: 'bpu-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => onExportPdf?.(colSet), disabled: !onExportPdf },
         { id: 'bpu-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'bpu-exchange-in', heading: t('pro_bpu_offers_received') },
         { id: 'bpu-import', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },

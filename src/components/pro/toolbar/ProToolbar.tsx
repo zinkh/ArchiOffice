@@ -1,6 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconChevronDown, IconDots } from '@tabler/icons-react';
+import { IconChevronDown, IconDots, IconDownload } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
 import { ToolbarMenu } from './ToolbarMenu';
 import { foldForMobile, invokeToolbarAction, type ToolbarItem, type ToolbarMenuEntry } from './proToolbar';
@@ -14,6 +14,8 @@ interface ProToolbarProps {
   dossierEntries: ToolbarMenuEntry[];
   dossierLabel: string;
   isMobile: boolean;
+  /** Ouvre la fenêtre d'export du dossier PRO (tous les documents). */
+  onExport?: () => void;
 }
 
 export const toolbarButtonClass = (opts: { accent?: boolean; pressed?: boolean; iconOnly?: boolean } = {}) => cn(
@@ -29,7 +31,7 @@ export const toolbarButtonClass = (opts: { accent?: boolean; pressed?: boolean; 
  * le menu « ⋯ » du dossier. Sur téléphone, seules les actions marquées
  * `mobile` restent visibles, les autres rejoignent le menu « ⋯ ».
  */
-export function ProToolbar({ items, resolve, dossierEntries, dossierLabel, isMobile }: ProToolbarProps) {
+export function ProToolbar({ items, resolve, dossierEntries, dossierLabel, isMobile, onExport }: ProToolbarProps) {
   const { t } = useTranslation();
   const run = (id: string, value?: string) => { invokeToolbarAction(resolve(), id, value); };
   const { visible, folded } = isMobile ? foldForMobile(items) : { visible: items, folded: [] as ToolbarMenuEntry[] };
@@ -113,6 +115,12 @@ export function ProToolbar({ items, resolve, dossierEntries, dossierLabel, isMob
           </div>
         );
       })}
+      {onExport && (
+        <button type="button" onClick={onExport} className={toolbarButtonClass()} title={t('pro_export_dialog_subtitle')}>
+          <span aria-hidden className="flex"><IconDownload size={16} /></span>
+          {t('pro_export')}
+        </button>
+      )}
       {menuEntries.length > 0 && (
         <ToolbarMenu
           entries={menuEntries}
