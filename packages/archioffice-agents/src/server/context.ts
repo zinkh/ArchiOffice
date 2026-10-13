@@ -428,18 +428,17 @@ export async function buildAgentContext(
         })
     );
   }
-  // Mémoire d'apprentissage — corrections, notes et améliorations déjà APPROUVÉES
-  // par l'architecte (agent_learning_suggestions), jamais une proposition encore
-  // 'pending'. Toujours peuplée quand learningEnabled, comme knowledgeDocuments :
-  // c'est ce qui referme la boucle de suggérer_amélioration une fois la proposition
-  // validée. Les agents reçoivent ainsi leurs retours validés pour améliorer leurs
-  // réponses futures.
+  // Mémoire d'apprentissage — corrections, notes, améliorations et notes de
+  // bibliothèque déjà APPROUVÉES par l'architecte (agent_learning_suggestions),
+  // jamais une proposition encore 'pending' ni une 'missing_capability'.
+  // Toujours peuplée quand learningEnabled, comme knowledgeDocuments : c'est ce
+  // qui referme la boucle une fois la proposition validée.
   if (learningEnabled) {
     fetches.push(
       supabaseAdmin.from('agent_learning_suggestions')
         .select('kind, title, content')
         .eq('tenant_id', tenantId).eq('agent_id', currentAgentId).eq('status', 'approved')
-        .in('kind', ['correction', 'note', 'improvement'])
+        .in('kind', ['correction', 'note', 'improvement', 'knowledge_note'])
         .order('created_at', { ascending: false })
         .limit(MAX_LEARNING_NOTES)
         .then((r: any) => {

@@ -840,7 +840,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setAttachedDocs([]);
   };
 
-    // Feedback handlers
+  // Feedback handlers
   const handleFeedback = useCallback((messageId: string, kind: FeedbackKind) => {
     setFeedbackMessageId(messageId);
     setFeedbackKind(kind);
@@ -853,10 +853,10 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     if (!feedbackMessageId || !feedbackTitle.trim() || !feedbackContent.trim() || !activeAgentId) return;
     setFeedbackSubmitting(true);
     try {
-      await apiFetch('/api/agents/learning', {
+      await apiFetch('/api/agent-learning-suggestions', {
         method: 'POST',
         body: JSON.stringify({
-          message_id: feedbackMessageId,
+          as_agent_id: activeAgentId,
           kind: feedbackKind,
           title: feedbackTitle.trim(),
           content: feedbackContent.trim(),
@@ -881,7 +881,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setFeedbackContent('');
   };
 
-const switchAgent = (agentId: string): void => {
+  const switchAgent = (agentId: string): void => {
     speech.stop();
     setActiveAgentId(agentId);
     setAgentSelectorOpen(false);
@@ -1119,7 +1119,7 @@ const switchAgent = (agentId: string): void => {
                 </div>
               )}
               {messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} onFeedback={handleFeedback} />
+                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} onFeedback={activeAgent?.learning_enabled ? handleFeedback : undefined} />
               ))}
               {loading && (
                 <div className="flex flex-col gap-1">

@@ -267,9 +267,9 @@ export function registerAgentRoutes(
 
   // ── Apprentissage des agents (agent_learning_suggestions) ────────────────
   // File d'attente de propositions déposées par suggerer_amelioration
-  // (learningTools.ts) : rien ne s'applique jamais tout seul, voir
-  // migrate_agent_learning.sql. GET liste pour l'écran de revue
-  // (/agents/learning), POST est appelé par l'outil de l'agent (as_agent_id),
+  // (learningTools.ts) et par les boutons de retour du chat : rien ne s'applique
+  // jamais tout seul, voir migrate_agent_learning.sql. GET liste pour l'écran de
+  // revue (/agents/learning), POST dépose une proposition (as_agent_id),
   // PUT approuve ou rejette.
 
   // GET /api/agent-learning-suggestions?status=pending
@@ -291,8 +291,10 @@ export function registerAgentRoutes(
     } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  // POST /api/agent-learning-suggestions — appelé par suggérer_amélioration
-  // via la boucle interne (as_agent_id), jamais directement par l'écran.
+  // POST /api/agent-learning-suggestions — deux appelants : l'outil
+  // suggerer_amelioration de l'agent (boucle interne) et les boutons de retour
+  // de la fenêtre de chat (correction, note, amélioration). Dans les deux cas
+  // as_agent_id est revalidé ci-dessous et la proposition reste 'pending'.
   app.post('/api/agent-learning-suggestions', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -960,128 +962,6 @@ export function registerAgentRoutes(
         return res.status(504).json({ error: e.message, code: 'AGENT_TIMEOUT' });
       }
       res.status(500).json({ error: `Erreur lors de la communication avec l'agent : ${e.message}` });
-    }
-  });
-
-
-  // POST /api/agents/learning - Submit feedback for agent learning
-  app.post('/api/agents/learning', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { message_id, kind, title, content } = req.body;
-
-      if (!message_id || !kind || !title || !content) {
-        return res.status(400).json({ error: 'message_id, kind, title, and content are required' });
-      }
-
-      if (!['correction', 'note', 'improvement'].includes(kind)) {
-        return res.status(400).json({ error: 'kind must be one of: correction, note, improvement' });
-      }
-
-      // Get the agent from the message
-      const { data: message, error: msgErr } = await supabaseAdmin
-        .from('agent_messages')
-        .select('agent_id, conversation_id')
-        .eq('id', message_id)
-        .eq('tenant_id', tenantId)
-        .single();
-
-      if (msgErr || !message) {
-        return res.status(404).json({ error: 'Message not found' });
-      }
-
-      const { data: suggestion, error: err } = await supabaseAdmin
-        .from('agent_learning_suggestions')
-        .insert({
-          tenant_id: tenantId,
-          agent_id: message.agent_id,
-          kind,
-          title,
-          content,
-          conversation_id: message.conversation_id,
-          message_id,
-          status: 'pending',
-          created_by: req.user.id,
-        })
-        .select()
-        .single();
-
-      if (err) throw err;
-
-      res.json({ 
-        id: suggestion.id, 
-        status: suggestion.status, 
-        message: 'Feedback submitted successfully. Waiting for approval.' 
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // GET /api/agents/learning/pending - List pending learning suggestions
-  app.get('/api/agents/learning/pending', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { agent_id } = req.query;
-
-      let query = supabaseAdmin
-        .from('agent_learning_suggestions')
-        .select('*, agent:agents(name, role_title)')
-        .eq('tenant_id', tenantId)
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
-
-      if (agent_id) {
-        query = query.eq('agent_id', agent_id);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      res.json(data || []);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // PUT /api/agents/learning/:id - Approve/reject a learning suggestion
-  app.put('/api/agents/learning/:id', async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const { id } = req.params;
-      const { status } = req.body;
-
-      if (!['approved', 'rejected'].includes(status)) {
-        return res.status(400).json({ error: 'status must be approved or rejected' });
-      }
-
-      // Get current suggestion
-      const { data: suggestion, error: err } = await supabaseAdmin
-        .from('agent_learning_suggestions')
-        .select('*')
-        .eq('id', id)
-        .eq('tenant_id', tenantId)
-        .single();
-
-      if (err || !suggestion) {
-        return res.status(404).json({ error: 'Suggestion not found' });
-      }
-
-      // Update status
-      const { error: updateErr } = await supabaseAdmin
-        .from('agent_learning_suggestions')
-        .update({
-          status,
-          reviewed_by: req.user.id,
-          reviewed_at: new Date().toISOString(),
-        })
-        .eq('id', id);
-
-      if (updateErr) throw updateErr;
-
-      res.json({ success: true, status });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
     }
   });
 }

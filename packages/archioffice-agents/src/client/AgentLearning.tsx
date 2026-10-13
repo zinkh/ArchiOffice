@@ -31,11 +31,11 @@ function formatDate(value: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-// L'approbation permet aux agents d'accéder à leurs retours validés via buildAgentContext.
-// Les types 'correction', 'note' et 'improvement' sont injectés dans le contexte de l'agent
-// pour améliorer ses futures réponses. Les types 'missing_capability' et 'knowledge_note'
-// sont conservés pour compatibilité mais 'note' et 'improvement' sont les nouveaux types
-// standard pour le feedback utilisateur (US-1, US-2, US-3).
+// L'approbation retient 'correction', 'note', 'improvement' et 'knowledge_note'
+// comme mémoire de l'agent (voir buildAgentContext) — une 'missing_capability'
+// approuvée ne fait rien d'automatique : elle documente seulement que
+// l'architecte a vu la demande. L'activer reste un geste volontaire depuis
+// /agents/:id/edit, jamais déclenché par cet écran.
 export default function AgentLearning() {
   const { t } = useTranslation();
   const [suggestions, setSuggestions] = useState<SuggestionRow[]>([]);

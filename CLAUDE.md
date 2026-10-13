@@ -2177,6 +2177,16 @@ comportement d'un agent, ça se confirme, ça ne se déduit jamais.
 - `knowledge_note` — l'agent propose lui-même une note pour sa mémoire (une
   règle ou une préférence du cabinet apprise en tâche).
 
+**Retours de l'utilisateur depuis le chat** (`supabase/migrate_agent_learning_feedback_kinds.sql`).
+Sous chaque réponse d'un agent qui a `learning_enabled`, trois boutons ouvrent
+`FeedbackModal` (`AgentChat.tsx`) : `correction` (corriger une erreur), `note`
+(un fait à retenir) et `improvement` (une amélioration à apporter). Ils déposent
+une proposition `pending` par le MÊME `POST /api/agent-learning-suggestions` que
+l'outil (`as_agent_id` revalidé, `learning_enabled` exigé) : une seule file, un
+seul écran de revue, aucune seconde route. Les boutons n'apparaissent pas pour un
+agent qui n'apprend pas. Une instance qui avait joué l'ancienne migration porte
+l'ancienne contrainte sur `kind` : la migration complémentaire la remplace.
+
 **Une file d'attente, pas une écriture définitive.** L'outil dépose la
 proposition dans `agent_learning_suggestions`, statut `pending` — jamais dans
 `documents` ni dans le prompt. L'architecte la revoit depuis
@@ -2186,10 +2196,11 @@ proposition dans `agent_learning_suggestions`, statut `pending` — jamais dans
 `as_agent_id` — introuvable, inactif ou sans `learning_enabled` est refusé.
 Une proposition déjà traitée ne peut pas être retraitée (409).
 
-**Seule une proposition *approuvée* devient mémoire, et seulement pour
-`correction`/`knowledge_note`.** `buildAgentContext()` (`context.ts`) relit,
+**Seule une proposition *approuvée* devient mémoire, et jamais pour
+`missing_capability`.** `buildAgentContext()` (`context.ts`) relit,
 quand `learningEnabled` est vrai, les lignes `agent_learning_suggestions` de
-CET agent au statut `approved` de ces deux natures, dans
+CET agent au statut `approved` de ces natures (`correction`, `note`, `improvement`,
+`knowledge_note`), dans
 `ctx.learningNotes` — auto-injecté à chaque tour comme
 `knowledgeDocuments`, jamais via un `tool`, jamais tant que le statut reste
 `pending` (`MÉMOIRE D'APPRENTISSAGE`, `systemPrompts.ts`, plafonné à
