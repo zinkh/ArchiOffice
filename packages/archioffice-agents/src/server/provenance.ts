@@ -53,17 +53,41 @@ export const MIN_CITATION_CHARS = 12;
 export const SOURCE_PARAMETER_SCHEMA = {
   type: 'object',
   description:
-    "OBLIGATOIRE. D'où vient cette création. Le serveur vérifie que `citation` figure mot pour mot dans ce que tu as réellement reçu " +
-    "(message de l'utilisateur, document joint lu, résultat d'un outil de lecture) et refuse la création sinon. " +
-    "Cite le passage précis qui justifie CET enregistrement, pas un titre ou un en-tête générique.",
+    "OBLIGATOIRE. D'o\u00f9 vient cette cr\u00e9ation. Le serveur v\u00e9rifie que `citation` figure mot pour mot dans ce que tu as r\u00e9ellement re\u00e7u " +
+    "(message de l'utilisateur, document joint lu, r\u00e9sultat d'un outil de lecture) et refuse la cr\u00e9ation sinon. " +
+    "Cite le passage pr\u00e9cis qui justifie CET enregistrement, pas un titre ou un en-t\u00eate g\u00e9n\u00e9rique.",
   properties: {
-    type: { type: 'string', enum: [...SOURCE_TYPES], description: 'Nature de la source.' },
+    type: { 
+      type: 'string', 
+      enum: [...SOURCE_TYPES], 
+      description: 'Nature de la source (demande_utilisateur, document_joint, email, base_cabinet, web, image_jointe).' 
+    },
     citation: {
       type: 'string',
-      description: `Extrait exact (au moins ${MIN_CITATION_CHARS} caractères) copié depuis la source, qui justifie cet enregistrement.`,
+      description: `Extrait exact (entre ${MIN_CITATION_CHARS} et 500 caractères) copié depuis la source, qui justifie cet enregistrement.`,
+      minLength: MIN_CITATION_CHARS,
+      maxLength: 500,
+    },
+    location: {
+      type: 'string',
+      description: 'Où trouver la source (ex: "Ligne 42 du PDF", "Message utilisateur du 10/10", "Email de client@exemple.com"). Doit faire entre 10 et 200 caractères.',
+      minLength: 10,
+      maxLength: 200,
+    },
+    document_id: {
+      type: 'string',
+      description: 'ID du document si type=document_joint ou image_jointe.',
+    },
+    message_id: {
+      type: 'string',
+      description: 'ID du message si type=email.',
+    },
+    record_id: {
+      type: 'string',
+      description: "ID de l'enregistrement si type=base_cabinet.",
     },
   },
-  required: ['type', 'citation'],
+  required: ['type', 'citation', 'location'],
 } as const;
 
 /** Minuscules, sans accents, ponctuation et espaces réduits à un seul espace. */
@@ -126,7 +150,7 @@ const COMMON_INSTRUCTION =
 /** Vérifie la source d'une création. Sans corpus (liaison MCP), aucun contrôle. */
 export function checkSource(args: Record<string, unknown>, corpus: SourceCorpus | undefined): SourceCheck {
   if (!corpus) return { ok: true };
-  const source = args.source as { type?: unknown; citation?: unknown } | undefined;
+  const source = args.source as { type?: unknown; citation?: unknown; location?: unknown } | undefined;
   if (!source || typeof source !== 'object') {
     return refusal(
       'Création refusée : aucune source indiquée.',
@@ -135,6 +159,16 @@ export function checkSource(args: Record<string, unknown>, corpus: SourceCorpus 
   }
   const type = String(source.type || '');
   const citation = String(source.citation || '').trim();
+  const location = String(source.location || '').trim();
+
+  // Verification de location
+  if (!location || location.length < 10 || location.length > 200) {
+    return refusal(
+      'Creation refusee : localisation de la source manquante ou invalide (doit faire entre 10 et 200 caracteres).',
+      `Precise ou trouver la source (ex: "Ligne 42 du PDF", "Message utilisateur du 10/10"). ${COMMON_INSTRUCTION}`,
+    );
+  }
+
   if (!(SOURCE_TYPES as readonly string[]).includes(type)) {
     return refusal(`Création refusée : type de source inconnu « ${type} ».`, `Types acceptés : ${SOURCE_TYPES.join(', ')}.`);
   }
