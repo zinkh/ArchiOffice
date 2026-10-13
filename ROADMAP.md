@@ -23,6 +23,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Project correspondence: editable drafts, personal signature, filing in the origin mailbox | ✅ | Linking an email to a project files it in a Gmail label / Outlook or IMAP folder `ArchiOffice/<project>` (best effort). Drafts are edited in place in the provider mailbox; there is no stored draft-to-project link, the tab matches drafts by client address and project name/code. |
 | Team management, roles, multi-tenant join requests | ✅ | Roles: `admin`, `manager`, `pm`, `user`. |
 | Company qualifications (Qualibat, Qualifelec, RGE...), search for building companies | 🟡 | Per-contact qualifications with validity status, an "expires soon" alert on consulted companies, import of RGE qualifications from the ADEME open data, and a company search (SIRENE directory + RGE badge) from the ACT consultation table. Qualibat itself is **not** queried: see the Qualibat entry under Integrations and the TODO under Known gaps. |
+| Sharing a project with a co-contractor (*cotraitant*) with per-item edit rights | ⏳ | Not built, see "Project sharing with a co-contractor" below. Today a co-contractor can only be listed on the project (`project_cotraitants`) and in the contract; it has no access to the project in the application. |
 | Billing & plan quotas | ✅ | Payment processing via **Stancer** (not Stripe), quota enforcement (`projects`, `users`, `documents`) tied to plan/trial status. |
 
 ## Document export
@@ -67,8 +68,32 @@ Model calls go through one provider-neutral layer, `packages/archioffice-agents/
 | Mistral | ✅ | Same. French, EU-hosted — the relevant argument for tenants whose own clients impose GDPR or data-sovereignty constraints. |
 | Per-model pricing | ✅ | `llm/pricing.ts`. A model absent from `MODEL_CATALOG` is refused rather than billed at an invented rate; `AI_PRICE_MARKUP` is the single margin lever. |
 | Provider choice from the UI | ✅ | Platform operator picks the active provider **and a model per provider** in `/admin` (**Fournisseur IA**), stored in `platform_settings`, effective within ~30s with no restart. Each provider keeps its own model, so switching back restores the earlier choice instead of resetting to that provider's default. A provider with no API key configured can be pre-set but not activated. Still instance-wide: no per-tenant or per-agent picker. |
+| "Latest" / "Default" model alias per provider (Gemini, Mistral, Claude) | ⏳ | Planned, not built. Today every selectable model is a pinned id in `MODEL_CATALOG`, so following a provider's new release means a code change. See "Latest and default model aliases" below. |
 | BYOK (tenants bringing their own API key) | ⏳ | Designed, not built — see below. |
 | Speech synthesis (TTS) native per provider | ⏳ | Always Gemini today, regardless of the tenant's active chat provider — see below. |
+
+### Latest and default model aliases — planned
+
+Goal: let the operator (and later a tenant) pick "Latest" or "Default" for Gemini, Mistral and Claude, so the newest model is reachable when a provider ships one, without waiting for a code release. Nothing is built; this records the constraints so they don't have to be re-derived.
+
+- **Two aliases per provider.** `default` is the model we have validated and priced (what `describeLlmSelection()` falls back to today). `latest` follows the provider's own moving alias: `mistral-*-latest` (already used in `MODEL_CATALOG`), Gemini's `*-latest` ids, and the unpinned Claude aliases. The choice is stored per provider in `platform_settings` next to the current model, and per tenant later through `tenants.ai_model`.
+- **The pricing invariant still holds.** A model absent from `MODEL_CATALOG` cannot run, because billing an unpriced model means inventing an amount. A moving alias can silently point to a model with a different price, so each alias needs a catalogue entry with a rate we maintain, and the resolved model id has to be recorded.
+- **Record the resolved model.** `agent_token_usage` must store the concrete model id the provider answered with (not just "latest"), so a charge can be read back with the rate that produced it. Compare it with the priced model on each call and log a warning when they differ, so a price drift is visible.
+- **Fallback.** If a `latest` alias is rejected by the provider (retired or renamed), fall back to that provider's `default` instead of failing the request, and report it in `/admin`.
+- **Admin UI.** Add "Latest" and "Default" entries to the model picker of **Fournisseur IA** in `/admin`, with a short note that "Latest" can change behaviour and cost without a deployment.
+- **Open question.** Whether `latest` should be allowed for a tenant-level choice, or stay a platform operator setting only, given its effect on billing.
+
+### Project sharing with a co-contractor — planned
+
+Goal: share a project with a co-contractor (*cotraitant*) so they can work on it, and let the architect decide, item by item, what they may edit and what stays read-only. Nothing is built.
+
+- **Model.** An external collaborator is not a member of the tenant: reuse the `tenant_memberships` identity split rather than adding a second account system, with a dedicated restricted role, and scope the access to specific projects the way `project_members` already does for `pm`. An invitation by email follows the existing `POST /api/team` flow (single-use link, the person chooses their own password).
+- **Per-item permissions.** A `project_shares` table (project, collaborator, status) plus `project_share_grants` (share, resource kind such as `lots`, `cctp`, `dpgf`, `tasks`, `documents`, `meetings`, `observations`, and optionally a lot or a chapter, with `read` or `write`). Default is no access: the architect grants explicitly, and anything not granted is invisible, not just read-only.
+- **Server is the barrier.** Every route reached by a collaborator checks the grant on the server (as `server/invoiceAccess.ts` does for invoices), never only in the UI. Financial data (fees, invoices, notes d'honoraires of the agency) stays out of any grant by default.
+- **Scope by lot.** Because a co-contractor usually owns a mission or a lot, grants should be expressible per lot (`projectLotId`) so they edit their own part of the CCTP/DPGF without seeing or touching the others.
+- **Traceability.** Record who changed what (the activity log already exists), and consider a change proposal mode where the co-contractor's edits wait for the architect's approval, as an option per grant.
+- **Cross-tenant references.** The shared project stays owned by one tenant; apply `assertTenantEntity` and `findMembership` checks so a collaborator can never reference or write outside the granted project.
+- **Before shipping.** Update the privacy policy and the subcontractor list, and define what happens to the access when the co-contractor is removed from the contract or the project is archived.
 
 ### BYOK — planned
 
