@@ -2834,8 +2834,13 @@ veut dire « aucun bâtiment », sans héritage.
   un chapitre sans article (généralités) et un texte propre au CCTP sans
   bâtiment valent pour tous ; un article chiffrable sans bâtiment n'entre dans
   aucun, et l'export par bâtiment le signale.
-- Le DPGF par bâtiment (PDF, Excel) est dans le menu Exporter du DPGF ; le
-  volet « Articles et bâtiments » qui le portait est supprimé.
+- **Export du DPGF SANS PRIX** : le bouton « Exporter » ouvre `DpgfExportDialog.tsx`
+  (tout le document, ou une sélection de lots, bâtiments et phases, ces deux
+  derniers seulement si le découpage est actif ; « sans bâtiment » / « sans
+  phase » se cochent aussi), puis PDF ou Excel. Filtrage pur dans
+  `src/lib/dpgfExportSelection.ts` (testé) ; `proExport.ts` n'émet ni P.U., ni
+  montant, ni total. Le classement choisi à l'écran reste suivi. Le volet
+  « Articles et bâtiments » est supprimé.
 
 **Le DPGF verse maintenant lui aussi ses offres au comparatif ACT.** L'ACT
 récupère les offres des entreprises sur la base du DPGF ou du BPU selon le

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, type HierarchySelection } from './hierarchyOps';
 import React, { useState, useRef } from 'react';
 import {
-  IconPlus, IconTrash, IconCopy, IconClipboard, IconFileTypePdf, IconTable,
+  IconPlus, IconTrash, IconCopy, IconClipboard,
   IconChevronRight, IconChevronDown, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconFileImport, IconScale, IconBuildingCommunity, IconArrowUp, IconArrowDown,
@@ -29,7 +29,7 @@ import {
   basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
   heritagePour, modifierFeuilles, quantitesParBatiment,
 } from '../../lib/batimentsArticles';
-import { forBuilding } from '../../lib/dpgfBuildings';
+import { DpgfExportDialog, type FormatExportDpgf } from './DpgfExportDialog';
 
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
@@ -99,6 +99,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [groupement, setGroupement] = useState<GroupementDpgf>('lot');
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
@@ -695,6 +696,21 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setDragState(null);
   };
 
+  // Export sans prix, éventuellement limité à des lots, bâtiments ou phases :
+  // le périmètre vient de la fenêtre d'export, le classement de l'écran.
+  const exporterDpgf = async (format: FormatExportDpgf, document: DPGF, perimetre: string): Promise<boolean> => {
+    const doc = perimetre ? { ...document, titre: `${dpgf.titre} - ${perimetre}` } : document;
+    const titre = perimetre ? `${projectName ?? dpgf.titre} (${perimetre})` : projectName;
+    try {
+      if (format === 'pdf') await exportDPGFtoPDF(doc, titre, groupement, settings ?? {});
+      else await exportDPGFtoExcel(doc, titre, groupement, settings ?? {});
+      return true;
+    } catch {
+      notify?.(t('pro_export_dialog_error'), { type: 'error' });
+      return false;
+    }
+  };
+
   // ── Barre d'outils (ligne des sous-onglets de ProTab) ───────────────────────
   const editable = groupement === 'lot';
   const targetChap = dpgf.lots[targetLotIdx]?.chapitres[targetChapIdx];
@@ -725,19 +741,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       ],
     },
     {
-      kind: 'menu', id: 'dpgf-export', label: t('pro_export'), icon: <IconDownload size={16} />,
-      entries: [
-        { id: 'dpgf-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}) },
-        { id: 'dpgf-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement, settings ?? {}) },
-        ...(batiments.length ? [{ id: 'dpgf-by-building', heading: t('pro_export_by_building') } as ToolbarMenuEntry] : []),
-        ...batiments.flatMap(b => {
-          const titre = `${projectName ?? dpgf.titre} · ${b.code}${b.libelle ? ` ${b.libelle}` : ''}`;
-          return [
-            { id: `dpgf-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
-            { id: `dpgf-xlsx-${b.id}`, label: `${b.code} · ${t('pro_export_excel')}`, icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
-          ];
-        }),
-      ],
+      kind: 'button', id: 'dpgf-export', label: t('pro_export'), icon: <IconDownload size={16} />,
+      onClick: () => setShowExport(true),
     },
   ]);
 
@@ -1208,6 +1213,14 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           />
         )}
       </div>
+      )}
+      {showExport && (
+        <DpgfExportDialog
+          open
+          dpgf={dpgf}
+          onClose={() => setShowExport(false)}
+          onExport={exporterDpgf}
+        />
       )}
     </div>
   );
