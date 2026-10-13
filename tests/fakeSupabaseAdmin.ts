@@ -47,6 +47,12 @@ export class FakeSupabaseAdmin {
   private tokenToUser = new Map<string, FakeUser>();
 
   private adminUsers = new Map<string, { id: string; email: string }>();
+  // Séquences de next_document_number : (cabinet|série) -> dernière valeur émise.
+  private docSequences = new Map<string, number>();
+  /** Quand vrai, rpc('next_document_number') répond comme une base sans la migration (PGRST202). */
+  public documentSequencesUnavailable = false;
+  /** Latence (ms) avant chaque insertion : ouvre la fenêtre de course entre « lire » et « écrire » d'une base réelle. */
+  public writeLatencyMs = 0;
 
   auth = {
     getUser: async (token: string) => {
@@ -90,6 +96,26 @@ export class FakeSupabaseAdmin {
   // check-and-write: both read and write the row synchronously here, same
   // as Postgres would under a row lock, so the atomicity these functions
   // exist for isn't something this in-memory fake can fail to reproduce.
+  private documentSequenceSeed(tenantId: string, series: string): number {
+    const suffix = (value: unknown) => {
+      const m = /-\d{4}-(\d{1,9})\s*$/.exec(String(value ?? ''));
+      return m ? parseInt(m[1], 10) : 0;
+    };
+    const rows = (table: string) => this.getTable(table).filter(r => r.tenant_id === tenantId);
+    const fromColumn = (table: string, column: string) => {
+      const list = rows(table);
+      return Math.max(list.length, ...list.map(r => suffix(r[column])), 0);
+    };
+    if (series === 'invoice') return fromColumn('invoices', 'invoice_number');
+    if (series === 'proposal') return fromColumn('proposals', 'reference');
+    if (series === 'note_honoraires') return fromColumn('notes_honoraires', 'numero');
+    if (series.startsWith('acompte:')) {
+      const projectId = series.slice('acompte:'.length);
+      return rows('invoices').filter(r => r.project_id === projectId && r.invoice_type === 'acompte').length;
+    }
+    throw new Error(`Série de numérotation inconnue : ${series}`);
+  }
+
   async rpc(fnName: string, params: Record<string, any>) {
     if (fnName === 'commit_phase_transition') {
       const p = params;
@@ -133,6 +159,19 @@ export class FakeSupabaseAdmin {
       tenant.ai_credit_balance_eur_cents = (tenant.ai_credit_balance_eur_cents || 0) + params.p_amount_cents;
       tenant.ai_credit_last_refresh = new Date().toISOString();
       return { data: true, error: null };
+    }
+    if (fnName === 'next_document_number') {
+      if (this.documentSequencesUnavailable) {
+        return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.next_document_number in the schema cache' } };
+      }
+      // Même logique que migrate_atomic_document_numbering.sql : amorçage sur le plus
+      // grand du nombre de lignes et du plus grand suffixe « -AAAA-NNN », puis
+      // incrément. Synchrone, donc atomique ici comme le verrou de ligne l'est en SQL.
+      const key = `${params.p_tenant_id}|${params.p_series}`;
+      if (!this.docSequences.has(key)) this.docSequences.set(key, this.documentSequenceSeed(params.p_tenant_id, params.p_series));
+      const next = (this.docSequences.get(key) as number) + 1;
+      this.docSequences.set(key, next);
+      return { data: next, error: null };
     }
     return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
   }
@@ -271,7 +310,7 @@ export class FakeSupabaseAdmin {
   }
 
   from(table: string) {
-    return new FakeQueryBuilder(this.tables, table, this.brokenTables);
+    return new FakeQueryBuilder(this.tables, table, this.brokenTables, () => this.writeLatencyMs);
   }
 }
 
@@ -285,7 +324,7 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
   private wantSingle = false;
   private wantMaybeSingle = false;
 
-  constructor(private tables: Map<string, Row[]>, private table: string, private brokenTables?: Set<string>) {}
+  constructor(private tables: Map<string, Row[]>, private table: string, private brokenTables?: Set<string>, private writeLatency?: () => number) {}
 
   select(_columns?: string, _opts?: { count?: string; head?: boolean }) {
     return this;
@@ -473,6 +512,8 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
     const rows = this.getRows();
 
     if (this.op === 'insert') {
+      const latency = this.writeLatency?.() ?? 0;
+      if (latency > 0) await new Promise(resolve => setTimeout(resolve, latency));
       const inserted = (Array.isArray(this.payload) ? this.payload : [this.payload!]).map(r => ({
         id: r.id ?? crypto.randomUUID(),
         ...r,
