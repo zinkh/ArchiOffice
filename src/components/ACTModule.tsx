@@ -112,6 +112,8 @@ interface ComparatifArticle {
   prix: Record<string, number>;
   is_section_header?: boolean;
   is_subtotal?: boolean;
+  /** Entreprise qui a ajouté ce poste, absent du marché : la ligne est colorée. */
+  ajoute_par?: string;
 }
 
 interface ComparatifLot {
@@ -1294,7 +1296,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                                   );
                                 }
                                 return (
-                                  <tr key={article.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
+                                  <tr key={article.id}
+                                      className={article.ajoute_par
+                                        ? 'bg-violet-50 dark:bg-violet-900/15 hover:bg-violet-100/70 dark:hover:bg-violet-900/25'
+                                        : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/30'}>
                                     <td className="px-3 py-2">
                                       <input className="w-full text-[0.6875rem] px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
                                         value={article.code} onChange={e => updateArticle(idx, { code: e.target.value })} placeholder="1.3.1" />
@@ -1302,6 +1307,12 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                                     <td className="px-3 py-2">
                                       <input className="w-full text-xs px-1.5 py-1 border border-[var(--tblr-border)] rounded bg-white dark:bg-zinc-900 outline-none focus:ring-1 focus:ring-blue-400"
                                         value={article.titre} onChange={e => updateArticle(idx, { titre: e.target.value })} placeholder="Désignation de l'article" />
+                                      {article.ajoute_par && (
+                                        <span className="mt-1 inline-block rounded px-1.5 py-0.5 text-[0.6875rem] font-semibold bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200"
+                                              title="Ce poste n'était pas prévu au marché : l'entreprise l'a ajouté à son offre.">
+                                          Ajouté par {article.ajoute_par}
+                                        </span>
+                                      )}
                                     </td>
                                     <td className="px-3 py-2">
                                       <input type="number" min={0} step={100}

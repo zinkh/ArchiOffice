@@ -16,6 +16,7 @@ import { VARIABLES_CCTP, jeton, type ContexteCctp } from '../../lib/cctpVariable
 import { articlesSansBatiment, basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, aDesCiblesBatiments } from '../../lib/batimentsArticles';
 import { exportCctpDocx, exportCctpPdf } from '../../lib/cctpExport';
 import type { ProNotify } from './DPGFWorkspace';
+import { IconFileImport } from '@tabler/icons-react';
 import { IconDownload, IconFileTypePdf, IconFileTypeDoc, IconChevronDown as IconChevronDownSmall, IconVariable } from '@tabler/icons-react';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -34,6 +35,8 @@ import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
+  /** Ouvre l'import d'un fichier qui remplit le CCTP (les lignes absentes deviennent des articles). */
+  onImportDocument?: () => void;
   dpgf: DPGF;
   onChange: (dpgf: DPGF) => void;
   /** Volet de structure, piloté par le menu « ⋯ » de ProTab. */
@@ -59,7 +62,7 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
   const isMobile = useMediaQuery('(max-width: 767px)');
@@ -416,6 +419,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       ],
     },
     { kind: 'button', id: 'cctp-generate', label: t('pro_cctp_generate'), icon: <IconSparkles size={16} />, hint: t('pro_cctp_generate_hint'), onClick: () => setShowGenerate(true) },
+    { kind: 'button', id: 'cctp-import', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
     { kind: 'button', id: 'cctp-library', label: t('pro_library'), icon: <IconBuildingStore size={16} />, pressed: showLibrary, onClick: () => setShowLibrary(v => !v) },
     { kind: 'button', id: 'cctp-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v) },
     {

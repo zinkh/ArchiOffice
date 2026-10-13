@@ -167,6 +167,7 @@ export default {
   "pro_grouping_building_phase": "Par bâtiment et phase",
   "pro_grouping_read_only": "Lecture seule : repassez « Par lot » pour modifier. Les exports PDF et Excel suivent ce classement.",
   "pro_import_offer": "Importer une offre",
+  "pro_import_document": "Importer un fichier (créer les postes)",
   "pro_push_to_act": "Verser au comparatif ACT",
   "pro_push_to_act_no_offer": "Importez d’abord une offre",
   "pro_market": "Marché",

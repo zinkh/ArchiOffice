@@ -167,6 +167,7 @@ export default {
   "pro_grouping_building_phase": "By building and phase",
   "pro_grouping_read_only": "Read-only: switch back to “By lot” to edit. PDF and Excel exports follow this grouping.",
   "pro_import_offer": "Import a bid",
+  "pro_import_document": "Import a file (create the items)",
   "pro_push_to_act": "Send to ACT comparison",
   "pro_push_to_act_no_offer": "Import a bid first",
   "pro_market": "Contract",
