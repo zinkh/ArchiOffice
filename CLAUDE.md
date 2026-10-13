@@ -848,6 +848,34 @@ reçues, synthèse économique), les exports dans `src/lib/actNegociationExport.
   des PDF passent par un `euros()` qui remplace l'espace fine U+202F, absente des
   polices de jsPDF (sinon « 31 /210 » : voir la note d'honoraires plus haut).
 
+### Postes ajoutés par une entreprise et import dans un document vierge
+
+Une ligne du fichier d'une offre qui ne correspond à aucun article du marché
+(`OffreImportDialog.tsx`, étape de rapprochement) se rattache à la main ou, au
+choix dans le menu « Rattacher à… », **devient un poste** (« + Créer un poste »).
+Un bouton crée d'un coup un poste pour toutes les lignes non rattachées.
+
+- **Le poste vit dans l'offre, pas dans le document** : `OffreDocument.postesAjoutes`
+  (`PosteAjoute`, `src/types/dpgf.ts`, jsonb, aucune migration, les routes
+  `/dpgf/offres` et `/bpu/offres` le conservent déjà). Le DPGF/BPU de référence reste celui que toutes les
+  entreprises ont chiffré. Le lot du poste se déduit du premier segment de son numéro (« 02.05 » ->
+  lot « 02 »), à défaut du lot de la ligne précédente, à défaut du premier lot
+  (`src/lib/postesAjoutes.ts`, testé). Sans quantité annoncée, un poste vaut 1 ; son montant entre dans
+  `totalOffreHT`, affiché « dont X de postes ajoutés ». Chaque poste laisse aussi une anomalie `ligne_ajoutee`.
+- **Marqué dans l'analyse** : `versComparatif` (`src/lib/bpuToAct.ts`) verse ces postes sous une section
+  « Postes ajoutés par les entreprises » de leur lot, avec `ComparatifArticle.ajoute_par`, seule l'entreprise
+  concernée ayant un prix ; le sous-total du lot les compte. `ACTModule.tsx` colore la ligne (violet, couleur
+  de donnée) avec la pastille « Ajouté par … » ; l'export Excel du comparatif (`actAnalysisExport.ts`) ajoute
+  « (ajouté par … ) » au libellé, la couleur n'y passant pas. Une offre écartée n'ajoute rien.
+- **Même dialogue pour remplir un document vierge** (`mode="document"`) : onglet PRO, menu « Importer un fichier
+  (créer les postes) » du DPGF, du DQE/BPU et du CCTP (bouton). Pas d'entreprise ni de prix obligatoire
+  (`detectHeader(..., { prixOptionnel })`, un CCTP n'a que des désignations) ; les lignes absentes du document
+  sont cochées « à créer » d'office et `ajouterLignesAuDocument` les range lot > chapitre > article (premier
+  segment = lot, deuxième = chapitre quand le numéro en compte trois, sinon un chapitre « Articles
+  importés »). Un lot ou un chapitre existant est complété, jamais dupliqué, aucun article existant n'est
+  modifié. `ProTab` écrit par `setDpgf`/`setBpu` et non `editDpgf`/`editBpu` : ceux-ci enverraient chaque
+  nouvelle ligne à la bibliothèque d'ouvrages, que des centaines de lignes tierces n'ont pas à enrichir d'office.
+
 ### Espace public de dépôt des offres (ACT)
 
 Une entreprise consultée reçoit un **lien personnel, sans compte** (`/depot/<jeton>`,
@@ -1897,6 +1925,38 @@ défaut) et non dans `lot_tracking` (`lotPresenceStatus`, `src/lib/siteReportPre
   que RETIRER des URL. Le réglage « Photos des rubriques dans le PDF » est propre au poste
   (`localStorage`, `chantier:pdf:rubriquePhotos`, coché par défaut) et passe par
   `includeRubriquePhotos`. Les rubriques reportées d'un CR au suivant ne reprennent pas les photos.
+
+### Écriture du DPGF par les agents et le MCP (`manage_dpgf`)
+
+`manage_dpgf` (`projectWorkTools.ts`, scope `projects`, donc aussi exposé au MCP) ajoute, modifie
+ou supprime des LIGNES du DPGF d'une opération, au lieu d'un UPDATE SQL sur `dpgfs` ou de
+l'envoi du document entier. L'outil n'est qu'un client de `POST /api/projects/:id/dpgf/lignes`
+(`server/routes/dpgf.ts`), qui applique l'opération par `server/dpgfLignes.ts` (pur, testé,
+`tests/dpgfLignes.test.ts`) : même jeton, même cabinet que l'écran.
+
+- **Actions** : `add_lignes` (lot, chapitre par numéro ou titre, défaut « DESCRIPTION DES OUVRAGES »,
+  jusqu'à 300 lignes par appel, numérotation `<chapitre>.<n>` à la suite, `replace_existing` pour
+  écraser une ligne vide « Nouvel article »), `update_ligne` et `delete_ligne` (par `id` ou numéro ;
+  la suppression passe par la confirmation en deux temps, un `dry_run` serveur en donne l'aperçu).
+  Il ne crée ni DPGF, ni lot, ni chapitre : le lot doit exister (`manage_project_lots`).
+- **Jamais touchés** : un chapitre `cctpOnly`, et une ligne qui porte un `cctpDescription`
+  (conservée par `replace_existing`, refusée en suppression). Une nouvelle ligne n'a ni
+  `batimentId`, ni `phaseId`, ni `trancheId` : `batimentId: ''` voudrait dire « aucun bâtiment, sans
+  héritage », l'absence « hérite du chapitre ou du lot ».
+- **Un appel est accepté en entier ou refusé en entier** (quantité et prix numériques et positifs,
+  lot et chapitre existants) ; erreurs en français, avec la liste des lots ou chapitres disponibles.
+  Rejouer `add_lignes` ajoute de nouveau : refaire un import passe par `replace_existing`.
+- **Totaux** : `prixTotal` des lignes touchées, `sousTotal` de chaque lot, `totalHT` et `totalTTC`
+  (champ `TVA` du document, 20 % à défaut) ; le récapitulatif rend les lignes ajoutées par lot et
+  les sous-totaux.
+- **Limite de la concurrence, à connaître** : `dpgfs` n'a ni `updated_at` ni version (aucune
+  migration n'a été faite) et le texte `data` est trop gros pour une comparaison dans une requête
+  PostgREST. La route sérialise donc les écritures par DPGF dans le processus et RELIT le document
+  juste avant d'écrire (trois essais, puis 409). Cela couvre des appels d'agent simultanés et la
+  plupart des enregistrements de l'application web, pas la fenêtre de quelques millisecondes entre
+  la relecture et l'écriture, ni plusieurs instances du serveur. L'autosauvegarde de l'écran réécrit
+  de toute façon le document entier : une colonne `updated_at` (ou une fonction SQL atomique) serait
+  la vraie réponse, à décider séparément.
 
 ### Intervenants d'une affaire (agents et MCP)
 

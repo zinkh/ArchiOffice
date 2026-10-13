@@ -224,6 +224,24 @@ export interface OffreAnomalie {
 }
 
 /**
+ * Poste chiffré par une entreprise alors qu'il n'était pas prévu au marché.
+ * Il vit dans l'OFFRE et non dans le document : le DPGF/BPU de référence reste
+ * celui que toutes les entreprises ont chiffré, et le comparatif ACT montre
+ * ces postes à part, marqués « ajouté par l'entreprise ».
+ */
+export interface PosteAjoute {
+  id: string;
+  numero: string;
+  designation: string;
+  unite: string;
+  /** Quantité annoncée par l'entreprise ; absente pour un poste sans quantité. */
+  quantite: number | null;
+  prixUnitaire: number | null;
+  /** Lot du document (Lot.id) auquel le poste est rattaché, déduit de son numéro. */
+  lotId?: string;
+}
+
+/**
  * Offre reçue d'une entreprise, issue du réimport de son bordereau chiffré.
  * Stockée dans une colonne SÉPARÉE du document (`bpu_data.offres`,
  * `dpgfs.offres`) : l'autosauvegarde débouncée de l'éditeur réécrit le
@@ -250,6 +268,8 @@ export interface OffreDocument {
    */
   prix: Record<string, number | null>;
   anomalies: OffreAnomalie[];
+  /** Postes que l'entreprise a ajoutés au bordereau (absent : aucun). */
+  postesAjoutes?: PosteAjoute[];
   /** Mis en cache pour la liste des offres. */
   totalOffreHT?: number;
   statut: 'brouillon' | 'validee' | 'ecartee';

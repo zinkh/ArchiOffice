@@ -26,6 +26,7 @@ interface ComparatifArticleExport {
   prix: Record<string, number>;
   is_section_header?: boolean;
   is_subtotal?: boolean;
+  ajoute_par?: string;
 }
 
 /** Ce que ces exports lisent d'une consultation ; ACTModule en porte davantage. */
@@ -43,6 +44,10 @@ const euros = (n?: number) =>
   n == null ? '—' : new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n).replace(/[  ]/g, ' ');
 
 // ── RAO (PDF) ─────────────────────────────────────────────────────────────────
+
+/** Un poste ajouté par une entreprise le dit dans l'export, où la couleur ne passe pas. */
+const titreArticle = (a: { titre: string; ajoute_par?: string }) =>
+  a.ajoute_par ? `${a.titre} (ajouté par ${a.ajoute_par})` : a.titre;
 
 export async function generateRAO(
   lots: ProjectLot[],
@@ -178,7 +183,7 @@ export async function generateComparatifExcel(
       } else if (article.is_subtotal) {
         comparaison.ligne(['', article.titre, '', ...entreprises.map(e => cellule(article.prix[e.id]))], { gras: true });
       } else {
-        comparaison.ligne([article.code || '', article.titre, cellule(article.estimatif), ...entreprises.map(e => cellule(article.prix[e.id]))]);
+        comparaison.ligne([article.code || '', titreArticle(article), cellule(article.estimatif), ...entreprises.map(e => cellule(article.prix[e.id]))]);
       }
     }
     comparaison.total([
@@ -218,7 +223,7 @@ export async function generateComparatifExcel(
       f.ligne([`Lot ${lot.lot_number} - ${lot.lot_title}`], { gras: true, fond: 'groupe', fusionner: true });
       for (const article of cl?.articles ?? []) {
         if (article.is_section_header || article.is_subtotal) continue;
-        f.ligne([article.code || '', article.titre, cellule(article.estimatif), cellule(article.prix[e.id])]);
+        f.ligne([article.code || '', titreArticle(article), cellule(article.estimatif), cellule(article.prix[e.id])]);
       }
       const offre = consultation.offres.find(o => o.lot_id === lot.id && o.entreprise_id === e.id);
       f.ligne(['', 'Total lot HT', '', offre?.montant_base ?? ''], { gras: true });

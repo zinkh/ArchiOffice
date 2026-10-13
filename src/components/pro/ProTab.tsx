@@ -15,6 +15,8 @@ import { EMPTY_BPU } from '../../types/bpu';
 import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
 import { exportBPUtoExcel, exportBPUtoPDF } from '../../lib/bpuExport';
 import { OffreImportDialog } from './OffreImportDialog';
+import { ajouterLignesAuDocument } from '../../lib/postesAjoutes';
+import type { LigneImportee } from '../../lib/bpuImport';
 import { bpuVersComparatif, dpgfVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
@@ -469,6 +471,27 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
   // Un seul dialogue sert les deux documents (OffreImportDialog) ; ce
   // discriminant dit dans lequel des deux on est en train d'importer.
   const [importCible, setImportCible] = useState<'dpgf' | 'bpu' | null>(null);
+  // Import d'un fichier dans un document encore vierge : le CCTP et le DPGF
+  // partagent le même arbre, le DQE et le BPU aussi.
+  const [importDocCible, setImportDocCible] = useState<'dpgf' | 'bpu' | null>(null);
+
+  /**
+   * Les lignes du fichier deviennent des articles du document. `setDpgf`/`setBpu`
+   * directement, et non `editDpgf`/`editBpu` : ceux-ci enverraient chaque
+   * nouvelle ligne à la bibliothèque d'ouvrages, or des centaines de lignes
+   * reprises d'un fichier tiers n'ont pas à l'enrichir d'office.
+   */
+  const creerArticlesDepuisFichier = useCallback((sources: LigneImportee[]) => {
+    if (importDocCible === 'bpu' && bpu) {
+      const { lots, ajoutes } = ajouterLignesAuDocument(bpu.lots, sources);
+      setBpu({ ...bpu, lots });
+      showToast(`${ajoutes} article(s) ajouté(s) au bordereau.`, 'success');
+    } else if (dpgf) {
+      const { lots, ajoutes } = ajouterLignesAuDocument(dpgf.lots, sources);
+      setDpgf({ ...dpgf, lots });
+      showToast(`${ajoutes} article(s) ajouté(s) au document.`, 'success');
+    }
+  }, [importDocCible, bpu, dpgf, setBpu, setDpgf, showToast]);
 
   /**
    * Les offres vivent dans une colonne séparée du document et passent par leur
@@ -831,7 +854,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
+              <CCTPEditor onImportDocument={() => setImportDocCible('dpgf')} dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
             ) : null}
           </div>
           {splitView && (
@@ -859,6 +882,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                   showTree={showTree}
                   onToggleTree={toggleTree}
                   onImportOffre={() => setImportCible('dpgf')}
+                  onImportDocument={() => setImportDocCible('dpgf')}
                   onPushToAct={dpgf.lots.length > 0 ? verserAuComparatifActDpgf : undefined}
                   offres={dpgfOffres}
                   onDragStart={ligne => setDraggedLigne(ligne)}
@@ -949,6 +973,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
                 onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
                 onImportOffre={() => setImportCible('bpu')}
+                onImportDocument={() => setImportDocCible('bpu')}
                 onPushToAct={verserAuComparatifAct}
                 onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
                 onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}
@@ -965,6 +990,15 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
           docLabel="bordereau"
           onClose={() => setImportCible(null)}
           onConfirm={enregistrerOffre}
+        />
+      )}
+      {importDocCible && (importDocCible === 'bpu' ? bpu : dpgf) && (
+        <OffreImportDialog
+          mode="document"
+          doc={(importDocCible === 'bpu' ? bpu : dpgf)!}
+          docLabel={importDocCible === 'bpu' ? 'bordereau' : activeSubTab === 'CCTP' ? 'CCTP' : 'DPGF'}
+          onClose={() => setImportDocCible(null)}
+          onCreerPostes={creerArticlesDepuisFichier}
         />
       )}
       {importCible === 'dpgf' && dpgf && (

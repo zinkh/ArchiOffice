@@ -6,8 +6,9 @@ import React, { useState, useMemo, useCallback } from 'react';
 import {
   IconX, IconUpload, IconAlertTriangle, IconCheck, IconArrowRight, IconLoader2,
 } from '@tabler/icons-react';
-import type { OffreDocument, OffreAnomalie } from '../../types/dpgf';
-import { parseOffreFile, type DocumentAvecArticles, type ResultatImport, type Rapprochement } from '../../lib/bpuImport';
+import type { OffreDocument, OffreAnomalie, Lot } from '../../types/dpgf';
+import { postesDepuisLignes, totalPostesAjoutes } from '../../lib/postesAjoutes';
+import { parseOffreFile, type DocumentAvecArticles, type ResultatImport, type Rapprochement, type LigneImportee } from '../../lib/bpuImport';
 import { formatCurrency } from '../../lib/utils';
 
 interface Entreprise { id: string; nom: string }
@@ -18,8 +19,16 @@ interface Props {
   docLabel?: string;
   /** Entreprises déjà consultées (act_data.consultation.entreprises). */
   entreprises?: Entreprise[];
+  /**
+   * « offre » : le fichier est le bordereau chiffré d'une entreprise.
+   * « document » : le fichier remplit un DPGF, un CCTP, un DQE ou un BPU encore
+   * vierge ; pas d'entreprise, et les lignes sans article deviennent des articles.
+   */
+  mode?: 'offre' | 'document';
   onClose: () => void;
-  onConfirm: (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => Promise<void> | void;
+  onConfirm?: (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => Promise<void> | void;
+  /** Mode « document » : reçoit les lignes du fichier à créer comme articles. */
+  onCreerPostes?: (sources: LigneImportee[]) => Promise<void> | void;
   /** Fichier déjà en main (bordereau remis sur le portail de dépôt) : évite de le re-sélectionner. */
   fichierInitial?: File;
   /** Entreprise connue d'avance (celle du lien de dépôt) et date de réception réelle. */
@@ -28,6 +37,9 @@ interface Props {
 }
 
 type Etape = 'fichier' | 'rapprochement';
+
+/** Valeur du menu « Rattacher à… » qui crée un poste au lieu de rattacher la ligne. */
+const CREER = '__creer__';
 
 const CONFIANCE_STYLE: Record<string, string> = {
   exacte: 'bg-green-100 text-green-800',
@@ -39,7 +51,7 @@ const CONFIANCE_LABEL: Record<string, string> = {
 };
 
 export const OffreImportDialog: React.FC<Props> = ({
-  doc, docLabel = 'bordereau', entreprises = [], onClose, onConfirm,
+  doc, docLabel = 'bordereau', entreprises = [], mode = 'offre', onClose, onConfirm, onCreerPostes,
   fichierInitial, entrepriseInitiale, dateReceptionInitiale,
 }) => {
   const [etape, setEtape] = useState<Etape>('fichier');
@@ -51,6 +63,7 @@ export const OffreImportDialog: React.FC<Props> = ({
   const [erreur, setErreur] = useState<string | null>(null);
   const [analyse, setAnalyse] = useState(false);
   const [enregistrement, setEnregistrement] = useState(false);
+  const modeDocument = mode === 'document';
 
   // Un rapprochement approximatif ne compte que si l'architecte l'a coché.
   const [approxValides, setApproxValides] = useState<Set<number>>(new Set());
@@ -73,17 +86,21 @@ export const OffreImportDialog: React.FC<Props> = ({
     if (!fichier) return;
     setAnalyse(true); setErreur(null);
     try {
-      const r = await parseOffreFile(fichier, doc);
+      const r = await parseOffreFile(fichier, doc, { prixOptionnel: modeDocument });
       if (r.rapprochements.length === 0 && r.nonAppariees.length === 0) {
-        setErreur(
-          "Aucune ligne de prix n'a pu être lue dans ce fichier. Vérifiez qu'il contient bien "
-          + "une colonne de désignation et une colonne de prix unitaire.",
+        setErreur(modeDocument
+          ? "Aucune ligne n'a pu être lue dans ce fichier. Vérifiez qu'il contient bien une colonne de désignation."
+          : "Aucune ligne de prix n'a pu être lue dans ce fichier. Vérifiez qu'il contient bien "
+            + "une colonne de désignation et une colonne de prix unitaire.",
         );
       } else {
         setResultat(r);
         // Les rapprochements sûrs sont retenus d'office ; les approximatifs
         // attendent une confirmation explicite.
         setApproxValides(new Set());
+        // Dans un document vierge, tout ce qui n'existe pas encore est à créer.
+        setManuels(modeDocument ? new Map(r.nonAppariees.map((_, i) => [i, CREER] as [number, string])) : new Map());
+        setIgnorees(new Set());
         setEtape('rapprochement');
       }
     } catch (e: any) {
@@ -91,7 +108,7 @@ export const OffreImportDialog: React.FC<Props> = ({
     } finally {
       setAnalyse(false);
     }
-  }, [fichier, doc]);
+  }, [fichier, doc, modeDocument]);
 
   // ── Décompte et total, tels qu'ils seront enregistrés ──────────────────────
   const retenus = useMemo(() => {
@@ -114,12 +131,35 @@ export const OffreImportDialog: React.FC<Props> = ({
     for (const r of retenus) prix[r.articleId] = r.prixUnitaire;
     if (resultat) {
       for (const [idx, articleId] of manuels) {
+        if (articleId === CREER) continue;
         const src = resultat.nonAppariees[idx];
         if (src && !ignorees.has(idx)) prix[articleId] = src.prixUnitaire;
       }
     }
     return prix;
   }, [retenus, manuels, ignorees, resultat]);
+
+  // Lignes du fichier à créer comme postes (offre) ou comme articles (document).
+  const aCreer = useMemo(
+    () => (resultat?.nonAppariees ?? []).filter((_, i) => manuels.get(i) === CREER && !ignorees.has(i)),
+    [resultat, manuels, ignorees],
+  );
+  const postesCrees = useMemo(
+    () => (modeDocument ? [] : postesDepuisLignes(aCreer, doc.lots as Lot[])),
+    [aCreer, doc.lots, modeDocument],
+  );
+  const totalPostes = totalPostesAjoutes(postesCrees);
+
+  const toutCreer = () => setManuels(prev => {
+    const m = new Map(prev);
+    resultat?.nonAppariees.forEach((_, i) => { if (!m.has(i) && !ignorees.has(i)) m.set(i, CREER); });
+    return m;
+  });
+  const defaireCreations = () => setManuels(prev => {
+    const m = new Map(prev);
+    for (const [i, v] of prev) if (v === CREER) m.delete(i);
+    return m;
+  });
 
   const totalOffre = useMemo(
     () => Object.entries(prixFinal).reduce(
@@ -139,6 +179,11 @@ export const OffreImportDialog: React.FC<Props> = ({
     if (!resultat || !fichier) return;
     setEnregistrement(true);
     try {
+      if (modeDocument) {
+        await onCreerPostes?.(aCreer);
+        onClose();
+        return;
+      }
       const anomalies: OffreAnomalie[] = [];
       for (const r of retenus) {
         for (const a of r.alertes) {
@@ -154,6 +199,13 @@ export const OffreImportDialog: React.FC<Props> = ({
           });
         }
       }
+      // Un poste créé garde sa trace dans les anomalies de l'offre.
+      for (const p of postesCrees) {
+        anomalies.push({
+          articleId: p.id, code: 'ligne_ajoutee',
+          message: `Poste ajouté par l'entreprise : ${p.numero} ${p.designation}`,
+        });
+      }
       for (const [idx] of resultat.nonAppariees.entries()) {
         if (!manuels.has(idx) && !ignorees.has(idx)) {
           const l = resultat.nonAppariees[idx];
@@ -164,12 +216,13 @@ export const OffreImportDialog: React.FC<Props> = ({
         }
       }
 
-      await onConfirm({
+      await onConfirm?.({
         entrepriseId, entrepriseNom: entrepriseNom.trim(),
         dateReception, fichierNom: fichier.name,
         documentVersion: doc.version,
         prix: prixFinal, anomalies,
-        totalOffreHT: totalOffre,
+        ...(postesCrees.length ? { postesAjoutes: postesCrees } : {}),
+        totalOffreHT: totalOffre + totalPostes,
         statut: 'validee',
       });
       onClose();
@@ -189,7 +242,8 @@ export const OffreImportDialog: React.FC<Props> = ({
 
         <div className="flex items-center justify-between px-5 py-3 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-sm font-semibold">
-            Importer une offre {etape === 'rapprochement' && '— rapprochement'}
+            {modeDocument ? `Importer un fichier dans le ${docLabel}` : 'Importer une offre'}
+            {etape === 'rapprochement' && ' — rapprochement'}
           </h2>
           <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><IconX size={18} /></button>
         </div>
@@ -205,7 +259,11 @@ export const OffreImportDialog: React.FC<Props> = ({
         {etape === 'fichier' && (
           <div className="p-5 space-y-4">
             <div>
-              <label className={label}>{docLabel[0].toUpperCase() + docLabel.slice(1)} chiffré renvoyé par l'entreprise</label>
+              <label className={label}>
+                {modeDocument
+                  ? `Fichier à importer dans le ${docLabel} (lots, chapitres et articles)`
+                  : `${docLabel[0].toUpperCase() + docLabel.slice(1)} chiffré renvoyé par l'entreprise`}
+              </label>
               <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-300 rounded-lg p-8 cursor-pointer hover:border-blue-400 transition-colors">
                 <IconUpload size={22} className="text-zinc-400" />
                 <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Choisir un fichier .xlsx, .ods, .xls ou .csv'}</span>
@@ -213,11 +271,13 @@ export const OffreImportDialog: React.FC<Props> = ({
                        onChange={e => { setFichier(e.target.files?.[0] ?? null); setErreur(null); }} />
               </label>
               <p className="mt-2 text-[0.6875rem] text-zinc-400">
-                Une offre reçue en PDF se saisit à la main sur l'écran suivant, dans la même structure.
+                {modeDocument
+                  ? 'Les lignes qui ne sont pas déjà dans le document pourront être créées comme articles, rangées sous leur lot.'
+                  : "Une offre reçue en PDF se saisit à la main sur l'écran suivant, dans la même structure."}
               </p>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            {!modeDocument && <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={label}>Entreprise</label>
                 {entreprises.length > 0 ? (
@@ -240,7 +300,7 @@ export const OffreImportDialog: React.FC<Props> = ({
                 <label className={label}>Date de réception</label>
                 <input type="date" className={champ} value={dateReception} onChange={e => setDateReception(e.target.value)} />
               </div>
-            </div>
+            </div>}
           </div>
         )}
 
@@ -250,21 +310,31 @@ export const OffreImportDialog: React.FC<Props> = ({
             {/* Décompte et écart : le seul chiffre qui dit d'un coup d'œil si
                 l'import est cohérent. */}
             <div className="px-5 py-3 border-b border-zinc-200 dark:border-zinc-700 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
-              <span className="text-green-700 font-semibold">{retenus.length} rattaché(s)</span>
+              <span className="text-green-700 font-semibold">
+                {retenus.length} {modeDocument ? 'déjà dans le document' : 'rattaché(s)'}
+              </span>
+              {aCreer.length > 0 && (
+                <span className="text-violet-700 font-semibold">
+                  {aCreer.length} {modeDocument ? 'à créer' : 'poste(s) créé(s)'}
+                </span>
+              )}
               {nbAConfirmer > 0 && <span className="text-amber-700 font-semibold">{nbAConfirmer} à confirmer</span>}
               {nbNonRattachees > 0 && <span className="text-red-600 font-semibold">{nbNonRattachees} non rattaché(s)</span>}
               {nbNonChiffres > 0 && <span className="text-zinc-500">{nbNonChiffres} article(s) non chiffré(s)</span>}
-              <span className="ml-auto font-mono">
-                Total de l'offre : <strong>{formatCurrency(totalOffre)}</strong>
+              {!modeDocument && <span className="ml-auto font-mono">
+                Total de l'offre : <strong>{formatCurrency(totalOffre + totalPostes)}</strong>
+                {totalPostes > 0 && (
+                  <span className="text-violet-700 ml-2">dont {formatCurrency(totalPostes)} de postes ajoutés</span>
+                )}
                 {ecartEstimation != null && (
                   <span className={ecartEstimation > 0 ? 'text-red-600 ml-2' : 'text-green-700 ml-2'}>
                     {ecartEstimation > 0 ? '+' : ''}{ecartEstimation.toFixed(1)} % / estimation
                   </span>
                 )}
-              </span>
+              </span>}
             </div>
 
-            {!resultat.meta.correspond && (
+            {!resultat.meta.correspond && !modeDocument && (
               <div className="mx-5 mt-3 px-3 py-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800 flex items-start gap-2">
                 <IconAlertTriangle size={14} className="shrink-0 mt-0.5" />
                 <span>
@@ -340,13 +410,27 @@ export const OffreImportDialog: React.FC<Props> = ({
               {/* Lignes du fichier sans article : rattachement à la main. */}
               {resultat.nonAppariees.length > 0 && (
                 <div className="mt-5">
-                  <h3 className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500 mb-2">
-                    Lignes du fichier non rattachées ({resultat.nonAppariees.length})
-                  </h3>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                    <h3 className="text-[0.6875rem] font-semibold uppercase tracking-wider text-zinc-500">
+                      {modeDocument ? 'Lignes du fichier absentes du document' : 'Lignes du fichier non rattachées'} ({resultat.nonAppariees.length})
+                    </h3>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={toutCreer}
+                              className="px-2 py-1 text-[0.6875rem] rounded border border-violet-300 text-violet-800 hover:bg-violet-50">
+                        {modeDocument ? 'Tout créer' : 'Créer un poste pour toutes les lignes non rattachées'}
+                      </button>
+                      {aCreer.length > 0 && (
+                        <button type="button" onClick={defaireCreations}
+                                className="px-2 py-1 text-[0.6875rem] rounded border border-zinc-300 text-zinc-600 hover:bg-zinc-50">
+                          Défaire les créations
+                        </button>
+                      )}
+                    </div>
+                  </div>
                   <table className="w-full text-xs border-collapse">
                     <tbody>
                       {resultat.nonAppariees.map((l, i) => (
-                        <tr key={i} className={`border-b border-zinc-100 ${ignorees.has(i) ? 'opacity-40' : ''}`}>
+                        <tr key={i} className={`border-b border-zinc-100 ${ignorees.has(i) ? 'opacity-40' : manuels.get(i) === CREER ? 'bg-violet-50' : ''}`}>
                           <td className="py-1 pr-2 text-zinc-400 w-20">{l.numero || l.ref}</td>
                           <td className="py-1 pr-2"><div className="truncate max-w-[240px]">{l.designation}</div></td>
                           <td className="py-1 pr-2 w-14 text-zinc-500">{l.unite}</td>
@@ -365,6 +449,9 @@ export const OffreImportDialog: React.FC<Props> = ({
                               })}
                             >
                               <option value="">Rattacher à…</option>
+                              <option value={CREER}>
+                                {modeDocument ? '+ Créer un article' : '+ Créer un poste (non prévu au marché)'}
+                              </option>
                               {articles.map(a => (
                                 <option key={a.id} value={a.id}>{a.numero} — {a.designation}</option>
                               ))}
@@ -393,7 +480,9 @@ export const OffreImportDialog: React.FC<Props> = ({
         {/* ── Pied de modale ───────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-zinc-200 dark:border-zinc-700">
           <span className="text-[0.6875rem] text-zinc-400">
-            {etape === 'rapprochement' && 'Rien n’est enregistré tant que vous n’avez pas validé.'}
+            {etape === 'rapprochement' && (modeDocument
+              ? 'Rien n’est ajouté au document tant que vous n’avez pas validé.'
+              : 'Rien n’est enregistré tant que vous n’avez pas validé.')}
           </span>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="px-3 py-1.5 text-xs rounded border border-zinc-300 hover:bg-zinc-50">
@@ -402,7 +491,7 @@ export const OffreImportDialog: React.FC<Props> = ({
             {etape === 'fichier' ? (
               <button
                 onClick={lancerAnalyse}
-                disabled={!fichier || !entrepriseNom.trim() || analyse}
+                disabled={!fichier || (!modeDocument && !entrepriseNom.trim()) || analyse}
                 className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 flex items-center gap-1.5"
               >
                 {analyse ? <IconLoader2 size={13} className="animate-spin" /> : <IconArrowRight size={13} />}
@@ -411,11 +500,11 @@ export const OffreImportDialog: React.FC<Props> = ({
             ) : (
               <button
                 onClick={valider}
-                disabled={enregistrement || retenus.length === 0}
+                disabled={enregistrement || (modeDocument ? aCreer.length === 0 : retenus.length === 0 && aCreer.length === 0)}
                 className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 flex items-center gap-1.5"
               >
                 {enregistrement ? <IconLoader2 size={13} className="animate-spin" /> : <IconCheck size={13} />}
-                Enregistrer l'offre
+                {modeDocument ? `Ajouter ${aCreer.length} article(s) au ${docLabel}` : "Enregistrer l'offre"}
               </button>
             )}
           </div>

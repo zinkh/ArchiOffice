@@ -123,8 +123,14 @@ const VOCABULAIRE: Record<ColonneKind, string[]> = {
 
 export type ColumnMap = Partial<Record<ColonneKind, number>>;
 
-/** Repère la ligne d'en-tête et la place de chaque colonne. */
-export function detectHeader(grid: any[][]): { headerRow: number; columns: ColumnMap } | null {
+/**
+ * Repère la ligne d'en-tête et la place de chaque colonne. `prixOptionnel` :
+ * un fichier sans colonne de prix (CCTP, DPGF vierge) reste exploitable, la
+ * désignation suffit.
+ */
+export function detectHeader(
+  grid: any[][], options: { prixOptionnel?: boolean } = {},
+): { headerRow: number; columns: ColumnMap } | null {
   const limite = Math.min(grid.length, 40);
   let best: { headerRow: number; columns: ColumnMap; score: number } | null = null;
 
@@ -143,7 +149,7 @@ export function detectHeader(grid: any[][]): { headerRow: number; columns: Colum
     });
     // Il faut au moins de quoi désigner un article et lui porter un prix.
     const utilisable = columns.designation !== undefined
-      && (columns.prixUnitaire !== undefined || columns.montant !== undefined);
+      && (options.prixOptionnel || columns.prixUnitaire !== undefined || columns.montant !== undefined);
     if (utilisable && (!best || score > best.score)) best = { headerRow: r, columns, score };
   }
 
@@ -379,7 +385,9 @@ export interface FeuilleBrute {
 }
 
 /** Analyse un classeur déjà lu. Séparé de la lecture pour rester testable. */
-export function analyserClasseur(feuilles: FeuilleBrute[], document: DocumentAvecArticles): ResultatImport {
+export function analyserClasseur(
+  feuilles: FeuilleBrute[], document: DocumentAvecArticles, options: { prixOptionnel?: boolean } = {},
+): ResultatImport {
   const meta: ResultatImport['meta'] = { correspond: true };
 
   const feuilleMeta = feuilles.find(f => f.nom === SHEET_META);
@@ -398,7 +406,7 @@ export function analyserClasseur(feuilles: FeuilleBrute[], document: DocumentAve
   for (const f of feuilles.slice(0, MAX_FEUILLES)) {
     if (f.nom === SHEET_META) continue;
     const grid = resoudreFusions(f.grid, f.merges).slice(0, MAX_ROWS_PAR_FEUILLE);
-    const detected = detectHeader(grid);
+    const detected = detectHeader(grid, options);
     if (!detected) continue;
     const { headerRow, columns } = detected;
 
@@ -428,7 +436,9 @@ export function analyserClasseur(feuilles: FeuilleBrute[], document: DocumentAve
 }
 
 /** Lit un fichier renvoyé par une entreprise et le rapproche du bordereau. */
-export async function parseOffreFile(file: File, document: DocumentAvecArticles): Promise<ResultatImport> {
+export async function parseOffreFile(
+  file: File, document: DocumentAvecArticles, options: { prixOptionnel?: boolean } = {},
+): Promise<ResultatImport> {
   const XLSX = await import('xlsx');
   const buffer = await file.arrayBuffer();
   // Les valeurs calculées seulement : aucune formule du fichier n'est évaluée.
@@ -443,5 +453,5 @@ export async function parseOffreFile(file: File, document: DocumentAvecArticles)
     };
   });
 
-  return analyserClasseur(feuilles, document);
+  return analyserClasseur(feuilles, document, options);
 }

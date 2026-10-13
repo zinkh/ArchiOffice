@@ -10,6 +10,7 @@
 // deux temps de delete_record (needs_confirmation, puis confirm: true).
 //
 //   manage_project_lots         lots de l'opération (numéro, intitulé, ordre)
+//   manage_dpgf                 lignes chiffrées du DPGF (ajout en lot, modification, suppression)
 //   manage_project_cotraitants  cotraitants du contrat (spécialité + contact)
 //   manage_project_members      équipe du cabinet affectée à l'affaire
 //   manage_project_journal      phase en cours et journal de l'opération (notes de phase)
@@ -33,7 +34,7 @@ const confirmation = (aRetirer: unknown, extra: Json = {}): Result => ({
 });
 
 export const PROJECT_WORK_TOOL_NAMES = [
-  'manage_project_lots', 'manage_project_cotraitants', 'manage_project_members', 'manage_project_journal', 'manage_observations',
+  'manage_project_lots', 'manage_dpgf', 'manage_project_cotraitants', 'manage_project_members', 'manage_project_journal', 'manage_observations',
 ] as const;
 export const MEETING_WORK_TOOL_NAMES = ['manage_meeting_attendees'] as const;
 
@@ -55,6 +56,36 @@ export const PROJECT_WORK_TOOLS: FunctionDeclarationLike[] = [
         action: { type: 'string', enum: ['list', 'add', 'update', 'remove', 'reorder'] },
         lots: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, numero: { type: 'string' }, nouveau_numero: { type: 'string' }, intitule: { type: 'string' } } } },
         ordre: { type: 'array', items: { type: 'string' }, description: 'reorder : numéros ou identifiants de lots, dans le nouvel ordre' },
+        confirm: confirmProp,
+      },
+      required: ['project_id', 'action'],
+    },
+  },
+  {
+    name: 'manage_dpgf',
+    description:
+      "ÉCRIT dans le DPGF d'une opération : ajoute, modifie ou supprime des lignes chiffrées (désignation, unité, quantité, prix unitaire). " +
+      "À utiliser dès que l'utilisateur demande de SAISIR, IMPORTER, COMPLÉTER ou CORRIGER un DPGF (« saisis ces articles dans le lot 05 », « importe ce DPGF », « mets 12 m² à la ligne 05.1.3 ») : jamais d'UPDATE SQL sur la table dpgfs, jamais une tâche à la place. " +
+      "Le lot doit déjà exister (manage_project_lots) et le DPGF aussi ; relis-le d'abord avec read_dpgf pour ne pas dupliquer. Les totaux (prix des lignes, sous-total de chaque lot, total HT et TTC) sont recalculés par l'outil. " +
+      "add_lignes : lot (numéro, ex. « 05 »), chapitre (numéro ou titre, défaut « DESCRIPTION DES OUVRAGES »), lignes = [{designation, unite, quantite, prix_unitaire?, numero?}] ; jusqu'à 300 lignes par appel, ce qui permet d'importer un DPGF entier lot par lot ; sans numero, les lignes sont numérotées « <chapitre>.<n> » à la suite. " +
+      "Rejouer add_lignes AJOUTE de nouveau les lignes : pour refaire un import ou écraser une ligne vide « Nouvel article », passe replace_existing: true (remplace les lignes du chapitre, sauf celles qui portent un texte de CCTP). " +
+      "update_ligne : id ou numero (+ lot si le numéro n'est pas unique), puis designation, unite, quantite et/ou prix_unitaire. " +
+      "delete_ligne : id ou numero, avec confirmation en deux temps. Les chapitres réservés au CCTP et les textes de CCTP ne sont jamais modifiés par cet outil.",
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        project_id: projectIdProp,
+        action: { type: 'string', enum: ['add_lignes', 'update_ligne', 'delete_ligne'] },
+        lot: { type: 'string', description: 'Numéro du lot (ex. « 05 ») ; pour update_ligne/delete_ligne, seulement pour lever une ambiguïté de numéro' },
+        chapitre: { type: 'string', description: 'add_lignes : numéro ou titre du chapitre (défaut « DESCRIPTION DES OUVRAGES »)' },
+        lignes: {
+          type: 'array', description: 'add_lignes : 300 lignes au plus',
+          items: { type: 'object', properties: { designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number', description: 'HT, 0 par défaut' }, numero: { type: 'string', description: 'Facultatif : sinon numérotation automatique' } }, required: ['designation', 'quantite'] },
+        },
+        replace_existing: { type: 'boolean', description: 'add_lignes : remplace les lignes existantes du chapitre (hors lignes portant un texte de CCTP)' },
+        id: { type: 'string', description: 'update_ligne / delete_ligne : identifiant de la ligne (read_dpgf)' },
+        numero: { type: 'string', description: 'update_ligne / delete_ligne : numéro de la ligne' },
+        designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number' },
         confirm: confirmProp,
       },
       required: ['project_id', 'action'],
@@ -541,6 +572,43 @@ async function manageAttendees(request: ToolRequest, meetingId: string, args: Js
   };
 }
 
+// ── manage_dpgf ──────────────────────────────────────────────────────────────
+
+const MAX_DPGF_LIGNES = 300;
+
+async function manageDpgf(request: ToolRequest, projectId: string, args: Json): Promise<Result> {
+  const action = text(args.action);
+  if (!['add_lignes', 'update_ligne', 'delete_ligne'].includes(action)) return failure('action doit valoir add_lignes, update_ligne ou delete_ligne.');
+  const path = `/api/projects/${encodeURIComponent(projectId)}/dpgf/lignes`;
+  const recordUrl = buildRecordUrl('projects', { id: projectId });
+
+  let body: Json;
+  if (action === 'add_lignes') {
+    const lignes = Array.isArray(args.lignes) ? args.lignes.filter((x: unknown) => x && typeof x === 'object') : [];
+    if (!lignes.length) return failure('lignes est requis pour add_lignes.');
+    if (lignes.length > MAX_DPGF_LIGNES) return failure(`${lignes.length} lignes en un appel : le maximum est ${MAX_DPGF_LIGNES}. Découpe l'import en plusieurs appels.`);
+    body = { action, lot: text(args.lot), chapitre: text(args.chapitre) || undefined, lignes, replace_existing: args.replace_existing === true };
+  } else {
+    body = { action, id: text(args.id) || undefined, numero: text(args.numero) || undefined, lot: text(args.lot) || undefined };
+    if (action === 'update_ligne') for (const k of ['designation', 'unite', 'quantite', 'prix_unitaire']) if (args[k] !== undefined) body[k] = args[k];
+  }
+
+  if (action === 'delete_ligne' && args.confirm !== true) {
+    const { res, json } = await request(path, 'POST', { ...body, dry_run: true });
+    if (!res.ok) return failure(json?.error || `HTTP ${res.status}`);
+    return confirmation(json.ligne);
+  }
+
+  const { res, json } = await request(path, 'POST', body);
+  if (!res.ok) return failure(json?.error || `HTTP ${res.status}`);
+  const { success: _ok, ...rapport } = json;
+  const n = action === 'add_lignes' ? Object.values<number>(rapport.lignes_ajoutees ?? {}).reduce((s, v) => s + v, 0) : 1;
+  return {
+    response: { success: true, ...rapport, record_url: recordUrl },
+    summary: action === 'add_lignes' ? `${plural(n, 'ligne')} ajoutée${n > 1 ? 's' : ''} au DPGF` : action === 'update_ligne' ? 'Ligne du DPGF modifiée' : 'Ligne du DPGF supprimée',
+  };
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function executeProjectWorkTool(baseUrl: string, auth: InternalAuth, name: string, args: Json): Promise<Result> {
@@ -554,6 +622,7 @@ export async function executeProjectWorkTool(baseUrl: string, auth: InternalAuth
     if (!projectId) return failure('project_id est requis.');
     switch (name) {
       case 'manage_project_lots': return await manageLots(request, projectId, args);
+      case 'manage_dpgf': return await manageDpgf(request, projectId, args);
       case 'manage_project_cotraitants': return await manageCotraitants(request, projectId, args);
       case 'manage_project_members': return await manageMembers(request, projectId, args);
       case 'manage_project_journal': return await manageJournal(request, projectId, args);

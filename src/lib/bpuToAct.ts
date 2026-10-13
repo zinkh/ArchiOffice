@@ -15,6 +15,7 @@
 // fonction sert donc les deux documents. `bpuVersComparatif` reste exporté
 // comme alias : c'est le nom que le code et les tests existants connaissent.
 import type { Lot, Ligne, OffreDocument } from '../types/dpgf';
+import { montantPoste } from './postesAjoutes';
 
 /** Forme des articles attendue par ACTModule (voir son ComparatifArticle). */
 export interface ComparatifArticle {
@@ -27,6 +28,12 @@ export interface ComparatifArticle {
   prix: Record<string, number>;
   is_section_header?: boolean;
   is_subtotal?: boolean;
+  /**
+   * Nom de l'entreprise qui a ajouté ce poste : il n'était pas prévu au
+   * marché, seule cette entreprise l'a chiffré. Sert à le colorer et à le
+   * signaler dans l'analyse des offres.
+   */
+  ajoute_par?: string;
 }
 
 export interface ComparatifLot {
@@ -86,6 +93,26 @@ export function versComparatif(lots: Lot[], offres: OffreDocument[]): VersementR
         }
       };
       walk(chap.lignes);
+    }
+
+    // Postes que des entreprises ont ajoutés à leur offre : ils ne sont pas
+    // dans le document, seule l'entreprise concernée les chiffre.
+    const ajouts = retenues.flatMap(o => (o.postesAjoutes ?? [])
+      .filter(p => p.lotId === lot.id)
+      .map(p => ({ o, p })));
+    if (ajouts.length) {
+      articles.push({
+        id: `${lot.id}__ajouts`, code: '', titre: 'Postes ajoutés par les entreprises',
+        prix: {}, is_section_header: true,
+      });
+      for (const { o, p } of ajouts) {
+        articles.push({
+          id: p.id, code: p.numero, titre: p.designation, unite: p.unite || undefined,
+          quantite: p.quantite ?? undefined,
+          prix: p.prixUnitaire != null ? { [o.entrepriseId!]: montantPoste(p) } : {},
+          ajoute_par: o.entrepriseNom,
+        });
+      }
     }
 
     // Sous-total du lot, par entreprise.

@@ -565,7 +565,11 @@ async function executeRichTool(baseUrl: string, auth: InternalAuth, name: string
 // collègue/publier au flux d'activité, jamais l'écriture du CCTP/DPGF
 // (write_dpgf_article) — même prudence que pour la suppression : un outil
 // MCP externe reste en lecture/écriture de fiches simples, jamais sur un
-// document arborescent aux totaux dérivés.
+// document arborescent aux totaux dérivés. Exception : manage_dpgf (scope
+// `projects`, donc repris ici avec les autres outils d'opération) n'écrit que
+// par des opérations ciblées (ajout / modification / suppression de lignes)
+// que le serveur applique lui-même, sous verrou, en recalculant les totaux ;
+// le MCP n'envoie jamais le document entier.
 //
 // delete_document (ci-dessus) fait exception à dessein : retirer UNE pièce
 // jointe n'a pas les mêmes conséquences que supprimer la fiche elle-même,
