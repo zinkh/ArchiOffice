@@ -2,8 +2,8 @@
 // — voir CLAUDE.md, "Apprentissage des agents : proposer, jamais appliquer".
 // Deux garanties couvertes ici : l'outil ne s'expose et ne s'exécute que si
 // learning_enabled est vrai, et seule une proposition APPROUVÉE de nature
-// correction/knowledge_note devient de la mémoire injectée au prompt —
-// jamais une proposition 'pending', 'rejected', ni 'missing_capability'.
+// correction/note/improvement/knowledge_note devient de la mémoire injectée au
+// prompt — jamais une proposition 'pending', 'rejected', ni 'missing_capability'.
 import { describe, expect, it } from 'vitest';
 import { FakeSupabaseAdmin } from './fakeSupabaseAdmin';
 import { buildAgentTools, executeAgentAction } from '../packages/archioffice-agents/src/server/tools';
@@ -57,6 +57,21 @@ describe('buildAgentContext — mémoire d\'apprentissage', () => {
 
     const ctx = await buildAgentContext(db as any, 'tenant-1', 'user-1', 'agent-1', [], [], false, false, true);
     expect(ctx.learningNotes).toEqual([{ kind: 'correction', title: 'Titre corrigé', content: 'Contenu approuvé' }]);
+  });
+
+  it('injecte les quatre natures de mémoire une fois approuvées, jamais missing_capability', async () => {
+    const db = new FakeSupabaseAdmin();
+    seedTenantAndUser(db, 'tenant-1');
+    const row = (id: string, kind: string, day: number) => ({
+      id, tenant_id: 'tenant-1', agent_id: 'agent-1', kind, title: `t-${kind}`, content: `c-${kind}`,
+      status: 'approved', created_at: `2026-09-0${day}T00:00:00Z`,
+    });
+    db.seed('agent_learning_suggestions', [
+      row('a', 'correction', 1), row('b', 'note', 2), row('c', 'improvement', 3),
+      row('d', 'knowledge_note', 4), row('e', 'missing_capability', 5),
+    ]);
+    const ctx = await buildAgentContext(db as any, 'tenant-1', 'user-1', 'agent-1', [], [], false, false, true);
+    expect(ctx.learningNotes.map(n => n.kind).sort()).toEqual(['correction', 'improvement', 'knowledge_note', 'note']);
   });
 
   it('ne peuple rien quand learningEnabled est faux', async () => {

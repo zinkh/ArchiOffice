@@ -27,7 +27,7 @@ export function buildLearningTools(): FunctionDeclarationLike[] {
     {
       name: 'suggerer_amelioration',
       description:
-        "Dépose une proposition d'amélioration à soumettre à l'architecte — jamais appliquée automatiquement, toujours en attente de validation dans /agents/learning. " +
+        "Dépose une proposition d'amélioration à soumettre à l'architecte — jamais appliquée automatiquement, toujours en attente de validation dans /agents/apprentissage. " +
         "Trois usages : " +
         "'correction' — l'utilisateur vient de corriger une réponse ou une hypothèse que tu avais faite ; propose de la retenir pour ne pas la refaire. " +
         "'missing_capability' — tu n'as pas pu répondre correctement faute d'un outil ou d'un accès que tu n'as pas (renseigne alors capacite_suggeree). " +

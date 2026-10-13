@@ -57,10 +57,21 @@ export const SOURCE_PARAMETER_SCHEMA = {
     "(message de l'utilisateur, document joint lu, résultat d'un outil de lecture) et refuse la création sinon. " +
     "Cite le passage précis qui justifie CET enregistrement, pas un titre ou un en-tête générique.",
   properties: {
-    type: { type: 'string', enum: [...SOURCE_TYPES], description: 'Nature de la source.' },
+    type: { 
+      type: 'string', 
+      enum: [...SOURCE_TYPES], 
+      description: 'Nature de la source (demande_utilisateur, document_joint, email, base_cabinet, web, image_jointe).' 
+    },
     citation: {
       type: 'string',
-      description: `Extrait exact (au moins ${MIN_CITATION_CHARS} caractères) copié depuis la source, qui justifie cet enregistrement.`,
+      description: `Extrait exact (entre ${MIN_CITATION_CHARS} et 500 caractères) copié depuis la source, qui justifie cet enregistrement.`,
+      minLength: MIN_CITATION_CHARS,
+      maxLength: 500,
+    },
+    location: {
+      type: 'string',
+      description: 'Facultatif. Où se trouve le passage (ex : « ligne 42 du PDF », « message du 10/10 »), pour aider la relecture. Jamais vérifié par le serveur.',
+      maxLength: 200,
     },
   },
   required: ['type', 'citation'],
@@ -135,6 +146,7 @@ export function checkSource(args: Record<string, unknown>, corpus: SourceCorpus 
   }
   const type = String(source.type || '');
   const citation = String(source.citation || '').trim();
+
   if (!(SOURCE_TYPES as readonly string[]).includes(type)) {
     return refusal(`Création refusée : type de source inconnu « ${type} ».`, `Types acceptés : ${SOURCE_TYPES.join(', ')}.`);
   }

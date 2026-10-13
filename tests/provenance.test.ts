@@ -28,6 +28,12 @@ describe('pas de création sans source', () => {
     expect((r.response as any).code).toBe('SOURCE_NON_VERIFIEE');
   });
 
+  it('accepte une source sans location : le champ est facultatif et jamais vérifié', () => {
+    const citation = "escalier non conforme : absence de bande d'éveil";
+    expect(checkSource({ source: { type: 'document_joint', citation } }, corpus()).ok).toBe(true);
+    expect(checkSource({ source: { type: 'document_joint', citation, location: 'x' } }, corpus()).ok).toBe(true);
+  });
+
   it('refuse l\'absence de source et les citations trop courtes', () => {
     expect(checkSource({}, corpus()).ok).toBe(false);
     expect(checkSource({ source: { type: 'demande_utilisateur', citation: 'Gros œuvre' } }, corpus()).ok).toBe(false);

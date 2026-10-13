@@ -11,6 +11,15 @@ jobs:
     name: Type check & build
     runs-on: ubuntu-latest
 
+    # Ensure all steps and child processes use consistent Postgres connection values
+    # to prevent accidental attempts to connect as the OS user 'root'.
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+
     # Lets tests/applySchemaFreshInstall.test.ts replay the Electron client's
     # entire local-bootstrap SQL history against a real, freshly emptied
     # Postgres — the only way to catch a migration that references a table a
@@ -23,6 +32,7 @@ jobs:
       postgres:
         image: postgres:16
         env:
+          POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
         ports:
           - 5432:5432
@@ -30,7 +40,7 @@ jobs:
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
     steps:
       - uses: actions/checkout@v7
@@ -45,6 +55,21 @@ jobs:
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
+
+      - name: Wait for Postgres to be ready
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y postgresql-client
+          attempts=0
+          until pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" || [ $attempts -ge 30 ]; do
+            attempts=$((attempts+1))
+            echo "Waiting for PostgreSQL... (attempt $attempts)"
+            sleep 2
+          done
+          if ! pg_isready -h "$PGHOST" -p "$PGPORT" -U "$PGUSER"; then
+            echo "Postgres did not become ready in time" >&2
+            exit 1
+          fi
 
       # Fails the build on a new critical vulnerability so one doesn't reach
       # main unnoticed. Kept at "critical" rather than "high": as of this
@@ -61,12 +86,6 @@ jobs:
 
       - name: Test
         run: npm test
-        env:
-          PGHOST: localhost
-          PGPORT: 5432
-          PGUSER: postgres
-          PGPASSWORD: postgres
-          PGDATABASE: postgres
 
       - name: Build
         run: npm run build

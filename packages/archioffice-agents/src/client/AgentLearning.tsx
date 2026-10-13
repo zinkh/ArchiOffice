@@ -3,11 +3,12 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconBulb, IconCheck, IconX, IconSettings } from '@tabler/icons-react';
 import { apiFetch } from '@/src/lib/api';
+import { useUser } from '@/src/UserContext';
 
 interface SuggestionRow {
   id: string;
   agent_id: string;
-  kind: 'correction' | 'missing_capability' | 'knowledge_note';
+  kind: 'correction' | 'note' | 'improvement' | 'missing_capability' | 'knowledge_note';
   title: string;
   content: string;
   suggested_capability: string | null;
@@ -18,6 +19,8 @@ interface SuggestionRow {
 
 const KIND_LABELS: Record<SuggestionRow['kind'], string> = {
   correction: 'Correction à retenir',
+  note: 'Note à retenir',
+  improvement: 'Amélioration',
   missing_capability: 'Capacité manquante',
   knowledge_note: 'Note pour la bibliothèque',
 };
@@ -29,20 +32,25 @@ function formatDate(value: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-// L'approbation ne retient QUE 'correction' et 'knowledge_note' comme mémoire
-// (voir buildAgentContext) — une 'missing_capability' approuvée ne fait rien
-// d'automatique côté agent : elle sert seulement à documenter que l'architecte
-// a vu la demande et sait quelle capacité l'agent réclame. L'activer reste un
-// geste volontaire depuis /agents/:id/edit, jamais déclenché par cet écran.
+// L'approbation retient 'correction', 'note', 'improvement' et 'knowledge_note'
+// comme mémoire de l'agent (voir buildAgentContext) — une 'missing_capability'
+// approuvée ne fait rien d'automatique : elle documente seulement que
+// l'architecte a vu la demande. L'activer reste un geste volontaire depuis
+// /agents/:id/edit, jamais déclenché par cet écran.
 export default function AgentLearning() {
   const { t } = useTranslation();
+  const { currentUser } = useUser() as any;
+  const isAdmin = currentUser?.system_role === 'admin';
   const [suggestions, setSuggestions] = useState<SuggestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showReviewed, setShowReviewed] = useState(false);
 
   const load = useCallback(async () => {
-    const rows = await apiFetch(showReviewed ? '/api/agent-learning-suggestions' : '/api/agent-learning-suggestions?status=pending').catch(() => []);
+    const url = showReviewed 
+      ? '/api/agent-learning-suggestions'
+      : '/api/agent-learning-suggestions?status=pending';
+    const rows = await apiFetch(url).catch(() => []);
     setSuggestions(rows as SuggestionRow[]);
   }, [showReviewed]);
 
@@ -51,10 +59,13 @@ export default function AgentLearning() {
   const review = async (id: string, action: 'approve' | 'reject') => {
     setError('');
     try {
-      await apiFetch(`/api/agent-learning-suggestions/${id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      await apiFetch(`/api/agent-learning-suggestions/${id}`, { 
+        method: 'PUT', 
+        body: JSON.stringify({ action }) 
+      });
       await load();
     } catch (e: any) {
-      setError(e?.message || 'La validation a échoué.');
+      setError(e?.message || t('agent_learning_validation_error'));
     }
   };
 
@@ -95,6 +106,7 @@ export default function AgentLearning() {
         <h2 className="font-semibold text-[14px]" style={{ color: 'var(--tblr-text)' }}>
           {t('agent_learning_pending')} ({pending.length})
         </h2>
+        {!isAdmin && <p className="text-[12px]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_learning_admin_only')}</p>}
         {pending.length === 0 && <p className="text-[13px]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_learning_none')}</p>}
         <div className="space-y-2">
           {pending.map(s => (
@@ -117,14 +129,14 @@ export default function AgentLearning() {
                     </Link>
                   )}
                 </div>
-                <div className="flex gap-1 shrink-0">
+                {isAdmin && <div className="flex gap-1 shrink-0">
                   <button onClick={() => review(s.id, 'approve')} title={t('agent_learning_approve')} className="p-1.5 rounded border" style={cardStyle}>
                     <IconCheck size={14} style={{ color: '#2fb344' }} />
                   </button>
                   <button onClick={() => review(s.id, 'reject')} title={t('agent_learning_reject')} className="p-1.5 rounded border" style={cardStyle}>
                     <IconX size={14} style={{ color: '#c92a2a' }} />
                   </button>
-                </div>
+                </div>}
               </div>
             </div>
           ))}
