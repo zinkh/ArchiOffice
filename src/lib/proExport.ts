@@ -1,6 +1,7 @@
 import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
 import type { AgencySettings } from './proposalExport';
+import { enregistrerPdf, type Sortie } from './exportSortie';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE,
@@ -97,8 +98,20 @@ function flattenDPGF(lots: Lot[]): Array<{
 
 // ── DPGF PDF ─────────────────────────────────────────────────────────────────
 
+export interface ExportDpgfOptions {
+  /**
+   * Par défaut le DPGF exporté est SANS PRIX (ni P.U., ni montant, ni total) :
+   * il sert de cadre de réponse aux entreprises. `avecPrix` est réservé à un
+   * usage interne.
+   */
+  avecPrix?: boolean;
+  /** Destination du fichier ; absente, il est téléchargé. */
+  sortie?: Sortie;
+}
+
 export async function exportDPGFtoPDF(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
+  { avecPrix = false, sortie }: ExportDpgfOptions = {},
 ) {
   const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
@@ -120,15 +133,19 @@ export async function exportDPGFtoPDF(
     autoTable(doc, {
       ...tableauGris(),
       startY,
-      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
-      body: rows.map(r => [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
+      head: [avecPrix
+        ? ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']
+        : ['N°', 'Désignation', 'Unité', 'Quantité']],
+      body: rows.map(r => {
+        const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite];
+        return avecPrix ? [...debut, r.prixUnitaire, r.prixTotal] : debut;
+      }),
       columnStyles: {
         0: { cellWidth: 20 },
         1: { cellWidth: 'auto' },
         2: { cellWidth: 18, halign: 'center' },
-        3: { cellWidth: 22, halign: 'right' },
-        4: { cellWidth: 28, halign: 'right' },
-        5: { cellWidth: 28, halign: 'right' },
+        3: { cellWidth: avecPrix ? 22 : 26, halign: 'right' },
+        ...(avecPrix ? { 4: { cellWidth: 28, halign: 'right' }, 5: { cellWidth: 28, halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -143,23 +160,28 @@ export async function exportDPGFtoPDF(
           data.cell.styles.fontStyle = 'italic';
         }
       },
-      foot: [['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €']],
+      ...(avecPrix ? { foot: [['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €']] } : {}),
     });
   } else {
     const rows = flattenDPGFGroupe(dpgf, groupement);
     autoTable(doc, {
       ...tableauGris(),
       startY,
-      head: [['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)']],
-      body: rows.map(r => [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite, r.prixTotal]),
+      head: [avecPrix
+        ? ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)']
+        : ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité']],
+      body: rows.map(r => {
+        const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite];
+        return avecPrix ? [...debut, r.prixTotal] : debut;
+      }),
       columnStyles: {
         0: { cellWidth: 18 },
         1: { cellWidth: 'auto' },
         2: { cellWidth: 32 },
         3: { cellWidth: 26 },
         4: { cellWidth: 16, halign: 'center' },
-        5: { cellWidth: 20, halign: 'right' },
-        6: { cellWidth: 28, halign: 'right' },
+        5: { cellWidth: avecPrix ? 20 : 24, halign: 'right' },
+        ...(avecPrix ? { 6: { cellWidth: 28, halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -168,17 +190,17 @@ export async function exportDPGFtoPDF(
           data.cell.styles.fillColor = TABLEAU_GRIS.groupe;
         }
       },
-      foot: [['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €']],
+      ...(avecPrix ? { foot: [['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €']] } : {}),
     });
   }
 
   drawAgencyFooters(doc, settings, letterhead);
-  doc.save(`DPGF_${dpgf.titre.replace(/\s+/g, '_')}.pdf`);
+  await enregistrerPdf(doc, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.pdf`, sortie);
 }
 
 // ── Estimation PDF ────────────────────────────────────────────────────────────
 
-export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}) {
+export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}, sortie?: Sortie) {
   const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
@@ -217,13 +239,14 @@ export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, se
   doc.text(`Total TTC : ${fmt(dpgf.totalTTC)} €`, 14, finalY + 6);
 
   drawAgencyFooters(doc, settings, letterhead);
-  doc.save(`Estimation_${dpgf.titre.replace(/\s+/g, '_')}.pdf`);
+  await enregistrerPdf(doc, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.pdf`, sortie);
 }
 
 // ── DPGF Excel ────────────────────────────────────────────────────────────────
 
 export async function exportDPGFtoExcel(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
+  { avecPrix = false, sortie }: ExportDpgfOptions = {},
 ) {
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
@@ -242,18 +265,21 @@ export async function exportDPGFtoExcel(
         { header: 'N°', width: 10 },
         { header: 'Désignation', width: 55 },
         { header: 'Unité', width: 10, align: 'center' },
-        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
-        { header: 'P.U. HT (€)', width: 15, align: 'right', numFmt: FORMAT_NOMBRE },
-        { header: 'Total HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_NOMBRE },
+        ...(avecPrix ? [
+          { header: 'P.U. HT (€)', width: 15, align: 'right' as const, numFmt: FORMAT_NOMBRE },
+          { header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE },
+        ] : []),
       ],
     });
     for (const r of flattenDPGF(dpgf.lots)) {
-      const valeurs = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q), nombre(r.pu), nombre(r.total)];
+      const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q)];
+      const valeurs = avecPrix ? [...debut, nombre(r.pu), nombre(r.total)] : debut;
       if (r.type === 'lot') f.ligne(valeurs, { gras: true, fond: 'groupe' });
       else if (r.type === 'chapitre') f.ligne(valeurs, { gras: true, fond: 'doux' });
       else f.ligne(valeurs, r.type === 'titre' ? { italique: true } : {});
     }
-    f.total(['', 'TOTAL HT', '', '', '', dpgf.totalHT]);
+    if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', dpgf.totalHT]);
   } else {
     const f = ajouterFeuille(wb, {
       ...commun,
@@ -263,22 +289,23 @@ export async function exportDPGFtoExcel(
         { header: 'Lot', width: 24 },
         { header: 'Localisation', width: 20 },
         { header: 'Unité', width: 10, align: 'center' },
-        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
-        { header: 'Total HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_NOMBRE },
+        ...(avecPrix ? [{ header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE }] : []),
       ],
     });
     for (const r of flattenDPGFGroupe(dpgf, groupement)) {
-      const valeurs = [r.numero, r.designation, r.lot, r.localisation, r.unite, nombre(r.q), nombre(r.total)];
+      const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, nombre(r.q)];
+      const valeurs = avecPrix ? [...debut, nombre(r.total)] : debut;
       f.ligne(valeurs, r.type === 'groupe' ? { gras: true, fond: 'groupe' } : {});
     }
-    f.total(['', 'TOTAL HT', '', '', '', '', dpgf.totalHT]);
+    if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', '', dpgf.totalHT]);
   }
-  await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`);
+  await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`, sortie);
 }
 
 // ── Estimation Excel ──────────────────────────────────────────────────────────
 
-export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}) {
+export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}, sortie?: Sortie) {
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const nombre = (n: number) => (n > 0 ? n : undefined);
 
@@ -332,5 +359,5 @@ export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, 
   }
   recap.total(['', 'TOTAL', dpgf.totalHT, dpgf.totalTTC - dpgf.totalHT, dpgf.totalTTC]);
 
-  await enregistrerClasseur(wb, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`);
+  await enregistrerClasseur(wb, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`, sortie);
 }

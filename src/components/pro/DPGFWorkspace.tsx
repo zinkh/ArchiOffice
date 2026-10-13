@@ -3,15 +3,14 @@ import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, type HierarchySelection } from './hierarchyOps';
 import React, { useState, useRef } from 'react';
 import {
-  IconPlus, IconTrash, IconCopy, IconClipboard, IconFileTypePdf, IconTable,
+  IconPlus, IconTrash, IconCopy, IconClipboard,
   IconChevronRight, IconChevronDown, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconFileImport, IconScale, IconBuildingCommunity, IconArrowUp, IconArrowDown,
-  IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconDownload, IconLayoutSidebarLeftCollapse,
+  IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
   IconSubtask,
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
-import { exportDPGFtoPDF, exportDPGFtoExcel } from '../../lib/proExport';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -29,7 +28,6 @@ import {
   basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
   heritagePour, modifierFeuilles, quantitesParBatiment,
 } from '../../lib/batimentsArticles';
-import { forBuilding } from '../../lib/dpgfBuildings';
 
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
@@ -722,21 +720,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         { id: 'dpgf-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'dpgf-import-offer', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'dpgf-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
-      ],
-    },
-    {
-      kind: 'menu', id: 'dpgf-export', label: t('pro_export'), icon: <IconDownload size={16} />,
-      entries: [
-        { id: 'dpgf-pdf', label: t('pro_export_pdf'), icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF(dpgf, projectName, groupement, settings ?? {}) },
-        { id: 'dpgf-xlsx', label: t('pro_export_excel'), icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel(dpgf, projectName, groupement, settings ?? {}) },
-        ...(batiments.length ? [{ id: 'dpgf-by-building', heading: t('pro_export_by_building') } as ToolbarMenuEntry] : []),
-        ...batiments.flatMap(b => {
-          const titre = `${projectName ?? dpgf.titre} · ${b.code}${b.libelle ? ` ${b.libelle}` : ''}`;
-          return [
-            { id: `dpgf-pdf-${b.id}`, label: `${b.code} · ${t('pro_export_pdf')}`, icon: <IconFileTypePdf size={16} />, onClick: () => exportDPGFtoPDF({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
-            { id: `dpgf-xlsx-${b.id}`, label: `${b.code} · ${t('pro_export_excel')}`, icon: <IconTable size={16} />, onClick: () => exportDPGFtoExcel({ ...forBuilding(dpgf, b.id), titre: `DPGF ${b.code}` }, titre, 'lot', settings ?? {}) },
-          ];
-        }),
       ],
     },
   ]);

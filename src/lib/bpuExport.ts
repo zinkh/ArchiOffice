@@ -12,6 +12,7 @@ import {
   type Colonne, type Cellule,
 } from './xlsxLetterhead';
 import { montantEnLettres } from './numberToFrenchWords';
+import { enregistrerPdf, type Sortie } from './exportSortie';
 
 export type ExportMode = 'bpu' | 'dqe';
 
@@ -109,6 +110,8 @@ export interface ExcelOptions {
   projectName?: string;
   /** Charte du cabinet (logo, coordonnées, pied de page). */
   settings?: AgencySettings;
+  /** Destination du fichier ; absente, il est téléchargé. */
+  sortie?: Sortie;
 }
 
 /** En-têtes de colonnes, dans l'ordre exact du classeur. */
@@ -122,7 +125,7 @@ export function excelHeaders(bpu: BPU, mode: ExportMode): string[] {
   return cols;
 }
 
-export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName, settings = {} }: ExcelOptions): Promise<void> {
+export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName, settings = {}, sortie }: ExcelOptions): Promise<void> {
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const rows = flattenBPU(bpu);
   const titre = mode === 'bpu' ? 'BPU — Bordereau de Prix Unitaires' : 'DQE — Détail Quantitatif Estimatif';
@@ -240,7 +243,7 @@ export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName, se
   for (const r of metaRows) meta.addRow(r.map(v => v ?? ''));
 
   const suffixe = vierge ? '_a_remplir' : '';
-  await enregistrerClasseur(wb, `${mode.toUpperCase()}_${sanitize(projectName || bpu.titre)}${suffixe}.xlsx`);
+  await enregistrerClasseur(wb, `${mode.toUpperCase()}_${sanitize(projectName || bpu.titre)}${suffixe}.xlsx`, sortie);
 }
 
 // ── PDF ───────────────────────────────────────────────────────────────────────
@@ -251,9 +254,11 @@ export interface PdfOptions {
   settings: AgencySettings;
   /** Bordereau à remplir : colonne P.U. vide. */
   vierge?: boolean;
+  /** Destination du fichier ; absente, il est téléchargé. */
+  sortie?: Sortie;
 }
 
-export async function exportBPUtoPDF(bpu: BPU, { mode, projectName, settings, vierge = false }: PdfOptions): Promise<void> {
+export async function exportBPUtoPDF(bpu: BPU, { mode, projectName, settings, vierge = false, sortie }: PdfOptions): Promise<void> {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'), import('jspdf-autotable'),
   ]);
@@ -344,5 +349,5 @@ export async function exportBPUtoPDF(bpu: BPU, { mode, projectName, settings, vi
 
   drawAgencyFooters(doc, settings, letterhead);
   const suffixe = vierge ? '_a_remplir' : '';
-  doc.save(`${mode.toUpperCase()}_${sanitize(projectName || bpu.titre)}${suffixe}.pdf`);
+  await enregistrerPdf(doc, `${mode.toUpperCase()}_${sanitize(projectName || bpu.titre)}${suffixe}.pdf`, sortie);
 }

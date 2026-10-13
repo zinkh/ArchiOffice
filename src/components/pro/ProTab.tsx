@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { CCTPEditor } from './CCTPEditor';
 import { DPGFWorkspace } from './DPGFWorkspace';
 import { EstimationEditor } from './EstimationEditor';
+import { ProExportDialog } from './ProExportDialog';
 import { BPUWorkspace } from './BPUWorkspace';
 import { LotsManager } from './LotsManager';
 import { appliquerOrdreLots, comparerNumerosDeLot, lotsDivergent, planImportLots, type LotProjet } from '../../lib/lotsOrder';
@@ -433,17 +434,14 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
    * ces références qui permettront de rapprocher le fichier renvoyé. On les
    * attribue donc avant d'exporter, et on les persiste.
    */
-  const exporterBpu = useCallback(async (kind: 'pdf' | 'xlsx', colSet: string, vierge: boolean) => {
-    if (!bpu) return;
+  const preparerBpuPourExport = useCallback((): BPU | null => {
+    if (!bpu) return null;
     const avecRefs = assignerReferences(bpu);
     if (avecRefs !== bpu) setBpu(avecRefs);
-    const mode = colSet === 'bpu' ? 'bpu' : 'dqe';
-    if (kind === 'xlsx') {
-      await exportBPUtoExcel(avecRefs, { mode, vierge, projectName, settings: settings ?? {} });
-    } else {
-      await exportBPUtoPDF(avecRefs, { mode, projectName, settings: settings ?? {}, vierge });
-    }
-  }, [bpu, setBpu, projectName, settings]);
+    return avecRefs;
+  }, [bpu, setBpu]);
+
+  const [showExport, setShowExport] = useState(false);
 
   /** Envoie les articles sélectionnés vers la bibliothèque de prix du cabinet. */
   const envoyerVersBibliotheque = useCallback(async (lignes: any[]) => {
@@ -720,9 +718,24 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
             dossierEntries={dossierEntries}
             dossierLabel={t('pro_dossier_menu')}
             isMobile={isMobile}
+            onExport={() => { setBpuTouched(true); setShowExport(true); }}
           />
         </div>
       </div>
+      {showExport && dpgf && (
+        <ProExportDialog
+          dpgf={dpgf}
+          bpu={bpu}
+          bpuLoading={bpuLoading || !bpuTouched}
+          ongletActif={activeSubTab}
+          projectName={projectName}
+          contexte={contexte}
+          settings={settings ?? {}}
+          prepareBpu={preparerBpuPourExport}
+          notify={(message, opts) => notify(message, opts)}
+          onClose={() => setShowExport(false)}
+        />
+      )}
 
       {renaming > 0 && <p role="status" className="px-3 text-sm">Synchronisation des titres de lots…</p>}
       {titleError && <p role="alert" className="px-3 text-sm text-red-600">{titleError} Le titre n’a pas été enregistré ; réessayez le renommage.</p>}
@@ -970,8 +983,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 onDragStart={ligne => setDraggedLigne(ligne)}
                 onInitFromDpgf={dpgf && dpgf.lots.length > 0 ? initBpuFromDpgf : undefined}
                 onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
-                onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
-                onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
                 onImportOffre={() => setImportCible('bpu')}
                 onImportDocument={() => setImportDocCible('bpu')}
                 onPushToAct={verserAuComparatifAct}

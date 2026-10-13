@@ -2834,8 +2834,27 @@ veut dire « aucun bâtiment », sans héritage.
   un chapitre sans article (généralités) et un texte propre au CCTP sans
   bâtiment valent pour tous ; un article chiffrable sans bâtiment n'entre dans
   aucun, et l'export par bâtiment le signale.
-- Le DPGF par bâtiment (PDF, Excel) est dans le menu Exporter du DPGF ; le
-  volet « Articles et bâtiments » qui le portait est supprimé.
+- **Un seul bouton « Exporter » pour tout le dossier PRO** (barre des sous-onglets de
+  `ProTab`, `ProExportDialog.tsx`) ; les menus d'export du CCTP, du DPGF, du BPU/DQE et
+  de l'estimation sont supprimés. La fenêtre choisit les documents (CCTP, DPGF, DQE, BPU,
+  avec raccourcis « CCTP seul », « CCTP + DPGF », « Dossier de consultation »), un format
+  par document (PDF, Word ou Excel, ou les deux), le périmètre (tout, ou lots, bâtiments et
+  phases) et l'option « Inclure les prix », **décochée par défaut** : DPGF, DQE et BPU sortent
+  alors sans P.U., montant ni total (le bordereau est « vierge »). L'**estimation** est à part
+  (« document interne ») et porte toujours ses prix. Orchestration dans
+  `src/lib/exportDossier.ts` (`produireDossier`), qui donne à chaque exporteur une `Sortie`
+  (`exportSortie.ts`) collectant les fichiers au lieu de les télécharger ; `livrer()` envoie un
+  fichier tel quel, **plusieurs dans un ZIP** (jszip). Sans `sortie`, les exporteurs
+  téléchargent comme avant.
+- **Périmètre commun** (`src/lib/exportPerimetre.ts`, testé) : lots désignés par leur
+  NUMÉRO, bâtiments et phases par leur CODE, car le CCTP/DPGF et le bordereau ont chacun
+  leur registre aux identifiants distincts. Un critère de bâtiment ou de phase est ignoré par
+  un document qui n'a pas activé ce découpage. Pour le CCTP (`{ cctp: true }`), les textes
+  réservés au CCTP et les chapitres sans article sont gardés, et une sélection de bâtiments
+  produit **un CCTP par bâtiment retenu** (`cctpPourBatiment`) ; la case « un fichier par
+  bâtiment » le fait aussi sans sélection. Un document sans article dans le périmètre est
+  ignoré avec un avertissement. Le BPU Excel garde ses intitulés, références et feuille
+  `_meta` (aller-retour de l'import), prix vides comme avant (`vierge`).
 
 **Le DPGF verse maintenant lui aussi ses offres au comparatif ACT.** L'ACT
 récupère les offres des entreprises sur la base du DPGF ou du BPU selon le
