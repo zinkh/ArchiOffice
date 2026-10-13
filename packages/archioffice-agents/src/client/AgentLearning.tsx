@@ -31,11 +31,11 @@ function formatDate(value: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
-// L'approbation ne retient QUE 'correction' et 'knowledge_note' comme mémoire
-// (voir buildAgentContext) — une 'missing_capability' approuvée ne fait rien
-// d'automatique côté agent : elle sert seulement à documenter que l'architecte
-// a vu la demande et sait quelle capacité l'agent réclame. L'activer reste un
-// geste volontaire depuis /agents/:id/edit, jamais déclenché par cet écran.
+// L'approbation permet aux agents d'accéder à leurs retours validés via buildAgentContext.
+// Les types 'correction', 'note' et 'improvement' sont injectés dans le contexte de l'agent
+// pour améliorer ses futures réponses. Les types 'missing_capability' et 'knowledge_note'
+// sont conservés pour compatibilité mais 'note' et 'improvement' sont les nouveaux types
+// standard pour le feedback utilisateur (US-1, US-2, US-3).
 export default function AgentLearning() {
   const { t } = useTranslation();
   const [suggestions, setSuggestions] = useState<SuggestionRow[]>([]);
@@ -44,7 +44,10 @@ export default function AgentLearning() {
   const [showReviewed, setShowReviewed] = useState(false);
 
   const load = useCallback(async () => {
-    const rows = await apiFetch(showReviewed ? '/api/agent-learning-suggestions' : '/api/agent-learning-suggestions?status=pending').catch(() => []);
+    const url = showReviewed 
+      ? '/api/agent-learning-suggestions'
+      : '/api/agent-learning-suggestions?status=pending';
+    const rows = await apiFetch(url).catch(() => []);
     setSuggestions(rows as SuggestionRow[]);
   }, [showReviewed]);
 
@@ -53,10 +56,13 @@ export default function AgentLearning() {
   const review = async (id: string, action: 'approve' | 'reject') => {
     setError('');
     try {
-      await apiFetch(`/api/agent-learning-suggestions/${id}`, { method: 'PUT', body: JSON.stringify({ action }) });
+      await apiFetch(`/api/agent-learning-suggestions/${id}`, { 
+        method: 'PUT', 
+        body: JSON.stringify({ action }) 
+      });
       await load();
     } catch (e: any) {
-      setError(e?.message || 'La validation a échoué.');
+      setError(e?.message || t('agent_learning_validation_error'));
     }
   };
 
