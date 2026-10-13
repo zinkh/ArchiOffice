@@ -383,6 +383,8 @@ export default {
       "feas_prefilling": "Prefilling...",
       "feas_export_pdf": "PDF",
       "feas_export_docx": "Word",
+      "feas_indice": "Revision",
+      "feas_issue_date": "Issue date",
       "feas_loading": "Loading the study...",
       "feas_empty": "No sections yet. Prefill the standard outline or add a section.",
       "feas_reorder": "Drag to reorder",

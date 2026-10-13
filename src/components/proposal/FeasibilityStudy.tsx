@@ -56,6 +56,18 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [indice, setIndice] = useState(proposal.feasibility_indice || 'A');
+  const [issueDate, setIssueDate] = useState(proposal.feasibility_issue_date?.slice(0, 10) || new Date().toISOString().slice(0, 10));
+  const metaTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Indice et date de diffusion sont enregistrés avec la proposition, 0,8 s après la dernière saisie.
+  const saveMeta = (nextIndice: string, nextDate: string) => {
+    if (metaTimer.current) clearTimeout(metaTimer.current);
+    metaTimer.current = setTimeout(() => {
+      apiFetch(`/api/proposals/${proposalId}/feasibility-meta`, { method: 'PUT', body: JSON.stringify({ indice: nextIndice, issueDate: nextDate }) })
+        .catch(err => setError(err?.message || t('feas_error_generic')));
+    }, 800);
+  };
   const [newTitle, setNewTitle] = useState('');
   const [prefilling, setPrefilling] = useState(false);
   const [draftingId, setDraftingId] = useState<string | null>(null);
@@ -285,7 +297,7 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
     try {
       const mod = await import('../../lib/feasibilityExport');
       const fn = kind === 'pdf' ? mod.exportFeasibilityPdf : mod.exportFeasibilityDocx;
-      await fn(proposal, sectionsRef.current, settings);
+      await fn(proposal, sectionsRef.current, settings, { indice, issueDate });
     } catch (err: any) { setError(err?.message || t('feas_error_generic')); }
     finally { setExporting(null); }
   };
@@ -314,6 +326,16 @@ export function FeasibilityStudy({ proposalId, proposal, parcelGeometry, setting
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          {t('feas_indice')}
+          <input type="text" value={indice} onChange={e => { setIndice(e.target.value); saveMeta(e.target.value, issueDate); }} maxLength={4}
+            className="w-12 px-2 py-1 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }} />
+        </label>
+        <label className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          {t('feas_issue_date')}
+          <input type="date" value={issueDate} onChange={e => { setIssueDate(e.target.value); saveMeta(indice, e.target.value); }}
+            className="px-2 py-1 rounded-lg text-xs" style={{ border: '1px solid var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }} />
+        </label>
         <button type="button" onClick={prefill} disabled={prefilling}
           className="flex items-center gap-1.5 text-xs font-bold uppercase px-3 py-1.5 rounded-lg disabled:opacity-60"
           style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>

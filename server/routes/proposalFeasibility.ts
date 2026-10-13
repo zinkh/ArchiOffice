@@ -43,7 +43,32 @@ function str(v: unknown, max: number): string {
   return (typeof v === 'string' ? v : '').slice(0, max);
 }
 
+/** Indice (4 caractères au plus) et date AAAA-MM-JJ valide ; vide vaut « non renseigné ». */
+export function sanitizeFeasibilityMeta(body: any): { indice: string | null; issueDate: string | null } | null {
+  const indice = typeof body?.indice === 'string' ? body.indice.trim() : '';
+  const date = typeof body?.issueDate === 'string' ? body.issueDate.trim() : '';
+  if (indice.length > 4) return null;
+  if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(`${date}T12:00:00Z`)))) return null;
+  return { indice: indice || null, issueDate: date || null };
+}
+
 export function registerProposalFeasibilityRoutes(app: Express, { supabaseAdmin, getTenantId, loadSiteData }: RouteDeps) {
+  app.put("/api/proposals/:id/feasibility-meta", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const meta = sanitizeFeasibilityMeta(req.body);
+      if (!meta) return res.status(400).json({ error: "Indice (4 caractères au plus) ou date de diffusion invalide." });
+      if (!(await assertTenantEntity(supabaseAdmin, 'proposals', req.params.id, tenantId))) {
+        return res.status(404).json({ error: "Proposition introuvable." });
+      }
+      const { error } = await supabaseAdmin.from('proposals')
+        .update({ feasibility_indice: meta.indice, feasibility_issue_date: meta.issueDate })
+        .eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ feasibility_indice: meta.indice, feasibility_issue_date: meta.issueDate });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Échec de l'enregistrement de l'indice." }); }
+  });
+
   app.get("/api/proposals/:id/feasibility", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

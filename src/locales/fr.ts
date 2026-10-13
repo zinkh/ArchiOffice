@@ -426,6 +426,8 @@ export default {
       "feas_prefilling": "Préremplissage...",
       "feas_export_pdf": "PDF",
       "feas_export_docx": "Word",
+      "feas_indice": "Indice",
+      "feas_issue_date": "Date de diffusion",
       "feas_loading": "Chargement de l'étude...",
       "feas_empty": "Aucune rubrique pour le moment. Préremplissez le plan type ou ajoutez une rubrique.",
       "feas_reorder": "Glisser pour réordonner",
