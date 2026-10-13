@@ -1490,9 +1490,15 @@ source. L'image validée devient un document de la proposition (catégorie
 effort. Le zonage du PLU n'est pas proposé en fond de carte : aucune couche
 raster GPU n'a été vérifiée sur la Géoplateforme.
 
-**Exports** (`src/lib/feasibilityExport.ts`) PDF et Word à la charte : page de
-garde, sommaire, une rubrique par page, extraits de cartes avec légende,
-pagination « P1|2 ». Le Word reste modifiable (texte, puces, images).
+**Exports** (`src/lib/feasibilityExport.ts`) PDF et Word, au même aspect : logo et
+repère « référence | Étude de faisabilité | Indice X » sur la première page
+seulement (repère seul ensuite), titre en majuscules, champs en lignes (pas de
+tableau de garde) avec indice et date de diffusion, sommaire, rubriques à la
+suite sous un titre majuscule souligné, extraits de cartes avec légende,
+pagination « P1|2 ». Indice et date vivent dans `proposals.feasibility_indice` /
+`feasibility_issue_date` (`supabase/migrate_proposal_feasibility_meta.sql`),
+écrits par `PUT /api/proposals/:id/feasibility-meta` ; sans valeur, l'export
+prend « A » et la date du jour. Le Word reste modifiable (texte, puces, images).
 
 ### Chaque ligne facturée devient un article dans Zoho
 

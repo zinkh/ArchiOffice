@@ -1062,6 +1062,9 @@ export interface Proposal {
   ban_id_terrain?: string;
   city_code_terrain?: string;
   ref_cadastrale?: string;
+  /** Indice de révision et date de diffusion (AAAA-MM-JJ) de l'étude de faisabilité. */
+  feasibility_indice?: string | null;
+  feasibility_issue_date?: string | null;
   zone_plu?: string;
   surface_parcelle?: string;
   nom_etablissement?: string;

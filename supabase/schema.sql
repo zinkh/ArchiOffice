@@ -320,6 +320,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   representant TEXT, qualite TEXT, adresse_client TEXT, cp_client TEXT,
   ville_client TEXT, telephone TEXT, portable TEXT, email_client TEXT,
   adresse_terrain TEXT, cp_ville_terrain TEXT, ref_cadastrale TEXT,
+  feasibility_indice TEXT, feasibility_issue_date DATE,
   zone_plu TEXT, surface_parcelle TEXT, nom_etablissement TEXT,
   avant_trav TEXT, apres_trav TEXT, type_et_cat TEXT, type_projet TEXT,
   categorie_projet TEXT, surface_plancher TEXT, surface_plancher_ext TEXT,
