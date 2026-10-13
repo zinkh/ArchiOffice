@@ -2008,6 +2008,25 @@ export default {
       "ai_draft_invoice_overdue": "Draft a polite payment follow-up email for invoice {{number}} for {{amount}} addressed to {{client}}.",
       "agent_chat_suggestions_badge": "{{count}} suggestion(s)",
 
+      // Agent feedback
+      "agent_feedback_correction": "Correction",
+      "agent_feedback_note": "Note",
+      "agent_feedback_improvement": "Improvement",
+      "agent_feedback_correction_desc": "Correct an error in the agent's response",
+      "agent_feedback_note_desc": "Add a note for the agent",
+      "agent_feedback_improvement_desc": "Suggest an improvement for the agent",
+      "agent_feedback_correction_placeholder": "Describe the correction needed",
+      "agent_feedback_note_placeholder": "What information should the agent remember?",
+      "agent_feedback_improvement_placeholder": "Describe your improvement suggestion",
+      "agent_feedback_details_placeholder": "Additional details...",
+      "read_aloud": "Read aloud",
+      "send_feedback": "Send feedback",
+      "sending": "Sending...",
+      "agent_feedback_error": "Unable to send feedback. Please try again.",
+      "close": "Close",
+      "title": "Title",
+      "details": "Details",
+
       // Calendar page
       "calendar_page_subtitle": "Milestones and tasks, by week and by month",
       "calendar_week_short": "W",

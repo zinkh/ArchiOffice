@@ -2164,6 +2164,25 @@ export default {
       "ai_draft_invoice_overdue": "Rédige un e-mail de relance de paiement poli pour la facture {{number}} d'un montant de {{amount}} auprès de {{client}}.",
       "agent_chat_suggestions_badge": "{{count}} suggestion(s)",
 
+      // Agent feedback
+      "agent_feedback_correction": "Correction",
+      "agent_feedback_note": "Note",
+      "agent_feedback_improvement": "Amélioration",
+      "agent_feedback_correction_desc": "Corriger une erreur dans la réponse de l'agent",
+      "agent_feedback_note_desc": "Ajouter une note pour l'agent",
+      "agent_feedback_improvement_desc": "Suggérer une amélioration pour l'agent",
+      "agent_feedback_correction_placeholder": "Décrivez la correction nécessaire",
+      "agent_feedback_note_placeholder": "Quelle information l'agent doit-il retenir ?",
+      "agent_feedback_improvement_placeholder": "Décrivez votre suggestion d'amélioration",
+      "agent_feedback_details_placeholder": "Détails supplémentaires...",
+      "read_aloud": "Lire à voix haute",
+      "send_feedback": "Envoyer le retour",
+      "sending": "Envoi en cours...",
+      "agent_feedback_error": "Impossible d'envoyer le retour. Veuillez réessayer.",
+      "close": "Fermer",
+      "title": "Titre",
+      "details": "Détails",
+
       // Calendar page
       "calendar_page_subtitle": "Jalons et tâches, par semaine et par mois",
       "calendar_week_short": "S",

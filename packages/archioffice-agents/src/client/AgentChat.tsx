@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, createContext, useContext, useCallb
 import { useLocation, useNavigate } from 'react-router-dom';
 import { projectIdFromPath, useOpenProjectTabs } from '@/src/lib/openProjectTabs';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink, IconCheck, IconPencil, IconBulb } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
@@ -109,12 +109,163 @@ export function ArtifactCard({ artifact, onPreview }: { artifact: AgentArtifact;
 const NEW_MESSAGE_SPRING = { type: 'spring', bounce: 0, visualDuration: 0.2 } as const;
 const NEW_MESSAGE_WINDOW_MS = 4000;
 
-export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
+// Feedback types
+export type FeedbackKind = 'correction' | 'note' | 'improvement';
+
+
+/**
+ * Feedback Modal Component - allows users to provide structured feedback on agent responses
+ * This enables the learning loop for agents to improve over time
+ */
+export function FeedbackModal({
+  isOpen,
+  onClose,
+  onSubmit,
+  kind,
+  title,
+  content,
+  onTitleChange,
+  onContentChange,
+  submitting,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+  kind: FeedbackKind;
+  title: string;
+  content: string;
+  onTitleChange: (value: string) => void;
+  onContentChange: (value: string) => void;
+  submitting: boolean;
+}) {
+  const { t } = useTranslation();
+  
+  // Labels for different feedback types
+  const kindLabels: Record<FeedbackKind, string> = {
+    correction: t('agent_feedback_correction'),
+    note: t('agent_feedback_note'),
+    improvement: t('agent_feedback_improvement'),
+  };
+
+  // Descriptions for each feedback type
+  const kindDescriptions: Record<FeedbackKind, string> = {
+    correction: t('agent_feedback_correction_desc'),
+    note: t('agent_feedback_note_desc'),
+    improvement: t('agent_feedback_improvement_desc'),
+  };
+
+  // Placeholders for title input
+  const placeholders: Record<FeedbackKind, string> = {
+    correction: t('agent_feedback_correction_placeholder'),
+    note: t('agent_feedback_note_placeholder'),
+    improvement: t('agent_feedback_improvement_placeholder'),
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        transition={{ duration: 0.2 }}
+        className="w-full max-w-md mx-4 rounded-xl shadow-xl overflow-hidden"
+        style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-6">
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <h3 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>
+                {kindLabels[kind]}
+              </h3>
+              <p className="text-sm mt-1" style={{ color: 'var(--tblr-muted)' }}>
+                {kindDescriptions[kind]}
+              </p>
+            </div>
+            <button 
+              onClick={onClose} 
+              className="p-1 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
+              title={t('close')}
+              aria-label={t('close')}
+            >
+              <IconX size={18} style={{ color: 'var(--tblr-muted)' }} />
+            </button>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--tblr-text)' }}>
+                {t('title')}
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => onTitleChange(e.target.value)}
+                placeholder={placeholders[kind]}
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none transition-colors focus:border-[var(--tblr-primary)]"
+                style={{
+                  background: 'var(--tblr-surface-2)',
+                  borderColor: 'var(--tblr-border)',
+                  color: 'var(--tblr-text)'
+                }}
+                autoFocus
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: 'var(--tblr-text)' }}>
+                {t('details')}
+              </label>
+              <textarea
+                value={content}
+                onChange={(e) => onContentChange(e.target.value)}
+                placeholder={t('agent_feedback_details_placeholder')}
+                rows={4}
+                className="w-full px-3 py-2 rounded-lg border text-sm outline-none resize-none transition-colors focus:border-[var(--tblr-primary)]"
+                style={{
+                  background: 'var(--tblr-surface-2)',
+                  borderColor: 'var(--tblr-border)',
+                  color: 'var(--tblr-text)'
+                }}
+              />
+            </div>
+            
+            <button
+              onClick={onSubmit}
+              disabled={!title.trim() || !content.trim() || submitting}
+              className="w-full py-2.5 px-4 rounded-lg font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
+              style={{ 
+                background: 'var(--tblr-primary)', 
+                color: 'white'
+              }}
+            >
+              {submitting ? (
+                <span className="flex items-center justify-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  {t('sending')}
+                </span>
+              ) : (
+                t('send_feedback')
+              )}
+            </button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+
+export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact, onFeedback }: {
   msg: AgentMessage & { artifact?: AgentArtifact };
   agentColor: string;
   speech: Speech;
   onPreviewArtifact?: (artifact: AgentArtifact) => void;
+  onFeedback?: (messageId: string, kind: FeedbackKind) => void;
 }) {
+  const { t } = useTranslation();
   const isUser = msg.role === 'user';
   // La lecture à voix haute ne sert que les réponses de l'agent : ce que
   // l'utilisateur a écrit, il vient de le formuler lui-même.
@@ -151,21 +302,54 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact }: {
         </div>
         {msg.artifact && <ArtifactCard artifact={msg.artifact} onPreview={onPreviewArtifact} />}
         {!isUser && msg.content && (
-          <button
-            onClick={() => speech.toggle(msg.id, markdownToPlainText(msg.content))}
-            className="mt-1 p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
-            style={{ color: isSpeaking ? 'var(--tblr-primary)' : 'var(--tblr-muted)', opacity: isSpeaking ? 1 : undefined }}
-            title="Lire à voix haute"
-            aria-label="Lire à voix haute"
-          >
-            {isSpeaking && speech.status === 'loading' ? (
-              <div className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
-            ) : isSpeaking ? (
-              <IconPlayerStopFilled size={14} />
-            ) : (
-              <IconVolume size={14} />
+          <div className="flex gap-1 mt-1">
+            <button
+              onClick={() => speech.toggle(msg.id, markdownToPlainText(msg.content))}
+              className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+              style={{ color: isSpeaking ? 'var(--tblr-primary)' : 'var(--tblr-muted)', opacity: isSpeaking ? 1 : undefined }}
+              title={t('read_aloud')}
+              aria-label={t('read_aloud')}
+            >
+              {isSpeaking && speech.status === 'loading' ? (
+                <div className="w-3.5 h-3.5 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
+              ) : isSpeaking ? (
+                <IconPlayerStopFilled size={14} />
+              ) : (
+                <IconVolume size={14} />
+              )}
+            </button>
+            {onFeedback && (
+              <>
+                <button
+                  onClick={() => onFeedback(msg.id, 'correction')}
+                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  style={{ color: 'var(--tblr-muted)' }}
+                  title={t('agent_feedback_correction')}
+                  aria-label={t('agent_feedback_correction')}
+                >
+                  <IconPencil size={14} />
+                </button>
+                <button
+                  onClick={() => onFeedback(msg.id, 'note')}
+                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  style={{ color: 'var(--tblr-muted)' }}
+                  title={t('agent_feedback_note')}
+                  aria-label={t('agent_feedback_note')}
+                >
+                  <IconBulb size={14} />
+                </button>
+                <button
+                  onClick={() => onFeedback(msg.id, 'improvement')}
+                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  style={{ color: 'var(--tblr-muted)' }}
+                  title={t('agent_feedback_improvement')}
+                  aria-label={t('agent_feedback_improvement')}
+                >
+                  <IconCheck size={14} />
+                </button>
+              </>
             )}
-          </button>
+          </div>
         )}
       </div>
     </motion.div>
@@ -330,6 +514,13 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
   const [copilotSuggestions, setCopilotSuggestions] = useState<CopilotSuggestion[]>([]);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  // Feedback modal state
+  const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
+  const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
+  const [feedbackKind, setFeedbackKind] = useState<FeedbackKind>('note');
+  const [feedbackTitle, setFeedbackTitle] = useState('');
+  const [feedbackContent, setFeedbackContent] = useState('');
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const dragCounterRef = useRef(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -649,7 +840,48 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setAttachedDocs([]);
   };
 
-  const switchAgent = (agentId: string): void => {
+    // Feedback handlers
+  const handleFeedback = useCallback((messageId: string, kind: FeedbackKind) => {
+    setFeedbackMessageId(messageId);
+    setFeedbackKind(kind);
+    setFeedbackTitle('');
+    setFeedbackContent('');
+    setFeedbackModalOpen(true);
+  }, []);
+
+  const submitFeedback = async () => {
+    if (!feedbackMessageId || !feedbackTitle.trim() || !feedbackContent.trim() || !activeAgentId) return;
+    setFeedbackSubmitting(true);
+    try {
+      await apiFetch('/api/agents/learning', {
+        method: 'POST',
+        body: JSON.stringify({
+          message_id: feedbackMessageId,
+          kind: feedbackKind,
+          title: feedbackTitle.trim(),
+          content: feedbackContent.trim(),
+        }),
+      });
+      setFeedbackModalOpen(false);
+      setFeedbackMessageId(null);
+      setFeedbackTitle('');
+      setFeedbackContent('');
+    } catch (e: any) {
+      console.error('Feedback submission failed:', e);
+      setErrorMsg(e?.message || t('agent_feedback_error'));
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  };
+
+  const closeFeedbackModal = () => {
+    setFeedbackModalOpen(false);
+    setFeedbackMessageId(null);
+    setFeedbackTitle('');
+    setFeedbackContent('');
+  };
+
+const switchAgent = (agentId: string): void => {
     speech.stop();
     setActiveAgentId(agentId);
     setAgentSelectorOpen(false);
@@ -887,7 +1119,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 </div>
               )}
               {messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} />
+                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} onFeedback={handleFeedback} />
               ))}
               {loading && (
                 <div className="flex flex-col gap-1">
@@ -1048,6 +1280,22 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           </motion.div>
+        )}
+      </AnimatePresence>
+      {/* Feedback Modal */}
+      <AnimatePresence>
+        {feedbackModalOpen && (
+          <FeedbackModal
+            isOpen={feedbackModalOpen}
+            onClose={closeFeedbackModal}
+            onSubmit={submitFeedback}
+            kind={feedbackKind}
+            title={feedbackTitle}
+            content={feedbackContent}
+            onTitleChange={setFeedbackTitle}
+            onContentChange={setFeedbackContent}
+            submitting={feedbackSubmitting}
+          />
         )}
       </AnimatePresence>
     </AgentChatContext.Provider>
