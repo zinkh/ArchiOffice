@@ -41,6 +41,8 @@ type Etape = 'fichier' | 'rapprochement';
 /** Valeur du menu « Rattacher à… » qui crée un poste au lieu de rattacher la ligne. */
 const CREER = '__creer__';
 
+const EXTENSIONS_ACCEPTEES = ['.xlsx', '.ods', '.xls', '.csv'];
+
 const CONFIANCE_STYLE: Record<string, string> = {
   exacte: 'bg-green-100 text-green-800',
   haute: 'bg-sky-100 text-sky-800',
@@ -64,6 +66,17 @@ export const OffreImportDialog: React.FC<Props> = ({
   const [analyse, setAnalyse] = useState(false);
   const [enregistrement, setEnregistrement] = useState(false);
   const modeDocument = mode === 'document';
+  // Glisser-déposer d'un fichier sur la zone : sans gestionnaire, le navigateur ouvre le
+  // fichier à la place de la page.
+  const [survol, setSurvol] = useState(false);
+  const choisirFichier = (f: File | null | undefined) => {
+    if (!f) return;
+    if (!EXTENSIONS_ACCEPTEES.some(ext => f.name.toLowerCase().endsWith(ext))) {
+      setErreur(`Format non pris en charge (${f.name}). Déposez un fichier ${EXTENSIONS_ACCEPTEES.join(', ')}.`);
+      return;
+    }
+    setFichier(f); setErreur(null);
+  };
 
   // Un rapprochement approximatif ne compte que si l'architecte l'a coché.
   const [approxValides, setApproxValides] = useState<Set<number>>(new Set());
@@ -236,7 +249,8 @@ export const OffreImportDialog: React.FC<Props> = ({
   const label = 'block text-[0.6875rem] font-semibold text-zinc-500 mb-1';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}
+         onDragOver={e => e.preventDefault()} onDrop={e => e.preventDefault()}>
       <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-5xl max-h-[90dvh] flex flex-col"
            onClick={e => e.stopPropagation()}>
 
@@ -264,11 +278,16 @@ export const OffreImportDialog: React.FC<Props> = ({
                   ? `Fichier à importer dans le ${docLabel} (lots, chapitres et articles)`
                   : `${docLabel[0].toUpperCase() + docLabel.slice(1)} chiffré renvoyé par l'entreprise`}
               </label>
-              <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-zinc-300 rounded-lg p-8 cursor-pointer hover:border-blue-400 transition-colors">
+              <label
+                className={`flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg p-8 cursor-pointer transition-colors ${survol ? 'border-blue-500 bg-blue-50' : 'border-zinc-300 hover:border-blue-400'}`}
+                onDragEnter={e => { e.preventDefault(); setSurvol(true); }}
+                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setSurvol(true); }}
+                onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setSurvol(false); }}
+                onDrop={e => { e.preventDefault(); setSurvol(false); choisirFichier(e.dataTransfer.files?.[0]); }}>
                 <IconUpload size={22} className="text-zinc-400" />
-                <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Choisir un fichier .xlsx, .ods, .xls ou .csv'}</span>
-                <input type="file" accept=".xlsx,.ods,.xls,.csv" className="hidden"
-                       onChange={e => { setFichier(e.target.files?.[0] ?? null); setErreur(null); }} />
+                <span className="text-sm text-zinc-600">{fichier ? fichier.name : 'Glisser un fichier ici ou cliquer pour le choisir (.xlsx, .ods, .xls, .csv)'}</span>
+                <input type="file" accept={EXTENSIONS_ACCEPTEES.join(',')} className="hidden"
+                       onChange={e => { choisirFichier(e.target.files?.[0]); e.target.value = ''; }} />
               </label>
               <p className="mt-2 text-[0.6875rem] text-zinc-400">
                 {modeDocument

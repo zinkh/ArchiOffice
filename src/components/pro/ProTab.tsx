@@ -20,7 +20,7 @@ import type { LigneImportee } from '../../lib/bpuImport';
 import { bpuVersComparatif, dpgfVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
-  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
+  IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter, IconFileImport,
   IconChecklist, IconCamera, IconHistory,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
@@ -678,6 +678,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
     ] : []),
     ...(canSplit ? [{ id: 'pro-compare', label: t('pro_dossier_compare'), icon: <IconLayoutColumns size={16} />, onClick: () => setSplitView(v => !v), checked: splitView }] : []),
     ...(hasTree && !isMobile ? [{ id: 'pro-tree', label: t('pro_dossier_show_structure'), icon: <IconLayoutSidebar size={16} />, onClick: toggleTree, checked: showTree }] : []),
+    // Import d'un fichier dans le document affiché : ici plutôt qu'en bouton, pour ne pas alourdir la barre.
+    ...(['CCTP', 'DPGF', 'BPU', 'DQE'].includes(activeSubTab) ? [{
+      id: 'pro-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />,
+      onClick: () => setImportDocCible(isBpuTab ? 'bpu' : 'dpgf'),
+      disabled: isBpuTab ? !bpu : !dpgf,
+    }] : []),
     { id: 'pro-print-sep', separator: true as const },
     { id: 'pro-print', label: t('pro_dossier_print'), icon: <IconPrinter size={16} />, onClick: handlePrint },
   ];
@@ -854,7 +860,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor onImportDocument={() => setImportDocCible('dpgf')} dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
+              <CCTPEditor dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
             ) : null}
           </div>
           {splitView && (
@@ -882,7 +888,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                   showTree={showTree}
                   onToggleTree={toggleTree}
                   onImportOffre={() => setImportCible('dpgf')}
-                  onImportDocument={() => setImportDocCible('dpgf')}
                   onPushToAct={dpgf.lots.length > 0 ? verserAuComparatifActDpgf : undefined}
                   offres={dpgfOffres}
                   onDragStart={ligne => setDraggedLigne(ligne)}
@@ -973,7 +978,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 onExportPdf={colSet => { void exporterBpu('pdf', colSet, false); }}
                 onExportExcel={(colSet, vierge) => { void exporterBpu('xlsx', colSet, vierge); }}
                 onImportOffre={() => setImportCible('bpu')}
-                onImportDocument={() => setImportDocCible('bpu')}
                 onPushToAct={verserAuComparatifAct}
                 onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
                 onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}

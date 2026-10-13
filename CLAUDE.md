@@ -867,8 +867,9 @@ Un bouton crée d'un coup un poste pour toutes les lignes non rattachées.
   concernée ayant un prix ; le sous-total du lot les compte. `ACTModule.tsx` colore la ligne (violet, couleur
   de donnée) avec la pastille « Ajouté par … » ; l'export Excel du comparatif (`actAnalysisExport.ts`) ajoute
   « (ajouté par … ) » au libellé, la couleur n'y passant pas. Une offre écartée n'ajoute rien.
-- **Même dialogue pour remplir un document vierge** (`mode="document"`) : onglet PRO, menu « Importer un fichier
-  (créer les postes) » du DPGF, du DQE/BPU et du CCTP (bouton). Pas d'entreprise ni de prix obligatoire
+- **Même dialogue pour remplir un document vierge** (`mode="document"`) : onglet PRO, entrée « Importer un fichier
+  (créer les postes) » du menu « ⋯ » (CCTP, DPGF, DQE, BPU) : pas de bouton de plus dans la barre. La zone de dépôt
+  accepte le glisser-déposer (un fichier lâché hors de la zone est ignoré au lieu d'être ouvert par le navigateur). Pas d'entreprise ni de prix obligatoire
   (`detectHeader(..., { prixOptionnel })`, un CCTP n'a que des désignations) ; les lignes absentes du document
   sont cochées « à créer » d'office et `ajouterLignesAuDocument` les range lot > chapitre > article (premier
   segment = lot, deuxième = chapitre quand le numéro en compte trois, sinon un chapitre « Articles

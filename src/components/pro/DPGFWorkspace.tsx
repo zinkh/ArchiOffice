@@ -63,8 +63,6 @@ interface DPGFWorkspaceProps {
   onToggleTree?: () => void;
   /** Ouvre l'import d'une offre reçue sur ce DPGF. Absent tant que ProTab ne le fournit pas. */
   onImportOffre?: () => void;
-  /** Ouvre l'import d'un fichier qui remplit ce DPGF (les lignes absentes deviennent des articles). */
-  onImportDocument?: () => void;
   /** Verse le DPGF et ses offres au comparatif détaillé du module ACT. */
   onPushToAct?: () => void;
   /** Juste pour désactiver « Verser au comparatif » tant qu'aucune offre n'est reçue. */
@@ -78,7 +76,7 @@ const isTextField = (el: EventTarget | null) =>
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   dpgf, onChange, projectName, onDropExternal, onDragStart,
-  showTree: showTreeProp, onToggleTree, onImportOffre, onImportDocument, onPushToAct, offres = [], notify,
+  showTree: showTreeProp, onToggleTree, onImportOffre, onPushToAct, offres = [], notify,
 }) => {
   const { settings } = useSettings();
   const { t } = useTranslation();
@@ -719,7 +717,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     {
       kind: 'menu', id: 'dpgf-market', label: t('pro_market'), icon: <IconScale size={16} />,
       entries: [
-        { id: 'dpgf-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'dpgf-import-offer', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'dpgf-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
       ],
