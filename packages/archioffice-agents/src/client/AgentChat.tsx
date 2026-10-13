@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef, createContext, useContext, useCallb
 import { useLocation, useNavigate } from 'react-router-dom';
 import { projectIdFromPath, useOpenProjectTabs } from '@/src/lib/openProjectTabs';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink, IconCheck, IconPencil, IconBulb } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink, IconNote, IconPencil, IconBulb } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
+import { useEscapeKey } from '@/src/hooks/useEscapeKey';
 import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
 import { useDictation } from './useDictation.js';
 import { useSpeech } from './useSpeech.js';
@@ -139,7 +140,8 @@ export function FeedbackModal({
   submitting: boolean;
 }) {
   const { t } = useTranslation();
-  
+  useEscapeKey(isOpen && !submitting, onClose);
+
   // Labels for different feedback types
   const kindLabels: Record<FeedbackKind, string> = {
     correction: t('agent_feedback_correction'),
@@ -170,6 +172,9 @@ export function FeedbackModal({
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 20 }}
         transition={{ duration: 0.2 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="agent-feedback-title"
         className="w-full max-w-md mx-4 rounded-xl shadow-xl overflow-hidden"
         style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
         onClick={(e) => e.stopPropagation()}
@@ -177,7 +182,7 @@ export function FeedbackModal({
         <div className="p-6">
           <div className="flex justify-between items-start mb-4">
             <div>
-              <h3 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>
+              <h3 id="agent-feedback-title" className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>
                 {kindLabels[kind]}
               </h3>
               <p className="text-sm mt-1" style={{ color: 'var(--tblr-muted)' }}>
@@ -305,7 +310,7 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact, onFe
           <div className="flex gap-1 mt-1">
             <button
               onClick={() => speech.toggle(msg.id, markdownToPlainText(msg.content))}
-              className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+              className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100"
               style={{ color: isSpeaking ? 'var(--tblr-primary)' : 'var(--tblr-muted)', opacity: isSpeaking ? 1 : undefined }}
               title={t('read_aloud')}
               aria-label={t('read_aloud')}
@@ -322,7 +327,7 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact, onFe
               <>
                 <button
                   onClick={() => onFeedback(msg.id, 'correction')}
-                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100"
                   style={{ color: 'var(--tblr-muted)' }}
                   title={t('agent_feedback_correction')}
                   aria-label={t('agent_feedback_correction')}
@@ -331,21 +336,21 @@ export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact, onFe
                 </button>
                 <button
                   onClick={() => onFeedback(msg.id, 'note')}
-                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100"
                   style={{ color: 'var(--tblr-muted)' }}
                   title={t('agent_feedback_note')}
                   aria-label={t('agent_feedback_note')}
                 >
-                  <IconBulb size={14} />
+                  <IconNote size={14} />
                 </button>
                 <button
                   onClick={() => onFeedback(msg.id, 'improvement')}
-                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100"
+                  className="p-1 rounded transition-colors hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100"
                   style={{ color: 'var(--tblr-muted)' }}
                   title={t('agent_feedback_improvement')}
                   aria-label={t('agent_feedback_improvement')}
                 >
-                  <IconCheck size={14} />
+                  <IconBulb size={14} />
                 </button>
               </>
             )}
