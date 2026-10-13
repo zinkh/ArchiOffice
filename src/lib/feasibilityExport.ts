@@ -144,26 +144,36 @@ const DOCX_IMAGE_W = 642;
 export async function exportFeasibilityDocx(p: ProposalForExport, sections: FeasibilitySection[], settings: AgencySettings): Promise<void> {
   const {
     Document, Packer, Paragraph, TextRun, ImageRun, Header, Footer, PageNumber, AlignmentType, HeadingLevel, BorderStyle,
+    Table, TableRow, TableCell, WidthType, TabStopType, TabStopPosition,
   } = await import('docx');
 
-  const headerChildren: InstanceType<typeof Paragraph>[] = [];
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92) : null;
-  if (logo) {
-    const h = 40;
-    headerChildren.push(new Paragraph({
-      children: [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
-    }));
-  }
-  headerChildren.push(
-    new Paragraph({ children: [new TextRun({ text: settings.agencyName || '', bold: true, size: 20, color: '111827' })] }),
+  // En-tête de la première page : logo à gauche, repère du document à droite, filet noir.
+  // Les pages suivantes n'ont pas de logo : seul le repère, en gris, sous un filet.
+  const repere = [p.reference, DOC_TITLE].filter(Boolean).join(' | ');
+  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 600, 400, 0.92) : null;
+  const firstHeaderChildren: InstanceType<typeof Paragraph>[] = [
     new Paragraph({
-      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: 'D1D5DB' } },
-      spacing: { after: 120 },
-      children: [new TextRun({ text: [settings.address, settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  '), size: 15, color: '6B7280' })],
+      tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
+      border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: '111827', space: 6 } },
+      spacing: { after: 240 },
+      children: [
+        ...(logo ? [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * 48), height: 48 } })] : [
+          new TextRun({ text: settings.agencyName || '', bold: true, size: 24, color: '111827' }),
+        ]),
+        new TextRun({ text: `\t${repere}`, size: 17, color: '6B7280' }),
+      ],
     }),
-  );
+  ];
+  const nextHeaderChildren: InstanceType<typeof Paragraph>[] = [
+    new Paragraph({
+      alignment: AlignmentType.RIGHT,
+      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '111827', space: 4 } },
+      spacing: { after: 240 },
+      children: [new TextRun({ text: repere, size: 17, color: '6B7280' })],
+    }),
+  ];
   const bandeau = await partnerLogosParagraph();
-  if (bandeau) headerChildren.push(bandeau);
+  if (bandeau) firstHeaderChildren.push(bandeau);
 
   const footerChildren = [
     new Paragraph({
@@ -181,25 +191,40 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
     }),
   ];
 
-  const body: InstanceType<typeof Paragraph>[] = [
-    new Paragraph({ heading: HeadingLevel.TITLE, spacing: { before: 600, after: 120 }, children: [new TextRun({ text: DOC_TITLE, bold: true, size: 44, color: '111827' })] }),
+  const gris = { style: BorderStyle.SINGLE, size: 4, color: '9CA3AF' };
+  const cellBorders = { top: gris, bottom: gris, left: gris, right: gris };
+  const body: (InstanceType<typeof Paragraph> | InstanceType<typeof Table>)[] = [
+    new Paragraph({ heading: HeadingLevel.TITLE, spacing: { before: 200, after: 80 }, children: [new TextRun({ text: DOC_TITLE.toUpperCase(), bold: true, size: 44, color: '111827' })] }),
   ];
-  if (p.title) body.push(new Paragraph({ spacing: { after: 360 }, children: [new TextRun({ text: p.title, size: 26, color: '6B7280' })] }));
-  for (const [k, v] of feasibilityCoverFields(p)) {
-    body.push(new Paragraph({ spacing: { after: 60 }, children: [
-      new TextRun({ text: `${k} : `, bold: true, size: 19, color: '6B7280' }),
-      new TextRun({ text: v, size: 20, color: '111827' }),
-    ] }));
-  }
-  if (sections.length) {
-    body.push(new Paragraph({ spacing: { before: 400, after: 120 }, children: [new TextRun({ text: 'Sommaire', bold: true, size: 24, color: '111827' })] }));
-    sections.forEach((s, i) => body.push(new Paragraph({ spacing: { after: 40 }, children: [new TextRun({ text: `${i + 1}. ${s.title}`, size: 20 })] })));
+  if (p.title) body.push(new Paragraph({ spacing: { after: 240 }, children: [new TextRun({ text: p.title, size: 26, color: '6B7280' })] }));
+  const fields = feasibilityCoverFields(p);
+  if (fields.length) {
+    body.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      columnWidths: [2400, 6626],
+      rows: fields.map(([k, v]) => new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 2400, type: WidthType.DXA }, borders: cellBorders,
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            children: [new Paragraph({ children: [new TextRun({ text: k, bold: true, size: 20, color: '111827' })] })],
+          }),
+          new TableCell({
+            width: { size: 6626, type: WidthType.DXA }, borders: cellBorders,
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            children: [new Paragraph({ children: [new TextRun({ text: v, size: 20, color: '111827' })] })],
+          }),
+        ],
+      })),
+    }));
   }
 
+  // Les rubriques s'enchaînent à la suite de la page de garde, sans saut de page.
   for (const [i, s] of sections.entries()) {
     body.push(new Paragraph({
-      heading: HeadingLevel.HEADING_1, pageBreakBefore: true, spacing: { after: 200 },
-      children: [new TextRun({ text: `${i + 1}. ${s.title}`, bold: true, size: 28, color: '111827' })],
+      heading: HeadingLevel.HEADING_1, keepNext: true, spacing: { before: 400, after: 160 },
+      border: { bottom: { style: BorderStyle.SINGLE, size: 12, color: '111827', space: 2 } },
+      children: [new TextRun({ text: `${i + 1}. ${s.title}`.toUpperCase(), bold: true, size: 26, color: '111827' })],
     }));
     for (const para of (s.content || '').split(/\n/)) {
       if (!para.trim()) continue;
@@ -234,9 +259,9 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
       },
     },
     sections: [{
-      properties: {},
-      headers: { default: new Header({ children: headerChildren }) },
-      footers: { default: new Footer({ children: footerChildren }) },
+      properties: { titlePage: true },
+      headers: { first: new Header({ children: firstHeaderChildren }), default: new Header({ children: nextHeaderChildren }) },
+      footers: { first: new Footer({ children: footerChildren }), default: new Footer({ children: footerChildren }) },
       children: body,
     }],
   });
