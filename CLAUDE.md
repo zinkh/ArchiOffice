@@ -1926,6 +1926,38 @@ défaut) et non dans `lot_tracking` (`lotPresenceStatus`, `src/lib/siteReportPre
   (`localStorage`, `chantier:pdf:rubriquePhotos`, coché par défaut) et passe par
   `includeRubriquePhotos`. Les rubriques reportées d'un CR au suivant ne reprennent pas les photos.
 
+### Écriture du DPGF par les agents et le MCP (`manage_dpgf`)
+
+`manage_dpgf` (`projectWorkTools.ts`, scope `projects`, donc aussi exposé au MCP) ajoute, modifie
+ou supprime des LIGNES du DPGF d'une opération, au lieu d'un UPDATE SQL sur `dpgfs` ou de
+l'envoi du document entier. L'outil n'est qu'un client de `POST /api/projects/:id/dpgf/lignes`
+(`server/routes/dpgf.ts`), qui applique l'opération par `server/dpgfLignes.ts` (pur, testé,
+`tests/dpgfLignes.test.ts`) : même jeton, même cabinet que l'écran.
+
+- **Actions** : `add_lignes` (lot, chapitre par numéro ou titre, défaut « DESCRIPTION DES OUVRAGES »,
+  jusqu'à 300 lignes par appel, numérotation `<chapitre>.<n>` à la suite, `replace_existing` pour
+  écraser une ligne vide « Nouvel article »), `update_ligne` et `delete_ligne` (par `id` ou numéro ;
+  la suppression passe par la confirmation en deux temps, un `dry_run` serveur en donne l'aperçu).
+  Il ne crée ni DPGF, ni lot, ni chapitre : le lot doit exister (`manage_project_lots`).
+- **Jamais touchés** : un chapitre `cctpOnly`, et une ligne qui porte un `cctpDescription`
+  (conservée par `replace_existing`, refusée en suppression). Une nouvelle ligne n'a ni
+  `batimentId`, ni `phaseId`, ni `trancheId` : `batimentId: ''` voudrait dire « aucun bâtiment, sans
+  héritage », l'absence « hérite du chapitre ou du lot ».
+- **Un appel est accepté en entier ou refusé en entier** (quantité et prix numériques et positifs,
+  lot et chapitre existants) ; erreurs en français, avec la liste des lots ou chapitres disponibles.
+  Rejouer `add_lignes` ajoute de nouveau : refaire un import passe par `replace_existing`.
+- **Totaux** : `prixTotal` des lignes touchées, `sousTotal` de chaque lot, `totalHT` et `totalTTC`
+  (champ `TVA` du document, 20 % à défaut) ; le récapitulatif rend les lignes ajoutées par lot et
+  les sous-totaux.
+- **Limite de la concurrence, à connaître** : `dpgfs` n'a ni `updated_at` ni version (aucune
+  migration n'a été faite) et le texte `data` est trop gros pour une comparaison dans une requête
+  PostgREST. La route sérialise donc les écritures par DPGF dans le processus et RELIT le document
+  juste avant d'écrire (trois essais, puis 409). Cela couvre des appels d'agent simultanés et la
+  plupart des enregistrements de l'application web, pas la fenêtre de quelques millisecondes entre
+  la relecture et l'écriture, ni plusieurs instances du serveur. L'autosauvegarde de l'écran réécrit
+  de toute façon le document entier : une colonne `updated_at` (ou une fonction SQL atomique) serait
+  la vraie réponse, à décider séparément.
+
 ### Intervenants d'une affaire (agents et MCP)
 
 Les intervenants (`project_stakeholders`, liste « Intervenants » de la fiche) ne sont pas une

@@ -22,6 +22,24 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { remonterPrixOffre } from '../articlePrices';
+import { appliquerOperation, DpgfLignesError, type Operation } from '../dpgfLignes';
+
+/**
+ * Un seul écrivain à la fois par DPGF DANS CE PROCESSUS. Combiné à la relecture juste
+ * avant l'écriture (voir POST .../dpgf/lignes), cela couvre deux appels d'agent ou de MCP
+ * simultanés. Ce n'est PAS un verrou de base : `dpgfs` n'a ni `updated_at` ni version, et
+ * la comparaison sur la colonne `data` (texte de plusieurs centaines de Ko) ne passe pas
+ * dans une requête PostgREST.
+ */
+const verrousDpgf = new Map<string, Promise<unknown>>();
+async function sousVerrou<T>(cle: string, travail: () => Promise<T>): Promise<T> {
+  const precedent = verrousDpgf.get(cle) ?? Promise.resolve();
+  const suite = precedent.catch(() => undefined).then(travail);
+  verrousDpgf.set(cle, suite);
+  try { return await suite; } finally { if (verrousDpgf.get(cle) === suite) verrousDpgf.delete(cle); }
+}
+const brut = (row: any): string => (typeof row?.data === 'string' ? row.data : JSON.stringify(row?.data ?? null));
+
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -90,6 +108,43 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     } catch (error) {
       console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
+    }
+  });
+
+  // ── Écriture de lignes (outil manage_dpgf des agents et du MCP) ─────────────
+  // Une opération ciblée (ajout, modification, suppression de lignes) appliquée au
+  // document par server/dpgfLignes.ts, puis totaux recalculés. `dry_run: true` rend le
+  // rapport sans rien écrire (confirmation en deux temps d'une suppression).
+  app.post('/api/projects/:projectId/dpgf/lignes', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const { dry_run: aBlanc, ...operation } = req.body ?? {};
+      const rapport = await sousVerrou(`${tenantId}:${projectId}`, async () => {
+        for (let essai = 0; essai < 3; essai++) {
+          const row = await loadRow(supabaseAdmin, tenantId, projectId);
+          if (!row) throw new DpgfLignesError("Ce projet n'a pas de DPGF.", 404);
+          const lu = brut(row);
+          const { doc, rapport } = appliquerOperation(typeof row.data === 'string' ? JSON.parse(row.data) : row.data, operation as Operation);
+          if (aBlanc === true) return { ...rapport, dry_run: true };
+          // Relecture juste avant d'écrire : si l'application web a enregistré entre-temps,
+          // on rejoue l'opération sur le document à jour au lieu de l'écraser.
+          const frais = await loadRow(supabaseAdmin, tenantId, projectId);
+          if (!frais || brut(frais) !== lu) continue;
+          const { error } = await supabaseAdmin.from('dpgfs')
+            .update({ data: JSON.stringify(doc) }).eq('id', row.id).eq('tenant_id', tenantId);
+          if (error) throw error;
+          const userName = await getUserName(tenantId, req.user.id, req.user.email);
+          logActivity(tenantId, req.user.id, userName, `DPGF : ${operation?.action} (outil agent)`, '', row.id, 'dpgf', 'Situations/DPGF');
+          return rapport;
+        }
+        throw new DpgfLignesError("Le DPGF a été modifié pendant l'opération : relance la demande.", 409);
+      });
+      res.json({ success: true, ...rapport });
+    } catch (e: any) {
+      if (e instanceof DpgfLignesError) return res.status(e.status).json({ error: e.message });
+      console.error('[POST /api/projects/:projectId/dpgf/lignes]', e);
+      res.status(500).json({ error: "Échec de l'écriture dans le DPGF." });
     }
   });
 
