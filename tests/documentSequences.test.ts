@@ -78,7 +78,24 @@ describe('getNextDocNumber : amorçage sur l\'existant', () => {
       { id: `p1-${tenantId}`, tenant_id: tenantId, reference: '2626 ' },
       { id: `p2-${tenantId}`, tenant_id: tenantId, reference: '2626 ' },
     ]);
-    expect(await getNextDocNumber(fakeSupabaseAdmin, tenantId, 'num_prefix_devis', 'proposals', 'DEVIS')).toBe(`DEVIS-${year}-003`);
+    expect(await getNextDocNumber(fakeSupabaseAdmin, tenantId, 'num_prefix_devis', 'proposals', 'DEVIS')).toBe(`DEVIS-${year}-001`);
+  });
+
+  it('repart de 001 chaque année : les numéros d\'une autre année ne comptent pas', async () => {
+    const tenantId = makeTenant();
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: `i1-${tenantId}`, tenant_id: tenantId, invoice_number: `FAC-${year - 1}-041` },
+      { id: `i2-${tenantId}`, tenant_id: tenantId, invoice_number: `FAC-${year - 1}-042` },
+    ]);
+    expect(await getNextDocNumber(fakeSupabaseAdmin, tenantId, 'num_prefix_facture', 'invoices', 'FAC')).toBe(`FAC-${year}-001`);
+  });
+
+  it('la suite d\'une année est indépendante de celle de l\'année précédente', async () => {
+    const tenantId = makeTenant();
+    const a = await nextDocumentSequence(fakeSupabaseAdmin, tenantId, 'invoice', year - 1, async () => 0);
+    const b = await nextDocumentSequence(fakeSupabaseAdmin, tenantId, 'invoice', year - 1, async () => 0);
+    const c = await nextDocumentSequence(fakeSupabaseAdmin, tenantId, 'invoice', year, async () => 0);
+    expect([a, b, c]).toEqual([1, 2, 1]);
   });
 
   it('numérote séparément devis, factures et notes d\'honoraires', async () => {
@@ -111,11 +128,11 @@ describe('repli et erreurs', () => {
 
   it('toute autre erreur de base est remontée, jamais remplacée par un numéro approximatif', async () => {
     const broken = { rpc: async () => ({ data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } }) };
-    await expect(nextDocumentSequence(broken, 'tenant-1', 'invoice', async () => 5)).rejects.toThrow(/statement timeout/);
+    await expect(nextDocumentSequence(broken, 'tenant-1', 'invoice', 2026, async () => 5)).rejects.toThrow(/statement timeout/);
   });
 
   it('refuse une valeur de séquence inattendue', async () => {
     const odd = { rpc: async () => ({ data: 'abc', error: null }) };
-    await expect(nextDocumentSequence(odd, 'tenant-1', 'invoice', async () => 5)).rejects.toThrow(/valeur inattendue/);
+    await expect(nextDocumentSequence(odd, 'tenant-1', 'invoice', 2026, async () => 5)).rejects.toThrow(/valeur inattendue/);
   });
 });

@@ -31,7 +31,7 @@ export async function getNextDocNumber(
     return count || 0;
   };
   const series = SERIES_BY_TABLE[countTable];
-  const next = series ? await nextDocumentSequence(supabaseAdmin, tenantId, series, countRows) : (await countRows()) + 1;
+  const next = series ? await nextDocumentSequence(supabaseAdmin, tenantId, series, year, countRows) : (await countRows()) + 1;
   const seq = String(next).padStart(3, '0');
   return `${prefix}-${year}-${seq}`;
 }

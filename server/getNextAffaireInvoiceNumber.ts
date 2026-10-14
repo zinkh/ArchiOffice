@@ -21,7 +21,7 @@ export async function getNextAffaireInvoiceNumber(
       .eq('tenant_id', tenantId).eq('project_id', projectId).eq('invoice_type', 'acompte');
     return count || 0;
   };
-  const next = await nextDocumentSequence(supabaseAdmin, tenantId, `acompte:${projectId}`, countAcomptes);
+  const next = await nextDocumentSequence(supabaseAdmin, tenantId, `acompte:${projectId}`, 0, countAcomptes);
   const seq = String(next).padStart(2, '0');
   return `${affaireCode}-ACO-${seq}`;
 }

@@ -18,17 +18,19 @@ export function isMissingSequenceFunction(error: any): boolean {
 }
 
 /**
- * Prochaine valeur de la série `series` du cabinet. `legacyCount` ne sert que de
- * repli quand la migration n'est pas jouée : il rend le nombre de lignes
- * existantes, comme avant.
+ * Prochaine valeur de la série `series` du cabinet pour l'année `year` (la
+ * numérotation repart de 1 chaque année ; les séries `acompte:` l'ignorent).
+ * `legacyCount` ne sert que de repli quand la migration n'est pas jouée : il rend
+ * le nombre de lignes existantes, comme avant.
  */
 export async function nextDocumentSequence(
   supabaseAdmin: any,
   tenantId: string,
   series: string,
+  year: number,
   legacyCount: () => Promise<number>,
 ): Promise<number> {
-  const { data, error } = await supabaseAdmin.rpc('next_document_number', { p_tenant_id: tenantId, p_series: series });
+  const { data, error } = await supabaseAdmin.rpc('next_document_number', { p_tenant_id: tenantId, p_series: series, p_year: year });
   if (!error) {
     const value = Number(data);
     if (!Number.isFinite(value) || value < 1) throw new Error(`Séquence « ${series} » : valeur inattendue (${String(data)}).`);

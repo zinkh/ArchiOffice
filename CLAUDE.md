@@ -258,10 +258,12 @@ même numéro à deux créations simultanées (trois notes d'honoraires d'un cab
 « NH-01 » en production). Séries : `invoice`, `proposal`, `note_honoraires`, `acompte:<projet>`.
 Quatre règles à garder :
 
-- **Pas de remise à zéro annuelle** : l'ancien comptage ne repartait pas de 1 au changement
-  d'année (l'année n'est qu'un élément du libellé), la séquence garde ce comportement.
-- **Amorçage sur l'existant**, à la première demande d'une série : le plus grand du nombre de
-  lignes et du plus grand suffixe d'un numéro de la forme `…-AAAA-NNN`. Une référence saisie à la
+- **Remise à zéro chaque année** : la clé d'une séquence est (cabinet, série, année) ; la
+  numérotation repart de 001 au 1er janvier. Les références d'acompte d'une affaire
+  (`acompte:<projet>`) ignorent l'année (année 0).
+- **Amorçage sur l'existant**, à la première demande d'une série pour une année : le plus grand
+  suffixe d'un numéro de la forme `…-AAAA-NNN` de CETTE année (001 s'il n'y en a pas ; pour un
+  acompte, le nombre d'acomptes déjà émis sur l'affaire). Une référence saisie à la
   main (« 2626 », « NH-01 ») n'est volontairement pas lue comme un suffixe, sinon elle ferait sauter
   la numérotation. Un numéro réservé par une création qui échoue ensuite n'est pas rendu : la suite
   peut avoir un trou, jamais un doublon.

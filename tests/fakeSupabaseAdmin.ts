@@ -96,15 +96,15 @@ export class FakeSupabaseAdmin {
   // check-and-write: both read and write the row synchronously here, same
   // as Postgres would under a row lock, so the atomicity these functions
   // exist for isn't something this in-memory fake can fail to reproduce.
-  private documentSequenceSeed(tenantId: string, series: string): number {
+  private documentSequenceSeed(tenantId: string, series: string, year: number): number {
     const suffix = (value: unknown) => {
-      const m = /-\d{4}-(\d{1,9})\s*$/.exec(String(value ?? ''));
+      const m = new RegExp(`-${year}-(\\d{1,9})\\s*$`).exec(String(value ?? ''));
       return m ? parseInt(m[1], 10) : 0;
     };
     const rows = (table: string) => this.getTable(table).filter(r => r.tenant_id === tenantId);
     const fromColumn = (table: string, column: string) => {
       const list = rows(table);
-      return Math.max(list.length, ...list.map(r => suffix(r[column])), 0);
+      return Math.max(...list.map(r => suffix(r[column])), 0);
     };
     if (series === 'invoice') return fromColumn('invoices', 'invoice_number');
     if (series === 'proposal') return fromColumn('proposals', 'reference');
@@ -165,10 +165,11 @@ export class FakeSupabaseAdmin {
         return { data: null, error: { code: 'PGRST202', message: 'Could not find the function public.next_document_number in the schema cache' } };
       }
       // Même logique que migrate_atomic_document_numbering.sql : amorçage sur le plus
-      // grand du nombre de lignes et du plus grand suffixe « -AAAA-NNN », puis
+      // grand suffixe « -AAAA-NNN » de l'année demandée, puis
       // incrément. Synchrone, donc atomique ici comme le verrou de ligne l'est en SQL.
-      const key = `${params.p_tenant_id}|${params.p_series}`;
-      if (!this.docSequences.has(key)) this.docSequences.set(key, this.documentSequenceSeed(params.p_tenant_id, params.p_series));
+      const year = String(params.p_series).startsWith('acompte:') ? 0 : Number(params.p_year);
+      const key = `${params.p_tenant_id}|${params.p_series}|${year}`;
+      if (!this.docSequences.has(key)) this.docSequences.set(key, this.documentSequenceSeed(params.p_tenant_id, params.p_series, year));
       const next = (this.docSequences.get(key) as number) + 1;
       this.docSequences.set(key, next);
       return { data: next, error: null };

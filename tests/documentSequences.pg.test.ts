@@ -45,15 +45,18 @@ describe.skipIf(!hasPostgres)('next_document_number : atomicité sur un vrai Pos
       `);
       await pool.query(readFileSync(join(__dirname, '../supabase/migrate_atomic_document_numbering.sql'), 'utf8'));
 
-      const next = async (tenant: string, series: string) =>
-        Number((await pool.query('SELECT next_document_number($1::uuid, $2::text) AS n', [tenant, series])).rows[0].n);
+      const next = async (tenant: string, series: string, year = 2026) =>
+        Number((await pool.query('SELECT next_document_number($1::uuid, $2::text, $3::int) AS n', [tenant, series, year])).rows[0].n);
 
-      // Amorçage : max(3 lignes, suffixe 20) = 20, donc la suite commence à 21.
+      // Amorçage : plus grand suffixe de l'année (020), donc la suite commence à 21.
       expect(await next(TENANT_A, 'invoice')).toBe(21);
-      // « NH-01 » (saisie à la main) n'est pas une séquence : 3 lignes -> 4.
-      expect(await next(TENANT_B, 'note_honoraires')).toBe(4);
-      // Un acompte existe sur l'affaire : la référence suivante est la 2e.
+      // Une autre année repart de 1, quels que soient les numéros existants.
+      expect(await next(TENANT_A, 'invoice', 2027)).toBe(1);
+      // « NH-01 » (saisie à la main) n'est pas une séquence : la série démarre à 1.
+      expect(await next(TENANT_B, 'note_honoraires')).toBe(1);
+      // Un acompte existe sur l'affaire : la référence suivante est la 2e, quelle que soit l'année.
       expect(await next(TENANT_A, `acompte:${PROJECT}`)).toBe(2);
+      expect(await next(TENANT_A, `acompte:${PROJECT}`, 2027)).toBe(3);
 
       // Vraie concurrence : 20 connexions en parallèle sur une même série.
       const values = await Promise.all(Array.from({ length: 20 }, () => next(TENANT_A, 'proposal')));
