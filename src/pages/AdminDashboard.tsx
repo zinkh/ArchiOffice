@@ -125,7 +125,7 @@ export function PlanSelect({ tenantId, current, onChange }: { tenantId: string; 
 
 // ─── Create Tenant Dialog ─────────────────────────────────────────────────────
 
-interface CreateTenantResult { tenantId: string; slug: string; tempPassword: string }
+interface CreateTenantResult { tenantId: string; slug: string; inviteLink: string | null; emailSent: boolean }
 
 function CreateTenantDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (t: TenantRow) => void }) {
   const [form, setForm] = useState({ name: '', slug: '', adminEmail: '', adminName: '', plan: 'trial' });
@@ -181,11 +181,13 @@ function CreateTenantDialog({ onClose, onCreated }: { onClose: () => void; onCre
             <div className="rounded-lg p-3 text-sm font-mono" style={{ background: 'var(--tblr-surface-2)' }}>
               <p style={{ color: 'var(--tblr-muted)' }}>Email admin</p>
               <p className="font-semibold" style={{ color: 'var(--tblr-text)' }}>{form.adminEmail}</p>
-              <p className="mt-2" style={{ color: 'var(--tblr-muted)' }}>Mot de passe temporaire</p>
-              <p className="font-semibold" style={{ color: 'var(--tblr-text)' }}>{result.tempPassword}</p>
+              <p className="mt-2" style={{ color: 'var(--tblr-muted)' }}>Lien d'invitation (usage unique)</p>
+              <p className="font-semibold break-all select-all" style={{ color: 'var(--tblr-text)' }}>{result.inviteLink ?? 'Indisponible'}</p>
             </div>
             <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
-              Transmettez ces identifiants à l'administrateur du cabinet. Il pourra changer son mot de passe après connexion.
+              {result.emailSent
+                ? "Le lien a été envoyé par e-mail à l'administrateur du cabinet. Il choisira lui-même son mot de passe."
+                : "Aucun e-mail n'a pu être envoyé : transmettez ce lien à l'administrateur du cabinet. Il choisira lui-même son mot de passe."}
             </p>
             <button onClick={onClose} className="w-full py-2 rounded-lg text-sm font-semibold mt-2" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
               Fermer

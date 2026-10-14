@@ -4,7 +4,7 @@
 // NOT tenant-scoped (it's the platform operator's cross-tenant admin
 // panel), so these tests check the requireSuperAdmin gate instead of
 // tenant isolation.
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
@@ -134,7 +134,8 @@ describe('Super-Admin tenant mutations', () => {
       name: 'Cabinet Test', slug, adminEmail: 'owner@cabinet-test.fr', adminName: 'Owner',
     });
     expect(created.status).toBe(201);
-    expect(created.body.tempPassword).toBeTruthy();
+    expect(created.body.tempPassword).toBeUndefined();
+    expect(created.body.inviteLink).toBeTruthy();
     expect(fakeSupabaseAdmin.getTable('tenants').find(t => t.id === created.body.tenantId)?.slug).toBe(slug);
     expect(fakeSupabaseAdmin.getTable('profiles').some(p => p.tenant_id === created.body.tenantId && p.system_role === 'admin')).toBe(true);
 
@@ -142,6 +143,18 @@ describe('Super-Admin tenant mutations', () => {
       name: 'Autre', slug, adminEmail: 'other@cabinet-test.fr', adminName: 'Other',
     });
     expect(dup.status).toBe(400);
+  });
+
+  it('retire le cabinet inséré quand le compte administrateur ne peut pas être créé', async () => {
+    const token = makeSuperAdminToken();
+    const slug = `cabinet-echec-${Date.now()}`;
+    const spy = vi.spyOn(fakeSupabaseAdmin.auth.admin, 'generateLink').mockResolvedValueOnce({ data: { user: null }, error: { message: 'User already registered' } } as any);
+    const res = await request(app).post('/api/admin/tenants').set(authHeader(token)).send({
+      name: 'Cabinet Echec', slug, adminEmail: 'deja@cabinet-test.fr', adminName: 'Deja',
+    });
+    spy.mockRestore();
+    expect(res.status).toBe(500);
+    expect(fakeSupabaseAdmin.getTable('tenants').some(t => t.slug === slug)).toBe(false);
   });
 
   it('deletes a tenant', async () => {

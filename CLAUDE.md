@@ -248,6 +248,37 @@ unique partiel `(tenant_id, invoice_number) WHERE invoice_number IS NOT NULL`
 cabinet de porter le même numéro, quelle que soit la cause (course locale,
 numéro fourni par un client, import).
 
+**Le numéro local vient d'une séquence atomique, plus d'un comptage.** `getNextDocNumber`
+(devis, factures, notes d'honoraires) et `getNextAffaireInvoiceNumber` (référence
+`CODE-ACO-NN` d'un acompte) appellent `nextDocumentSequence()` (`server/documentSequence.ts`),
+donc la fonction SQL `next_document_number(cabinet, série)`
+(`supabase/migrate_atomic_document_numbering.sql`) : un `UPDATE ... RETURNING` sur
+`document_sequences`, sous verrou de ligne Postgres. L'ancien « nombre de lignes + 1 » donnait le
+même numéro à deux créations simultanées (trois notes d'honoraires d'un cabinet portent déjà
+« NH-01 » en production). Séries : `invoice`, `proposal`, `note_honoraires`, `acompte:<projet>`.
+Quatre règles à garder :
+
+- **Remise à zéro chaque année** : la clé d'une séquence est (cabinet, série, année) ; la
+  numérotation repart de 001 au 1er janvier. Les références d'acompte d'une affaire
+  (`acompte:<projet>`) ignorent l'année (année 0).
+- **Amorçage sur l'existant**, à la première demande d'une série pour une année : le plus grand
+  suffixe d'un numéro de la forme `…-AAAA-NNN` de CETTE année (001 s'il n'y en a pas ; pour un
+  acompte, le nombre d'acomptes déjà émis sur l'affaire). Une référence saisie à la
+  main (« 2626 », « NH-01 ») n'est volontairement pas lue comme un suffixe, sinon elle ferait sauter
+  la numérotation. Un numéro réservé par une création qui échoue ensuite n'est pas rendu : la suite
+  peut avoir un trou, jamais un doublon.
+- **Repli sans la migration** (poste Electron, hébergement en retard) : seule l'absence de la
+  fonction (`PGRST202`, `42883`) ramène à l'ancien calcul ; toute autre erreur est remontée, jamais
+  remplacée par un numéro approximatif.
+- **Fonctions réservées au rôle serveur** (`REVOKE` pour `PUBLIC`, `anon`, `authenticated`) : un
+  compte connecté ne peut pas faire avancer la séquence d'un autre cabinet par l'API REST.
+
+Tests : `tests/documentSequences.test.ts` (faux Supabase avec latence d'écriture, qui donne des
+doublons avec l'ancien calcul) et `tests/documentSequences.pg.test.ts` (vrai Postgres, vraies
+connexions parallèles, exécuté par la CI). Les index uniques `(tenant_id, numero)` des devis et des
+notes d'honoraires ne sont PAS posés : des doublons existent déjà en production et feraient échouer
+la migration.
+
 ### Délai de paiement et date d'échéance
 
 Une facture sans date d'échéance explicite (typiquement la facture brouillon
