@@ -22,7 +22,7 @@ import { bpuVersComparatif, dpgfVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
-  IconChecklist, IconCamera, IconHistory,
+  IconChecklist, IconFileImport, IconCamera, IconHistory,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -668,7 +668,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
 
   // Menu « ⋯ » : ce qui concerne le dossier PRO plutôt que le document.
   const hasTree = activeSubTab !== 'LOTS';
+  const cibleImportFichier: 'dpgf' | 'bpu' | null = isBpuTab ? 'bpu' : (activeSubTab === 'CCTP' || activeSubTab === 'DPGF') ? 'dpgf' : null;
   const dossierEntries: ToolbarMenuEntry[] = [
+    ...(cibleImportFichier ? [
+      { id: 'pro-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => setImportDocCible(cibleImportFichier), disabled: cibleImportFichier === 'bpu' ? !bpu : !dpgf },
+      { id: 'pro-import-sep', separator: true as const },
+    ] : []),
     ...(!isBpuTab && activeSubTab !== 'LOTS' ? [
       { id: 'pro-check', label: t('pro_dossier_check'), icon: <IconChecklist size={16} />, onClick: controlerDossier, disabled: !dpgf },
       { id: 'pro-freeze', label: t('pro_dossier_freeze'), icon: <IconCamera size={16} />, onClick: () => { void creerInstantane(); }, disabled: !dpgf },

@@ -35,6 +35,9 @@ const GROUP_ICONS: Record<ProjectTabGroupId, React.ElementType> = {
 };
 
 /** Sigle de mission MOP accolé au nom de famille, là où une seule mission la compose. */
+/** Sous-onglets dont le sigle suffit : pas d'intitulé long à côté (il reste en infobulle). */
+const ONGLETS_SANS_INTITULE = new Set(['INSPIRATION', 'PRO', 'NOTICES']);
+
 const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'ESQ–PRO', CONSULTATION: 'ACT' };
 
 /**
@@ -194,7 +197,7 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
                 }}
               >
                 <span className="font-mono text-[0.8125rem] font-bold">{tab}</span>
-                <span className="hidden md:inline">{t(`project_tab_title_${tab.toLowerCase()}`)}</span>
+                {!ONGLETS_SANS_INTITULE.has(tab) && <span className="hidden md:inline">{t(`project_tab_title_${tab.toLowerCase()}`)}</span>}
                 {horsMission(tab) && (
                   <span
                     className="px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold"

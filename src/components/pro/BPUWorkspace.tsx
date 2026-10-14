@@ -621,7 +621,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     {
       kind: 'menu', id: 'bpu-exchange', label: t('pro_import_export'), icon: <IconFileExport size={16} />,
       entries: [
-        { id: 'bpu-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'bpu-exchange-in', heading: t('pro_bpu_offers_received') },
         { id: 'bpu-import', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'bpu-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },

@@ -742,7 +742,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     {
       kind: 'menu', id: 'dpgf-market', label: t('pro_market'), icon: <IconScale size={16} />,
       entries: [
-        { id: 'dpgf-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'dpgf-import-offer', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'dpgf-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
       ],

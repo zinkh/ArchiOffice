@@ -14,7 +14,6 @@ import { hierarchyKey } from './hierarchyOps';
 import { VARIABLES_CCTP, jeton, type ContexteCctp } from '../../lib/cctpVariables';
 import { basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, aDesCiblesBatiments } from '../../lib/batimentsArticles';
 import type { ProNotify } from './DPGFWorkspace';
-import { IconFileImport } from '@tabler/icons-react';
 import { IconChevronDown as IconChevronDownSmall, IconVariable } from '@tabler/icons-react';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -400,7 +399,6 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       ],
     },
     { kind: 'button', id: 'cctp-generate', label: t('pro_cctp_generate'), icon: <IconSparkles size={16} />, hint: t('pro_cctp_generate_hint'), onClick: () => setShowGenerate(true) },
-    { kind: 'button', id: 'cctp-import', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
     { kind: 'button', id: 'cctp-library', label: t('pro_library'), icon: <IconBuildingStore size={16} />, pressed: showLibrary, onClick: () => setShowLibrary(v => !v) },
     { kind: 'button', id: 'cctp-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v) },
   ]);
