@@ -29,6 +29,8 @@ import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { AutosaveIndicator } from '../projectDetail/AutosaveIndicator';
 import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
 import { ProToolbar } from './toolbar/ProToolbar';
+import { ProSearch } from './toolbar/ProSearch';
+import type { CibleRecherche } from '../../lib/proRecherche';
 import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, type ToolbarRegistry } from './toolbar/proToolbar';
 import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
@@ -668,6 +670,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
 
   // Menu « ⋯ » : ce qui concerne le dossier PRO plutôt que le document.
   const hasTree = activeSubTab !== 'LOTS';
+  // Recherche : la trouvaille choisie est relue par l'atelier ouvert, qui la
+  // déplie, la sélectionne et la montre (useCibleRecherche). Elle ne survit pas
+  // à un changement d'onglet.
+  const [cibleRecherche, setCibleRecherche] = useState<CibleRecherche | null>(null);
+  const nonceRecherche = useRef(0);
+  useEffect(() => { setCibleRecherche(null); }, [activeSubTab]);
+  const docRecherche = activeSubTab === 'LOTS' ? null : isBpuTab ? bpu : dpgf;
   const cibleImportFichier: 'dpgf' | 'bpu' | null = isBpuTab ? 'bpu' : (activeSubTab === 'CCTP' || activeSubTab === 'DPGF') ? 'dpgf' : null;
   const dossierEntries: ToolbarMenuEntry[] = [
     ...(cibleImportFichier ? [
@@ -724,6 +733,14 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
             dossierLabel={t('pro_dossier_menu')}
             isMobile={isMobile}
             onExport={() => { setBpuTouched(true); setShowExport(true); }}
+            search={docRecherche ? (
+              <ProSearch
+                key={activeSubTab}
+                doc={docRecherche}
+                cctp={activeSubTab === 'CCTP'}
+                onPick={trouvaille => setCibleRecherche({ ...trouvaille, nonce: ++nonceRecherche.current })}
+              />
+            ) : undefined}
           />
         </div>
       </div>
@@ -872,7 +889,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor onImportDocument={() => setImportDocCible('dpgf')} dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
+              <CCTPEditor searchTarget={cibleRecherche} onImportDocument={() => setImportDocCible('dpgf')} dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
             ) : null}
           </div>
           {splitView && (
@@ -893,6 +910,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 <div className="flex items-center justify-center h-full text-[var(--tblr-muted)]">Chargement du DPGF…</div>
               ) : dpgf ? (
                 <DPGFWorkspace
+                  searchTarget={cibleRecherche}
                   dpgf={dpgf}
                   onChange={editDpgf}
                   notify={notify}
@@ -937,6 +955,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 <div className="flex items-center justify-center h-full text-[var(--tblr-muted)]">Chargement…</div>
               ) : dpgf ? (
                 <EstimationEditor
+                  searchTarget={cibleRecherche}
                   dpgf={dpgf}
                   onChange={editDpgf}
                   projectName={projectName}
@@ -977,6 +996,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
               </div>
             ) : bpu ? (
               <BPUWorkspace
+                searchTarget={cibleRecherche}
                 bpu={bpu}
                 onChange={editBpu}
                 notify={notify}

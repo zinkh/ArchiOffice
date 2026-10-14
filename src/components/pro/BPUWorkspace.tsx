@@ -17,6 +17,8 @@ import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, to
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import type { ProNotify } from './DPGFWorkspace';
 import { formatQuantite } from '../../lib/quantiteFormat';
+import { useCibleRecherche } from '../../hooks/useCibleRecherche';
+import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
 import { natureEffective, trancheEffective } from '../../types/bpu';
 import {
@@ -65,6 +67,8 @@ interface BPUWorkspaceProps {
   onImportOffre?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce bordereau (les lignes absentes deviennent des articles). */
   onImportDocument?: () => void;
+  /** Trouvaille de la recherche à ouvrir et montrer. */
+  searchTarget?: CibleRecherche | null;
   onPushToAct?: () => void;
 }
 
@@ -121,7 +125,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   bpu, onChange, mode, projectName, offres = [], projectLots = [], notify,
   showTree: showTreeProp, onToggleTree, onDragStart, onDropExternal,
   onInitFromDpgf, onPushToDpgf, onOpenLibrary, onPushToLibrary,
-  onImportOffre, onImportDocument, onPushToAct,
+  onImportOffre, onImportDocument, onPushToAct, searchTarget,
 }) => {
   const [colSet, setColSet] = useState<ColSet>(mode);
   // Le même atelier sert les onglets BPU et DQE : changer d'onglet change de colonnes.
@@ -159,6 +163,17 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     [bpu.lots, expandedLots, expandedChaps, expandedLignes],
   );
   const rowKey = rowKeyOf;
+
+  // Trouvaille choisie dans la recherche : dépliée, sélectionnée, puis montrée.
+  useCibleRecherche(searchTarget, c => {
+    setEditingCell(null);
+    setExpandedLots(prev => new Set([...prev, c.lotId]));
+    if (c.chapId) setExpandedChaps(prev => new Set([...prev, c.chapId!]));
+    if (c.ancetresIds.length) setExpandedLignes(prev => new Set([...prev, ...c.ancetresIds]));
+    setSelectedLotId(c.lotId);
+    if (c.chapIdx !== undefined) setSelectedChap({ lotIdx: c.lotIdx, chapIdx: c.chapIdx });
+    setSelectedRowKeys(new Set([clePourCible(c)]));
+  });
 
   const showQte = colSet === 'dqe' || colSet === 'comparatif';
   const showMontant = colSet === 'dqe';
@@ -857,7 +872,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 if (row.kind === 'lot') {
                   const t = row.lot.trancheId ? trancheById.get(row.lot.trancheId) : undefined;
                   return (
-                    <tr key={rKey} data-lot-id={row.lot.id}
+                    <tr key={rKey} data-lot-id={row.lot.id} data-search-id={row.lot.id}
                         onClick={() => { setSelectedRowKeys(new Set([rKey])); setSelectedLotId(row.lot.id); }}
                         className={`border-b border-[#9ab0cb] ${isDropTarget ? 'bg-blue-100' : 'bg-[#c8d8ec] dark:bg-blue-900/30'} font-bold`}>
                       <td className="px-2 py-2">
@@ -918,7 +933,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
                 if (row.kind === 'chapitre') {
                   return (
-                    <tr key={rKey}
+                    <tr key={rKey} data-search-id={row.chapitre!.id}
                         onClick={() => { setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! }); setSelectedLotId(row.lot.id); setSelectedRowKeys(new Set([rKey])); }}
                         className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 cursor-pointer
                           ${isDropTarget ? 'ring-1 ring-blue-400' : ''}
@@ -970,7 +985,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 const lettres = l.prixUnitaireLettres ?? (l.prixUnitaire > 0 ? montantEnLettres(l.prixUnitaire) : '');
 
                 return (
-                  <tr key={rKey}
+                  <tr key={rKey} data-search-id={l.id}
                       draggable={!hasChildren}
                       onDragStart={e => handleDragStart(e, l, row)}
                       onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = dragSource ? 'move' : 'copy'; setDropTarget(rKey); }}

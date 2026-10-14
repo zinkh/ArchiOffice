@@ -50,6 +50,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
           return (
             <button
               key={rKey}
+              data-search-id={row.lot.id}
               type="button"
               aria-expanded={open}
               onClick={() => onToggleLot(row.lot.id)}
@@ -69,6 +70,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
           return (
             <button
               key={rKey}
+              data-search-id={row.chapitre!.id}
               type="button"
               aria-expanded={open}
               onClick={() => onToggleChap(row.chapitre!.id)}
@@ -87,6 +89,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
         return (
           <div
             key={rKey}
+            data-search-id={l.id}
             className="flex gap-3 p-3 rounded-lg border"
             style={{
               marginLeft: `${(row.depth - 2) * 0.75}rem`,

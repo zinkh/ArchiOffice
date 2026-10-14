@@ -614,3 +614,16 @@ button, [role="button"], [role="tab"], .btn {
   max-width: min(36rem, calc(100vw - 6rem));
   white-space: normal;
 }
+
+/* Élément montré par la recherche d'un dossier PRO : repère qui s'estompe. */
+[data-search-flash] {
+  animation: search-flash 1.8s ease-out;
+}
+[data-search-flash] > td { animation: search-flash 1.8s ease-out; }
+@keyframes search-flash {
+  0%, 55% { background-color: var(--tblr-primary-lt); box-shadow: inset 3px 0 0 var(--tblr-primary); }
+  100% { background-color: transparent; box-shadow: inset 3px 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-search-flash], [data-search-flash] > td { animation: none; background-color: var(--tblr-primary-lt); }
+}

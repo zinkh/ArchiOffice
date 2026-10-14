@@ -25,6 +25,8 @@ import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
+import { useCibleRecherche } from '../../hooks/useCibleRecherche';
+import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
 import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
 import { localisationsConnues, localisationsDeLigne } from '../../lib/cctpImages';
 import {
@@ -60,6 +62,8 @@ interface DPGFWorkspaceProps {
   projectName?: string;
   onDropExternal?: (ligne: Ligne) => void;
   onDragStart?: (ligne: Ligne) => void;
+  /** Trouvaille de la recherche à ouvrir et montrer. */
+  searchTarget?: CibleRecherche | null;
   showTree?: boolean;
   onToggleTree?: () => void;
   /** Ouvre l'import d'une offre reçue sur ce DPGF. Absent tant que ProTab ne le fournit pas. */
@@ -78,7 +82,7 @@ const isTextField = (el: EventTarget | null) =>
     || (el instanceof HTMLInputElement && el.type !== 'checkbox'));
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
-  dpgf, onChange, projectName, onDropExternal, onDragStart,
+  dpgf, onChange, projectName, onDropExternal, onDragStart, searchTarget,
   showTree: showTreeProp, onToggleTree, onImportOffre, onImportDocument, onPushToAct, offres = [], notify,
 }) => {
   const { settings } = useSettings();
@@ -156,6 +160,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setAnchorKey(keys.at(-1) ?? null);
   };
   const clearSelection = () => { setSelectedKeys(new Set()); setAnchorKey(null); };
+
+  // Trouvaille choisie dans la recherche : dépliée, sélectionnée, puis montrée.
+  useCibleRecherche(searchTarget, c => {
+    setGroupement('lot');
+    setEditingCell(null);
+    setExpandedLots(prev => new Set([...prev, c.lotId]));
+    if (c.chapId) setExpandedChaps(prev => new Set([...prev, c.chapId!]));
+    if (c.ancetresIds.length) setExpandedLignes(prev => new Set([...prev, ...c.ancetresIds]));
+    setSelectedLotId(c.lotId);
+    if (c.chapId) setSelectedChapId(c.chapId);
+    selectKeys([clePourCible(c)]);
+  });
   const toggleKey = (rKey: string) => {
     setSelectedKeys(prev => {
       const next = new Set(prev);
@@ -985,6 +1001,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <tr
                         key={rKey}
                         data-lot-id={row.lot.id}
+                        data-search-id={row.lot.id}
                         onClick={e => clickRow(e, row)}
                         className={rowClass(rKey, 'group border-y font-semibold')}
                         style={{ borderColor: 'var(--tblr-border)', ...(selectedKeys.has(rKey) || dropTarget === rKey ? {} : { background: 'var(--tblr-surface-2)' }) }}
@@ -1030,6 +1047,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                     return (
                       <tr
                         key={rKey}
+                        data-search-id={row.chapitre!.id}
                         className={rowClass(rKey, `group border-b font-semibold text-[0.8125rem] ${chapVise ? 'outline outline-1 -outline-offset-1 outline-[var(--tblr-primary)]' : ''}`)}
                         style={{ borderColor: 'var(--tblr-border)' }}
                         onClick={e => clickRow(e, row)}
@@ -1074,6 +1092,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   return (
                     <tr
                       key={rKey}
+                      data-search-id={l.id}
                       onClick={e => clickRow(e, row)}
                       draggable={!hasChildren}
                       onDragStart={e => handleDragStart(e, row)}
