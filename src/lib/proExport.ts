@@ -33,14 +33,69 @@ const totauxHorsBase = (dpgf: DPGF): { libelle: string; total: number }[] =>
     .filter(t => t.total);
 
 /** Lignes de pied « Options (PSE) » et « Variantes », seulement s'il y en a. */
-function piedHorsBase(dpgf: DPGF, colonnes: number, format: (n: number) => string): string[][] {
-  return totauxHorsBase(dpgf).map(t => ['', t.libelle, ...Array(colonnes - 3).fill(''), format(t.total) + ' €']);
+function piedHorsBase(dpgf: DPGF, colonnes: number, format: (n: number) => string, extra = 0): string[][] {
+  return totauxHorsBase(dpgf).map(t => ['', t.libelle, ...Array(colonnes - 3).fill(''), format(t.total) + ' €', ...Array(extra).fill('')]);
 }
 
 /** Pied Excel des options et variantes, en nombres (pas de texte formaté). */
-function ajouterHorsBase(f: { ligne: (valeurs: (string | number | undefined)[], style?: { gras?: boolean }) => void }, dpgf: DPGF, colonnes: number) {
-  for (const t of totauxHorsBase(dpgf)) f.ligne(['', t.libelle, ...Array(colonnes - 3).fill(''), t.total], { gras: true });
+function ajouterHorsBase(f: { ligne: (valeurs: (string | number | undefined)[], style?: { gras?: boolean }) => void }, dpgf: DPGF, colonnes: number, extra = 0) {
+  for (const t of totauxHorsBase(dpgf)) f.ligne(['', t.libelle, ...Array(colonnes - 3).fill(''), t.total, ...Array(extra).fill('')], { gras: true });
 }
+
+/** Taux affiché sans décimale inutile : « 10 », « 5,5 ». */
+const fmtTaux = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(n);
+
+/** TVA d'un poste qui porte un taux dédié ; `undefined` pour les autres et les postes pour mémoire. */
+const tvaDuPoste = (taux: number | undefined, total: number, pm: boolean): number | undefined =>
+  taux == null || !Number.isFinite(taux) || pm ? undefined : total * taux / 100;
+
+/** Une ligne de calcul par taux : base HT des postes concernés et TVA correspondante. */
+interface VentilationTva { taux: number; base: number; montant: number }
+
+/** Ventile par taux les postes à taux dédié (lots et chapitres n'en portent pas), taux croissants. */
+function ventilerTva(rows: { total: number; tvaTaux?: number; tvaMontant?: number }[]): VentilationTva[] {
+  const parTaux = new Map<number, VentilationTva>();
+  for (const r of rows) {
+    if (r.tvaTaux == null || r.tvaMontant == null) continue;
+    const v = parTaux.get(r.tvaTaux) ?? { taux: r.tvaTaux, base: 0, montant: 0 };
+    v.base += r.total;
+    v.montant += r.tvaMontant;
+    parTaux.set(r.tvaTaux, v);
+  }
+  return [...parTaux.values()].sort((a, b) => a.taux - b.taux);
+}
+
+const libelleTva = (v: VentilationTva) => `TVA ${fmtTaux(v.taux)} % sur ${fmt(v.base)} € HT`;
+const sommeMontants = (vs: VentilationTva[]) => vs.reduce((s, v) => s + v.montant, 0);
+
+/** Pied PDF : une ligne par taux, puis le total s'il y a plusieurs taux. `colonnes` = colonnes sans la TVA. */
+function piedTvaPdf(rows: Parameters<typeof ventilerTva>[0], colonnes: number): string[][] {
+  const vs = ventilerTva(rows);
+  const vide = Array(colonnes - 3).fill('');
+  const lignes = vs.map(v => ['', libelleTva(v), ...vide, '', fmt(v.montant) + ' €']);
+  return vs.length > 1 ? [...lignes, ['', 'TOTAL TVA dédiée', ...vide, '', fmt(sommeMontants(vs)) + ' €']] : lignes;
+}
+
+/** Pied Excel : base, taux et montant en nombres, une ligne par taux puis le total s'il y en a plusieurs. */
+function ajouterPiedTvaExcel(
+  f: { ligne: (valeurs: (string | number | undefined)[], style?: { gras?: boolean }) => void },
+  rows: Parameters<typeof ventilerTva>[0], colonnes: number,
+) {
+  const vs = ventilerTva(rows);
+  const vide = Array(colonnes - 3).fill('');
+  for (const v of vs) f.ligne(['', `TVA ${fmtTaux(v.taux)} %`, ...vide, v.base, v.taux, v.montant], { gras: true });
+  if (vs.length > 1) f.ligne(['', 'TOTAL TVA dédiée', ...vide, '', '', sommeMontants(vs)], { gras: true });
+}
+
+/** Taux dédié et TVA correspondante d'une ligne, à étaler dans la ligne aplatie. */
+const tvaDeLigne = (l: Ligne): { tvaTaux?: number; tvaMontant?: number } => {
+  const tvaMontant = tvaDuPoste(l.tva, l.prixTotal, !!l.pourMemoire);
+  return tvaMontant === undefined ? {} : { tvaTaux: l.tva, tvaMontant };
+};
+
+/** Cellule PDF :« 23,40 (10 %) », vide pour un poste sans taux dédié. */
+const celluleTva = (taux?: number, montant?: number) =>
+  taux == null || montant == null ? '' : `${fmt(montant)} (${fmtTaux(taux)} %)`;
 
 /**
  * Aplatit un DPGF classé par bâtiment/phase (jamais par lot : l'arbre par lot
@@ -63,6 +118,8 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
   q: number;
   total: number;
   pm: boolean;
+  tvaTaux?: number;
+  tvaMontant?: number;
 }> {
   const rows: ReturnType<typeof flattenDPGFGroupe> = [];
   for (const [, g] of grouperDpgf(dpgf, groupement)) {
@@ -78,6 +135,7 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
         quantite: a.ligne.quantite > 0 ? formatQuantite(a.ligne.quantite) : '',
         prixTotal: a.ligne.pourMemoire ? 'PM' : a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
         q: a.ligne.quantite, total: a.ligne.prixTotal, pm: !!a.ligne.pourMemoire,
+        ...tvaDeLigne(a.ligne),
       });
     }
   }
@@ -97,6 +155,8 @@ function flattenDPGF(lots: Lot[]): Array<{
   pu: number;
   total: number;
   pm: boolean;
+  tvaTaux?: number;
+  tvaMontant?: number;
 }> {
   const rows: ReturnType<typeof flattenDPGF> = [];
   for (const lot of lots) {
@@ -118,6 +178,7 @@ function flattenDPGF(lots: Lot[]): Array<{
             prixTotal: ligne.pourMemoire ? 'PM' : ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
             type: ligne.type,
             q: ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal, pm: !!ligne.pourMemoire,
+            ...tvaDeLigne(ligne),
           });
           if (ligne.children?.length) walk(ligne.children, depth + 1);
         }
@@ -137,14 +198,20 @@ export interface ExportDpgfOptions {
    * usage interne.
    */
   avecPrix?: boolean;
+  /**
+   * Ajoute la colonne « TVA » : montant de TVA des seuls postes qui portent un
+   * taux dédié (`Ligne.tva`). Masquée par défaut ; sans effet hors `avecPrix`.
+   */
+  avecTva?: boolean;
   /** Destination du fichier ; absente, il est téléchargé. */
   sortie?: Sortie;
 }
 
 export async function exportDPGFtoPDF(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
-  { avecPrix = false, sortie }: ExportDpgfOptions = {},
+  { avecPrix = false, avecTva = false, sortie }: ExportDpgfOptions = {},
 ) {
+  const colTva = avecPrix && avecTva;
   const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
@@ -166,11 +233,11 @@ export async function exportDPGFtoPDF(
       ...tableauGris(),
       startY,
       head: [avecPrix
-        ? ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']
+        ? ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]
         : ['N°', 'Désignation', 'Unité', 'Quantité']],
       body: rows.map(r => {
         const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite];
-        return avecPrix ? [...debut, r.prixUnitaire, r.prixTotal] : debut;
+        return avecPrix ? [...debut, r.prixUnitaire, r.prixTotal, ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])] : debut;
       }),
       columnStyles: {
         0: { cellWidth: 20 },
@@ -178,6 +245,7 @@ export async function exportDPGFtoPDF(
         2: { cellWidth: 18, halign: 'center' },
         3: { cellWidth: avecPrix ? 22 : 26, halign: 'right' },
         ...(avecPrix ? { 4: { cellWidth: 28, halign: 'right' }, 5: { cellWidth: 28, halign: 'right' } } : {}),
+        ...(colTva ? { 6: { cellWidth: 36, halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -193,8 +261,9 @@ export async function exportDPGFtoPDF(
         }
       },
       ...(avecPrix ? { foot: [
-        ['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €'],
-        ...piedHorsBase(dpgf, 6, fmt),
+        ['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €', ...(colTva ? [''] : [])],
+        ...piedHorsBase(dpgf, 6, fmt, colTva ? 1 : 0),
+        ...(colTva ? piedTvaPdf(rows, 6) : []),
       ] } : {}),
     });
   } else {
@@ -203,11 +272,11 @@ export async function exportDPGFtoPDF(
       ...tableauGris(),
       startY,
       head: [avecPrix
-        ? ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)']
+        ? ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]
         : ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité']],
       body: rows.map(r => {
         const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite];
-        return avecPrix ? [...debut, r.prixTotal] : debut;
+        return avecPrix ? [...debut, r.prixTotal, ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])] : debut;
       }),
       columnStyles: {
         0: { cellWidth: 18 },
@@ -217,6 +286,7 @@ export async function exportDPGFtoPDF(
         4: { cellWidth: 16, halign: 'center' },
         5: { cellWidth: avecPrix ? 20 : 24, halign: 'right' },
         ...(avecPrix ? { 6: { cellWidth: 28, halign: 'right' } } : {}),
+        ...(colTva ? { 7: { cellWidth: 36, halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -226,8 +296,9 @@ export async function exportDPGFtoPDF(
         }
       },
       ...(avecPrix ? { foot: [
-        ['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €'],
-        ...piedHorsBase(dpgf, 7, fmt),
+        ['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €', ...(colTva ? [''] : [])],
+        ...piedHorsBase(dpgf, 7, fmt, colTva ? 1 : 0),
+        ...(colTva ? piedTvaPdf(rows, 7) : []),
       ] } : {}),
     });
   }
@@ -288,8 +359,14 @@ export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, se
 
 export async function exportDPGFtoExcel(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
-  { avecPrix = false, sortie }: ExportDpgfOptions = {},
+  { avecPrix = false, avecTva = false, sortie }: ExportDpgfOptions = {},
 ) {
+  const colTva = avecPrix && avecTva;
+  // Colonnes TVA : le taux dédié du poste, puis son montant (un nombre dans la cellule).
+  const entetesTva = colTva ? [
+    { header: 'Taux TVA dédié (%)', width: 14, align: 'right' as const, numFmt: FORMAT_QUANTITE },
+    { header: 'TVA dédiée (€)', width: 15, align: 'right' as const, numFmt: FORMAT_NOMBRE },
+  ] : [];
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
   const commun = {
@@ -311,18 +388,23 @@ export async function exportDPGFtoExcel(
         ...(avecPrix ? [
           { header: 'P.U. HT (€)', width: 15, align: 'right' as const, numFmt: FORMAT_NOMBRE },
           { header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE },
+          ...entetesTva,
         ] : []),
       ],
     });
-    for (const r of flattenDPGF(dpgf.lots)) {
+    const lignes = flattenDPGF(dpgf.lots);
+    for (const r of lignes) {
       const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q)];
-      const valeurs = avecPrix ? [...debut, r.pm ? 'PM' : nombre(r.pu), r.pm ? 'PM' : nombre(r.total)] : debut;
+      const valeurs = avecPrix
+        ? [...debut, r.pm ? 'PM' : nombre(r.pu), r.pm ? 'PM' : nombre(r.total), ...(colTva ? [r.tvaTaux, r.tvaMontant] : [])]
+        : debut;
       if (r.type === 'lot') f.ligne(valeurs, { gras: true, fond: 'groupe' });
       else if (r.type === 'chapitre') f.ligne(valeurs, { gras: true, fond: 'doux' });
       else f.ligne(valeurs, r.type === 'titre' ? { italique: true } : {});
     }
     if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', dpgf.totalHT]);
-    if (avecPrix) ajouterHorsBase(f, dpgf, 6);
+    if (avecPrix) ajouterHorsBase(f, dpgf, 6, colTva ? 2 : 0);
+    if (colTva) ajouterPiedTvaExcel(f, lignes, 6);
   } else {
     const f = ajouterFeuille(wb, {
       ...commun,
@@ -333,16 +415,20 @@ export async function exportDPGFtoExcel(
         { header: 'Localisation', width: 20 },
         { header: 'Unité', width: 10, align: 'center' },
         { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_QUANTITE },
-        ...(avecPrix ? [{ header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE }] : []),
+        ...(avecPrix ? [{ header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE }, ...entetesTva] : []),
       ],
     });
-    for (const r of flattenDPGFGroupe(dpgf, groupement)) {
+    const articles = flattenDPGFGroupe(dpgf, groupement);
+    for (const r of articles) {
       const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, nombre(r.q)];
-      const valeurs = avecPrix ? [...debut, r.pm ? 'PM' : nombre(r.total)] : debut;
+      const valeurs = avecPrix
+        ? [...debut, r.pm ? 'PM' : nombre(r.total), ...(colTva ? [r.tvaTaux, r.tvaMontant] : [])]
+        : debut;
       f.ligne(valeurs, r.type === 'groupe' ? { gras: true, fond: 'groupe' } : {});
     }
     if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', '', dpgf.totalHT]);
-    if (avecPrix) ajouterHorsBase(f, dpgf, 7);
+    if (avecPrix) ajouterHorsBase(f, dpgf, 7, colTva ? 2 : 0);
+    if (colTva) ajouterPiedTvaExcel(f, articles, 7);
   }
   await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`, sortie);
 }

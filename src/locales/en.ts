@@ -169,6 +169,8 @@ export default {
   "pro_export_dialog_options": "Options",
   "pro_export_dialog_prices": "Include prices",
   "pro_export_dialog_prices_hint": "DPGF, DQE and BPU. Unchecked, they come out without unit prices, amounts or totals (blank schedule). The estimate always contains prices.",
+  "pro_export_dialog_vat": "Add the VAT column",
+  "pro_export_dialog_vat_hint": "DPGF only. VAT amount of the items that carry a dedicated rate; the others stay empty.",
   "pro_export_dialog_cctp_per_building": "Specifications: one file per building",
   "pro_export_dialog_cctp_buildings_hint": "Selecting buildings produces one specifications file per selected building.",
   "pro_export_dialog_format_of": "Format of {{doc}}",

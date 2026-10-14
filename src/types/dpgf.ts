@@ -141,6 +141,12 @@ export interface Ligne extends DecoupageNoeud {
    * son contenu.
    */
   nature?: NatureArticle;
+  /**
+   * Taux de TVA propre à ce poste, en % (travaux de rénovation à 10 %, 5,5 %...).
+   * Absent : le poste suit le taux général du document (`DPGF.TVA`). Seuls les
+   * postes qui portent un taux dédié alimentent la colonne « TVA » des exports.
+   */
+  tva?: number;
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
   children?: Ligne[];
   cctpOnly?: boolean;

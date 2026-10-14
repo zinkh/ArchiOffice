@@ -169,6 +169,8 @@ export default {
   "pro_export_dialog_options": "Options",
   "pro_export_dialog_prices": "Inclure les prix",
   "pro_export_dialog_prices_hint": "DPGF, DQE et BPU. Décoché, ils sortent sans prix unitaires, montants ni totaux (bordereau vierge). L'estimation contient toujours des prix.",
+  "pro_export_dialog_vat": "Ajouter la colonne TVA",
+  "pro_export_dialog_vat_hint": "DPGF seulement. Montant de TVA des postes qui portent un taux dédié, les autres restent vides.",
   "pro_export_dialog_cctp_per_building": "CCTP : un fichier par bâtiment",
   "pro_export_dialog_cctp_buildings_hint": "Une sélection de bâtiments produit un CCTP par bâtiment retenu.",
   "pro_export_dialog_format_of": "Format de {{doc}}",

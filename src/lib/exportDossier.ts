@@ -32,6 +32,8 @@ export interface DemandeDossier {
   selection: ExportSelection;
   /** DPGF, DQE et BPU : avec leurs prix (usage interne). L'estimation en a toujours. */
   avecPrix: boolean;
+  /** DPGF avec prix : ajoute la colonne de TVA des postes à taux dédié (masquée par défaut). */
+  avecTva?: boolean;
   /** CCTP : un fichier par bâtiment, même sans sélection de bâtiments. */
   cctpParBatiment: boolean;
   projectName?: string;
@@ -81,7 +83,7 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
   const sortie: Sortie = (nom, blob) => { fichiers.push({ nom, blob }); };
   const etiquette = d.perimetre ? `${d.projectName ?? d.dpgf.titre} - ${d.perimetre}` : d.projectName;
   const settings = d.settings;
-  const prix = { avecPrix: d.avecPrix, sortie };
+  const prix = { avecPrix: d.avecPrix, avecTva: d.avecTva, sortie };
 
   for (const doc of DOCUMENTS_DOSSIER) {
     const choix = d.documents[doc];
