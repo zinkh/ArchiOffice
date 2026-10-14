@@ -197,25 +197,25 @@ export function TaskFormModal({ initial, projects, team, allTasks = [], lockProj
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 [&>div]:min-w-0">
             <div>
               <label className={labelCls} style={labelStyle}>{t('calendar_field_start_date')} *</label>
-              <input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={inputCls} style={{ ...inputStyle, colorScheme: 'light dark' }} />
+              <input required type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className={inputCls} style={{ ...inputStyle, colorScheme: 'light dark', minWidth: 0, maxWidth: '100%', height: '2.5rem', WebkitAppearance: 'none', appearance: 'none' }} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('calendar_field_end_date')} *</label>
-              <input required type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={inputCls} style={{ ...inputStyle, colorScheme: 'light dark' }} />
+              <input required type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className={inputCls} style={{ ...inputStyle, colorScheme: 'light dark', minWidth: 0, maxWidth: '100%', height: '2.5rem', WebkitAppearance: 'none', appearance: 'none' }} />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 [&>div]:min-w-0">
             <div>
               <label className={labelCls} style={labelStyle}>{t('calendar_field_due_date')}</label>
-              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className={inputCls} style={{ ...inputStyle, colorScheme: 'light dark' }} />
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className={inputCls} style={{ ...inputStyle, colorScheme: 'light dark', minWidth: 0, maxWidth: '100%', height: '2.5rem', WebkitAppearance: 'none', appearance: 'none' }} />
             </div>
             <div>
               <label className={labelCls} style={labelStyle}>{t('calendar_field_progress')}</label>
-              <input type="number" min="0" max="100" value={progress} onChange={e => setProgress(e.target.value)} className={inputCls} style={inputStyle} />
+              <input type="number" min="0" max="100" value={progress} onChange={e => setProgress(e.target.value)} className={inputCls} style={{ ...inputStyle, height: '2.5rem' }} />
             </div>
           </div>
 

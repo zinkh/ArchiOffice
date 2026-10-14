@@ -2262,6 +2262,8 @@ export default {
       "inspiration_export_pdf": "Export as PDF",
       "inspiration_exporting": "Exporting…",
       "inspiration_export_failed": "Unable to export the board as PDF.",
+      "inspiration_load_unavailable": "The server is not responding right now. Try again in a few seconds.",
+      "inspiration_retry": "Retry",
       "inspiration_load_failed": "Unable to load inspiration.",
       "inspiration_board_create_failed": "Unable to create the board.",
       "inspiration_board_update_failed": "Unable to update the board.",

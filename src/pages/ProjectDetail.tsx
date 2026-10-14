@@ -4201,13 +4201,13 @@ export default function ProjectDetail() {
                         <div className="space-y-1">
                           <label htmlFor="os-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_number')}</label>
                           <input id="os-numero" type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.os_number} onChange={e => setNewOs({...newOs, os_number: e.target.value})} />
                         </div>
                         <div className="space-y-1">
                           <label htmlFor="os-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_issue_date')}</label>
-                          <input id="os-date" type="date"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          <input id="os-date" type="date" style={{ minWidth: 0, WebkitAppearance: "none", appearance: "none" }}
+                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.date_emission} onChange={e => setNewOs({...newOs, date_emission: e.target.value})} />
                         </div>
                         <div className="space-y-1">
@@ -4215,7 +4215,7 @@ export default function ProjectDetail() {
                           <select
                             id="os-marche"
                             required
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.marche_id} onChange={e => handleMarcheChange(e.target.value)}>
                             <option value="">{t('projectdetail_os_contract_choose')}</option>
                             {marchesTravaux.map((m: any) => (
@@ -4256,14 +4256,14 @@ export default function ProjectDetail() {
                       <div className="space-y-1">
                         <label htmlFor="os-titre" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_title_field')} <span aria-hidden className="text-red-500">*</span></label>
                         <input id="os-titre" required type="text"
-                          className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                           value={newOs.title} onChange={e => setNewOs({...newOs, title: e.target.value})}
                           placeholder={t('projectdetail_os_title_placeholder')} />
                       </div>
                       <div className="space-y-1">
                         <label htmlFor="os-objet" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_note_subject')}</label>
                         <input id="os-objet" type="text"
-                          className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                           value={newOs.objet} onChange={e => setNewOs({...newOs, objet: e.target.value})}
                           placeholder={t('projectdetail_os_subject_placeholder')} />
                       </div>
@@ -4271,20 +4271,20 @@ export default function ProjectDetail() {
                         <div className="space-y-1">
                           <label htmlFor="os-emetteur" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_issuer')}</label>
                           <input id="os-emetteur" type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.emetteur_os} onChange={e => setNewOs({...newOs, emetteur_os: e.target.value})} />
                         </div>
                         <div className="space-y-1">
                           <label htmlFor="os-destinataire" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_recipient')}</label>
                           <input id="os-destinataire" type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.destinataire_os || newOs.entreprise}
                             onChange={e => setNewOs(prev => ({...prev, destinataire_os: e.target.value, entreprise: e.target.value}))} />
                         </div>
                         <div className="space-y-1">
                           <label htmlFor="os-montant" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_amount')}</label>
                           <input id="os-montant" type="number"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.montant_devis_presente} onChange={e => setNewOs({...newOs, montant_devis_presente: e.target.value})} />
                         </div>
                       </div>
@@ -4293,11 +4293,11 @@ export default function ProjectDetail() {
                           <label htmlFor="os-delai" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_duration')}</label>
                           <div className="flex gap-2">
                             <input id="os-delai" type="number" placeholder="30"
-                              className="w-20 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              className="w-20 shrink-0 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newOs.delai_execution} onChange={e => setNewOs({...newOs, delai_execution: e.target.value})} />
                             <select
                               aria-label={t('projectdetail_os_duration_unit')}
-                              className="flex-1 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg p-2 text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                              className="flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                               value={newOs.delai_unit} onChange={e => setNewOs({...newOs, delai_unit: e.target.value})}>
                               <option value="jours">{t('projectdetail_unit_jours')}</option>
                               <option value="semaines">{t('projectdetail_unit_semaines')}</option>
@@ -4308,7 +4308,7 @@ export default function ProjectDetail() {
                         <div className="md:col-span-2 flex items-end">
                           <button type="button" onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title || isCreatingOs}
                             title={!newOs.marche_id || !newOs.title ? t('projectdetail_os_create_disabled') : undefined}
-                            className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
+                            className="w-full h-10 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
                             {isCreatingOs ? 'Création…' : t('projectdetail_os_create')}
                           </button>
                         </div>

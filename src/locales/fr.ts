@@ -2406,6 +2406,8 @@ export default {
       "inspiration_export_pdf": "Exporter en PDF",
       "inspiration_exporting": "Export en cours…",
       "inspiration_export_failed": "Impossible d’exporter la planche en PDF.",
+      "inspiration_load_unavailable": "Le serveur ne répond pas pour le moment. Réessayez dans quelques secondes.",
+      "inspiration_retry": "Réessayer",
       "inspiration_load_failed": "Impossible de charger les inspirations.",
       "inspiration_board_create_failed": "Impossible de créer la planche.",
       "inspiration_board_update_failed": "Impossible de modifier la planche.",

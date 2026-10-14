@@ -985,6 +985,32 @@ consultation : entreprise rapprochée par SIRET (fiche contact) puis par nom,
 sinon créée ; offre du couple lot x entreprise mise à jour sans doublon, notes,
 conformité et négociations intactes. L'aperçu de l'effet précède l'import.
 
+### Marchés de travaux constitués depuis l'ACT (phase « Marchés »)
+
+Dernière étape d'ACT, après l'attribution : `MarchesPhase.tsx` liste un marché par lot attribué
+(`consultation.attributions`) et constitue la ligne `marches_entreprises` correspondante
+(`supabase/migrate_marches_act.sql` : `act_lot_id`, `act_entreprise_id`, `contact_id`, `offre_snapshot`,
+`statut_signature` `a_constituer | a_signer | signe`, `mode_signature`, `date_signature`,
+`acte_signe_document_id`). La création manuelle d'un marché (formulaire d'OS, RDT) reste possible, sans
+consultation : ces lignes n'ont pas d'`act_lot_id` et n'apparaissent pas dans la phase.
+
+- **Constitution idempotente** : `POST /api/projects/:projectId/marches-act` (`server/routes/marchesEntreprises.ts`,
+  `tests/marchesAct.test.ts`). Un second appel met à jour un marché non signé, ne duplique jamais (index unique
+  TOTAL `(project_id, act_lot_id)`, les NULL des marchés manuels restent libres) et **ne touche jamais un marché
+  signé** : si l'attribution change ensuite, l'écran signale l'écart sans rien réécrire. Le POST/PUT générique
+  retire ces colonnes du corps (`sansColonnesAct`) : seules les routes de l'ACT les écrivent.
+- **Quatre pièces, chacune dans son fichier** (`src/lib/marcheAct.ts`, pur et testé). Le CCAP est UN SEUL pour
+  l'opération, jamais par entreprise (`construireCCAP`, réglages de la phase « Critères »). Le CCTP est l'extrait
+  du lot (sans prix). Le DPGF est celui du lot aux prix de l'offre retenue, **figés** dans `offre_snapshot` à la
+  constitution : un DPGF modifié ensuite ne change pas le marché ; un article absent de l'offre vaut zéro (compté,
+  jamais complété par l'estimation du cabinet), les postes ajoutés par l'entreprise sont rangés sous un chapitre
+  dédié. L'acte d'engagement est le formulaire PDF existant, prérempli (`valeursActe` : rien d'inventé, un champ
+  inconnu reste vide). « Les 4 pièces » livre une archive de quatre fichiers séparés.
+- **Signature, deux modes** : papier (dépôt du scan) ou électronique (dépôt du PDF signé). Aucun service de
+  signature électronique n'est connecté : le mode est enregistré avec le document déposé (catégorie « Marchés »,
+  phase ACT). `POST /api/marches-entreprises/:id/signature` puis `.../signature/rouvrir` ; la date, le mode et le
+  document sont validés par le serveur.
+
 ### Exports PDF et Excel : une seule charte
 
 Tout document produit depuis l'interface porte la charte du cabinet : en-tête
