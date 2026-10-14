@@ -8,7 +8,7 @@ import { natureEffective } from '../types/bpu';
 import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
 import {
-  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_NOMBRE,
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_NOMBRE, FORMAT_QUANTITE,
   type Colonne, type Cellule,
 } from './xlsxLetterhead';
 import { montantEnLettres } from './numberToFrenchWords';
@@ -151,7 +151,7 @@ export async function exportBPUtoExcel(bpu: BPU, { mode, vierge, projectName, se
     { header: 'Désignation', width: 55 },
     { header: 'Unité', width: 8, align: 'center' },
   ];
-  if (mode === 'dqe') colonnes.push({ header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE });
+  if (mode === 'dqe') colonnes.push({ header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_QUANTITE });
   colonnes.push({ header: 'P.U. HT (€)', width: 14, align: 'right', numFmt: FORMAT_NOMBRE });
   if (mode === 'dqe') colonnes.push({ header: 'Montant HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE });
   if (bpu.prixEnLettres) colonnes.push({ header: 'P.U. en lettres', width: 45 });

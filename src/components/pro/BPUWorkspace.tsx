@@ -16,6 +16,7 @@ import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import type { ProNotify } from './DPGFWorkspace';
+import { formatQuantite } from '../../lib/quantiteFormat';
 import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
 import { natureEffective, trancheEffective } from '../../types/bpu';
 import {
@@ -668,7 +669,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   }) => {
     const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
     if (isEditing) return <CellInput value={editingCell.value} onCommit={commitEdit} className={className} />;
-    const display = numeric && typeof value === 'number' && value > 0 ? fmt2(value) : String(value || '');
+    const display = numeric && typeof value === 'number' && value > 0 ? (field === 'quantite' ? formatQuantite(value) : fmt2(value)) : String(value || '');
     return (
       <div
         onDoubleClick={() => startEdit(rKey, field, value)}

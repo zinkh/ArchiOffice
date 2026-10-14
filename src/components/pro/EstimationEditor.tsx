@@ -15,6 +15,7 @@ import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
 import { sansGlisserPendantSaisie } from './EditableCell';
+import { formatQuantite } from '../../lib/quantiteFormat';
 import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -250,6 +251,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
 
   // ── Editable number cell ──────────────────────────────────────────────────────
   const EditNum = ({ rowId, field, value, pm = false }: { rowId: string; field: string; value: number; pm?: boolean }) => {
+    const affiche = field === 'quantite' ? formatQuantite : fmt2;
     const isEditing = editCell?.rowId === rowId && editCell?.field === field;
     if (isEditing) {
       return (
@@ -274,7 +276,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         onDoubleClick={() => startEdit(rowId, field, pm ? 'PM' : value)}
         title="Double-clic pour éditer"
       >
-        {pm ? 'PM' : value > 0 ? fmt2(value) : ''}
+        {pm ? 'PM' : value > 0 ? affiche(value) : ''}
       </div>
     );
   };
@@ -456,7 +458,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             <td className="px-2 py-0.5 text-center text-xs text-zinc-500">{ligne.unite}</td>
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
-                                {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{ligne.quantite}</span> : (<div className="flex items-center gap-1">
+                                {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{formatQuantite(ligne.quantite)}</span> : (<div className="flex items-center gap-1">
                                   <div className="flex-1"><EditNum rowId={rowId} field="quantite" value={ligne.quantite} /></div>
                                   <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
                                 </div>)}

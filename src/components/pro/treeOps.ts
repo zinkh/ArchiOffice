@@ -32,12 +32,22 @@ export const uid = () => `id_${Date.now()}_${_uid++}`;
  * offres. Pour les fichiers reçus, voir parseFrenchNumber dans lib/bpuImport.
  */
 export function evalFormula(raw: string): number {
-  if (!raw.startsWith('=')) return parseFloat(raw) || 0;
+  // Virgule décimale française (« 17,7 »), espaces et espaces insécables
+  // (séparateur de milliers d'un nombre copié) ne comptent pas.
+  const texte = raw.trim().replace(/[\s\u00a0\u202f]/g, '').replace(/,/g, '.');
+  // Un reste de calcul flottant (17,7 + 7,35 = 25.049999999999997) n'est pas
+  // une valeur saisie : 10 décimales suffisent à l'effacer sans rien arrondir
+  // de ce que l'architecte écrit.
+  const propre = (n: number) => Number(n.toFixed(10));
+  if (!texte.startsWith('=')) {
+    const n = parseFloat(texte);
+    return Number.isFinite(n) ? propre(n) : 0;
+  }
   try {
-    const expr = raw.slice(1).replace(/[^0-9+\-*/.() ]/g, '');
+    const expr = texte.slice(1).replace(/[^0-9+\-*/.()]/g, '');
     // eslint-disable-next-line no-new-func
     const result = Function('"use strict"; return (' + expr + ')')();
-    return typeof result === 'number' && isFinite(result) ? result : 0;
+    return typeof result === 'number' && isFinite(result) ? propre(result) : 0;
   } catch {
     return 0;
   }

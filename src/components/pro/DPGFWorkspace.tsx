@@ -25,6 +25,7 @@ import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
+import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
 import { localisationsConnues, localisationsDeLigne } from '../../lib/cctpImages';
 import {
   basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
@@ -928,7 +929,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       {batiments.filter(b => b.id in quantites).map(b => (
                         <span key={b.id} className="inline-flex items-center gap-1">
                           <span style={{ color: 'var(--tblr-muted)' }}>{b.code}</span>
-                          <span className="w-16"><EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric showZero editOnClick label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} /></span>
+                          <span className="w-16"><EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric maxDecimals={DECIMALES_QUANTITE} showZero editOnClick label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} /></span>
                         </span>
                       ))}
                     </div>
@@ -1140,7 +1141,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         );
                       })}
                       <td className="px-2 py-0.5">
-                        {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(l.quantite)}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric {...cellProps} />)}
+                        {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{formatQuantite(l.quantite)}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric maxDecimals={DECIMALES_QUANTITE} {...cellProps} />)}
                       </td>
                       <td className="px-2 py-0.5">
                         <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric pm={!!l.pourMemoire && !hasChildren} {...cellProps} />
