@@ -998,8 +998,10 @@ admise que pour une donnée qui en a besoin (statut d'une réserve, retard).
   seul cette ligne dès qu'il est appelé au-delà de la page 1 (`drawCompactHeader`), et `drawAgencyFooters()`
   l'ajoute aux pages restées sans en-tête ; ne jamais redessiner l'en-tête complet après un `addPage()`.
   Excel : `ajouterFeuille()` pose `differentFirst` (première page sans en-tête d'impression, les suivantes
-  « agence | document »). Documents d'agent (`artifacts.ts`) : même règle en PDF et en Word. Les exports Word
-  du reste de l'application ne suivent pas encore cette règle.
+  « agence | document »). Word : `docxSectionChrome()` (`src/lib/docxRunningHeader.ts`) pose `titlePage`
+  et les deux en-têtes (complet en première page, ligne réduite ensuite) ; tout nouvel export Word passe
+  par lui. Documents d'agent (`artifacts.ts`) : même règle en PDF, en Word et en Excel (ExcelJS, plus
+  SheetJS qui n'écrit pas les en-têtes d'impression).
 - **PDF** : `src/lib/pdfLetterhead.ts` (`drawAgencyHeader`, `drawAgencyFooters`,
   `tableauGris()` / `TABLEAU_GRIS` pour les tableaux autoTable, `fetchAgencySettings()`
   pour un générateur qui n'a pas les réglages sous la main). Ne plus écrire de
@@ -1023,7 +1025,7 @@ admise que pour une donnée qui en a besoin (statut d'une réserve, retard).
 - **Répartition d'honoraires** (`feeDistribution.ts`) : reste une calculette, ses formules
   visent des lignes décalées par l'en-tête, d'où un compteur de lignes tenu à l'écriture.
 - **Hors périmètre** : la facture d'abonnement ArchiOffice (`subscriptionInvoice.ts`),
-  émise par la plateforme et non par le cabinet, et les exports Word.
+  émise par la plateforme et non par le cabinet, et les exports Word (hors règle de l'en-tête réduit ci-dessus).
 
 ### Charte sobre : documents générés, pas l'interface
 

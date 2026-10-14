@@ -251,10 +251,13 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
   ];
   const nextHeaderChildren: InstanceType<typeof Paragraph>[] = [
     new Paragraph({
-      alignment: AlignmentType.RIGHT,
+      tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '111827', space: 4 } },
       spacing: { after: 240 },
-      children: [new TextRun({ text: repere, size: 17, color: '6B7280' })],
+      children: [
+        new TextRun({ text: settings.agencyName || '', bold: true, size: 16, color: '111827' }),
+        new TextRun({ text: `\t${repere}`, size: 16, color: '6B7280' }),
+      ],
     }),
   ];
   const bandeau = await partnerLogosParagraph();
