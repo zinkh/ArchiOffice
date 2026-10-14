@@ -30,6 +30,10 @@ describe.skipIf(!hasPostgres)('next_document_number : atomicité sur un vrai Pos
     await admin.query(`CREATE DATABASE ${dbName}`);
 
     const pool = new Pool({ ...base, database: dbName, max: 20 });
+    // DROP DATABASE ... WITH (FORCE) coupe les connexions que le pool ferme encore : sans
+    // écouteur, ces erreurs de fermeture deviennent des erreurs non gérées de Vitest.
+    pool.on('error', () => {});
+    pool.on('connect', client => { client.on('error', () => {}); });
     try {
       await pool.query(`
         CREATE TABLE tenants (id uuid PRIMARY KEY);
