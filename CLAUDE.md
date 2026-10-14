@@ -1109,6 +1109,36 @@ SMTP du cabinet passe par `resolveEmailSender()`. Le SMTP du cabinet doit accept
 avec une adresse différente de son identifiant de connexion, ce qu'ArchiOffice ne peut pas
 vérifier.
 
+### Dossier de références pour les marchés publics
+
+Bouton « Dossier de références » de `/references` (`src/components/ReferencesDossierDialog.tsx`) : l'architecte coche les opérations
+(affaires ou références manuelles), les réordonne (flèches), choisit les images de chaque fiche (6 au plus, la première est la
+principale, téléversement de plusieurs images possible), complète la fiche, retouche le texte du programme **pour cet export
+seulement** et génère un PDF A4 **paysage ou portrait** : page de garde (logo, « Références », gérant, mosaïque, coordonnées),
+tableau récapitulatif, une fiche par référence.
+
+- **Rendu** : `server/referencesDossier/` ; `template.ts` (HTML/CSS pur, testé) -> `render.ts` (playwright-core, Chromium de l'hôte :
+  `CHROMIUM_PATH`, sinon chemin Playwright, sinon `/usr/bin/chromium` ; `printBackground`, `preferCSSPageSize`, aucune requête réseau,
+  un rendu à la fois). Le Dockerfile installe `chromium`. Source Sans 3 est embarquée en base64 (`@fontsource/source-sans-3`).
+  Route `POST /api/references/dossier/pdf` (`referencesDossierLimiter`, 6 par minute, 60 références au plus).
+- **Charte de la fiche** (À NE PAS CHANGER sans l'accord de l'architecte) : marges 11 x 12 mm, titre 13,5 pt gras majuscules
+  « Nature — Ville (Dépt) », logo 11 mm, filet 1,2 pt, grille d'infos (Programme, Labels / distinctions, Maître d'ouvrage,
+  Maître d'œuvre, Mission, Phase, Surface / Budget), accent unique `#b2242a`, pied « NOM · AAZS · 01 / 01 ». **Toute donnée absente
+  s'imprime « NC »** (`nc()`), jamais une valeur inventée. Images : `classeNbImages` (n1 à n6), `.thumbs` seulement à partir de 4
+  images ; portrait = une grande image puis les vignettes, paysage = deux grandes puis une rangée de vignettes.
+- **Données** : `reference_sheets` (`supabase/migrate_reference_sheets.sql`, une ligne par affaire OU référence manuelle : nature, ville,
+  département, labels, maître d'œuvre, mission, phase, texte du budget, images retenues). Sans fiche, les valeurs se déduisent :
+  ville/département du code postal de l'adresse (`deriveCityDept`, rien sans code postal), mission du contrat MOE lié, cotraitants
+  dans le maître d'œuvre, budget = `construction_cost` (jamais `budget`, ambigu), programme = `projects.programme` seulement (la
+  `description` peut porter des honoraires : jamais reprise). Une instance sans la table lit des fiches vides (`42P01`) et refuse l'écriture en 503.
+- **Aucune image d'un autre projet** : chaque image est relue en base et n'est acceptée que si elle appartient à la référence ET au
+  cabinet (`loadCandidate`, `server/referencesDossier/data.ts`) ; sinon elle est ignorée et signalée (`X-Dossier-Warnings`).
+  Les images viennent de la couverture, des documents de l'affaire (images ou catégorie « Références - images ») ou, pour une
+  référence manuelle, de sa galerie et des documents `resource_type = 'custom_references'` (ajouté à `ATTACHABLE_RESOURCE_TYPES`).
+  Elles sont réduites à 1800 px (JPEG) avant le rendu ; un fichier sur un drive externe n'est pas lu.
+- Pagination « 01 / 12 » sur le document entier (couverture comptée, sans pied) : c'est le gabarit de la fiche, qui l'emporte sur « P1|2 ».
+- Tests : `tests/referencesDossier.test.ts`. Pas encore de PPTX.
+
 ### Qualifications des entreprises et recherche d'entreprises
 
 `contact_qualifications` (`supabase/migrate_contact_qualifications.sql`) : une ligne par qualification

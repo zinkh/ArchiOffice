@@ -4,11 +4,18 @@ FROM node:22-slim
 # server/ocr.ts pour rendre en image les pages d'un PDF scanné avant
 # reconnaissance de caractères. Sans lui, l'OCR des PDF est simplement
 # désactivé (celui des images continue de fonctionner) et l'agent le signale.
+# chromium rend le PDF du dossier de références (server/referencesDossier/render.ts,
+# playwright-core sans navigateur téléchargé) ; fonts-liberation fournit le repli
+# Arial/Helvetica si Source Sans 3 manquait.
+ENV CHROMIUM_PATH=/usr/bin/chromium
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     make \
     g++ \
     poppler-utils \
+    chromium \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

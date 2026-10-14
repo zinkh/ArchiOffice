@@ -147,3 +147,14 @@ export const depotWriteLimiter = rateLimit({
   keyGenerator: (req: any) => ipKeyGenerator(req.ip || ''),
   message: { error: 'Trop de dépôts en peu de temps. Veuillez réessayer dans quelques minutes.' },
 });
+
+// Dossier de références : un rendu PDF lance Chromium, bien plus coûteux qu'une
+// requête ordinaire. Plafond par personne.
+export const referencesDossierLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de générations de dossier. Veuillez patienter avant de réessayer.' },
+});

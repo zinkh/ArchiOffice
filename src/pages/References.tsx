@@ -38,6 +38,7 @@ import type { Cotraitant, RefImage, CustomRef, RefItem } from '../lib/referenceI
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT } from '../lib/contactCategories';
+import { ReferencesDossierDialog } from '../components/ReferencesDossierDialog';
 
 // ── Unified reference type ─────────────────────────────────────────────────
 
@@ -887,6 +888,7 @@ export default function References() {
   const [items, setItems] = useState<RefItem[]>([]);
   const [expandedDomains, setExpandedDomains] = useState<Set<string>>(new Set());
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [dossierOpen, setDossierOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [sortConfig, setSortConfig] = useState<{ key: keyof RefItem; direction: 'asc' | 'desc' } | null>(null);
@@ -1224,6 +1226,10 @@ export default function References() {
             <IconUpload size={16} />
             {t('references_import')}
           </button>
+          <button onClick={() => setDossierOpen(true)} className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium border transition-colors shadow-sm hover:bg-[var(--tblr-surface-2)]" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', background: 'var(--tblr-surface)' }}>
+            <IconFileTypePdf size={18} />
+            {t('refdossier_open')}
+          </button>
           <button onClick={exportToPDF} disabled={selectedIds.size === 0} className="flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
             <IconFileTypePdf size={18} />
             {t('references_export_pdf', { count: selectedIds.size })}
@@ -1507,6 +1513,7 @@ export default function References() {
           onImported={handleImported}
         />
       )}
+      {dossierOpen && <ReferencesDossierDialog items={items} initialSelectedIds={[...selectedIds]} onClose={() => setDossierOpen(false)} />}
     </div>
   );
 }
