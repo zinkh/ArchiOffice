@@ -85,6 +85,24 @@ describe('exportDPGFtoExcel', () => {
   });
 });
 
+describe('DPGF sans prix : cadre de réponse pour les entreprises', () => {
+  it('garde les colonnes P.U. et Total, vides, pour un import ultérieur dans l\'ACT', async () => {
+    const { exportDPGFtoExcel } = await import('../proExport');
+    await exportDPGFtoExcel(sampleDPGF, 'Projet', 'lot');
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const lignes: unknown[][] = [];
+    wb.worksheets[0].eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+    const entete = lignes.find(l => l.includes('P.U. HT (€)'))!;
+    expect(entete).toEqual(['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']);
+    const poste = lignes.find(l => l.includes('01.1.1'))!;
+    expect(poste[3]).toBe(12);
+    expect(poste.slice(4).every(v => v == null || v === '')).toBe(true);
+    expect(lignes.some(l => l.includes('TOTAL HT'))).toBe(false);
+  });
+});
+
 describe('colonne TVA dédiée du DPGF', () => {
   const avecTauxDedie: DPGF = {
     ...sampleDPGF,

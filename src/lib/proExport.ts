@@ -113,9 +113,11 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
   localisation: string;
   unite: string;
   quantite: string;
+  prixUnitaire: string;
   prixTotal: string;
   /** Valeurs brutes, pour l'Excel : un montant doit y rester un nombre. */
   q: number;
+  pu: number;
   total: number;
   pm: boolean;
   tvaTaux?: number;
@@ -123,7 +125,7 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
 }> {
   const rows: ReturnType<typeof flattenDPGFGroupe> = [];
   for (const [, g] of grouperDpgf(dpgf, groupement)) {
-    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixTotal: fmt(g.total), q: 0, total: g.total, pm: false });
+    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(g.total), q: 0, pu: 0, total: g.total, pm: false });
     for (const a of g.articles) {
       rows.push({
         type: 'article',
@@ -133,8 +135,9 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
         localisation: a.ligne.localisation || '',
         unite: a.ligne.unite,
         quantite: a.ligne.quantite > 0 ? formatQuantite(a.ligne.quantite) : '',
+        prixUnitaire: a.ligne.pourMemoire ? 'PM' : a.ligne.prixUnitaire > 0 ? fmt(a.ligne.prixUnitaire) : '',
         prixTotal: a.ligne.pourMemoire ? 'PM' : a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
-        q: a.ligne.quantite, total: a.ligne.prixTotal, pm: !!a.ligne.pourMemoire,
+        q: a.ligne.quantite, pu: a.ligne.prixUnitaire, total: a.ligne.prixTotal, pm: !!a.ligne.pourMemoire,
         ...tvaDeLigne(a.ligne),
       });
     }
@@ -193,9 +196,11 @@ function flattenDPGF(lots: Lot[]): Array<{
 
 export interface ExportDpgfOptions {
   /**
-   * Par défaut le DPGF exporté est SANS PRIX (ni P.U., ni montant, ni total) :
-   * il sert de cadre de réponse aux entreprises. `avecPrix` est réservé à un
-   * usage interne.
+   * Par défaut le DPGF exporté est SANS PRIX : il sert de cadre de réponse aux
+   * entreprises. Les colonnes « P.U. HT (€) » et « Total HT (€) » restent
+   * présentes mais VIDES, pour que l'entreprise les remplisse et que le fichier
+   * revienne dans l'atelier ACT (import d'offre). `avecPrix` les remplit et
+   * ajoute les totaux : usage interne.
    */
   avecPrix?: boolean;
   /**
@@ -232,19 +237,20 @@ export async function exportDPGFtoPDF(
     autoTable(doc, {
       ...tableauGris(),
       startY,
-      head: [avecPrix
-        ? ['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]
-        : ['N°', 'Désignation', 'Unité', 'Quantité']],
+      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]],
       body: rows.map(r => {
         const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, r.quantite];
-        return avecPrix ? [...debut, r.prixUnitaire, r.prixTotal, ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])] : debut;
+        // Sans prix, P.U. et Total restent des cases vides à remplir par l'entreprise.
+        return [...debut, avecPrix ? r.prixUnitaire : '', avecPrix ? r.prixTotal : '',
+          ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])];
       }),
       columnStyles: {
         0: { cellWidth: 20 },
         1: { cellWidth: 'auto' },
         2: { cellWidth: 18, halign: 'center' },
-        3: { cellWidth: avecPrix ? 22 : 26, halign: 'right' },
-        ...(avecPrix ? { 4: { cellWidth: 28, halign: 'right' }, 5: { cellWidth: 28, halign: 'right' } } : {}),
+        3: { cellWidth: 22, halign: 'right' },
+        4: { cellWidth: 28, halign: 'right' },
+        5: { cellWidth: 28, halign: 'right' },
         ...(colTva ? { 6: { cellWidth: 36, halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
@@ -271,12 +277,11 @@ export async function exportDPGFtoPDF(
     autoTable(doc, {
       ...tableauGris(),
       startY,
-      head: [avecPrix
-        ? ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]
-        : ['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité']],
+      head: [['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]],
       body: rows.map(r => {
         const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, r.quantite];
-        return avecPrix ? [...debut, r.prixTotal, ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])] : debut;
+        return [...debut, avecPrix ? r.prixUnitaire : '', avecPrix ? r.prixTotal : '',
+          ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])];
       }),
       columnStyles: {
         0: { cellWidth: 18 },
@@ -284,9 +289,10 @@ export async function exportDPGFtoPDF(
         2: { cellWidth: 32 },
         3: { cellWidth: 26 },
         4: { cellWidth: 16, halign: 'center' },
-        5: { cellWidth: avecPrix ? 20 : 24, halign: 'right' },
-        ...(avecPrix ? { 6: { cellWidth: 28, halign: 'right' } } : {}),
-        ...(colTva ? { 7: { cellWidth: 36, halign: 'right' } } : {}),
+        5: { cellWidth: 20, halign: 'right' },
+        6: { cellWidth: 26, halign: 'right' },
+        7: { cellWidth: 28, halign: 'right' },
+        ...(colTva ? { 8: { cellWidth: 36, halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -296,9 +302,9 @@ export async function exportDPGFtoPDF(
         }
       },
       ...(avecPrix ? { foot: [
-        ['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €', ...(colTva ? [''] : [])],
-        ...piedHorsBase(dpgf, 7, fmt, colTva ? 1 : 0),
-        ...(colTva ? piedTvaPdf(rows, 7) : []),
+        ['', 'TOTAL HT', '', '', '', '', '', fmt(dpgf.totalHT) + ' €', ...(colTva ? [''] : [])],
+        ...piedHorsBase(dpgf, 8, fmt, colTva ? 1 : 0),
+        ...(colTva ? piedTvaPdf(rows, 8) : []),
       ] } : {}),
     });
   }
@@ -384,20 +390,22 @@ export async function exportDPGFtoExcel(
         { header: 'N°', width: 10 },
         { header: 'Désignation', width: 55 },
         { header: 'Unité', width: 10, align: 'center' },
-        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_QUANTITE },
-        ...(avecPrix ? [
-          { header: 'P.U. HT (€)', width: 15, align: 'right' as const, numFmt: FORMAT_NOMBRE },
-          { header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE },
-          ...entetesTva,
-        ] : []),
+        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_QUANTITE },
+        // Toujours présentes : vides sans prix, l'entreprise les remplit (import ACT).
+        { header: 'P.U. HT (€)', width: 15, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Total HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+        ...entetesTva,
       ],
     });
     const lignes = flattenDPGF(dpgf.lots);
     for (const r of lignes) {
       const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q)];
-      const valeurs = avecPrix
-        ? [...debut, r.pm ? 'PM' : nombre(r.pu), r.pm ? 'PM' : nombre(r.total), ...(colTva ? [r.tvaTaux, r.tvaMontant] : [])]
-        : debut;
+      const valeurs = [
+        ...debut,
+        avecPrix ? (r.pm ? 'PM' : nombre(r.pu)) : undefined,
+        avecPrix ? (r.pm ? 'PM' : nombre(r.total)) : undefined,
+        ...(colTva ? [r.tvaTaux, r.tvaMontant] : []),
+      ];
       if (r.type === 'lot') f.ligne(valeurs, { gras: true, fond: 'groupe' });
       else if (r.type === 'chapitre') f.ligne(valeurs, { gras: true, fond: 'doux' });
       else f.ligne(valeurs, r.type === 'titre' ? { italique: true } : {});
@@ -414,21 +422,26 @@ export async function exportDPGFtoExcel(
         { header: 'Lot', width: 24 },
         { header: 'Localisation', width: 20 },
         { header: 'Unité', width: 10, align: 'center' },
-        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_QUANTITE },
-        ...(avecPrix ? [{ header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE }, ...entetesTva] : []),
+        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_QUANTITE },
+        { header: 'P.U. HT (€)', width: 15, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Total HT (€)', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+        ...entetesTva,
       ],
     });
     const articles = flattenDPGFGroupe(dpgf, groupement);
     for (const r of articles) {
       const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, nombre(r.q)];
-      const valeurs = avecPrix
-        ? [...debut, r.pm ? 'PM' : nombre(r.total), ...(colTva ? [r.tvaTaux, r.tvaMontant] : [])]
-        : debut;
+      const valeurs = [
+        ...debut,
+        avecPrix ? (r.pm ? 'PM' : nombre(r.pu)) : undefined,
+        avecPrix ? (r.pm ? 'PM' : nombre(r.total)) : undefined,
+        ...(colTva ? [r.tvaTaux, r.tvaMontant] : []),
+      ];
       f.ligne(valeurs, r.type === 'groupe' ? { gras: true, fond: 'groupe' } : {});
     }
-    if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', '', dpgf.totalHT]);
-    if (avecPrix) ajouterHorsBase(f, dpgf, 7, colTva ? 2 : 0);
-    if (colTva) ajouterPiedTvaExcel(f, articles, 7);
+    if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', '', '', dpgf.totalHT]);
+    if (avecPrix) ajouterHorsBase(f, dpgf, 8, colTva ? 2 : 0);
+    if (colTva) ajouterPiedTvaExcel(f, articles, 8);
   }
   await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`, sortie);
 }
