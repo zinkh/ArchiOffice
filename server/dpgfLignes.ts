@@ -122,9 +122,14 @@ function trouverLigne(doc: Json, op: { id?: string; numero?: string; lot?: strin
 
 // ── Totaux ───────────────────────────────────────────────────────────────────
 
-const sommeLigne = (l: Json): number => (Array.isArray(l.children) && l.children.length
-  ? l.children.reduce((s: number, c: Json) => s + sommeLigne(c), 0)
-  : Number(l.prixTotal) || 0);
+// Pour mémoire, option (PSE) et variante ne comptent pas dans le total de base,
+// non plus que leurs sous-articles (cf. sumLigne, src/components/pro/treeOps.ts).
+const sommeLigne = (l: Json): number => {
+  if (l.pourMemoire || (l.nature && l.nature !== 'base')) return 0;
+  return Array.isArray(l.children) && l.children.length
+    ? l.children.reduce((s: number, c: Json) => s + sommeLigne(c), 0)
+    : Number(l.prixTotal) || 0;
+};
 
 /** Sous-total de chaque lot, totalHT et totalTTC (TVA du document, 20 % à défaut). */
 export function recalculerTotaux(doc: Json): Pick<Rapport, 'sous_totaux' | 'total_ht' | 'total_ttc' | 'tva'> {

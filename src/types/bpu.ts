@@ -11,16 +11,10 @@
 // components/pro/treeOps.ts, la charge utile du glisser-déposer et les
 // conversions DPGF<->BPU fonctionnent sans adaptateur. Le BPU est réellement le
 // même arbre d'articles, c'est la prémisse de « le DQE est une vue ».
-import type { Ligne, Chapitre, Lot, DecoupageDocument, OffreDocument, OffreAnomalie } from './dpgf';
-export type { OffreAnomalie } from './dpgf';
-
-/**
- * Nature d'un article au sens du règlement de la consultation. Une PSE
- * (prestation supplémentaire éventuelle) ou une variante n'entre jamais dans
- * le montant de l'offre de base : les totaux sont donc des réductions filtrées
- * sur ce champ, et non un arbre parallèle.
- */
-export type NatureArticle = 'base' | 'pse' | 'variante' | 'option';
+import type { Ligne, Chapitre, Lot, DecoupageDocument, OffreDocument, OffreAnomalie, NatureArticle } from './dpgf';
+export type { OffreAnomalie, NatureArticle } from './dpgf';
+// `NatureArticle` vit désormais dans types/dpgf.ts : le DPGF et l'estimation
+// portent eux aussi des PSE, options et variantes (champ `Ligne.nature`).
 
 export type TypeMarche = 'bons_de_commande' | 'prix_unitaires' | 'mixte';
 
@@ -36,8 +30,6 @@ export interface BPULigne extends Ligne {
   refBpu?: string;
   /** Montant en toutes lettres, dérivé du nombre mais surchargeable à la main. */
   prixUnitaireLettres?: string;
-  /** Défaut 'base' quand le champ est absent. */
-  nature?: NatureArticle;
   /** Surcharge la tranche héritée du chapitre puis du lot. */
   trancheId?: string;
   // `articleTypeId` (provenance bibliothèque) est désormais porté par Ligne :

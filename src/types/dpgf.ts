@@ -80,6 +80,17 @@ export interface ImageArticle {
   legende: string;
 }
 
+/**
+ * Nature d'un article au sens du règlement de la consultation. Une PSE
+ * (prestation supplémentaire éventuelle), une option ou une variante n'entre
+ * jamais dans le montant de l'offre de base : les totaux sont des réductions
+ * filtrées sur ce champ, et non un arbre parallèle. Absent : 'base'.
+ */
+export type NatureArticle = 'base' | 'pse' | 'variante' | 'option';
+/** Natures comptées à part du total de base. */
+export type NatureHorsBase = Exclude<NatureArticle, 'base'>;
+export const NATURES_HORS_BASE: NatureHorsBase[] = ['pse', 'option', 'variante'];
+
 export interface Ligne extends DecoupageNoeud {
   /** Quantités propres à chaque bâtiment ; une table vide signifie sans affectation. */
   quantitesBatiments?: Record<string, number>;
@@ -117,6 +128,19 @@ export interface Ligne extends DecoupageNoeud {
   genereParIa?: 'llm' | 'nomic';
   /** Quand elle existe, la quantité de la ligne est la somme de ces postes. */
   quantiteDetails?: QuantiteDetail[];
+  /**
+   * « PM » (pour mémoire) : l'article est décrit mais son prix n'est pas
+   * compté. Se saisit en tapant « PM » dans le prix ; prix unitaire et total
+   * restent à 0.
+   */
+  pourMemoire?: boolean;
+  /**
+   * Nature de la prestation. Absent ou 'base' : comptée au total. `pse`,
+   * `option` et `variante` sont chiffrées mais comptées à part, jamais dans le
+   * total de base. Portée par un article à sous-articles, elle vaut pour tout
+   * son contenu.
+   */
+  nature?: NatureArticle;
   type: 'ouvrage' | 'sous-total' | 'titre' | 'commentaire';
   children?: Ligne[];
   cctpOnly?: boolean;

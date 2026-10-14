@@ -10,6 +10,7 @@
 // client pourraient un jour montrer deux classements différents.
 import React, { useMemo } from 'react';
 import type { DPGF, GroupementDpgf } from '../../types/dpgf';
+import { StatutBadges } from './StatutBadges';
 import { grouperDpgf } from '../../lib/dpgfGrouping';
 import { formatCurrency } from '../../lib/utils';
 
@@ -49,12 +50,17 @@ export const DpgfGroupedView: React.FC<{ dpgf: DPGF; groupement: Exclude<Groupem
               {g.articles.map(a => (
                 <tr key={`${a.ligne.id}-${a.batimentId ?? ""}`} className="border-b border-zinc-100 dark:border-zinc-800">
                   <td className="px-2 py-0.5 text-xs text-zinc-400">{a.ligne.numero}</td>
-                  <td className="px-2 py-0.5">{a.ligne.designation}</td>
+                  <td className="px-2 py-0.5">
+                    <span className="inline-flex items-center gap-1.5">
+                      {a.ligne.designation}
+                      <StatutBadges pourMemoire={a.ligne.pourMemoire} nature={a.nature} />
+                    </span>
+                  </td>
                   <td className="px-2 py-0.5 text-xs text-zinc-500 truncate">{a.lot.numero} {a.lot.titre}</td>
                   <td className="px-2 py-0.5 text-xs text-zinc-500">{a.ligne.localisation || ''}</td>
                   <td className="px-2 py-0.5 text-center">{a.ligne.unite}</td>
                   <td className="px-2 py-0.5 text-right font-mono">{a.ligne.quantite}</td>
-                  <td className="px-2 py-0.5 text-right font-mono">{formatCurrency(a.ligne.prixTotal || 0)}</td>
+                  <td className="px-2 py-0.5 text-right font-mono">{a.ligne.pourMemoire ? 'PM' : formatCurrency(a.ligne.prixTotal || 0)}</td>
                 </tr>
               ))}
             </React.Fragment>

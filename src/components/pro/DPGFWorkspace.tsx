@@ -8,9 +8,9 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconFileImport, IconScale, IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
-  IconSubtask,
+  IconSubtask, IconTag,
 } from '@tabler/icons-react';
-import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -23,7 +23,9 @@ import type { ArticleBibliotheque } from '../../types/library';
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
-import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
+import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
+import { StatutBadges } from './StatutBadges';
+import { localisationsConnues, localisationsDeLigne } from '../../lib/cctpImages';
 import {
   basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
   heritagePour, modifierFeuilles, quantitesParBatiment,
@@ -32,10 +34,10 @@ import {
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
 import {
-  uid, evalFormula, MAX_ARTICLE_DEPTH, childNumber,
+  uid, evalFormula, parsePrixSaisi, estHorsBase, MAX_ARTICLE_DEPTH, childNumber,
   mutateLigneAtPath, addChildToLigneAtPath,
   takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
-  collectLigneIdsWithChildren, sumLigne, recomputeLot as recomputeLotOp,
+  collectLigneIdsWithChildren, sumLigne, sumLigneNature, recomputeLot as recomputeLotOp,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey,
   type FlatRow,
 } from './treeOps';
@@ -115,10 +117,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 
   // ── Derived flat rows ────────────────────────────────────────────────────────
   // Nombre de colonnes ajoutées en queue de tableau par le découpage
-  // (bâtiment, phase — chacune conditionnelle — et localisation, toujours
-  // présente). Sert à étendre le colSpan des lignes de totaux en pied de
+  // (la phase, conditionnelle ; la localisation suit la désignation). Sert à étendre le colSpan des lignes de totaux en pied de
   // tableau, qui ne connaissent pas ces colonnes autrement.
-  const nbColsDecoupage = (dpgf.multiPhases ? 1 : 0) + 1;
+  const nbColsDecoupage = dpgf.multiPhases ? 1 : 0;
   // Plusieurs bâtiments : une colonne « Bâtiments » (cases à cocher) puis une
   // quantité par bâtiment, avant la quantité totale.
   const multiBat = !!dpgf.multiBatiments;
@@ -126,6 +127,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const nbColsBat = multiBat ? 1 + batiments.length : 0;
   // La phase seule reste dans la colonne de découpage : le bâtiment a la sienne.
   const docPhases = { ...dpgf, multiBatiments: false };
+
+  // Localisations déjà saisies dans le projet, proposées dans les autres cases.
+  const localisationsProjet = localisationsConnues(dpgf);
 
   const flatRows: FlatRow<Lot, Chapitre, Ligne>[] =
     buildFlatRows(dpgf.lots, { expandedLots, expandedChaps, expandedLignes });
@@ -371,15 +375,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             const q = evalFormula(value);
             return { ...ligne, quantite: q, prixTotal: q * ligne.prixUnitaire };
           }
-          if (field === 'prixUnitaire') {
-            const pu = evalFormula(value);
-            return { ...ligne, prixUnitaire: pu, prixTotal: ligne.quantite * pu };
-          }
-          if (field === 'prixTotal') {
-            return { ...ligne, prixTotal: evalFormula(value) };
+          if (field === 'prixUnitaire' || field === 'prixTotal') {
+            // « PM » : l'article est décrit mais son prix n'est pas compté.
+            const saisi = parsePrixSaisi(value);
+            if (saisi.pourMemoire) return { ...ligne, pourMemoire: true, prixUnitaire: 0, prixTotal: 0 };
+            const { pourMemoire: _pm, ...sansPm } = ligne;
+            return field === 'prixUnitaire'
+              ? { ...sansPm, prixUnitaire: saisi.valeur, prixTotal: ligne.quantite * saisi.valeur }
+              : { ...sansPm, prixTotal: saisi.valeur };
           }
           if (field === 'localisation') {
-            return { ...ligne, localisation: value };
+            // « a,  b, » devient « a, b » : virgules et espaces nettoyés.
+            return { ...ligne, localisation: localisationsDeLigne(value).join(', ') };
           }
           return ligne;
         });
@@ -542,6 +549,23 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     </td>
   );
 
+  // ── Statut du prix : base, option (PSE), variante, pour mémoire (PM) ───────
+  // Posé sur les articles de la sélection ; un lot ou un chapitre vise tous ses
+  // articles. « Prestation de base » retire option, variante et PM.
+  const statutEntries = (keys: string[]): ToolbarMenuEntry[] => {
+    const lignes = collectSelectedLignes<Ligne>(dpgf.lots, keys);
+    const tous = (f: (l: Ligne) => boolean) => lignes.length > 0 && lignes.every(f);
+    const appliquer = (patch: Parameters<typeof appliquerStatutLignes>[2]) => commitLots(appliquerStatutLignes(dpgf.lots, keys, patch));
+    return [
+      { id: 'st-base', label: t('pro_status_base'), checked: tous(l => !estHorsBase(l.nature) && !l.pourMemoire), onClick: () => appliquer({ nature: undefined, pourMemoire: undefined }) },
+      ...NATURES_HORS_BASE.map(nature => ({
+        id: `st-${nature}`, label: t(`pro_status_${nature}`), checked: tous(l => l.nature === nature), onClick: () => appliquer({ nature }),
+      })),
+      { id: 'st-sep', separator: true },
+      { id: 'st-pm', label: t('pro_status_pm'), checked: tous(l => !!l.pourMemoire), onClick: () => appliquer({ pourMemoire: !tous(l => !!l.pourMemoire) }) },
+    ];
+  };
+
   const selectionActions = (sel: HierarchySelection[]): SelectionAction[] => {
     const one = sel.length === 1 ? sel[0] : null;
     const onlyOne = t('pro_selection_single_only');
@@ -558,6 +582,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         onClick: () => one && changeHierarchy(one, 'demote'), disabled: !canDemote(dpgf.lots, one), hint: sel.length > 1 ? onlyOne : undefined },
       ...(multiBat ? [{ id: 'batiments', label: t('pro_buildings'), icon: <IconBuildingCommunity size={16} />, groupStart: true, onClick: () => {},
         menu: () => batimentEntries(sel.map(hierarchyKey)) }] : []),
+      { id: 'statut', label: t('pro_status'), icon: <IconTag size={16} />, groupStart: !multiBat, onClick: () => {},
+        menu: () => statutEntries(sel.map(hierarchyKey)), disabled: !sel.length },
       { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+D', mobile: true, groupStart: true,
         onClick: () => one && changeHierarchy(one, 'duplicate'), disabled: !one, hint: sel.length > 1 ? onlyOne : undefined },
       { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+C',
@@ -577,7 +603,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       : s.kind === 'chapitre'
       ? [{ id: 'add-art', label: t('pro_add_article'), icon: <IconRowInsertBottom size={16} />, onClick: () => addLigne(s.lotIdx, s.chapIdx) }]
       : [{ id: 'add-sub', label: t('pro_add_sub_article'), icon: <IconSubtask size={16} />, onClick: () => addSubLigne(s.lotIdx, s.chapIdx, s.lignePath), disabled: !canAddChildTo(s) }];
-    return [...add, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
+    const statut: ToolbarMenuEntry[] = s.kind === 'ligne'
+      ? [{ id: 'sep-statut', separator: true }, { id: 'head-statut', heading: t('pro_status') }, ...statutEntries([rowKey(row)])]
+      : [];
+    return [...add, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
   };
 
   // ── Raccourcis clavier du tableau ───────────────────────────────────────────
@@ -717,7 +746,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     {
       kind: 'menu', id: 'dpgf-market', label: t('pro_market'), icon: <IconScale size={16} />,
       entries: [
-        { id: 'dpgf-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'dpgf-import-offer', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'dpgf-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
       ],
@@ -934,6 +962,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   <th className="w-6" aria-hidden />
                   <th className="px-2 py-2 text-left font-semibold w-24">{t('pro_col_number')}</th>
                   <th className="px-2 py-2 text-left font-semibold">{t('pro_col_designation')}</th>
+                  <th className="px-2 py-2 text-left font-semibold w-36">{t('pro_col_location')}</th>
                   <th className="px-2 py-2 text-center font-semibold w-16">{t('pro_col_unit')}</th>
                   {multiBat && <th className="px-1 py-2 text-left font-semibold w-24">{t('pro_buildings')}</th>}
                   {batiments.map(b => (
@@ -943,7 +972,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   <th className="px-2 py-2 text-right font-semibold w-28">{t('pro_col_unit_price')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-32">{t('pro_col_total')}</th>
                   {dpgf.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">{t('pro_col_phase')}</th>}
-                  <th className="px-2 py-2 text-left font-semibold w-28">{t('pro_col_location')}</th>
                   <th className="w-10"><span className="sr-only">{t('pro_col_actions')}</span></th>
                 </tr>
               </thead>
@@ -972,7 +1000,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 font-mono text-xs" style={{ color: 'var(--tblr-muted)' }}>
                           <EditableCell rKey={rKey} field="numero" value={row.lot.numero} {...cellProps} />
                         </td>
-                        <td className="px-2 py-1" colSpan={multiBat ? 2 : 4}>
+                        <td className="px-2 py-1" colSpan={multiBat ? 3 : 5}>
                           <EditableCell rKey={rKey} field="titre" value={row.lot.titre} {...cellProps} />
                         </td>
                         {multiBat && <>{batimentsCell(rKey, row.lot.numero)}<td colSpan={batiments.length + 2} /></>}
@@ -990,7 +1018,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                             </div>
                           </td>
                         )}
-                        <td className="px-1 py-1" />{/* pas de localisation au niveau lot */}
                         {menuCell(row, row.lot.numero)}
                       </tr>
                     );
@@ -1018,7 +1045,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 font-mono text-xs font-normal" style={{ color: 'var(--tblr-muted)' }}>
                           <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} {...cellProps} />
                         </td>
-                        <td className="px-2 py-1" colSpan={multiBat ? 2 : 5}>
+                        <td className="px-2 py-1" colSpan={multiBat ? 3 : 6}>
                           <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} {...cellProps} />
                         </td>
                         {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 3} /></>}
@@ -1033,7 +1060,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                             </div>
                           </td>
                         )}
-                        <td className="px-1 py-1" />{/* pas de localisation au niveau chapitre */}
                         {menuCell(row, row.chapitre!.numero)}
                       </tr>
                     );
@@ -1093,7 +1119,11 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                               IA
                             </span>
                           )}
+                          <StatutBadges pourMemoire={l.pourMemoire} nature={l.nature} />
                         </div>
+                      </td>
+                      <td className="px-2 py-0.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                        <EditableCell rKey={rKey} field="localisation" value={l.localisation || ''} className="text-xs" suggestions={localisationsProjet} {...cellProps} />
                       </td>
                       <td className="px-2 py-0.5 text-center">
                         <EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center" {...cellProps} />
@@ -1113,15 +1143,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(l.quantite)}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric {...cellProps} />)}
                       </td>
                       <td className="px-2 py-0.5">
-                        <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric {...cellProps} />
+                        <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric pm={!!l.pourMemoire && !hasChildren} {...cellProps} />
                       </td>
                       <td className="px-2 py-0.5 text-right font-mono tabular-nums">
                         {hasChildren ? (
                           <span className="px-1 py-0.5 text-sm" style={{ color: 'var(--tblr-muted)' }}>
-                            {formatCurrency(sumLigne(l))}
+                            {l.pourMemoire ? 'PM' : formatCurrency(estHorsBase(l.nature) ? sumLigneNature(l, l.nature, true) : sumLigne(l))}
                           </span>
                         ) : (
-                          <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric {...cellProps} />
+                          <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric pm={!!l.pourMemoire} {...cellProps} />
                         )}
                       </td>
                       {dpgf.multiPhases && (
@@ -1135,9 +1165,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           </div>
                         </td>
                       )}
-                      <td className="px-2 py-0.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>
-                        <EditableCell rKey={rKey} field="localisation" value={l.localisation || ''} className="text-xs" {...cellProps} />
-                      </td>
                       {menuCell(row, l.numero)}
                     </tr>
                   );
@@ -1145,17 +1172,24 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 
                 {/* Totaux, recalculés depuis les articles */}
                 <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                  <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-2 text-left text-sm font-semibold">{t('pro_total_ht')}</th>
+                  <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-2 text-left text-sm font-semibold">{t('pro_total_ht')}</th>
                   <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>
+                {NATURES_HORS_BASE.filter(n => totaux.horsBase[n].nb > 0).map(n => (
+                  <tr key={n} style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                    <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t(`pro_total_${n}_ht`)}</th>
+                    <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.horsBase[n].totalHT)}</td>
+                    <td colSpan={nbColsDecoupage + 1} />
+                  </tr>
+                ))}
                 <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
-                  <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
+                  <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
                   <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.montantTVA)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>
                 <tr className="border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                  <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-2 text-left font-bold">{t('pro_total_ttc')}</th>
+                  <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-2 text-left font-bold">{t('pro_total_ttc')}</th>
                   <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>

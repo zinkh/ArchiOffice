@@ -6,6 +6,8 @@
 // Tout est générique sur la FORME des nœuds plutôt que sur les types du DPGF,
 // pour que les types du BPU — qui étendent ceux du DPGF — passent tels quels.
 
+import type { NatureArticle, NatureHorsBase } from '../../types/dpgf';
+
 // ── Identifiants ─────────────────────────────────────────────────────────────
 let _uid = 0;
 /**
@@ -186,12 +188,54 @@ export function moveLigneSibling<T extends { children?: any[] }>(lignes: T[], pa
   return next;
 }
 
-/** Un parent porte la somme de ses enfants plutôt que son propre montant. */
-export function sumLigne<T extends { prixTotal: number; children?: any[] }>(ligne: T): number {
+/**
+ * Saisie d'un prix : « PM » (ou « P.M. », « pour mémoire ») vaut pour mémoire,
+ * tout autre texte est un nombre ou une formule.
+ */
+export function parsePrixSaisi(raw: string): { pourMemoire: true } | { pourMemoire: false; valeur: number } {
+  const t = raw.trim().replace(/[.\s]/g, '').toLowerCase();
+  if (t === 'pm' || t === 'pourmémoire' || t === 'pourmemoire') return { pourMemoire: true };
+  return { pourMemoire: false, valeur: evalFormula(raw) };
+}
+
+type LigneChiffree = { prixTotal: number; pourMemoire?: boolean; nature?: NatureArticle; children?: any[] };
+
+/** Option, PSE ou variante : hors du total de base. */
+export const estHorsBase = (nature?: NatureArticle): nature is NatureHorsBase => !!nature && nature !== 'base';
+
+/**
+ * Montant de BASE d'un article : un parent porte la somme de ses enfants. Un
+ * article pour mémoire, une option ou une variante (et tout ce qu'ils
+ * contiennent) ne compte pas.
+ */
+export function sumLigne<T extends LigneChiffree>(ligne: T): number {
+  if (ligne.pourMemoire || estHorsBase(ligne.nature)) return 0;
   if (ligne.children && ligne.children.length > 0) {
     return ligne.children.reduce((s: number, c: T) => s + sumLigne(c), 0);
   }
   return ligne.prixTotal;
+}
+
+/**
+ * Montant d'une nature donnée (PSE, options ou variantes). La nature d'un
+ * parent s'applique à tous ses sous-articles ; un article pour mémoire ne
+ * compte pas.
+ */
+export function sumLigneNature<T extends LigneChiffree>(ligne: T, nature: NatureHorsBase, actif = false): number {
+  if (ligne.pourMemoire) return 0;
+  if (estHorsBase(ligne.nature) && ligne.nature !== nature) return 0;
+  const dedans = actif || ligne.nature === nature;
+  if (ligne.children && ligne.children.length > 0) {
+    return ligne.children.reduce((s: number, c: T) => s + sumLigneNature(c, nature, dedans), 0);
+  }
+  return dedans ? ligne.prixTotal : 0;
+}
+
+/** Total des PSE, des options ou des variantes d'un lot. */
+export function sousTotalNature(lot: { chapitres: any[] }, nature: NatureHorsBase): number {
+  return lot.chapitres.reduce(
+    (s: number, c: any) => s + (c.cctpOnly ? 0 : c.lignes.reduce((ls: number, l: any) => ls + sumLigneNature(l, nature), 0)), 0,
+  );
 }
 
 export function collectLigneIdsWithChildren<T extends { id: string; children?: any[] }>(

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconChevronDown, IconDots, IconX } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
@@ -30,8 +30,40 @@ interface SelectionBarProps {
  * de l'écran sur téléphone, à portée de pouce. Le parent doit être
  * `relative` pour la version bureau.
  */
+/**
+ * Au bureau, la barre est posée au bas de son parent. Quand ce parent est plus
+ * haut que l'écran (le bas du tableau sort de la fenêtre), elle serait hors de
+ * vue : elle passe alors en position fixe au bas de la fenêtre, calée sur la
+ * largeur du parent. `sticky` ne convient pas, les conteneurs des ateliers PRO
+ * coupent le débordement (`overflow-hidden`) et ne défilent pas.
+ */
+function useBarreFixe(actif: boolean) {
+  const ancre = useRef<HTMLDivElement>(null);
+  const [fixe, setFixe] = useState<{ left: number; width: number; bottom: number } | null>(null);
+  useLayoutEffect(() => {
+    const parent = ancre.current?.parentElement;
+    if (!actif || !parent) return;
+    const MARGE = 16;
+    const mesurer = () => {
+      const r = parent.getBoundingClientRect();
+      const horsEcran = r.bottom - MARGE > window.innerHeight && r.top < window.innerHeight - 80;
+      setFixe(prev => {
+        if (!horsEcran) return prev ? null : prev;
+        const next = { left: r.left, width: r.width, bottom: MARGE };
+        return prev && prev.left === next.left && prev.width === next.width ? prev : next;
+      });
+    };
+    mesurer();
+    window.addEventListener('scroll', mesurer, true);
+    window.addEventListener('resize', mesurer);
+    return () => { window.removeEventListener('scroll', mesurer, true); window.removeEventListener('resize', mesurer); };
+  }, [actif]);
+  return { ancre, fixe };
+}
+
 export function SelectionBar({ label, actions, onClear, isMobile }: SelectionBarProps) {
   const { t } = useTranslation();
+  const { ancre, fixe } = useBarreFixe(!isMobile);
 
   if (isMobile) {
     // Un menu ne s'imbrique pas dans « Plus » : il reste dans la barre.
@@ -95,7 +127,7 @@ export function SelectionBar({ label, actions, onClear, isMobile }: SelectionBar
   }
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4 no-print">
+    <div ref={ancre} className={cn('pointer-events-none z-20 flex justify-center px-4 no-print', fixe ? 'fixed' : 'absolute inset-x-0 bottom-4')} style={fixe ?? undefined}>
       <div
         role="toolbar"
         aria-label={t('pro_selection_toolbar')}

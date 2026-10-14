@@ -621,7 +621,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     {
       kind: 'menu', id: 'bpu-exchange', label: t('pro_import_export'), icon: <IconFileExport size={16} />,
       entries: [
-        { id: 'bpu-import-doc', label: t('pro_import_document'), icon: <IconFileImport size={16} />, onClick: () => onImportDocument?.(), disabled: !onImportDocument },
         { id: 'bpu-exchange-in', heading: t('pro_bpu_offers_received') },
         { id: 'bpu-import', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
         { id: 'bpu-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
@@ -1073,7 +1072,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   {Object.entries(vent.parNature).filter(([n]) => n !== 'base').map(([n, montant]) => (
                     <tr key={n} className="bg-zinc-50 dark:bg-zinc-800/20 text-xs">
                       <td colSpan={nbCols - 2} className="px-4 py-1 text-right text-zinc-500">
-                        dont {NATURE_LABELS[n as NatureArticle]} (hors offre de base)
+                        {NATURE_LABELS[n as NatureArticle]} (hors offre de base, non compris dans le total)
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-zinc-500">{formatCurrency(montant)}</td>
                       <td colSpan={1 + nbColsDecoupage} />

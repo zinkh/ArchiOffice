@@ -16,22 +16,29 @@ function parcourir(lignes: Ligne[], visite: (l: Ligne) => void): void {
   }
 }
 
+/** Les localisations d'un article : plusieurs possibles, séparées par des virgules. */
+export function localisationsDeLigne(valeur: string | undefined): string[] {
+  return (valeur ?? '').split(',').map(normaliser).filter(Boolean);
+}
+
 /**
- * Les localisations déjà utilisées dans le document, les plus fréquentes
- * d'abord (à égalité, ordre alphabétique). « SdB  étage » et « sdb étage »
- * comptent pour une seule, écrite comme elle l'a été le plus souvent.
+ * Les localisations déjà utilisées dans le document (donc dans le projet), les
+ * plus fréquentes d'abord (à égalité, ordre alphabétique). Une cellule peut en
+ * porter plusieurs, séparées par des virgules : chacune compte à part.
+ * « SdB  étage » et « sdb étage » comptent pour une seule, écrite comme elle
+ * l'a été le plus souvent.
  */
 export function localisationsConnues(doc: Pick<DPGF, 'lots'>): string[] {
   const parCle = new Map<string, { total: number; ecritures: Map<string, number> }>();
   for (const lot of doc.lots) {
     for (const chap of lot.chapitres) {
       parcourir(chap.lignes, l => {
-        const valeur = normaliser(l.localisation ?? '');
-        if (!valeur) return;
-        const entree = parCle.get(cle(valeur)) ?? { total: 0, ecritures: new Map() };
-        entree.total += 1;
-        entree.ecritures.set(valeur, (entree.ecritures.get(valeur) ?? 0) + 1);
-        parCle.set(cle(valeur), entree);
+        for (const valeur of localisationsDeLigne(l.localisation)) {
+          const entree = parCle.get(cle(valeur)) ?? { total: 0, ecritures: new Map() };
+          entree.total += 1;
+          entree.ecritures.set(valeur, (entree.ecritures.get(valeur) ?? 0) + 1);
+          parCle.set(cle(valeur), entree);
+        }
       });
     }
   }
