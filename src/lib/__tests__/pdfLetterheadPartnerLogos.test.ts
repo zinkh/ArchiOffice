@@ -88,3 +88,34 @@ describe('groupement actif', () => {
     expect(avec.ws.getCell('A5').value).toBe('En groupement avec');
   });
 });
+
+describe('en-tête des pages suivantes', () => {
+  const pdfPage = (page: number) => ({
+    ...fakePdf(),
+    internal: { pageSize: { getWidth: () => 210, getHeight: () => 297 }, getCurrentPageInfo: () => ({ pageNumber: page }) },
+    getTextWidth: () => 30,
+    splitTextToSize: (t: string) => [t],
+  });
+
+  it('ne dessine jamais le logo ni le bandeau des cotraitants au-delà de la première page', () => {
+    const pdf = pdfPage(2);
+    const y = drawAgencyHeader(pdf, { agencyName: 'AAZS' }, { title: 'DPGF', logo: logo(200, 100), partnerLogos: [logo(100, 100)] });
+    expect(pdf.addImage).not.toHaveBeenCalled();
+    expect(y).toBeLessThan(20);
+  });
+
+  it('tient sur une ligne : agence à gauche, document à droite', () => {
+    const pdf = pdfPage(3);
+    drawAgencyHeader(pdf, { agencyName: 'AAZS', address: '23 Bd de l\'Europe' }, { title: 'DPGF', subtitle: 'Villa' });
+    const textes = pdf.text.mock.calls.map(c => c[0]);
+    expect(textes).toEqual(['AAZS', 'DPGF  |  Villa']);
+    expect(pdf.text.mock.calls[1][3]).toEqual({ align: 'right' });
+    expect(pdf.text.mock.calls[0][2]).toBe(pdf.text.mock.calls[1][2]);
+  });
+
+  it('garde le logo sur la première page', () => {
+    const pdf = pdfPage(1);
+    drawAgencyHeader(pdf, { agencyName: 'AAZS' }, { title: 'DPGF', logo: logo(200, 100) });
+    expect(pdf.addImage).toHaveBeenCalledTimes(1);
+  });
+});

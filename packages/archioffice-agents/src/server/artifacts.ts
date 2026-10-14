@@ -148,6 +148,18 @@ async function buildDocx(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Bu
     })
   );
 
+  const compactHeaderChildren = [
+    new Paragraph({
+      tabStops: [{ type: 'right' as any, position: 9026 }],
+      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'BBBBBB' } },
+      spacing: { after: 120 },
+      children: [
+        new TextRun({ text: agency.name || '', bold: true, size: 16 }),
+        new TextRun({ text: `\t${title}`, size: 16, color: '666666' }),
+      ],
+    }),
+  ];
+
   const footerLine = agencyFooterLine(agency);
   const footerChildren = [
     ...(footerLine
@@ -220,9 +232,16 @@ async function buildDocx(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Bu
     creator: agency.name || 'ArchiOffice',
     title,
     sections: [{
-      properties: {},
-      headers: { default: new Header({ children: headerChildren }) },
-      footers: { default: new Footer({ children: footerChildren }) },
+      properties: { titlePage: true },
+      // Première page : logo et coordonnées. Suivantes : une ligne (agence, puis document à droite).
+      headers: {
+        first: new Header({ children: headerChildren }),
+        default: new Header({ children: compactHeaderChildren }),
+      },
+      footers: {
+        first: new Footer({ children: footerChildren }),
+        default: new Footer({ children: footerChildren }),
+      },
       children: body,
     }],
   });
@@ -276,8 +295,23 @@ async function buildPdf(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Buf
     return bottom + 8;
   };
 
+  // Pages suivantes : une seule ligne, l'agence à gauche et le document à droite
+  // (le logo n'est imprimé que sur la première page).
+  const drawCompactHeader = (): number => {
+    setFont('bold', 8);
+    const nom = agency.name || '';
+    pdf.text(nom, margin, 10);
+    setFont('normal', 8, 107);
+    const [doc] = pdf.splitTextToSize(title, Math.max(contentW - pdf.getTextWidth(nom) - 8, 20)) as string[];
+    pdf.text(doc ?? '', pageW - margin, 10, { align: 'right' });
+    pdf.setDrawColor(210, 210, 210);
+    pdf.setLineWidth(0.2);
+    pdf.line(margin, 12.5, pageW - margin, 12.5);
+    return margin + 4;
+  };
+
   let y = drawHeader();
-  const newPage = () => { pdf.addPage(); y = drawHeader(); };
+  const newPage = () => { pdf.addPage(); y = drawCompactHeader(); };
   const ensureSpace = (h: number) => { if (y + h > pageH - margin - 12) newPage(); };
 
   setFont('bold', 16);

@@ -992,6 +992,14 @@ Tout document produit depuis l'interface porte la charte du cabinet : en-tête
 (adresse, SIRET...) et pagination « P1|2 » en bas à droite. La couleur n'est
 admise que pour une donnée qui en a besoin (statut d'une réserve, retard).
 
+- **Logo sur la première page seulement.** Le logo (et les coordonnées, le bandeau des cotraitants) ne
+  s'imprime que sur la PREMIÈRE page. Les pages suivantes portent un en-tête d'UNE seule ligne : le nom de
+  l'agence en texte à gauche, le nom du document à droite, jamais le logo. PDF : `drawAgencyHeader()` dessine
+  seul cette ligne dès qu'il est appelé au-delà de la page 1 (`drawCompactHeader`), et `drawAgencyFooters()`
+  l'ajoute aux pages restées sans en-tête ; ne jamais redessiner l'en-tête complet après un `addPage()`.
+  Excel : `ajouterFeuille()` pose `differentFirst` (première page sans en-tête d'impression, les suivantes
+  « agence | document »). Documents d'agent (`artifacts.ts`) : même règle en PDF et en Word. Les exports Word
+  du reste de l'application ne suivent pas encore cette règle.
 - **PDF** : `src/lib/pdfLetterhead.ts` (`drawAgencyHeader`, `drawAgencyFooters`,
   `tableauGris()` / `TABLEAU_GRIS` pour les tableaux autoTable, `fetchAgencySettings()`
   pour un générateur qui n'a pas les réglages sous la main). Ne plus écrire de
