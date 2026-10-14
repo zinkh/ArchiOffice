@@ -8,9 +8,9 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconFileImport, IconScale, IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
-  IconSubtask,
+  IconSubtask, IconTag,
 } from '@tabler/icons-react';
-import { DPGF, Lot, Chapitre, Ligne, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -23,7 +23,8 @@ import type { ArticleBibliotheque } from '../../types/library';
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
-import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
+import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
+import { StatutBadges } from './StatutBadges';
 import {
   basculerBatimentEnMasse, batimentsParOrdre, etatBatimentSelection, feuillesSelectionnees, fixerQuantiteBatiment,
   heritagePour, modifierFeuilles, quantitesParBatiment,
@@ -32,10 +33,10 @@ import {
 // Les helpers d'arbre, l'évaluateur de formules et l'aplatissement vivent
 // désormais dans treeOps.ts, partagés avec l'atelier BPU/DQE.
 import {
-  uid, evalFormula, MAX_ARTICLE_DEPTH, childNumber,
+  uid, evalFormula, parsePrixSaisi, estHorsBase, MAX_ARTICLE_DEPTH, childNumber,
   mutateLigneAtPath, addChildToLigneAtPath,
   takeLigneAtPath, insertLigneAtPath, renumeroterLignes,
-  collectLigneIdsWithChildren, sumLigne, recomputeLot as recomputeLotOp,
+  collectLigneIdsWithChildren, sumLigne, sumLigneNature, recomputeLot as recomputeLotOp,
   buildFlatRows, rowKey as rowKeyOf, parseRowKey,
   type FlatRow,
 } from './treeOps';
@@ -371,12 +372,14 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             const q = evalFormula(value);
             return { ...ligne, quantite: q, prixTotal: q * ligne.prixUnitaire };
           }
-          if (field === 'prixUnitaire') {
-            const pu = evalFormula(value);
-            return { ...ligne, prixUnitaire: pu, prixTotal: ligne.quantite * pu };
-          }
-          if (field === 'prixTotal') {
-            return { ...ligne, prixTotal: evalFormula(value) };
+          if (field === 'prixUnitaire' || field === 'prixTotal') {
+            // « PM » : l'article est décrit mais son prix n'est pas compté.
+            const saisi = parsePrixSaisi(value);
+            if (saisi.pourMemoire) return { ...ligne, pourMemoire: true, prixUnitaire: 0, prixTotal: 0 };
+            const { pourMemoire: _pm, ...sansPm } = ligne;
+            return field === 'prixUnitaire'
+              ? { ...sansPm, prixUnitaire: saisi.valeur, prixTotal: ligne.quantite * saisi.valeur }
+              : { ...sansPm, prixTotal: saisi.valeur };
           }
           if (field === 'localisation') {
             return { ...ligne, localisation: value };
@@ -542,6 +545,23 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     </td>
   );
 
+  // ── Statut du prix : base, option (PSE), variante, pour mémoire (PM) ───────
+  // Posé sur les articles de la sélection ; un lot ou un chapitre vise tous ses
+  // articles. « Prestation de base » retire option, variante et PM.
+  const statutEntries = (keys: string[]): ToolbarMenuEntry[] => {
+    const lignes = collectSelectedLignes<Ligne>(dpgf.lots, keys);
+    const tous = (f: (l: Ligne) => boolean) => lignes.length > 0 && lignes.every(f);
+    const appliquer = (patch: Parameters<typeof appliquerStatutLignes>[2]) => commitLots(appliquerStatutLignes(dpgf.lots, keys, patch));
+    return [
+      { id: 'st-base', label: t('pro_status_base'), checked: tous(l => !estHorsBase(l.nature) && !l.pourMemoire), onClick: () => appliquer({ nature: undefined, pourMemoire: undefined }) },
+      ...NATURES_HORS_BASE.map(nature => ({
+        id: `st-${nature}`, label: t(`pro_status_${nature}`), checked: tous(l => l.nature === nature), onClick: () => appliquer({ nature }),
+      })),
+      { id: 'st-sep', separator: true },
+      { id: 'st-pm', label: t('pro_status_pm'), checked: tous(l => !!l.pourMemoire), onClick: () => appliquer({ pourMemoire: !tous(l => !!l.pourMemoire) }) },
+    ];
+  };
+
   const selectionActions = (sel: HierarchySelection[]): SelectionAction[] => {
     const one = sel.length === 1 ? sel[0] : null;
     const onlyOne = t('pro_selection_single_only');
@@ -558,6 +578,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         onClick: () => one && changeHierarchy(one, 'demote'), disabled: !canDemote(dpgf.lots, one), hint: sel.length > 1 ? onlyOne : undefined },
       ...(multiBat ? [{ id: 'batiments', label: t('pro_buildings'), icon: <IconBuildingCommunity size={16} />, groupStart: true, onClick: () => {},
         menu: () => batimentEntries(sel.map(hierarchyKey)) }] : []),
+      { id: 'statut', label: t('pro_status'), icon: <IconTag size={16} />, groupStart: !multiBat, onClick: () => {},
+        menu: () => statutEntries(sel.map(hierarchyKey)), disabled: !sel.length },
       { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+D', mobile: true, groupStart: true,
         onClick: () => one && changeHierarchy(one, 'duplicate'), disabled: !one, hint: sel.length > 1 ? onlyOne : undefined },
       { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+C',
@@ -577,7 +599,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       : s.kind === 'chapitre'
       ? [{ id: 'add-art', label: t('pro_add_article'), icon: <IconRowInsertBottom size={16} />, onClick: () => addLigne(s.lotIdx, s.chapIdx) }]
       : [{ id: 'add-sub', label: t('pro_add_sub_article'), icon: <IconSubtask size={16} />, onClick: () => addSubLigne(s.lotIdx, s.chapIdx, s.lignePath), disabled: !canAddChildTo(s) }];
-    return [...add, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
+    const statut: ToolbarMenuEntry[] = s.kind === 'ligne'
+      ? [{ id: 'sep-statut', separator: true }, { id: 'head-statut', heading: t('pro_status') }, ...statutEntries([rowKey(row)])]
+      : [];
+    return [...add, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
   };
 
   // ── Raccourcis clavier du tableau ───────────────────────────────────────────
@@ -1093,6 +1118,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                               IA
                             </span>
                           )}
+                          <StatutBadges pourMemoire={l.pourMemoire} nature={l.nature} />
                         </div>
                       </td>
                       <td className="px-2 py-0.5 text-center">
@@ -1113,15 +1139,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(l.quantite)}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric {...cellProps} />)}
                       </td>
                       <td className="px-2 py-0.5">
-                        <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric {...cellProps} />
+                        <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric pm={!!l.pourMemoire && !hasChildren} {...cellProps} />
                       </td>
                       <td className="px-2 py-0.5 text-right font-mono tabular-nums">
                         {hasChildren ? (
                           <span className="px-1 py-0.5 text-sm" style={{ color: 'var(--tblr-muted)' }}>
-                            {formatCurrency(sumLigne(l))}
+                            {l.pourMemoire ? 'PM' : formatCurrency(estHorsBase(l.nature) ? sumLigneNature(l, l.nature, true) : sumLigne(l))}
                           </span>
                         ) : (
-                          <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric {...cellProps} />
+                          <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric pm={!!l.pourMemoire} {...cellProps} />
                         )}
                       </td>
                       {dpgf.multiPhases && (
@@ -1149,6 +1175,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
                   <td colSpan={nbColsDecoupage + 1} />
                 </tr>
+                {NATURES_HORS_BASE.filter(n => totaux.horsBase[n].nb > 0).map(n => (
+                  <tr key={n} style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                    <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t(`pro_total_${n}_ht`)}</th>
+                    <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.horsBase[n].totalHT)}</td>
+                    <td colSpan={nbColsDecoupage + 1} />
+                  </tr>
+                ))}
                 <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                   <th scope="row" colSpan={7 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
                   <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.montantTVA)}</td>

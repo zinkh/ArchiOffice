@@ -3,8 +3,8 @@
 // élément décale tous ceux qui le suivent. Les fonctions ci-dessous traitent
 // donc toujours la sélection du dernier élément vers le premier, et rendent un
 // arbre neuf sans toucher à celui reçu.
-import type { Ligne } from '../../types/dpgf';
-import { MAX_ARTICLE_DEPTH, deleteLigneAtPath, insertLigneAtPath, parseRowKey, recomputeLot, renumeroterLignes, type LotLike, type ParsedRowKey } from './treeOps';
+import { NATURES_HORS_BASE, type Ligne, type NatureArticle, type NatureHorsBase } from '../../types/dpgf';
+import { MAX_ARTICLE_DEPTH, deleteLigneAtPath, insertLigneAtPath, mutateLigneAtPath, parseRowKey, recomputeLot, estHorsBase, renumeroterLignes, sousTotalNature, type LotLike, type ParsedRowKey } from './treeOps';
 import { ligneAtPath } from './hierarchyOps';
 
 type Parsed = NonNullable<ParsedRowKey>;
@@ -125,9 +125,67 @@ export function pasteLignes<L extends LotLike, G extends Ligne>(
  * enregistrés : un document importé ou réparé à la main peut porter un
  * `totalHT` ou un `sousTotal` qui ne correspond plus à ses lignes.
  */
-export function totauxDocument(lots: LotLike[], tva: number): { sousTotaux: number[]; totalHT: number; montantTVA: number; totalTTC: number } {
+export function totauxDocument(lots: LotLike[], tva: number): {
+  sousTotaux: number[]; totalHT: number; montantTVA: number; totalTTC: number;
+  /** PSE, options et variantes, comptées à part : jamais dans le total de base. */
+  horsBase: Record<NatureHorsBase, { totalHT: number; nb: number }>;
+} {
   const sousTotaux = lots.map(lot => recomputeLot(lot).sousTotal);
   const totalHT = sousTotaux.reduce((s, n) => s + n, 0);
   const montantTVA = totalHT * (Number(tva) || 0) / 100;
-  return { sousTotaux, totalHT, montantTVA, totalTTC: totalHT + montantTVA };
+  const horsBase = Object.fromEntries(NATURES_HORS_BASE.map(nature => [nature, {
+    totalHT: lots.reduce((s, lot) => s + sousTotalNature(lot, nature), 0),
+    nb: lots.reduce((s, lot) => s + compterNature(lot.chapitres, nature), 0),
+  }])) as Record<NatureHorsBase, { totalHT: number; nb: number }>;
+  return { sousTotaux, totalHT, montantTVA, totalTTC: totalHT + montantTVA, horsBase };
+}
+
+/** Nombre d'articles (feuilles) d'une nature, pour un parent compris. */
+function compterNature(chapitres: any[], nature: NatureHorsBase): number {
+  const dans = (lignes: any[], actif: boolean): number => lignes.reduce((n: number, l: any) => {
+    if (estHorsBase(l.nature) && l.nature !== nature) return n;
+    const ici = actif || l.nature === nature;
+    return n + (l.children?.length ? dans(l.children, ici) : ici ? 1 : 0);
+  }, 0);
+  return chapitres.reduce((n: number, c: any) => n + (c.cctpOnly ? 0 : dans(c.lignes, false)), 0);
+}
+
+/**
+ * Pose (ou retire) la nature d'une prestation et/ou « pour mémoire » sur les
+ * articles sélectionnés. Un lot ou un chapitre vise tous ses articles de
+ * premier niveau, un article porte son propre statut (valable pour ses
+ * sous-articles). `patch` à `undefined` retire la propriété.
+ */
+export function appliquerStatutLignes<L extends LotLike>(
+  lots: L[], keys: Iterable<string>, patch: { nature?: NatureArticle | undefined; pourMemoire?: boolean | undefined },
+): L[] {
+  const sel = parseSelection(keys);
+  const toucher = (ligne: any) => {
+    const next = { ...ligne };
+    if ('nature' in patch) { if (patch.nature && patch.nature !== 'base') next.nature = patch.nature; else delete next.nature; }
+    if ('pourMemoire' in patch) {
+      if (patch.pourMemoire) { next.pourMemoire = true; if (!ligne.children?.length) { next.prixUnitaire = 0; next.prixTotal = 0; } }
+      else delete next.pourMemoire;
+    }
+    return next;
+  };
+  let next = lots.map(lot => ({ ...lot, chapitres: lot.chapitres.map((c: any) => ({ ...c, lignes: [...c.lignes] })) })) as L[];
+  const touched = new Set<number>();
+  for (const s of sel) {
+    const lot = next[s.lotIdx];
+    if (!lot) continue;
+    const chapIdxs = s.kind === 'lot' ? lot.chapitres.map((_: unknown, i: number) => i) : [s.chapIdx];
+    for (const ci of chapIdxs) {
+      const chap = lot.chapitres[ci];
+      if (!chap) continue;
+      touched.add(s.lotIdx);
+      if (s.kind === 'ligne') {
+        chap.lignes = mutateLigneAtPath(chap.lignes, s.lignePath, toucher);
+      } else {
+        chap.lignes = chap.lignes.map((l: any) => (l.cctpOnly ? l : toucher(l)));
+      }
+    }
+  }
+  next = next.map((lot, i) => (touched.has(i) ? recomputeLot(lot) : lot));
+  return next;
 }

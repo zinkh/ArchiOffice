@@ -37,7 +37,7 @@ export const CellInput = ({
 };
 
 export const EditableCell = ({
-  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false,
+  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false,
 }: {
   rKey: string; field: string; value: string | number; editingCell: EditingCell | null;
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
@@ -48,9 +48,13 @@ export const EditableCell = ({
   label?: string;
   /** Affiche « 0,00 » plutôt qu'une case vide (quantité attendue d'un bâtiment coché). */
   showZero?: boolean;
+  /** Prix « pour mémoire » : affiche et édite « PM » au lieu d'un montant. */
+  pm?: boolean;
 }) => {
   const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
-  const display = numeric && typeof value === 'number' && (value > 0 || (showZero && value === 0))
+  const display = pm
+    ? 'PM'
+    : numeric && typeof value === 'number' && (value > 0 || (showZero && value === 0))
     ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
     : String(value || '');
 
@@ -59,8 +63,8 @@ export const EditableCell = ({
   }
   return (
     <div
-      onDoubleClick={() => onStartEdit(rKey, field, value)}
-      onClick={editOnClick ? e => { e.stopPropagation(); onStartEdit(rKey, field, value); } : undefined}
+      onDoubleClick={() => onStartEdit(rKey, field, pm ? 'PM' : value)}
+      onClick={editOnClick ? e => { e.stopPropagation(); onStartEdit(rKey, field, pm ? 'PM' : value); } : undefined}
       className={`px-1 py-0.5 cursor-text rounded min-h-[22px] hover:bg-[var(--tblr-surface-2)] ${numeric ? 'text-right font-mono tabular-nums' : ''} ${className}`}
       title={editOnClick ? undefined : 'Double-clic pour éditer'}
     >

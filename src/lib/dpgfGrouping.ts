@@ -2,7 +2,7 @@
 // Logique pure partagée par la vue écran (DpgfGroupedView) et par l'export
 // PDF/Excel (proExport.ts) : les deux doivent montrer EXACTEMENT le même
 // classement, jamais deux implémentations qui pourraient diverger.
-import type { DPGF, Ligne, Lot, Chapitre, GroupementDpgf } from '../types/dpgf';
+import type { DPGF, Ligne, Lot, Chapitre, GroupementDpgf, NatureArticle } from '../types/dpgf';
 import { batimentEffectif, phaseEffective, decoupageDe } from '../types/dpgf';
 
 export interface ArticleAplati {
@@ -11,6 +11,8 @@ export interface ArticleAplati {
   chapitre: Chapitre;
   batimentId?: string;
   phaseId?: string;
+  /** Option ou variante, y compris héritée d'un article parent : hors total de base. */
+  nature?: NatureArticle;
 }
 
 /** Aplatit l'arbre en une liste d'articles chiffrables (les parents à enfants
@@ -18,19 +20,20 @@ export interface ArticleAplati {
  * propre montant, et n'ont donc pas leur place dans une addition par groupe). */
 export function aplatirDpgf(dpgf: DPGF): ArticleAplati[] {
   const out: ArticleAplati[] = [];
-  const descendre = (lignes: Ligne[], lot: Lot, chapitre: Chapitre) => {
+  const descendre = (lignes: Ligne[], lot: Lot, chapitre: Chapitre, heritee?: NatureArticle) => {
     for (const l of lignes) {
-      if (l.children?.length) { descendre(l.children, lot, chapitre); continue; }
+      const nature = l.nature && l.nature !== 'base' ? l.nature : heritee;
+      if (l.children?.length) { descendre(l.children, lot, chapitre, nature); continue; }
       if (l.cctpOnly || chapitre.cctpOnly) continue;
       if (l.quantitesBatiments !== undefined) {
         for (const [batimentId, quantite] of Object.entries(l.quantitesBatiments)) out.push({
-          ligne: { ...l, quantite, prixTotal: quantite * l.prixUnitaire }, lot, chapitre, batimentId,
-          phaseId: phaseEffective(lot, chapitre, l),
+          ligne: { ...l, quantite, prixTotal: l.pourMemoire ? 0 : quantite * l.prixUnitaire }, lot, chapitre, batimentId,
+          phaseId: phaseEffective(lot, chapitre, l), nature,
         });
         continue;
       }
       out.push({
-        ligne: l, lot, chapitre,
+        ligne: l, lot, chapitre, nature,
         batimentId: batimentEffectif(lot, chapitre, l),
         phaseId: phaseEffective(lot, chapitre, l),
       });
@@ -85,7 +88,8 @@ export function grouperDpgf(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot
     const { clef, libelle } = clefEtLibelle(a);
     const g = map.get(clef) ?? { libelle, articles: [], total: 0 };
     g.articles.push(a);
-    g.total += a.ligne.prixTotal || 0;
+    // Pour mémoire, options et variantes ne comptent pas dans le total de base.
+    if ((!a.nature || a.nature === 'base') && !a.ligne.pourMemoire) g.total += a.ligne.prixTotal || 0;
     map.set(clef, g);
   }
 

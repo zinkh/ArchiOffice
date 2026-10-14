@@ -1,5 +1,6 @@
-import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT } from '../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT, NATURES_HORS_BASE, type NatureArticle } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
+import { sousTotalNature } from '../components/pro/treeOps';
 import type { AgencySettings } from './proposalExport';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
@@ -11,6 +12,34 @@ import {
 
 const fmt = (n: number) =>
   new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+
+const LIBELLE_NATURE = { pse: 'PSE', option: 'Option', variante: 'Variante' } as const;
+const LIBELLE_TOTAL_NATURE = {
+  pse: 'PSE HT, non comprises dans le total',
+  option: 'Options HT, non comprises dans le total',
+  variante: 'Variantes HT, non comprises dans le total',
+} as const;
+
+/** Repère imprimé après la désignation : PSE, option, variante ou pour mémoire. */
+const repereStatut = (pourMemoire?: boolean, nature?: NatureArticle) =>
+  [nature && nature !== 'base' ? LIBELLE_NATURE[nature] : '', pourMemoire ? 'PM' : '']
+    .filter(Boolean).map(r => ` (${r})`).join('');
+
+/** Totaux hors base d'un document (PSE, options, variantes), seulement les non nuls. */
+const totauxHorsBase = (dpgf: DPGF): { libelle: string; total: number }[] =>
+  NATURES_HORS_BASE
+    .map(n => ({ libelle: LIBELLE_TOTAL_NATURE[n], total: dpgf.lots.reduce((s, l) => s + sousTotalNature(l, n), 0) }))
+    .filter(t => t.total);
+
+/** Lignes de pied « Options (PSE) » et « Variantes », seulement s'il y en a. */
+function piedHorsBase(dpgf: DPGF, colonnes: number, format: (n: number) => string): string[][] {
+  return totauxHorsBase(dpgf).map(t => ['', t.libelle, ...Array(colonnes - 3).fill(''), format(t.total) + ' €']);
+}
+
+/** Pied Excel des options et variantes, en nombres (pas de texte formaté). */
+function ajouterHorsBase(f: { ligne: (valeurs: (string | number | undefined)[], style?: { gras?: boolean }) => void }, dpgf: DPGF, colonnes: number) {
+  for (const t of totauxHorsBase(dpgf)) f.ligne(['', t.libelle, ...Array(colonnes - 3).fill(''), t.total], { gras: true });
+}
 
 /**
  * Aplatit un DPGF classé par bâtiment/phase (jamais par lot : l'arbre par lot
@@ -32,21 +61,22 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
   /** Valeurs brutes, pour l'Excel : un montant doit y rester un nombre. */
   q: number;
   total: number;
+  pm: boolean;
 }> {
   const rows: ReturnType<typeof flattenDPGFGroupe> = [];
   for (const [, g] of grouperDpgf(dpgf, groupement)) {
-    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixTotal: fmt(g.total), q: 0, total: g.total });
+    rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixTotal: fmt(g.total), q: 0, total: g.total, pm: false });
     for (const a of g.articles) {
       rows.push({
         type: 'article',
         numero: a.ligne.numero,
-        designation: a.ligne.designation,
+        designation: a.ligne.designation + repereStatut(a.ligne.pourMemoire, a.nature),
         lot: `${a.lot.numero} ${a.lot.titre}`,
         localisation: a.ligne.localisation || '',
         unite: a.ligne.unite,
         quantite: a.ligne.quantite > 0 ? fmt(a.ligne.quantite) : '',
-        prixTotal: a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
-        q: a.ligne.quantite, total: a.ligne.prixTotal,
+        prixTotal: a.ligne.pourMemoire ? 'PM' : a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
+        q: a.ligne.quantite, total: a.ligne.prixTotal, pm: !!a.ligne.pourMemoire,
       });
     }
   }
@@ -65,12 +95,13 @@ function flattenDPGF(lots: Lot[]): Array<{
   q: number;
   pu: number;
   total: number;
+  pm: boolean;
 }> {
   const rows: ReturnType<typeof flattenDPGF> = [];
   for (const lot of lots) {
-    rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot', q: 0, pu: 0, total: lot.sousTotal });
+    rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot', q: 0, pu: 0, total: lot.sousTotal, pm: false });
     for (const chap of lot.chapitres) {
-      rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre', q: 0, pu: 0, total: 0 });
+      rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre', q: 0, pu: 0, total: 0, pm: false });
       // Descend dans les sous-articles : la version précédente s'arrêtait au
       // premier niveau et faisait disparaître silencieusement tout ce qui se
       // trouvait en dessous de chaque export PDF ou Excel.
@@ -79,13 +110,13 @@ function flattenDPGF(lots: Lot[]): Array<{
           rows.push({
             depth,
             numero: ligne.numero,
-            designation: ligne.designation,
+            designation: ligne.designation + repereStatut(ligne.pourMemoire, ligne.nature),
             unite: ligne.unite,
             quantite: ligne.quantite > 0 ? fmt(ligne.quantite) : '',
-            prixUnitaire: ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
-            prixTotal: ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
+            prixUnitaire: ligne.pourMemoire ? 'PM' : ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
+            prixTotal: ligne.pourMemoire ? 'PM' : ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
             type: ligne.type,
-            q: ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal,
+            q: ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal, pm: !!ligne.pourMemoire,
           });
           if (ligne.children?.length) walk(ligne.children, depth + 1);
         }
@@ -160,7 +191,10 @@ export async function exportDPGFtoPDF(
           data.cell.styles.fontStyle = 'italic';
         }
       },
-      ...(avecPrix ? { foot: [['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €']] } : {}),
+      ...(avecPrix ? { foot: [
+        ['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €'],
+        ...piedHorsBase(dpgf, 6, fmt),
+      ] } : {}),
     });
   } else {
     const rows = flattenDPGFGroupe(dpgf, groupement);
@@ -190,7 +224,10 @@ export async function exportDPGFtoPDF(
           data.cell.styles.fillColor = TABLEAU_GRIS.groupe;
         }
       },
-      ...(avecPrix ? { foot: [['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €']] } : {}),
+      ...(avecPrix ? { foot: [
+        ['', 'TOTAL HT', '', '', '', '', fmt(dpgf.totalHT) + ' €'],
+        ...piedHorsBase(dpgf, 7, fmt),
+      ] } : {}),
     });
   }
 
@@ -237,6 +274,10 @@ export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, se
   doc.text(`TVA ${dpgf.TVA}% : ${fmt(dpgf.totalTTC - dpgf.totalHT)} €`, 14, finalY);
   doc.setFont('helvetica', 'bold');
   doc.text(`Total TTC : ${fmt(dpgf.totalTTC)} €`, 14, finalY + 6);
+  doc.setFont('helvetica', 'normal');
+  totauxHorsBase(dpgf).forEach((t, i) => {
+    doc.text(`${t.libelle} : ${fmt(t.total)} € (TTC ${fmt(t.total * (1 + dpgf.TVA / 100))} €)`, 14, finalY + 14 + i * 6);
+  });
 
   drawAgencyFooters(doc, settings, letterhead);
   await enregistrerPdf(doc, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.pdf`, sortie);
@@ -274,12 +315,13 @@ export async function exportDPGFtoExcel(
     });
     for (const r of flattenDPGF(dpgf.lots)) {
       const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q)];
-      const valeurs = avecPrix ? [...debut, nombre(r.pu), nombre(r.total)] : debut;
+      const valeurs = avecPrix ? [...debut, r.pm ? 'PM' : nombre(r.pu), r.pm ? 'PM' : nombre(r.total)] : debut;
       if (r.type === 'lot') f.ligne(valeurs, { gras: true, fond: 'groupe' });
       else if (r.type === 'chapitre') f.ligne(valeurs, { gras: true, fond: 'doux' });
       else f.ligne(valeurs, r.type === 'titre' ? { italique: true } : {});
     }
     if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', dpgf.totalHT]);
+    if (avecPrix) ajouterHorsBase(f, dpgf, 6);
   } else {
     const f = ajouterFeuille(wb, {
       ...commun,
@@ -295,10 +337,11 @@ export async function exportDPGFtoExcel(
     });
     for (const r of flattenDPGFGroupe(dpgf, groupement)) {
       const debut = [r.numero, r.designation, r.lot, r.localisation, r.unite, nombre(r.q)];
-      const valeurs = avecPrix ? [...debut, nombre(r.total)] : debut;
+      const valeurs = avecPrix ? [...debut, r.pm ? 'PM' : nombre(r.total)] : debut;
       f.ligne(valeurs, r.type === 'groupe' ? { gras: true, fond: 'groupe' } : {});
     }
     if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', '', dpgf.totalHT]);
+    if (avecPrix) ajouterHorsBase(f, dpgf, 7);
   }
   await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`, sortie);
 }
@@ -333,13 +376,16 @@ export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, 
       detail.ligne(['', `${chap.numero} ${chap.titre}`], { gras: true, fond: 'doux' });
       for (const ligne of chap.lignes) {
         detail.ligne([
-          ligne.numero, `  ${ligne.designation}`, ligne.unite,
-          nombre(ligne.quantite), nombre(ligne.prixUnitaire), nombre(ligne.prixTotal),
+          ligne.numero, `  ${ligne.designation}${repereStatut(ligne.pourMemoire, ligne.nature)}`, ligne.unite,
+          nombre(ligne.quantite), ligne.pourMemoire ? 'PM' : nombre(ligne.prixUnitaire), ligne.pourMemoire ? 'PM' : nombre(ligne.prixTotal),
         ]);
       }
     }
   }
   detail.total(['', 'TOTAL', '', '', '', dpgf.totalHT, dpgf.totalTTC - dpgf.totalHT, dpgf.totalTTC]);
+  for (const t of totauxHorsBase(dpgf)) {
+    detail.ligne(['', t.libelle, '', '', '', t.total, t.total * dpgf.TVA / 100, t.total * (1 + dpgf.TVA / 100)], { gras: true });
+  }
 
   const recap = ajouterFeuille(wb, {
     nom: 'Récapitulatif', settings, logo,

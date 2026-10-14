@@ -4,12 +4,13 @@ import { useTranslation } from 'react-i18next';
 import {
   IconChevronRight, IconChevronDown,
   IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
-  IconRefresh, IconX, IconMapPin, IconArrowUp, IconArrowDown, IconReceiptTax,
+  IconRefresh, IconX, IconMapPin, IconArrowUp, IconArrowDown, IconReceiptTax, IconTag,
 } from '@tabler/icons-react';
-import { DPGF } from '../../types/dpgf';
-import { evalFormula, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
-import { totauxDocument } from './selectionOps';
-import { useProToolbar } from './toolbar/proToolbar';
+import { DPGF, NATURES_HORS_BASE } from '../../types/dpgf';
+import { evalFormula, parsePrixSaisi, estHorsBase, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
+import { appliquerStatutLignes, totauxDocument } from './selectionOps';
+import { StatutBadges } from './StatutBadges';
+import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -102,8 +103,14 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
       const li = Number(parts[1]);
       const ci = Number(parts[2]);
       const path = parts.slice(3).join('-').split('.').map(Number);
-      const v = evalFormula(rawValue);
-      mutateLigne(li, ci, path, { [field]: v });
+      if (field === 'prixUnitaire' || field === 'prixTotal') {
+        // « PM » : l'article est décrit mais son prix n'est pas compté.
+        const saisi = parsePrixSaisi(rawValue);
+        if (saisi.pourMemoire) mutateLigne(li, ci, path, { pourMemoire: true, prixUnitaire: 0, prixTotal: 0 });
+        else mutateLigne(li, ci, path, { [field]: saisi.valeur, pourMemoire: undefined });
+      } else {
+        mutateLigne(li, ci, path, { [field]: evalFormula(rawValue) });
+      }
     }
     setEditCell(null);
   };
@@ -212,7 +219,26 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     return lignes;
   })() : [];
   const selIndex = selectedRow?.path.at(-1) ?? -1;
+  // Statut du prix de l'article sélectionné : base, option (PSE), variante, PM.
+  const statutEntries = (): ToolbarMenuEntry[] => {
+    if (!selectedRow || !selectedLigne) return [];
+    const key = `ligne-${selectedRow.lotIdx}-${selectedRow.chapIdx}-${selectedRow.path.join('-')}`;
+    const appliquer = (patch: Parameters<typeof appliquerStatutLignes>[2]) => {
+      const lots = appliquerStatutLignes(dpgf.lots, [key], patch);
+      onChange(recomputeDPGF({ ...dpgf, lots }));
+    };
+    const l = selectedLigne;
+    return [
+      { id: 'st-base', label: t('pro_status_base'), checked: !estHorsBase(l.nature) && !l.pourMemoire, onClick: () => appliquer({ nature: undefined, pourMemoire: undefined }) },
+      ...NATURES_HORS_BASE.map(nature => ({
+        id: `st-${nature}`, label: t(`pro_status_${nature}`), checked: l.nature === nature, onClick: () => appliquer({ nature }),
+      })),
+      { id: 'st-sep', separator: true },
+      { id: 'st-pm', label: t('pro_status_pm'), checked: !!l.pourMemoire, onClick: () => appliquer({ pourMemoire: !l.pourMemoire }) },
+    ];
+  };
   const selectionActions: SelectionAction[] = [
+    { id: 'statut', label: t('pro_status'), icon: <IconTag size={16} />, onClick: () => {}, menu: statutEntries },
     { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: selIndex <= 0 },
     { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => moveSelected(1), disabled: selIndex < 0 || selIndex >= siblingsOfSelected.length - 1 },
   ];
@@ -222,7 +248,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const showMarge = colSet === 'marge';
 
   // ── Editable number cell ──────────────────────────────────────────────────────
-  const EditNum = ({ rowId, field, value }: { rowId: string; field: string; value: number }) => {
+  const EditNum = ({ rowId, field, value, pm = false }: { rowId: string; field: string; value: number; pm?: boolean }) => {
     const isEditing = editCell?.rowId === rowId && editCell?.field === field;
     if (isEditing) {
       return (
@@ -241,10 +267,10 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
     return (
       <div
         className="text-right font-mono text-sm px-1 cursor-text hover:bg-blue-50 rounded min-h-[22px]"
-        onDoubleClick={() => startEdit(rowId, field, value)}
+        onDoubleClick={() => startEdit(rowId, field, pm ? 'PM' : value)}
         title="Double-clic pour éditer"
       >
-        {value > 0 ? fmt2(value) : ''}
+        {pm ? 'PM' : value > 0 ? fmt2(value) : ''}
       </div>
     );
   };
@@ -417,7 +443,12 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             style={{ borderColor: 'var(--tblr-border)', ...(ligne.type !== 'ouvrage' ? { color: 'var(--tblr-muted)' } : {}) }}
                           >
                             <td className="px-2 py-0.5 text-xs text-zinc-400" style={{ paddingLeft: `${2 + depth * 1.25}rem` }}>{ligne.numero}</td>
-                            <td className="px-2 py-0.5 text-sm"><input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, path, { designation: e.target.value })} /></td>
+                            <td className="px-2 py-0.5 text-sm">
+                              <div className="flex items-center gap-1.5">
+                                <input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, path, { designation: e.target.value })} />
+                                <StatutBadges pourMemoire={ligne.pourMemoire} nature={ligne.nature} />
+                              </div>
+                            </td>
                             <td className="px-2 py-0.5 text-center text-xs text-zinc-500">{ligne.unite}</td>
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
@@ -429,14 +460,14 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             )}
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
-                                <EditNum rowId={rowId} field="prixUnitaire" value={ligne.prixUnitaire} />
+                                <EditNum rowId={rowId} field="prixUnitaire" value={ligne.prixUnitaire} pm={!!ligne.pourMemoire} />
                               </td>
                             )}
                             <td className="px-1 py-0.5">
-                              {ligne.quantitesBatiments !== undefined ? <span>{fmt2(ligne.prixTotal)}</span> : <EditNum rowId={rowId} field="prixTotal" value={ligne.prixTotal} />}
+                              {ligne.quantitesBatiments !== undefined && !ligne.pourMemoire ? <span>{fmt2(ligne.prixTotal)}</span> : <EditNum rowId={rowId} field="prixTotal" value={ligne.prixTotal} pm={!!ligne.pourMemoire} />}
                             </td>
                             <td className="px-2 py-0.5 text-right font-mono text-xs text-zinc-500">
-                              {ttc > 0 ? fmt2(ttc) : ''}
+                              {ligne.pourMemoire ? 'PM' : ttc > 0 ? fmt2(ttc) : ''}
                             </td>
                             {showMarge && (
                               <td className="px-2 py-0.5 text-right text-xs text-zinc-400">
@@ -471,6 +502,15 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                 {showMarge && <td />}
                 <td />
               </tr>
+              {NATURES_HORS_BASE.filter(n => totaux.horsBase[n].nb > 0).map(n => (
+                <tr key={n} style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                  <th scope="row" colSpan={showQtyPU ? 5 : 3} className="px-4 py-1.5 text-left text-sm font-normal">{t(`pro_total_${n}_ht`)}</th>
+                  <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.horsBase[n].totalHT)}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.horsBase[n].totalHT * (1 + dpgf.TVA / 100))}</td>
+                  {showMarge && <td />}
+                  <td />
+                </tr>
+              ))}
               <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                 <th scope="row" colSpan={showQtyPU ? 5 : 3} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_included', { rate: dpgf.TVA })}</th>
                 <td />

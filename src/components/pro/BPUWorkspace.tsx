@@ -1073,7 +1073,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   {Object.entries(vent.parNature).filter(([n]) => n !== 'base').map(([n, montant]) => (
                     <tr key={n} className="bg-zinc-50 dark:bg-zinc-800/20 text-xs">
                       <td colSpan={nbCols - 2} className="px-4 py-1 text-right text-zinc-500">
-                        dont {NATURE_LABELS[n as NatureArticle]} (hors offre de base)
+                        {NATURE_LABELS[n as NatureArticle]} (hors offre de base, non compris dans le total)
                       </td>
                       <td className="px-2 py-1 text-right font-mono text-zinc-500">{formatCurrency(montant)}</td>
                       <td colSpan={1 + nbColsDecoupage} />
