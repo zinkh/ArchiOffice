@@ -4,6 +4,7 @@
 import type { AgencySettings } from './proposalExport';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
+import { docxSectionChrome } from './docxRunningHeader';
 import type { Bloc, DocModele } from './actMarche';
 
 const nomFichier = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_|_$/g, '');
@@ -182,16 +183,14 @@ export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySett
     }
   };
 
-  const sections = docs.map(doc => ({
-    properties: {},
-    headers: { default: new Header({ children: entete }) },
-    footers: { default: new Footer({ children: pied }) },
+  const sections = await Promise.all(docs.map(async doc => ({
+    ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
     children: [
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 200, after: 60 }, children: [new TextRun({ text: doc.titre, bold: true, size: 30, color: '111827' })] }),
       ...(doc.sousTitre ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: doc.sousTitre, size: 21, color: '6B7280' })] })] : []),
       ...doc.blocs.flatMap(rendreBloc),
     ],
-  }));
+  })));
 
   const blob = await Packer.toBlob(new Document({ sections }));
   telecharger(blob, `${nomFichier(nom)}.docx`);

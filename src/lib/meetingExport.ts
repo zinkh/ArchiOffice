@@ -8,6 +8,7 @@ import { resolveSignedUrl } from './signedStorageUrl';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
 import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
+import { docxSectionChrome } from './docxRunningHeader';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -433,7 +434,8 @@ export async function exportMeetingToDocx(
   // ── Assemble document ─────────────────────────────────────────────────────
   const doc = new Document({
     sections: [{
-      properties: {},
+      // L'en-tête du corps ne sert que la première page ; les suivantes portent une ligne.
+      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: meeting.title }),
       children: [
         // Agency header
         ...agencyParagraphs,

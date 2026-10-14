@@ -10,7 +10,6 @@
 // par la bibliothèque docx (déjà utilisée par src/lib/meetingExport.ts) pour
 // obtenir un document réellement présentable, et par jsPDF pour le PDF, comme
 // les exports de l'interface.
-import * as XLSX from 'xlsx';
 import type { AgentArtifact } from '../types.js';
 import { agencyFooterLine, EMPTY_AGENCY, type AgencyIdentity } from './agencyIdentity.js';
 
@@ -148,6 +147,18 @@ async function buildDocx(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Bu
     })
   );
 
+  const compactHeaderChildren = [
+    new Paragraph({
+      tabStops: [{ type: 'right' as any, position: 9026 }],
+      border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: 'BBBBBB' } },
+      spacing: { after: 120 },
+      children: [
+        new TextRun({ text: agency.name || '', bold: true, size: 16 }),
+        new TextRun({ text: `\t${title}`, size: 16, color: '666666' }),
+      ],
+    }),
+  ];
+
   const footerLine = agencyFooterLine(agency);
   const footerChildren = [
     ...(footerLine
@@ -220,9 +231,16 @@ async function buildDocx(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Bu
     creator: agency.name || 'ArchiOffice',
     title,
     sections: [{
-      properties: {},
-      headers: { default: new Header({ children: headerChildren }) },
-      footers: { default: new Footer({ children: footerChildren }) },
+      properties: { titlePage: true },
+      // Première page : logo et coordonnées. Suivantes : une ligne (agence, puis document à droite).
+      headers: {
+        first: new Header({ children: headerChildren }),
+        default: new Header({ children: compactHeaderChildren }),
+      },
+      footers: {
+        first: new Footer({ children: footerChildren }),
+        default: new Footer({ children: footerChildren }),
+      },
       children: body,
     }],
   });
@@ -276,8 +294,23 @@ async function buildPdf(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Buf
     return bottom + 8;
   };
 
+  // Pages suivantes : une seule ligne, l'agence à gauche et le document à droite
+  // (le logo n'est imprimé que sur la première page).
+  const drawCompactHeader = (): number => {
+    setFont('bold', 8);
+    const nom = agency.name || '';
+    pdf.text(nom, margin, 10);
+    setFont('normal', 8, 107);
+    const [doc] = pdf.splitTextToSize(title, Math.max(contentW - pdf.getTextWidth(nom) - 8, 20)) as string[];
+    pdf.text(doc ?? '', pageW - margin, 10, { align: 'right' });
+    pdf.setDrawColor(210, 210, 210);
+    pdf.setLineWidth(0.2);
+    pdf.line(margin, 12.5, pageW - margin, 12.5);
+    return margin + 4;
+  };
+
   let y = drawHeader();
-  const newPage = () => { pdf.addPage(); y = drawHeader(); };
+  const newPage = () => { pdf.addPage(); y = drawCompactHeader(); };
   const ensureSpace = (h: number) => { if (y + h > pageH - margin - 12) newPage(); };
 
   setFont('bold', 16);
@@ -347,47 +380,81 @@ async function buildPdf(spec: ArtifactSpec, agency: AgencyIdentity): Promise<Buf
 }
 
 // ── Tableur ─────────────────────────────────────────────────────────────────
-function buildExcel(spec: ArtifactSpec, agency: AgencyIdentity): string {
-  const wb = XLSX.utils.book_new();
+// ExcelJS et non SheetJS : la version communautaire de SheetJS n'écrit ni la
+// mise en forme, ni les en-têtes et pieds d'impression. Sans eux, impossible
+// d'appliquer la charte (identité sur la première page seulement, une ligne
+// « agence | document » ensuite, pagination « P1|2 »).
+const echapperEntetePied = (t: string) => t.replace(/&/g, '&&');
+
+async function buildExcel(spec: ArtifactSpec, agency: AgencyIdentity): Promise<string> {
+  const { Workbook } = await import('exceljs');
+  const wb = new Workbook();
+  wb.creator = agency.name || 'ArchiOffice';
+  wb.created = new Date();
   const sheets = spec.sheets ?? [{ name: 'Données', rows: spec.rows ?? [] }];
   const title = spec.title || baseName(spec.filename);
 
-  for (const sheet of sheets) {
+  // Pied : tenir en 255 caractères, en retirant des mentions entières.
+  const mentions = agencyFooterLine(agency).split('  ·  ');
+  while (mentions.length > 1 && mentions.join('  ·  ').length > 170) mentions.pop();
+  const piedComplet = `&L&"Calibri,Regular"&7 ${echapperEntetePied(mentions.join('  ·  '))}&R&"Calibri,Bold"&8 P&P|&N`;
+
+  sheets.forEach((sheet, index) => {
     const dataRows = sheet.rows ?? [];
     const colCount = dataRows.reduce((n, r) => Math.max(n, r.length), 1);
-    // Bandeau d'identité : la mise en forme des cellules (gras, fonds) n'est
-    // pas écrite par la version communautaire de SheetJS, alors que la largeur
-    // des colonnes, le figeage des volets et le filtre le sont. On s'appuie
-    // donc sur ce qui sort réellement du fichier plutôt que sur des styles
-    // silencieusement ignorés.
-    const banner: any[][] = [
-      [agency.name || 'Cabinet'],
-      [[agency.address, agency.phone ? `Tél : ${agency.phone}` : '', agency.email].filter(Boolean).join('  ·  ')],
-      [title],
-      [],
-    ];
-    const rows = [...banner, ...dataRows];
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-
-    ws['!cols'] = Array.from({ length: colCount }, (_, c) => {
-      const width = dataRows.reduce((max, r) => Math.max(max, String(r?.[c] ?? '').length), 10);
-      return { wch: Math.min(Math.max(width + 2, 12), 60) };
+    const ws = wb.addWorksheet((sheet.name || `Données${index ? ` ${index + 1}` : ''}`).slice(0, 31), {
+      views: [{ showGridLines: false }],
     });
-    ws['!merges'] = banner.map((_, r) => ({ s: { r, c: 0 }, e: { r, c: Math.max(colCount - 1, 0) } }));
-    if (dataRows.length > 1) {
-      const headerRow = banner.length; // 0-indexé : première ligne de données
-      ws['!freeze'] = { xSplit: 0, ySplit: headerRow + 1 };
-      ws['!autofilter'] = {
-        ref: XLSX.utils.encode_range(
-          { r: headerRow, c: 0 },
-          { r: rows.length - 1, c: Math.max(colCount - 1, 0) }
-        ),
-      };
-    }
-    XLSX.utils.book_append_sheet(wb, ws, (sheet.name || 'Données').slice(0, 31));
-  }
+    ws.columns = Array.from({ length: colCount }, (_, c) => {
+      const width = dataRows.reduce((max, r) => Math.max(max, String(r?.[c] ?? '').length), 10);
+      return { width: Math.min(Math.max(width + 2, 12), 60) };
+    });
 
-  return XLSX.write(wb, { type: 'base64', bookType: 'xlsx' }) as string;
+    // Bandeau d'identité (texte : l'agent n'a pas de logo à placer ici).
+    const banner = [
+      agency.name || 'Cabinet',
+      [agency.address, agency.phone ? `Tél : ${agency.phone}` : '', agency.email].filter(Boolean).join('  ·  '),
+      title,
+      '',
+    ];
+    banner.forEach((texte, i) => {
+      const row = ws.addRow([texte]);
+      if (colCount > 1) ws.mergeCells(row.number, 1, row.number, colCount);
+      row.getCell(1).font = { name: 'Calibri', size: i === 0 ? 11 : i === 2 ? 12 : 8, bold: i === 0 || i === 2, color: { argb: i === 1 ? 'FF6B7280' : 'FF111827' } };
+    });
+
+    const premiereDonnee = banner.length + 1; // 1-indexé
+    dataRows.forEach((r, i) => {
+      const row = ws.addRow(r.map(v => v ?? null));
+      if (i === 0 && dataRows.length > 1) {
+        row.eachCell(cell => {
+          cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: 'FFFFFFFF' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF3C3C3C' } };
+        });
+      }
+    });
+
+    if (dataRows.length > 1) {
+      ws.views = [{ showGridLines: false, state: 'frozen', ySplit: premiereDonnee }];
+      ws.autoFilter = { from: { row: premiereDonnee, column: 1 }, to: { row: premiereDonnee + dataRows.length - 1, column: colCount } };
+    }
+    ws.pageSetup = {
+      paperSize: 9, orientation: colCount > 6 ? 'landscape' : 'portrait',
+      fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      ...(dataRows.length > 1 ? { printTitlesRow: `${premiereDonnee}:${premiereDonnee}` } : {}),
+    };
+    // Identité sur la première page seulement : les suivantes portent une ligne.
+    ws.headerFooter = {
+      differentFirst: true,
+      firstHeader: '',
+      firstFooter: piedComplet,
+      oddHeader: `&L&"Calibri,Bold"&8 ${echapperEntetePied(agency.name || '')}&R&"Calibri,Regular"&8 ${echapperEntetePied(title.slice(0, 90))}`,
+      oddFooter: piedComplet,
+    };
+  });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  return Buffer.from(buffer as ArrayBuffer).toString('base64');
 }
 
 function buildCsv(spec: ArtifactSpec): string {
@@ -404,7 +471,7 @@ export async function generateArtifact(spec: ArtifactSpec, agency: AgencyIdentit
     return {
       type: 'excel',
       filename: withExtension(spec.filename, '.xlsx'),
-      data: buildExcel(spec, agency),
+      data: await buildExcel(spec, agency),
       mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     };
   }
