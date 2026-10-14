@@ -14,6 +14,7 @@ import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
+import { sansGlisserPendantSaisie } from './EditableCell';
 import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -255,7 +256,10 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         <input
           autoFocus
           defaultValue={editCell!.value}
-          onBlur={e => commitCell(e.target.value)}
+          onMouseEnter={sansGlisserPendantSaisie.onMouseEnter}
+          onMouseLeave={sansGlisserPendantSaisie.onMouseLeave}
+          onFocus={sansGlisserPendantSaisie.onFocus}
+          onBlur={e => { sansGlisserPendantSaisie.onBlur(e); commitCell(e.target.value); }}
           onKeyDown={e => {
             if (e.key === 'Enter') commitCell((e.target as HTMLInputElement).value);
             if (e.key === 'Escape') setEditCell(null);
@@ -415,7 +419,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                           </button>
                         </td>
                         <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={showMarge ? 6 : 5}>
-                          <input aria-label="Nom du chapitre" className="w-full bg-transparent" value={chap.titre} onChange={e => {
+                          <input {...sansGlisserPendantSaisie} aria-label="Nom du chapitre" className="w-full bg-transparent" value={chap.titre} onChange={e => {
                             onChange({ ...dpgf, lots: dpgf.lots.map((l, i) => i !== li ? l : { ...l, chapitres: l.chapitres.map((c, j) => j !== ci ? c : { ...c, titre: e.target.value }) }) });
                           }} />
                         </td>
@@ -445,7 +449,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             <td className="px-2 py-0.5 text-xs text-zinc-400" style={{ paddingLeft: `${2 + depth * 1.25}rem` }}>{ligne.numero}</td>
                             <td className="px-2 py-0.5 text-sm">
                               <div className="flex items-center gap-1.5">
-                                <input aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, path, { designation: e.target.value })} />
+                                <input {...sansGlisserPendantSaisie} aria-label="Nom de l’article" className="w-full bg-transparent" value={ligne.designation} onChange={e => mutateLigne(li, ci, path, { designation: e.target.value })} />
                                 <StatutBadges pourMemoire={ligne.pourMemoire} nature={ligne.nature} />
                               </div>
                             </td>

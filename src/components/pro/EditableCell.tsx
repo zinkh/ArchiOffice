@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 export interface EditingCell {
   rowKey: string;
@@ -12,6 +12,30 @@ export interface EditingCell {
 // remontait l'input à chaque frappe, réinitialisant son état local `v` à la
 // valeur d'origine. D'où le texte qui s'effaçait sauf à taper plus vite que
 // le cycle de rendu, et l'édition qui ne se commitait jamais vraiment.
+/**
+ * Un champ texte dans une ligne `draggable` ne laisse pas poser le curseur à la
+ * souris (le clic démarre un glisser, la sélection ne suit pas) : le navigateur
+ * oblige alors à passer par les flèches. La ligne cesse donc d'être
+ * glissable pendant que le pointeur survole le champ ou qu'il a le focus.
+ * À étaler sur l'<input> : `<input {...sansGlisserPendantSaisie} />`.
+ */
+// Une ligne qui n'est pas glissable (draggable="false") n'est jamais touchée :
+// seule celle qu'on a suspendue est rétablie (marqueur data-glisser-suspendu).
+const ligneGlissable = (el: Element, suspendre_: boolean) => {
+  const ligne = suspendre_ ? el.closest('[draggable="true"]') : el.closest('[data-glisser-suspendu]');
+  if (!ligne) return;
+  if (suspendre_) { ligne.setAttribute('data-glisser-suspendu', ''); ligne.setAttribute('draggable', 'false'); }
+  else { ligne.removeAttribute('data-glisser-suspendu'); ligne.setAttribute('draggable', 'true'); }
+};
+export const sansGlisserPendantSaisie = {
+  onMouseEnter: (e: React.MouseEvent<HTMLElement>) => ligneGlissable(e.currentTarget, true),
+  onMouseLeave: (e: React.MouseEvent<HTMLElement>) => {
+    if (document.activeElement !== e.currentTarget) ligneGlissable(e.currentTarget, false);
+  },
+  onFocus: (e: React.FocusEvent<HTMLElement>) => ligneGlissable(e.currentTarget, true),
+  onBlur: (e: React.FocusEvent<HTMLElement>) => ligneGlissable(e.currentTarget, false),
+};
+
 const sansAccent = (t: string) => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('fr');
 
 /**
@@ -44,6 +68,16 @@ export const CellInput = ({
   const [v, setV] = useState(value);
   const [actif, setActif] = useState(-1);
   const ref = useRef<HTMLInputElement>(null);
+  // Échap retire le champ sans blur : la ligne glissable est alors rétablie ici.
+  useEffect(() => {
+    const ligne = ref.current?.closest('[draggable]');
+    return () => {
+      if (ligne?.hasAttribute('data-glisser-suspendu')) {
+        ligne.removeAttribute('data-glisser-suspendu');
+        ligne.setAttribute('draggable', 'true');
+      }
+    };
+  }, []);
   const propositions = suggestions ? propositionsListe(v, suggestions) : [];
   const rect = propositions.length ? ref.current?.getBoundingClientRect() : undefined;
   const choisir = (proposition: string) => {
@@ -60,8 +94,10 @@ export const CellInput = ({
         aria-autocomplete={suggestions ? 'list' : undefined}
         value={v}
         onChange={e => { setV(e.target.value); setActif(-1); }}
-        onFocus={e => e.target.select()}
-        onBlur={() => onCommit(v)}
+        onMouseEnter={sansGlisserPendantSaisie.onMouseEnter}
+        onMouseLeave={sansGlisserPendantSaisie.onMouseLeave}
+        onFocus={e => { sansGlisserPendantSaisie.onFocus(e); e.target.select(); }}
+        onBlur={e => { sansGlisserPendantSaisie.onBlur(e); onCommit(v); }}
         onKeyDown={e => {
           // Les raccourcis du tableau (Tab, Suppr, Alt+flèches) ne doivent pas
           // agir sur la ligne pendant la saisie.
