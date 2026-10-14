@@ -16,6 +16,8 @@ interface ProToolbarProps {
   isMobile: boolean;
   /** Ouvre la fenêtre d'export du dossier PRO (tous les documents). */
   onExport?: () => void;
+  /** Recherche dans le document affiché : loupe juste avant le menu « ⋯ ». */
+  search?: React.ReactNode;
 }
 
 export const toolbarButtonClass = (opts: { accent?: boolean; pressed?: boolean; iconOnly?: boolean } = {}) => cn(
@@ -31,7 +33,7 @@ export const toolbarButtonClass = (opts: { accent?: boolean; pressed?: boolean; 
  * le menu « ⋯ » du dossier. Sur téléphone, seules les actions marquées
  * `mobile` restent visibles, les autres rejoignent le menu « ⋯ ».
  */
-export function ProToolbar({ items, resolve, dossierEntries, dossierLabel, isMobile, onExport }: ProToolbarProps) {
+export function ProToolbar({ items, resolve, dossierEntries, dossierLabel, isMobile, onExport, search }: ProToolbarProps) {
   const { t } = useTranslation();
   const run = (id: string, value?: string) => { invokeToolbarAction(resolve(), id, value); };
   const { visible, folded } = isMobile ? foldForMobile(items) : { visible: items, folded: [] as ToolbarMenuEntry[] };
@@ -121,6 +123,7 @@ export function ProToolbar({ items, resolve, dossierEntries, dossierLabel, isMob
           {t('pro_export')}
         </button>
       )}
+      {search}
       {menuEntries.length > 0 && (
         <ToolbarMenu
           entries={menuEntries}

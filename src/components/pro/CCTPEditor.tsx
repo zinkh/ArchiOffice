@@ -26,6 +26,8 @@ import { IconArrowUp, IconArrowDown } from '@tabler/icons-react';
 import { lotsDepuisGeneration, type CctpGenerationEngine, type GeneratedLot } from '../../lib/cctpGeneration';
 import { SignedImage } from '../SignedImage';
 import { IconPhotoPlus, IconX } from '@tabler/icons-react';
+import { useCibleRecherche } from '../../hooks/useCibleRecherche';
+import type { CibleRecherche } from '../../lib/proRecherche';
 import { legendeImage, localisationsConnues, nouvelleImage, retirerImage } from '../../lib/cctpImages';
 import { envoyerIllustration } from '../../lib/cctpImagesUpload';
 import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
@@ -34,6 +36,8 @@ import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPT
 interface CCTPEditorProps {
   /** Ouvre l'import d'un fichier qui remplit le CCTP (les lignes absentes deviennent des articles). */
   onImportDocument?: () => void;
+  /** Trouvaille de la recherche à ouvrir et montrer. */
+  searchTarget?: CibleRecherche | null;
   dpgf: DPGF;
   onChange: (dpgf: DPGF) => void;
   /** Volet de structure, piloté par le menu « ⋯ » de ProTab. */
@@ -59,7 +63,7 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget }) => {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
@@ -72,6 +76,16 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
   );
   const [selection, setSelection] = useState<Selection | null>(null);
+
+  // Trouvaille choisie dans la recherche : dépliée, sélectionnée (son texte
+  // s'ouvre dans l'éditeur), puis montrée dans l'arbre.
+  useCibleRecherche(searchTarget, c => {
+    setExpandedLots(prev => new Set([...prev, c.lotId]));
+    if (c.chapId) setExpandedChaps(prev => new Set([...prev, c.chapId!]));
+    setSelection(c.kind === 'lot' ? { kind: 'lot', lotIdx: c.lotIdx }
+      : c.kind === 'chapitre' ? { kind: 'chapitre', lotIdx: c.lotIdx, chapIdx: c.chapIdx! }
+        : { kind: 'ligne', lotIdx: c.lotIdx, chapIdx: c.chapIdx!, lignePath: c.lignePath! });
+  });
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
@@ -455,6 +469,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
               <div key={lot.id}>
                 {/* Lot row */}
                 <div
+                  data-search-id={lot.id}
                   onClick={() => setSelection({ kind: 'lot', lotIdx: li })}
                   className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
                     selection?.kind === 'lot' && selection.lotIdx === li
@@ -478,6 +493,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                       <div key={chap.id}>
                         {/* Chapitre row */}
                         <div
+                          data-search-id={chap.id}
                           onClick={() => setSelection({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
                           onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                           onDrop={e => { e.preventDefault(); if (!dragSource) { const raw = e.dataTransfer.getData('application/json'); if (raw && onDropExternal) { try { onDropExternal(JSON.parse(raw) as Ligne); } catch {} } return; } const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = renumeroterLignes([...dest.lignes, taken.ligne], String(dest.numero || ci + 1)); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); onChange(next); } setDragSource(null); }}
@@ -516,6 +532,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                             {flattenCctpLignes(chap.lignes).map(({ ligne, path, depth }) => (
                               <div
                                 key={ligne.id}
+                                data-search-id={ligne.id}
                                 draggable={!ligne.children?.length}
                                 onDragStart={e => { const s = { lotIdx: li, chapIdx: ci, path }; setDragSource(s); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(s)); e.dataTransfer.setData('application/json', JSON.stringify(ligne)); }}
                                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}

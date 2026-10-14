@@ -137,7 +137,7 @@ export const CellInput = ({
 };
 
 export const EditableCell = ({
-  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false, suggestions,
+  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false, suggestions, maxDecimals = 2,
 }: {
   rKey: string; field: string; value: string | number; editingCell: EditingCell | null;
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
@@ -152,12 +152,14 @@ export const EditableCell = ({
   pm?: boolean;
   /** Valeurs proposées pendant la saisie (liste séparée par des virgules). */
   suggestions?: string[];
+  /** Décimales affichées au plus (2 par défaut ; une quantité n'est jamais arrondie à l'écran). */
+  maxDecimals?: number;
 }) => {
   const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
   const display = pm
     ? 'PM'
     : numeric && typeof value === 'number' && (value > 0 || (showZero && value === 0))
-    ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)
+    ? new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: Math.max(2, maxDecimals) }).format(value)
     : String(value || '');
 
   if (isEditing) {

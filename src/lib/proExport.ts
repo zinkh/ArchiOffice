@@ -1,11 +1,12 @@
 import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT, NATURES_HORS_BASE, type NatureArticle } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
+import { formatQuantite } from './quantiteFormat';
 import { sousTotalNature } from '../components/pro/treeOps';
 import type { AgencySettings } from './proposalExport';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
 import {
-  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE,
+  ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE, FORMAT_QUANTITE,
 } from './xlsxLetterhead';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
         lot: `${a.lot.numero} ${a.lot.titre}`,
         localisation: a.ligne.localisation || '',
         unite: a.ligne.unite,
-        quantite: a.ligne.quantite > 0 ? fmt(a.ligne.quantite) : '',
+        quantite: a.ligne.quantite > 0 ? formatQuantite(a.ligne.quantite) : '',
         prixTotal: a.ligne.pourMemoire ? 'PM' : a.ligne.prixTotal > 0 ? fmt(a.ligne.prixTotal) : '',
         q: a.ligne.quantite, total: a.ligne.prixTotal, pm: !!a.ligne.pourMemoire,
       });
@@ -112,7 +113,7 @@ function flattenDPGF(lots: Lot[]): Array<{
             numero: ligne.numero,
             designation: ligne.designation + repereStatut(ligne.pourMemoire, ligne.nature),
             unite: ligne.unite,
-            quantite: ligne.quantite > 0 ? fmt(ligne.quantite) : '',
+            quantite: ligne.quantite > 0 ? formatQuantite(ligne.quantite) : '',
             prixUnitaire: ligne.pourMemoire ? 'PM' : ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
             prixTotal: ligne.pourMemoire ? 'PM' : ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
             type: ligne.type,
@@ -306,7 +307,7 @@ export async function exportDPGFtoExcel(
         { header: 'N°', width: 10 },
         { header: 'Désignation', width: 55 },
         { header: 'Unité', width: 10, align: 'center' },
-        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_QUANTITE },
         ...(avecPrix ? [
           { header: 'P.U. HT (€)', width: 15, align: 'right' as const, numFmt: FORMAT_NOMBRE },
           { header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE },
@@ -331,7 +332,7 @@ export async function exportDPGFtoExcel(
         { header: 'Lot', width: 24 },
         { header: 'Localisation', width: 20 },
         { header: 'Unité', width: 10, align: 'center' },
-        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Quantité', width: avecPrix ? 12 : 14, align: 'right', numFmt: FORMAT_QUANTITE },
         ...(avecPrix ? [{ header: 'Total HT (€)', width: 16, align: 'right' as const, numFmt: FORMAT_NOMBRE }] : []),
       ],
     });
@@ -360,7 +361,7 @@ export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, 
       { header: 'N°', width: 10 },
       { header: 'Désignation', width: 50 },
       { header: 'Unité', width: 10, align: 'center' },
-      { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_NOMBRE },
+      { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_QUANTITE },
       { header: 'P.U. HT', width: 14, align: 'right', numFmt: FORMAT_NOMBRE },
       { header: 'Total HT', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
       { header: `TVA ${dpgf.TVA}%`, width: 16, align: 'right', numFmt: FORMAT_NOMBRE },

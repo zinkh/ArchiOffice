@@ -4,6 +4,7 @@ import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import type { Chapitre, Ligne, Lot } from '../../types/dpgf';
 import { formatCurrency } from '../../lib/utils';
 import { EditableCell, type EditingCell } from './EditableCell';
+import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
 import { rowKey, sumLigne, type FlatRow } from './treeOps';
 
 interface DpgfMobileListProps {
@@ -25,7 +26,7 @@ interface DpgfMobileListProps {
   extra?: (row: FlatRow<Lot, Chapitre, Ligne>, rKey: string) => React.ReactNode;
 }
 
-const fmtQte = (n: number) => new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 }).format(n || 0);
+const fmtQte = (n: number) => formatQuantite(n || 0);
 
 /**
  * Le DPGF sur téléphone : lots et chapitres en intertitres, chaque article en
@@ -49,6 +50,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
           return (
             <button
               key={rKey}
+              data-search-id={row.lot.id}
               type="button"
               aria-expanded={open}
               onClick={() => onToggleLot(row.lot.id)}
@@ -68,6 +70,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
           return (
             <button
               key={rKey}
+              data-search-id={row.chapitre!.id}
               type="button"
               aria-expanded={open}
               onClick={() => onToggleChap(row.chapitre!.id)}
@@ -86,6 +89,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
         return (
           <div
             key={rKey}
+            data-search-id={l.id}
             className="flex gap-3 p-3 rounded-lg border"
             style={{
               marginLeft: `${(row.depth - 2) * 0.75}rem`,
@@ -121,7 +125,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
                 <div className="flex items-center gap-1 text-[0.8125rem] tabular-nums" style={{ color: 'var(--tblr-muted)' }}>
                   {l.quantitesBatiments !== undefined
                     ? <span>{fmtQte(l.quantite)}</span>
-                    : <div className="w-16"><EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric label={t('pro_col_quantity')} {...cell} /></div>}
+                    : <div className="w-16"><EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric maxDecimals={DECIMALES_QUANTITE} label={t('pro_col_quantity')} {...cell} /></div>}
                   <span>{l.unite} ×</span>
                   <div className="w-20"><EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric label={t('pro_col_unit_price')} {...cell} /></div>
                   <span className="ml-auto font-semibold whitespace-nowrap" style={{ color: 'var(--tblr-text)' }}>{formatCurrency(l.prixTotal)}</span>

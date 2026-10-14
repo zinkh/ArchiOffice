@@ -15,6 +15,9 @@ import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
 import { sansGlisserPendantSaisie } from './EditableCell';
+import { formatQuantite } from '../../lib/quantiteFormat';
+import { useCibleRecherche } from '../../hooks/useCibleRecherche';
+import type { CibleRecherche } from '../../lib/proRecherche';
 import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -27,6 +30,8 @@ interface EstimationEditorProps {
   projectName?: string;
   externalDrop?: import('../../types/dpgf').Ligne | null;
   onDragStart?: (ligne: import('../../types/dpgf').Ligne) => void;
+  /** Trouvaille de la recherche à ouvrir et montrer. */
+  searchTarget?: CibleRecherche | null;
   showTree?: boolean;
   onToggleTree?: () => void;
 }
@@ -59,7 +64,7 @@ function recomputeDPGF(dpgf: DPGF): DPGF {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const EstimationEditor: React.FC<EstimationEditorProps> = ({
-  dpgf, onChange, projectName, externalDrop, onDragStart,
+  dpgf, onChange, projectName, externalDrop, onDragStart, searchTarget,
   showTree: showTreeProp, onToggleTree,
 }) => {
   const { t } = useTranslation();
@@ -80,6 +85,17 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   const [selectedRow, setSelectedRow] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [breakdown, setBreakdown] = useState<{ lotIdx: number; chapIdx: number; ligneIdx: number } | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
+
+  // Trouvaille choisie dans la recherche : dépliée, sélectionnée, puis montrée.
+  useCibleRecherche(searchTarget, c => {
+    setEditCell(null);
+    setExpandedLots(prev => new Set([...prev, c.lotId]));
+    if (c.chapId) setExpandedChaps(prev => new Set([...prev, c.chapId!]));
+    setSelectedLotId(c.lotId);
+    setSelectedRow(c.kind === 'ligne' && c.chapIdx !== undefined && c.lignePath
+      ? { lotIdx: c.lotIdx, chapIdx: c.chapIdx, path: c.lignePath }
+      : null);
+  });
 
   const fmt2 = (n: number) =>
     new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
@@ -250,6 +266,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
 
   // ── Editable number cell ──────────────────────────────────────────────────────
   const EditNum = ({ rowId, field, value, pm = false }: { rowId: string; field: string; value: number; pm?: boolean }) => {
+    const affiche = field === 'quantite' ? formatQuantite : fmt2;
     const isEditing = editCell?.rowId === rowId && editCell?.field === field;
     if (isEditing) {
       return (
@@ -274,7 +291,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         onDoubleClick={() => startEdit(rowId, field, pm ? 'PM' : value)}
         title="Double-clic pour éditer"
       >
-        {pm ? 'PM' : value > 0 ? fmt2(value) : ''}
+        {pm ? 'PM' : value > 0 ? affiche(value) : ''}
       </div>
     );
   };
@@ -380,6 +397,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                   {/* Lot header */}
                   <tr
                     data-lot-id={lot.id}
+                    data-search-id={lot.id}
                     className="border-y font-semibold"
                     style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}
                     onDragOver={e => { e.preventDefault(); setDropTarget(`lot-${li}`); }}
@@ -406,6 +424,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                     <React.Fragment key={chap.id}>
                       {/* Chapitre header */}
                       <tr
+                        data-search-id={chap.id}
                         className={`border-b font-semibold ${dropTarget === `chap-${li}-${ci}` ? 'bg-[var(--tblr-primary-lt)]' : ''}`}
                         style={{ borderColor: 'var(--tblr-border)' }}
                         onDragOver={e => { e.preventDefault(); setDropTarget(`chap-${li}-${ci}`); }}
@@ -435,6 +454,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                         return (
                           <tr
                             key={ligne.id}
+                            data-search-id={ligne.id}
                             onClick={() => setSelectedRow({ lotIdx: li, chapIdx: ci, path })}
                             draggable
                             onDragStart={e => handleDragStart(e, ligne, li, ci, path)}
@@ -456,7 +476,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             <td className="px-2 py-0.5 text-center text-xs text-zinc-500">{ligne.unite}</td>
                             {showQtyPU && (
                               <td className="px-1 py-0.5">
-                                {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{ligne.quantite}</span> : (<div className="flex items-center gap-1">
+                                {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{formatQuantite(ligne.quantite)}</span> : (<div className="flex items-center gap-1">
                                   <div className="flex-1"><EditNum rowId={rowId} field="quantite" value={ligne.quantite} /></div>
                                   <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
                                 </div>)}

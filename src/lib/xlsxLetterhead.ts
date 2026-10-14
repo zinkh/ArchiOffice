@@ -44,6 +44,8 @@ export interface Colonne {
 
 export const FORMAT_EURO = '#,##0.00" €"';
 export const FORMAT_NOMBRE = '#,##0.00';
+/** Quantité : deux décimales au moins, jusqu'à six, sans arrondir ce qui a été saisi. */
+export const FORMAT_QUANTITE = '#,##0.00####';
 
 export interface FeuilleOptions {
   /** Nom de l'onglet (31 caractères maximum, caractères interdits retirés). */
