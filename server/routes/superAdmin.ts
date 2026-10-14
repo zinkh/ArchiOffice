@@ -436,11 +436,22 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
       const { error: tenantErr } = await supabaseAdmin.from('tenants').insert({ id: tenantId, slug: cleanSlug, name, plan, trial_ends_at: trialEndsAt });
       if (tenantErr) throw tenantErr;
 
-      const tempPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-4).toUpperCase() + '!';
-      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-        email: adminEmail, password: tempPassword, user_metadata: { name: adminName }, email_confirm: true,
+      // Aucun mot de passe n'est fabriqué ni transmis : `generateLink({ type: 'invite' })`
+      // crée le compte SANS mot de passe et renvoie un lien à usage unique ; l'administrateur
+      // du cabinet choisit lui-même son mot de passe sur /reset-password (même mécanisme que
+      // POST /api/team). Si la création du compte échoue, le cabinet déjà inséré est retiré :
+      // il resterait sinon sans aucun administrateur.
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      const { data: linkData, error: authErr } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'invite', email: adminEmail,
+        options: { data: { name: adminName }, redirectTo: `${appUrl}/reset-password` },
       });
-      if (authErr || !authData?.user) throw authErr ?? new Error('Création utilisateur échouée');
+      if (authErr || !linkData?.user) {
+        await supabaseAdmin.from('tenants').delete().eq('id', tenantId);
+        throw authErr ?? new Error('Création utilisateur échouée');
+      }
+      const authData = { user: linkData.user };
+      const inviteLink: string | null = linkData.properties?.action_link ?? null;
 
       await supabaseAdmin.from('profiles').upsert({
         id: authData.user.id, tenant_id: tenantId, name: adminName, email: adminEmail,
@@ -450,8 +461,19 @@ export function registerSuperAdminRoutes(app: Express, { supabaseAdmin }: RouteD
         userId: authData.user.id, tenantId, role: 'Admin', systemRole: 'admin', makeDefault: true,
       });
 
+      // Envoi du lien par la messagerie de la plateforme, en meilleur effort : le lien est de
+      // toute façon rendu au super-administrateur, qui peut le transmettre lui-même.
+      const esc = (v: string) => v.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+      const emailSent = inviteLink
+        ? await sendPlatformMail(
+            adminEmail,
+            `Votre cabinet ${name} sur ArchiOffice`,
+            `<p>Bonjour ${esc(String(adminName))},</p><p>Le cabinet « ${esc(String(name))} » a été créé sur ArchiOffice. <a href="${esc(inviteLink)}">Choisir mon mot de passe et me connecter</a> (lien à usage unique).</p>`,
+          ).catch(() => false)
+        : false;
+
       await logAdminAction(supabaseAdmin, req.user, 'tenant.created', tenantId, { name, slug: cleanSlug, plan, adminEmail });
-      res.status(201).json({ tenantId, slug: cleanSlug, tempPassword });
+      res.status(201).json({ tenantId, slug: cleanSlug, inviteLink, emailSent });
     } catch (e: any) {
       console.error("[POST /api/admin/tenants]", e); res.status(500).json({ error: e.message }); }
   });
