@@ -37,7 +37,10 @@ import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows'
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
 import { countOpenObservations } from '../lib/observationsOpen';
-import { CONCERNED_OPTIONS } from '../lib/siteReportPresence';
+import { LotEventsDialog, type LotEventsKind } from './chantier/LotEventsDialog';
+import {
+  HEURE_VALIDE, basculerBatiment, batimentsDuLot, joursIntemperies, reperBatiment, resumePenalites, retardCumule,
+} from '../lib/siteReportLotSuivi';
 
 interface ChantierModuleProps {
   project: Project;
@@ -422,7 +425,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, download: false, attachments: pdfAttachments },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, download: false, attachments: pdfAttachments, allReports: reports },
       );
       if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
         setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
@@ -488,6 +491,17 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   };
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
+  // Téléphone : seul le compte-rendu ouvert est affiché, les autres s'atteignent par cette feuille.
+  const [crSheetOpen, setCrSheetOpen] = useState(false);
+  // Pénalités et intempéries d'un lot : la fenêtre d'ajout (LotEventsDialog).
+  const [eventsDialog, setEventsDialog] = useState<{ lotId: string; kind: LotEventsKind } | null>(null);
+  // Cases « W/D » : un bâtiment du registre du chantier chacune (WETLAB, DRYLAB...).
+  const batimentsChantier = useMemo(() => batimentsActifs(decoupage), [decoupage]);
+  const codesBatiments = batimentsChantier.map(reperBatiment).join('/');
+  // Heure de convocation commune à tous les lots du compte-rendu, remplaçable lot par lot.
+  const heureDefaut = selectedReport?.heure_convocation || '';
+  // Retard cumulé : somme des retards de la semaine du compte-rendu et de tous les précédents.
+  const retardCumuleDuLot = (lotId: string) => (selectedReport ? retardCumule(lotId, reports, selectedReport) : 0);
 
   // Présence des intervenants du projet (MOA/AMO/MOE/CT/CSPS...), distincte
   // de la présence des lots ci-dessus : même tableau `attendance`, ligne
@@ -755,7 +769,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -902,8 +916,56 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
               >
                 <IconPlus size={16} /> Nouveau compte-rendu
               </button>
+              {/* Téléphone : seul le compte-rendu ouvert est affiché ; les autres s'ouvrent depuis une feuille. */}
+              {!isDesktop && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setCrSheetOpen(true)}
+                    className="min-h-11 flex items-center justify-between gap-2 rounded-lg border border-[var(--tblr-border)] px-4 py-2 text-sm font-semibold text-[var(--tblr-text)]"
+                    style={{ background: 'var(--tblr-surface)' }}
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <IconListDetails size={16} aria-hidden="true" />
+                      <span className="truncate">Tous les comptes-rendus</span>
+                    </span>
+                    <span className="shrink-0 text-xs text-[var(--tblr-muted)]">{reports.length}</span>
+                  </button>
+                  <BottomSheet open={crSheetOpen} onClose={() => setCrSheetOpen(false)} title="Comptes-rendus du chantier">
+                    {aDecoupage && (
+                      <div className="flex flex-wrap gap-2 px-2 pb-2">
+                        <DecoupageFilters decoupage={decoupage} filtre={filtreDecoupage} onChange={setFiltreDecoupage} />
+                      </div>
+                    )}
+                    {visibleReports.map(r => (
+                      <SheetOption
+                        key={r.id}
+                        selected={selectedReportId === r.id}
+                        onSelect={() => { setSelectedReportId(r.id); setCrSheetOpen(false); window.scrollTo({ top: 0 }); }}
+                        trailing={
+                          r.pendingSync
+                            ? <span className="text-[0.6875rem] font-bold uppercase">en attente</span>
+                            : <span className={cn('text-[0.6875rem] font-bold px-1.5 py-0.5 rounded-full', STATUT_CR_COLORS[r.statut || 'brouillon'])}>{STATUT_CR_LABELS[r.statut || 'brouillon']}</span>
+                        }
+                      >
+                        <span className="min-w-0">
+                          <span className="block">CR {r.report_number}</span>
+                          <span className="block text-xs font-normal text-[var(--tblr-muted)]">
+                            {r.date}{etiquetteDecoupage(r, decoupage) && ` · ${etiquetteDecoupage(r, decoupage)}`}
+                          </span>
+                        </span>
+                      </SheetOption>
+                    ))}
+                    {visibleReports.length === 0 && (
+                      <p className="p-4 text-sm text-[var(--tblr-muted)] italic text-center">
+                        {reports.length === 0 ? 'Aucun compte-rendu.' : 'Aucun compte-rendu pour ce bâtiment ou cette phase.'}
+                      </p>
+                    )}
+                  </BottomSheet>
+                </>
+              )}
               {/* CR list */}
-              <div className="rounded-xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+              <div className={cn('rounded-xl overflow-hidden', !isDesktop && 'hidden')} style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
                 <div className="px-3 py-2 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)] border-b border-[var(--tblr-border)]">
                   Comptes-rendus · {visibleReports.length}{visibleReports.length !== reports.length ? ` / ${reports.length}` : ''}
                 </div>
@@ -1129,7 +1191,21 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   </Section>
 
                   {/* Présence & suivi des lots (page 2 du CR) */}
-                  <Section id="presence" title="Présence & suivi des lots" icon={IconBuilding}>
+                  <Section id="presence" title="Présence & suivi des lots" icon={IconBuilding}
+                    action={
+                      <label className="flex items-center justify-between sm:justify-start gap-2">
+                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Heure par défaut</span>
+                        <DraftInput
+                          type="time"
+                          aria-label="Heure de convocation par défaut, tous les lots"
+                          title="Heure de convocation de tous les lots, modifiable pour chacun"
+                          className="w-28 min-h-11 md:min-h-0 rounded-md border border-[var(--tblr-border)] bg-[var(--tblr-surface)] px-2.5 py-1.5 text-sm text-[var(--tblr-text)] focus:border-[var(--tblr-primary)] outline-none"
+                          value={heureDefaut}
+                          onCommit={v => updateReportField('heure_convocation', v && HEURE_VALIDE.test(v) ? v : null)}
+                        />
+                      </label>
+                    }
+                  >
                     {lots_list.length === 0 && (
                       <p className="text-sm text-[var(--tblr-muted)] italic py-2 text-center">Aucun lot renseigné pour ce projet.</p>
                     )}
@@ -1141,6 +1217,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         onStatus={changeLotStatus}
                         getTracking={lotId => (selectedReport.lot_tracking || []).find(x => x.lot_id === lotId)}
                         onTrack={setLotTracking}
+                        batiments={batimentsChantier}
+                        retardCumule={retardCumuleDuLot}
+                        defaultHeure={heureDefaut}
+                        onOpenEvents={(lotId, kind) => setEventsDialog({ lotId, kind })}
                       />
                     ) : (
                     <div className="overflow-x-auto">
@@ -1151,13 +1231,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                             <th className="text-left py-1.5 pr-2">Statut</th>
                             <th className="text-left py-1.5 pr-2">Effectif</th>
                             <th className="text-center py-1.5 pr-2">Retard sem. (j)</th>
-                            <th className="text-center py-1.5 pr-2">Retard cumulé (j)</th>
-                            <th className="text-center py-1.5 pr-2">Retard docs (j)</th>
-                            <th className="text-center py-1.5 pr-2">Intempéries (j)</th>
+                            <th className="text-center py-1.5 pr-2" title="Somme des retards de la semaine de tous les comptes-rendus">Retard cumulé (j)</th>
+                            <th className="text-left py-1.5 pr-2">Pénalités</th>
                             <th className="text-center py-1.5 pr-2">Convoqué suiv.</th>
                             <th className="text-left py-1.5 pr-2">Lieu</th>
                             <th className="text-left py-1.5 pr-2">Heure</th>
-                            <th className="text-left py-1.5">W/D</th>
+                            {batimentsChantier.length > 1 && <th className="text-left py-1.5" title="Bâtiments concernés par le lot">{codesBatiments}</th>}
                           </tr>
                         </thead>
                         <tbody>
@@ -1171,6 +1250,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                 <td className="py-2 pr-2">
                                   <div className="font-semibold text-[var(--tblr-text)]">{lot.contact_name?.split(' - ')[0]}</div>
                                   <div className="text-xs text-[var(--tblr-muted)]">{lot.lot_number} — {lot.lot_title}</div>
+                                  <button type="button" onClick={() => setEventsDialog({ lotId: lot.id, kind: 'intemperie' })}
+                                    aria-label={`Ajouter une intempérie, ${lot.lot_title}`}
+                                    className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--tblr-border)] px-2 text-xs font-semibold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] pointer-coarse:min-h-11">
+                                    <IconPlus size={14} /> Intempérie
+                                    {joursIntemperies(t) > 0 && <span className="font-normal text-[var(--tblr-muted)]">· {joursIntemperies(t)} j</span>}
+                                  </button>
                                 </td>
                                 <td className="py-2 pr-2 whitespace-nowrap">
                                   <select
@@ -1196,22 +1281,21 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                     onCommit={v => setLotTracking(lot.id, { retard_semaine: parseDays(v) })} />
                                 </td>
                                 <td className="py-2 pr-2 text-center">
-                                  <DraftInput type="number" min={0} aria-label={`Retard cumulé en jours, ${lot.lot_title}`}
-                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
-                                    value={t?.retard_cumule != null ? String(t.retard_cumule) : ''}
-                                    onCommit={v => setLotTracking(lot.id, { retard_cumule: parseDays(v) })} />
+                                  <output
+                                    aria-label={`Retard cumulé en jours, ${lot.lot_title}, calculé`}
+                                    title="Somme des retards de la semaine de tous les comptes-rendus"
+                                    className="inline-block min-w-12 rounded bg-[var(--tblr-surface-2)] px-2 py-1 text-xs font-semibold text-[var(--tblr-text)]"
+                                  >
+                                    {retardCumuleDuLot(lot.id)}
+                                  </output>
                                 </td>
-                                <td className="py-2 pr-2 text-center">
-                                  <DraftInput type="number" min={0} aria-label={`Retard de remise des documents en jours, ${lot.lot_title}`}
-                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
-                                    value={t?.retard_docs_jours != null ? String(t.retard_docs_jours) : ''}
-                                    onCommit={v => setLotTracking(lot.id, { retard_docs_jours: parseDays(v) })} />
-                                </td>
-                                <td className="py-2 pr-2 text-center">
-                                  <DraftInput type="number" min={0} aria-label={`Jours d\'intempéries, ${lot.lot_title}`}
-                                    className="w-16 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs text-center"
-                                    value={t?.intemperies_jours != null ? String(t.intemperies_jours) : ''}
-                                    onCommit={v => setLotTracking(lot.id, { intemperies_jours: parseDays(v) })} />
+                                <td className="py-2 pr-2">
+                                  <button type="button" onClick={() => setEventsDialog({ lotId: lot.id, kind: 'penalite' })}
+                                    aria-label={`Ajouter une pénalité, ${lot.lot_title}`}
+                                    className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--tblr-border)] px-2 text-xs font-semibold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] pointer-coarse:min-h-11">
+                                    <IconPlus size={14} /> Pénalité
+                                  </button>
+                                  {resumePenalites(t) && <div className="mt-1 text-xs text-[var(--tblr-muted)] whitespace-nowrap">{resumePenalites(t)}</div>}
                                 </td>
                                 <td className="py-2 pr-2 text-center">
                                   <input type="checkbox" checked={!!t?.convoque_reunion_suivante} onChange={e => setLotTracking(lot.id, { convoque_reunion_suivante: e.target.checked })} />
@@ -1225,17 +1309,27 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                 <td className="py-2">
                                   <DraftInput type="time" aria-label={`Heure de convocation, ${lot.lot_title}`}
                                     className="w-24 p-1 rounded border border-[var(--tblr-border)] bg-transparent text-xs"
-                                    value={t?.heure || ''}
-                                    onCommit={v => setLotTracking(lot.id, { heure: v || undefined })} />
+                                    title={heureDefaut ? `Heure par défaut : ${heureDefaut}` : undefined}
+                                    value={t?.heure || heureDefaut || ''}
+                                    onCommit={v => setLotTracking(lot.id, { heure: v && v !== heureDefaut ? v : undefined })} />
                                 </td>
-                                <td className="py-2">
-                                  <select aria-label={`Travaux ou documents, ${lot.lot_title}`}
-                                    className="p-1.5 rounded-lg border border-[var(--tblr-border)] bg-transparent text-xs"
-                                    value={t?.concerned || ''}
-                                    onChange={e => setLotTracking(lot.id, { concerned: (e.target.value || undefined) as SiteReportLotTracking['concerned'] })}>
-                                    {CONCERNED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label || '—'}</option>)}
-                                  </select>
-                                </td>
+                                {batimentsChantier.length > 1 && (
+                                  <td className="py-2">
+                                    <div className="flex items-center gap-3" role="group" aria-label={`Bâtiments concernés, ${lot.lot_title}`}>
+                                      {batimentsChantier.map(b => (
+                                        <label key={b.id} title={b.libelle || reperBatiment(b)} className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--tblr-text)] pointer-coarse:min-h-11">
+                                          <input
+                                            type="checkbox"
+                                            className="size-4 pointer-coarse:size-5"
+                                            checked={batimentsDuLot(t, batimentsChantier).includes(b.id)}
+                                            onChange={e => setLotTracking(lot.id, { batiment_ids: basculerBatiment(t, b.id, e.target.checked, batimentsChantier), concerned: undefined })}
+                                          />
+                                          {reperBatiment(b)}
+                                        </label>
+                                      ))}
+                                    </div>
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -1244,6 +1338,21 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     </div>
                     )}
                   </Section>
+
+                  {eventsDialog && (() => {
+                    const lot = lots_list.find(l => l.id === eventsDialog.lotId);
+                    if (!lot) return null;
+                    return (
+                      <LotEventsDialog
+                        kind={eventsDialog.kind}
+                        lotLabel={[lot.contact_name?.split(' - ')[0], `${lot.lot_number} ${lot.lot_title}`].filter(Boolean).join(' · ')}
+                        tracking={(selectedReport.lot_tracking || []).find(x => x.lot_id === lot.id)}
+                        reportDate={selectedReport.date}
+                        onChange={patch => setLotTracking(lot.id, patch)}
+                        onClose={() => setEventsDialog(null)}
+                      />
+                    );
+                  })()}
 
                   {/* Rubriques personnalisées (corps administratif du CR) */}
                   <Section id="rubriques"

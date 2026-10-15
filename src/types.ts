@@ -1308,8 +1308,37 @@ export interface SiteReportLotTracking {
   lieu?: string;
   /** Heure de convocation (HH:MM) quand les entreprises sont convoquées à des heures différentes. */
   heure?: string;
-  /** Lot concerné par des travaux (W), des documents à remettre (D), les deux, ou aucun. */
+  /**
+   * Ancien choix travaux (W) / documents (D), remplacé par `batiment_ids`. Relu par
+   * `batimentsDuLot` (src/lib/siteReportLotSuivi.ts) tant qu'aucun bâtiment n'est coché.
+   */
   concerned?: 'W' | 'D' | 'WD';
+  /** Bâtiments du chantier (registre `chantier_decoupage`) concernés par ce lot : WETLAB, DRYLAB... */
+  batiment_ids?: string[];
+  /** Pénalités appliquées au lot sur ce compte-rendu (remplacent « Retard docs »). */
+  penalites?: PenaliteLot[];
+  /** Intempéries constatées pour le lot sur ce compte-rendu (remplacent la colonne de jours). */
+  intemperies_list?: IntemperieLot[];
+}
+
+/** Une pénalité : type selon le CCAP/CCTP, nombre de jours (ou d'occurrences) et montant par jour. */
+export interface PenaliteLot {
+  id: string;
+  type: 'retard_execution' | 'absence_reunion' | 'retard_documents' | 'retard_reserves' | 'proprete_securite' | 'autre';
+  /** Intitulé libre, utile pour le type « autre ». */
+  motif?: string;
+  jours: number;
+  /** Montant par jour, en euros. */
+  montant_jour: number;
+}
+
+/** Un épisode d'intempéries, avec le nombre de jours perdus (demi-journées admises). */
+export interface IntemperieLot {
+  id: string;
+  type: 'pluie' | 'gel' | 'neige' | 'vent' | 'canicule' | 'autre';
+  /** Jour de l'épisode (AAAA-MM-JJ). */
+  date?: string;
+  jours: number;
 }
 
 export interface SiteReport {
@@ -1327,6 +1356,8 @@ export interface SiteReport {
   effectif_total?: number;
   attendance?: SiteReportAttendee[];
   lot_tracking?: SiteReportLotTracking[];
+  /** Heure de convocation par défaut (HH:MM) à la prochaine réunion, pour tous les lots ; chaque lot peut avoir la sienne. */
+  heure_convocation?: string | null;
   statut?: 'brouillon' | 'diffuse' | 'archive';
   decisions?: { auteur: string; texte: string; tag: 'planning' | 'technique' | 'financier' }[];
   /** Créé hors ligne, pas encore atteint le serveur — voir src/lib/offlineQueue.ts. */
