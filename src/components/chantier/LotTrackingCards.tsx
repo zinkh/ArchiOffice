@@ -1,13 +1,17 @@
 import React from 'react';
+import { IconPlus } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import type { PresenceStatus, ProjectLot, SiteReportLotTracking } from '../../types';
+import type { Batiment } from '../../types/dpgf';
 import { DraftInput, parseDays, TOUCH_TARGET } from './fields';
-import { CONCERNED_OPTIONS } from '../../lib/siteReportPresence';
+import {
+  basculerBatiment, batimentsDuLot, joursIntemperies, reperBatiment, resumePenalites,
+} from '../../lib/siteReportLotSuivi';
 
 /**
  * « Présence & suivi des lots » au téléphone : une carte par lot, à la place du
- * tableau de dix colonnes. Mêmes champs, mêmes enregistrements ; chaque champ
- * porte son libellé visible (un en-tête de colonne n'existe plus ici).
+ * tableau. Mêmes champs, mêmes enregistrements ; chaque champ porte son libellé
+ * visible (un en-tête de colonne n'existe plus ici).
  */
 export const DEFAULT_LIEU = 'Sur site';
 
@@ -24,34 +28,35 @@ function Labeled({ label, children }: { label: string; children: React.ReactNode
 const CARD_FIELD =
   'w-full min-h-11 rounded-md border border-[var(--tblr-border)] bg-[var(--tblr-surface)] px-2.5 py-2 text-sm text-[var(--tblr-text)] focus:border-[var(--tblr-primary)] outline-none';
 
-export function LotTrackingCards({ lots, statusLabels, getStatus, onStatus, getTracking, onTrack }: {
+const ACTION_BTN =
+  'inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--tblr-border)] px-3 text-sm font-semibold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]';
+
+export function LotTrackingCards({
+  lots, statusLabels, getStatus, onStatus, getTracking, onTrack,
+  batiments, retardCumule, defaultHeure, onOpenPenalites,
+}: {
   lots: ProjectLot[];
   statusLabels: Record<PresenceStatus, string>;
   getStatus: (lot: ProjectLot) => PresenceStatus;
   onStatus: (lot: ProjectLot, status: PresenceStatus) => void;
   getTracking: (lotId: string) => SiteReportLotTracking | undefined;
   onTrack: (lotId: string, patch: Partial<Omit<SiteReportLotTracking, 'lot_id'>>) => void;
+  /** Bâtiments du chantier : les cases « W/D » n'existent que s'il y en a plusieurs. */
+  batiments: Batiment[];
+  /** Somme des retards de la semaine de tous les comptes-rendus jusqu'à celui-ci. */
+  retardCumule: (lotId: string) => number;
+  /** Heure de convocation commune à tous les lots, que chacun peut remplacer. */
+  defaultHeure: string;
+  onOpenPenalites: (lotId: string) => void;
 }) {
-  const days = (lotId: string, field: 'retard_semaine' | 'retard_cumule' | 'retard_docs_jours' | 'intemperies_jours', label: string, ariaLabel: string, lotTitle: string) => {
-    const v = getTracking(lotId)?.[field];
-    return (
-      <Labeled label={label}>
-        <DraftInput
-          type="number" inputMode="numeric" min={0}
-          aria-label={`${ariaLabel}, ${lotTitle}`}
-          className={CARD_FIELD}
-          value={v != null ? String(v) : ''}
-          onCommit={val => onTrack(lotId, { [field]: parseDays(val) })}
-        />
-      </Labeled>
-    );
-  };
-
   return (
     <ul className="space-y-3">
       {lots.map(lot => {
         const t = getTracking(lot.id);
         const company = lot.contact_name?.split(' - ')[0];
+        const penalites = resumePenalites(t);
+        const intemperies = joursIntemperies(t);
+        const coches = new Set(batimentsDuLot(t, batiments));
         return (
           <li key={lot.id} className="rounded-xl border border-[var(--tblr-border)] p-3 space-y-2.5">
             <div className="flex items-start justify-between gap-3">
@@ -69,7 +74,7 @@ export function LotTrackingCards({ lots, statusLabels, getStatus, onStatus, getT
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-3">
+            <div className="grid grid-cols-3 gap-x-2">
               <Labeled label="Effectif">
                 <DraftInput
                   type="number" inputMode="numeric" min={0}
@@ -79,28 +84,57 @@ export function LotTrackingCards({ lots, statusLabels, getStatus, onStatus, getT
                   onCommit={v => onTrack(lot.id, { effectif: parseDays(v) })}
                 />
               </Labeled>
-              {days(lot.id, 'intemperies_jours', 'Intempéries (j)', 'Jours d\'intempéries', lot.lot_title)}
+              <Labeled label="Retard sem. (j)">
+                <DraftInput
+                  type="number" inputMode="numeric" min={0}
+                  aria-label={`Retard de la semaine en jours, ${lot.lot_title}`}
+                  className={CARD_FIELD}
+                  value={t?.retard_semaine != null ? String(t.retard_semaine) : ''}
+                  onCommit={v => onTrack(lot.id, { retard_semaine: parseDays(v) })}
+                />
+              </Labeled>
+              <div className="flex flex-col gap-1 min-w-0">
+                <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Cumulé (j)</span>
+                <output
+                  aria-label={`Retard cumulé en jours, ${lot.lot_title}, calculé`}
+                  title="Somme des retards de la semaine de tous les comptes-rendus"
+                  className="flex min-h-11 items-center rounded-md bg-[var(--tblr-surface-2)] px-2.5 text-sm font-semibold text-[var(--tblr-text)]"
+                >
+                  {retardCumule(lot.id)}
+                </output>
+              </div>
             </div>
 
-            <fieldset className="min-w-0">
-              <legend className="mb-1 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Retard (j)</legend>
-              <div className="grid grid-cols-3 gap-x-2">
-                {days(lot.id, 'retard_semaine', 'Semaine', 'Retard de la semaine en jours', lot.lot_title)}
-                {days(lot.id, 'retard_cumule', 'Cumulé', 'Retard cumulé en jours', lot.lot_title)}
-                {days(lot.id, 'retard_docs_jours', 'Docs', 'Retard de remise des documents en jours', lot.lot_title)}
-              </div>
-            </fieldset>
+            <div className="min-w-0">
+              <button type="button" className={ACTION_BTN} onClick={() => onOpenPenalites(lot.id)}>
+                <IconPlus size={16} /> Pénalité
+              </button>
+              {(penalites || intemperies > 0) && (
+                <p className="mt-1 text-xs text-[var(--tblr-muted)] break-words">
+                  {[penalites, intemperies > 0 ? `${intemperies} j d'intempéries` : ''].filter(Boolean).join(' · ')}
+                </p>
+              )}
+            </div>
 
-            <Labeled label="Travaux / documents">
-              <select
-                aria-label={`Travaux ou documents, ${lot.lot_title}`}
-                className={CARD_FIELD}
-                value={t?.concerned || ''}
-                onChange={e => onTrack(lot.id, { concerned: (e.target.value || undefined) as SiteReportLotTracking['concerned'] })}
-              >
-                {CONCERNED_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.long}</option>)}
-              </select>
-            </Labeled>
+            {batiments.length > 1 && (
+              <fieldset className="min-w-0">
+                <legend className="mb-1 text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Bâtiments concernés</legend>
+                <div className="flex flex-wrap gap-2">
+                  {batiments.map(b => (
+                    <label key={b.id} className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[var(--tblr-border)] px-3 text-sm text-[var(--tblr-text)]">
+                      <input
+                        type="checkbox"
+                        className="size-5"
+                        checked={coches.has(b.id)}
+                        onChange={e => onTrack(lot.id, { batiment_ids: basculerBatiment(t, b.id, e.target.checked, batiments), concerned: undefined })}
+                      />
+                      <span className="font-semibold">{reperBatiment(b)}</span>
+                      {b.libelle && <span className="text-[var(--tblr-muted)]">{b.libelle}</span>}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
 
             <div className="grid grid-cols-[1fr_8.5rem] gap-x-3">
               <Labeled label="Lieu">
@@ -115,9 +149,10 @@ export function LotTrackingCards({ lots, statusLabels, getStatus, onStatus, getT
                 <DraftInput
                   type="time"
                   aria-label={`Heure de convocation, ${lot.lot_title}`}
+                  title={defaultHeure ? `Heure par défaut : ${defaultHeure}` : undefined}
                   className={CARD_FIELD}
-                  value={t?.heure || ''}
-                  onCommit={v => onTrack(lot.id, { heure: v || undefined })}
+                  value={t?.heure || defaultHeure || ''}
+                  onCommit={v => onTrack(lot.id, { heure: v && v !== defaultHeure ? v : undefined })}
                 />
               </Labeled>
             </div>

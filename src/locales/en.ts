@@ -2081,6 +2081,7 @@ export default {
       // Loading / error states
       "error_loading_title": "Couldn't load the data",
       "error_loading_desc": "Something went wrong while loading. Check your connection and try again.",
+      "server_unavailable_desc": "ArchiOffice is being updated or restarted. This usually takes less than a minute and your data is safe. Wait a moment, then click \"Retry\".",
       "retry_btn": "Retry",
 
       // Dashboard — budget tracking

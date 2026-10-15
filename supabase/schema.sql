@@ -493,6 +493,8 @@ CREATE TABLE IF NOT EXISTS site_reports (
   -- Suivi par lot (page 2 du CR : présence P/R/AE/ANE, effectif, retards,
   -- intempéries, lieu) — supabase/migrate_site_report_lot_tracking.sql
   lot_tracking JSONB DEFAULT '[]',
+  -- Heure de convocation par défaut (HH:MM) — supabase/migrate_site_report_heure_convocation.sql
+  heure_convocation TEXT,
   -- Bâtiment et phase du chantier visés (supabase/migrate_chantier_decoupage.sql)
   batiment_id TEXT, phase_id TEXT
 );

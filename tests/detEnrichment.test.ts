@@ -136,6 +136,29 @@ describe('site_reports — lot_tracking (page 2 du CR)', () => {
     expect(fakeSupabaseAdmin.getTable('site_reports').find((r: any) => r.id === reportId)?.lot_tracking)
       .toHaveLength(1);
   });
+
+  it('keeps the default convocation time, bâtiments, pénalités and intempéries of a lot', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const projectId = 'project-lot-suivi';
+    fakeSupabaseAdmin.seed('projects', [{ id: projectId, tenant_id: tenantId, name: 'Chantier suivi des lots' }]);
+    const created = await request(app).post(`/api/projects/${projectId}/reports`).set(authHeader(token)).send({ date: '2026-09-16', report_number: 1 });
+    const reportId = created.body.id;
+
+    const suivi = {
+      lot_id: 'lot-04', retard_semaine: 2, batiment_ids: ['b-wet', 'b-dry'], heure: '10:00',
+      penalites: [{ id: 'p1', type: 'retard_documents', jours: 3, montant_jour: 150 }],
+      intemperies_list: [{ id: 'i1', type: 'pluie', date: '2026-09-15', jours: 1 }],
+    };
+    const ok = await request(app).put(`/api/reports/${reportId}`).set(authHeader(token)).send({ lot_tracking: [suivi], heure_convocation: '09:30' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.heure_convocation).toBe('09:30');
+    expect(ok.body.lot_tracking).toEqual([suivi]);
+
+    // Une heure illisible efface la valeur plutôt que d'enregistrer n'importe quoi.
+    const illisible = await request(app).put(`/api/reports/${reportId}`).set(authHeader(token)).send({ heure_convocation: '25:99' });
+    expect(illisible.body.heure_convocation).toBeNull();
+  });
 });
 
 describe('site_report_notes — rubriques personnalisables', () => {

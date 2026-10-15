@@ -161,6 +161,12 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       if (statut !== undefined) update.statut = statut;
       if (decisions !== undefined) update.decisions = decisions;
       if (lot_tracking !== undefined) update.lot_tracking = lot_tracking;
+      // Heure de convocation par défaut, commune à tous les lots (HH:MM) ; illisible = effacée.
+      // Absente de la requête, elle n'est jamais écrite : une base sans la colonne n'est pas touchée.
+      if (req.body.heure_convocation !== undefined) {
+        const heure = req.body.heure_convocation;
+        update.heure_convocation = typeof heure === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(heure) ? heure : null;
+      }
       if (req.body.batiment_id !== undefined) update.batiment_id = cleanRef(req.body.batiment_id) || null;
       if (req.body.phase_id !== undefined) update.phase_id = cleanRef(req.body.phase_id) || null;
       // Le client renvoie le CR entier à chaque sauvegarde : une date absente ou

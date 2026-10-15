@@ -12,8 +12,12 @@ import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLette
 import { loadPhotoDataUrl } from './planRender';
 import { autoSaveDocument } from './autoSaveDocument';
 import { appendAttachments } from './pdfAttachments';
-import { etiquetteDecoupage, type DecoupageChantier } from './chantierDecoupage';
-import { attendeeStatus, lotPresenceStatus, concernedLabel, pdfOrientation } from './siteReportPresence';
+import { batimentsActifs, etiquetteDecoupage, type DecoupageChantier } from './chantierDecoupage';
+import { attendeeStatus, lotPresenceStatus, pdfOrientation } from './siteReportPresence';
+import {
+  formatEuros, groupesIntemperies, heureEffective, libelleIntemperie, libellePenalite, montantPenalite,
+  reperBatiment, resumeBatiments, resumePenalites, retardCumule,
+} from './siteReportLotSuivi';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
 
 export interface SiteReportExportProject {
@@ -42,6 +46,8 @@ export interface SiteReportExportOptions {
   includeRubriquePhotos?: boolean;
   /** Documents (PDF, JPEG, PNG) ajoutés à la suite du compte-rendu, par exemple un compte rendu OPC. */
   attachments?: File[];
+  /** Tous les comptes-rendus de l'affaire : le retard cumulé d'un lot en est la somme jusqu'à celui-ci. */
+  allReports?: SiteReport[];
 }
 
 export interface SiteReportPdf {
@@ -227,10 +233,15 @@ export async function exportSiteReportToPDF(
   y += 7;
 
   const tracking = report.lot_tracking || [];
+  const lotsTries = [...lots].sort((a, b) => a.lot_number.localeCompare(b.lot_number, 'fr', { numeric: true }));
+  // Cases par bâtiment (W/D pour WETLAB et DRYLAB) : une colonne seulement quand l'opération en compte plusieurs.
+  const batiments = batimentsActifs(opts.decoupage);
+  const avecBatiments = batiments.length > 1;
+  const tousLesCr = opts.allReports?.length ? opts.allReports : [report];
   autoTable(doc, {
     startY: y,
-    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Retard docs (j)', 'Intempéries (j)', 'Convoqué suiv.', 'Lieu', 'Heure', 'W/D']],
-    body: [...lots].sort((a, b) => a.lot_number.localeCompare(b.lot_number, 'fr', { numeric: true })).map(lot => {
+    head: [['N°', 'Lot', 'Entreprise', 'Téléphone', 'Statut', 'Effectif', 'Retard sem. (j)', 'Retard cumulé (j)', 'Pénalités', 'Convoqué suiv.', 'Lieu', 'Heure', ...(avecBatiments ? [batiments.map(reperBatiment).join('/')] : [])]],
+    body: lotsTries.map(lot => {
       const t = tracking.find(x => x.lot_id === lot.id);
       const contact = lot.contact_id ? contactById.get(lot.contact_id) : undefined;
       const phones = contactPhones(contact);
@@ -244,21 +255,67 @@ export async function exportSiteReportToPDF(
         status,
         t?.effectif != null ? String(t.effectif) : '',
         t?.retard_semaine != null ? String(t.retard_semaine) : (t?.retard_execution && t?.retard_cumule == null ? 'Oui' : ''),
-        t?.retard_cumule != null ? String(t.retard_cumule) : '',
-        t?.retard_docs_jours != null ? String(t.retard_docs_jours) : (t?.retard_remise_docs ? 'Oui' : ''),
-        t?.intemperies_jours != null ? String(t.intemperies_jours) : (t?.intemperies ? 'Oui' : ''),
+        String(retardCumule(lot.id, tousLesCr, report) || ''),
+        resumePenalites(t) || (t?.retard_docs_jours ? `${t.retard_docs_jours} j de retard de documents` : (t?.retard_remise_docs ? 'Retard de documents' : '')),
         t?.convoque_reunion_suivante ? 'Oui' : '',
         t?.lieu ?? 'Sur site',
-        t?.heure || '',
-        concernedLabel(t?.concerned),
+        heureEffective(t, report.heure_convocation),
+        ...(avecBatiments ? [resumeBatiments(t, batiments)] : []),
       ];
     }),
     styles: { fontSize: 7, textColor: GRIS_TEXTE, cellPadding: 1.4, overflow: 'linebreak' },
     headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 6.8 },
     alternateRowStyles: { fillColor: GRIS_FOND },
-    columnStyles: { 0: { cellWidth: 8 }, 4: { fontStyle: 'bold' }, 13: { halign: 'center', fontStyle: 'bold' } },
+    columnStyles: { 0: { cellWidth: 8 }, 4: { fontStyle: 'bold' }, ...(avecBatiments ? { 12: { halign: 'center', fontStyle: 'bold' } } : {}) },
     margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
   });
+
+  // Détail des pénalités et des intempéries saisies par lot (les colonnes de jours ont disparu du tableau).
+  const penalitesLignes = lotsTries.flatMap(lot =>
+    (tracking.find(x => x.lot_id === lot.id)?.penalites ?? []).map(p => [
+      `${lot.lot_number} ${lot.lot_title}`, libellePenalite(p), String(p.jours), formatEuros(p.montant_jour), formatEuros(montantPenalite(p)),
+    ]),
+  );
+  // Un épisode = une ligne, avec les entreprises qu'il concerne (« Toutes » quand ce sont tous les lots).
+  const nomEntreprise = (lot: ProjectLot) => lot.contact_name?.split(' - ')[0] || lot.lot_title;
+  const intemperiesLignes: string[][] = groupesIntemperies(tracking).map(g => {
+    const concernes = lotsTries.filter(l => g.lotIds.includes(l.id));
+    return [
+      libelleIntemperie(g.type), g.date ? fmtDate(g.date) : '', String(g.jours),
+      concernes.length === lotsTries.length && lotsTries.length > 1 ? 'Toutes les entreprises' : concernes.map(nomEntreprise).join(', '),
+    ];
+  });
+  // Ancienne saisie (nombre de jours seul, par lot) : reprise telle quelle tant qu'elle n'est pas retirée.
+  for (const lot of lotsTries) {
+    const t = tracking.find(x => x.lot_id === lot.id);
+    const ancien = Number(t?.intemperies_jours) || 0;
+    if (ancien > 0 || (t?.intemperies && !t?.intemperies_list?.length)) intemperiesLignes.push(['Intempéries', '', ancien > 0 ? String(ancien) : 'Oui', nomEntreprise(lot)]);
+  }
+  const detailStyles = {
+    styles: { fontSize: 7.5, textColor: GRIS_TEXTE, cellPadding: 1.4, overflow: 'linebreak' as const },
+    headStyles: { fillColor: [60, 60, 60] as [number, number, number], textColor: 255, fontStyle: 'bold' as const, fontSize: 7 },
+    alternateRowStyles: { fillColor: GRIS_FOND },
+    margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
+  };
+  const apresTableau = () => ((doc as any).lastAutoTable?.finalY ?? y) + 6;
+  if (penalitesLignes.length > 0) {
+    autoTable(doc, {
+      startY: apresTableau(),
+      head: [['Pénalités : lot', 'Motif', 'Jours', 'Montant par jour', 'Montant']],
+      body: penalitesLignes,
+      columnStyles: { 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right', fontStyle: 'bold' } },
+      ...detailStyles,
+    });
+  }
+  if (intemperiesLignes.length > 0) {
+    autoTable(doc, {
+      startY: apresTableau(),
+      head: [['Intempéries', 'Jour', 'Jours perdus', 'Entreprises concernées']],
+      body: intemperiesLignes,
+      columnStyles: { 2: { halign: 'right' } },
+      ...detailStyles,
+    });
+  }
 
   const pageH = () => doc.internal.pageSize.getHeight();
   const thumbsPerRow = () => Math.max(1, Math.floor((contentW() + THUMB_GAP) / (THUMB_W + THUMB_GAP)));
