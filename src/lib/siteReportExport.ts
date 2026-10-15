@@ -15,7 +15,7 @@ import { appendAttachments } from './pdfAttachments';
 import { batimentsActifs, etiquetteDecoupage, type DecoupageChantier } from './chantierDecoupage';
 import { attendeeStatus, lotPresenceStatus, pdfOrientation } from './siteReportPresence';
 import {
-  formatEuros, heureEffective, libelleIntemperie, libellePenalite, montantPenalite,
+  formatEuros, groupesIntemperies, heureEffective, libelleIntemperie, libellePenalite, montantPenalite,
   reperBatiment, resumeBatiments, resumePenalites, retardCumule,
 } from './siteReportLotSuivi';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
@@ -276,16 +276,21 @@ export async function exportSiteReportToPDF(
       `${lot.lot_number} ${lot.lot_title}`, libellePenalite(p), String(p.jours), formatEuros(p.montant_jour), formatEuros(montantPenalite(p)),
     ]),
   );
-  const intemperiesLignes = lotsTries.flatMap(lot => {
-    const t = tracking.find(x => x.lot_id === lot.id);
-    const lignes = (t?.intemperies_list ?? []).map(i => [
-      `${lot.lot_number} ${lot.lot_title}`, libelleIntemperie(i.type), i.date ? fmtDate(i.date) : '', String(i.jours),
-    ]);
-    // Ancienne saisie (nombre de jours seul) : reprise telle quelle tant qu'elle n'est pas retirée.
-    const ancien = Number(t?.intemperies_jours) || 0;
-    if (ancien > 0 || (t?.intemperies && !t?.intemperies_list?.length)) lignes.push([`${lot.lot_number} ${lot.lot_title}`, 'Intempéries', '', ancien > 0 ? String(ancien) : 'Oui']);
-    return lignes;
+  // Un épisode = une ligne, avec les entreprises qu'il concerne (« Toutes » quand ce sont tous les lots).
+  const nomEntreprise = (lot: ProjectLot) => lot.contact_name?.split(' - ')[0] || lot.lot_title;
+  const intemperiesLignes: string[][] = groupesIntemperies(tracking).map(g => {
+    const concernes = lotsTries.filter(l => g.lotIds.includes(l.id));
+    return [
+      libelleIntemperie(g.type), g.date ? fmtDate(g.date) : '', String(g.jours),
+      concernes.length === lotsTries.length && lotsTries.length > 1 ? 'Toutes les entreprises' : concernes.map(nomEntreprise).join(', '),
+    ];
   });
+  // Ancienne saisie (nombre de jours seul, par lot) : reprise telle quelle tant qu'elle n'est pas retirée.
+  for (const lot of lotsTries) {
+    const t = tracking.find(x => x.lot_id === lot.id);
+    const ancien = Number(t?.intemperies_jours) || 0;
+    if (ancien > 0 || (t?.intemperies && !t?.intemperies_list?.length)) intemperiesLignes.push(['Intempéries', '', ancien > 0 ? String(ancien) : 'Oui', nomEntreprise(lot)]);
+  }
   const detailStyles = {
     styles: { fontSize: 7.5, textColor: GRIS_TEXTE, cellPadding: 1.4, overflow: 'linebreak' as const },
     headStyles: { fillColor: [60, 60, 60] as [number, number, number], textColor: 255, fontStyle: 'bold' as const, fontSize: 7 },
@@ -305,9 +310,9 @@ export async function exportSiteReportToPDF(
   if (intemperiesLignes.length > 0) {
     autoTable(doc, {
       startY: apresTableau(),
-      head: [['Intempéries : lot', 'Type', 'Jour', 'Jours perdus']],
+      head: [['Intempéries', 'Jour', 'Jours perdus', 'Entreprises concernées']],
       body: intemperiesLignes,
-      columnStyles: { 3: { halign: 'right' } },
+      columnStyles: { 2: { halign: 'right' } },
       ...detailStyles,
     });
   }

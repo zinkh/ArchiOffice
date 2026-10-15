@@ -22,8 +22,9 @@ import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, queuedMultipartRequest, listPendingWrites, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
 import {
   DECOUPAGE_VIDE, sanitizeDecoupage, superposerEcrituresEnAttente, correspondDecoupage, etiquetteDecoupage,
-  batimentsActifs, phasesActives, type DecoupageChantier, type FiltreDecoupage,
+  batimentsActifs, phasesActives, registreDepuisDocument, type DecoupageChantier, type FiltreDecoupage,
 } from '../lib/chantierDecoupage';
+import type { Batiment } from '../types/dpgf';
 import { DecoupageSelects, DecoupageFilters, DecoupagePanelChantier } from './chantier/DecoupageFields';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { db } from '../db';
@@ -37,7 +38,8 @@ import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows'
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
 import { countOpenObservations } from '../lib/observationsOpen';
-import { LotEventsDialog, type LotEventsKind } from './chantier/LotEventsDialog';
+import { LotEventsDialog } from './chantier/LotEventsDialog';
+import { IntemperiesDialog } from './chantier/IntemperiesDialog';
 import {
   HEURE_VALIDE, basculerBatiment, batimentsDuLot, joursIntemperies, reperBatiment, resumePenalites, retardCumule,
 } from '../lib/siteReportLotSuivi';
@@ -425,7 +427,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, download: false, attachments: pdfAttachments, allReports: reports },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports },
       );
       if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
         setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
@@ -511,10 +513,37 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   // Téléphone : seul le compte-rendu ouvert est affiché, les autres s'atteignent par cette feuille.
   const [crSheetOpen, setCrSheetOpen] = useState(false);
-  // Pénalités et intempéries d'un lot : la fenêtre d'ajout (LotEventsDialog).
-  const [eventsDialog, setEventsDialog] = useState<{ lotId: string; kind: LotEventsKind } | null>(null);
-  // Cases « W/D » : un bâtiment du registre du chantier chacune (WETLAB, DRYLAB...).
-  const batimentsChantier = useMemo(() => batimentsActifs(decoupage), [decoupage]);
+  // Pénalités d'un lot (LotEventsDialog) et intempéries du compte-rendu (IntemperiesDialog).
+  const [penaliteLotId, setPenaliteLotId] = useState<string | null>(null);
+  const [intemperiesOpen, setIntemperiesOpen] = useState(false);
+  // Cases « W/D » : un bâtiment chacune (WETLAB, DRYLAB...). Ils viennent du registre du chantier
+  // et, tant qu'il n'en a pas, automatiquement de celui du CCTP/DPGF de l'affaire : pas de bouton
+  // à presser. Les identifiants sont ceux du DPGF, donc stables d'un compte-rendu à l'autre.
+  const [batimentsDpgf, setBatimentsDpgf] = useState<Batiment[]>([]);
+  const registreAChercher = batimentsActifs(decoupage).length === 0;
+  useEffect(() => {
+    if (!registreAChercher) { setBatimentsDpgf([]); return; }
+    let annule = false;
+    apiFetch<any>(`/api/projects/${project.id}/dpgf`)
+      .then(doc => { if (!annule) setBatimentsDpgf(doc?.multiBatiments === false ? [] : batimentsActifs(registreDepuisDocument(doc))); })
+      .catch(() => { if (!annule) setBatimentsDpgf([]); });
+    return () => { annule = true; };
+  }, [project.id, registreAChercher]);
+  const batimentsChantier = useMemo(() => {
+    const propres = batimentsActifs(decoupage);
+    return propres.length > 0 ? propres : batimentsDpgf;
+  }, [decoupage, batimentsDpgf]);
+  // Registre transmis à l'export PDF : celui du chantier, complété par celui du DPGF si besoin.
+  const decoupageEffectif = useMemo<DecoupageChantier>(
+    () => (batimentsActifs(decoupage).length > 0 || batimentsDpgf.length === 0
+      ? decoupage
+      : { ...decoupage, multiBatiments: true, batiments: batimentsDpgf }),
+    [decoupage, batimentsDpgf],
+  );
+  // Modifie le suivi de plusieurs lots d'un seul enregistrement (une intempérie en touche plusieurs).
+  const mutateLotTracking = (transform: (list: SiteReportLotTracking[]) => SiteReportLotTracking[]) => {
+    updateReportField('lot_tracking', transform([...(selectedReport?.lot_tracking || [])]));
+  };
   const codesBatiments = batimentsChantier.map(reperBatiment).join('/');
   // Heure de convocation commune à tous les lots du compte-rendu, remplaçable lot par lot.
   const heureDefaut = selectedReport?.heure_convocation || '';
@@ -787,7 +816,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -1211,17 +1240,23 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   {/* Présence & suivi des lots (page 2 du CR) */}
                   <Section id="presence" title="Présence & suivi des lots" icon={IconBuilding}
                     action={
-                      <label className="flex items-center justify-between sm:justify-start gap-2">
-                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Heure par défaut</span>
-                        <DraftInput
-                          type="time"
-                          aria-label="Heure de convocation par défaut, tous les lots"
-                          title="Heure de convocation de tous les lots, modifiable pour chacun"
-                          className="w-28 min-h-11 md:min-h-0 rounded-md border border-[var(--tblr-border)] bg-[var(--tblr-surface)] px-2.5 py-1.5 text-sm text-[var(--tblr-text)] focus:border-[var(--tblr-primary)] outline-none"
-                          value={heureDefaut}
-                          onCommit={v => updateReportField('heure_convocation', v && HEURE_VALIDE.test(v) ? v : null)}
-                        />
-                      </label>
+                      <div className="flex flex-wrap items-center justify-between sm:justify-end gap-x-4 gap-y-2">
+                        <label className="flex items-center gap-2">
+                          <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Heure par défaut</span>
+                          <DraftInput
+                            type="time"
+                            aria-label="Heure de convocation par défaut, tous les lots"
+                            title="Heure de convocation de tous les lots, modifiable pour chacun"
+                            className="w-28 min-h-11 md:min-h-0 rounded-md border border-[var(--tblr-border)] bg-[var(--tblr-surface)] px-2.5 py-1.5 text-sm text-[var(--tblr-text)] focus:border-[var(--tblr-primary)] outline-none"
+                            value={heureDefaut}
+                            onCommit={v => updateReportField('heure_convocation', v && HEURE_VALIDE.test(v) ? v : null)}
+                          />
+                        </label>
+                        <button type="button" onClick={() => setIntemperiesOpen(true)}
+                          className="inline-flex min-h-11 md:min-h-0 items-center justify-center gap-1.5 rounded-lg border border-[var(--tblr-border)] px-3 py-1.5 text-xs font-bold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]">
+                          <IconPlus size={14} /> Intempérie
+                        </button>
+                      </div>
                     }
                   >
                     {lots_list.length === 0 && (
@@ -1238,7 +1273,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         batiments={batimentsChantier}
                         retardCumule={retardCumuleDuLot}
                         defaultHeure={heureDefaut}
-                        onOpenEvents={(lotId, kind) => setEventsDialog({ lotId, kind })}
+                        onOpenPenalites={setPenaliteLotId}
                       />
                     ) : (
                     <div className="overflow-x-auto">
@@ -1268,12 +1303,9 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                 <td className="py-2 pr-2">
                                   <div className="font-semibold text-[var(--tblr-text)]">{lot.contact_name?.split(' - ')[0]}</div>
                                   <div className="text-xs text-[var(--tblr-muted)]">{lot.lot_number} — {lot.lot_title}</div>
-                                  <button type="button" onClick={() => setEventsDialog({ lotId: lot.id, kind: 'intemperie' })}
-                                    aria-label={`Ajouter une intempérie, ${lot.lot_title}`}
-                                    className="mt-1 inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--tblr-border)] px-2 text-xs font-semibold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] pointer-coarse:min-h-11">
-                                    <IconPlus size={14} /> Intempérie
-                                    {joursIntemperies(t) > 0 && <span className="font-normal text-[var(--tblr-muted)]">· {joursIntemperies(t)} j</span>}
-                                  </button>
+                                  {joursIntemperies(t) > 0 && (
+                                    <div className="mt-0.5 text-xs text-[var(--tblr-muted)]">{joursIntemperies(t)} j d'intempéries</div>
+                                  )}
                                 </td>
                                 <td className="py-2 pr-2 whitespace-nowrap">
                                   <select
@@ -1308,7 +1340,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                                   </output>
                                 </td>
                                 <td className="py-2 pr-2">
-                                  <button type="button" onClick={() => setEventsDialog({ lotId: lot.id, kind: 'penalite' })}
+                                  <button type="button" onClick={() => setPenaliteLotId(lot.id)}
                                     aria-label={`Ajouter une pénalité, ${lot.lot_title}`}
                                     className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-[var(--tblr-border)] px-2 text-xs font-semibold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] pointer-coarse:min-h-11">
                                     <IconPlus size={14} /> Pénalité
@@ -1357,20 +1389,27 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     )}
                   </Section>
 
-                  {eventsDialog && (() => {
-                    const lot = lots_list.find(l => l.id === eventsDialog.lotId);
+                  {penaliteLotId && (() => {
+                    const lot = lots_list.find(l => l.id === penaliteLotId);
                     if (!lot) return null;
                     return (
                       <LotEventsDialog
-                        kind={eventsDialog.kind}
                         lotLabel={[lot.contact_name?.split(' - ')[0], `${lot.lot_number} ${lot.lot_title}`].filter(Boolean).join(' · ')}
                         tracking={(selectedReport.lot_tracking || []).find(x => x.lot_id === lot.id)}
-                        reportDate={selectedReport.date}
                         onChange={patch => setLotTracking(lot.id, patch)}
-                        onClose={() => setEventsDialog(null)}
+                        onClose={() => setPenaliteLotId(null)}
                       />
                     );
                   })()}
+                  {intemperiesOpen && (
+                    <IntemperiesDialog
+                      lots={lots_list}
+                      tracking={selectedReport.lot_tracking || []}
+                      reportDate={selectedReport.date}
+                      onChange={mutateLotTracking}
+                      onClose={() => setIntemperiesOpen(false)}
+                    />
+                  )}
 
                   {/* Rubriques personnalisées (corps administratif du CR) */}
                   <Section id="rubriques"

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ajouterIntemperie, groupesIntemperies, retirerIntemperie,
   basculerBatiment, batimentsDuLot, heureEffective, joursIntemperies, libellePenalite, montantPenalite,
   resumeBatiments, resumePenalites, retardCumule, totalPenalites,
 } from '../siteReportLotSuivi';
@@ -97,6 +98,38 @@ describe('pénalités', () => {
   it('nomme le motif d’une pénalité « autre »', () => {
     expect(libellePenalite({ type: 'autre', motif: 'Dépôt sauvage' })).toBe('Dépôt sauvage');
     expect(libellePenalite({ type: 'retard_execution' })).toBe("Retard d'exécution des travaux");
+  });
+});
+
+describe('intempéries saisies pour plusieurs entreprises', () => {
+  const ids = () => { let n = 0; return () => `id${++n}`; };
+
+  it('recopie l’épisode dans le suivi de chaque entreprise concernée, avec un groupe commun', () => {
+    const suivi = ajouterIntemperie([{ lot_id: 'l1' }], ['l1', 'l2'], { type: 'pluie', date: '2026-10-14', jours: 1 }, ids());
+    expect(suivi.map(t => t.lot_id)).toEqual(['l1', 'l2']);
+    const [a, b] = suivi.map(t => t.intemperies_list![0]);
+    expect(a.groupe).toBe(b.groupe);
+    expect(a.id).not.toBe(b.id);
+    expect(groupesIntemperies(suivi)).toEqual([{ key: a.groupe, type: 'pluie', date: '2026-10-14', jours: 1, lotIds: ['l1', 'l2'] }]);
+  });
+
+  it('ne touche pas aux entreprises non concernées', () => {
+    const suivi = ajouterIntemperie([{ lot_id: 'l1' }, { lot_id: 'l3', effectif: 4 }], ['l1'], { type: 'gel', jours: 0.5 }, ids());
+    expect(suivi.find(t => t.lot_id === 'l3')).toEqual({ lot_id: 'l3', effectif: 4 });
+  });
+
+  it('retire l’épisode de toutes les entreprises d’un coup', () => {
+    const suivi = ajouterIntemperie([], ['l1', 'l2'], { type: 'vent', jours: 1 }, ids());
+    const key = groupesIntemperies(suivi)[0].key;
+    const apres = retirerIntemperie(suivi, key);
+    expect(apres.every(t => t.intemperies_list === undefined)).toBe(true);
+    expect(groupesIntemperies(apres)).toEqual([]);
+  });
+
+  it('traite une entrée sans groupe (saisie précédente) comme un épisode à part', () => {
+    const suivi = [{ lot_id: 'l1', intemperies_list: [{ id: 'x', type: 'pluie' as const, jours: 1 }] }];
+    expect(groupesIntemperies(suivi)[0]).toMatchObject({ key: 'x', lotIds: ['l1'] });
+    expect(retirerIntemperie(suivi, 'x')[0].intemperies_list).toBeUndefined();
   });
 });
 

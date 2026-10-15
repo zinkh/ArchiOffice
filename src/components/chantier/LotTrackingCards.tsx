@@ -7,7 +7,6 @@ import { DraftInput, parseDays, TOUCH_TARGET } from './fields';
 import {
   basculerBatiment, batimentsDuLot, joursIntemperies, reperBatiment, resumePenalites,
 } from '../../lib/siteReportLotSuivi';
-import type { LotEventsKind } from './LotEventsDialog';
 
 /**
  * « Présence & suivi des lots » au téléphone : une carte par lot, à la place du
@@ -34,7 +33,7 @@ const ACTION_BTN =
 
 export function LotTrackingCards({
   lots, statusLabels, getStatus, onStatus, getTracking, onTrack,
-  batiments, retardCumule, defaultHeure, onOpenEvents,
+  batiments, retardCumule, defaultHeure, onOpenPenalites,
 }: {
   lots: ProjectLot[];
   statusLabels: Record<PresenceStatus, string>;
@@ -48,7 +47,7 @@ export function LotTrackingCards({
   retardCumule: (lotId: string) => number;
   /** Heure de convocation commune à tous les lots, que chacun peut remplacer. */
   defaultHeure: string;
-  onOpenEvents: (lotId: string, kind: LotEventsKind) => void;
+  onOpenPenalites: (lotId: string) => void;
 }) {
   return (
     <ul className="space-y-3">
@@ -106,19 +105,15 @@ export function LotTrackingCards({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2">
-              <div className="min-w-0">
-                <button type="button" className={ACTION_BTN} onClick={() => onOpenEvents(lot.id, 'penalite')}>
-                  <IconPlus size={16} /> Pénalité
-                </button>
-                {penalites && <p className="mt-1 text-xs text-[var(--tblr-muted)] break-words">{penalites}</p>}
-              </div>
-              <div className="min-w-0">
-                <button type="button" className={ACTION_BTN} onClick={() => onOpenEvents(lot.id, 'intemperie')}>
-                  <IconPlus size={16} /> Intempérie
-                </button>
-                {intemperies > 0 && <p className="mt-1 text-xs text-[var(--tblr-muted)]">{intemperies} j d'intempéries</p>}
-              </div>
+            <div className="min-w-0">
+              <button type="button" className={ACTION_BTN} onClick={() => onOpenPenalites(lot.id)}>
+                <IconPlus size={16} /> Pénalité
+              </button>
+              {(penalites || intemperies > 0) && (
+                <p className="mt-1 text-xs text-[var(--tblr-muted)] break-words">
+                  {[penalites, intemperies > 0 ? `${intemperies} j d'intempéries` : ''].filter(Boolean).join(' · ')}
+                </p>
+              )}
             </div>
 
             {batiments.length > 1 && (

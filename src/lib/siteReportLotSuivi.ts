@@ -81,6 +81,62 @@ export function joursIntemperies(t?: Pick<SiteReportLotTracking, 'intemperies_li
   return Math.round((saisis + ancien) * 100) / 100;
 }
 
+/** Une intempérie telle que l'architecte la voit : un épisode, et les lots (entreprises) qu'il concerne. */
+export interface GroupeIntemperie {
+  key: string;
+  type: IntemperieLot['type'];
+  date?: string;
+  jours: number;
+  lotIds: string[];
+}
+
+/** Regroupe les entrées par épisode : même `groupe`, à défaut chaque entrée est un épisode à part. */
+export function groupesIntemperies(tracking: SiteReportLotTracking[]): GroupeIntemperie[] {
+  const groupes = new Map<string, GroupeIntemperie>();
+  for (const t of tracking) {
+    for (const i of t.intemperies_list ?? []) {
+      const key = i.groupe ?? i.id;
+      const existant = groupes.get(key);
+      if (existant) existant.lotIds.push(t.lot_id);
+      else groupes.set(key, { key, type: i.type, date: i.date, jours: i.jours, lotIds: [t.lot_id] });
+    }
+  }
+  return [...groupes.values()].sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
+}
+
+/** Ajoute un épisode au suivi de chaque lot concerné (la ligne de suivi est créée au besoin). */
+export function ajouterIntemperie(
+  tracking: SiteReportLotTracking[],
+  lotIds: string[],
+  episode: { type: IntemperieLot['type']; date?: string; jours: number },
+  newId: () => string,
+): SiteReportLotTracking[] {
+  const groupe = newId();
+  const concernes = new Set(lotIds);
+  const suivi = tracking.map(t => (
+    concernes.has(t.lot_id)
+      ? { ...t, intemperies_list: [...(t.intemperies_list ?? []), { id: newId(), groupe, ...episode }] }
+      : t
+  ));
+  const presents = new Set(tracking.map(t => t.lot_id));
+  for (const lotId of lotIds) {
+    if (!presents.has(lotId)) {
+      presents.add(lotId);
+      suivi.push({ lot_id: lotId, intemperies_list: [{ id: newId(), groupe, ...episode }] });
+    }
+  }
+  return suivi;
+}
+
+/** Retire un épisode de tous les lots qu'il concernait. */
+export function retirerIntemperie(tracking: SiteReportLotTracking[], key: string): SiteReportLotTracking[] {
+  return tracking.map(t => {
+    if (!t.intemperies_list?.some(i => (i.groupe ?? i.id) === key)) return t;
+    const reste = t.intemperies_list.filter(i => (i.groupe ?? i.id) !== key);
+    return { ...t, intemperies_list: reste.length ? reste : undefined };
+  });
+}
+
 // ── Retard cumulé ────────────────────────────────────────────────────────────
 
 /**

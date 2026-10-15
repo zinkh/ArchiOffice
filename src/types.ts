@@ -1335,6 +1335,11 @@ export interface PenaliteLot {
 /** Un épisode d'intempéries, avec le nombre de jours perdus (demi-journées admises). */
 export interface IntemperieLot {
   id: string;
+  /**
+   * Une intempérie touche plusieurs entreprises : elle est saisie une fois puis recopiée dans le
+   * suivi de chaque lot concerné, avec le même `groupe` pour la retrouver et la retirer d'un coup.
+   */
+  groupe?: string;
   type: 'pluie' | 'gel' | 'neige' | 'vent' | 'canicule' | 'autre';
   /** Jour de l'épisode (AAAA-MM-JJ). */
   date?: string;
