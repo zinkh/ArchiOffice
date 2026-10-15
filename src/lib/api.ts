@@ -1,6 +1,10 @@
 import { getAccessToken } from './authToken';
 import { applyTenantHeader, handleTenantRejection } from './activeTenant';
 import { signalTenantSuspended, TENANT_SUSPENDED_CODE } from './tenantSuspended';
+import i18n from '../i18n';
+
+export const SERVER_UNAVAILABLE_CODE = 'SERVER_UNAVAILABLE';
+const SERVER_UNAVAILABLE_STATUSES = new Set([502, 503, 504]);
 
 export const baseFetchJson = async <T = any>(url: string, options?: RequestInit): Promise<T> => {
   const fetchFn = (window as any)._originalFetch || window.fetch;
@@ -12,10 +16,11 @@ export const baseFetchJson = async <T = any>(url: string, options?: RequestInit)
     // code, which by itself gives no way to tell a 500 apart from another.
     let message = `Failed to fetch ${url}: ${res.status} ${res.statusText}`;
     let code: string | undefined;
+    let hasServerMessage = false;
     try {
       const body = await res.json();
-      if (body?.error) message = body.error;
-      else if (body?.message) message = body.message;
+      if (body?.error) { message = body.error; hasServerMessage = true; }
+      else if (body?.message) { message = body.message; hasServerMessage = true; }
       // Lets a caller branch on a stable machine-readable reason (e.g.
       // 'INSUFFICIENT_SCOPE' from the mail connectors, see
       // server/mailProviderErrors.ts) instead of matching the French
@@ -23,6 +28,15 @@ export const baseFetchJson = async <T = any>(url: string, options?: RequestInit)
       code = body?.code;
     } catch {
       // Body wasn't JSON (e.g. an HTML error page) — keep the generic message.
+    }
+    // 502/503/504 sans corps JSON : c'est la passerelle ou l'hébergeur qui
+    // répond à la place du serveur (redémarrage, mise à jour en cours). Un
+    // « Failed to fetch /api/projects: 504 » ne dit rien à l'utilisateur ; on
+    // lui dit que c'est passager. Un 504 avec un message du serveur (délai d'un
+    // service externe, par exemple) garde ce message.
+    if (!hasServerMessage && SERVER_UNAVAILABLE_STATUSES.has(res.status)) {
+      message = i18n.t('server_unavailable_desc');
+      code = SERVER_UNAVAILABLE_CODE;
     }
     // Le cabinet sélectionné n'est plus l'un des siens (départ du cabinet,
     // adhésion révoquée) : on l'oublie et on repart sur le cabinet par défaut
@@ -43,7 +57,9 @@ export const baseFetchJson = async <T = any>(url: string, options?: RequestInit)
   if (!contentType || !contentType.includes('application/json')) {
     const text = await res.text();
     if (text.includes('Please wait while your application starts')) {
-      throw new Error('Server is still starting. Please wait a moment and refresh.');
+      const err: any = new Error(i18n.t('server_unavailable_desc'));
+      err.code = SERVER_UNAVAILABLE_CODE;
+      throw err;
     }
     throw new Error(`Expected JSON response from ${url} but received ${contentType || 'unknown content type'}`);
   }

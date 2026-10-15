@@ -2238,6 +2238,7 @@ export default {
       // Loading / error states
       "error_loading_title": "Impossible de charger les données",
       "error_loading_desc": "Une erreur est survenue lors du chargement. Vérifiez votre connexion puis réessayez.",
+      "server_unavailable_desc": "ArchiOffice est en cours de mise à jour ou de redémarrage. Cela dure en général moins d'une minute : vos données ne sont pas perdues. Patientez un instant puis cliquez sur « Réessayer ».",
       "retry_btn": "Réessayer",
 
       // Dashboard — budget tracking
