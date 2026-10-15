@@ -6,35 +6,59 @@ import { useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { IconUpload, IconLoader2, IconLifebuoy } from '@tabler/icons-react';
 import { db } from '../db';
-import { importQueueBackupFile } from '../lib/offlineQueueBackup';
+import { importQueueBackupFile, type ImportPhase, type ImportResult } from '../lib/offlineQueueBackup';
+import { entityLabel } from '../lib/pendingWriteLabels';
 import { QueueBackupExport } from './QueueBackupExport';
+import { ReplayProgressBar } from './ReplayProgressBar';
+
+const plural = (n: number, one: string, many: string) => (n > 1 ? many : one);
 
 export function OfflineQueueBackupCard() {
   const pending = useLiveQuery(() => db.pendingWrites.count(), [], 0);
   const [busy, setBusy] = useState<'import' | null>(null);
+  const [phase, setPhase] = useState<ImportPhase | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  const [result, setResult] = useState<ImportResult | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const importFile = async (file: File | undefined) => {
     if (!file) return;
     setBusy('import');
+    setPhase({ step: 'reading' });
     setMessage(null);
+    setResult(null);
     try {
-      const { imported, rejected } = await importQueueBackupFile(file);
+      const outcome = await importQueueBackupFile(file, setPhase);
+      setResult(outcome);
+      const { imported, sent, stillPending, rejected, attempted } = outcome;
       const rejectedText = rejected.length > 0
-        ? ` ${rejected.length} entrée${rejected.length > 1 ? 's' : ''} refusée${rejected.length > 1 ? 's' : ''} (${[...new Set(rejected.map(r => r.reason))].join(', ')}).`
+        ? ` ${rejected.length} ${plural(rejected.length, 'entrée refusée', 'entrées refusées')} (${[...new Set(rejected.map(r => r.reason))].join(', ')}).`
         : '';
-      setMessage({
-        kind: rejected.length > 0 ? 'error' : 'ok',
-        text: `${imported} écriture${imported > 1 ? 's' : ''} rechargée${imported > 1 ? 's' : ''} : envoi en cours.${rejectedText} Importer deux fois le même fichier ne crée pas de doublon.`,
-      });
+      if (imported === 0) {
+        setMessage({ kind: 'error', text: `Rien à envoyer : le fichier ne contient aucune écriture valide.${rejectedText}` });
+      } else if (!attempted) {
+        setMessage({ kind: 'error', text: `${imported} ${plural(imported, 'écriture rechargée', 'écritures rechargées')} mais PAS envoyée${imported > 1 ? 's' : ''} : l'appareil est hors ligne. L'envoi reprendra au retour du réseau.${rejectedText}` });
+      } else if (stillPending.length === 0) {
+        setMessage({ kind: rejected.length > 0 ? 'error' : 'ok', text: `Envoyé : ${sent} ${plural(sent, 'écriture est arrivée', 'écritures sont arrivées')} sur le serveur (${sent}/${imported}).${rejectedText}` });
+      } else {
+        setMessage({ kind: 'error', text: `${sent} sur ${imported} ${plural(sent, 'envoyée', 'envoyées')} au serveur. ${stillPending.length} ${plural(stillPending.length, 'reste', 'restent')} en attente (causes ci-dessous) : l'envoi sera retenté automatiquement.${rejectedText}` });
+      }
     } catch (err) {
       setMessage({ kind: 'error', text: (err as Error).message || 'L\'import a échoué.' });
     } finally {
       setBusy(null);
+      setPhase(null);
       if (inputRef.current) inputRef.current.value = '';
     }
   };
+
+  const phaseText = phase?.step === 'reading'
+    ? 'Lecture du fichier…'
+    : phase?.step === 'storing'
+      ? `Rechargement dans la file : ${phase.done}/${phase.total}`
+      : phase?.step === 'sending'
+        ? 'Envoi au serveur…'
+        : null;
 
   return (
     <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -61,7 +85,7 @@ export function OfflineQueueBackupCard() {
           className="btn btn-sm flex items-center gap-1.5 disabled:opacity-50"
         >
           {busy === 'import' ? <IconLoader2 size={14} className="animate-spin" /> : <IconUpload size={14} />}
-          Importer une sauvegarde
+          {busy === 'import' ? 'Import en cours…' : 'Importer une sauvegarde'}
         </button>
         <input
           ref={inputRef}
@@ -71,6 +95,9 @@ export function OfflineQueueBackupCard() {
           onChange={e => void importFile(e.target.files?.[0])}
         />
       </div>
+      {phaseText && <p role="status" className="text-xs font-semibold" style={{ color: 'var(--tblr-text)' }}>{phaseText}</p>}
+      {/* Avancement réel de l'envoi : écriture en cours, octets de la photo, envoyées / restantes. */}
+      <ReplayProgressBar />
       {message && (
         <p
           role="status"
@@ -79,6 +106,13 @@ export function OfflineQueueBackupCard() {
         >
           {message.text}
         </p>
+      )}
+      {result && result.stillPending.length > 0 && (
+        <ul className="space-y-1 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
+          {result.stillPending.map(item => (
+            <li key={item.id}><span className="font-semibold" style={{ color: 'var(--tblr-text)' }}>{entityLabel(item.entity)}</span> : {item.message}</li>
+          ))}
+        </ul>
       )}
     </div>
   );

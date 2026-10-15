@@ -37,9 +37,26 @@ export interface QueueBackup {
 
 export interface ImportSummary {
   imported: number;
+  /** Identifiants des entrées rechargées dans la file : permet de vérifier ensuite lesquelles sont parties. */
+  ids: string[];
   /** Entrées du fichier refusées (format inattendu), avec la raison. */
   rejected: { id: string; reason: string }[];
 }
+
+/** Ce que l'import a réellement obtenu : rechargé dans la file n'est pas envoyé au serveur. */
+export interface ImportResult extends ImportSummary {
+  /** Entrées du fichier arrivées au serveur. */
+  sent: number;
+  /** Entrées restées en file après l'envoi, avec la dernière cause connue. */
+  stillPending: { id: string; entity: PendingWrite['entity']; message: string }[];
+  /** Faux quand le réseau manquait : l'envoi n'a pas été tenté, il reprendra tout seul. */
+  attempted: boolean;
+}
+
+export type ImportPhase =
+  | { step: 'reading' }
+  | { step: 'storing'; done: number; total: number }
+  | { step: 'sending' };
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -60,19 +77,24 @@ function base64ToBlob(base64: string, type: string): Blob {
   return new Blob([bytes], { type });
 }
 
+/** Avancement de la préparation : entrées lues sur le total (la lecture des photos prend plusieurs secondes). */
+export type BuildProgress = (done: number, total: number) => void;
+
 /** Construit la sauvegarde de la file actuelle. Une photo illisible est signalée plutôt que silencieusement omise. */
-export async function buildQueueBackup(): Promise<{ backup: QueueBackup; unreadable: string[] }> {
+export async function buildQueueBackup(onProgress?: BuildProgress): Promise<{ backup: QueueBackup; unreadable: string[] }> {
   const entries = await db.pendingWrites.orderBy('createdAt').toArray();
   const unreadable: string[] = [];
   const writes: BackupWrite[] = [];
-  for (const entry of entries) {
+  onProgress?.(0, entries.length);
+  for (const [index, entry] of entries.entries()) {
     const { blob, ...rest } = entry;
     if (entry.kind === 'multipart') {
-      if (!blob || blob.size === 0) { unreadable.push(entry.id); continue; }
+      if (!blob || blob.size === 0) { unreadable.push(entry.id); onProgress?.(index + 1, entries.length); continue; }
       writes.push({ ...rest, blob: { base64: await blobToBase64(blob), type: blob.type || 'application/octet-stream' } });
     } else {
       writes.push(rest);
     }
+    onProgress?.(index + 1, entries.length);
   }
   return {
     backup: { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), writes },
@@ -93,8 +115,8 @@ export interface PreparedBackup {
  * téléchargement exigent un geste de la personne, que la lecture des photos (plusieurs secondes)
  * a déjà fait expirer. Un téléchargement lancé juste après ce travail est ignoré sans erreur.
  */
-export async function prepareQueueBackup(): Promise<PreparedBackup> {
-  const { backup, unreadable } = await buildQueueBackup();
+export async function prepareQueueBackup(onProgress?: BuildProgress): Promise<PreparedBackup> {
+  const { backup, unreadable } = await buildQueueBackup(onProgress);
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
   const file = new File([JSON.stringify(backup)], `archioffice-file-attente-${stamp}.json`, { type: 'application/json' });
   return { file, count: backup.writes.length, unreadable: unreadable.length };
@@ -136,13 +158,33 @@ export async function deliverBackupFile(file: File): Promise<DeliveryResult> {
   return 'downloaded';
 }
 
-/** Lit un fichier choisi par la personne, le recharge dans la file puis lance le rejeu s'il y a du réseau. */
-export async function importQueueBackupFile(file: File): Promise<ImportSummary> {
+/**
+ * Lit un fichier choisi par la personne, le recharge dans la file, l'envoie au serveur puis dit
+ * lesquelles de ses entrées sont réellement arrivées. « Rechargé dans la file » ne veut pas dire
+ * « envoyé » : sans cette vérification, l'import annonçait un succès sans savoir ce qu'il en était.
+ */
+export async function importQueueBackupFile(file: File, onPhase?: (phase: ImportPhase) => void): Promise<ImportResult> {
   if (file.size > MAX_BACKUP_BYTES) throw new Error('Ce fichier est trop volumineux pour une sauvegarde de la file.');
-  const summary = await importQueueBackup(await file.text());
-  const { replayPendingWrites } = await import('./offlineQueue');
-  void replayPendingWrites();
-  return summary;
+  onPhase?.({ step: 'reading' });
+  const summary = await importQueueBackup(await file.text(), (done, total) => onPhase?.({ step: 'storing', done, total }));
+
+  const attempted = navigator.onLine && summary.ids.length > 0;
+  if (attempted) {
+    onPhase?.({ step: 'sending' });
+    const { replayNow } = await import('./offlineQueue');
+    await replayNow();
+  }
+  const remaining = (await db.pendingWrites.bulkGet(summary.ids)).filter((w): w is PendingWrite => Boolean(w));
+  return {
+    ...summary,
+    attempted,
+    sent: summary.ids.length - remaining.length,
+    stillPending: remaining.map(w => ({
+      id: w.id,
+      entity: w.entity,
+      message: w.lastError || (attempted ? 'pas encore envoyée' : 'réseau indisponible'),
+    })),
+  };
 }
 
 /** Vérifie une entrée du fichier : un fichier de secours vient de l'extérieur, il ne peut viser que l'API de l'application. */
@@ -184,7 +226,7 @@ function validateWrite(raw: any): { ok: true; write: PendingWrite } | { ok: fals
 }
 
 /** Recharge un fichier de secours dans la file ; le rejeu part ensuite comme pour toute écriture en attente. */
-export async function importQueueBackup(text: string): Promise<ImportSummary> {
+export async function importQueueBackup(text: string, onStored?: (done: number, total: number) => void): Promise<ImportSummary> {
   let parsed: any;
   try {
     parsed = JSON.parse(text);
@@ -204,6 +246,10 @@ export async function importQueueBackup(text: string): Promise<ImportSummary> {
     if (result.ok) valid.push(result.write);
     else rejected.push({ id: String(raw?.id ?? '?'), reason: result.reason });
   }
-  for (const write of valid) await db.pendingWrites.put(write);
-  return { imported: valid.length, rejected };
+  onStored?.(0, valid.length);
+  for (const [index, write] of valid.entries()) {
+    await db.pendingWrites.put(write);
+    onStored?.(index + 1, valid.length);
+  }
+  return { imported: valid.length, ids: valid.map(w => w.id), rejected };
 }
