@@ -79,8 +79,8 @@ The single `server.ts` process:
 ### Build
 
 ```bash
-npm run build        # vite build → dist/, then copies proxy.json to dist/
-npm run start        # Production: tsx server.ts (serves dist/ as static)
+npm run build        # vite build → dist/, copies proxy.json, compiles the server → dist-api/ (scripts/build-server.mjs)
+npm run start        # Production: node dist-api/server.mjs (serves dist/ as static; `start:tsx` runs the sources)
 npm run preview      # Preview built output with Vite
 ```
 

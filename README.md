@@ -107,7 +107,7 @@ CI (`.github/workflows/*.yml`) runs both, in that order, before `npm run build`.
 ### 5. Build for production
 
 ```bash
-npm run build   # outputs the static frontend to dist/
+npm run build   # outputs the static frontend to dist/ and the compiled server to dist-api/
 npm run start   # serves dist/ with the same Express server
 ```
 

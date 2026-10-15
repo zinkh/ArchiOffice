@@ -1,4 +1,4 @@
-// Preloaded via `--import ./instrument.ts` (see package.json's dev/start
+// Preloaded via `--import ./instrument.ts` (see package.json's dev/start:tsx
 // scripts) so Sentry.init() runs before server.ts's own imports — including
 // express — are resolved. Under ESM, a module's imports are always fully
 // evaluated before any of its top-level code runs, so calling Sentry.init()
