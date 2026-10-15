@@ -85,6 +85,84 @@ describe('exportDPGFtoExcel', () => {
   });
 });
 
+describe('DPGF sans prix : cadre de réponse pour les entreprises', () => {
+  it('garde les colonnes P.U. et Total, vides, pour un import ultérieur dans l\'ACT', async () => {
+    const { exportDPGFtoExcel } = await import('../proExport');
+    await exportDPGFtoExcel(sampleDPGF, 'Projet', 'lot');
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const lignes: unknown[][] = [];
+    wb.worksheets[0].eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+    const entete = lignes.find(l => l.includes('P.U. HT (€)'))!;
+    expect(entete).toEqual(['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']);
+    const poste = lignes.find(l => l.includes('01.1.1'))!;
+    expect(poste[3]).toBe(12);
+    expect(poste.slice(4).every(v => v == null || v === '')).toBe(true);
+    expect(lignes.some(l => l.includes('TOTAL HT'))).toBe(false);
+  });
+});
+
+describe('colonne TVA dédiée du DPGF', () => {
+  const avecTauxDedie: DPGF = {
+    ...sampleDPGF,
+    lots: [{
+      ...sampleDPGF.lots[0],
+      chapitres: [{
+        ...sampleDPGF.lots[0].chapitres[0],
+        lignes: [
+          { ...sampleDPGF.lots[0].chapitres[0].lignes[0], tva: 10 },
+          { ...sampleDPGF.lots[0].chapitres[0].lignes[0], id: 'l2', numero: '01.1.2', tva: 5.5, prixTotal: 200 },
+          { ...sampleDPGF.lots[0].chapitres[0].lignes[0], id: 'l3', numero: '01.1.3' },
+        ],
+      }],
+    }],
+  };
+
+  const lireFeuille = async (opts: { avecPrix?: boolean; avecTva?: boolean }) => {
+    const { exportDPGFtoExcel } = await import('../proExport');
+    await exportDPGFtoExcel(avecTauxDedie, 'Projet', 'lot', {}, opts);
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const lignes: unknown[][] = [];
+    wb.worksheets[0].eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+    return lignes;
+  };
+
+  it('reste absente par défaut, même avec les prix', async () => {
+    const lignes = await lireFeuille({ avecPrix: true });
+    expect(lignes.some(l => l.includes('TVA dédiée (€)'))).toBe(false);
+  });
+
+  it('ajoute taux et montant des seuls postes à taux dédié, avec leur total', async () => {
+    const lignes = await lireFeuille({ avecPrix: true, avecTva: true });
+    expect(lignes.some(l => l.includes('TVA dédiée (€)'))).toBe(true);
+    const poste = lignes.find(l => l.includes('01.1.1'))!;
+    expect(poste.slice(-2)).toEqual([10, 96]);
+    const sans = lignes.find(l => l.includes('01.1.3'))!;
+    expect(sans.slice(6).every(v => v == null || v === '')).toBe(true);
+    // Une ligne de calcul par taux (base, taux, montant), puis le total.
+    const t55 = lignes.find(l => l.includes('TVA 5,5 %'))!;
+    expect(t55.slice(-3)).toEqual([200, 5.5, 11]);
+    const t10 = lignes.find(l => l.includes('TVA 10 %'))!;
+    expect(t10.slice(-3)).toEqual([960, 10, 96]);
+    const total = lignes.find(l => l.includes('TOTAL TVA dédiée'))!;
+    expect(total[total.length - 1]).toBeCloseTo(107, 5);
+  });
+
+  it("n'ajoute rien sans les prix", async () => {
+    const lignes = await lireFeuille({ avecPrix: false, avecTva: true });
+    expect(lignes.some(l => l.includes('TVA dédiée (€)'))).toBe(false);
+  });
+
+  it('génère le PDF avec la colonne', async () => {
+    const { exportDPGFtoPDF } = await import('../proExport');
+    await exportDPGFtoPDF(avecTauxDedie, 'Projet', 'lot', {}, { avecPrix: true, avecTva: true });
+    expect(pdfSaveSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('exportEstimationtoExcel', () => {
   it('writes a non-empty xlsx blob with a Détail and Récapitulatif sheet', async () => {
     const { exportEstimationtoExcel } = await import('../proExport');

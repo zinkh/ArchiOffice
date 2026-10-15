@@ -4,7 +4,9 @@
 import type { AgencySettings } from './proposalExport';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
+import { docxSectionChrome } from './docxRunningHeader';
 import type { Bloc, DocModele } from './actMarche';
+import { enregistrerPdf, type Sortie } from './exportSortie';
 
 const nomFichier = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_|_$/g, '');
 
@@ -25,7 +27,7 @@ function telecharger(blob: Blob, nom: string) {
 // ── PDF ──────────────────────────────────────────────────────────────────────
 
 /** Un seul PDF pour un ou plusieurs documents : chacun repart sur une nouvelle page. */
-export async function exporterMarchePdf(docs: DocModele[], settings: AgencySettings, nom: string): Promise<void> {
+export async function exporterMarchePdf(docs: DocModele[], settings: AgencySettings, nom: string, sortie?: Sortie): Promise<void> {
   const [{ default: jsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(settings.logoUrl)]);
   const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
   const largeur = pdf.internal.pageSize.getWidth() - MARGE * 2;
@@ -116,12 +118,12 @@ export async function exporterMarchePdf(docs: DocModele[], settings: AgencySetti
   });
 
   drawAgencyFooters(pdf, settings, { title: docs[0].titre, margin: MARGE });
-  pdf.save(`${nomFichier(nom)}.pdf`);
+  await enregistrerPdf(pdf, `${nomFichier(nom)}.pdf`, sortie);
 }
 
 // ── Word ─────────────────────────────────────────────────────────────────────
 
-export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySettings, nom: string): Promise<void> {
+export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySettings, nom: string, sortie?: Sortie): Promise<void> {
   const {
     Document, Packer, Paragraph, TextRun, ImageRun, Header, Footer, PageNumber, AlignmentType, BorderStyle,
     Table, TableRow, TableCell, WidthType,
@@ -182,17 +184,16 @@ export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySett
     }
   };
 
-  const sections = docs.map(doc => ({
-    properties: {},
-    headers: { default: new Header({ children: entete }) },
-    footers: { default: new Footer({ children: pied }) },
+  const sections = await Promise.all(docs.map(async doc => ({
+    ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
     children: [
       new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 200, after: 60 }, children: [new TextRun({ text: doc.titre, bold: true, size: 30, color: '111827' })] }),
       ...(doc.sousTitre ? [new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 240 }, children: [new TextRun({ text: doc.sousTitre, size: 21, color: '6B7280' })] })] : []),
       ...doc.blocs.flatMap(rendreBloc),
     ],
-  }));
+  })));
 
   const blob = await Packer.toBlob(new Document({ sections }));
-  telecharger(blob, `${nomFichier(nom)}.docx`);
+  if (sortie) await sortie(`${nomFichier(nom)}.docx`, blob);
+  else telecharger(blob, `${nomFichier(nom)}.docx`);
 }

@@ -401,6 +401,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
               ? { ...sansPm, prixUnitaire: saisi.valeur, prixTotal: ligne.quantite * saisi.valeur }
               : { ...sansPm, prixTotal: saisi.valeur };
           }
+          if (field === 'tva') {
+            // Vide : le poste suit le taux général du document. 0 reste un taux (exonéré).
+            const { tva: _tva, ...sansTva } = ligne;
+            if (value.trim() === '') return sansTva;
+            const taux = parseFloat(value.replace(',', '.'));
+            return Number.isFinite(taux) && taux >= 0 && taux <= 100 ? { ...sansTva, tva: taux } : ligne;
+          }
           if (field === 'localisation') {
             // « a,  b, » devient « a, b » : virgules et espaces nettoyés.
             return { ...ligne, localisation: localisationsDeLigne(value).join(', ') };
@@ -988,6 +995,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   <th className="px-2 py-2 text-right font-semibold w-24">{multiBat ? t('pro_col_quantity_total') : t('pro_col_quantity')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-28">{t('pro_col_unit_price')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-32">{t('pro_col_total')}</th>
+                  <th className="px-2 py-2 text-right font-semibold w-20" title={t('pro_col_vat_hint')}>{t('pro_col_vat')}</th>
                   {dpgf.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">{t('pro_col_phase')}</th>}
                   <th className="w-10"><span className="sr-only">{t('pro_col_actions')}</span></th>
                 </tr>
@@ -1025,6 +1033,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 text-right font-mono tabular-nums">
                           {formatCurrency(totaux.sousTotaux[row.lotIdx])}
                         </td>
+                        <td />
                         {dpgf.multiPhases && (
                           <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-center">
@@ -1064,10 +1073,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 font-mono text-xs font-normal" style={{ color: 'var(--tblr-muted)' }}>
                           <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} {...cellProps} />
                         </td>
-                        <td className="px-2 py-1" colSpan={multiBat ? 3 : 6}>
+                        <td className="px-2 py-1" colSpan={multiBat ? 3 : 7}>
                           <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} {...cellProps} />
                         </td>
-                        {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 3} /></>}
+                        {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 4} /></>}
                         {dpgf.multiPhases && (
                           <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-center">
@@ -1174,6 +1183,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric pm={!!l.pourMemoire} {...cellProps} />
                         )}
                       </td>
+                      <td className="px-2 py-0.5">
+                        <EditableCell rKey={rKey} field="tva" value={l.tva ?? ''} numeric showZero maxDecimals={3} label={t('pro_col_vat_of', { numero: l.numero })} className="text-xs" {...cellProps} />
+                      </td>
                       {dpgf.multiPhases && (
                         <td className="px-1 py-0.5" onClick={e => e.stopPropagation()}>
                           <div className="flex items-center gap-1 justify-center">
@@ -1194,24 +1206,24 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                   <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-2 text-left text-sm font-semibold">{t('pro_total_ht')}</th>
                   <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
-                  <td colSpan={nbColsDecoupage + 1} />
+                  <td colSpan={nbColsDecoupage + 2} />
                 </tr>
                 {NATURES_HORS_BASE.filter(n => totaux.horsBase[n].nb > 0).map(n => (
                   <tr key={n} style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                     <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t(`pro_total_${n}_ht`)}</th>
                     <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.horsBase[n].totalHT)}</td>
-                    <td colSpan={nbColsDecoupage + 1} />
+                    <td colSpan={nbColsDecoupage + 2} />
                   </tr>
                 ))}
                 <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                   <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
                   <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.montantTVA)}</td>
-                  <td colSpan={nbColsDecoupage + 1} />
+                  <td colSpan={nbColsDecoupage + 2} />
                 </tr>
                 <tr className="border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                   <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-2 text-left font-bold">{t('pro_total_ttc')}</th>
                   <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
-                  <td colSpan={nbColsDecoupage + 1} />
+                  <td colSpan={nbColsDecoupage + 2} />
                 </tr>
               </tbody>
             </table>

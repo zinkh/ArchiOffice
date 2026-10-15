@@ -6,7 +6,7 @@ import {
   IconFileText, IconBuilding, IconUsers, IconScale, IconTrophy,
   IconDownload, IconMessageDots, IconMail, IconAlertTriangle,
   IconClipboardList, IconCurrencyEuro, IconPercentage, IconStar,
-  IconX, IconEdit, IconEye, IconSend, IconCircleCheck, IconSearch, IconArrowsExchange, IconAdjustments,
+  IconX, IconEdit, IconEye, IconSend, IconCircleCheck, IconSearch, IconArrowsExchange, IconAdjustments, IconGavel,
 } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import { cn } from '../lib/utils';
@@ -33,6 +33,7 @@ import {
 } from '../lib/actNegociation';
 import { genererPVOuverture } from '../lib/actNegociationExport';
 import MarcheDocumentsPanel, { type OperationMarche } from './act/MarcheDocumentsPanel';
+import MarchesPhase from './act/MarchesPhase';
 import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
@@ -134,7 +135,7 @@ interface Consultation extends DonneesNegociation {
   marche?: ParametresMarche;
 }
 
-type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse';
+type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse' | 'marches';
 
 const PHASES: { id: Phase; label: string; short: string; icon: React.ElementType }[] = [
   { id: 'preparation', label: 'Préparation de la consultation', short: 'Préparation', icon: IconFileText },
@@ -143,6 +144,7 @@ const PHASES: { id: Phase; label: string; short: string; icon: React.ElementType
   { id: 'collecte', label: 'Collecte des offres', short: 'Offres', icon: IconCurrencyEuro },
   { id: 'negociation', label: 'Négociation des offres', short: 'Négociation', icon: IconArrowsExchange },
   { id: 'analyse', label: 'Analyse & Attribution', short: 'Attribution', icon: IconTrophy },
+  { id: 'marches', label: 'Marchés de travaux', short: 'Marchés', icon: IconGavel },
 ];
 
 const TYPE_DOC_LABELS: Record<string, string> = {
@@ -1504,6 +1506,18 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
             );
           })}
         </div>
+      )}
+
+      {/* ── Phase 7 : Marchés de travaux (CCAP, CCTP, DPGF, acte d'engagement) ── */}
+      {phase === 'marches' && (
+        <MarchesPhase
+          projectId={projectId}
+          projectName={projectName}
+          lots={lots}
+          contacts={allContacts}
+          consultation={consultationCourante as any}
+          operation={{ nom: projectName, ...operation }}
+        />
       )}
 
       {/* Navigation bas */}

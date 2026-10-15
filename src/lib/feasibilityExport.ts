@@ -9,7 +9,7 @@ type ProposalForExport = Partial<Proposal>;
 import type { AgencySettings } from './proposalExport';
 import { classifyContentLine, feasibilityCoverFields, feasibilityFilename, parseInlineMarkdown, stripInlineMarkdown, type FeasibilitySection } from './feasibilityBlocks';
 import { partnerLogosParagraph } from './docxPartnerLogos';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, drawCompactHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { compressImage, type CompressedImage } from './imageCompression';
 import { resolveSignedUrl } from './signedStorageUrl';
 
@@ -104,7 +104,8 @@ export async function exportFeasibilityPdf(p: ProposalForExport, sections: Feasi
     return yy + 8;
   };
   y = drawHeader(true);
-  const newPage = () => { pdf.addPage(); y = drawHeader(false); };
+  // Pages suivantes : l'en-tête réduit de la charte (agence à gauche, repère du document à droite).
+  const newPage = () => { pdf.addPage(); drawCompactHeader(pdf, settings, { title: repere, margin }); y = top + 15; };
   const ensure = (h: number) => { if (y + h > bottom) newPage(); };
 
   // Page de garde : titre, sous-titre, champs, sommaire.
@@ -250,10 +251,13 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
   ];
   const nextHeaderChildren: InstanceType<typeof Paragraph>[] = [
     new Paragraph({
-      alignment: AlignmentType.RIGHT,
+      tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
       border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '111827', space: 4 } },
       spacing: { after: 240 },
-      children: [new TextRun({ text: repere, size: 17, color: '6B7280' })],
+      children: [
+        new TextRun({ text: settings.agencyName || '', bold: true, size: 16, color: '111827' }),
+        new TextRun({ text: `\t${repere}`, size: 16, color: '6B7280' }),
+      ],
     }),
   ];
   const bandeau = await partnerLogosParagraph();

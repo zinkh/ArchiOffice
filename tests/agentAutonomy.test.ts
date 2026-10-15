@@ -285,6 +285,25 @@ describe('documents produits par un agent', () => {
     expect(Buffer.from(artifact.data, 'base64').length).toBeGreaterThan(0);
   });
 
+  it('classeur : identité sur la première page, une ligne agence | document ensuite', async () => {
+    const artifact = await generateArtifact(
+      { type: 'excel', filename: 'suivi', title: 'Suivi des lots', sheets: [{ name: 'Lots', rows: [['Lot', 'Montant'], ['GO', 1000]] }] },
+      AGENCY
+    );
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(artifact.data, 'base64') as any);
+    const ws = wb.worksheets[0];
+    expect(ws.getCell('A1').value).toBe(AGENCY.name);
+    expect(ws.getCell('A5').value).toBe('Lot');
+    expect(ws.getCell('B6').value).toBe(1000);
+    expect(ws.headerFooter.differentFirst).toBe(true);
+    expect(ws.headerFooter.firstHeader ?? '').toBe('');
+    expect(ws.headerFooter.oddHeader).toContain(AGENCY.name);
+    expect(ws.headerFooter.oddHeader).toContain('Suivi des lots');
+    expect(ws.headerFooter.firstFooter).toContain('P&P|&N');
+  });
+
   it('lit les dimensions d\'un PNG pour ne pas déformer le logo', () => {
     const png = Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEklEQVR4nGP8//8/AzJgYkAFuPgAaHYDrDgOaJcAAAAASUVORK5CYII=',

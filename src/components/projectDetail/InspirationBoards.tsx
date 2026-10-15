@@ -56,18 +56,30 @@ export function InspirationBoards({ projectId, projectName, projectCode }: { pro
   const [exporting, setExporting] = useState(false);
 
   const fetchData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await apiFetch<InspirationPayload>('/api/inspiration-boards?project_id=' + encodeURIComponent(projectId));
-      setBoards(data.boards || []);
-      setItems(data.items || []);
-      setPlacements(data.placements || []);
-    } catch (err: any) {
-      setError(err?.message || t('inspiration_load_failed'));
-    } finally {
-      setLoading(false);
+    setLoading(true);
+    setError(null);
+    // Un 502-504 vient de la passerelle ou d'un serveur qui redémarre, jamais de
+    // la route : on relance deux fois avant d'afficher une erreur.
+    const url = '/api/inspiration-boards?project_id=' + encodeURIComponent(projectId);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const data = await apiFetch<InspirationPayload>(url);
+        setBoards(data.boards || []);
+        setItems(data.items || []);
+        setPlacements(data.placements || []);
+        setLoading(false);
+        return;
+      } catch (err: any) {
+        const transient = [502, 503, 504].includes(err?.status);
+        if (transient && attempt < 2) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * (attempt + 1)));
+          continue;
+        }
+        setError(transient ? t('inspiration_load_unavailable') : (err?.message || t('inspiration_load_failed')));
+        break;
+      }
     }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -456,7 +468,10 @@ export function InspirationBoards({ projectId, projectName, projectCode }: { pro
 
       {error && (
         <div role="alert" className="rounded-lg px-4 py-3 text-sm border" style={{ borderColor: 'var(--tblr-danger)', color: 'var(--tblr-danger)', background: 'var(--tblr-surface)' }}>
-          {error}
+          <span>{error}</span>
+          <button type="button" onClick={() => void fetchData()} disabled={loading} className="ml-3 font-bold underline disabled:opacity-50">
+            {t('inspiration_retry')}
+          </button>
         </div>
       )}
 

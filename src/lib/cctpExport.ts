@@ -11,6 +11,7 @@ import { imagesDeLigne } from './cctpImages';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
+import { docxSectionChrome } from './docxRunningHeader';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
@@ -297,9 +298,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
 
   const document_ = new Document({
     sections: [{
-      properties: {},
-      headers: { default: new Header({ children: headerChildren }) },
-      footers: { default: new Footer({ children: footerChildren }) },
+      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren }),
       children: body,
     }],
   });

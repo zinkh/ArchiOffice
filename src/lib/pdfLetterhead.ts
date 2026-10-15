@@ -108,13 +108,70 @@ export async function loadLogoDataUrl(
   }
 }
 
+// ── En-tête des pages suivantes ──────────────────────────────────────────────
+// Règle de la charte : le logo, les coordonnées et les logos des cotraitants ne
+// figurent que sur la PREMIÈRE page. Les pages suivantes portent un en-tête
+// d'une seule ligne : le nom de l'agence en texte à gauche, le nom du document
+// à droite. drawAgencyHeader() applique la règle seul (appelé sur une page
+// au-delà de la première, il dessine cette ligne) et drawAgencyFooters()
+// complète les pages qui n'ont reçu aucun en-tête.
+
+/** Pages (par document jsPDF) qui portent déjà un en-tête, complet ou réduit. */
+const pagesAvecEntete = new WeakMap<object, Set<number>>();
+
+const pageCourante = (pdf: any): number =>
+  pdf.internal?.getCurrentPageInfo?.()?.pageNumber ?? 1;
+
+const marquerEntete = (pdf: any, page: number) => {
+  const pages = pagesAvecEntete.get(pdf) ?? new Set<number>();
+  pages.add(page);
+  pagesAvecEntete.set(pdf, pages);
+};
+
+/** Ordonnée où le contenu d'une page réduite peut commencer. */
+export const ENTETE_REDUIT_BAS = 16;
+
+/**
+ * En-tête d'une seule ligne : agence à gauche, document à droite, filet fin.
+ * Rend l'ordonnée où le contenu peut commencer.
+ */
+export function drawCompactHeader(
+  pdf: any, settings: AgencySettings, opts: Pick<LetterheadOptions, 'title' | 'subtitle' | 'margin'>,
+): number {
+  const pageW = pdf.internal.pageSize.getWidth();
+  const margin = opts.margin ?? 14;
+  const base = 8;
+
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.setTextColor(...GRIS_TEXTE);
+  const agence = settings.agencyName || '';
+  pdf.text(agence, margin, base);
+
+  const placeDroite = pageW - margin * 2 - pdf.getTextWidth(agence) - 8;
+  const document = [opts.title, opts.subtitle].filter(Boolean).join('  |  ');
+  pdf.setFont('helvetica', 'normal');
+  pdf.setTextColor(...GRIS_DOUX);
+  const [ligne] = pdf.splitTextToSize(document, Math.max(placeDroite, 20)) as string[];
+  pdf.text(ligne ?? '', pageW - margin, base, { align: 'right' });
+
+  pdf.setDrawColor(...GRIS_FILET);
+  pdf.setLineWidth(0.25);
+  pdf.line(margin, base + 2.5, pageW - margin, base + 2.5);
+  marquerEntete(pdf, pageCourante(pdf));
+  return Math.max(ENTETE_REDUIT_BAS, margin + 2);
+}
+
 /**
  * Dessine l'en-tête sur la page courante et rend l'ordonnée où le contenu peut
- * commencer.
+ * commencer. Première page : logo, coordonnées, titre. Pages suivantes : la
+ * ligne réduite (voir plus haut), jamais le logo.
  */
 export function drawAgencyHeader(
   pdf: any, settings: AgencySettings, opts: LetterheadOptions,
 ): number {
+  if (pageCourante(pdf) > 1) return drawCompactHeader(pdf, settings, opts);
+  marquerEntete(pdf, 1);
   const pageW = pdf.internal.pageSize.getWidth();
   const margin = opts.margin ?? 14;
   let y = margin;
@@ -256,6 +313,7 @@ export function drawAgencyFooters(pdf: any, settings: AgencySettings, opts: Lett
 
   for (let p = 1; p <= total; p++) {
     pdf.setPage(p);
+    if (p > 1 && !pagesAvecEntete.get(pdf)?.has(p)) drawCompactHeader(pdf, settings, opts);
     pdf.setDrawColor(...GRIS_FILET);
     pdf.setLineWidth(0.25);
     pdf.line(margin, pageH - 11, pageW - margin, pageH - 11);
@@ -290,7 +348,7 @@ export const TABLEAU_GRIS = {
 /** Options autoTable communes : entête gris foncé, lignes alternées, pied de page libre en bas. */
 export function tableauGris(margin = 14): Record<string, any> {
   return {
-    margin: { left: margin, right: margin, bottom: 18 },
+    margin: { left: margin, right: margin, top: 17, bottom: 18 },
     styles: { fontSize: 8, textColor: TABLEAU_GRIS.texte, cellPadding: 2 },
     headStyles: { fillColor: TABLEAU_GRIS.entete, textColor: 255, fontStyle: 'bold' },
     alternateRowStyles: { fillColor: TABLEAU_GRIS.alterne },

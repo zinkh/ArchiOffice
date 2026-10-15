@@ -15,6 +15,29 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
 }
 
+/**
+ * Colonnes écrites seulement par les routes de l'ACT (constitution et
+ * signature). Le POST/PUT générique, qui reprend le corps tel quel, ne doit pas
+ * pouvoir rouvrir ou falsifier un marché signé.
+ */
+const COLONNES_ACT = [
+  'act_lot_id', 'act_entreprise_id', 'offre_snapshot',
+  'statut_signature', 'mode_signature', 'date_signature', 'acte_signe_document_id',
+] as const;
+
+function sansColonnesAct(body: any): Record<string, unknown> {
+  const copie = { ...(body ?? {}) };
+  for (const c of COLONNES_ACT) delete copie[c];
+  return copie;
+}
+
+const MAX_SNAPSHOT_CHARS = 500_000;
+const texte = (v: unknown, max = 300): string => String(v ?? '').trim().slice(0, max);
+const montant = (v: unknown): number | null => {
+  const n = typeof v === 'number' ? v : Number(String(v ?? '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+};
+
 export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.get("/api/marches-entreprises/:projectId", async (req: any, res: any) => {
     try {
@@ -36,7 +59,7 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
-        .insert({ ...req.body })
+        .insert(sansColonnesAct(req.body))
         .select()
         .single();
       if (error) throw error;
@@ -52,7 +75,7 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
-        .update({ ...req.body, updated_at: new Date().toISOString() })
+        .update({ ...sansColonnesAct(req.body), updated_at: new Date().toISOString() })
         .eq('id', req.params.id)
         .select()
         .single();
@@ -60,6 +83,145 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
       res.json(data);
     } catch (e: any) {
       console.error("[PUT /api/marches-entreprises/:id]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/projects/:projectId/marches-act : constitue (ou met à jour) les
+  // marchés des lots attribués dans l'ACT. Idempotent par (affaire, lot) : un
+  // second appel ne duplique rien, et un marché déjà signé n'est jamais touché.
+  app.post("/api/projects/:projectId/marches-act", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const projectId = String(req.params.projectId);
+      if (!(await assertTenantEntity(supabaseAdmin, 'projects', projectId, tenantId))) {
+        return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
+      }
+      const entrees = Array.isArray(req.body?.marches) ? req.body.marches : null;
+      if (!entrees || entrees.length === 0 || entrees.length > 100) {
+        return res.status(400).json({ error: "Liste de marchés absente ou trop longue." });
+      }
+
+      const lignes: Record<string, unknown>[] = [];
+      for (const e of entrees) {
+        const actLotId = texte(e?.act_lot_id, 100);
+        const nom = texte(e?.entreprise_nom);
+        const ht = montant(e?.montant_ht);
+        if (!actLotId || !nom || ht === null) {
+          return res.status(400).json({ error: "Chaque marché exige un lot, une entreprise et un montant HT valide." });
+        }
+        const tva = e?.tva_rate === undefined ? 20 : montant(e.tva_rate);
+        if (tva === null || tva > 100) return res.status(400).json({ error: "Taux de TVA invalide." });
+        const contactId = texte(e?.contact_id, 100) || null;
+        if (contactId && !(await assertTenantEntity(supabaseAdmin, 'contacts', contactId, tenantId))) {
+          return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+        }
+        let snapshot: unknown = null;
+        if (e?.offre_snapshot && typeof e.offre_snapshot === 'object') {
+          if (JSON.stringify(e.offre_snapshot).length > MAX_SNAPSHOT_CHARS) {
+            return res.status(400).json({ error: "L'offre à figer est trop volumineuse." });
+          }
+          snapshot = e.offre_snapshot;
+        }
+        lignes.push({
+          act_lot_id: actLotId,
+          act_entreprise_id: texte(e?.act_entreprise_id, 100) || null,
+          contact_id: contactId,
+          entreprise_nom: nom,
+          lot_numero: texte(e?.lot_numero, 30),
+          lot_titre: texte(e?.lot_titre),
+          montant_ht: ht,
+          tva_rate: tva,
+          offre_snapshot: snapshot,
+        });
+      }
+
+      const { data: existants, error: errLecture } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .select('id, act_lot_id, statut_signature')
+        .eq('project_id', projectId);
+      if (errLecture) throw errLecture;
+      const parLot = new Map<string, any>((existants ?? []).filter((m: any) => m.act_lot_id).map((m: any) => [m.act_lot_id, m]));
+
+      let crees = 0, misAJour = 0, ignores = 0;
+      const maintenant = new Date().toISOString();
+      for (const ligne of lignes) {
+        const deja = parLot.get(ligne.act_lot_id as string);
+        if (deja?.statut_signature === 'signe') { ignores++; continue; }
+        if (deja) {
+          const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+            .update({ ...ligne, updated_at: maintenant })
+            .eq('id', deja.id);
+          if (error) throw error;
+          misAJour++;
+        } else {
+          const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+            .insert({ ...ligne, project_id: projectId, statut_signature: 'a_signer' });
+          if (error) throw error;
+          crees++;
+        }
+      }
+
+      const { data: marches, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true });
+      if (error) throw error;
+      res.json({ marches: marches ?? [], crees, misAJour, ignores });
+    } catch (e: any) {
+      console.error("[POST /api/projects/:projectId/marches-act]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/marches-entreprises/:id/signature : enregistre la signature
+  // (papier : scan déposé ; électronique : document signé déposé). Le marché
+  // passe « signé » et ses pièces se verrouillent.
+  app.post("/api/marches-entreprises/:id/signature", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const mode = String(req.body?.mode ?? '');
+      if (mode !== 'papier' && mode !== 'electronique') {
+        return res.status(400).json({ error: "Mode de signature inconnu (papier ou électronique)." });
+      }
+      const date = String(req.body?.date_signature ?? '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) {
+        return res.status(400).json({ error: "Date de signature invalide." });
+      }
+      const documentId = texte(req.body?.document_id, 100) || null;
+      if (documentId && !(await assertTenantEntity(supabaseAdmin, 'documents', documentId, tenantId))) {
+        return res.status(400).json({ error: "Document introuvable pour ce cabinet." });
+      }
+      const { data: marche } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .select('id').eq('id', req.params.id).maybeSingle();
+      if (!marche) return res.status(404).json({ error: "Marché introuvable." });
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .update({
+          statut_signature: 'signe', mode_signature: mode, date_signature: date,
+          acte_signe_document_id: documentId, updated_at: new Date().toISOString(),
+        })
+        .eq('id', req.params.id)
+        .select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) {
+      console.error("[POST /api/marches-entreprises/:id/signature]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // POST /api/marches-entreprises/:id/signature/rouvrir : annule la signature
+  // enregistrée par erreur ; le marché repasse « à signer ».
+  app.post("/api/marches-entreprises/:id/signature/rouvrir", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: marche } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .select('id').eq('id', req.params.id).maybeSingle();
+      if (!marche) return res.status(404).json({ error: "Marché introuvable." });
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .update({
+          statut_signature: 'a_signer', mode_signature: null, date_signature: null,
+          acte_signe_document_id: null, updated_at: new Date().toISOString(),
+        })
+        .eq('id', req.params.id)
+        .select().single();
+      if (error) throw error;
+      res.json(data);
+    } catch (e: any) {
+      console.error("[POST /api/marches-entreprises/:id/signature/rouvrir]", e); res.status(500).json({ error: e.message }); }
   });
 
   app.delete("/api/marches-entreprises/:id", async (req: any, res: any) => {

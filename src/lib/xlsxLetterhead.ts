@@ -250,8 +250,17 @@ export function ajouterFeuille(wb: Workbook, opts: FeuilleOptions): Feuille {
   const mentions = agencyFooterLine(settings).split('  ·  ');
   while (mentions.length > 1 && mentions.join('  ·  ').length > 170) mentions.pop();
   const pied = echapperPied(mentions.join('  ·  '));
+  // Logo et coordonnées ne sont que sur la première page imprimée. Les suivantes
+  // portent une ligne : l'agence à gauche, le document à droite.
+  const nomAgence = echapperPied(settings.agencyName || '');
+  const nomDocument = echapperPied([opts.title, opts.subtitle].filter(Boolean).join(' | ').slice(0, 90));
+  const piedComplet = `&L&"Calibri,Regular"&7 ${pied}&R&"Calibri,Bold"&8 P&P|&N`;
   ws.headerFooter = {
-    oddFooter: `&L&"Calibri,Regular"&7 ${pied}&R&"Calibri,Bold"&8 P&P|&N`,
+    differentFirst: true,
+    firstHeader: '',
+    firstFooter: piedComplet,
+    oddHeader: `&L&"Calibri,Bold"&8 ${nomAgence}&R&"Calibri,Regular"&8 ${nomDocument}`,
+    oddFooter: piedComplet,
   };
 
   // ── Lignes de contenu ──────────────────────────────────────────────────────

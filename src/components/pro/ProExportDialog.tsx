@@ -70,6 +70,7 @@ export const ProExportDialog: React.FC<Props> = ({
     () => ({ [DEPART[ongletActif] ?? 'cctp']: 'pdf' }));
   const [mode, setMode] = useState<'all' | 'custom'>('all');
   const [avecPrix, setAvecPrix] = useState(false);
+  const [avecTva, setAvecTva] = useState(false);
   const [cctpParBatiment, setCctpParBatiment] = useState(false);
   const [busy, setBusy] = useState(false);
   const [erreur, setErreur] = useState('');
@@ -123,7 +124,7 @@ export const ProExportDialog: React.FC<Props> = ({
     try {
       const bpuPret = documents.bpu || documents.dqe ? prepareBpu() : null;
       const res = await produireDossier({
-        dpgf, bpu: bpuPret, documents, selection, avecPrix, cctpParBatiment,
+        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment,
         projectName, perimetre: perimetre(), settings, contexte,
       });
       for (const a of res.avertissements) {
@@ -280,6 +281,15 @@ export const ProExportDialog: React.FC<Props> = ({
               <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_prices_hint')}</span>
             </span>
           </label>
+          {avecPrix && documents.dpgf && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0 ml-6">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={avecTva} onChange={e => setAvecTva(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_vat')}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_vat_hint')}</span>
+              </span>
+            </label>
+          )}
           {dpgf.multiBatiments && documents.cctp && (
             <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
               <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={cctpParBatiment} onChange={e => setCctpParBatiment(e.target.checked)} />

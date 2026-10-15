@@ -77,6 +77,20 @@ function contactPhones(c?: Contact | null): { mobile: string; fixe: string } {
   return { mobile: c.phone_mobile || '', fixe: c.phone_work || c.phone || '' };
 }
 
+/** Statut d'une rubrique tel qu'il s'imprime : la valeur stockée peut être en anglais (« open »). */
+const RUBRIQUE_STATUS_LABELS: Record<string, string> = {
+  open: 'Ouvert',
+  done: 'Terminé',
+  closed: 'Clos',
+  in_progress: 'En cours',
+  pending: 'En attente',
+};
+
+function rubriqueStatusLabel(status: string | undefined | null): string {
+  if (!status) return '';
+  return RUBRIQUE_STATUS_LABELS[status.trim().toLowerCase()] ?? status;
+}
+
 export async function exportSiteReportToPDF(
   report: SiteReport,
   notes: SiteReportNote[],
@@ -276,6 +290,12 @@ export async function exportSiteReportToPDF(
   // ── Rubriques personnalisées ────────────────────────────────────────────
   const byCategory = new Map<string, SiteReportNote[]>();
   for (const n of notes) {
+    // Une rubrique sans texte, société, échéance ni photo n'a rien à dire : elle reste à l'écran,
+    // pas dans le PDF (sinon une ligne vide « Ouvert » sous chaque titre).
+    const hasContent = Boolean(
+      (n.text || n.description || '').trim() || (n.responsible_company || '').trim() || n.due_date || (n.photos && n.photos.length > 0),
+    );
+    if (!hasContent) continue;
     if (!byCategory.has(n.category)) byCategory.set(n.category, []);
     byCategory.get(n.category)!.push(n);
   }
@@ -316,7 +336,7 @@ export async function exportSiteReportToPDF(
           [n.lot_concerne ? `Lot : ${n.lot_concerne}` : '', n.text || n.description || ''].filter(Boolean).join('\n'),
           n.responsible_company || '',
           fmtDate(n.due_date) + (n.realization_date ? `${n.due_date ? '\n' : ''}Réalisé le ${fmtDate(n.realization_date)}` : ''),
-          n.statut || n.status,
+          rubriqueStatusLabel(n.statut || n.status),
         ]),
         styles: { fontSize: 8, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
         columnStyles: { 0: { cellWidth: RUBRIQUE_COLS[0] }, 2: { cellWidth: RUBRIQUE_COLS[2] }, 3: { cellWidth: RUBRIQUE_COLS[3] }, 4: { cellWidth: RUBRIQUE_COLS[4], fontStyle: 'bold' } },
