@@ -290,6 +290,12 @@ export async function exportSiteReportToPDF(
   // ── Rubriques personnalisées ────────────────────────────────────────────
   const byCategory = new Map<string, SiteReportNote[]>();
   for (const n of notes) {
+    // Une rubrique sans texte, société, échéance ni photo n'a rien à dire : elle reste à l'écran,
+    // pas dans le PDF (sinon une ligne vide « Ouvert » sous chaque titre).
+    const hasContent = Boolean(
+      (n.text || n.description || '').trim() || (n.responsible_company || '').trim() || n.due_date || (n.photos && n.photos.length > 0),
+    );
+    if (!hasContent) continue;
     if (!byCategory.has(n.category)) byCategory.set(n.category, []);
     byCategory.get(n.category)!.push(n);
   }
