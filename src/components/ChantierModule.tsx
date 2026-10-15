@@ -1240,9 +1240,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                   {/* Présence & suivi des lots (page 2 du CR) */}
                   <Section id="presence" title="Présence & suivi des lots" icon={IconBuilding}
                     action={
-                      <div className="flex flex-wrap items-center justify-between sm:justify-end gap-x-4 gap-y-2">
-                        <label className="flex items-center gap-2">
-                          <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Heure par défaut</span>
+                      <div className="flex w-full sm:w-auto flex-wrap items-center justify-between sm:justify-end gap-x-3 gap-y-2 sm:gap-x-4">
+                        <label className="flex min-w-0 items-center gap-2">
+                          <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">
+                            <span className="sm:hidden">Convocation</span>
+                            <span className="hidden sm:inline">Heure par défaut</span>
+                          </span>
                           <DraftInput
                             type="time"
                             aria-label="Heure de convocation par défaut, tous les lots"
@@ -1253,7 +1256,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           />
                         </label>
                         <button type="button" onClick={() => setIntemperiesOpen(true)}
-                          className="inline-flex min-h-11 md:min-h-0 items-center justify-center gap-1.5 rounded-lg border border-[var(--tblr-border)] px-3 py-1.5 text-xs font-bold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]">
+                          className="inline-flex shrink-0 min-h-11 md:min-h-0 items-center justify-center gap-1.5 rounded-lg border border-[var(--tblr-border)] px-3 py-1.5 text-xs font-bold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]">
                           <IconPlus size={14} /> Intempérie
                         </button>
                       </div>
@@ -1272,7 +1275,6 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         onTrack={setLotTracking}
                         batiments={batimentsChantier}
                         retardCumule={retardCumuleDuLot}
-                        defaultHeure={heureDefaut}
                         onOpenPenalites={setPenaliteLotId}
                       />
                     ) : (
