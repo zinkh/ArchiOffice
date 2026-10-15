@@ -5,7 +5,7 @@ import { PillTabs } from './ui/PillTabs';
 import { BottomSheet, SheetOption } from './ui/BottomSheet';
 import { DiffusionDialog, type DiffusionResult } from './chantier/DiffusionDialog';
 import { buildDiffusionRecipients } from '../lib/crDiffusion';
-import { baseFetchJson } from '../lib/api';
+import { apiFetch, baseFetchJson, SERVER_UNAVAILABLE_CODE } from '../lib/api';
 import { checkAttachment, MAX_ATTACHMENTS } from '../lib/pdfAttachments';
 import { getAccessToken } from '../lib/authToken';
 import { applyTenantHeader } from '../lib/activeTenant';
@@ -454,7 +454,25 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       );
     } catch (err) {
       console.error('Diffusion du compte-rendu :', err);
-      setDiffusionError((err as Error).message || 'La diffusion a échoué.');
+      if ((err as { code?: string }).code === SERVER_UNAVAILABLE_CODE) {
+        // La passerelle a coupé (504) : les messages ont pu partir malgré tout. On relit le compte-rendu
+        // pour le savoir, plutôt que de laisser croire à un échec et inviter à envoyer en double.
+        const dejaDiffuse = selectedReport.statut === 'diffuse';
+        const relu = await apiFetch<SiteReport[]>(`/api/projects/${project.id}/reports`).catch(() => null);
+        const serveur = Array.isArray(relu) ? relu.find(r => r.id === selectedReport.id) : undefined;
+        if (serveur?.statut === 'diffuse' && !dejaDiffuse) {
+          setReports(prev => prev.map(r => (r.id === serveur.id ? { ...r, statut: 'diffuse' } : r)));
+          db.siteReportsCache.put({ ...selectedReport, statut: 'diffuse' }).catch(() => {});
+          setDiffusionOpen(false);
+          showToast('Le serveur a répondu trop lentement, mais le compte-rendu a bien été diffusé.', 'success', { duration: 8000 });
+        } else if (dejaDiffuse) {
+          setDiffusionError('Le serveur n’a pas répondu à temps. Les messages sont peut-être partis : vérifiez le dossier des éléments envoyés avant de renvoyer, pour éviter les doublons.');
+        } else {
+          setDiffusionError('Le serveur n’a pas répondu à temps et rien n’indique que l’envoi ait abouti (le compte-rendu n’est pas passé en « diffusé »). Patientez un instant, puis cliquez de nouveau sur Envoyer.');
+        }
+      } else {
+        setDiffusionError((err as Error).message || 'La diffusion a échoué.');
+      }
     } finally {
       setDiffusionBusy(false);
     }
