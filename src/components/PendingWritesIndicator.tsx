@@ -87,16 +87,21 @@ export function PendingWritesIndicator() {
             </div>
             <ul className="space-y-1">
               {writes.map(w => (
-                <li key={w.id} className="flex items-center justify-between gap-2 px-1.5 py-1 rounded text-xs" style={{ color: 'var(--tblr-text)' }}>
-                  <span className="truncate">{ENTITY_LABELS[w.entity] || w.entity}</span>
-                  {w.status === 'error' ? (
-                    <span className="flex-shrink-0 text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-danger, #e03131)' }} title={w.lastError}>
-                      Échec
-                    </span>
-                  ) : (
-                    <span className="flex-shrink-0 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
-                      {new Date(w.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                    </span>
+                <li key={w.id} className="px-1.5 py-1 rounded text-xs" style={{ color: 'var(--tblr-text)' }}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate">{ENTITY_LABELS[w.entity] || w.entity}</span>
+                    {w.status === 'error' ? (
+                      <span className="flex-shrink-0 text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-danger, #e03131)' }} title={w.lastError}>
+                        Échec
+                      </span>
+                    ) : (
+                      <span className="flex-shrink-0 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
+                        {new Date(w.createdAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    )}
+                  </div>
+                  {w.status === 'error' && w.lastError && (
+                    <div className="text-[0.6875rem] break-words" style={{ color: 'var(--tblr-muted)' }}>{w.lastError}</div>
                   )}
                 </li>
               ))}

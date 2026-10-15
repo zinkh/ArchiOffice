@@ -30,6 +30,10 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
+const SMTP_CONNECT_TIMEOUT_MS = 15_000;
+/** Le téléversement d'un PDF de plusieurs Mo peut être lent, mais reste sous le délai des passerelles (~60 s). */
+const SMTP_SOCKET_TIMEOUT_MS = 40_000;
+
 /** Un compte-rendu avec ses photos reste sous ce poids ; au-delà, la plupart des boîtes refuseraient le message. */
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
@@ -116,6 +120,11 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
         port: parseInt(String(smtpPort)),
         secure: String(smtpPort) === '465',
         auth: { user: smtpUser, pass: smtpPass },
+        // Délais courts : sans eux, un SMTP injoignable laisse la requête courir jusqu'au délai de la
+        // passerelle (504 sans message) au lieu de répondre par une erreur lisible.
+        connectionTimeout: SMTP_CONNECT_TIMEOUT_MS,
+        greetingTimeout: SMTP_CONNECT_TIMEOUT_MS,
+        socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
       });
 
       // Même expéditeur que POST /api/send-email : adresse générale de l'agence ou adresse
@@ -137,8 +146,9 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
 
       const sent: { contact_id: string; name: string; email: string; observations: number }[] = [];
       const failed: { contact_id: string; name: string; email: string; error: string }[] = [];
-      // Un message par destinataire, l'un après l'autre : chacun ne voit que SES observations
-      // et aucune adresse des autres (un envoi groupé les dévoilerait).
+      // Un message par destinataire : chacun ne voit que SES observations et aucune adresse des
+      // autres (un envoi groupé les dévoilerait). Envoyés en parallèle, pour que la durée totale ne
+      // dépasse pas le délai de la passerelle quand il y a plusieurs destinataires.
       const send = async (r: DiffusionRecipient) => {
         const mail = buildDiffusionMail(r, ctx);
         try {
@@ -153,7 +163,7 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
           failed.push({ contact_id: r.contactId, name: r.name, email: r.email, error: err?.message || 'Envoi impossible' });
         }
       };
-      for (const r of addressable) await send(r);
+      await Promise.all(addressable.map(send));
 
       let statut = (report as any).statut;
       if (sent.length > 0) {
