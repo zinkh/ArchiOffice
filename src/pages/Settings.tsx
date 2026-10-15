@@ -1247,9 +1247,12 @@ export default function Settings() {
   // visible de tous, comme l'était la section « Informations utilisateur ».
   const SETTINGS_TABS = [
     { key: 'cabinet', label: 'Cabinet', icon: IconBuilding, adminOnly: true },
-    { key: 'agents', label: 'Agents IA', icon: IconRobot, adminOnly: true },
+    // Visibles de tous : ils portent aussi des réglages personnels (liaison Gemini,
+    // Telegram, boîtes mail). Les blocs qui engagent le cabinet restent réservés à
+    // l'administrateur, dans l'onglet.
+    { key: 'agents', label: 'Agents IA', icon: IconRobot, adminOnly: false },
     { key: 'rh', label: 'RH', icon: IconCalendarTime, adminOnly: true },
-    { key: 'communication', label: 'Communication', icon: IconMailbox, adminOnly: true },
+    { key: 'communication', label: 'Communication', icon: IconMailbox, adminOnly: false },
     { key: 'notifications', label: 'Notifications', icon: IconBell, adminOnly: true },
     { key: 'integrations', label: 'Intégrations', icon: IconPuzzle, adminOnly: true },
     { key: 'donnees', label: 'Données et RGPD', icon: IconShieldLock, adminOnly: true },
@@ -1258,7 +1261,7 @@ export default function Settings() {
   const visibleTabs = SETTINGS_TABS.filter(tab => isAdmin || !tab.adminOnly);
   const [activeTab, setActiveTab] = useState<string>('cabinet');
   useEffect(() => {
-    if (!isAdmin && activeTab !== 'profil') setActiveTab('profil');
+    if (!visibleTabs.some(tab => tab.key === activeTab)) setActiveTab('profil');
   }, [isAdmin]);
 
   // ── Marketplace helpers ────────────────────────────────────────────────────
@@ -2418,9 +2421,10 @@ export default function Settings() {
         </>
       )}
 
-      {isAdmin && activeTab === 'agents' && (
+      {activeTab === 'agents' && (
         <>
           {/* ── Agents IA ── */}
+          {isAdmin && (
           <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>Agents IA</h2>
             <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
@@ -2443,6 +2447,25 @@ export default function Settings() {
               </button>
             </div>
           </div>
+          )}
+
+          {/* Liaison Gemini (MCP) : action immédiate (révoquer), pas de formulaire saveSection. */}
+          <McpConnectionsCard />
+
+          {/* Bot Telegram : actions immédiates (générer un code, révoquer). */}
+          <TelegramConnectionsCard />
+
+          {/* Courrier entrant : choisir l'agent de triage engage le cabinet. Ne s'affiche que
+              si l'instance a un domaine de réception configuré (server/agentMailInbox.ts). */}
+          {isAdmin && <AgentMailInboxCard />}
+
+          {/* Revue matinale des mails par un agent (server/agentMailReview.ts) :
+              réglage personnel, une boîte mail l'étant. */}
+          <AgentMailReviewCard />
+
+          {/* Missions persistantes et validation humaine des tâches proposées. */}
+          <AgentMissionsCard />
+          <RagSettingsCard />
         </>
       )}
 
@@ -2659,8 +2682,13 @@ export default function Settings() {
         </>
       )}
 
-      {isAdmin && activeTab === 'communication' && (
+      {activeTab === 'communication' && (
         <>
+          {/* Mes boîtes mail : actions immédiates (useMailAccounts), personnelles. */}
+          <MailAccountsCard />
+
+          {isAdmin && (
+          <>
           {/* ── SMTP ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div>
@@ -2719,6 +2747,8 @@ export default function Settings() {
 
           {/* ── Modèles de mails ── */}
           <EmailTemplatesSettings />
+          </>
+          )}
         </>
       )}
 
@@ -3420,34 +3450,8 @@ export default function Settings() {
           all three, entirely separate from every tenant-settings section above. */}
       {renderSaveButton('profile', () => saveProfile())}
 
-      {/* Mes boîtes mail — état géré par son propre hook (useMailAccounts),
-          pas par saveSection/renderSaveButton : connecter/déconnecter/définir
-          par défaut sont des actions immédiates, pas un formulaire à valider. */}
-      <MailAccountsCard />
-
-      {/* Liaison Gemini (MCP) — même principe : action immédiate (révoquer),
-          pas de formulaire à valider via saveSection/renderSaveButton. */}
-      <McpConnectionsCard />
-
-      {/* Bot Telegram — même principe : actions immédiates (générer un code,
-          révoquer), pas de formulaire via saveSection/renderSaveButton. */}
-      <TelegramConnectionsCard />
-
-      {/* Sauvegarde de secours de la file hors ligne : action immédiate, comme les cartes ci-dessus. */}
+      {/* Sauvegarde de secours de la file hors ligne : propre à l'appareil, donc dans le profil. */}
       <OfflineQueueBackupCard />
-
-      {/* Courrier entrant — même principe : choisir l'agent de triage est
-          une action immédiate, pas un champ du grand formulaire. Ne
-          s'affiche que si l'instance a un domaine de réception configuré
-          (server/agentMailInbox.ts). */}
-      <AgentMailInboxCard />
-
-      {/* Revue matinale des mails par un agent (server/agentMailReview.ts) :
-          réglage personnel, une boîte mail l'étant. */}
-      <AgentMailReviewCard />
-      {/* Missions persistantes et validation humaine des tâches proposées. */}
-      <AgentMissionsCard />
-      <RagSettingsCard />
         </>
       )}
         </div>

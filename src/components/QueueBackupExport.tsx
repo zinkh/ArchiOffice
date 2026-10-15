@@ -19,14 +19,16 @@ const plural = (n: number, one: string, many: string) => (n > 1 ? many : one);
 export function QueueBackupExport({ pending, className, style, onMessage }: Props) {
   const [phase, setPhase] = useState<'idle' | 'preparing' | 'ready' | 'delivering'>('idle');
   const [prepared, setPrepared] = useState<PreparedBackup | null>(null);
+  const [prep, setPrep] = useState<{ done: number; total: number } | null>(null);
 
   const say = (kind: 'ok' | 'error', text: string) => onMessage?.({ kind, text });
 
   const prepare = async () => {
     setPhase('preparing');
+    setPrep(null);
     onMessage?.(null);
     try {
-      const result = await prepareQueueBackup();
+      const result = await prepareQueueBackup((done, total) => setPrep({ done, total }));
       if (result.count === 0) {
         setPhase('idle');
         say('error', result.unreadable > 0
@@ -82,7 +84,9 @@ export function QueueBackupExport({ pending, className, style, onMessage }: Prop
   return (
     <button type="button" onClick={prepare} disabled={phase === 'preparing'} className={className} style={style}>
       {phase === 'preparing' ? <IconLoader2 size={13} className="animate-spin" /> : <IconDownload size={13} />}
-      Sauvegarder dans un fichier{typeof pending === 'number' ? ` (${pending})` : ''}
+      {phase === 'preparing'
+        ? `Préparation${prep ? ` ${prep.done}/${prep.total}` : ''}…`
+        : `Sauvegarder dans un fichier${typeof pending === 'number' ? ` (${pending})` : ''}`}
     </button>
   );
 }
