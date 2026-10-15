@@ -3,7 +3,7 @@ import { IconPlus } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import type { PresenceStatus, ProjectLot, SiteReportLotTracking } from '../../types';
 import type { Batiment } from '../../types/dpgf';
-import { DraftInput, parseDays, TOUCH_TARGET } from './fields';
+import { DraftInput, parseDays } from './fields';
 import {
   basculerBatiment, batimentsDuLot, joursIntemperies, reperBatiment, resumePenalites,
 } from '../../lib/siteReportLotSuivi';
@@ -15,9 +15,11 @@ import {
  */
 export const DEFAULT_LIEU = 'Sur site';
 
+// `justify-between` : un libellé qui passe sur deux lignes (texte agrandi sur le
+// téléphone) ne décale plus son champ, les trois champs d'une rangée restent alignés.
 function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 min-w-0">
+    <label className="flex flex-col justify-between gap-1 min-w-0">
       <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{label}</span>
       {children}
     </label>
@@ -27,6 +29,15 @@ function Labeled({ label, children }: { label: string; children: React.ReactNode
 // Champ de carte : toujours encadré (la carte n'existe que sous 768 px), 44 px de haut.
 const CARD_FIELD =
   'w-full min-h-11 rounded-md border border-[var(--tblr-border)] bg-[var(--tblr-surface)] px-2.5 py-2 text-sm text-[var(--tblr-text)] focus:border-[var(--tblr-primary)] outline-none';
+
+// Le statut est une donnée : sa pastille porte la couleur d'état, le reste de la carte reste neutre.
+const STATUS_DOT: Record<PresenceStatus, string> = {
+  P: 'bg-[var(--tblr-success)]',
+  R: 'bg-[var(--tblr-warning)]',
+  AE: 'bg-[var(--tblr-muted)]',
+  ANE: 'bg-[var(--tblr-danger)]',
+  NC: 'border-2 border-[var(--tblr-muted)] bg-transparent',
+};
 
 const ACTION_BTN =
   'inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg border border-[var(--tblr-border)] px-3 text-sm font-semibold text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)]';
@@ -57,17 +68,28 @@ export function LotTrackingCards({
         const penalites = resumePenalites(t);
         const intemperies = joursIntemperies(t);
         const coches = new Set(batimentsDuLot(t, batiments));
+        const status = getStatus(lot);
         return (
           <li key={lot.id} className="rounded-xl border border-[var(--tblr-border)] p-3 space-y-2.5">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="font-semibold text-[var(--tblr-text)] leading-snug break-words">{company || lot.lot_title}</p>
-                <p className="text-xs text-[var(--tblr-muted)]">{lot.lot_number} · {lot.lot_title}</p>
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 shrink-0 rounded border border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-[var(--tblr-muted)]">
+                {lot.lot_number}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold leading-snug text-[var(--tblr-text)] [overflow-wrap:anywhere] hyphens-auto">{company || lot.lot_title}</p>
+                {company && <p className="text-xs text-[var(--tblr-muted)] hyphens-auto">{lot.lot_title}</p>}
               </div>
+            </div>
+
+            <div className="relative">
+              <span
+                aria-hidden
+                className={cn('pointer-events-none absolute left-3 top-1/2 size-2.5 -translate-y-1/2 rounded-full', STATUS_DOT[status])}
+              />
               <select
                 aria-label={`Statut de présence, ${lot.lot_title}`}
-                className={cn('shrink-0 rounded-lg border border-[var(--tblr-border)] bg-transparent px-2 py-1.5 text-sm', TOUCH_TARGET)}
-                value={getStatus(lot)}
+                className={cn(CARD_FIELD, 'pl-8 font-semibold')}
+                value={status}
                 onChange={e => onStatus(lot, e.target.value as PresenceStatus)}
               >
                 {(Object.keys(statusLabels) as PresenceStatus[]).map(v => <option key={v} value={v}>{statusLabels[v]}</option>)}
@@ -84,7 +106,7 @@ export function LotTrackingCards({
                   onCommit={v => onTrack(lot.id, { effectif: parseDays(v) })}
                 />
               </Labeled>
-              <Labeled label="Retard sem. (j)">
+              <Labeled label="Retard (j)">
                 <DraftInput
                   type="number" inputMode="numeric" min={0}
                   aria-label={`Retard de la semaine en jours, ${lot.lot_title}`}
@@ -93,8 +115,8 @@ export function LotTrackingCards({
                   onCommit={v => onTrack(lot.id, { retard_semaine: parseDays(v) })}
                 />
               </Labeled>
-              <div className="flex flex-col gap-1 min-w-0">
-                <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Cumulé (j)</span>
+              <div className="flex flex-col justify-between gap-1 min-w-0">
+                <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Cumul (j)</span>
                 <output
                   aria-label={`Retard cumulé en jours, ${lot.lot_title}, calculé`}
                   title="Somme des retards de la semaine de tous les comptes-rendus"
@@ -136,7 +158,7 @@ export function LotTrackingCards({
               </fieldset>
             )}
 
-            <div className="grid grid-cols-[1fr_8.5rem] gap-x-3">
+            <div className="grid grid-cols-2 gap-x-3">
               <Labeled label="Lieu">
                 <DraftInput
                   aria-label={`Lieu de la réunion, ${lot.lot_title}`}
