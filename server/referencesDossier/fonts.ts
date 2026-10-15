@@ -14,7 +14,8 @@ let cached: string | null = null;
 
 export function sourceSansFontFaces(): string {
   if (cached !== null) return cached;
-  const require = createRequire(import.meta.url);
+  // Résolu depuis le dossier de travail (la racine de l'application) : `import.meta` n'existe pas dans le bundle serveur CJS.
+  const require = createRequire(`${process.cwd()}/package.json`);
   let dir: string;
   try {
     dir = require.resolve('@fontsource/source-sans-3/package.json').replace(/package\.json$/, 'files/');
