@@ -22,6 +22,7 @@ import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
 import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
+import { OfflineQueueBackupCard } from '../components/OfflineQueueBackupCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
 import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
@@ -3431,6 +3432,9 @@ export default function Settings() {
       {/* Bot Telegram — même principe : actions immédiates (générer un code,
           révoquer), pas de formulaire via saveSection/renderSaveButton. */}
       <TelegramConnectionsCard />
+
+      {/* Sauvegarde de secours de la file hors ligne : action immédiate, comme les cartes ci-dessus. */}
+      <OfflineQueueBackupCard />
 
       {/* Courrier entrant — même principe : choisir l'agent de triage est
           une action immédiate, pas un champ du grand formulaire. Ne
