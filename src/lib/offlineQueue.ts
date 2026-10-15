@@ -57,11 +57,53 @@ export interface QueuedResult<T = any> {
 const TRANSIENT_HTTP_STATUSES = new Set([401, 502, 503, 504]);
 
 /**
+ * Une requête de rejeu qui ne répond jamais (jeton en attente du verrou d'authentification,
+ * connexion à moitié morte sur iPad) bloquait toute la file : le drapeau `replaying` restait
+ * vrai et plus aucun rejeu ne partait. Chaque requête a donc un délai, au-delà duquel elle est
+ * abandonnée et retentée plus tard.
+ */
+const REPLAY_JSON_TIMEOUT_MS = 30_000;
+const REPLAY_MULTIPART_TIMEOUT_MS = 90_000;
+/** Un rejeu en cours depuis plus longtemps que cela est considéré comme planté : un autre peut démarrer. */
+const REPLAY_STALE_MS = 10 * 60_000;
+/** Deux délais dépassés d'affilée : le réseau est probablement mort, on arrête là. */
+const MAX_CONSECUTIVE_TIMEOUTS = 2;
+
+class ReplayTimeoutError extends Error {
+  constructor() {
+    super('Pas de réponse du serveur (délai dépassé)');
+    this.name = 'ReplayTimeoutError';
+  }
+}
+
+function isReplayTimeout(error: unknown): boolean {
+  return error instanceof ReplayTimeoutError;
+}
+
+/**
+ * `fetch` avec un délai ferme. Le délai court aussi pendant l'obtention du jeton (le `fetch`
+ * patché par authInterceptor.ts l'attend avant d'envoyer), que l'AbortController seul n'interrompt pas.
+ */
+function fetchWithDeadline(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  return new Promise<Response>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      controller.abort();
+      reject(new ReplayTimeoutError());
+    }, timeoutMs);
+    fetch(url, { ...init, signal: controller.signal }).then(
+      response => { clearTimeout(timer); resolve(response); },
+      error => { clearTimeout(timer); reject(error); },
+    );
+  });
+}
+
+/**
  * Erreur réseau (hors-ligne, coupure en cours de requête) ou réponse HTTP
  * transitoire : l'écriture n'a pas été jugée, on la garde pour plus tard.
  */
 function isNetworkError(error: unknown): boolean {
-  if (error instanceof TypeError) return true;
+  if (error instanceof TypeError || isReplayTimeout(error)) return true;
   const status = (error as { status?: unknown } | null)?.status;
   return typeof status === 'number' && TRANSIENT_HTTP_STATUSES.has(status);
 }
@@ -200,6 +242,7 @@ export async function queuedMultipartRequest<T = any>(request: MultipartWriteReq
 export const OFFLINE_WRITE_SYNCED_EVENT = 'archioffice:offline-write-synced';
 
 let replaying = false;
+let replayingSince = 0;
 
 /**
  * Rejoue les écritures en attente, dans l'ordre de création. S'arrête dès la
@@ -211,16 +254,30 @@ let replaying = false;
  * la file indéfiniment.
  */
 export async function replayPendingWrites(): Promise<void> {
-  if (replaying || !navigator.onLine) return;
+  if (!navigator.onLine) return;
+  if (replaying && Date.now() - replayingSince < REPLAY_STALE_MS) return;
   replaying = true;
+  replayingSince = Date.now();
   try {
     const entries = await db.pendingWrites.orderBy('createdAt').toArray();
+    let consecutiveTimeouts = 0;
     for (const entry of entries) {
       const headers = new Headers();
       // Impose le cabinet capturé à la mise en file, pas le cabinet
       // actuellement affiché : authInterceptor.ts ne pose X-Tenant-Id que si
       // absent, donc le poser ici prime toujours sur le cabinet actif.
       if (entry.tenantId) headers.set('X-Tenant-Id', entry.tenantId);
+
+      // Sur iPad, un Blob rangé dans IndexedDB peut redevenir illisible : l'envoyer vide ne ferait
+      // que bloquer ou créer une photo vide. L'entrée reste visible en échec, avec la raison.
+      if (entry.kind === 'multipart' && !(entry.blob && entry.blob.size > 0)) {
+        await db.pendingWrites.update(entry.id, {
+          status: 'error',
+          attempts: entry.attempts + 1,
+          lastError: 'Fichier illisible sur cet appareil : reprenez la photo.',
+        });
+        continue;
+      }
 
       let init: RequestInit;
       if (entry.kind === 'json') {
@@ -231,10 +288,15 @@ export async function replayPendingWrites(): Promise<void> {
       }
 
       try {
-        const response = await fetch(entry.url, init);
+        const response = await fetchWithDeadline(
+          entry.url,
+          init,
+          entry.kind === 'multipart' ? REPLAY_MULTIPART_TIMEOUT_MS : REPLAY_JSON_TIMEOUT_MS,
+        );
         if (!response.ok) {
           await throwForHttpError(response);
         }
+        consecutiveTimeouts = 0;
         await db.pendingWrites.delete(entry.id);
         // Permet à l'écran qui a mis l'écriture en file (toujours ouvert ou
         // rouvert depuis) de lever son badge « en attente » — voir
@@ -242,6 +304,15 @@ export async function replayPendingWrites(): Promise<void> {
         // entity/id ce qui le concerne.
         window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_SYNCED_EVENT, { detail: { id: entry.id, entity: entry.entity } }));
       } catch (error) {
+        if (isReplayTimeout(error)) {
+          // Une entrée qui ne répond pas ne doit pas bloquer celles qui la suivent : on la garde
+          // en attente (avec la raison visible) et on passe à la suivante. Deux délais d'affilée :
+          // c'est le réseau, pas l'entrée, on arrête.
+          await db.pendingWrites.update(entry.id, { attempts: entry.attempts + 1, lastError: (error as Error).message });
+          consecutiveTimeouts++;
+          if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) return;
+          continue;
+        }
         if (isNetworkError(error)) {
           // Connexion retombée pendant le rejeu : on arrête là, on retentera
           // tout — celle-ci comprise — au prochain déclenchement.
