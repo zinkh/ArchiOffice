@@ -4,31 +4,16 @@
 // l'appareil et de la session, pas du cabinet.
 import { useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { IconDownload, IconUpload, IconLoader2, IconLifebuoy } from '@tabler/icons-react';
+import { IconUpload, IconLoader2, IconLifebuoy } from '@tabler/icons-react';
 import { db } from '../db';
-import { downloadQueueBackup, importQueueBackupFile } from '../lib/offlineQueueBackup';
+import { importQueueBackupFile } from '../lib/offlineQueueBackup';
+import { QueueBackupExport } from './QueueBackupExport';
 
 export function OfflineQueueBackupCard() {
   const pending = useLiveQuery(() => db.pendingWrites.count(), [], 0);
-  const [busy, setBusy] = useState<'export' | 'import' | null>(null);
+  const [busy, setBusy] = useState<'import' | null>(null);
   const [message, setMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const exportQueue = async () => {
-    setBusy('export');
-    setMessage(null);
-    try {
-      const { count, filename, unreadable } = await downloadQueueBackup();
-      const extra = unreadable > 0
-        ? ` ${unreadable} photo${unreadable > 1 ? 's' : ''} illisible${unreadable > 1 ? 's' : ''} sur cet appareil n'${unreadable > 1 ? 'ont' : 'a'} pas pu être sauvegardée${unreadable > 1 ? 's' : ''} : à reprendre.`
-        : '';
-      setMessage({ kind: unreadable > 0 ? 'error' : 'ok', text: `${count} écriture${count > 1 ? 's' : ''} sauvegardée${count > 1 ? 's' : ''} dans ${filename}.${extra}` });
-    } catch (err) {
-      setMessage({ kind: 'error', text: (err as Error).message || 'La sauvegarde a échoué.' });
-    } finally {
-      setBusy(null);
-    }
-  };
 
   const importFile = async (file: File | undefined) => {
     if (!file) return;
@@ -64,15 +49,11 @@ export function OfflineQueueBackupCard() {
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={exportQueue}
-          disabled={busy !== null || pending === 0}
+        <QueueBackupExport
+          pending={pending}
           className="btn btn-sm flex items-center gap-1.5 disabled:opacity-50"
-        >
-          {busy === 'export' ? <IconLoader2 size={14} className="animate-spin" /> : <IconDownload size={14} />}
-          Sauvegarder la file ({pending})
-        </button>
+          onMessage={setMessage}
+        />
         <button
           type="button"
           onClick={() => inputRef.current?.click()}

@@ -80,28 +80,60 @@ export async function buildQueueBackup(): Promise<{ backup: QueueBackup; unreada
   };
 }
 
-export interface DownloadSummary {
+export interface PreparedBackup {
+  file: File;
   count: number;
-  filename: string;
   /** Photos de la file dont le fichier est illisible sur cet appareil : absentes de la sauvegarde. */
   unreadable: number;
 }
 
-/** Télécharge la sauvegarde. Fonctionne hors ligne : tout se passe sur l'appareil. */
-export async function downloadQueueBackup(): Promise<DownloadSummary> {
+/**
+ * Construit le fichier de sauvegarde (hors ligne : tout se passe sur l'appareil). La remise du
+ * fichier est une seconde étape, déclenchée par un nouvel appui : sur iPad, le partage et le
+ * téléchargement exigent un geste de la personne, que la lecture des photos (plusieurs secondes)
+ * a déjà fait expirer. Un téléchargement lancé juste après ce travail est ignoré sans erreur.
+ */
+export async function prepareQueueBackup(): Promise<PreparedBackup> {
   const { backup, unreadable } = await buildQueueBackup();
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-  const filename = `archioffice-file-attente-${stamp}.json`;
-  const url = URL.createObjectURL(new Blob([JSON.stringify(backup)], { type: 'application/json' }));
+  const file = new File([JSON.stringify(backup)], `archioffice-file-attente-${stamp}.json`, { type: 'application/json' });
+  return { file, count: backup.writes.length, unreadable: unreadable.length };
+}
+
+export type DeliveryResult = 'shared' | 'downloaded' | 'cancelled';
+
+/**
+ * Remet le fichier à la personne. Dans une application installée sur l'écran d'accueil de l'iPad
+ * (mode standalone), un lien `<a download>` ne fait souvent rien : on passe d'abord par la feuille
+ * de partage (« Enregistrer dans Fichiers », AirDrop, Mail), et on ne retombe sur le téléchargement
+ * qu'ailleurs. Doit être appelée directement depuis un appui.
+ */
+export async function deliverBackupFile(file: File): Promise<DeliveryResult> {
+  const nav = navigator as Navigator & { canShare?: (data: ShareData) => boolean };
+  if (typeof nav.share === 'function' && typeof nav.canShare === 'function') {
+    // iOS n'accepte pas tous les types de fichier : le texte brut passe là où le JSON est refusé.
+    for (const type of [file.type, 'text/plain']) {
+      const candidate = type === file.type ? file : new File([file], file.name, { type });
+      if (!nav.canShare({ files: [candidate] })) continue;
+      try {
+        await nav.share({ files: [candidate], title: file.name });
+        return 'shared';
+      } catch (err) {
+        if ((err as DOMException)?.name === 'AbortError') return 'cancelled';
+        break; // partage refusé : on tente le téléchargement
+      }
+    }
+  }
+  const url = URL.createObjectURL(file);
   const link = document.createElement('a');
   link.href = url;
-  link.download = filename;
+  link.download = file.name;
   document.body.appendChild(link);
   link.click();
   link.remove();
-  // Safari iOS lit le lien après le clic : on ne libère l'URL qu'un peu plus tard.
+  // Safari lit le lien après le clic : on ne libère l'URL qu'un peu plus tard.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return { count: backup.writes.length, filename, unreadable: unreadable.length };
+  return 'downloaded';
 }
 
 /** Lit un fichier choisi par la personne, le recharge dans la file puis lance le rejeu s'il y a du réseau. */

@@ -12,7 +12,7 @@ vi.mock('../../db', () => ({
   },
 }));
 
-import { buildQueueBackup, importQueueBackup, BACKUP_FORMAT } from '../offlineQueueBackup';
+import { buildQueueBackup, importQueueBackup, prepareQueueBackup, deliverBackupFile, BACKUP_FORMAT } from '../offlineQueueBackup';
 
 const json = (id: string, createdAt: number, extra: object = {}) => ({
   id, entity: 'observation', method: 'POST', url: '/api/projects/p1/observations', kind: 'json',
@@ -60,6 +60,59 @@ describe('sauvegarde de la file hors ligne', () => {
     const { backup, unreadable } = await buildQueueBackup();
     expect(backup.writes).toHaveLength(0);
     expect(unreadable).toEqual(['ph1']);
+  });
+
+  it('prépare un fichier JSON nommé, relisible par l\'import', async () => {
+    rows.set('o1', json('o1', 1));
+    const { file, count, unreadable } = await prepareQueueBackup();
+    expect(file.name).toMatch(/^archioffice-file-attente-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.json$/);
+    expect(file.type).toBe('application/json');
+    expect([count, unreadable]).toEqual([1, 0]);
+    rows.clear();
+    expect((await importQueueBackup(await file.text())).imported).toBe(1);
+  });
+
+  describe('remise du fichier', () => {
+    const file = () => new File(['{}'], 'sauvegarde.json', { type: 'application/json' });
+
+    it('passe par la feuille de partage quand elle accepte le fichier (iPad)', async () => {
+      const share = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('navigator', { share, canShare: () => true });
+      expect(await deliverBackupFile(file())).toBe('shared');
+      expect(share).toHaveBeenCalledTimes(1);
+    });
+
+    it('retente en texte brut quand le JSON est refusé par le partage', async () => {
+      const share = vi.fn().mockResolvedValue(undefined);
+      vi.stubGlobal('navigator', { share, canShare: ({ files }: { files: File[] }) => files[0].type === 'text/plain' });
+      expect(await deliverBackupFile(file())).toBe('shared');
+      expect(share.mock.calls[0][0].files[0].type).toBe('text/plain');
+      expect(share.mock.calls[0][0].files[0].name).toBe('sauvegarde.json');
+    });
+
+    it('signale l\'annulation au lieu d\'annoncer un succès', async () => {
+      const abort = Object.assign(new Error('annulé'), { name: 'AbortError' });
+      vi.stubGlobal('navigator', { share: vi.fn().mockRejectedValue(abort), canShare: () => true });
+      expect(await deliverBackupFile(file())).toBe('cancelled');
+    });
+
+    it('retombe sur le téléchargement quand le partage n\'existe pas', async () => {
+      vi.stubGlobal('navigator', {});
+      const createObjectURL = vi.fn(() => 'blob:test');
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }));
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      expect(await deliverBackupFile(file())).toBe('downloaded');
+      expect(click).toHaveBeenCalledTimes(1);
+    });
+
+    it('retombe sur le téléchargement quand le partage est refusé sans être annulé', async () => {
+      const denied = Object.assign(new Error('refusé'), { name: 'NotAllowedError' });
+      vi.stubGlobal('navigator', { share: vi.fn().mockRejectedValue(denied), canShare: () => true });
+      vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: () => 'blob:test', revokeObjectURL: vi.fn() }));
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      expect(await deliverBackupFile(file())).toBe('downloaded');
+      expect(click).toHaveBeenCalled();
+    });
   });
 
   it('refuse un fichier qui n\'est pas une sauvegarde', async () => {
