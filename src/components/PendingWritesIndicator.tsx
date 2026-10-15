@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconCloudUpload, IconAlertTriangle, IconRefresh, IconX, IconDownload } from '@tabler/icons-react';
+import { IconCloudUpload, IconAlertTriangle, IconRefresh, IconX } from '@tabler/icons-react';
 import { db, PendingWrite } from '../db';
 import { replayPendingWrites } from '../lib/offlineQueue';
-import { downloadQueueBackup } from '../lib/offlineQueueBackup';
+import { QueueBackupExport } from './QueueBackupExport';
 
 const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
   meeting: 'Réunion',
@@ -41,26 +41,12 @@ const ENTITY_LABELS: Record<PendingWrite['entity'], string> = {
 export function PendingWritesIndicator() {
   const [open, setOpen] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [backingUp, setBackingUp] = useState(false);
-  const [backupNote, setBackupNote] = useState<string | null>(null);
+  const [backupMessage, setBackupMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const writes = useLiveQuery(() => db.pendingWrites.orderBy('createdAt').toArray(), []);
 
   if (!writes || writes.length === 0) return null;
 
   const hasError = writes.some(w => w.status === 'error');
-
-  const backup = async () => {
-    setBackingUp(true);
-    setBackupNote(null);
-    try {
-      const { count, unreadable } = await downloadQueueBackup();
-      setBackupNote(`${count} écriture${count > 1 ? 's' : ''} sauvegardée${count > 1 ? 's' : ''}.${unreadable > 0 ? ` ${unreadable} photo(s) illisible(s), à reprendre.` : ''}`);
-    } catch (err) {
-      setBackupNote((err as Error).message || 'La sauvegarde a échoué.');
-    } finally {
-      setBackingUp(false);
-    }
-  };
 
   const retry = async () => {
     setRetrying(true);
@@ -122,19 +108,19 @@ export function PendingWritesIndicator() {
                 </li>
               ))}
             </ul>
-            <button
-              type="button"
-              onClick={backup}
-              disabled={backingUp}
+            <QueueBackupExport
               className="w-full mt-1 flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50"
               style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-              title="Enregistre ces saisies dans un fichier, à importer depuis un poste connecté (Réglages)"
-            >
-              <IconDownload size={13} />
-              Sauvegarder dans un fichier
-            </button>
-            {backupNote && (
-              <p className="px-1.5 pt-1 text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{backupNote}</p>
+              onMessage={setBackupMessage}
+            />
+            {backupMessage && (
+              <p
+                role="status"
+                className="px-1.5 pt-1 text-[0.6875rem]"
+                style={{ color: backupMessage.kind === 'error' ? 'var(--tblr-danger, #e03131)' : 'var(--tblr-muted)' }}
+              >
+                {backupMessage.text}
+              </p>
             )}
             <button
               type="button"
