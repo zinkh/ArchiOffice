@@ -42,4 +42,8 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["npm", "start"]
+# Serveur compilé au build (dist-api/, scripts/build-server.mjs) et lancé par
+# node directement : ni tsx qui recompilait tout le TypeScript à chaque
+# démarrage (une vingtaine de secondes, ~180 Mo de plus en mémoire), ni npm qui
+# restait en processus parent sans rien faire.
+CMD ["node", "--import", "./dist-api/instrument.mjs", "dist-api/server.mjs"]
