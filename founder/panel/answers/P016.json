@@ -1,0 +1,13 @@
+{
+  "id": "P016",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Je testerais peut-être l'essai gratuit un soir, mais je ne paierais pas dans le mois : je n'ai vu aucun avis, aucune référence d'autre agence, et j'ai trois chantiers en cours que je ne vais pas migrer sur un outil que personne ne m'a confirmé. 29 € ne me fait pas peur, c'est le risque de changer d'outil en plein chantier.",
+  "objection": "Pas d'avis ni de références d'autres agences, et je ne sais pas ce que l'IA et l'assistance valent puisqu'elles sont sur devis : je ne veux pas découvrir en plein chantier que l'outil ne tient pas ou que le support n'existe pas pour mon palier.",
+  "would_change_my_mind": "Une démo et deux ou trois agences comparables à la mienne, joignables, qui l'utilisent depuis plusieurs mois pour les comptes-rendus de chantier et les factures, avec des avis lisibles.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

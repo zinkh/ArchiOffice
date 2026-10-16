@@ -1,0 +1,13 @@
+{
+  "id": "P018",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Je testerais peut-être l'essai gratuit par curiosité, mais je ne paierais pas en l'état. Je n'ai encore rien décidé sur la facturation électronique et je ne vais pas migrer mes devis et mes factures vers un outil dont je ne sais pas qui le tient.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ? Je ne confie pas ma facturation à un outil qui peut disparaître ou rester en l'état.",
+  "would_change_my_mind": "Une équipe identifiable derrière le produit, avec une feuille de route et une preuve de pérennité (clients réels, ancienneté), et une facture Factur-X que mon comptable ou ma plateforme agréée accepte.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 39,
+  "price_too_expensive": 69
+}

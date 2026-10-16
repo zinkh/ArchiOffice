@@ -1,0 +1,13 @@
+{
+  "id": "P014",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "need",
+  "reason": "La facturation électronique m'oblige à passer à un outil conforme, et 29 € par mois avec essai gratuit et remboursement 30 jours, c'est un risque faible pour éviter une facture non conforme. Je prendrais le Starter, surtout pour les factures.",
+  "objection": "Trop de modules, je n'en utilise que deux ; je ne vois pas ce qui est vraiment meilleur qu'un outil de facturation simple, et je ne sais pas si ça marche correctement sur mon téléphone depuis le chantier.",
+  "would_change_my_mind": "Pouvoir tester l'émission d'une facture Factur-X et l'usage sur téléphone en chantier pendant l'essai, ou un palier moins cher centré sur devis et factures.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 39,
+  "price_too_expensive": 59
+}
