@@ -1,0 +1,13 @@
+{
+  "id": "P008",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "Je teste volontiers si l'essai est gratuit, mais changer d'outil en cours de projets, c'est trop lourd : il faudrait reprendre les projets, les contacts, les prix et ma numérotation. Je n'ai rien décidé pour la facture électronique, donc je ne vais pas payer maintenant.",
+  "objection": "Reprendre tous mes projets en cours, mes contacts, ma bibliothèque de prix et ma numérotation de factures dans un nouvel outil, c'est des heures de travail et un risque d'erreur.",
+  "would_change_my_mind": "Un import de mes projets, contacts et prix depuis mes tableurs actuels, avec la reprise de ma numérotation de factures, et l'assurance d'être en règle pour la facturation électronique.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

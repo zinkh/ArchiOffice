@@ -1,0 +1,13 @@
+{
+  "id": "P007",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "convenience",
+  "reason": "Je jongle entre tableurs et outils séparés, et le vocabulaire loi MOP avec les réserves sur tablette me parle. Comme l'essai est gratuit et rapide, je teste, et si ça tient la route sur chantier je prends Pro.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ? Je ne veux pas migrer tous mes devis, CCTP et factures dans un outil qui disparaît.",
+  "would_change_my_mind": "Un export complet de mes données (Excel/PDF) garanti, et des signes clairs de pérennité : équipe, clients de ma taille, feuille de route publique.",
+  "price_too_cheap": 15,
+  "price_cheap": 35,
+  "price_expensive": 90,
+  "price_too_expensive": 160
+}

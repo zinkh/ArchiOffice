@@ -1,0 +1,13 @@
+{
+  "id": "P004",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "J'ai déjà un outil qui tourne et je ne bascule que pour un gain net que je ne vois pas ici. Je ne connais aucune agence qui l'utilise, et je n'ai pas envie de servir de cobaye avec mes factures et mes dossiers de chantier.",
+  "objection": "Aucune preuve qu'une autre agence s'en sert déjà ; migrer mes devis, honoraires et factures vers un outil inconnu est un risque, et rien ne me dit que ça vaut l'effort par rapport à mon outil actuel.",
+  "would_change_my_mind": "Des références d'agences comparables à la mienne qui l'utilisent depuis un moment, plus un import simple de mes données actuelles et un essai gratuit qui tient sur un vrai projet.",
+  "price_too_cheap": 8,
+  "price_cheap": 19,
+  "price_expensive": 35,
+  "price_too_expensive": 60
+}

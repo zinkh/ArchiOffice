@@ -1,0 +1,13 @@
+{
+  "id": "P001",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Je ne vais pas migrer mes devis, mes CCTP et mes factures vers un outil dont je ne sais pas qui le maintient dans cinq ans. Avec trois chantiers et mes comptes-rendus le soir, je n'ai pas le temps de tester un nouveau logiciel pour peut-être le regretter.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ? Si ça s'arrête, mes données et mon historique de factures sont coincés.",
+  "would_change_my_mind": "Une garantie claire d'export complet de mes données (Excel/PDF), une équipe identifiable derrière le produit avec des références d'autres agences, et un essai gratuit qui me laisse faire un vrai compte-rendu de chantier de bout en bout.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 39,
+  "price_too_expensive": 59
+}

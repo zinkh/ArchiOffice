@@ -1,0 +1,13 @@
+{
+  "id": "P006",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "J'ai entendu parler de l'obligation de facturation électronique mais je n'ai encore rien décidé, et je ne vais pas confier ma facturation à un outil dont je ne connais aucun utilisateur. Je pourrais tester l'essai gratuit, mais je ne m'abonne pas pour l'instant.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye pour une obligation légale où une erreur de facture me retombe dessus.",
+  "would_change_my_mind": "Des références d'agences d'architecture comparables à la mienne qui l'utilisent déjà pour leurs factures, et une garantie claire de conformité Factur-X / facturation électronique.",
+  "price_too_cheap": 9,
+  "price_cheap": 20,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

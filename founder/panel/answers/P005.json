@@ -1,0 +1,13 @@
+{
+  "id": "P005",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "Je suis seul, j'ai mes chantiers en cours, mes contacts, mes prix et ma numérotation dans mes outils actuels. Changer en cours de projets, c'est du temps que je n'ai pas, et mon besoin urgent c'est les réserves sur le terrain, pas une suite complète.",
+  "objection": "La reprise des projets, contacts, prix et numérotation en cours de route est trop lourde, et je ne sais pas si les réserves marchent vraiment bien depuis un téléphone sur le chantier, avec ou sans réseau.",
+  "would_change_my_mind": "Pouvoir tester le suivi de chantier et les réserves sur mon téléphone, sur un vrai chantier, sans rien migrer, et n'adopter le reste que sur mon prochain projet.",
+  "price_too_cheap": 8,
+  "price_cheap": 19,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

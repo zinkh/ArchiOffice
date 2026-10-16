@@ -1,0 +1,13 @@
+{
+  "id": "P009",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Je ne connais aucune agence qui l'utilise et je ne vais pas m'engager sur mes devis, mes honoraires et mes factures avec un outil dont personne autour de moi ne parle. Je garde mes outils actuels tant que je n'ai pas vu des références et des avis.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye avec ma facturation et mes données de chantier.",
+  "would_change_my_mind": "Une démo complète, trois références d'agences comparables à la mienne que je peux appeler, et des avis vérifiables, ainsi que la preuve que ça marche vraiment depuis un téléphone sur le chantier.",
+  "price_too_cheap": 9,
+  "price_cheap": 25,
+  "price_expensive": 60,
+  "price_too_expensive": 120
+}
