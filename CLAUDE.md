@@ -1956,7 +1956,11 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
 - **« Présence & suivi des lots »** : tableau à partir de 768 px, une carte par lot
   (`LotTrackingCards.tsx`, `useMediaQuery`, un seul rendu monté) en dessous. Même
   `lot_tracking`, mêmes champs ; le premier choix de statut crée la ligne de présence
-  AVEC ce statut (il était ignoré, la ligne naissant « Présent »).
+  AVEC ce statut (il était ignoré, la ligne naissant « Présent »). Chaque carte est
+  repliée par défaut sur le lot et son statut (pastille de couleur), avec un résumé de ce
+  qui est saisi ; dépliée, effectif, retards, bâtiments, convocation et pénalité. Lieu et
+  heure par lot ne se saisissent qu'au bureau : au téléphone, l'heure « Convocation » de
+  la section vaut pour tous les lots.
 - **Aucune saisie ne part à chaque frappe** : `DraftInput` et `CommitTextarea`
   n'enregistrent qu'à la sortie du champ. Chaque frappe renvoyait le compte-rendu entier
   au serveur, dont la réponse écrasait la saisie en cours (le lieu « se réinitialisait »,
