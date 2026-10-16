@@ -23,7 +23,7 @@ Cas B : environ **16 000 €** avant que l'activité se paie seule, sans atteind
 
 ## Trois façons d'améliorer la marge
 1. **Atteindre le volume** : chaque agence de plus rapporte 36,18 € par mois. +50 % de volume améliore l'année 1 d'environ 3 700 € (cas B).
-2. **Monter le prix moyen** par le mix (plus de Pro) ou par le support inclus : passer de 38 € à 44 € ramène le seuil de 46 à 40 agences. La marge de Pro à 49 € plutôt que 59 € est négative sur le mix : à tester avec les vraies agences (voir `pricing.md`).
+2. **Monter le prix moyen** par le mix (plus de Pro) ou par le support inclus : passer de 38 € à 44 € ramène le seuil de 46 à 40 agences. À l'inverse, Pro à 49 € au lieu de 59 € ramène le prix moyen à 35 € : seuil à 51 agences, marge 16 %, année 1 à -13 184 € (cas B). Le test de prix proposé dans `pricing.md` a donc un coût réel.
 3. **Réduire le temps payé** par l'automatisation de l'accueil (import, export, aide intégrée) : 750 €/mois au lieu de 1 500 €/mois baisse le seuil à 26 agences.
 
 ## Les conditions d'argent du conseil
