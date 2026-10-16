@@ -1,0 +1,13 @@
+{
+  "id": "P014",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "need",
+  "reason": "La facturation électronique devient obligatoire et je ne veux pas me planter sur une facture. Factur-X conforme et utilisable depuis le téléphone sur chantier, pour 29 € par mois, ça vaut l'essai gratuit puis Starter.",
+  "objection": "Trop de modules, je n'en utilise que deux (devis et factures), et je ne vois pas lequel est vraiment meilleur que ce que j'ai déjà. Je ne sais pas si la conformité Factur-X est vraiment fiable.",
+  "would_change_my_mind": "Une démo claire montrant la facture électronique conforme de bout en bout, utilisable sur téléphone, sans devoir apprendre les autres modules.",
+  "price_too_cheap": 8,
+  "price_cheap": 15,
+  "price_expensive": 35,
+  "price_too_expensive": 60
+}

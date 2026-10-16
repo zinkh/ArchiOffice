@@ -1,0 +1,13 @@
+{
+  "id": "P012",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "Mes devis, honoraires et DPGF tournent sur Excel et Word depuis des années et ça marche. Je ne vais pas tout reprendre dans un nouvel outil pour une semaine normale de travail.",
+  "objection": "Mes données de clients et de chantiers : où sont-elles hébergées, et que se passe-t-il si le service s'arrête ? Je ne veux pas dépendre d'un abonnement pour retrouver mes propres fichiers.",
+  "would_change_my_mind": "Un export complet de mes données en Excel/Word à tout moment, un hébergement en France clairement annoncé, et la possibilité d'importer mes tableurs existants sans tout ressaisir.",
+  "price_too_cheap": 8,
+  "price_cheap": 15,
+  "price_expensive": 35,
+  "price_too_expensive": 60
+}

@@ -1,0 +1,13 @@
+{
+  "id": "P011",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Mes devis, honoraires et DPGF sont dans Excel et Word depuis des années et ça marche. Je ne connais aucune agence qui utilise ce logiciel, et je n'ai pas envie de servir de cobaye avec mes données de chantier.",
+  "objection": "Aucune autre agence que je connais ne l'utilise : si ça tourne mal ou si l'éditeur disparaît, je perds mes devis et mes DPGF et je suis seule à me débrouiller.",
+  "would_change_my_mind": "Un confrère de ma région, dans une agence comparable à la mienne, qui l'utilise depuis un an et me le montre, avec la certitude de pouvoir exporter tout mon travail en Excel et Word.",
+  "price_too_cheap": 8,
+  "price_cheap": 20,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

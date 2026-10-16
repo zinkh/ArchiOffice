@@ -1,0 +1,13 @@
+{
+  "id": "P015",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "J'ai déjà un outil de gestion qui fait l'essentiel, et changer dans une petite agence coûte du temps de reprise de données et de formation. Rien dans cette offre ne me montre un gain net assez clair pour basculer cette semaine.",
+  "objection": "Quel est le gain concret par rapport à ce que j'ai déjà ? Je n'ai pas de temps à perdre à migrer mes devis, mes CCTP et mes factures pour un outil qui fait à peu près la même chose.",
+  "would_change_my_mind": "Une démonstration sur un de mes vrais dossiers, avec import de mes données existantes, qui prouve que les factures Factur-X sont conformes à l'obligation de facturation électronique et que je gagne un temps mesurable sur le CCTP/DPGF.",
+  "price_too_cheap": 9,
+  "price_cheap": 25,
+  "price_expensive": 59,
+  "price_too_expensive": 120
+}

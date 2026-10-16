@@ -1,0 +1,13 @@
+{
+  "id": "P016",
+  "buys": true,
+  "purchases_first_month": 1,
+  "reason_code": "need",
+  "reason": "Je rédige mes comptes-rendus le soir et je jongle entre tableurs pour devis, CCTP et factures. À 29 € par mois, l'essai gratuit me laisse tester sur un vrai chantier avant de payer, et si ça tient je prends le Starter.",
+  "objection": "Je ne connais aucune agence qui l'utilise, je n'ai pas lu d'avis, et l'IA et l'assistance sont réservées à l'offre sur devis. Si les données sont bloquées le jour où je veux partir, je perds mes CCTP et mes factures.",
+  "would_change_my_mind": "Des références d'autres petites agences, des avis lisibles, et la preuve que je peux exporter toutes mes données.",
+  "price_too_cheap": 8,
+  "price_cheap": 19,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

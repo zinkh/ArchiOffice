@@ -1,0 +1,13 @@
+{
+  "id": "P019",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "J'ai trois chantiers en cours, mes comptes-rendus le soir, et des outils qui tournent déjà. Je n'ai pas le temps de tout migrer, et on m'en promet beaucoup alors que je n'en utilise que deux.",
+  "objection": "Trop de modules, je ne vois pas lequel est vraiment meilleur que ce que j'ai pour le suivi de chantier et les réserves. Rien ne me montre que ça tient sur un chantier, au téléphone, sans réseau.",
+  "would_change_my_mind": "Un essai sur un de mes vrais chantiers où je rédige un compte-rendu avec les réserves depuis mon téléphone en moins de 15 minutes, sans réseau, et où le PDF sort propre.",
+  "price_too_cheap": 9,
+  "price_cheap": 29,
+  "price_expensive": 79,
+  "price_too_expensive": 150
+}
