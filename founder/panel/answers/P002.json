@@ -1,0 +1,13 @@
+{
+  "id": "P002",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "Mes devis, honoraires et DPGF sont dans Excel et Word depuis des années et ça marche. Je n'ai pas décidé pour la facturation électronique, donc rien ne presse, et je ne vais pas migrer mes affaires en cours sur un outil de plus.",
+  "objection": "Si une facture ou un document légal sort faux de leur logiciel, c'est moi qui paie. Je n'ai aucune preuve que leur Factur-X et leur numérotation sont fiables, et je perds du temps à tout ressaisir.",
+  "would_change_my_mind": "Une obligation de facturation électronique qui me tombe dessus avec une date précise, et un confrère architecte que je connais qui me dit que ça tient la route sur ses vraies factures.",
+  "price_too_cheap": 8,
+  "price_cheap": 15,
+  "price_expensive": 29,
+  "price_too_expensive": 50
+}

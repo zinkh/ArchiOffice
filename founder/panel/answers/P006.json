@@ -1,0 +1,13 @@
+{
+  "id": "P006",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "J'ai entendu parler de la facture électronique mais je n'ai rien décidé, et je ne vais pas migrer mes devis et mes factures vers un outil dont je ne connais aucun utilisateur. Je ne veux pas servir de cobaye pour une obligation légale.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise. Si la facturation est mal conforme, c'est moi qui porte l'erreur, pas l'éditeur.",
+  "would_change_my_mind": "Un témoignage ou une référence d'une agence de ma taille que je peux appeler, ou la preuve que l'outil est immatriculé comme plateforme de facturation électronique.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 59,
+  "price_too_expensive": 99
+}

@@ -1,0 +1,13 @@
+{
+  "id": "P007",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Je testerais volontiers l'essai gratuit, mais je ne paie rien le premier mois : migrer devis, factures et CCTP d'une agence de dix personnes dans un outil dont je ne connais pas la solidité, ça se décide après des semaines d'usage réel, pas sur une annonce.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ? Si l'outil disparaît, mes factures et ma numérotation sont dedans.",
+  "would_change_my_mind": "Une équipe identifiable derrière le produit (pas un architecte seul), un engagement clair sur la pérennité et la réversibilité, et un essai où mes trois vraies affaires tournent bien sur téléphone depuis le chantier.",
+  "price_too_cheap": 15,
+  "price_cheap": 40,
+  "price_expensive": 120,
+  "price_too_expensive": 250
+}

@@ -1,0 +1,13 @@
+{
+  "id": "P008",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "Je testerais volontiers l'essai gratuit, mais de là à payer, non : j'ai des projets en cours avec mes outils et mes tableurs, et je n'ai encore rien décidé pour la facturation électronique. Je ne bascule pas en pleine affaire.",
+  "objection": "Changer d'outil en cours de projets est trop lourd : reprise des projets, contacts, prix, numérotation. Même avec la mise en route accompagnée, je crains de perdre du temps et de me tromper sur ma numérotation de factures.",
+  "would_change_my_mind": "Que l'essai sur mes 3 vraies affaires montre en une heure ou deux que mes projets, contacts et ma numérotation de factures reprennent proprement, et que la facture Factur-X règle mon problème d'obligation sans effort.",
+  "price_too_cheap": 9,
+  "price_cheap": 20,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

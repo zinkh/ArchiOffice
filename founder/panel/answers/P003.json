@@ -1,0 +1,13 @@
+{
+  "id": "P003",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "timing",
+  "reason": "Le prix par palier est correct, mais je n'ai encore rien décidé sur la facturation électronique et mes tableurs fonctionnent. Je ne paie pas un outil de plus tant que je n'y suis pas obligée, et un essai gratuit ne m'engage à rien, donc je peux regarder plus tard.",
+  "objection": "À 3-5 personnes il me faut le palier Pro à 59 €, et je ne vois pas ce que l'IA et l'assistance de l'offre sur devis ajoutent. Je dois migrer mes projets et ma numérotation de factures, et je ne sais pas si ça vaut ce travail pour remplacer des tableurs gratuits.",
+  "would_change_my_mind": "Une date butoir claire sur la facturation électronique qui m'oblige à agir, ou une comparaison chiffrée montrant que l'outil me coûte moins que mes outils actuels une fois les utilisateurs comptés.",
+  "price_too_cheap": 9,
+  "price_cheap": 25,
+  "price_expensive": 55,
+  "price_too_expensive": 90
+}

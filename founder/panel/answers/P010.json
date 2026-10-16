@@ -1,0 +1,13 @@
+{
+  "id": "P010",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "habit",
+  "reason": "J'ai déjà mon outil de gestion et je ne change que pour un gain net que je ne vois pas ici. Le prix n'est pas le problème, c'est le temps de reprise et le risque de tout perturber pour une promesse de 'tout-en-un'.",
+  "objection": "Trop de modules, je n'en utilise que deux, et je ne vois pas lequel est vraiment meilleur que ce que j'ai déjà. Migrer mes projets et ma numérotation de factures en cours d'année me fait peur.",
+  "would_change_my_mind": "Une démonstration concrète que la facturation électronique obligatoire est couverte et que la reprise de mes données se fait sans rien casser, avec une preuve que ça me fait gagner du temps sur mes deux usages principaux.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 45,
+  "price_too_expensive": 80
+}

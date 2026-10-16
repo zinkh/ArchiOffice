@@ -1,0 +1,13 @@
+{
+  "id": "P009",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "Je ne connais aucune agence qui l'utilise et je ne veux pas servir de cobaye. Je ne change pas mes outils sur la foi d'une page : il me faut des références, des avis et une démo avant de m'engager.",
+  "objection": "Aucune référence d'autre agence, aucun avis visible. Le tarif fondateur et les '10 premières agences' me font surtout penser que je serais l'une des premières à essuyer les plâtres, avec mes factures et mes dossiers de chantier en jeu.",
+  "would_change_my_mind": "Deux ou trois agences comparables à la mienne, que je peux appeler, qui l'utilisent depuis plusieurs mois, plus une démo où je vois le suivi de chantier fonctionner sur tablette.",
+  "price_too_cheap": 9,
+  "price_cheap": 25,
+  "price_expensive": 59,
+  "price_too_expensive": 120
+}

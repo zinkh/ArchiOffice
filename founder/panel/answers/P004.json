@@ -1,0 +1,13 @@
+{
+  "id": "P004",
+  "buys": false,
+  "purchases_first_month": 0,
+  "reason_code": "trust",
+  "reason": "J'ai déjà mon outil et mes tableurs qui tournent, et je ne bascule que pour un gain net. Un produit sans aucune agence que je connaisse qui l'utilise, je n'ai pas envie de servir de cobaye avec mes vraies affaires et mes factures.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise. Si ça plante ou si l'éditeur disparaît, je me retrouve avec des factures et des chantiers en cours à ressaisir, et je suis souvent sur chantier avec juste un téléphone, donc je ne sais pas si ça tient sur mobile.",
+  "would_change_my_mind": "Le témoignage d'une agence d'architecture comparable à la mienne que je peux appeler, qui l'utilise depuis plusieurs mois, et une démo sur téléphone qui montre le suivi de chantier et les réserves qui marchent vraiment.",
+  "price_too_cheap": 9,
+  "price_cheap": 19,
+  "price_expensive": 39,
+  "price_too_expensive": 69
+}
