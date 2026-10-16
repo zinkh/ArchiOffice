@@ -1,0 +1,94 @@
+{
+ "n": 20,
+ "seed": 786225,
+ "customer": {
+  "business": "ArchiOffice, logiciel en ligne de gestion pour agences d'architecture, en abonnement mensuel",
+  "target": "Architectes et petites agences d'architecture en France (1 à 15 personnes) qui font aujourd'hui devis, honoraires, CCTP/DPGF, suivi de chantier et factures avec des outils séparés ou des tableurs",
+  "where": "France, achat en ligne, essai gratuit puis abonnement",
+  "age": [
+   30,
+   62
+  ],
+  "segments": [
+   {
+    "name": "Architecte seul ou en micro-structure",
+    "share": 0.45,
+    "income": [
+     28000,
+     60000
+    ]
+   },
+   {
+    "name": "Petite agence (2 à 5 personnes)",
+    "share": 0.4,
+    "income": [
+     45000,
+     90000
+    ]
+   },
+   {
+    "name": "Agence moyenne (6 à 15 personnes)",
+    "share": 0.15,
+    "income": [
+     70000,
+     140000
+    ]
+   }
+  ],
+  "behaviours": [
+   {
+    "name": "Fidèle au tableur",
+    "share": 0.2,
+    "how": "Tient devis, honoraires et DPGF dans Excel et Word depuis des années, ne voit pas pourquoi changer."
+   },
+   {
+    "name": "Déjà équipé d'un outil de gestion",
+    "share": 0.15,
+    "how": "Utilise un logiciel de gestion d'agence ou de temps et ne bascule que pour un gain net."
+   },
+   {
+    "name": "Chantier d'abord",
+    "share": 0.12,
+    "how": "Son besoin urgent est le suivi de chantier et les réserves sur le terrain, le reste est secondaire."
+   },
+   {
+    "name": "Poussé par la facturation électronique",
+    "share": 0.15,
+    "how": "Cherche un outil conforme parce que la loi l'y oblige et veut éviter l'erreur de facture."
+   },
+   {
+    "name": "Chasseur de prix",
+    "share": 0.1,
+    "how": "Compare les abonnements, calcule le coût par utilisateur, privilégie le moins cher."
+   },
+   {
+    "name": "Lit tous les avis",
+    "share": 0.13,
+    "how": "Demande une démo, des références d'autres agences et lit les avis avant de s'engager."
+   },
+   {
+    "name": "Curieux, aime tester",
+    "share": 0.15,
+    "how": "Essaie volontiers un nouvel outil si l'essai est gratuit et rapide."
+   }
+  ],
+  "objections": [
+   "Changer d'outil en cours de projets est trop lourd : reprise des projets, contacts, prix, numérotation",
+   "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye",
+   "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ?",
+   "Une erreur sur une facture ou un document légal me coûte cher, je dois pouvoir faire confiance",
+   "Trop de modules, je n'en utilise que deux, je ne vois pas lequel est vraiment meilleur",
+   "Mes données de clients et de chantiers : où sont-elles hébergées, que se passe-t-il si le service s'arrête ?",
+   "J'ai déjà un outil qui fait l'essentiel, quel est le gain concret ?",
+   "Le prix par palier me convient mais l'IA et l'assistance sont réservées à l'offre sur devis"
+  ],
+  "habits": [
+   "vous avez trois chantiers en cours et des comptes-rendus à rédiger le soir",
+   "vous rédigez vos CCTP et DPGF dans Word et Excel",
+   "vous avez déjà changé d'outil une fois et cela vous a pris un mois",
+   "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé",
+   "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+  ]
+ },
+ "pitch": "ArchiOffice, un logiciel en ligne de gestion pour agences d'architecture françaises, en abonnement mensuel.\nIl couvre les devis, les appels d'offres, les honoraires, les CCTP et DPGF, le suivi de chantier et les réserves, les comptes-rendus et les factures (Factur-X), avec le vocabulaire et les phases de la loi MOP.\nEssai gratuit : 3 projets, 1 utilisateur, 100 Mo. Starter 29 € par mois (10 projets, 2 utilisateurs, 1 Go). Pro 59 € par mois (projets illimités, 10 utilisateurs, 10 Go, toutes les intégrations). Entreprise sur devis (utilisateurs illimités, assistants IA, formation sur site).\nApplication web utilisable sur téléphone et tablette, avec un client de bureau et un mode hors ligne."
+}

@@ -1,0 +1,222 @@
+[
+ {
+  "id": "P001",
+  "name": "Emma",
+  "age": 50,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 80000,
+  "behaviour": "Chasseur de prix",
+  "behaviour_how": "Compare les abonnements, calcule le coût par utilisateur, privilégie le moins cher.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ?",
+  "habit": "vous avez trois chantiers en cours et des comptes-rendus à rédiger le soir"
+ },
+ {
+  "id": "P002",
+  "name": "Nico",
+  "age": 51,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 29000,
+  "behaviour": "Fidèle au tableur",
+  "behaviour_how": "Tient devis, honoraires et DPGF dans Excel et Word depuis des années, ne voit pas pourquoi changer.",
+  "objection": "Une erreur sur une facture ou un document légal me coûte cher, je dois pouvoir faire confiance",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P003",
+  "name": "Clara",
+  "age": 36,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 79000,
+  "behaviour": "Chasseur de prix",
+  "behaviour_how": "Compare les abonnements, calcule le coût par utilisateur, privilégie le moins cher.",
+  "objection": "Le prix par palier me convient mais l'IA et l'assistance sont réservées à l'offre sur devis",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P004",
+  "name": "Jasper",
+  "age": 31,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 36000,
+  "behaviour": "Déjà équipé d'un outil de gestion",
+  "behaviour_how": "Utilise un logiciel de gestion d'agence ou de temps et ne bascule que pour un gain net.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P005",
+  "name": "Rohan",
+  "age": 45,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 59000,
+  "behaviour": "Chantier d'abord",
+  "behaviour_how": "Son besoin urgent est le suivi de chantier et les réserves sur le terrain, le reste est secondaire.",
+  "objection": "Changer d'outil en cours de projets est trop lourd : reprise des projets, contacts, prix, numérotation",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P006",
+  "name": "Lena",
+  "age": 45,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 75000,
+  "behaviour": "Poussé par la facturation électronique",
+  "behaviour_how": "Cherche un outil conforme parce que la loi l'y oblige et veut éviter l'erreur de facture.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P007",
+  "name": "Yara",
+  "age": 37,
+  "segment": "Agence moyenne (6 à 15 personnes)",
+  "income": 120000,
+  "behaviour": "Curieux, aime tester",
+  "behaviour_how": "Essaie volontiers un nouvel outil si l'essai est gratuit et rapide.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ?",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P008",
+  "name": "Selin",
+  "age": 61,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 52000,
+  "behaviour": "Curieux, aime tester",
+  "behaviour_how": "Essaie volontiers un nouvel outil si l'essai est gratuit et rapide.",
+  "objection": "Changer d'outil en cours de projets est trop lourd : reprise des projets, contacts, prix, numérotation",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P009",
+  "name": "Kira",
+  "age": 60,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 71000,
+  "behaviour": "Lit tous les avis",
+  "behaviour_how": "Demande une démo, des références d'autres agences et lit les avis avant de s'engager.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P010",
+  "name": "June",
+  "age": 59,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 50000,
+  "behaviour": "Déjà équipé d'un outil de gestion",
+  "behaviour_how": "Utilise un logiciel de gestion d'agence ou de temps et ne bascule que pour un gain net.",
+  "objection": "Trop de modules, je n'en utilise que deux, je ne vois pas lequel est vraiment meilleur",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P011",
+  "name": "Sana",
+  "age": 45,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 63000,
+  "behaviour": "Fidèle au tableur",
+  "behaviour_how": "Tient devis, honoraires et DPGF dans Excel et Word depuis des années, ne voit pas pourquoi changer.",
+  "objection": "Je ne connais aucune autre agence qui l'utilise, je ne veux pas servir de cobaye",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P012",
+  "name": "Theo",
+  "age": 52,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 34000,
+  "behaviour": "Fidèle au tableur",
+  "behaviour_how": "Tient devis, honoraires et DPGF dans Excel et Word depuis des années, ne voit pas pourquoi changer.",
+  "objection": "Mes données de clients et de chantiers : où sont-elles hébergées, que se passe-t-il si le service s'arrête ?",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P013",
+  "name": "Cole",
+  "age": 31,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 35000,
+  "behaviour": "Fidèle au tableur",
+  "behaviour_how": "Tient devis, honoraires et DPGF dans Excel et Word depuis des années, ne voit pas pourquoi changer.",
+  "objection": "Trop de modules, je n'en utilise que deux, je ne vois pas lequel est vraiment meilleur",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P014",
+  "name": "Elena",
+  "age": 31,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 34000,
+  "behaviour": "Poussé par la facturation électronique",
+  "behaviour_how": "Cherche un outil conforme parce que la loi l'y oblige et veut éviter l'erreur de facture.",
+  "objection": "Trop de modules, je n'en utilise que deux, je ne vois pas lequel est vraiment meilleur",
+  "habit": "vous travaillez parfois depuis le chantier avec seulement un téléphone ou une tablette"
+ },
+ {
+  "id": "P015",
+  "name": "Ezra",
+  "age": 51,
+  "segment": "Petite agence (2 à 5 personnes)",
+  "income": 85000,
+  "behaviour": "Déjà équipé d'un outil de gestion",
+  "behaviour_how": "Utilise un logiciel de gestion d'agence ou de temps et ne bascule que pour un gain net.",
+  "objection": "J'ai déjà un outil qui fait l'essentiel, quel est le gain concret ?",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P016",
+  "name": "Luca",
+  "age": 31,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 37000,
+  "behaviour": "Lit tous les avis",
+  "behaviour_how": "Demande une démo, des références d'autres agences et lit les avis avant de s'engager.",
+  "objection": "Le prix par palier me convient mais l'IA et l'assistance sont réservées à l'offre sur devis",
+  "habit": "vous avez trois chantiers en cours et des comptes-rendus à rédiger le soir"
+ },
+ {
+  "id": "P017",
+  "name": "Iris",
+  "age": 38,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 40000,
+  "behaviour": "Lit tous les avis",
+  "behaviour_how": "Demande une démo, des références d'autres agences et lit les avis avant de s'engager.",
+  "objection": "Trop de modules, je n'en utilise que deux, je ne vois pas lequel est vraiment meilleur",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P018",
+  "name": "Darius",
+  "age": 32,
+  "segment": "Architecte seul ou en micro-structure",
+  "income": 31000,
+  "behaviour": "Curieux, aime tester",
+  "behaviour_how": "Essaie volontiers un nouvel outil si l'essai est gratuit et rapide.",
+  "objection": "Qui maintient ça dans cinq ans si le créateur est occupé par sa propre agence ?",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ },
+ {
+  "id": "P019",
+  "name": "Tariq",
+  "age": 56,
+  "segment": "Agence moyenne (6 à 15 personnes)",
+  "income": 95000,
+  "behaviour": "Chantier d'abord",
+  "behaviour_how": "Son besoin urgent est le suivi de chantier et les réserves sur le terrain, le reste est secondaire.",
+  "objection": "Trop de modules, je n'en utilise que deux, je ne vois pas lequel est vraiment meilleur",
+  "habit": "vous avez trois chantiers en cours et des comptes-rendus à rédiger le soir"
+ },
+ {
+  "id": "P020",
+  "name": "Ethan",
+  "age": 53,
+  "segment": "Agence moyenne (6 à 15 personnes)",
+  "income": 73000,
+  "behaviour": "Poussé par la facturation électronique",
+  "behaviour_how": "Cherche un outil conforme parce que la loi l'y oblige et veut éviter l'erreur de facture.",
+  "objection": "Le prix par palier me convient mais l'IA et l'assistance sont réservées à l'offre sur devis",
+  "habit": "vous avez entendu parler de l'obligation de facturation électronique mais n'avez rien décidé"
+ }
+]
