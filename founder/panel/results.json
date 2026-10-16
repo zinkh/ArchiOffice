@@ -1,0 +1,164 @@
+{
+ "business": "ArchiOffice, logiciel en ligne de gestion pour agences d'architecture, en abonnement mensuel",
+ "seed": 786225,
+ "dealt": 20,
+ "answered": 20,
+ "skipped": [],
+ "buys": 1,
+ "passes": 19,
+ "buy_rate": 0.05,
+ "by_segment": [
+  [
+   "Architecte seul ou en micro-structure",
+   9,
+   0.1111111111111111
+  ],
+  [
+   "Petite agence (2 à 5 personnes)",
+   8,
+   0.0
+  ],
+  [
+   "Agence moyenne (6 à 15 personnes)",
+   3,
+   0.0
+  ]
+ ],
+ "by_behaviour": [
+  [
+   "Poussé par la facturation électronique",
+   3,
+   0.3333333333333333
+  ],
+  [
+   "Chasseur de prix",
+   2,
+   0.0
+  ],
+  [
+   "Fidèle au tableur",
+   4,
+   0.0
+  ],
+  [
+   "Déjà équipé d'un outil de gestion",
+   3,
+   0.0
+  ],
+  [
+   "Chantier d'abord",
+   2,
+   0.0
+  ],
+  [
+   "Curieux, aime tester",
+   3,
+   0.0
+  ],
+  [
+   "Lit tous les avis",
+   3,
+   0.0
+  ]
+ ],
+ "by_income": [
+  [
+   "under $37,000",
+   6,
+   0.16666666666666666
+  ],
+  [
+   "$73,000 and up",
+   7,
+   0.0
+  ],
+  [
+   "$37,000 to $73,000",
+   7,
+   0.0
+  ]
+ ],
+ "why_not": [
+  [
+   "trust",
+   9,
+   [
+    "Le prix est correct, je ne vais pas dire le contraire, mais je ne paie pas un outil qui va porter mes factures et mes DPGF si je ne sais pas qui est derrière. Avec trois chantiers en cours je n'ai pas le temps de tester pour rien : je regarderais l'essai gratuit un soir calme, je ne sortirais pas la carte ce mois-ci.",
+    "J'ai déjà mon outil et mes tableurs qui tournent, et je ne bascule que pour un gain net. Un produit sans aucune agence que je connaisse qui l'utilise, je n'ai pas envie de servir de cobaye avec mes vraies affaires et mes factures."
+   ],
+   [
+    "P001",
+    "P004"
+   ]
+  ],
+  [
+   "habit",
+   7,
+   [
+    "Mes devis, honoraires et DPGF sont dans Excel et Word depuis des années et ça marche. Je n'ai pas décidé pour la facturation électronique, donc rien ne presse, et je ne vais pas migrer mes affaires en cours sur un outil de plus.",
+    "Je m'en sors avec mes tableurs et mes outils actuels, et changer en cours de projets, c'est reprendre mes affaires, mes contacts, mes prix et ma numérotation. Mon besoin urgent, c'est les réserves sur le terrain depuis mon téléphone, et rien ici ne me prouve que c'est fluide sur le chantier."
+   ],
+   [
+    "P002",
+    "P005"
+   ]
+  ],
+  [
+   "timing",
+   2,
+   [
+    "Le prix par palier est correct, mais je n'ai encore rien décidé sur la facturation électronique et mes tableurs fonctionnent. Je ne paie pas un outil de plus tant que je n'y suis pas obligée, et un essai gratuit ne m'engage à rien, donc je peux regarder plus tard.",
+    "J'ai entendu parler de l'obligation de facturation électronique mais je n'ai encore rien décidé, et changer d'outil pour toute une agence de dix personnes ne se fait pas en un mois. Je ne paierai pas avant d'avoir comparé avec ce que mon comptable ou mon outil actuel va proposer."
+   ],
+   [
+    "P003",
+    "P020"
+   ]
+  ],
+  [
+   "need",
+   1,
+   [
+    "Mon besoin, c'est le suivi de chantier et les réserves sur le terrain, et là on me parle de tout un tas de modules dont j'utiliserais deux. Je n'ai pas vu en quoi le chantier est meilleur que ce que j'ai déjà, et changer d'outil avec trois chantiers en cours, non."
+   ],
+   [
+    "P019"
+   ]
+  ]
+ ],
+ "why_yes": [
+  [
+   "need",
+   1,
+   [
+    "La facturation électronique m'oblige à passer à un outil conforme, et 29 € par mois avec essai gratuit et remboursement 30 jours, c'est un risque faible pour éviter une facture non conforme. Je prendrais le Starter, surtout pour les factures."
+   ],
+   [
+    "P014"
+   ]
+  ]
+ ],
+ "flip": [
+  "Voir qui est derrière (une vraie société, pas un architecte seul), plusieurs agences comme la mienne qui l'utilisent depuis plus d'un an, et un export qui se rouvre vraiment dans un tableur, testé pendant l'essai.",
+  "Une obligation de facturation électronique qui me tombe dessus avec une date précise, et un confrère architecte que je connais qui me dit que ça tient la route sur ses vraies factures.",
+  "Une date butoir claire sur la facturation électronique qui m'oblige à agir, ou une comparaison chiffrée montrant que l'outil me coûte moins que mes outils actuels une fois les utilisateurs comptés.",
+  "Le témoignage d'une agence d'architecture comparable à la mienne que je peux appeler, qui l'utilise depuis plusieurs mois, et une démo sur téléphone qui montre le suivi de chantier et les réserves qui marchent vraiment.",
+  "Une démo ou un essai où je saisis des réserves avec photos depuis mon téléphone sur un vrai chantier, même sans réseau, et où ma numérotation de factures et mes contacts sont repris sans que j'aie à les ressaisir.",
+  "Un témoignage ou une référence d'une agence de ma taille que je peux appeler, ou la preuve que l'outil est immatriculé comme plateforme de facturation électronique.",
+  "Une équipe identifiable derrière le produit (pas un architecte seul), un engagement clair sur la pérennité et la réversibilité, et un essai où mes trois vraies affaires tournent bien sur téléphone depuis le chantier.",
+  "Que l'essai sur mes 3 vraies affaires montre en une heure ou deux que mes projets, contacts et ma numérotation de factures reprennent proprement, et que la facture Factur-X règle mon problème d'obligation sans effort.",
+  "Deux ou trois agences comparables à la mienne, que je peux appeler, qui l'utilisent depuis plusieurs mois, plus une démo où je vois le suivi de chantier fonctionner sur tablette.",
+  "Une démonstration concrète que la facturation électronique obligatoire est couverte et que la reprise de mes données se fait sans rien casser, avec une preuve que ça me fait gagner du temps sur mes deux usages principaux.",
+  "Le témoignage ou la référence d'une agence de ma taille que je peux appeler, plus la preuve que je peux importer mes tableurs et DPGF existants et utiliser l'outil sur mon téléphone au chantier.",
+  "Une indication claire de l'hébergement (en France/UE) et de ce qui se passe si le service ferme, plus un essai où je retrouve mes propres fichiers Excel (import de mes devis et DPGF) sans tout ressaisir.",
+  "Un module unique, devis/honoraires ou DPGF, qui reprend mes fichiers Excel tels quels, marche vraiment sur téléphone au chantier, et qui est moins cher que Starter à 29 €.",
+  "Une démonstration sur une de mes vraies affaires qui montre un gain de temps mesurable, ou une obligation de facturation électronique que mon outil actuel ne sait pas traiter.",
+  "Une démo et deux ou trois agences comparables à la mienne, joignables, qui l'utilisent depuis plusieurs mois pour les comptes-rendus de chantier et les factures, avec des avis lisibles.",
+  "Une démo sur mon cas (devis et factures Factur-X), des références de petites agences comparables et des avis indépendants, avec la preuve que la facturation électronique est conforme.",
+  "Une équipe identifiable derrière le produit, avec une feuille de route et une preuve de pérennité (clients réels, ancienneté), et une facture Factur-X que mon comptable ou ma plateforme agréée accepte.",
+  "Une démonstration du suivi de chantier et des réserves sur mon téléphone, sur un de mes vrais chantiers, qui me fait gagner mes soirées de comptes-rendus, avec la possibilité de ne payer que ce module.",
+  "Un prix affiché pour l'offre Entreprise, plus des références d'agences comparables à la mienne et la confirmation que mes factures et ma numérotation sont reprises sans risque d'erreur avant l'échéance légale."
+ ],
+ "purchases_first_month_per_buyer": 1.0,
+ "price_answers": 20
+}
