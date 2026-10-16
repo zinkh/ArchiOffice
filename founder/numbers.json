@@ -1,0 +1,24 @@
+{
+  "business": "ArchiOffice, abonnement mensuel pour agences d'architecture (cas B : avec 1 500 EUR par mois de temps payé)",
+  "unit": "agence abonnée par mois",
+  "price": 38.00,
+  "variable": [
+    {"label": "Frais de paiement carte (1,5 % x 38 + 0,25)", "cost": 0.82},
+    {"label": "Stockage et trafic par agence (estimation)", "cost": 1.00}
+  ],
+  "fixed_monthly": [
+    {"label": "Supabase Pro et calcul (estimation)", "cost": 35},
+    {"label": "Hébergement du serveur (estimation)", "cost": 20},
+    {"label": "Domaine, courriel, outils (estimation)", "cost": 15},
+    {"label": "Expert-comptable (estimation)", "cost": 50},
+    {"label": "Assurance RC pro et cyber (estimation)", "cost": 40},
+    {"label": "Temps payé : support et développement (hypothèse)", "cost": 1500}
+  ],
+  "startup": [
+    {"label": "Démos, salons, publicité de lancement (estimation)", "cost": 2000},
+    {"label": "CGV, RGPD, relecture juridique (estimation)", "cost": 1500}
+  ],
+  "days_per_month": 1,
+  "plan_per_day": 60,
+  "ramp_per_day": [1, 2, 4, 6, 9, 12, 16, 20, 25, 30, 36, 42]
+}
