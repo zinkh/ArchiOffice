@@ -5,6 +5,8 @@ import { apiFetch } from '../lib/api';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
 import { exportWeeklyTimesheetPdf, exportAdminMatrixExcel, exportMonthlySummaryExcel } from '../lib/hrExport';
+import HourlyCostsCard from '../components/HourlyCostsCard';
+import { MISSION_PHASES } from '../lib/profitability';
 import type { TimeEntry, TimeWeeklySummary, TimeTeamSummaryEntry, TimeAdminMatrix, TimeMonthlySummaryEntry, Project } from '../types';
 
 function toISODate(d: Date): string {
@@ -49,9 +51,11 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
   const [teamData, setTeamData] = useState<TimeTeamSummaryEntry[] | null>(null);
   const [now, setNow] = useState(Date.now());
   const [clockProjectId, setClockProjectId] = useState('');
+  const [clockPhase, setClockPhase] = useState('');
+  const [clockBillable, setClockBillable] = useState(true);
   const [manualOpen, setManualOpen] = useState(false);
-  const [manualForm, setManualForm] = useState<{ id?: string; entry_date: string; start: string; end: string; project_id: string; description: string }>(
-    { entry_date: toISODate(new Date()), start: '09:00', end: '17:00', project_id: '', description: '' },
+  const [manualForm, setManualForm] = useState<{ id?: string; entry_date: string; start: string; end: string; project_id: string; description: string; phase: string; billable: boolean }>(
+    { entry_date: toISODate(new Date()), start: '09:00', end: '17:00', project_id: '', description: '', phase: '', billable: true },
   );
   const [matrix, setMatrix] = useState<TimeAdminMatrix | null>(null);
   const [monthValue, setMonthValue] = useState(() => toISODate(new Date()).slice(0, 7));
@@ -106,7 +110,7 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
 
   const handleClockIn = async () => {
     try {
-      await apiFetch('/api/time_entries/clock-in', { method: 'POST', body: JSON.stringify({ project_id: clockProjectId || undefined }) });
+      await apiFetch('/api/time_entries/clock-in', { method: 'POST', body: JSON.stringify({ project_id: clockProjectId || undefined, phase: clockPhase || undefined, billable: clockBillable }) });
       refreshCurrent(); refreshWeek();
     } catch (e: any) { alert(e.message || t('time_tracking_clockin_error')); }
   };
@@ -125,9 +129,10 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
         start: new Date(entry.start_time).toTimeString().slice(0, 5),
         end: entry.end_time ? new Date(entry.end_time).toTimeString().slice(0, 5) : '17:00',
         project_id: entry.project_id || '', description: entry.description || '',
+        phase: entry.phase || '', billable: entry.billable !== false,
       });
     } else {
-      setManualForm({ entry_date: toISODate(new Date()), start: '09:00', end: '17:00', project_id: '', description: '' });
+      setManualForm({ entry_date: toISODate(new Date()), start: '09:00', end: '17:00', project_id: '', description: '', phase: '', billable: true });
     }
     setManualOpen(true);
   };
@@ -135,7 +140,7 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
   const saveManual = async () => {
     const start_time = `${manualForm.entry_date}T${manualForm.start}:00`;
     const end_time = `${manualForm.entry_date}T${manualForm.end}:00`;
-    const payload = { entry_date: manualForm.entry_date, start_time, end_time, project_id: manualForm.project_id || undefined, description: manualForm.description || undefined };
+    const payload = { entry_date: manualForm.entry_date, start_time, end_time, project_id: manualForm.project_id || undefined, description: manualForm.description || undefined, phase: manualForm.phase || null, billable: manualForm.billable };
     try {
       if (manualForm.id) await apiFetch(`/api/time_entries/${manualForm.id}`, { method: 'PUT', body: JSON.stringify(payload) });
       else await apiFetch('/api/time_entries', { method: 'POST', body: JSON.stringify(payload) });
@@ -164,6 +169,18 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
             <option value="">{t('time_tracking_no_project')}</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
+          {!current && (
+            <>
+              <select aria-label={t('time_tracking_phase_label')} className="p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700" value={clockPhase} onChange={e => setClockPhase(e.target.value)}>
+                <option value="">{t('time_tracking_phase_none')}</option>
+                {MISSION_PHASES.map(phase => <option key={phase} value={phase}>{phase}</option>)}
+              </select>
+              <label className="flex shrink-0 items-center gap-1.5 text-sm">
+                <input type="checkbox" checked={clockBillable} onChange={e => setClockBillable(e.target.checked)} />
+                {t('time_tracking_billable')}
+              </label>
+            </>
+          )}
           {current ? (
             <button onClick={handleClockOut} className="flex shrink-0 items-center gap-2 whitespace-nowrap bg-red-600 text-white px-4 py-2 rounded-md font-medium hover:bg-red-700 shadow-sm">
               <IconPlayerStop size={18} /> {t('time_tracking_clock_out')} ({elapsedLabel})
@@ -234,7 +251,7 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
                         <div key={e.id} className="text-xs bg-zinc-50 dark:bg-zinc-900 rounded p-2 flex justify-between items-start gap-1">
                           <div>
                             <div className="font-medium">{new Date(e.start_time).toTimeString().slice(0, 5)} – {e.end_time ? new Date(e.end_time).toTimeString().slice(0, 5) : '…'}</div>
-                            <div className="text-zinc-500">{projectName(e.project_id)}</div>
+                            <div className="text-zinc-500">{projectName(e.project_id)}{e.phase ? ` · ${e.phase}` : ''}{e.billable === false ? ` · ${t('time_tracking_non_billable')}` : ''}</div>
                           </div>
                           <div className="flex gap-1 shrink-0">
                             <button onClick={() => openManual(e)} className="text-zinc-400 hover:text-blue-600"><IconEdit size={13} /></button>
@@ -310,6 +327,8 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
             ) : <p className="text-sm text-zinc-400">{t('loading')}</p>}
           </div>
 
+          <HourlyCostsCard />
+
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 p-4 space-y-3">
             <h3 className="font-bold">{t('time_tracking_monthly_export_title')}</h3>
             <p className="text-xs text-zinc-500">{t('time_tracking_monthly_export_hint')}</p>
@@ -341,6 +360,14 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
                 <option value="">{t('time_tracking_no_project')}</option>
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
+              <select aria-label={t('time_tracking_phase_label')} className="w-full p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700" value={manualForm.phase} onChange={e => setManualForm({ ...manualForm, phase: e.target.value })}>
+                <option value="">{t('time_tracking_phase_none')}</option>
+                {MISSION_PHASES.map(phase => <option key={phase} value={phase}>{phase}</option>)}
+              </select>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={manualForm.billable} onChange={e => setManualForm({ ...manualForm, billable: e.target.checked })} />
+                {t('time_tracking_billable')}
+              </label>
               <input className="w-full p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700" placeholder={t('time_tracking_description_placeholder')} value={manualForm.description} onChange={e => setManualForm({ ...manualForm, description: e.target.value })} />
               <div className="flex justify-end gap-2">
                 <button onClick={() => setManualOpen(false)} className="px-4 py-2 rounded bg-zinc-200 dark:bg-zinc-700">{t('btn_cancel')}</button>
