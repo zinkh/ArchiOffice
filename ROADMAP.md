@@ -22,6 +22,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Internal feed, notifications, direct messaging | ✅ | |
 | Project correspondence: editable drafts, personal signature, filing in the origin mailbox | ✅ | Linking an email to a project files it in a Gmail label / Outlook or IMAP folder `ArchiOffice/<project>` (best effort). Drafts are edited in place in the provider mailbox; there is no stored draft-to-project link, the tab matches drafts by client address and project name/code. |
 | Team management, roles, multi-tenant join requests | ✅ | Roles: `admin`, `manager`, `pm`, `user`. |
+| Time tracking, leave, profitability by phase | 🟡 | Clock-in/out and manual entries with project, **mission phase** and a billable flag; leave requests with manager approval and balances; weekly/monthly HR exports. Admins set a **loaded hourly cost per member** (stored on the cabinet membership), and the HONOS tab shows planned fees vs cost of time per phase (admin and manager only). Not built yet: the workload plan, FEC export and expense reports, see the three entries under Known gaps. |
 | Company qualifications (Qualibat, Qualifelec, RGE...), search for building companies | 🟡 | Per-contact qualifications with validity status, an "expires soon" alert on consulted companies, import of RGE qualifications from the ADEME open data, and a company search (SIRENE directory + RGE badge) from the ACT consultation table. Qualibat itself is **not** queried: see the Qualibat entry under Integrations and the TODO under Known gaps. |
 | Sharing a project with a co-contractor (*cotraitant*) with per-item edit rights | ⏳ | Not built, see "Project sharing with a co-contractor" below. Today a co-contractor can only be listed on the project (`project_cotraitants`) and in the contract; it has no access to the project in the application. |
 | Billing & plan quotas | ✅ | Payment processing via **Stancer** (not Stripe), quota enforcement (`projects`, `users`, `documents`) tied to plan/trial status. |
@@ -195,3 +196,31 @@ Screenshots and a demo GIF are also still on the list — see the TODO in [READM
 ---
 
 Don't see something you expected here, or know of a gap this page is missing? Open an issue or update this file in the same PR as the change that makes it stale.
+
+### Workload plan (*plan de charge*): assignments per collaborator and per week
+
+⏳ Planned. Time tracking only shows hours already worked (`TeamWeekSchedule`); nothing plans the future. Competitors (OOTI, Milient, Architek) all offer it.
+
+- New table of assignments (tenant, user, project, phase, week or date range, planned hours), with the usual `tenant_id` scoping, `assertTenantEntity` checks on `project_id` and membership checks on `user_id`.
+- A view per collaborator and per week: planned hours against capacity, overloads in red, planned vs actually worked hours (from `time_entries`).
+- **Linked to leave already managed**: approved `leave_requests` (and public holidays) reduce a person's weekly capacity, so planning on a week of leave shows the overload instead of hiding it. `leave_requests.business_days` already gives the number of days.
+- Planned hours per phase feed a forecast of the profitability by phase (planned hours x hourly cost vs fees), next to the actual figures that already exist.
+- Out of scope for a first version: drag-and-drop on the Gantt, automatic levelling, skills matching.
+
+### FEC export (*Fichier des Écritures Comptables*)
+
+⏳ Planned. Only the Zoho and Odoo connectors exist today; Sage and Dext (common among French practices) are not connected, and no accounting file can be exported.
+
+- Export of the invoices (and payments) of a fiscal year in the FEC layout required by the tax administration (18 mandatory columns, tab- or pipe-separated, `SIREN` + `FEC` + closing date in the file name).
+- Needs a chart-of-accounts mapping per tenant (client, sales, VAT collected accounts), settings in `/settings`, and a validation pass (balanced entries, sequential numbering, no gap) before download. The sequential invoice numbering in `document_sequences` already guarantees the numbering rule.
+- Frozen invoices (`invoice_accounting_sync.sync_status = 'synced'`) must come out unchanged between two exports of the same year.
+- Follow-up: Sage and Dext import files built on the same journal lines.
+
+### Expense reports (*notes de frais*) and supplier invoices
+
+⏳ Planned, after the FEC export (their entries are what the FEC needs to be complete). No table, route or screen exists.
+
+- Expense report per member: date, amount excl. VAT, VAT, category, receipt (stored through the existing document store), project and phase to charge it to, billable or not, validation circuit modelled on leave requests (`pending`, `approved`, `rejected`).
+- Supplier quotes and invoices attachable to a project and a phase, so they count in the cost side of the profitability by phase.
+- Export of approved expenses for payroll/accounting (Excel in the cabinet charter, then FEC lines).
+

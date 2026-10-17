@@ -10,6 +10,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { listTenantProfiles } from '../tenantMemberships';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { normalizePhase, summarizeTimeByPhase } from '../../src/lib/profitability';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -29,6 +30,33 @@ function sumHours(entries: any[]): number {
   }, 0);
 }
 
+/** Phase et facturable lus dans un corps de requête. `undefined` = champ absent, rien à écrire. */
+function readPhaseAndBillable(body: any): { error?: string; phase?: string | null; billable?: boolean } {
+  const out: { phase?: string | null; billable?: boolean } = {};
+  if (body.phase !== undefined) {
+    if (body.phase === null || body.phase === '') out.phase = null;
+    else {
+      const phase = normalizePhase(body.phase);
+      if (!phase) return { error: 'Phase inconnue.' };
+      out.phase = phase;
+    }
+  }
+  if (body.billable !== undefined) {
+    if (typeof body.billable !== 'boolean') return { error: 'billable doit être un booléen.' };
+    out.billable = body.billable;
+  }
+  return out;
+}
+
+/** Coût horaire (centimes) de chaque membre du cabinet ; vide sur une instance non migrée. */
+async function loadHourlyCosts(supabaseAdmin: any, tenantId: string): Promise<{ costs: Record<string, number | null>; available: boolean }> {
+  const { data, error } = await supabaseAdmin.from('tenant_memberships').select('user_id, hourly_cost_cents').eq('tenant_id', tenantId);
+  if (error) return { costs: {}, available: false };
+  const costs: Record<string, number | null> = {};
+  for (const row of data || []) costs[row.user_id] = row.hourly_cost_cents ?? null;
+  return { costs, available: true };
+}
+
 export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, requireManagerOf, resolveReportIds, isAdmin, requireTenantAdmin }: RouteDeps) {
   app.post("/api/time_entries/clock-in", async (req: any, res: any) => {
     try {
@@ -37,6 +65,8 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
+      const extras = readPhaseAndBillable(req.body);
+      if (extras.error) return res.status(400).json({ error: extras.error });
       const { data: open } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').select('id').eq('user_id', req.user.id).is('end_time', null).maybeSingle();
       if (open) return res.status(409).json({ error: 'Vous êtes déjà pointé(e)' });
       const id = crypto.randomUUID();
@@ -45,6 +75,7 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
         id, user_id: req.user.id, project_id: project_id || null,
         entry_date: now.split('T')[0], start_time: now, description: description || null,
         source: 'clock', created_at: now, updated_at: now,
+        phase: extras.phase ?? null, billable: extras.billable ?? true,
       });
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
@@ -100,12 +131,15 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
+      const extras = readPhaseAndBillable(req.body);
+      if (extras.error) return res.status(400).json({ error: extras.error });
       const id = crypto.randomUUID();
       const now = new Date().toISOString();
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').insert({
         id, user_id: req.user.id, project_id: project_id || null,
         entry_date, start_time, end_time, description: description || null,
         source: 'manual', created_at: now, updated_at: now,
+        phase: extras.phase ?? null, billable: extras.billable ?? true,
       });
       if (error) throw error;
       res.status(201).json({ id });
@@ -123,9 +157,14 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       if (project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
+      const extras = readPhaseAndBillable(req.body);
+      if (extras.error) return res.status(400).json({ error: extras.error });
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries').update({
         entry_date, start_time, end_time: end_time || null, project_id: project_id || null,
         description: description || null, updated_at: new Date().toISOString(),
+        // Un champ absent du corps laisse la valeur enregistrée telle quelle.
+        ...(extras.phase !== undefined ? { phase: extras.phase } : {}),
+        ...(extras.billable !== undefined ? { billable: extras.billable } : {}),
       }).eq('id', id);
       if (error) throw error;
       res.json({ success: true });
@@ -143,6 +182,58 @@ export function registerTimeTrackingRoutes(app: Express, { supabaseAdmin, getTen
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to delete time entry" }); }
+  });
+
+  // ─── Coût horaire et rentabilité par phase ────────────────────────────
+  // Le coût horaire d'un membre est une donnée de gestion : seuls les
+  // administrateurs le lisent et l'écrivent, et il vit sur l'adhésion au
+  // cabinet (jamais sur le profil, qui suit la personne d'un cabinet à l'autre).
+  app.get("/api/hourly-costs", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { costs, available } = await loadHourlyCosts(supabaseAdmin, tenantId);
+      res.json({ available, costs });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to load hourly costs" }); }
+  });
+
+  app.put("/api/hourly-costs/:userId", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { userId } = req.params;
+      const raw = req.body?.hourly_cost_eur;
+      let cents: number | null = null;
+      if (raw !== null && raw !== undefined && raw !== '') {
+        const eur = Number(raw);
+        if (!Number.isFinite(eur) || eur < 0 || eur > 10000) return res.status(400).json({ error: 'Coût horaire invalide (0 à 10 000 €).' });
+        cents = Math.round(eur * 100);
+      }
+      const { data: member } = await supabaseAdmin.from('tenant_memberships').select('user_id').eq('tenant_id', tenantId).eq('user_id', userId).maybeSingle();
+      if (!member) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet.' });
+      const { error } = await supabaseAdmin.from('tenant_memberships').update({ hourly_cost_cents: cents }).eq('tenant_id', tenantId).eq('user_id', userId);
+      if (error) return res.status(503).json({ error: "Coût horaire indisponible : la mise à jour de la base n'est pas appliquée." });
+      res.json({ success: true, hourly_cost_cents: cents });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to save hourly cost" }); }
+  });
+
+  // Heures, temps facturable et coût par phase pour une affaire. Réservé aux
+  // administrateurs et managers : le coût du temps ne se lit pas à tous.
+  app.get("/api/projects/:projectId/time-by-phase", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!(await isAdmin(tenantId, req.user.id)) && (await resolveReportIds(tenantId, req.user.id, false)).length === 0) {
+        return res.status(403).json({ error: "Réservé aux managers et administrateurs" });
+      }
+      const { projectId } = req.params;
+      if (!(await assertTenantEntity(supabaseAdmin, 'projects', projectId, tenantId))) {
+        return res.status(404).json({ error: 'Projet introuvable pour ce cabinet.' });
+      }
+      const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'time_entries')
+        .select('user_id, start_time, end_time, phase, billable').eq('project_id', projectId);
+      if (error) throw error;
+      const { costs, available } = await loadHourlyCosts(supabaseAdmin, tenantId);
+      const { byPhase, unratedUsers } = summarizeTimeByPhase(data || [], costs);
+      res.json({ by_phase: byPhase, unrated_user_ids: unratedUsers, costs_available: available });
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to compute time by phase" }); }
   });
 
   app.get("/api/time_entries/weekly-summary", async (req: any, res: any) => {

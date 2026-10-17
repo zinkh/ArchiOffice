@@ -87,6 +87,8 @@ CREATE TABLE IF NOT EXISTS tenant_memberships (
   is_default  BOOLEAN NOT NULL DEFAULT FALSE,
   -- Adresse d'envoi personnelle dans CE cabinet (migrate_membership_sender_email.sql).
   sender_email TEXT,
+  -- Coût horaire chargé dans CE cabinet, en centimes (migrate_time_phase_cost.sql).
+  hourly_cost_cents INTEGER CHECK (hourly_cost_cents IS NULL OR hourly_cost_cents >= 0),
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   UNIQUE (user_id, tenant_id)
 );
@@ -1158,9 +1160,12 @@ CREATE TABLE IF NOT EXISTS time_entries (
   end_time TEXT,
   description TEXT,
   source TEXT NOT NULL DEFAULT 'clock',
+  phase TEXT,
+  billable BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TEXT,
   updated_at TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_time_entries_tenant_project_phase ON time_entries(tenant_id, project_id, phase);
 CREATE INDEX IF NOT EXISTS idx_time_entries_tenant_user_date ON time_entries(tenant_id, user_id, entry_date);
 CREATE INDEX IF NOT EXISTS idx_time_entries_tenant_project ON time_entries(tenant_id, project_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_time_entries_one_open_per_user

@@ -2100,6 +2100,16 @@ l'envoi du document entier. L'outil n'est qu'un client de `POST /api/projects/:i
   de toute façon le document entier : une colonne `updated_at` (ou une fonction SQL atomique) serait
   la vraie réponse, à décider séparément.
 
+### Temps par phase, coût horaire et rentabilité par phase
+
+`time_entries` porte désormais `phase` (code de la mission : ESQ, APS, APD, PC, PRO, DCE, ACT, VISA, DET, AOR, `NULL` = non imputé) et `billable` (vrai par défaut : tout le temps déjà saisi reste facturable), `supabase/migrate_time_phase_cost.sql`. Le pointage, la saisie manuelle et la modification les acceptent (`readPhaseAndBillable`, `server/routes/timeTracking.ts`) : une phase hors liste est refusée en 400, un champ absent d'un `PUT` laisse la valeur enregistrée.
+
+**Le coût horaire est une donnée de gestion, tenue par cabinet** : `tenant_memberships.hourly_cost_cents` (centimes, `NULL` = non renseigné), jamais sur `profiles` qui suit la personne d'un cabinet à l'autre. `GET /api/hourly-costs` et `PUT /api/hourly-costs/:userId` sont réservés aux administrateurs (saisi en euros, stocké en centimes, membre d'un autre cabinet refusé en 404) ; l'écran est `HourlyCostsCard` dans l'onglet admin du suivi du temps. Une instance non migrée lit `available: false` et refuse l'écriture en 503, sans casser le reste.
+
+`src/lib/profitability.ts` (pur, partagé serveur et écran, `src/lib/__tests__/profitability.test.ts`) fait le calcul : budget d'une phase = honoraires révisés x part de la mission du contrat MOE (`MISSION_ID_TO_PHASE`, déplacé hors de `ProjectDetail.tsx`), coût = heures x coût horaire de chaque membre, marge = budget - coût. `GET /api/projects/:projectId/time-by-phase` (administrateurs et managers seulement : le coût du temps ne se lit pas à tous) renvoie heures, heures facturables et coût par phase, et **la liste des membres ayant saisi du temps sans coût horaire** : l'écran (`ProjectProfitability.tsx`, onglet HONOS) le signale au lieu de présenter une marge flatteuse. Les missions qui ne sont pas une phase (OPC...) n'ont pas de budget ; leur temps se saisit sans phase et apparaît sur une ligne « Sans phase ». Tests : `tests/timePhaseCost.test.ts`.
+
+Pas encore couvert, voir ROADMAP.md : plan de charge prévisionnel (table d'affectations reliée aux congés), export FEC, notes de frais et factures fournisseurs.
+
 ### Intervenants d'une affaire (agents et MCP)
 
 Les intervenants (`project_stakeholders`, liste « Intervenants » de la fiche) ne sont pas une
