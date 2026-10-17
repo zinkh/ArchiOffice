@@ -27,7 +27,7 @@
 // can prompt reconnecting (src/hooks/useMailConnections.ts).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
-import { resolveMailAccount, isFirstMailAccountForUser } from '../mailAccounts';
+import { resolveMailAccount, isFirstMailAccountForUser, MailAccountSaveError } from '../mailAccounts';
 import { outlookAccessTokenCache } from '../mailTokenCache';
 import { getOutlookAccessToken } from '../mailOAuthTokens';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
@@ -154,8 +154,9 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
 
       // Une même adresse Outlook se reconnecte (mise à jour du token) ; une
       // adresse différente devient un compte de plus (server/mailAccounts.ts).
-      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
+      const { data: existing, error: lookupError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
         .select('id').eq('user_id', userId).eq('provider', 'microsoft').eq('external_account_email', email).maybeSingle();
+      if (lookupError) throw new MailAccountSaveError(lookupError.message);
       if (existing) outlookAccessTokenCache.delete(existing.id);
       const row = {
         refresh_token: encryptSecret(tokenData.refresh_token),
@@ -164,23 +165,28 @@ export function registerOutlookSyncRoutes(app: Express, { supabaseAdmin, getTena
         external_account_email: email,
         scopes: OUTLOOK_SCOPE,
       };
+      // Une écriture refusée par la base ne doit jamais revenir à l'écran comme
+      // une connexion réussie : la boîte n'apparaîtrait nulle part, sans explication.
+      let writeError: { message: string } | null = null;
       if (existing) {
-        await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update(row).eq('id', existing.id);
+        ({ error: writeError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update(row).eq('id', existing.id));
       } else {
         const isFirst = await isFirstMailAccountForUser(supabaseAdmin, tenantId, userId);
-        await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').insert({
+        ({ error: writeError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').insert({
           id: crypto.randomUUID(),
           user_id: userId,
           provider: 'microsoft',
           auth_type: 'oauth',
           is_default: isFirst,
           ...row,
-        });
+        }));
       }
+      if (writeError) throw new MailAccountSaveError(writeError.message);
       res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}outlook_connected=1`);
     } catch (error: any) {
       console.error('[Outlook callback error]', error.message);
-      res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}outlook_error=1`);
+      const reason = error instanceof MailAccountSaveError ? 'save' : '1';
+      res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}outlook_error=${reason}`);
     }
   });
 

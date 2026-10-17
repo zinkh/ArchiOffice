@@ -28,4 +28,13 @@ describe('renommer la catégorie d\'une rubrique de CR', () => {
     expect(res.status).toBe(400);
     expect(fakeSupabaseAdmin.getTable('site_report_notes').find(n => n.id === 'n2')?.category).toBe('Sécurité');
   });
+
+  it('enregistre la date d\'une rubrique', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('site_report_notes', [{ id: 'n3', tenant_id: tenantId, report_id: 'r1', category: 'Sécurité', issue_date: '2026-10-01', text: '', status: 'open' }]);
+    const res = await request(app).put('/api/notes/n3').set(authHeader(token)).send({ issue_date: '2026-10-15' });
+    expect(res.status).toBe(200);
+    expect(fakeSupabaseAdmin.getTable('site_report_notes').find(n => n.id === 'n3')?.issue_date).toBe('2026-10-15');
+  });
 });

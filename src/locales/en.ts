@@ -2988,6 +2988,7 @@ export default {
       "correspondence_connect_imap_password_hint": "Use an app-specific password if your provider offers one, rather than your main password.",
       "correspondence_connect_imap_submit": "Connect",
       "correspondence_connect_imap_error": "Connection failed.",
+      "mail_account_save_error": "The mailbox was authorized but could not be saved. Try again; if the problem persists, contact support.",
       "correspondence_connected_as": "Connected as {{email}}",
       "correspondence_disconnect": "Disconnect",
       "correspondence_search": "Search",
