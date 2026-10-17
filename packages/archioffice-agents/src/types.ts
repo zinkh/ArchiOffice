@@ -170,6 +170,14 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     // assignee_id.
     defaults: { status: 'todo', priority: 'normal', start_date: '@today', end_date: '@today+14' },
     fields: 'title*, description, start_date (défaut : aujourd\'hui), end_date (défaut : dans 14 jours), due_date, project_id (laisser vide pour une tâche interne au cabinet), status (todo/in_progress/review/done), priority (low/normal/high/urgent), assignee_id (identifiant d\'un membre de l\'équipe)' },
+  { key: 'phone_calls', label: 'Appels téléphoniques', basePath: '/api/phone-calls', create: true, update: true, delete: true, list: true, identityField: 'subject',
+    knownFields: ['subject', 'direction', 'called_at', 'duration_minutes', 'caller_name', 'caller_company', 'caller_phone', 'caller_email', 'contact_id', 'project_id', 'notes', 'assignee_id', 'status', 'priority', 'callback_due'],
+    required: ['subject'],
+    enums: { direction: ['entrant', 'sortant'], status: ['a_traiter', 'en_cours', 'traite'], priority: ['low', 'normal', 'high', 'urgent'] },
+    // called_at est posé par le serveur (maintenant) quand il manque ; l'agent
+    // ne doit pas l'inventer. Le PUT de la route est partiel : pas de mergeOnUpdate.
+    defaults: { direction: 'entrant', status: 'a_traiter', priority: 'normal' },
+    fields: 'subject* (objet de l\'appel), direction (entrant/sortant), called_at (date et heure ISO, défaut : maintenant), duration_minutes, caller_name, caller_company, caller_phone, caller_email, contact_id, project_id (laisser vide si aucune affaire), notes, assignee_id (identifiant d\'un membre de l\'équipe à qui attribuer l\'appel : il est prévenu), status (a_traiter/en_cours/traite), priority (low/normal/high/urgent), callback_due (YYYY-MM-DD, rappel souhaité)' },
   { key: 'milestones', label: 'Jalons', basePath: '/api/milestones', create: true, update: true, delete: true, list: true, mergeOnUpdate: true, identityField: 'title',
     knownFields: ['title', 'due_date', 'project_id', 'status'],
     required: ['title', 'due_date'],
@@ -277,7 +285,7 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
 // le template reste la source, cette table n'intervient que s'il arrive vide,
 // cas d'une base où la migration de backfill n'a pas encore tourné.
 export const AGENT_DEFAULT_ACTION_SCOPES: Record<string, string[]> = {
-  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits', 'tenders'],
+  'secretaire':          ['contacts', 'meetings', 'tasks', 'milestones', 'projects', 'permits', 'tenders', 'phone_calls'],
   'charge-projet':       ['projects', 'tasks', 'milestones', 'meetings', 'contacts', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'permits', 'tenders', 'rfis', 'avenants_moe'],
   'pilote-chantier':     ['meetings', 'tasks', 'ordres_de_service', 'visas', 'receptions', 'reserves', 'gpa_reserves', 'rfis', 'marches_entreprises'],
   'economiste':          ['proposals', 'marches_entreprises', 'notes_honoraires', 'articles_type'],

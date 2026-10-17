@@ -74,6 +74,7 @@ const Notifications = lazy(() => import('./pages/Notifications'));
 const Profile = lazy(() => import('./pages/Profile'));
 const Messages = lazy(() => import('./pages/Messages'));
 const Reunions = lazy(() => import('./pages/Reunions'));
+const PhoneCalls = lazy(() => import('./pages/PhoneCalls'));
 const OrdresDeService = lazy(() => import('./pages/OrdresDeService'));
 const Contrats = lazy(() => import('./pages/Contrats'));
 const GoogleAuthCallback = lazy(() => import('./pages/GoogleAuthCallback'));
@@ -852,6 +853,7 @@ export default function App() {
               <Route path="/profile/:userId" element={<Profile />} />
               <Route path="/messages" element={<Messages />} />
               <Route path="/reunions" element={<Reunions />} />
+              <Route path="/appels" element={<PhoneCalls />} />
               <Route path="/ordres-de-service" element={<OrdresDeService />} />
               <Route path="/contrats" element={<Contrats />} />
               <Route path="/document_templates" element={<DocumentTemplates />} />
