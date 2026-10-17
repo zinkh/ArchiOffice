@@ -115,6 +115,24 @@ export function emptyPhoneCallDraft(now: Date, defaults: Partial<PhoneCall> = {}
   };
 }
 
+/**
+ * Lien `tel:` pour lancer l'appel d'un téléphone, ou `null` quand la saisie ne
+ * ressemble pas à un numéro. Le numéro est saisi librement (« 06 84 01 66 33 »,
+ * « 03.83.00.00.00 », « +33 (0)6 84... ») : seuls les chiffres et un « + »
+ * initial sont gardés, les espaces, points, tirets et parenthèses faisant
+ * échouer certains composeurs. « 00 » devant l'indicatif vaut « + ».
+ */
+export function telHref(phone: string | null | undefined): string | null {
+  if (!phone) return null;
+  // « +33 (0)6 84... » : le 0 entre parenthèses est le préfixe national, à ne pas composer.
+  const trimmed = phone.trim().replace(/\(0\)/g, '');
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length < 3) return null;
+  if (trimmed.startsWith('+')) return `tel:+${digits}`;
+  if (digits.startsWith('00')) return `tel:+${digits.slice(2)}`;
+  return `tel:${digits}`;
+}
+
 /** `datetime-local` attend l'heure LOCALE sans fuseau : toISOString() la décalerait. */
 export function toLocalInputValue(iso: string | undefined): string {
   const date = iso ? new Date(iso) : new Date();

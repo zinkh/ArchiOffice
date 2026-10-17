@@ -2255,6 +2255,7 @@ export default {
       "phonecalls_task_pending": "Task kept on this device, waiting to be sent.",
       "phonecalls_task_queued": "Task kept on this device, it will be created when the network is back.",
       "phonecalls_assign_to": "Assign to",
+      "phonecalls_dial": "Call {{phone}}",
       "phonecalls_unassigned": "Unassigned",
       "phonecalls_save_error": "Failed to save the call.",
       "phonecalls_delete_confirm": "Delete this call?",

@@ -3,7 +3,7 @@ import type { PendingWrite } from '../../db';
 import type { PhoneCall } from '../../types';
 import {
   DEFAULT_PHONE_CALL_FILTERS, filterPhoneCalls, fromLocalInputValue, isCallbackOverdue,
-  overlayPendingPhoneCalls, sortPhoneCalls, summarizeForAssignee, toLocalInputValue,
+  overlayPendingPhoneCalls, sortPhoneCalls, summarizeForAssignee, telHref, toLocalInputValue,
 } from '../phoneCalls';
 
 const call = (over: Partial<PhoneCall> = {}): PhoneCall => ({
@@ -97,6 +97,26 @@ describe('overlayPendingPhoneCalls', () => {
   });
   it('ignore les écritures d\'une autre entité', () => {
     expect(overlayPendingPhoneCalls([], [write({ entity: 'meeting', jsonBody: { id: 'm', subject: 'x' } })])).toEqual([]);
+  });
+});
+
+describe('telHref', () => {
+  it('ne garde que les chiffres d\'un numéro saisi librement', () => {
+    expect(telHref('06 84 01 66 33')).toBe('tel:0684016633');
+    expect(telHref('03.83.00.00.00')).toBe('tel:0383000000');
+    expect(telHref(' 03-83-00-00-00 ')).toBe('tel:0383000000');
+  });
+  it('conserve l\'indicatif international et retire le 0 entre parenthèses', () => {
+    expect(telHref('+33 6 84 01 66 33')).toBe('tel:+33684016633');
+    expect(telHref('+33 (0)6 84 01 66 33')).toBe('tel:+33684016633');
+    expect(telHref('0033 6 84 01 66 33')).toBe('tel:+33684016633');
+  });
+  it('rend null pour une saisie qui n\'est pas un numéro', () => {
+    expect(telHref(null)).toBeNull();
+    expect(telHref(undefined)).toBeNull();
+    expect(telHref('')).toBeNull();
+    expect(telHref('à rappeler')).toBeNull();
+    expect(telHref('12')).toBeNull();
   });
 });
 
