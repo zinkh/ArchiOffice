@@ -215,14 +215,16 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
     try {
       const tenantId = await getTenantId(req.user.id);
       const { noteId } = req.params;
-      const { category, responsible_company, text, status, due_date, realization_date } = req.body;
+      const { category, responsible_company, text, status, issue_date, due_date, realization_date } = req.body;
       if (category !== undefined && (typeof category !== 'string' || !category.trim())) {
         return res.status(400).json({ error: "Le nom de la rubrique ne peut pas être vide" });
       }
       // Seuls les champs fournis sont écrits : renommer une rubrique n'envoie que `category`.
       const patch = Object.fromEntries(Object.entries({
         category: typeof category === 'string' ? category.trim() : category,
-        responsible_company, text, status, due_date, realization_date,
+        // La ligne d'une rubrique enregistre sa date à la sortie du champ : sans
+        // issue_date ici, chaque modification de date répondait 400 « Rien à modifier ».
+        responsible_company, text, status, issue_date, due_date, realization_date,
       }).filter(([, v]) => v !== undefined));
       if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
       const { error } = await supabaseAdmin.from('site_report_notes').update(patch).eq('id', noteId).eq('tenant_id', tenantId);
