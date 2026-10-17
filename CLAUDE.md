@@ -1300,6 +1300,13 @@ priorités des tâches).
   `overlayPendingPhoneCalls` (`src/lib/phoneCalls.ts`, testé) rejoue la file par-dessus la liste lue,
   sans quoi une relecture ferait disparaître un appel saisi avant son envoi.
 - **Instance non migrée** : la lecture rend une liste vide, l'écriture un 503 explicite.
+- **Lancer l'appel depuis l'écran** : une icône verte (lien `tel:`, 44 px) ouvre le composeur du
+  téléphone, dans la liste des appels et à côté du champ téléphone de la fiche, **sous 768 px
+  seulement** (`md:hidden` : un lien `tel:` n'ouvre rien d'utile sur un poste de bureau).
+  `telHref()` (`src/lib/phoneCalls.ts`, testé) ne garde que les chiffres et un « + » initial, lit
+  « 00 » comme « + », retire le « (0) » de « +33 (0)6... » et rend `null` en dessous de 3 chiffres
+  (pas d'icône pour « à rappeler »). Composer ne crée ni ne modifie rien : l'appel sortant se note
+  par « Nouvel appel » (sens « sortant »).
 - **Où le retrouver** : menu Outils, volet « Plan d'actions » de la fiche affaire (bouton « Appel »,
   `/appels?new=1&project=<id>`), liste `LinkedPhoneCalls` de l'onglet Correspondance, carte « Appels à
   traiter » de `OperationalKpis` (les appels de la personne connectée, quel que soit le périmètre du

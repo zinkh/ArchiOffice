@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { AnimatePresence } from 'motion/react';
 import {
   IconPhone, IconPhoneIncoming, IconPhoneOutgoing, IconPlus, IconSearch, IconFileTypePdf,
-  IconFileSpreadsheet, IconLoader2, IconAlertTriangle, IconChecklist,
+  IconFileSpreadsheet, IconLoader2, IconAlertTriangle, IconChecklist, IconPhoneCall,
 } from '@tabler/icons-react';
 import { useUser } from '../UserContext';
 import { usePhoneCalls } from '../hooks/usePhoneCalls';
@@ -17,7 +17,7 @@ import { ErrorState, ListSkeleton } from '../components/DataState';
 import { PhoneCallFormModal } from '../components/phoneCalls/PhoneCallFormModal';
 import {
   DEFAULT_PHONE_CALL_FILTERS, emptyPhoneCallDraft, filterPhoneCalls, isCallbackOverdue,
-  summarizeForAssignee,
+  summarizeForAssignee, telHref,
 } from '../lib/phoneCalls';
 import { PHONE_CALL_STATUSES } from '../schemas/phoneCall.schema';
 import type { Contact, PhoneCall, Project } from '../types';
@@ -255,6 +255,7 @@ export default function PhoneCalls() {
               const style = STATUS_STYLE[call.status];
               const who = [call.caller_name, call.caller_company].filter(Boolean).join(' · ');
               const DirectionIcon = call.direction === 'sortant' ? IconPhoneOutgoing : IconPhoneIncoming;
+              const dialHref = telHref(call.caller_phone);
               return (
                 <li key={call.id} className="rounded-lg border flex flex-col md:flex-row md:items-center gap-2 md:gap-4 p-3" style={{ background: 'var(--tblr-surface)', borderColor: overdue ? '#ffa8a8' : 'var(--tblr-border)' }}>
                   <button type="button" onClick={() => setModal(call)} className="flex items-start gap-3 text-left flex-1 min-w-0 rounded focus-visible:outline focus-visible:outline-2" style={{ color: 'var(--tblr-text)' }}>
@@ -272,6 +273,17 @@ export default function PhoneCalls() {
                   </button>
 
                   <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                    {dialHref && (
+                      // Lance le composeur du téléphone ; masqué dès 768 px, où un lien tel: n'ouvre rien d'utile.
+                      <a
+                        href={dialHref}
+                        aria-label={t('phonecalls_dial', { phone: call.caller_phone }) as string}
+                        className="md:hidden flex items-center justify-center w-11 h-11 rounded-full border transition-colors active:bg-[var(--tblr-surface-2)]"
+                        style={{ borderColor: 'var(--tblr-success)', color: 'var(--tblr-success)', background: '#ebfbee' }}
+                      >
+                        <IconPhoneCall size={20} />
+                      </a>
+                    )}
                     {call.callback_due && (
                       <span className="flex items-center gap-1 text-[0.6875rem] font-medium px-2 py-1 rounded" style={{ color: overdue ? '#c92a2a' : 'var(--tblr-muted)', background: overdue ? '#fff5f5' : 'var(--tblr-surface-2)' }}>
                         {overdue && <IconAlertTriangle size={12} />}

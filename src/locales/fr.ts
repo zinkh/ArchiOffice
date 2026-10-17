@@ -2399,6 +2399,7 @@ export default {
       "phonecalls_task_pending": "Tâche gardée sur cet appareil, en attente d'envoi.",
       "phonecalls_task_queued": "Tâche gardée sur cet appareil, elle sera créée au retour du réseau.",
       "phonecalls_assign_to": "Attribuer à",
+      "phonecalls_dial": "Appeler le {{phone}}",
       "phonecalls_unassigned": "Non attribué",
       "phonecalls_save_error": "Échec de l'enregistrement de l'appel.",
       "phonecalls_delete_confirm": "Supprimer cet appel ?",

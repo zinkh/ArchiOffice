@@ -2,11 +2,11 @@ import { useId, useState, type FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { IconX, IconAlertTriangle, IconLoader2, IconTrash, IconChecklist, IconExternalLink } from '@tabler/icons-react';
+import { IconX, IconAlertTriangle, IconLoader2, IconTrash, IconChecklist, IconExternalLink, IconPhoneCall } from '@tabler/icons-react';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { ContactAutocomplete } from '../ContactAutocomplete';
 import { PHONE_CALL_DIRECTIONS, PHONE_CALL_STATUSES, PHONE_CALL_PRIORITIES } from '../../schemas/phoneCall.schema';
-import { fromLocalInputValue, toLocalInputValue } from '../../lib/phoneCalls';
+import { fromLocalInputValue, telHref, toLocalInputValue } from '../../lib/phoneCalls';
 import type { Contact, PhoneCall, Project, TeamMember } from '../../types';
 
 export interface PhoneCallFormModalProps {
@@ -59,6 +59,7 @@ export function PhoneCallFormModal({ initial, projects, team, contacts, onClose,
 
   const id = (name: string) => `${uid}-${name}`;
   const online = typeof navigator === 'undefined' || navigator.onLine;
+  const dialHref = telHref(callerPhone);
 
   // Choisir une fiche contact préremplit l'identité de l'interlocuteur, sans
   // jamais écraser ce que la personne vient de saisir.
@@ -179,7 +180,20 @@ export function PhoneCallFormModal({ initial, projects, team, contacts, onClose,
             </div>
             <div>
               <label htmlFor={id('caller-phone')} className={labelCls} style={labelStyle}>{t('phonecalls_field_caller_phone')}</label>
-              <input id={id('caller-phone')} type="tel" value={callerPhone} onChange={e => setCallerPhone(e.target.value)} className={inputCls} style={inputStyle} />
+              <div className="flex items-center gap-2">
+                <input id={id('caller-phone')} type="tel" value={callerPhone} onChange={e => setCallerPhone(e.target.value)} className={inputCls} style={inputStyle} />
+                {dialHref && (
+                  // Lance le composeur du téléphone ; masqué dès 768 px, où un lien tel: n'ouvre rien d'utile.
+                  <a
+                    href={dialHref}
+                    aria-label={t('phonecalls_dial', { phone: callerPhone }) as string}
+                    className="md:hidden shrink-0 flex items-center justify-center w-11 h-11 rounded-full border transition-colors active:bg-[var(--tblr-surface-2)]"
+                    style={{ borderColor: 'var(--tblr-success)', color: 'var(--tblr-success)', background: '#ebfbee' }}
+                  >
+                    <IconPhoneCall size={20} />
+                  </a>
+                )}
+              </div>
             </div>
             <div>
               <label htmlFor={id('caller-email')} className={labelCls} style={labelStyle}>{t('phonecalls_field_caller_email')}</label>
