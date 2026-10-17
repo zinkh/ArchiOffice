@@ -78,6 +78,7 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
     { leave_type: 'conges_payes', motif: '', start_date: '', end_date: '', reason: '' },
   );
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Admin balances panel state: userId -> { conges_payes, rtt }
   const [balanceEdits, setBalanceEdits] = useState<Record<string, { conges_payes?: number; rtt?: number }>>({});
@@ -104,8 +105,11 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
   const previewDays = businessDaysBetween(form.start_date, form.end_date);
 
   const submitRequest = async () => {
+    if (submitting) return;
     setSubmitError(null);
     if (!form.start_date || !form.end_date) { setSubmitError(t('leave_missing_dates')); return; }
+    if (form.end_date < form.start_date) { setSubmitError(t('leave_invalid_dates')); return; }
+    setSubmitting(true);
     try {
       await apiFetch('/api/leave_requests', {
         method: 'POST',
@@ -118,6 +122,7 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
       setForm({ leave_type: 'conges_payes', motif: '', start_date: '', end_date: '', reason: '' });
       refreshMine();
     } catch (e: any) { setSubmitError(e.message || t('leave_submit_error')); }
+    finally { setSubmitting(false); }
   };
 
   const cancelRequest = async (id: string) => {
@@ -180,8 +185,8 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
                   {MOTIF_OPTIONS.map(m => <option key={m.value} value={m.value}>{m.label} ({m.days}j)</option>)}
                 </select>
               )}
-              <input type="date" className="p-2 border rounded dark:bg-zinc-900 dark:border-zinc-700" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
-              <input type="date" className="p-2 border rounded dark:bg-zinc-900 dark:border-zinc-700" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
+              <input type="date" aria-label={t('leave_start_date')} className="p-2 border rounded dark:bg-zinc-900 dark:border-zinc-700" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} />
+              <input type="date" aria-label={t('leave_end_date')} min={form.start_date || undefined} className="p-2 border rounded dark:bg-zinc-900 dark:border-zinc-700" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} />
               <input className="p-2 border rounded md:col-span-2 dark:bg-zinc-900 dark:border-zinc-700" placeholder={t('leave_reason_placeholder')} value={form.reason} onChange={e => setForm({ ...form, reason: e.target.value })} />
             </div>
             {form.start_date && form.end_date && (
@@ -189,7 +194,7 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
             )}
             <p className="text-xs text-zinc-400">{t('leave_counting_note')}</p>
             {submitError && <p className="text-red-600 text-sm">{submitError}</p>}
-            <button onClick={submitRequest} className="px-4 py-2 rounded bg-blue-600 text-white font-medium">{t('leave_submit')}</button>
+            <button onClick={submitRequest} disabled={submitting} aria-busy={submitting} className="px-4 py-2 rounded bg-blue-600 text-white font-medium disabled:opacity-60 disabled:cursor-wait">{t('leave_submit')}</button>
           </div>
 
           <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">

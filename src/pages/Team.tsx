@@ -205,7 +205,7 @@ export default function Team() {
   else body = <TeamMembers {...viewProps} />;
 
   return (
-    <div className={cn('mx-auto max-w-[88rem] space-y-5', notice ? 'pb-28' : 'pb-10')}>
+    <div className={cn('mx-auto max-w-[88rem] space-y-5', notice ? 'pb-36 md:pb-28' : 'pb-28 md:pb-10')}>
       <TeamHeader
         headcount={team.length}
         admins={team.filter((m) => m.system_role === 'admin').length}
