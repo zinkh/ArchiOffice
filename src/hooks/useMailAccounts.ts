@@ -73,7 +73,8 @@ export function useMailAccounts() {
       load();
       window.history.replaceState({}, '', window.location.pathname);
     } else if (params.has('gmail_error') || params.has('outlook_error')) {
-      setError(t('correspondence_connect_imap_error') as string);
+      const reason = params.get('gmail_error') || params.get('outlook_error');
+      setError(t(reason === 'save' ? 'mail_account_save_error' : 'correspondence_connect_imap_error') as string);
       window.history.replaceState({}, '', window.location.pathname);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

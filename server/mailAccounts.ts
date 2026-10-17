@@ -103,3 +103,11 @@ export async function setDefaultMailAccount(supabaseAdmin: any, tenantId: string
   await table().update({ is_default: true }).eq('id', accountId);
   return true;
 }
+
+/** Google ou Microsoft a autorisé la boîte, mais la base a refusé de l'enregistrer. */
+export class MailAccountSaveError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MailAccountSaveError';
+  }
+}

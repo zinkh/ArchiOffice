@@ -3132,6 +3132,7 @@ export default {
       "correspondence_connect_imap_password_hint": "Utilisez si possible un mot de passe d'application dédié plutôt que votre mot de passe principal.",
       "correspondence_connect_imap_submit": "Se connecter",
       "correspondence_connect_imap_error": "Échec de la connexion.",
+      "mail_account_save_error": "La boîte a été autorisée, mais n'a pas pu être enregistrée. Réessayez ; si le problème persiste, contactez le support.",
       "correspondence_connected_as": "Connecté en tant que {{email}}",
       "correspondence_disconnect": "Déconnecter",
       "correspondence_search": "Rechercher",

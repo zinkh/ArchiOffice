@@ -24,7 +24,7 @@
 import type { Express } from 'express';
 import MailComposer from 'nodemailer/lib/mail-composer';
 import { tenantScopedFrom } from '../tenantScopedFrom';
-import { resolveMailAccount, isFirstMailAccountForUser } from '../mailAccounts';
+import { resolveMailAccount, isFirstMailAccountForUser, MailAccountSaveError } from '../mailAccounts';
 import { gmailAccessTokenCache } from '../mailTokenCache';
 import { getGmailAccessToken } from '../mailOAuthTokens';
 import { createOAuthState, consumeOAuthState } from '../oauthState';
@@ -145,8 +145,9 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
       // Une même adresse Gmail se reconnecte (mise à jour du token) ; une
       // adresse différente devient un compte de plus — c'est tout le point
       // du multi-comptes (server/mailAccounts.ts).
-      const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
+      const { data: existing, error: lookupError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
         .select('id').eq('user_id', userId).eq('provider', 'google').eq('external_account_email', email).maybeSingle();
+      if (lookupError) throw new MailAccountSaveError(lookupError.message);
       if (existing) gmailAccessTokenCache.delete(existing.id);
       const row = {
         refresh_token: encryptSecret(tokenData.refresh_token),
@@ -155,23 +156,28 @@ export function registerGmailSyncRoutes(app: Express, { supabaseAdmin, getTenant
         external_account_email: email,
         scopes: GMAIL_SCOPE,
       };
+      // Une écriture refusée par la base ne doit jamais revenir à l'écran comme
+      // une connexion réussie : la boîte n'apparaîtrait nulle part, sans explication.
+      let writeError: { message: string } | null = null;
       if (existing) {
-        await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update(row).eq('id', existing.id);
+        ({ error: writeError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').update(row).eq('id', existing.id));
       } else {
         const isFirst = await isFirstMailAccountForUser(supabaseAdmin, tenantId, userId);
-        await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').insert({
+        ({ error: writeError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections').insert({
           id: crypto.randomUUID(),
           user_id: userId,
           provider: 'google',
           auth_type: 'oauth',
           is_default: isFirst,
           ...row,
-        });
+        }));
       }
+      if (writeError) throw new MailAccountSaveError(writeError.message);
       res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}gmail_connected=1`);
     } catch (error: any) {
       console.error('[Gmail callback error]', error.message);
-      res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}gmail_error=1`);
+      const reason = error instanceof MailAccountSaveError ? 'save' : '1';
+      res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}gmail_error=${reason}`);
     }
   });
 
