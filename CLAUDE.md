@@ -1285,10 +1285,15 @@ priorités des tâches).
 - **Notification** (`notifyUsers`, catégorie « Tâches », lien `/appels?open=<id>`) à l'attribution et à
   chaque CHANGEMENT d'assigné, jamais à une modification de statut ou de note, ni quand on s'attribue
   l'appel à soi-même.
-- **« Créer une tâche »** (`POST /:id/task`, réseau obligatoire) : tâche du même assigné, de la même
-  priorité, rattachée à la même affaire, échéance = rappel souhaité ; l'appel garde le lien
-  (`task_id`) et passe de « à traiter » à « en cours ». Rejouable : un appel qui a déjà sa tâche rend
-  celle-ci (`already_exists`), jamais une seconde.
+- **« Créer une tâche »** (`POST /:id/task`) : tâche du même assigné, de la même priorité, rattachée
+  à la même affaire, échéance = rappel souhaité ; l'appel garde le lien (`task_id`) et passe de
+  « à traiter » à « en cours ». Rejouable : un appel qui a déjà sa tâche rend celle-ci
+  (`already_exists`), jamais une seconde. **Possible hors ligne** : l'appareil génère l'identifiant de
+  la tâche (`task_id` du corps, `^[A-Za-z0-9_-]{8,64}$`) et met la demande en file (id de file
+  `task:<appel>`) ; l'appel affiche tout de suite sa tâche « en attente d'envoi »
+  (`overlayPendingPhoneCalls`). Au rejeu, le serveur reprend une tâche de ce `task_id` déjà insérée
+  (coupure avant le lien posé sur l'appel) au lieu d'en créer une autre. Les dates de la tâche sont
+  celles du jour du rejeu.
 - **Hors ligne** : lecture « cache d'abord » (`phoneCallsCache`, Dexie v10) et écritures par la file
   (`entity: 'phoneCall'`). L'id de l'appel est généré par l'appareil et `POST` est idempotent (200 au
   rejeu). Chaque modification a son propre id de file (deux changements successifs ne s'écrasent pas) ;

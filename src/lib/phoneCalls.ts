@@ -65,6 +65,7 @@ export function summarizeForAssignee(calls: PhoneCall[], assigneeId: string, tod
 }
 
 const PENDING_ENTITY: PendingWrite['entity'] = 'phoneCall';
+const TASK_URL = /\/api\/phone-calls\/([^/]+)\/task$/;
 
 /**
  * Les écritures du journal encore en file (hors ligne), rejouées par-dessus la
@@ -79,7 +80,17 @@ export function overlayPendingPhoneCalls(calls: PhoneCall[], pending: PendingWri
     .filter(w => w.entity === PENDING_ENTITY && w.kind === 'json')
     .sort((a, b) => a.createdAt - b.createdAt);
   for (const write of ordered) {
-    const body = (write.jsonBody || {}) as Partial<PhoneCall>;
+    const body = (write.jsonBody || {}) as Partial<PhoneCall> & { task_id?: string };
+    // Demande de tâche en attente (POST /api/phone-calls/:id/task) : l'appel
+    // montre déjà sa tâche et passe en cours, comme le fera le serveur.
+    const taskLink = write.method === 'POST' ? TASK_URL.exec(write.url) : null;
+    if (taskLink) {
+      const callId = decodeURIComponent(taskLink[1]);
+      result = result.map(c => (c.id === callId && !c.task_id
+        ? { ...c, task_id: body.task_id || null, status: c.status === 'a_traiter' ? 'en_cours' : c.status, pendingSync: true }
+        : c));
+      continue;
+    }
     const targetId = write.method === 'POST' ? body.id : write.url.split('/').pop();
     if (!targetId) continue;
     if (write.method === 'POST') {

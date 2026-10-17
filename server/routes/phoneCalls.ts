@@ -29,6 +29,9 @@ const UPDATABLE_FIELDS = [
   'assignee_id', 'status', 'priority', 'callback_due',
 ] as const;
 
+// Identifiant de tâche proposé par l'appareil (UUID généré par le navigateur).
+const TASK_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+
 const MAX_LIST = 500;
 const DEFAULT_LIST = 200;
 
@@ -236,17 +239,33 @@ export function registerPhoneCallRoutes(app: Express, { supabaseAdmin, getTenant
         if (current) return res.status(200).json({ task: current, call, already_exists: true });
       }
 
+      // Saisie hors ligne : l'appareil a déjà annoncé l'identifiant de la tâche
+      // (affiché « en attente d'envoi ») et la file hors ligne rejoue cette
+      // demande. Un rejeu après une coupure entre l'insertion de la tâche et le
+      // lien posé sur l'appel retrouve la tâche au lieu d'en créer une seconde.
+      const requestedId = typeof req.body?.task_id === 'string' ? req.body.task_id.trim() : '';
+      if (requestedId && !TASK_ID_PATTERN.test(requestedId)) return res.status(400).json({ error: 'task_id invalide' });
+
       const today = new Date().toISOString().slice(0, 10);
-      const taskId = crypto.randomUUID();
-      const { data: task, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').insert({
-        id: taskId,
-        ...buildTaskFromCall(call, today),
-        progress: 0,
-        dependencies: JSON.stringify([]),
-        status: 'todo',
-        created_by: req.user.id,
-      }).select().single();
-      if (error) throw error;
+      const taskId = requestedId || crypto.randomUUID();
+      let task: any = null;
+      let reused = false;
+      if (requestedId) {
+        const { data: already } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').select('*').eq('id', taskId).maybeSingle();
+        if (already) { task = already; reused = true; }
+      }
+      if (!task) {
+        const { data: inserted, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').insert({
+          id: taskId,
+          ...buildTaskFromCall(call, today),
+          progress: 0,
+          dependencies: JSON.stringify([]),
+          status: 'todo',
+          created_by: req.user.id,
+        }).select().single();
+        if (error) throw error;
+        task = inserted;
+      }
 
       const callPatch: Record<string, any> = { task_id: taskId, updated_at: new Date().toISOString() };
       if ((call as any).status === 'a_traiter') callPatch.status = 'en_cours';
@@ -254,8 +273,8 @@ export function registerPhoneCallRoutes(app: Express, { supabaseAdmin, getTenant
       if (linkError) throw linkError;
 
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
-      logActivity(tenantId, req.user.id, userName, `Création de la tâche "${task.title}" depuis un appel`, task.title, taskId, 'task', CATEGORY);
-      res.status(201).json({ task: { ...task, dependencies: [] }, call: updated, already_exists: false });
+      if (!reused) logActivity(tenantId, req.user.id, userName, `Création de la tâche "${task.title}" depuis un appel`, task.title, taskId, 'task', CATEGORY);
+      res.status(reused ? 200 : 201).json({ task: { ...task, dependencies: [] }, call: updated, already_exists: reused });
     } catch (e: any) { sendFailure(res, e, 'Failed to create task from phone call: ' + e.message); }
   });
 }

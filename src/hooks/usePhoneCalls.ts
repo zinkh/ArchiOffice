@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiFetch } from '../lib/api';
 import { db, type PendingWrite } from '../db';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { queuedJsonRequest } from '../lib/offlineQueue';
@@ -27,8 +26,14 @@ export interface UsePhoneCallsResult {
   createCall: (input: Partial<PhoneCall>) => Promise<SaveResult>;
   updateCall: (id: string, patch: Partial<PhoneCall>) => Promise<SaveResult>;
   deleteCall: (id: string) => Promise<SaveResult>;
-  /** Crée la tâche de suivi. Exige le réseau : la tâche n'a pas d'identifiant côté appareil. */
-  createTaskFromCall: (id: string) => Promise<Task>;
+  /** Crée la tâche de suivi. Hors ligne, la demande est gardée et rejouée au retour du réseau. */
+  createTaskFromCall: (id: string) => Promise<TaskResult>;
+}
+
+export interface TaskResult {
+  queued: boolean;
+  /** Présente seulement quand le serveur a répondu tout de suite. */
+  task?: Task;
 }
 
 const LIST_LIMIT = 500;
@@ -128,13 +133,23 @@ export function usePhoneCalls(options: UsePhoneCallsOptions = {}): UsePhoneCalls
     }
   }, []);
 
-  const createTaskFromCall = useCallback(async (id: string): Promise<Task> => {
-    const result = await apiFetch<{ task: Task; call: PhoneCall }>(`/api/phone-calls/${id}/task`, { method: 'POST' });
-    if (result?.call) {
-      cachePut(result.call);
-      setCalls(prev => prev.map(c => (c.id === id ? result.call : c)));
+  const createTaskFromCall = useCallback(async (id: string): Promise<TaskResult> => {
+    // L'identifiant de la tâche est généré ici : l'appel peut ainsi montrer sa
+    // tâche tout de suite, et le serveur reconnaît un rejeu de la file.
+    const taskId = crypto.randomUUID();
+    const result = await queuedJsonRequest<{ task: Task; call: PhoneCall }>({
+      // Identifiant de file propre à l'appel : une seconde demande n'ajoute pas une seconde entrée.
+      entity: 'phoneCall', id: `task:${id}`, method: 'POST', url: `/api/phone-calls/${id}/task`, body: { task_id: taskId },
+    });
+    if (result.queued || !result.data?.call) {
+      setCalls(prev => prev.map(c => (c.id === id && !c.task_id
+        ? { ...c, task_id: taskId, status: c.status === 'a_traiter' ? 'en_cours' : c.status, pendingSync: true }
+        : c)));
+      return { queued: true };
     }
-    return result.task;
+    cachePut(result.data.call);
+    setCalls(prev => prev.map(c => (c.id === id ? (result.data as { call: PhoneCall }).call : c)));
+    return { queued: false, task: result.data.task };
   }, []);
 
   return { calls, loading, loadFailed, reload, createCall, updateCall, deleteCall, createTaskFromCall };

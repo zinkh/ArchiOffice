@@ -179,6 +179,40 @@ describe('Tâche créée depuis un appel', () => {
     expect(fakeSupabaseAdmin.getTable('tasks').filter(t => t.tenant_id === tenantId)).toHaveLength(1);
   });
 
+  it('utilise l\'identifiant de tâche annoncé par l\'appareil (saisie hors ligne)', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const call = await request(app).post('/api/phone-calls').set(authHeader(token)).send({ subject: 'Noté sans réseau' });
+
+    const res = await request(app).post(`/api/phone-calls/${call.body.id}/task`).set(authHeader(token)).send({ task_id: 'task-offline-0001' });
+    expect(res.status).toBe(201);
+    expect(res.body.task.id).toBe('task-offline-0001');
+    expect(res.body.call).toMatchObject({ task_id: 'task-offline-0001', status: 'en_cours' });
+  });
+
+  it('reprend la tâche déjà créée quand la file rejoue après une coupure avant le lien', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const call = await request(app).post('/api/phone-calls').set(authHeader(token)).send({ subject: 'Coupure en route' });
+    // La tâche a été insérée, mais la réponse (et le lien sur l'appel) s'est perdue.
+    fakeSupabaseAdmin.seed('tasks', [{ id: 'task-offline-0002', tenant_id: tenantId, title: 'Suite à l\'appel : Coupure en route', start_date: '2026-10-17', end_date: '2026-10-17', status: 'todo', dependencies: '[]' }]);
+
+    const res = await request(app).post(`/api/phone-calls/${call.body.id}/task`).set(authHeader(token)).send({ task_id: 'task-offline-0002' });
+    expect(res.status).toBe(200);
+    expect(res.body.already_exists).toBe(true);
+    expect(res.body.call.task_id).toBe('task-offline-0002');
+    expect(fakeSupabaseAdmin.getTable('tasks').filter(t => t.tenant_id === tenantId)).toHaveLength(1);
+  });
+
+  it('refuse un identifiant de tâche mal formé', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const call = await request(app).post('/api/phone-calls').set(authHeader(token)).send({ subject: 'Appel' });
+    const res = await request(app).post(`/api/phone-calls/${call.body.id}/task`).set(authHeader(token)).send({ task_id: '../etc' });
+    expect(res.status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('tasks').filter(t => t.tenant_id === tenantId)).toHaveLength(0);
+  });
+
   it('répond 404 pour un appel d\'un autre cabinet', async () => {
     const tenantB = makeTenant();
     fakeSupabaseAdmin.seed('phone_calls', [{ id: 'call-b2', tenant_id: tenantB, subject: 'Secret' }]);

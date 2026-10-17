@@ -229,16 +229,20 @@ export function PhoneCallFormModal({ initial, projects, team, contacts, onClose,
           {isEdit && onCreateTask && (
             <div className="rounded-lg border px-3 py-2.5 flex items-center justify-between gap-3" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
               <span className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
-                {initial.task_id ? t('phonecalls_task_created') : online ? t('phonecalls_create_task') : t('phonecalls_task_needs_network')}
+                {initial.task_id
+                  ? (initial.pendingSync ? t('phonecalls_task_pending') : t('phonecalls_task_created'))
+                  : online ? t('phonecalls_create_task') : t('phonecalls_task_offline_hint')}
               </span>
-              {initial.task_id ? (
+              {initial.task_id && initial.pendingSync ? (
+                <span className="text-xs font-medium" style={{ color: '#e67700' }}>{t('phonecalls_pending')}</span>
+              ) : initial.task_id ? (
                 <Link to={taskHref} className="flex items-center gap-1.5 text-xs font-medium hover:underline" style={{ color: 'var(--tblr-primary)' }}>
                   <IconExternalLink size={14} /> {t('phonecalls_open_task')}
                 </Link>
               ) : (
                 <button
                   type="button"
-                  disabled={!online || busy !== null || !!initial.pendingSync}
+                  disabled={busy !== null}
                   onClick={() => run('task', onCreateTask, 'phonecalls_task_error')}
                   className="flex items-center gap-1.5 px-3 py-2 text-xs rounded border font-medium transition-colors hover:bg-[var(--tblr-surface)] disabled:opacity-50"
                   style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}

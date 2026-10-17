@@ -114,8 +114,9 @@ export default function PhoneCalls() {
 
   async function handleCreateTask() {
     if (!modal?.id) return;
-    await createTaskFromCall(modal.id);
-    showToast(t('phonecalls_task_created') as string);
+    const result = await createTaskFromCall(modal.id);
+    if (result.queued) showToast(t('phonecalls_task_queued') as string, 'success', { duration: 6000 });
+    else showToast(t('phonecalls_task_created') as string);
   }
 
   // Changement rapide depuis la ligne (statut, collaborateur) : écriture partielle, retour arrière en cas de refus.

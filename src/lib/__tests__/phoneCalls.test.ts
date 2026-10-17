@@ -85,6 +85,16 @@ describe('overlayPendingPhoneCalls', () => {
     const removed = overlayPendingPhoneCalls(base, [write({ method: 'DELETE', url: '/api/phone-calls/y', jsonBody: undefined })]);
     expect(removed.map(c => c.id)).toEqual(['x']);
   });
+  it('montre la tâche demandée hors ligne sur l\'appel, qui passe en cours', () => {
+    const pending = [write({ url: '/api/phone-calls/c1/task', jsonBody: { task_id: 'task-offline-0001' } })];
+    const [shown] = overlayPendingPhoneCalls([call({ id: 'c1' })], pending);
+    expect(shown).toMatchObject({ task_id: 'task-offline-0001', status: 'en_cours', pendingSync: true });
+  });
+  it('ne change ni le statut d\'un appel déjà pris en charge, ni une tâche déjà liée', () => {
+    const pending = [write({ url: '/api/phone-calls/c1/task', jsonBody: { task_id: 'nouvelle' } })];
+    expect(overlayPendingPhoneCalls([call({ id: 'c1', task_id: 'ancienne' })], pending)[0].task_id).toBe('ancienne');
+    expect(overlayPendingPhoneCalls([call({ id: 'c1', status: 'traite' })], pending)[0].status).toBe('traite');
+  });
   it('ignore les écritures d\'une autre entité', () => {
     expect(overlayPendingPhoneCalls([], [write({ entity: 'meeting', jsonBody: { id: 'm', subject: 'x' } })])).toEqual([]);
   });
