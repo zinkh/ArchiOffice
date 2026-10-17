@@ -487,6 +487,15 @@ export function ProjectOverview({
           </button>
           <button
             type="button"
+            onClick={() => navigate(`/appels?new=1&project=${encodeURIComponent(project.id)}`)}
+            className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)' }}
+          >
+            <IconPhone size={17} style={{ color: 'var(--tblr-muted)' }} />
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_call')}</span>
+          </button>
+          <button
+            type="button"
             onClick={onGoToInvoices}
             title={t('project_overview_action_fees_title')}
             className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"

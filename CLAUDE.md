@@ -1269,6 +1269,47 @@ des montants de ses affaires, avec un bouton vers ses affaires et non vers le
 traitement des retards. Les autres intégrations qui écrivent des factures
 (SuperPDP, Chorus Pro, Zoho) n'ont pas encore ce garde-fou.
 
+### Journal des appels téléphoniques
+
+`/appels` (`src/pages/PhoneCalls.tsx`) : l'appel reçu ou passé au cabinet se saisit en quelques
+secondes (interlocuteur, objet, notes), s'attribue à un collaborateur qui reçoit une notification, et
+peut devenir une tâche. Table `phone_calls` (`supabase/migrate_phone_calls.sql`, hors `SYNC_TABLES`),
+routes `server/routes/phoneCalls.ts` (`GET/POST /api/phone-calls`, `PUT/DELETE /api/phone-calls/:id`,
+`POST /api/phone-calls/:id/task`, `tests/phoneCalls.test.ts`), vocabulaire dans
+`src/schemas/phoneCall.schema.ts` (sens `entrant`/`sortant`, statuts `a_traiter`/`en_cours`/`traite`,
+priorités des tâches).
+
+- **Tous les rôles voient tous les appels du cabinet.** « Mes appels » (défaut) est un filtre de
+  confort, pas une barrière. `project_id`, `contact_id` et `assignee_id` du corps sont vérifiés contre le
+  cabinet (`assertTenantEntity`, `findMembership`), le PUT passe par une liste blanche de colonnes.
+- **Notification** (`notifyUsers`, catégorie « Tâches », lien `/appels?open=<id>`) à l'attribution et à
+  chaque CHANGEMENT d'assigné, jamais à une modification de statut ou de note, ni quand on s'attribue
+  l'appel à soi-même.
+- **« Créer une tâche »** (`POST /:id/task`) : tâche du même assigné, de la même priorité, rattachée
+  à la même affaire, échéance = rappel souhaité ; l'appel garde le lien (`task_id`) et passe de
+  « à traiter » à « en cours ». Rejouable : un appel qui a déjà sa tâche rend celle-ci
+  (`already_exists`), jamais une seconde. **Possible hors ligne** : l'appareil génère l'identifiant de
+  la tâche (`task_id` du corps, `^[A-Za-z0-9_-]{8,64}$`) et met la demande en file (id de file
+  `task:<appel>`) ; l'appel affiche tout de suite sa tâche « en attente d'envoi »
+  (`overlayPendingPhoneCalls`). Au rejeu, le serveur reprend une tâche de ce `task_id` déjà insérée
+  (coupure avant le lien posé sur l'appel) au lieu d'en créer une autre. Les dates de la tâche sont
+  celles du jour du rejeu.
+- **Hors ligne** : lecture « cache d'abord » (`phoneCallsCache`, Dexie v10) et écritures par la file
+  (`entity: 'phoneCall'`). L'id de l'appel est généré par l'appareil et `POST` est idempotent (200 au
+  rejeu). Chaque modification a son propre id de file (deux changements successifs ne s'écrasent pas) ;
+  `overlayPendingPhoneCalls` (`src/lib/phoneCalls.ts`, testé) rejoue la file par-dessus la liste lue,
+  sans quoi une relecture ferait disparaître un appel saisi avant son envoi.
+- **Instance non migrée** : la lecture rend une liste vide, l'écriture un 503 explicite.
+- **Où le retrouver** : menu Outils, volet « Plan d'actions » de la fiche affaire (bouton « Appel »,
+  `/appels?new=1&project=<id>`), liste `LinkedPhoneCalls` de l'onglet Correspondance, carte « Appels à
+  traiter » de `OperationalKpis` (les appels de la personne connectée, quel que soit le périmètre du
+  tableau de bord).
+- **Exports** (`src/lib/phoneCallsExport.ts`) : la liste telle qu'affichée, PDF paysage et Excel à la
+  charte (seul un rappel en retard est en rouge). Un rappel en retard = échéance strictement passée sur
+  un appel non traité ; une date absente ou illisible n'en est jamais un.
+- **Agents et MCP** : ressource `phone_calls` dans `AGENT_RESOURCES` (par défaut pour l'agent
+  « secrétaire »), `called_at` posé par le serveur quand l'agent ne le fournit pas.
+
 ### Groupement vs agence dans les notes d'honoraires
 
 Une note d'honoraires (`src/pages/ProjectDetail.tsx`, section « Notes

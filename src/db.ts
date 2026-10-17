@@ -1,6 +1,6 @@
 import Dexie, { Table } from 'dexie';
 import type { SiteReport, SiteReportNote } from './types';
-import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, MeetingAttendee, Reserve, GpaReserve, Observation } from './types';
+import { Project, Contact, Tender, Proposal, Invoice, Milestone, Task, ContactCategory, ProjectCategory, ProjectTemplate, TeamMember as UserProfile, Meeting, MeetingAttendee, Reserve, GpaReserve, Observation, PhoneCall } from './types';
 
 /**
  * Une écriture (POST/PUT/PATCH) différée faute de réseau, rejouée par
@@ -21,7 +21,7 @@ export interface PendingWrite {
   blobFieldName?: string;
   blobFilename?: string;
   extraFields?: Record<string, string>;
-  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'siteReportNotePhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem' | 'meetingAttendee';
+  entity: 'siteReportNote' | 'chantierDecoupage' | 'meeting' | 'meetingPhoto' | 'reserve' | 'reservePhoto' | 'gpaReserve' | 'gpaReservePhoto' | 'observation' | 'observationPhoto' | 'siteReportNotePhoto' | 'project' | 'siteReport' | 'proposal' | 'tender' | 'inspirationBoard' | 'inspirationItem' | 'inspirationBoardItem' | 'meetingAttendee' | 'phoneCall';
   status: 'pending' | 'error';
   attempts: number;
   lastError?: string;
@@ -47,6 +47,7 @@ export class AppDatabase extends Dexie {
   // effacerait le cache de toutes les autres.
   meetingsCache!: Table<Meeting>;
   meetingAttendeesCache!: Table<MeetingAttendee>;
+  phoneCallsCache!: Table<PhoneCall>;
   reservesCache!: Table<Reserve>;
   gpaReservesCache!: Table<GpaReserve>;
   observationsCache!: Table<Observation>;
@@ -128,6 +129,11 @@ export class AppDatabase extends Dexie {
     // ligne (voir src/lib/meetingAttendeesOffline.ts).
     this.version(9).stores({
       meetingAttendeesCache: 'id, meeting_id',
+    });
+    // v10 : journal des appels téléphoniques, saisissable hors ligne (voir
+    // src/hooks/usePhoneCalls.ts).
+    this.version(10).stores({
+      phoneCallsCache: 'id, assignee_id, project_id',
     });
   }
 }

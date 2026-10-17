@@ -32,6 +32,7 @@ import {
   IconFileDescription,
   IconMessageCircle,
   IconMail,
+  IconPhone,
 } from '@tabler/icons-react';
 import { BrandLogo } from './ArchiOfficeLogo';
 import { useUser } from '../UserContext';
@@ -53,6 +54,7 @@ export const NAV_ITEMS = [
   { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
   { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
   { name: 'reunions',       path: '/reunions',        icon: IconMessages },
+  { name: 'phone_calls',    path: '/appels',          icon: IconPhone },
   { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
   { name: 'team_hr',        path: '/team',           icon: IconUsers },
   { name: 'contacts',       path: '/contacts',       icon: IconAddressBook },
@@ -94,6 +96,7 @@ export const NAV_SECTIONS = [
       { name: 'kanban',         path: '/kanban',         icon: IconLayoutKanban },
       { name: 'calendar',       path: '/calendar',       icon: IconCalendarWeek },
       { name: 'reunions',       path: '/reunions',        icon: IconMessages },
+      { name: 'phone_calls',    path: '/appels',          icon: IconPhone },
       { name: 'ordres_de_service', path: '/ordres-de-service', icon: IconClipboardList },
       { name: 'mailbox',        path: '/mailbox',        icon: IconMail },
     ],

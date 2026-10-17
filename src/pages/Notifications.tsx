@@ -96,6 +96,7 @@ const TARGET_TYPE_PATH: Record<string, (id: string) => string> = {
   invoice: () => '/invoices',
   document: () => '/documents',
   meeting: () => '/reunions',
+  phone_call: id => `/appels?open=${encodeURIComponent(id)}`,
   ordre_de_service: () => '/ordres-de-service',
   tender_rss_source: () => '/tenders',
 };

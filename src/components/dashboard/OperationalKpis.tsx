@@ -10,7 +10,11 @@ import {
   IconClipboardCheck,
   IconShieldCheck,
   IconChecklist,
+  IconPhone,
 } from '@tabler/icons-react';
+import { useUser } from '../../UserContext';
+import { usePhoneCalls } from '../../hooks/usePhoneCalls';
+import { summarizeForAssignee } from '../../lib/phoneCalls';
 import { fetchJson } from '../../lib/api';
 import { computeOpsKpis, type OpsInput, type OpsKpis, type ProjectScope } from '../../lib/dashboardOps';
 import { ErrorState, StatCardSkeletonGrid } from '../DataState';
@@ -49,6 +53,10 @@ function GroupTitle({ children }: { children: React.ReactNode }) {
  */
 export default function OperationalKpis({ scopeProjectIds, projects, omit = [], onKpis }: OperationalKpisProps) {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
+  // Les appels à traiter de la personne connectée, quel que soit le périmètre
+  // (agence, équipe) du tableau de bord : c'est SON suivi.
+  const { calls: phoneCalls } = usePhoneCalls();
   const [data, setData] = useState(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -102,6 +110,7 @@ export default function OperationalKpis({ scopeProjectIds, projects, omit = [], 
     trendUp: late === 0,
   });
   const show = (kpi: OmittableKpi) => !omit.includes(kpi);
+  const myCalls = summarizeForAssignee(phoneCalls, currentUser?.id || '', new Date().toISOString().slice(0, 10));
 
   return (
     <div className="space-y-4">
@@ -153,7 +162,17 @@ export default function OperationalKpis({ scopeProjectIds, projects, omit = [], 
 
       <div>
         <GroupTitle>{t('kpi_group_site')}</GroupTitle>
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
+          <StatCard
+            label={t('phonecalls_card_title')}
+            value={myCalls.open}
+            icon={IconPhone}
+            accent="#206bc4"
+            accentBg="#e8f0fb"
+            to="/appels"
+            trend={myCalls.overdue > 0 ? t('phonecalls_card_overdue', { count: myCalls.overdue }) : t('phonecalls_card_none')}
+            trendUp={myCalls.overdue === 0}
+          />
           <StatCard
             label={t('kpi_meetings_week')}
             value={kpis.meetingsThisWeek}

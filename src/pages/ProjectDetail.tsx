@@ -92,6 +92,7 @@ import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import ChantierModule from '../components/ChantierModule';
 import MilestoneGantt from '../components/MilestoneGantt';
 import CorrespondenceTab from '../components/CorrespondenceTab';
+import LinkedPhoneCalls from '../components/phoneCalls/LinkedPhoneCalls';
 import { ProTab } from '../components/pro/ProTab';
 import { SituationsTravaux } from '../components/projectDetail/situations/SituationsTravaux';
 import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS, computePartInteretFromContrat, missionFlagsFromMaf } from '../lib/mafUtils';
@@ -4883,6 +4884,7 @@ export default function ProjectDetail() {
 
             {activeTab === 'CORRESPONDANCE' && (
               <div className="space-y-8">
+                <LinkedPhoneCalls projectId={id!} />
                 <CorrespondenceTab localType="project" localId={id!} contactEmail={project?.client_email} relatedKeywords={[project?.name, project?.project_code, project?.reference].filter(Boolean) as string[]} />
               </div>
             )}

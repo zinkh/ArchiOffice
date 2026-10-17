@@ -248,6 +248,35 @@ export interface Task {
   // serveur la jetait à chaque écriture. Utiliser `status === 'done'`.
 }
 
+/** Un appel téléphonique saisi au cabinet (table `phone_calls`, server/routes/phoneCalls.ts). */
+export interface PhoneCall {
+  id: string;
+  direction: 'entrant' | 'sortant';
+  /** Date et heure ISO de l'appel. */
+  called_at: string;
+  duration_minutes?: number | null;
+  caller_name?: string | null;
+  caller_company?: string | null;
+  caller_phone?: string | null;
+  caller_email?: string | null;
+  contact_id?: string | null;
+  project_id?: string | null;
+  subject: string;
+  notes?: string | null;
+  assignee_id?: string | null;
+  status: 'a_traiter' | 'en_cours' | 'traite';
+  priority: TaskPriority;
+  /** Date de rappel souhaitée, YYYY-MM-DD. */
+  callback_due?: string | null;
+  /** Tâche de suivi créée depuis l'appel. */
+  task_id?: string | null;
+  created_by?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  /** Posé côté client tant que la saisie n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
+  pendingSync?: boolean;
+}
+
 export interface ProjectCotraitant {
   id: string;
   project_id: string;

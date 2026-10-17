@@ -462,6 +462,41 @@ CREATE INDEX IF NOT EXISTS idx_tasks_tenant_project  ON tasks(tenant_id, project
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_assignee ON tasks(tenant_id, assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_tenant_status   ON tasks(tenant_id, status);
 
+-- Journal des appels téléphoniques, attribués à un collaborateur
+-- (supabase/migrate_phone_calls.sql, server/routes/phoneCalls.ts).
+CREATE TABLE IF NOT EXISTS phone_calls (
+  id TEXT PRIMARY KEY,
+  tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  direction TEXT NOT NULL DEFAULT 'entrant'
+    CONSTRAINT phone_calls_direction_check CHECK (direction IN ('entrant', 'sortant')),
+  called_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  duration_minutes INTEGER
+    CONSTRAINT phone_calls_duration_check CHECK (duration_minutes IS NULL OR duration_minutes >= 0),
+  caller_name TEXT,
+  caller_company TEXT,
+  caller_phone TEXT,
+  caller_email TEXT,
+  contact_id TEXT REFERENCES contacts(id) ON DELETE SET NULL,
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  subject TEXT NOT NULL,
+  notes TEXT,
+  -- TEXT sans FK, comme tasks.assignee_id.
+  assignee_id TEXT,
+  status TEXT NOT NULL DEFAULT 'a_traiter'
+    CONSTRAINT phone_calls_status_check CHECK (status IN ('a_traiter', 'en_cours', 'traite')),
+  priority TEXT NOT NULL DEFAULT 'normal'
+    CONSTRAINT phone_calls_priority_check CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+  callback_due DATE,
+  task_id TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_phone_calls_tenant_assignee ON phone_calls(tenant_id, assignee_id);
+CREATE INDEX IF NOT EXISTS idx_phone_calls_tenant_status   ON phone_calls(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_phone_calls_tenant_called   ON phone_calls(tenant_id, called_at DESC);
+CREATE INDEX IF NOT EXISTS idx_phone_calls_tenant_project  ON phone_calls(tenant_id, project_id);
+
 CREATE TABLE IF NOT EXISTS ordres_de_service (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -826,6 +861,7 @@ ALTER TABLE project_cotraitants  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_stakeholders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE project_lots         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tasks                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE phone_calls          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ordres_de_service    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_reports         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE site_report_notes    ENABLE ROW LEVEL SECURITY;
@@ -933,6 +969,8 @@ CREATE POLICY "tenant_isolation" ON project_stakeholders
 CREATE POLICY "tenant_isolation" ON project_lots
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON tasks
+  USING (tenant_id = my_tenant_id());
+CREATE POLICY "tenant_isolation" ON phone_calls
   USING (tenant_id = my_tenant_id());
 CREATE POLICY "tenant_isolation" ON ordres_de_service
   USING (tenant_id = my_tenant_id());
