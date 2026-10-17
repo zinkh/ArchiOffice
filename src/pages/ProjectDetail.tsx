@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, ChangeEvent, useRef, useId, type Dispatch, type SetStateAction } from 'react';
+import { MISSION_PHASES, MISSION_ID_TO_PHASE } from '../lib/profitability';
+import ProjectProfitability from '../components/projectDetail/ProjectProfitability';
 import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
@@ -161,17 +163,6 @@ const FormField = ({ label, value, onChange, type = 'text', options = [], requir
     {hint && <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{hint}</p>}
   </div>
   );
-};
-
-const MISSION_PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR'];
-
-
-// Maps ContratMOEMission ids (Contrats.tsx uses 'pro', Proposals.tsx's
-// fee_distribution uses 'projet' for the same phase — both are accepted here)
-// to the DocumentPhase codes used by the "Phase actuelle" buttons below.
-const MISSION_ID_TO_PHASE: Record<string, DocumentPhase> = {
-  esquisse: 'ESQ', aps: 'APS', apd: 'APD', pro: 'PRO', projet: 'PRO',
-  act: 'ACT', visa: 'VISA', det: 'DET', aor: 'AOR',
 };
 
 export default function ProjectDetail() {
@@ -2102,6 +2093,19 @@ export default function ProjectDetail() {
                             </p>
                           )}
                         </div>
+                      );
+                    })()}
+
+                    {/* Rentabilité par phase : honoraires prévus face au coût du temps passé */}
+                    {(currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager') && id && (() => {
+                      const honRevises = (Number(project.remuneration) || 0) + cumulAvenantsApprouves;
+                      if (honRevises <= 0) return null;
+                      return (
+                        <ProjectProfitability
+                          projectId={id}
+                          honoraires={honRevises}
+                          missions={(linkedContratsMoe[0]?.missions_list ?? []) as any[]}
+                        />
                       );
                     })()}
 

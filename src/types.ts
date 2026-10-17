@@ -140,6 +140,10 @@ export interface TimeEntry {
   end_time?: string | null;
   description?: string;
   source: 'clock' | 'manual';
+  /** Phase de mission sur laquelle le temps est imputé (ESQ, APS...). */
+  phase?: DocumentPhase | null;
+  /** Temps facturable ; absent vaut facturable. */
+  billable?: boolean;
 }
 
 export interface TimeWeeklySummary {
