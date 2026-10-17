@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { IconX } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
+import { useHorizontalScrollHints } from '../hooks/useHorizontalScrollHints';
 import {
   MAX_OPEN_PROJECT_TABS, closeProjectTab, pathAfterClosing, projectIdFromPath,
   touchProjectTab, useOpenProjectTabs,
@@ -19,6 +20,7 @@ export default function ProjectTabsBar({ variant = 'strip' }: { variant?: 'strip
   const tabs = useOpenProjectTabs();
   const activeId = projectIdFromPath(location.pathname);
   const fullPath = location.pathname + location.search;
+  const stripRef = useHorizontalScrollHints<HTMLElement>('[aria-current="page"]', activeId);
 
   useEffect(() => {
     if (activeId) touchProjectTab(activeId, { path: fullPath });
@@ -36,6 +38,7 @@ export default function ProjectTabsBar({ variant = 'strip' }: { variant?: 'strip
 
   return (
     <nav
+      ref={stripRef}
       aria-label="Affaires ouvertes"
       className={cn(
         'flex items-center gap-1 overflow-x-auto scroll-fade-x',

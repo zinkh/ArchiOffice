@@ -79,6 +79,7 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
   );
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Admin balances panel state: userId -> { conges_payes, rtt }
   const [balanceEdits, setBalanceEdits] = useState<Record<string, { conges_payes?: number; rtt?: number }>>({});
@@ -127,21 +128,24 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
 
   const cancelRequest = async (id: string) => {
     if (!confirm(t('leave_cancel_confirm'))) return;
+    setActionError(null);
     try { await apiFetch(`/api/leave_requests/${id}`, { method: 'DELETE' }); refreshMine(); }
-    catch (e: any) { alert(e.message || t('leave_cancel_error')); }
+    catch (e: any) { setActionError(e.message || t('leave_cancel_error')); }
   };
 
   const decide = async (id: string, status: 'approved' | 'rejected') => {
+    setActionError(null);
     try {
       await apiFetch(`/api/leave_requests/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, decision_note: decisionNotes[id] || undefined }) });
       apiFetch<LeaveRequest[]>('/api/leave_requests?scope=team').then(setTeamRequests).catch(() => {});
-    } catch (e: any) { alert(e.message || t('leave_decide_error')); }
+    } catch (e: any) { setActionError(e.message || t('leave_decide_error')); }
   };
 
   const saveBalance = async (userId: string, leaveType: 'conges_payes' | 'rtt', value: number) => {
+    setActionError(null);
     try {
       await apiFetch('/api/leave_balances', { method: 'PUT', body: JSON.stringify({ user_id: userId, year: currentYear, leave_type: leaveType, allocated_days: value }) });
-    } catch (e: any) { alert(e.message || t('leave_balance_save_error')); }
+    } catch (e: any) { setActionError(e.message || t('leave_balance_save_error')); }
   };
 
   return (
@@ -157,6 +161,10 @@ export default function Leave({ embedded = false }: { embedded?: boolean }) {
           <button onClick={() => setTab('balances')} className={`px-3 py-1.5 rounded-full text-sm font-medium ${tab === 'balances' ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'}`}>{t('leave_tab_balances')}</button>
         )}
       </div>
+
+      {actionError && (
+        <p role="alert" className="text-red-600 text-sm">{actionError}</p>
+      )}
 
       {tab === 'mine' && (
         <div className="space-y-6">
