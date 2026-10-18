@@ -38,9 +38,9 @@ const TITRE_SECTION = 'text-[0.6875rem] font-bold uppercase tracking-wider';
 
 function Ligne({ label, valeur, aPreciser }: { label: string; valeur?: string | null; aPreciser: string }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-2 text-sm">
+    <div className="min-w-0 space-y-1 text-sm">
       <dt style={{ color: 'var(--tblr-muted)' }}>{label}</dt>
-      <dd className="min-w-0 break-words" style={{ color: valeur?.trim() ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>
+      <dd className="min-w-0 break-words leading-relaxed" style={{ color: valeur?.trim() ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>
         {valeur?.trim() || aPreciser}
       </dd>
     </div>
@@ -195,7 +195,7 @@ function StudyRequestForm({ kind, project }: Props) {
 
       <section className="rounded-xl border border-[var(--tblr-border)] p-4" aria-labelledby={`${p}-faits`}>
         <h3 id={`${p}-faits`} className={TITRE_SECTION} style={{ color: 'var(--tblr-muted)' }}>{t('study_common_facts_title')}</h3>
-        <dl className="mt-3 grid gap-2 md:grid-cols-2">
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr))]">
           {def.faits.map(f => (
             <Ligne key={f} label={t(`study_fact_${f}`)} valeur={projet[f]} aPreciser={aPreciser} />
           ))}
@@ -232,7 +232,7 @@ function StudyRequestForm({ kind, project }: Props) {
               return (
                 <label key={c.id} className="flex min-h-11 items-center gap-3 rounded-lg border border-[var(--tblr-border)] p-3 text-sm">
                   <input type="checkbox" className="size-4 shrink-0" checked={contactIds.includes(c.id)} onChange={() => basculer(contactIds, c.id, setContactIds)} />
-                  <span className="min-w-0 break-words">
+                  <span className="min-w-0 break-words leading-relaxed">
                     <span className="font-semibold">{nom}</span>
                     {c.company_name && nom !== c.company_name && <span style={{ color: 'var(--tblr-muted)' }}> · {c.company_name}</span>}
                     <span className="block text-xs" style={{ color: 'var(--tblr-muted)' }}>{c.email}</span>
