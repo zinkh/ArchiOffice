@@ -1,6 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, Navigate, Outlet } from 'react-router-dom';
 import {
-  IconSearch,
   IconBell,
   IconSettings,
   IconMenu2,
@@ -14,13 +13,14 @@ import {
   IconUser,
   IconBuilding,
 } from '@tabler/icons-react';
+import { GlobalSearch } from './components/GlobalSearch';
 import { BrandLogo } from './components/ArchiOfficeLogo';
 import { PendingWritesIndicator } from './components/PendingWritesIndicator';
 import { UpdateBanner } from './components/UpdateBanner';
 import { TenantSuspendedGate } from './components/TenantSuspendedGate';
 import { useNotificationBridge } from './hooks/useNotificationBridge';
 import ImpersonationBanner from './components/ImpersonationBanner';
-import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { useTranslation } from 'react-i18next';
@@ -195,11 +195,6 @@ function Header() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{ projects: any[]; contacts: any[]; tenders: any[]; invoices: any[] }>({ projects: [], contacts: [], tenders: [], invoices: [] });
-  const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const item = NAV_ITEMS.find(i => i.path === location.pathname);
@@ -241,56 +236,6 @@ function Header() {
     fetchUnreadMessages();
     const interval = setInterval(fetchUnreadMessages, 30000);
     return () => clearInterval(interval);
-  }, []);
-
-  // Debounced search
-  useEffect(() => {
-    if (!searchQuery.trim() || searchQuery.length < 2) {
-      setSearchResults({ projects: [], contacts: [], tenders: [], invoices: [] });
-      setIsSearching(false);
-      return;
-    }
-    setIsSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-        if (res.ok) {
-          const data = await res.json();
-          setSearchResults(data);
-        }
-      } catch (err) {
-        console.error('Search failed:', err);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
-
-  // Escape / Ctrl+K keyboard shortcuts and outside click
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setIsSearchOpen(false);
-        setSearchQuery('');
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsSearchOpen(true);
-        setTimeout(() => document.getElementById('global-search-input')?.focus(), 50);
-      }
-    };
-    const handleClick = (e: MouseEvent) => {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setIsSearchOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKey);
-    document.addEventListener('mousedown', handleClick);
-    return () => {
-      window.removeEventListener('keydown', handleKey);
-      document.removeEventListener('mousedown', handleClick);
-    };
   }, []);
 
   /* ── Tabler navbar: opaque, 56px, border-bottom ── */
@@ -371,107 +316,8 @@ function Header() {
             <PendingWritesIndicator />
           </div>
 
-          {/* Search */}
-          <div ref={searchRef} className="relative hidden md:flex">
-            <div className="relative">
-              <IconSearch
-                size={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2"
-                style={{ color: 'var(--tblr-muted)' }}
-              />
-              <input
-                id="global-search-input"
-                type="text"
-                value={searchQuery}
-                onChange={e => { setSearchQuery(e.target.value); setIsSearchOpen(true); }}
-                onFocus={() => setIsSearchOpen(true)}
-                placeholder={`${t('search_placeholder')} (Ctrl+K)`}
-                style={{
-                  background: 'var(--tblr-surface-2)',
-                  border: '1px solid var(--tblr-border)',
-                  color: 'var(--tblr-text)',
-                  borderRadius: 'var(--tblr-radius)',
-                  fontSize: '13px',
-                }}
-                className="pl-8 pr-3 py-1.5 w-52 outline-none transition-[border-color,box-shadow] focus:w-72 focus:border-[var(--tblr-primary)] focus:shadow-[0_0_0_3px_var(--tblr-primary-lt)]"
-              />
-              {isSearching && (
-                <div
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3 h-3 border-2 border-t-transparent rounded-full animate-spin"
-                  style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }}
-                />
-              )}
-            </div>
-
-            {/* Search dropdown — Tabler card style */}
-            {isSearchOpen && searchQuery.length >= 2 && (
-              <div
-                className="absolute top-full mt-1 left-0 w-96 z-50 overflow-hidden max-h-[70dvh] overflow-y-auto"
-                style={{
-                  background: 'var(--tblr-surface)',
-                  border: '1px solid var(--tblr-border)',
-                  borderRadius: 'var(--tblr-radius)',
-                  boxShadow: '0 4px 16px rgba(0,0,0,.12)',
-                }}
-              >
-                {Object.entries(searchResults).every(([, arr]) => (arr as any[]).length === 0) && !isSearching ? (
-                  <div className="p-4 text-sm text-center" style={{ color: 'var(--tblr-muted)' }}>
-                    Aucun résultat pour «&nbsp;{searchQuery}&nbsp;»
-                  </div>
-                ) : (
-                  <div>
-                    {([
-                      { key: 'projects',  label: 'Projets',         path: (id: string) => `/projects/${id}`, color: '#206bc4', letter: 'P' },
-                      { key: 'contacts',  label: 'Contacts',        path: () => '/contacts',                 color: '#2fb344', letter: 'C' },
-                      { key: 'tenders',   label: "Appels d'offres", path: (id: string) => `/tenders/${id}`,  color: '#f76707', letter: 'A' },
-                      { key: 'invoices',  label: 'Factures',        path: () => '/invoices',                 color: '#ae3ec9', letter: 'F' },
-                    ] as const).map(({ key, label, path, color, letter }) => {
-                      const items = (searchResults as any)[key] as any[];
-                      if (!items?.length) return null;
-                      return (
-                        <div key={key}>
-                          <div
-                            className="px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-wider border-b"
-                            style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', borderColor: 'var(--tblr-border)' }}
-                          >
-                            {label}
-                          </div>
-                          {items.map((item: any) => (
-                            <Link
-                              key={item.id}
-                              to={path(item.id)}
-                              onClick={() => { setIsSearchOpen(false); setSearchQuery(''); }}
-                              className="flex items-center gap-3 px-3 py-2.5 transition-colors"
-                              style={{ borderBottom: '1px solid var(--tblr-border)' }}
-                              onMouseOver={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
-                              onMouseOut={e => (e.currentTarget.style.background = '')}
-                            >
-                              <span
-                                className="w-7 h-7 rounded flex items-center justify-center text-xs font-bold text-white shrink-0"
-                                style={{ background: color }}
-                              >
-                                {letter}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
-                                  {item._label}
-                                </p>
-                                {(item.client || item.email) && (
-                                  <p className="text-xs truncate" style={{ color: 'var(--tblr-muted)' }}>
-                                    {item.client || item.email}
-                                  </p>
-                                )}
-                              </div>
-                            </Link>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Search: state is scoped to the selected practice and user. */}
+          <GlobalSearch scopeKey={`${activeTenantId ?? ''}:${currentUser?.id ?? ''}`} />
 
           {/* Theme toggle */}
           <button
