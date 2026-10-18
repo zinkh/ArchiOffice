@@ -47,7 +47,10 @@ export function texteDeOdt(buffer: Buffer): string | null {
 export async function lireTexteDepot(nomFichier: string, buffer: Buffer): Promise<string | null> {
   const ext = extensionDe(nomFichier);
   let texte: string | null = null;
-  if (ext === 'pdf') texte = (await pdfParse(buffer)).text;
+  // Pass plain bytes to the legacy PDF.js reader: valid PDFs supplied as a
+  // Node Buffer can fail with "bad XRef entry" on Node 24. A Uint8Array copy
+  // preserves the document bytes and works on both Node 22 and Node 24.
+  if (ext === 'pdf') texte = (await pdfParse(Uint8Array.from(buffer))).text;
   else if (ext === 'docx') texte = (await mammoth.extractRawText({ buffer })).value;
   else if (ext === 'xlsx' || ext === 'ods') texte = await texteDeTableur(buffer);
   else if (ext === 'odt') texte = texteDeOdt(buffer);
