@@ -174,6 +174,7 @@ export default function ProjectDetail() {
   const navigate = useNavigate();
   const { currentUser, setHeaderTitle } = useUser();
   const { t } = useTranslation();
+  const projectPanelId = useId();
   
   const [project, setProject] = useState<Project | null>(null);
   const [projectLoadState, setProjectLoadState] = useState<ProjectLoadState>('loading');
@@ -1958,6 +1959,7 @@ export default function ProjectDetail() {
       {/* Tab bar */}
       <div className="shrink-0 px-4 pt-3">
         <ProjectTabBar
+          panelId={projectPanelId}
           activeTab={activeTab}
           onChange={setActiveTab}
           isChantier={!!project.is_chantier}
@@ -1966,7 +1968,7 @@ export default function ProjectDetail() {
         />
       </div>
 
-      <div className={`flex-1 ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
+      <div id={projectPanelId} role="tabpanel" aria-label={t(`project_tab_title_${activeTab.toLowerCase()}`)} tabIndex={0} className={`flex-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
         {activeTab === 'INFOS' && !showFullEditor ? (
           <ProjectOverview
             project={project}

@@ -399,10 +399,13 @@ export function registerAgentRoutes(
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: agentId } = req.params;
-      const { data: conv } = await supabaseAdmin.from('agent_conversations').select('id').eq('agent_id', agentId).eq('user_id', req.user.id).eq('tenant_id', tenantId).single();
+      const { data: conv, error: readError } = await supabaseAdmin.from('agent_conversations').select('id').eq('agent_id', agentId).eq('user_id', req.user.id).eq('tenant_id', tenantId).maybeSingle();
+      if (readError) throw readError;
       if (conv) {
-        await supabaseAdmin.from('agent_messages').delete().eq('conversation_id', (conv as any).id);
-        await supabaseAdmin.from('agent_conversations').update({ attached_document_ids: [] }).eq('id', (conv as any).id);
+        const { error: deleteError } = await supabaseAdmin.from('agent_messages').delete().eq('conversation_id', (conv as any).id).eq('tenant_id', tenantId);
+        if (deleteError) throw deleteError;
+        const { error: updateError } = await supabaseAdmin.from('agent_conversations').update({ attached_document_ids: [] }).eq('id', (conv as any).id).eq('tenant_id', tenantId).eq('user_id', req.user.id);
+        if (updateError) throw updateError;
       }
       res.json({ ok: true });
     } catch (e: any) { res.status(500).json({ error: e.message }); }

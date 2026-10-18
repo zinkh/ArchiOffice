@@ -1,4 +1,10 @@
 export default {
+  "agent_chat_clearing": "Effacement en cours…",
+  "agent_chat_clear": "Effacer l’historique",
+  "agent_chat_clear_title": "Effacer l’historique de cet agent ?",
+  "agent_chat_clear_description": "Les messages de cette conversation seront supprimés. Cette action est irréversible.",
+  "agent_chat_clear_failed": "L’effacement n’a pas été confirmé. Votre conversation reste affichée. Vérifiez votre connexion puis réessayez.",
+
   "projectdetail_load_offline_cached": "Mode hors connexion. Les dernières données enregistrées sur cet appareil restent consultables.",
   "projectdetail_load_offline": "Cette affaire n’est pas disponible hors connexion. Reconnectez-vous puis réessayez.",
   "projectdetail_load_not_found": "Cette affaire est introuvable. Elle a peut-être été supprimée.",

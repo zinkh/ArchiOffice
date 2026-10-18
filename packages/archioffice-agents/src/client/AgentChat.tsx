@@ -1,3 +1,4 @@
+import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { projectIdFromPath, useOpenProjectTabs } from '@/src/lib/openProjectTabs';
@@ -673,7 +674,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   }, [speech]);
 
   const sendMessage = async () => {
-    if (!input.trim() || !activeAgentId || loading) return;
+    if (!input.trim() || !activeAgentId || loading || resetBusy) return;
     // Le micro ne reste pas ouvert par-dessus un envoi : la suite de la
     // dictée arriverait dans une zone que l'on vient de vider. Une lecture en
     // cours n'a pas non plus sa place pendant qu'une nouvelle réponse arrive.
@@ -830,21 +831,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendMessage(); }
   };
 
-  const resetConversation = async () => {
-    if (!activeAgentId) return;
+  const { resetConversation, resetBusy, clearing, resetDialog } = useConversationReset(activeAgentId, loading || loadingHistory, () => {
     speech.stop();
-    try {
-      await apiFetch(`/api/agents/${activeAgentId}/conversation`, { method: 'DELETE' });
-    } catch (e) {
-      console.error('Failed to reset conversation:', e);
-    }
     setMessages([]);
     setErrorMsg(null);
-    // A fresh conversation shouldn't carry over documents attached to the
-    // previous one — otherwise they linger as "already attached" and the
-    // picker/drop zone looks like it can't add anything new.
     setAttachedDocs([]);
-  };
+  }, setErrorMsg);
 
   // Le message de confirmation disparaît seul
   useEffect(() => {
@@ -905,6 +897,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AgentChatContext.Provider value={{ openChat, closeChat, refreshCopilotSuggestions: loadCopilotSuggestions }}>
+      {resetDialog}
       {children}
 
       {/* Floating trigger — desktop only : sur mobile, l'icône Agents de la
@@ -1281,11 +1274,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     el.style.height = 'auto';
                     el.style.height = Math.min(el.scrollHeight, 100) + 'px';
                   }}
-                  disabled={loading}
+                  disabled={loading || resetBusy}
                 />
                 <button
                   onClick={sendMessage}
-                  disabled={!input.trim() || loading}
+                  disabled={!input.trim() || loading || resetBusy}
                   className="p-2 rounded-lg transition-colors flex items-center justify-center"
                   style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading ? 0.5 : 1 }}
                   title={`${t('agent_chat_send')} (Ctrl+Entrée)`}
@@ -1295,10 +1288,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               </div>
               <button
                 onClick={resetConversation}
-                className="text-[11px] mt-1.5 hover:underline"
+                disabled={loading || loadingHistory || resetBusy}
+                className="min-h-11 text-[0.6875rem] mt-1.5 hover:underline disabled:opacity-50 disabled:cursor-wait"
                 style={{ color: 'var(--tblr-muted)' }}
               >
-                {t('agent_chat_new')}
+                {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
               </button>
             </div>
           </motion.div>

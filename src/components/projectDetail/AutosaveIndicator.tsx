@@ -16,14 +16,14 @@ export function AutosaveIndicator({ status, onRetry }: { status: AutosaveStatus;
     return (
       <div role="alert" className="inline-flex items-center gap-1.5 text-[0.8125rem] font-medium" style={{ color: 'var(--tblr-text)' }}>
         <IconAlertTriangle size={16} aria-hidden className="shrink-0" style={{ color: 'var(--tblr-danger)' }} />
-        <span className="hidden sm:inline">{label}</span>
+        <span className="sr-only sm:not-sr-only">{label}</span>
         {status === 'error' && (
           <button
             type="button"
             onClick={onRetry}
             title={label}
             aria-label={`${label} : ${t('projectdetail_autosave_retry')}`}
-            className="h-8 px-2.5 inline-flex items-center gap-1 rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            className="min-h-11 sm:min-h-8 px-2.5 inline-flex items-center gap-1 rounded-lg border text-[0.8125rem] font-semibold transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
             style={{ borderColor: 'var(--tblr-border)' }}
           >
             <IconRefresh size={14} aria-hidden />

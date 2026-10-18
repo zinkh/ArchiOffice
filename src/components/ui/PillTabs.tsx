@@ -1,4 +1,5 @@
 import React from 'react';
+import { navigateTabList } from '../../lib/tabListNavigation';
 import { cn } from '../../lib/utils';
 import { useHorizontalScrollHints } from '../../hooks/useHorizontalScrollHints';
 
@@ -27,20 +28,8 @@ export function PillTabs({ tabs, activeId, onChange, className, ariaLabel }: Pil
   const scrollRef = useHorizontalScrollHints<HTMLDivElement>('[aria-selected="true"]', activeId);
   // Flèches gauche/droite, Début et Fin entre les onglets (motif ARIA « tabs »,
   // activation automatique) : seul l'onglet actif est dans l'ordre de tabulation.
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const index = tabs.findIndex(t => t.id === activeId);
-    if (index === -1) return;
-    let next = -1;
-    if (e.key === 'ArrowRight') next = (index + 1) % tabs.length;
-    else if (e.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
-    else if (e.key === 'Home') next = 0;
-    else if (e.key === 'End') next = tabs.length - 1;
-    if (next === -1) return;
-    e.preventDefault();
-    onChange(tabs[next].id);
-    const buttons = e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]');
-    buttons[next]?.focus();
-  };
+  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) =>
+    navigateTabList(e, tabs.map(t => t.id), activeId, onChange);
 
   return (
     <div

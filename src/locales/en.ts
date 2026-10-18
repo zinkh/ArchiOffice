@@ -1,4 +1,10 @@
 export default {
+  "agent_chat_clearing": "Clearing history…",
+  "agent_chat_clear": "Clear history",
+  "agent_chat_clear_title": "Clear this agent’s history?",
+  "agent_chat_clear_description": "The messages in this conversation will be deleted. This cannot be undone.",
+  "agent_chat_clear_failed": "History deletion was not confirmed. Your conversation is still displayed. Check your connection and try again.",
+
   "projectdetail_load_offline_cached": "Offline. The last data saved on this device remains available.",
   "projectdetail_load_offline": "This project is unavailable offline. Reconnect and try again.",
   "projectdetail_load_not_found": "This project could not be found. It may have been deleted.",

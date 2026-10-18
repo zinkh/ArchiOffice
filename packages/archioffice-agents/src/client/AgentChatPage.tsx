@@ -9,6 +9,7 @@
 // l'application le fait déjà pour l'écran plein (voir ProjectDetail.tsx et
 // isFullBleedRoute dans App.tsx, dont cette page reprend le même principe de
 // mise en page en colonnes avec défilement propre à chacune).
+import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -199,7 +200,7 @@ export default function AgentChatPage() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
 
   const sendMessage = async () => {
-    if (!input.trim() || !agentId || loading) return;
+    if (!input.trim() || !agentId || loading || resetBusy) return;
     if (dictation.status !== 'idle') dictation.stop();
     speech.stop();
     const rawInput = input.trim();
@@ -247,15 +248,13 @@ export default function AgentChatPage() {
     }
   };
 
-  const resetConversation = async () => {
-    if (!agentId) return;
+  const { resetConversation, resetBusy, clearing, resetDialog } = useConversationReset(agentId, loading || loadingHistory, () => {
     speech.stop();
-    try { await apiFetch(`/api/agents/${agentId}/conversation`, { method: 'DELETE' }); } catch {}
     setMessages([]);
-    setSelectedArtifact(null);
     setErrorMsg(null);
     setAttachedDocs([]);
-  };
+    setSelectedArtifact(null);
+  }, setErrorMsg);
 
   const switchAgent = (id: string) => {
     speech.stop();
@@ -271,6 +270,7 @@ export default function AgentChatPage() {
 
   return (
     <div className="flex flex-col lg:h-full">
+      {resetDialog}
       {/* Topbar — même traitement que ProjectDetail.tsx (bouton retour, identité, actions) */}
       <div
         className="shrink-0 flex items-center gap-3 px-4 py-2.5 border-b"
@@ -331,16 +331,17 @@ export default function AgentChatPage() {
         )}
         <button
           onClick={resetConversation}
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[12px] shrink-0 hover:bg-[var(--tblr-surface-2)] transition-colors"
+          disabled={loading || loadingHistory || resetBusy}
+          className="min-h-11 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.75rem] shrink-0 hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
           style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
         >
-          <IconRefresh size={13} /> {t('agent_chat_new')}
+          <IconRefresh size={13} /> {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
         </button>
       </div>
 
       {/* Standing AI-content disclosure, comme dans le panneau flottant. */}
       <div
-        className="shrink-0 px-4 py-1.5 text-[10px] text-center border-b"
+        className="shrink-0 px-4 py-1.5 text-[0.6875rem] text-center border-b"
         style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
       >
         {t('agent_chat_ai_disclaimer')}
@@ -434,11 +435,11 @@ export default function AgentChatPage() {
                   el.style.height = 'auto';
                   el.style.height = Math.min(el.scrollHeight, 140) + 'px';
                 }}
-                disabled={loading}
+                disabled={loading || resetBusy}
               />
               <button
                 onClick={sendMessage}
-                disabled={!input.trim() || loading}
+                disabled={!input.trim() || loading || resetBusy}
                 className="p-2 rounded-lg transition-colors flex items-center justify-center"
                 style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading ? 0.5 : 1 }}
                 title={`${t('agent_chat_send')} (Ctrl+Entrée)`}
