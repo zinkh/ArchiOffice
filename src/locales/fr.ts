@@ -2486,6 +2486,7 @@ export default {
       "project_tab_title_taches": "Tâches de l'affaire",
       "project_tab_title_honos": "Contrat, honoraires et notes d'honoraires",
       "project_tab_title_inspiration": "Inspirations et planches d’ambiance",
+      "project_tab_title_diag": "Diagnostics : étude de sol auprès du géotechnicien",
       "inspiration_title": "Inspirations & planches",
       "inspiration_subtitle": "Rassemblez les références du projet et composez des planches par phase d’étude.",
       "inspiration_board_subtitle": "Composez la planche à partir de la bibliothèque visuelle du projet.",

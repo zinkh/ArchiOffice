@@ -2342,6 +2342,7 @@ export default {
       "project_tab_title_taches": "Project tasks",
       "project_tab_title_honos": "Contract, fees and fee notes",
       "project_tab_title_inspiration": "Inspiration and moodboards",
+      "project_tab_title_diag": "Diagnostics: soil study request to the geotechnical engineer",
       "inspiration_title": "Inspiration & boards",
       "inspiration_subtitle": "Collect project references and compose boards for each design phase.",
       "inspiration_board_subtitle": "Compose the board from the project visual library.",

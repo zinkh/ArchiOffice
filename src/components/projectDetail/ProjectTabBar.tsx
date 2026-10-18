@@ -36,7 +36,7 @@ const GROUP_ICONS: Record<ProjectTabGroupId, React.ElementType> = {
 
 /** Sigle de mission MOP accolé au nom de famille, là où une seule mission la compose. */
 /** Sous-onglets dont le sigle suffit : pas d'intitulé long à côté (il reste en infobulle). */
-const ONGLETS_SANS_INTITULE = new Set(['INSPIRATION', 'PRO', 'NOTICES']);
+const ONGLETS_SANS_INTITULE = new Set(['INSPIRATION', 'DIAG', 'PRO', 'NOTICES']);
 
 const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'ESQ–PRO', CONSULTATION: 'ACT' };
 
