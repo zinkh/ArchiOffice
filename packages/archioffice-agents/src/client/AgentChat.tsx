@@ -87,24 +87,28 @@ export function downloadArtifact(artifact: AgentArtifact): void {
  * afficher un aperçu.
  */
 export function ArtifactCard({ artifact, onPreview }: { artifact: AgentArtifact; onPreview?: (artifact: AgentArtifact) => void }) {
+  const { t } = useTranslation();
+  const action = t(onPreview ? 'agent_document_preview_named' : 'agent_document_download_named', { name: artifact.filename });
   return (
-    <div
-      className="flex items-center gap-3 px-3 py-2.5 rounded-xl mt-2 border cursor-pointer hover:opacity-80 transition-opacity"
+    <button
+      type="button"
+      aria-label={action}
+      className="w-full min-h-11 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--tblr-primary)] flex items-center gap-3 px-3 py-2.5 rounded-xl mt-2 border cursor-pointer hover:opacity-80 transition-opacity"
       style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
       onClick={() => (onPreview ? onPreview(artifact) : downloadArtifact(artifact))}
-      title={onPreview ? `Aperçu de ${artifact.filename}` : `Télécharger ${artifact.filename}`}
+      title={action}
     >
       {ARTIFACT_ICONS[artifact.type] ?? <IconFileText size={20} />}
-      <div className="flex-1 min-w-0">
-        <div className="text-[12px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{artifact.filename}</div>
-        <div className="text-[10px]" style={{ color: 'var(--tblr-muted)' }}>
+      <span className="block flex-1 min-w-0">
+        <span className="block text-[12px] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>{artifact.filename}</span>
+        <span className="block text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>
           {ARTIFACT_TYPE_LABELS[artifact.type] ?? 'Document'}
-        </div>
-      </div>
+        </span>
+      </span>
       {onPreview
         ? <IconArrowsMaximize size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />
         : <IconDownload size={14} style={{ color: 'var(--tblr-muted)', flexShrink: 0 }} />}
-    </div>
+    </button>
   );
 }
 
@@ -382,6 +386,7 @@ export function DocumentPicker({ attached, onAttach, onDetach }: {
   onAttach: (doc: DocMeta) => void;
   onDetach: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [docs, setDocs] = useState<DocMeta[]>([]);
   const ref = useRef<HTMLDivElement | null>(null);
@@ -401,13 +406,15 @@ export function DocumentPicker({ attached, onAttach, onDetach }: {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)]"
-        title="Joindre un document"
+        className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)]"
+        title={t('agent_document_attach')}
+        aria-label={t('agent_document_attach')}
+        aria-expanded={open}
         style={{ color: attached.length > 0 ? 'var(--tblr-primary)' : 'var(--tblr-muted)' }}
       >
         <IconPaperclip size={15} />
         {attached.length > 0 && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center text-white" style={{ background: 'var(--tblr-primary)' }}>
+          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[0.6875rem] font-bold flex items-center justify-center text-white" style={{ background: 'var(--tblr-primary)' }}>
             {attached.length}
           </span>
         )}
@@ -438,8 +445,8 @@ export function DocumentPicker({ attached, onAttach, onDetach }: {
                   >
                     <IconFileText size={13} />
                     <span className="truncate flex-1">{doc.name}</span>
-                    {doc.phase && <span className="text-[10px] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{doc.phase}</span>}
-                    {isAttached && <span className="text-[10px] font-semibold" style={{ color: 'var(--tblr-primary)' }}>✓</span>}
+                    {doc.phase && <span className="text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{doc.phase}</span>}
+                    {isAttached && <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-primary)' }}>✓</span>}
                   </button>
                 );
               })}
@@ -452,10 +459,10 @@ export function DocumentPicker({ attached, onAttach, onDetach }: {
       {attached.length > 0 && (
         <div className="absolute bottom-full mb-2 left-8 flex flex-wrap gap-1" style={{ display: open ? 'none' : 'flex' }}>
           {attached.map(doc => (
-            <div key={doc.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+            <div key={doc.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
               <IconFileText size={10} />
               <span className="max-w-[100px] truncate">{doc.name}</span>
-              <button onClick={() => onDetach(doc.id)} className="hover:opacity-70">
+              <button type="button" onClick={() => onDetach(doc.id)} aria-label={t('agent_document_remove_named', { name: doc.name })} className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-full hover:opacity-70">
                 <IconClose size={9} />
               </button>
             </div>
@@ -893,7 +900,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
         <span className="hidden sm:inline">{t('agents')}</span>
         {copilotSuggestions.length > 0 && (
           <span
-            className="absolute -top-1 -right-1 flex items-center justify-center rounded-full text-[10px] font-bold"
+            className="absolute -top-1 -right-1 flex items-center justify-center rounded-full text-[0.6875rem] font-bold"
             style={{ background: '#e03131', color: 'white', minWidth: 18, height: 18, padding: '0 4px' }}
           >
             {copilotSuggestions.length}
@@ -1002,7 +1009,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 short and always visible rather than repeated per message,
                 since every reply and tool action in this panel is AI-generated. */}
             <div
-              className="px-4 py-1.5 text-[10px] text-center border-b shrink-0"
+              className="px-4 py-1.5 text-[0.6875rem] text-center border-b shrink-0"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}
             >
               {t('agent_chat_ai_disclaimer')}
@@ -1149,7 +1156,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 </div>
               )}
               {tokenBalance !== null && (
-                <div className="text-[10px] mb-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
+                <div className="text-[0.6875rem] mb-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
                   {(tokenBalance / 100).toFixed(2)} € de crédits IA restants
                 </div>
               )}
