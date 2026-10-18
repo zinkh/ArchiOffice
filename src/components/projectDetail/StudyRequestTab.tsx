@@ -195,7 +195,7 @@ function StudyRequestForm({ kind, project }: Props) {
 
       <section className="rounded-xl border border-[var(--tblr-border)] p-4" aria-labelledby={`${p}-faits`}>
         <h3 id={`${p}-faits`} className={TITRE_SECTION} style={{ color: 'var(--tblr-muted)' }}>{t('study_common_facts_title')}</h3>
-        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 [grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr))]">
+        <dl className="mt-4 grid grid-cols-1 gap-x-6 gap-y-4 md:grid-cols-2">
           {def.faits.map(f => (
             <Ligne key={f} label={t(`study_fact_${f}`)} valeur={projet[f]} aPreciser={aPreciser} />
           ))}
