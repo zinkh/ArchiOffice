@@ -3,7 +3,7 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import { expect, it, vi } from 'vitest';
-import { AgentChatProvider, useAgentChat } from '../packages/archioffice-agents/src/client/AgentChat';
+import { ArtifactCard, AgentChatProvider, useAgentChat } from '../packages/archioffice-agents/src/client/AgentChat';
 const mocks = vi.hoisted(() => ({ request: vi.fn(), t: (key: string, opts?: any) => opts?.name ? `${key} ${opts.name}` : key,
   speech: { stop: vi.fn(), toggle: vi.fn(), activeId: null }, dictation: { status: 'idle', supported: false } }));
 vi.mock('../src/lib/api', () => ({ apiFetch: mocks.request }));
@@ -47,5 +47,28 @@ it('does not switch the floating chat automatically after a colleague consultati
     expect(mocks.request).toHaveBeenCalledWith('/api/agents/a2/conversation');
   } finally {
     await act(async () => root.unmount()); container.remove(); vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals();
+  }
+});
+
+
+it('exposes generated documents as named, focusable buttons and preserves preview actions', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  const host = document.createElement('div'); document.body.append(host);
+  const root = createRoot(host);
+  const artifact = { type: 'pdf' as const, filename: 'Notice sécurité.pdf', mimeType: 'application/pdf', data: '' };
+  const preview = vi.fn();
+  try {
+    await act(async () => root.render(React.createElement(ArtifactCard, { artifact, onPreview: preview })));
+    const button = host.querySelector('button')!;
+    expect(button.type).toBe('button');
+    expect(button.tabIndex).toBe(0);
+    expect(button.getAttribute('aria-label')).toBe('agent_document_preview_named Notice sécurité.pdf');
+    button.focus(); expect(document.activeElement).toBe(button);
+    await act(async () => button.click());
+    expect(preview).toHaveBeenCalledExactlyOnceWith(artifact);
+    await act(async () => root.render(React.createElement(ArtifactCard, { artifact })));
+    expect(host.querySelector('button')!.getAttribute('aria-label')).toBe('agent_document_download_named Notice sécurité.pdf');
+  } finally {
+    await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals();
   }
 });

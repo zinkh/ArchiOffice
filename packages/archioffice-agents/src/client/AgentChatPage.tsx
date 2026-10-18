@@ -76,15 +76,17 @@ function ArtifactPanel({ artifact, onClose }: { artifact: AgentArtifact; onClose
         </div>
         <button
           onClick={() => downloadArtifact(artifact)}
-          className="p-1.5 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
+          className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
           title="Télécharger"
+          aria-label="Télécharger"
         >
           <IconDownload size={16} style={{ color: 'var(--tblr-muted)' }} />
         </button>
         <button
           onClick={onClose}
-          className="p-1.5 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
+          className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
           title="Fermer l'aperçu"
+          aria-label="Fermer l'aperçu"
         >
           <IconX size={16} style={{ color: 'var(--tblr-muted)' }} />
         </button>
