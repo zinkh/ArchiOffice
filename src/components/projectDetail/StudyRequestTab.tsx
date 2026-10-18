@@ -2,10 +2,11 @@
 // technique (CT) ou coordination SPS (CSPS). Le formulaire reprend les données de
 // l'affaire ; le message s'ouvre dans le composeur de messagerie, où l'architecte
 // relit et envoie. Un envoi confirmé est consigné dans l'historique de l'affaire.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconSend, IconAlertTriangle, IconCheck } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
+import { useStudyList } from '../../hooks/useStudyList';
 import { useMailAccounts } from '../../hooks/useMailAccounts';
 import { useSettings } from '../../hooks/useSettings';
 import MailComposeModal from '../MailComposeModal';
@@ -32,12 +33,12 @@ interface Props {
 type Erreur = { cle: string; valeurs?: Record<string, string> };
 type Notice = { ok: boolean; texte: string };
 
-const CHAMP = 'mt-1 w-full min-h-11 rounded-lg border border-[var(--tblr-border)] bg-white px-3 py-2 text-sm dark:bg-zinc-900';
+const CHAMP = 'mt-1 w-full min-h-11 rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-bg)] px-3 py-2 text-sm text-[var(--tblr-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--tblr-primary)]';
 const TITRE_SECTION = 'text-[0.6875rem] font-bold uppercase tracking-wider';
 
 function Ligne({ label, valeur, aPreciser }: { label: string; valeur?: string | null; aPreciser: string }) {
   return (
-    <div className="grid grid-cols-[minmax(0,11rem)_1fr] gap-2 text-sm">
+    <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-2 text-sm">
       <dt style={{ color: 'var(--tblr-muted)' }}>{label}</dt>
       <dd className="min-w-0 break-words" style={{ color: valeur?.trim() ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}>
         {valeur?.trim() || aPreciser}
@@ -46,7 +47,11 @@ function Ligne({ label, valeur, aPreciser }: { label: string; valeur?: string | 
   );
 }
 
-export function StudyRequestTab({ kind, project }: Props) {
+export function StudyRequestTab(props: Props) {
+  return <StudyRequestForm key={`${props.project.id}:${props.kind}`} {...props} />;
+}
+
+function StudyRequestForm({ kind, project }: Props) {
   const { t, i18n } = useTranslation();
   const def = STUDY_KIND_DEFS[kind];
   const p = def.prefix;
@@ -54,8 +59,10 @@ export function StudyRequestTab({ kind, project }: Props) {
   const { settings } = useSettings();
   const agence = settings as unknown as { agencyName?: string; email?: string } | null;
 
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [historique, setHistorique] = useState<StudyRequestRecord[] | null>(null);
+  const contactsState = useStudyList<Contact>('/api/contacts');
+  const historyState = useStudyList<StudyRequestRecord>(`/api/projects/${project.id}/study-requests?kind=${kind}`);
+  const contacts = contactsState.data;
+  const historique = historyState.data;
   const [etudes, setEtudes] = useState<string[]>([]);
   const [values, setValues] = useState<Record<string, StudyValue>>({});
   const [contactIds, setContactIds] = useState<string[]>([]);
@@ -66,19 +73,6 @@ export function StudyRequestTab({ kind, project }: Props) {
   const [message, setMessage] = useState<{ id: string; sujet: string; corps: string; destinataires: string[] } | null>(null);
 
   const projet = useMemo(() => studyProjetFromProject(project), [project]);
-
-  useEffect(() => {
-    apiFetch<Contact[]>('/api/contacts').then(setContacts).catch(() => setContacts([]));
-  }, []);
-
-  const charger = async () => {
-    try {
-      setHistorique(await apiFetch<StudyRequestRecord[]>(`/api/projects/${project.id}/study-requests?kind=${kind}`));
-    } catch {
-      setHistorique(null);
-    }
-  };
-  useEffect(() => { void charger(); }, [project.id, kind]);
 
   // Une catégorie est exigée : un contact sans catégorie n'est jamais proposé d'office.
   const destinataires = useMemo(
@@ -167,13 +161,20 @@ export function StudyRequestTab({ kind, project }: Props) {
     setValues({});
     setContactIds([]);
     setAutresEmails('');
-    await charger();
+    historyState.retry();
   };
 
   const dateLisible = (iso: string) => {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(i18n.language, { day: '2-digit', month: '2-digit', year: 'numeric' });
   };
+
+  const lecture = (state: { status: string; retry: () => void }, errorKey: string) => (
+    <div role={state.status === 'error' ? 'alert' : 'status'} className="flex flex-wrap items-center gap-3 text-sm text-[var(--tblr-muted)]">
+      <p>{t(state.status === 'error' ? errorKey : 'study_common_loading')}</p>
+      {state.status === 'error' && <button type="button" onClick={state.retry} className="min-h-11 rounded-lg border border-[var(--tblr-border)] px-3 font-semibold text-[var(--tblr-text)]">{t('study_common_retry')}</button>}
+    </div>
+  );
 
   const aPreciser = t('study_common_a_preciser');
   const groupesRendus = def.groupes.map(g => ({ id: g.id, champs: g.champs.map(id => def.champs.find(c => c.id === id)).filter((c): c is StudyFieldDef => !!c) }));
@@ -222,7 +223,7 @@ export function StudyRequestTab({ kind, project }: Props) {
 
       <section className="space-y-3" aria-labelledby={`${p}-destinataires`}>
         <h3 id={`${p}-destinataires`} className={TITRE_SECTION} style={{ color: 'var(--tblr-muted)' }}>{t('study_common_recipients_title')}</h3>
-        {destinataires.length === 0 ? (
+        {contactsState.status !== 'success' ? lecture(contactsState, 'study_common_contacts_load_error') : destinataires.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('study_common_recipients_empty')}</p>
         ) : (
           <div className="grid gap-2 md:grid-cols-2">
@@ -269,9 +270,7 @@ export function StudyRequestTab({ kind, project }: Props) {
 
       <section className="space-y-3" aria-labelledby={`${p}-historique`}>
         <h3 id={`${p}-historique`} className={TITRE_SECTION} style={{ color: 'var(--tblr-muted)' }}>{t('study_common_history_title')}</h3>
-        {historique === null ? (
-          <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('study_common_history_load_error')}</p>
-        ) : historique.length === 0 ? (
+        {historyState.status !== 'success' ? lecture(historyState, 'study_common_history_load_error') : historique.length === 0 ? (
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('study_common_history_empty')}</p>
         ) : (
           <ul className="space-y-2">
