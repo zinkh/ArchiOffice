@@ -6,7 +6,7 @@
 // INSPIRATION et NOTICES s'ajoutent sous Études.
 
 export type ProjectTabId =
-  | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'PRO' | 'NOTICES' | 'ACT'
+  | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'DIAG' | 'CT' | 'CSPS' | 'PRO' | 'NOTICES' | 'ACT'
   | 'VISA' | 'DET' | 'RDT' | 'AOR' | 'CORRESPONDANCE';
 
 export type ProjectTabGroupId =
@@ -22,7 +22,7 @@ export const PROJECT_TAB_GROUPS: readonly ProjectTabGroup[] = [
   // Hors du filtre chantier : des tâches existent dès la phase études.
   { id: 'TACHES', tabs: ['TACHES'] },
   { id: 'HONOS', tabs: ['HONOS'] },
-  { id: 'ETUDES', tabs: ['INSPIRATION', 'PRO', 'NOTICES'] },
+  { id: 'ETUDES', tabs: ['INSPIRATION', 'DIAG', 'CT', 'CSPS', 'PRO', 'NOTICES'] },
   { id: 'CONSULTATION', tabs: ['ACT'] },
   { id: 'CHANTIER', tabs: ['VISA', 'DET', 'RDT', 'AOR'] },
   { id: 'CORRESPONDANCE', tabs: ['CORRESPONDANCE'] },

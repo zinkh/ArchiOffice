@@ -164,14 +164,14 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
     <div className="space-y-6">
       <div className={`flex items-center flex-wrap gap-3 ${embedded ? 'sm:justify-end' : 'justify-between'}`}>
         {!embedded && <h2 className="text-2xl font-bold text-zinc-900 dark:text-white">{t('time_tracking_title')}</h2>}
-        <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
-          <select className="min-w-0 flex-1 p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700 sm:max-w-64 sm:flex-none" value={clockProjectId} onChange={e => setClockProjectId(e.target.value)} disabled={!!current}>
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto">
+          <select className="min-w-48 flex-1 p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700 sm:max-w-64 sm:flex-none" value={clockProjectId} onChange={e => setClockProjectId(e.target.value)} disabled={!!current}>
             <option value="">{t('time_tracking_no_project')}</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           {!current && (
             <>
-              <select aria-label={t('time_tracking_phase_label')} className="p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700" value={clockPhase} onChange={e => setClockPhase(e.target.value)}>
+              <select aria-label={t('time_tracking_phase_label')} className="shrink-0 p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700" value={clockPhase} onChange={e => setClockPhase(e.target.value)}>
                 <option value="">{t('time_tracking_phase_none')}</option>
                 {MISSION_PHASES.map(phase => <option key={phase} value={phase}>{phase}</option>)}
               </select>

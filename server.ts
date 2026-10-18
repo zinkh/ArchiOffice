@@ -108,6 +108,7 @@ import { registerKnowledgeSharingRoutes } from "./server/routes/knowledgeSharing
 import { registerInspirationRoutes } from "./server/routes/inspirations";
 import { registerTaskRoutes } from "./server/routes/tasks";
 import { registerPhoneCallRoutes } from "./server/routes/phoneCalls";
+import { registerProjectStudyRequestRoutes } from "./server/routes/projectStudyRequests";
 import { registerSendEmailRoutes } from "./server/routes/sendEmail";
 import { registerMailDraftRoutes } from "./server/routes/mailDrafts";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
@@ -1113,6 +1114,7 @@ export async function createApp() {
   registerInspirationRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerPhoneCallRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectStudyRequestRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerTelegramRoutes(app, { supabaseAdmin, getTenantId, baseUrl: `http://127.0.0.1:${PORT}` });
   registerSendEmailRoutes(app, { supabaseAdmin, getTenantId });
   registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });

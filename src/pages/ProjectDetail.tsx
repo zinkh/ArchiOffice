@@ -105,6 +105,7 @@ import { PhaseStepper } from '../components/ui/PhaseStepper';
 import { ProjectOverview } from '../components/projectDetail/ProjectOverview';
 import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
+import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
 
@@ -3290,6 +3291,9 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'INSPIRATION' && <InspirationBoards projectId={id!} projectName={project?.name} projectCode={project?.project_code || project?.reference || undefined} />}
+            {activeTab === 'DIAG' && project && <StudyRequestTab kind="geotechnique" project={project} />}
+            {activeTab === 'CT' && project && <StudyRequestTab kind="controle_technique" project={project} />}
+            {activeTab === 'CSPS' && project && <StudyRequestTab kind="csps" project={project} />}
             {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} contexte={project ? {
               operation: project.name,
               reference: project.project_code,

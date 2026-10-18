@@ -1,5 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
+import { useHorizontalScrollHints } from '../../hooks/useHorizontalScrollHints';
 import { FOCUS_RING } from './teamShared';
 
 export type TeamTab = 'team' | 'leave' | 'time';
@@ -27,8 +28,9 @@ const TABS: { id: TeamTab; label: string }[] = [
 /** Onglets soulignés des écrans Tabler : l'équipe, les congés et le suivi du temps partagent une seule page. */
 export default function TeamTabs({ tab, onTab, pendingLeave }: TeamTabsProps) {
   const { t } = useTranslation();
+  const scrollRef = useHorizontalScrollHints<HTMLElement>('[aria-current="page"]', tab);
   return (
-    <nav aria-label={t('team_tabs_label') as string} className="-mb-1 overflow-x-auto border-b border-[var(--tblr-border)]">
+    <nav ref={scrollRef} aria-label={t('team_tabs_label') as string} className="scroll-fade-x -mb-1 overflow-x-auto border-b border-[var(--tblr-border)]">
       <ul className="flex min-w-max gap-1">
         {TABS.map((item) => {
           const active = tab === item.id;
