@@ -49,6 +49,8 @@ import { Table, Header, HeaderRow, Body, Row, HeaderCell, Cell } from '@table-li
 import { useTheme } from '@table-library/react-table-library/theme';
 import { formatCurrency, cn, isFlagTrue } from '../lib/utils';
 import { apiFetch } from '../lib/api';
+import { loadProjectDetail, type ProjectLoadState } from '../lib/projectDetailLoad';
+import { mutateVisa } from '../lib/visaMutation';
 import { useActiveGroupement } from '../hooks/useActiveGroupement';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, fetchAgencySettings } from '../lib/pdfLetterhead';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -172,8 +174,12 @@ export default function ProjectDetail() {
   const navigate = useNavigate();
   const { currentUser, setHeaderTitle } = useUser();
   const { t } = useTranslation();
+  const projectPanelId = useId();
   
   const [project, setProject] = useState<Project | null>(null);
+  const [projectLoadState, setProjectLoadState] = useState<ProjectLoadState>('loading');
+  const projectLoadController = useRef<AbortController | null>(null);
+  const projectLoadSequence = useRef(0);
   // La fiche telle qu'elle est en base (dernier chargement ou dernier
   // enregistrement réussi) : c'est elle qui dit s'il reste des saisies à
   // enregistrer.
@@ -272,6 +278,9 @@ export default function ProjectDetail() {
   const milestoneCreationsInFlight = useRef<Set<string>>(new Set());
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [visas, setVisas] = useState<Visa[]>([]);
+  const visaActionsInFlight = useRef(new Set<string>());
+  const [visaBusyIds, setVisaBusyIds] = useState<Set<string>>(new Set());
+  const [visaActionErrors, setVisaActionErrors] = useState<Record<string, string>>({});
   const [receptions, setReceptions] = useState<Reception[]>([]);
   const [reserves, setReserves] = useState<Reserve[]>([]);
   const [gpaReserves, setGpaReserves] = useState<GpaReserve[]>([]);
@@ -758,6 +767,9 @@ export default function ProjectDetail() {
   }, [activeTab, id]);
 
   useEffect(() => {
+    setProject(null);
+    setSavedProject(null);
+    setProjectLoadState('loading');
     if (id) {
       fetchFullProject();
       fetchCategories();
@@ -771,6 +783,10 @@ export default function ProjectDetail() {
       fetchPermits();
       fetchRfis();
     }
+    return () => {
+      projectLoadSequence.current++;
+      projectLoadController.current?.abort();
+    };
   }, [id]);
 
   useEffect(() => {
@@ -861,22 +877,42 @@ export default function ProjectDetail() {
   // volontairement préchargé, l'instantané peut même dater d'avant la toute
   // première ouverture de sa fiche aujourd'hui.
   const fetchFullProject = async () => {
-    const cached = await cachedProjectSnapshot(id!);
-    if (cached) applyFullProjectData(cached);
-    if (!navigator.onLine) return;
+    if (!id) return;
+    projectLoadController.current?.abort();
+    const controller = new AbortController();
+    projectLoadController.current = controller;
+    const sequence = ++projectLoadSequence.current;
+    setProjectLoadState('loading');
+    const state = await loadProjectDetail({
+      id,
+      signal: controller.signal,
+      readCache: cachedProjectSnapshot,
+      writeCache: async data => { await db.projectSnapshots.put({ id, data, cachedAt: Date.now() }); },
+      onData: data => {
+        if (sequence === projectLoadSequence.current && !controller.signal.aborted) applyFullProjectData(data);
+      },
+    });
+    if (sequence === projectLoadSequence.current && !controller.signal.aborted) setProjectLoadState(state);
+  };
+
+  const handleVisaAction = async (visa: Visa, action: 'approved' | 'rejected' | 'delete') => {
+    // A ref locks immediately, including two clicks before React renders disabled.
+    if (visaActionsInFlight.current.has(visa.id)) return;
+    visaActionsInFlight.current.add(visa.id);
+    setVisaBusyIds(new Set(visaActionsInFlight.current));
+    setVisaActionErrors(prev => { const next = { ...prev }; delete next[visa.id]; return next; });
     try {
-      const res = await fetch(`/api/projects/${id}/full`);
-      if (res.ok) {
-        const data = await res.json();
-        applyFullProjectData(data);
-        await db.projectSnapshots.put({ id: id!, data, cachedAt: Date.now() });
-      } else if (!cached) {
-        navigate('/projects');
-      }
-    } catch (err) {
-      console.error('Failed to fetch full project:', err);
-      // Coupure réseau après le rendu depuis le cache (s'il y en avait un) :
-      // on garde ce qui est déjà affiché plutôt que de naviguer ailleurs.
+      await mutateVisa(visa, action);
+      setVisas(prev => action === 'delete' ? prev.filter(v => v.id !== visa.id)
+        : prev.map(v => v.id === visa.id ? { ...v, status: action } : v));
+      showToast(t(action === 'delete' ? 'projectdetail_visa_deleted_named' : 'projectdetail_visa_updated_named', { title: visa.title }));
+    } catch {
+      const message = t('projectdetail_visa_action_failed_named', { title: visa.title });
+      setVisaActionErrors(prev => ({ ...prev, [visa.id]: message }));
+      showToast(message, 'error', { duration: 6000 });
+    } finally {
+      visaActionsInFlight.current.delete(visa.id);
+      setVisaBusyIds(new Set(visaActionsInFlight.current));
     }
   };
 
@@ -1798,16 +1834,40 @@ export default function ProjectDetail() {
     }
   };
 
+  const projectLoadMessage = projectLoadState === 'offline' ? t(project ? 'projectdetail_load_offline_cached' : 'projectdetail_load_offline')
+    : projectLoadState === 'not-found' ? t('projectdetail_load_not_found')
+    : projectLoadState === 'forbidden' ? t('projectdetail_load_forbidden')
+    : t('projectdetail_load_error');
+
   if (!project) return (
-    <div role="status" className="p-8 flex items-center justify-center gap-2 text-sm" style={{ color: 'var(--tblr-muted)' }}>
-      <span aria-hidden className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-      {t('loading')}
+    <div className="p-6 space-y-4" style={{ color: 'var(--tblr-text)' }}>
+      {projectLoadState === 'loading' ? (
+        <div role="status" className="flex items-center gap-2 text-sm" style={{ color: 'var(--tblr-muted)' }}>
+          <span aria-hidden className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          {t('loading')}
+        </div>
+      ) : (
+        <>
+          <p role="alert" className="text-sm">{projectLoadMessage}</p>
+          <div className="flex flex-wrap gap-3">
+            <button type="button" className="btn btn-secondary min-h-11" onClick={() => { void fetchFullProject(); }}>{t('retry_btn')}</button>
+            <Link className="btn btn-secondary min-h-11" to="/projects">{t('projectdetail_back_to_projects')}</Link>
+          </div>
+        </>
+      )}
     </div>
   );
 
   return (
     <div className="flex flex-col lg:h-full">
       <Toast toast={toast} />
+      {projectLoadState !== 'ready' && projectLoadState !== 'loading' && (
+        <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border p-3 text-sm" style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
+          <span>{t('projectdetail_load_cached')}</span>
+          <span>{projectLoadMessage}</span>
+          <button type="button" className="btn btn-secondary min-h-11" onClick={() => { void fetchFullProject(); }}>{t('retry_btn')}</button>
+        </div>
+      )}
       {confirmDialog}
       {phaseToCheck && id && <PhaseControlDialog projectId={id} phase={phaseToCheck}
         members={team.map(m => ({ id: m.id, name: m.name }))}
@@ -1899,6 +1959,7 @@ export default function ProjectDetail() {
       {/* Tab bar */}
       <div className="shrink-0 px-4 pt-3">
         <ProjectTabBar
+          panelId={projectPanelId}
           activeTab={activeTab}
           onChange={setActiveTab}
           isChantier={!!project.is_chantier}
@@ -1907,7 +1968,7 @@ export default function ProjectDetail() {
         />
       </div>
 
-      <div className={`flex-1 ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
+      <div id={projectPanelId} role="tabpanel" aria-label={t(`project_tab_title_${activeTab.toLowerCase()}`)} tabIndex={0} className={`flex-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
         {activeTab === 'INFOS' && !showFullEditor ? (
           <ProjectOverview
             project={project}
@@ -4802,20 +4863,18 @@ export default function ProjectDetail() {
                               <span className="truncate block max-w-48" title={visa.comments}>{visa.comments || <span className="italic text-[var(--tblr-muted)]">—</span>}</span>
                             </td>
                             <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
+                              {visaBusyIds.has(visa.id) && <p role="status" className="mb-2 text-[0.8125rem]">{t('projectdetail_visa_updating_named', { title: visa.title })}</p>}
+                              {visaActionErrors[visa.id] && <p role="alert" className="mb-2 max-w-xs text-[0.8125rem] text-[var(--tblr-text)]">{visaActionErrors[visa.id]}</p>}
+                              <div aria-busy={visaBusyIds.has(visa.id)} className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
                                 {/* Quick validate */}
                                 {visa.status !== 'approved' && (
                                   <button
                                     type="button"
                                     title={t('projectdetail_visa_quick_approve')}
                                     aria-label={t('projectdetail_visa_quick_approve_named', { title: visa.title })}
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`/api/visas/${visa.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...visa, status: 'approved' }) });
-                                        if (res.ok) setVisas(prev => prev.map(v => v.id === visa.id ? { ...v, status: 'approved' } : v));
-                                      } catch (err) { console.error(err); }
-                                    }}
-                                    className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                    onClick={() => { void handleVisaAction(visa, 'approved'); }}
+                                    disabled={visaBusyIds.has(visa.id)}
+                                    className="disabled:opacity-50 disabled:cursor-wait p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
                                   >
                                     <IconCheck size={15} />
                                   </button>
@@ -4826,13 +4885,9 @@ export default function ProjectDetail() {
                                     type="button"
                                     title={t('projectdetail_visa_quick_reject')}
                                     aria-label={t('projectdetail_visa_quick_reject_named', { title: visa.title })}
-                                    onClick={async () => {
-                                      try {
-                                        const res = await fetch(`/api/visas/${visa.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...visa, status: 'rejected' }) });
-                                        if (res.ok) setVisas(prev => prev.map(v => v.id === visa.id ? { ...v, status: 'rejected' } : v));
-                                      } catch (err) { console.error(err); }
-                                    }}
-                                    className="p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                    onClick={() => { void handleVisaAction(visa, 'rejected'); }}
+                                    disabled={visaBusyIds.has(visa.id)}
+                                    className="disabled:opacity-50 disabled:cursor-wait p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                   >
                                     <IconX size={15} />
                                   </button>
@@ -4842,13 +4897,14 @@ export default function ProjectDetail() {
                                   type="button"
                                   title={t('projectdetail_visa_edit')}
                                   aria-label={t('projectdetail_visa_edit_named', { title: visa.title })}
+                                  disabled={visaBusyIds.has(visa.id)}
                                   onClick={() => {
                                     setEditingVisa(visa);
                                     setVisaFile(null);
                                     setVisaForm({ title: visa.title, date: visa.date.split('T')[0], status: visa.status, comments: visa.comments || '', lot_id: visa.lot_id || '' });
                                     setIsVisaModalOpen(true);
                                   }}
-                                  className="p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                                  className="disabled:opacity-50 disabled:cursor-wait p-1.5 text-[var(--tblr-muted)] hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
                                 >
                                   <IconEdit size={15} />
                                 </button>
@@ -4857,14 +4913,12 @@ export default function ProjectDetail() {
                                   type="button"
                                   title={t('projectdetail_visa_delete')}
                                   aria-label={t('projectdetail_visa_delete_named', { title: visa.title })}
+                                  disabled={visaBusyIds.has(visa.id)}
                                   onClick={async () => {
-                                    if (!(await confirmDelete('projectdetail_confirm_delete_visa'))) return;
-                                    try {
-                                      const res = await fetch(`/api/visas/${visa.id}`, { method: 'DELETE' });
-                                      if (res.ok) setVisas(prev => prev.filter(v => v.id !== visa.id));
-                                    } catch (err) { console.error(err); }
+                                    if (visaActionsInFlight.current.has(visa.id) || !(await confirmDelete('projectdetail_confirm_delete_visa'))) return;
+                                    await handleVisaAction(visa, 'delete');
                                   }}
-                                  className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                  className="disabled:opacity-50 disabled:cursor-wait p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                 >
                                   <IconTrash size={15} />
                                 </button>

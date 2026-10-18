@@ -1,3 +1,5 @@
+import { ChatRequestStatus, ConsultedAgentLinks, type AgentConsultation } from './ChatRequestStatus.js';
+import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { projectIdFromPath, useOpenProjectTabs } from '@/src/lib/openProjectTabs';
@@ -264,7 +266,7 @@ export function FeedbackModal({
 
 
 export function MessageBubble({ msg, agentColor, speech, onPreviewArtifact, onFeedback }: {
-  msg: AgentMessage & { artifact?: AgentArtifact };
+  msg: AgentMessage & { artifact?: AgentArtifact; consulted?: AgentConsultation[] };
   agentColor: string;
   speech: Speech;
   onPreviewArtifact?: (artifact: AgentArtifact) => void;
@@ -502,7 +504,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(false);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<(AgentMessage & { artifact?: AgentArtifact })[]>([]);
+  const [messages, setMessages] = useState<(AgentMessage & { artifact?: AgentArtifact; consulted?: AgentConsultation[] })[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -514,7 +516,6 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   // Android Web Share Target. On regular in-app opens, the route-derived
   // project remains authoritative.
   const [contextProjectId, setContextProjectId] = useState<string | null>(null);
-  const [elapsedSec, setElapsedSec] = useState(0);
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
   const [copilotSuggestions, setCopilotSuggestions] = useState<CopilotSuggestion[]>([]);
@@ -565,20 +566,6 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     if (dictation.status !== 'idle') speech.stop();
   }, [dictation.status, speech]);
 
-  // Surfaces "still working" feedback while a request is in flight, instead of
-  // leaving the user staring at bouncing dots with no sense of progress.
-  useEffect(() => {
-    if (!loading) { setElapsedSec(0); return; }
-    const start = Date.now();
-    const id = setInterval(() => setElapsedSec(Math.round((Date.now() - start) / 1000)), 1000);
-    return () => clearInterval(id);
-  }, [loading]);
-
-  const loadingLabel = elapsedSec < 6
-    ? t('agent_chat_thinking')
-    : elapsedSec < 18
-      ? t('agent_chat_thinking_slow')
-      : t('agent_chat_thinking_long');
 
   useEffect(() => {
     apiFetch('/api/agents')
@@ -673,7 +660,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   }, [speech]);
 
   const sendMessage = async () => {
-    if (!input.trim() || !activeAgentId || loading) return;
+    if (!input.trim() || !activeAgentId || loading || loadingHistory || resetBusy) return;
     // Le micro ne reste pas ouvert par-dessus un envoi : la suite de la
     // dictée arriverait dans une zone que l'on vient de vider. Une lecture en
     // cours n'a pas non plus sa place pendant qu'une nouvelle réponse arrive.
@@ -726,26 +713,20 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
         }),
         signal: controller.signal,
       });
-      const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {
+      const assistantMsg: AgentMessage & { artifact?: AgentArtifact; consulted?: AgentConsultation[] } = {
         id: crypto.randomUUID(),
         conversation_id: '',
         tenant_id: '',
         role: 'assistant',
         content: res.reply,
         artifact: res.artifact,
+        consulted: res.consulted,
         created_at: new Date().toISOString(),
       };
       setMessages(prev => [...prev, assistantMsg]);
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
       saveDraft(agentId, '');
-      // L'agent a consulté un collègue (consulter_agent) : sa réponse est
-      // déjà enregistrée dans SA conversation avec l'utilisateur (voir
-      // routes.ts) — on y bascule pour la montrer, après avoir laissé le
-      // temps de lire la réponse de l'agent qu'on vient de recevoir.
-      if (res.consulted?.length) {
-        const target = res.consulted[0];
-        setTimeout(() => switchAgent(target.id), 1200);
-      }
+
     } catch (e: any) {
       const errText: string = e?.message ?? t('agent_chat_error');
       if (e?.name === 'AbortError') {
@@ -830,21 +811,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     if (e.key === 'Enter' && e.ctrlKey) { e.preventDefault(); sendMessage(); }
   };
 
-  const resetConversation = async () => {
-    if (!activeAgentId) return;
+  const { resetConversation, resetBusy, clearing, resetDialog } = useConversationReset(activeAgentId, loading || loadingHistory, () => {
     speech.stop();
-    try {
-      await apiFetch(`/api/agents/${activeAgentId}/conversation`, { method: 'DELETE' });
-    } catch (e) {
-      console.error('Failed to reset conversation:', e);
-    }
     setMessages([]);
     setErrorMsg(null);
-    // A fresh conversation shouldn't carry over documents attached to the
-    // previous one — otherwise they linger as "already attached" and the
-    // picker/drop zone looks like it can't add anything new.
     setAttachedDocs([]);
-  };
+  }, setErrorMsg);
 
   // Le message de confirmation disparaît seul
   useEffect(() => {
@@ -905,6 +877,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AgentChatContext.Provider value={{ openChat, closeChat, refreshCopilotSuggestions: loadCopilotSuggestions }}>
+      {resetDialog}
       {children}
 
       {/* Floating trigger — desktop only : sur mobile, l'icône Agents de la
@@ -940,7 +913,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
             style={expanded ? {
               bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(900px, calc(100vw - 24px))',
-              height: 'min(88vh, calc(100vh - 40px))',
+              height: 'min(88dvh, calc(100dvh - 100px - env(safe-area-inset-bottom, 0px)))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             } : {
@@ -950,7 +923,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               // une marge basse plus généreuse pour ne pas la recouvrir.
               bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
               width: 'min(420px, calc(100vw - 24px))',
-              height: 'min(640px, calc(100vh - 100px))',
+              height: 'min(640px, calc(100dvh - 100px - env(safe-area-inset-bottom, 0px)))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             }}
@@ -1020,7 +993,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   ? <IconArrowsMinimize size={16} style={{ color: 'var(--tblr-muted)' }} />
                   : <IconArrowsMaximize size={16} style={{ color: 'var(--tblr-muted)' }} />}
               </button>
-              <button onClick={closeChat} className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors">
+              <button onClick={closeChat} aria-label={t('close')} className="min-h-11 min-w-11 inline-flex items-center justify-center p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors">
                 <IconX size={16} style={{ color: 'var(--tblr-muted)' }} />
               </button>
             </div>
@@ -1096,16 +1069,16 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     key={s.id}
                     className="flex items-start gap-2 p-2 rounded-lg"
                     style={{
-                      background: s.tone === 'danger' ? '#fff5f5' : '#fff4e6',
-                      border: `1px solid ${s.tone === 'danger' ? '#ffc9c9' : '#ffd8a8'}`,
+                      background: 'var(--tblr-surface-2)',
+                      border: '1px solid var(--tblr-border)',
                     }}
                   >
-                    <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? '#c92a2a' : '#e67700' }} />
+                    <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? 'var(--tblr-danger)' : 'var(--tblr-warning)' }} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12px]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
+                      <p className="text-[0.75rem]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
                       <button
                         onClick={() => { setInput(s.draft); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                        className="mt-1 text-[11px] font-semibold hover:underline"
+                        className="mt-1 text-[0.6875rem] font-semibold hover:underline"
                         style={{ color: 'var(--tblr-primary)' }}
                       >
                         {t('ai_draft_reminder_btn')}
@@ -1133,34 +1106,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 </div>
               )}
               {messages.map(msg => (
-                <MessageBubble key={msg.id} msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} onFeedback={activeAgent?.learning_enabled ? handleFeedback : undefined} />
+                <React.Fragment key={msg.id}>
+                  <MessageBubble msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} onFeedback={activeAgent?.learning_enabled ? handleFeedback : undefined} />
+                  <ConsultedAgentLinks agents={msg.consulted} onOpen={switchAgent} disabled={loading || resetBusy} />
+                </React.Fragment>
               ))}
-              {loading && (
-                <div className="flex flex-col gap-1">
-                  <div className="flex gap-2 justify-start">
-                    <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: activeAgent?.avatar_color ?? '#206bc4' }}>
-                      <IconRobot size={13} color="white" />
-                    </div>
-                    <div className="px-3 py-2 rounded-xl flex flex-col gap-1" style={{ background: 'var(--tblr-surface-2)' }}>
-                      <div className="flex gap-1 items-center">
-                        {[0, 1, 2].map(i => (
-                          <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--tblr-muted)', animationDelay: `${i * 0.15}s` }} />
-                        ))}
-                      </div>
-                      <div className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>{loadingLabel}</div>
-                    </div>
-                  </div>
-                  {elapsedSec >= 8 && (
-                    <button
-                      onClick={cancelRequest}
-                      className="self-start ml-8 text-[11px] hover:underline"
-                      style={{ color: 'var(--tblr-muted)' }}
-                    >
-                      {t('agent_chat_cancel')}
-                    </button>
-                  )}
-                </div>
-              )}
+              {loading && <ChatRequestStatus onStop={cancelRequest} />}
               {errorMsg === 'enterprise' && (
                 <div className="mx-2 p-3 rounded-lg border text-[12px]" style={{ background: '#fff4e6', borderColor: '#ffd8a8', color: '#f76707' }}>
                   <div className="flex items-center gap-2 font-semibold mb-1"><IconAlertTriangle size={14} /> {t('enterprise_required')}</div>
@@ -1268,7 +1219,8 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   }}
                   onKeyDown={handleKeyDown}
                   placeholder={t('agent_chat_placeholder')}
-                  className="flex-1 resize-none rounded-lg px-3 py-2 text-[13px] outline-none border transition-colors"
+                  aria-label={t('agent_chat_message_label')}
+                  className="flex-1 resize-none rounded-lg px-3 py-2 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
                   style={{
                     background: 'var(--tblr-surface-2)',
                     borderColor: 'var(--tblr-border)',
@@ -1281,13 +1233,13 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     el.style.height = 'auto';
                     el.style.height = Math.min(el.scrollHeight, 100) + 'px';
                   }}
-                  disabled={loading}
+                  disabled={loading || resetBusy}
                 />
                 <button
                   onClick={sendMessage}
-                  disabled={!input.trim() || loading}
+                  disabled={!input.trim() || loading || loadingHistory || resetBusy}
                   className="p-2 rounded-lg transition-colors flex items-center justify-center"
-                  style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading ? 0.5 : 1 }}
+                  style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading || loadingHistory || resetBusy ? 0.5 : 1 }}
                   title={`${t('agent_chat_send')} (Ctrl+Entrée)`}
                 >
                   <IconSend size={16} />
@@ -1295,10 +1247,11 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
               </div>
               <button
                 onClick={resetConversation}
-                className="text-[11px] mt-1.5 hover:underline"
+                disabled={loading || loadingHistory || resetBusy}
+                className="min-h-11 text-[0.6875rem] mt-1.5 hover:underline disabled:opacity-50 disabled:cursor-wait"
                 style={{ color: 'var(--tblr-muted)' }}
               >
-                {t('agent_chat_new')}
+                {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
               </button>
             </div>
           </motion.div>

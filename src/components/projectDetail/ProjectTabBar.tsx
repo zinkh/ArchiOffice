@@ -8,6 +8,7 @@ import { PillTabs, type PillTabItem } from '../ui/PillTabs';
 import { BottomSheet, SheetOption } from '../ui/BottomSheet';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { cn } from '../../lib/utils';
+import { navigateTabList } from '../../lib/tabListNavigation';
 import { useHorizontalScrollHints } from '../../hooks/useHorizontalScrollHints';
 import {
   CHANTIER_ONLY_TABS, groupOfTab, tabForGroup, visibleTabGroups,
@@ -16,6 +17,7 @@ import {
 
 interface ProjectTabBarProps {
   activeTab: string;
+  panelId?: string;
   onChange: (tab: ProjectTabId) => void;
   isChantier: boolean;
   /** Visibilité et repère « hors mission » des onglets gouvernés par le contrat MOE. */
@@ -45,7 +47,7 @@ const GROUP_HINTS: Partial<Record<ProjectTabGroupId, string>> = { ETUDES: 'ESQ�
  * niveau. Les inspirations, le PRO et les notices vivent sous « Études » ; les missions de
  * chantier (VISA, DET, RDT, AOR) vivent sous « Chantier ».
  */
-export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabState, mobileTrailing }: ProjectTabBarProps) {
+export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabState, mobileTrailing, panelId }: ProjectTabBarProps) {
   const { t } = useTranslation();
   // Sous 768 px, deux barres défilantes cédaient la place au contenu et
   // tronquaient leurs libellés : un seul sélecteur ouvre une feuille en liste.
@@ -173,6 +175,7 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
         <div
           ref={subTabsRef}
           role="tablist"
+          onKeyDown={e => navigateTabList(e, activeVisibleGroup.tabs, activeTab, tab => onChange(tab as ProjectTabId))}
           aria-label={t(`project_tab_group_${activeVisibleGroup.id.toLowerCase()}`)}
           className="scroll-fade-x flex items-center gap-1 overflow-x-auto max-w-full border-b"
           style={{ borderColor: 'var(--tblr-border)' }}
@@ -185,6 +188,9 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
                 type="button"
                 role="tab"
                 aria-selected={isActive}
+                aria-controls={panelId}
+                aria-label={t(`project_tab_title_${tab.toLowerCase()}`)}
+                tabIndex={isActive ? 0 : -1}
                 onClick={() => onChange(tab)}
                 title={t(`project_tab_title_${tab.toLowerCase()}`)}
                 className={cn(
