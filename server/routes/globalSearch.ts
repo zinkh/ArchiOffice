@@ -42,6 +42,10 @@ export function registerGlobalSearchRoutes(app: Express, { supabaseAdmin, getTen
           .limit(8),
       ]);
 
+      // A failed domain is not an empty search, nor a complete result set.
+      const failed = [projectsRes, contactsRes, tendersRes, invoicesRes].find(result => result.error);
+      if (failed) throw failed.error;
+
       res.json({
         projects: (projectsRes.data || []).map((p: any) => ({ ...p, _type: 'project', _url: `/projects/${p.id}`, _label: p.name })),
         contacts: (contactsRes.data || []).map((c: any) => ({ ...c, _type: 'contact', _url: '/contacts', _label: `${c.first_name || ''} ${c.last_name || ''}`.trim() || c.company })),
