@@ -122,6 +122,7 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
           {groups.map(g => {
             const Icon = GROUP_ICONS[g.id];
             const groupLabel = t(`project_tab_group_${g.id.toLowerCase()}`);
+            const sigleWidthCh = Math.max(...g.tabs.map(tab => tab.length));
             if (g.tabs.length === 1) {
               return (
                 <SheetOption
@@ -149,8 +150,9 @@ export function ProjectTabBar({ activeTab, onChange, isChantier, chantierTabStat
                     onSelect={() => choose(tab)}
                     trailing={horsMission(tab) ? <span className="text-[0.6875rem] font-semibold">{horsMissionLabel}</span> : undefined}
                   >
-                    <span className="font-mono font-bold w-10 shrink-0">{tab}</span>
-                    <span className="truncate">{t(`project_tab_title_${tab.toLowerCase()}`)}</span>
+                    {/* Colonne des sigles calée sur le plus long de la famille (« INSPIRATION ») : une largeur fixe les faisait déborder sur le libellé. */}
+                    <span className="font-mono text-[0.8125rem] font-bold shrink-0" style={{ width: `${sigleWidthCh}ch` }}>{tab}</span>
+                    <span className="min-w-0 line-clamp-2 leading-snug">{t(`project_tab_title_${tab.toLowerCase()}`)}</span>
                   </SheetOption>
                 ))}
               </div>
