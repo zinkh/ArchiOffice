@@ -5,10 +5,10 @@ import {
 } from '../projectTabs';
 
 describe('navigation de la fiche affaire', () => {
-  it('range chacun des treize onglets dans une seule famille', () => {
+  it('range chacun des quinze onglets dans une seule famille', () => {
     const all = PROJECT_TAB_GROUPS.flatMap(g => g.tabs);
-    expect(all).toHaveLength(13);
-    expect(new Set(all).size).toBe(13);
+    expect(all).toHaveLength(15);
+    expect(new Set(all).size).toBe(15);
   });
 
   it('accepte les identifiants des liens existants (?tab=) et refuse le reste', () => {
@@ -24,6 +24,8 @@ describe('navigation de la fiche affaire', () => {
     expect(groupOfTab('RDT')?.id).toBe('CHANTIER');
     expect(groupOfTab('INSPIRATION')?.id).toBe('ETUDES');
     expect(groupOfTab('DIAG')?.id).toBe('ETUDES');
+    expect(groupOfTab('CT')?.id).toBe('ETUDES');
+    expect(groupOfTab('CSPS')?.id).toBe('ETUDES');
     expect(groupOfTab('PRO')?.id).toBe('ETUDES');
     expect(groupOfTab('NOTICES')?.id).toBe('ETUDES');
   });

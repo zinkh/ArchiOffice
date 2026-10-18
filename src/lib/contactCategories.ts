@@ -60,6 +60,24 @@ export function isBureauEtudesContact(c: CategorizedContact): boolean {
   return isUncategorized(c) || n.includes('bureau') || n === 'bet';
 }
 
+/** Géotechniciens : libellé « Bureau d'études » ou « Géotechnique ». Sans catégorie, pas de sélection automatique. */
+export function isGeotechniqueContact(c: CategorizedContact): boolean {
+  const n = normalizeCategory(c.category);
+  return n.length > 0 && (n.includes('etude') || n.includes('geotech') || n === 'bet');
+}
+
+/** Bureaux de contrôle technique : « Bureau de contrôle », « Contrôleur technique », « CT ». */
+export function isBureauControleContact(c: CategorizedContact): boolean {
+  const n = normalizeCategory(c.category);
+  return n.length > 0 && (n.includes('controle') || n === 'ct');
+}
+
+/** Coordinateurs SPS : « CSPS », « SPS », « Coordinateur sécurité ». */
+export function isCoordinateurSpsContact(c: CategorizedContact): boolean {
+  const n = normalizeCategory(c.category);
+  return n.length > 0 && (n.includes('sps') || n.includes('coordinat'));
+}
+
 /**
  * Crée la catégorie si le cabinet ne l'a pas encore, pour qu'elle apparaisse
  * dans les filtres de la page Contacts. Un échec (doublon créé entre-temps
