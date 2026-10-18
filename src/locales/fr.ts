@@ -1,4 +1,10 @@
 export default {
+  "agent_chat_message_label": "Message à l’agent",
+  "agent_chat_waiting": "Réponse en cours…",
+  "agent_chat_waiting_long": "La réponse prend plus de temps. Vous pouvez interrompre l’attente.",
+  "agent_chat_stop_waiting": "Interrompre l’attente",
+  "agent_chat_view_colleague": "Voir la réponse de {{name}}",
+
   "agent_chat_clearing": "Effacement en cours…",
   "agent_chat_clear": "Effacer l’historique",
   "agent_chat_clear_title": "Effacer l’historique de cet agent ?",
@@ -2142,7 +2148,7 @@ export default {
       "agent_chat_thinking_long": "Cela prend plus de temps que d'habitude. L'agent traite peut-être une réponse longue.",
       "agent_chat_timeout": "Le service met trop de temps à répondre. Veuillez réessayer.",
       "agent_chat_cancel": "Annuler",
-      "agent_chat_cancelled": "Requête annulée.",
+      "agent_chat_cancelled": "L’attente a été interrompue. Une action déjà engagée peut continuer côté serveur. Vérifiez l’historique avant de renvoyer votre demande.",
       "agent_chat_drop_hint": "Déposez un document ici pour le joindre",
       "agent_chat_uploading": "Envoi de {{name}}…",
       "agent_chat_upload_error": "Échec de l'envoi du document.",

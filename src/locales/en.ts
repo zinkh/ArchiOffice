@@ -1,4 +1,10 @@
 export default {
+  "agent_chat_message_label": "Message to the agent",
+  "agent_chat_waiting": "Waiting for the response…",
+  "agent_chat_waiting_long": "The response is taking longer. You can stop waiting.",
+  "agent_chat_stop_waiting": "Stop waiting",
+  "agent_chat_view_colleague": "View {{name}}’s response",
+
   "agent_chat_clearing": "Clearing history…",
   "agent_chat_clear": "Clear history",
   "agent_chat_clear_title": "Clear this agent’s history?",
@@ -2084,7 +2090,7 @@ export default {
       "agent_chat_thinking_long": "This is taking longer than usual. The agent may be preparing a long reply.",
       "agent_chat_timeout": "The service is taking too long to respond. Please try again.",
       "agent_chat_cancel": "Cancel",
-      "agent_chat_cancelled": "Request cancelled.",
+      "agent_chat_cancelled": "You stopped waiting. An action already started may continue on the server. Check the history before sending your request again.",
       "agent_chat_drop_hint": "Drop a document here to attach it",
       "agent_chat_uploading": "Uploading {{name}}…",
       "agent_chat_upload_error": "Failed to upload the document.",

@@ -9,6 +9,7 @@
 // l'application le fait déjà pour l'écran plein (voir ProjectDetail.tsx et
 // isFullBleedRoute dans App.tsx, dont cette page reprend le même principe de
 // mise en page en colonnes avec défilement propre à chacune).
+import { ChatRequestStatus, ConsultedAgentLinks, type AgentConsultation } from './ChatRequestStatus.js';
 import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -134,7 +135,7 @@ export default function AgentChatPage() {
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [agentSelectorOpen, setAgentSelectorOpen] = useState(false);
-  const [messages, setMessages] = useState<(AgentMessage & { artifact?: AgentArtifact })[]>([]);
+  const [messages, setMessages] = useState<(AgentMessage & { artifact?: AgentArtifact; consulted?: AgentConsultation[] })[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
@@ -144,6 +145,19 @@ export default function AgentChatPage() {
   const [selectedArtifact, setSelectedArtifact] = useState<AgentArtifact | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const requestController = useRef<AbortController | null>(null);
+  const requestSequence = useRef(0);
+  const historySequence = useRef(0);
+  const abortReason = useRef<'user' | 'timeout' | null>(null);
+  useEffect(() => {
+    setLoading(false);
+    return () => {
+      requestSequence.current++;
+      historySequence.current++;
+      requestController.current?.abort();
+      requestController.current = null;
+    };
+  }, [agentId]);
 
   const activeAgent: Agent | null = agents.find(a => a.id === agentId) ?? null;
 
@@ -169,6 +183,7 @@ export default function AgentChatPage() {
   }, []);
 
   const loadConversation = useCallback(async (id: string) => {
+    const sequence = ++historySequence.current;
     setLoadingHistory(true);
     setMessages([]);
     setSelectedArtifact(null);
@@ -176,7 +191,8 @@ export default function AgentChatPage() {
     setInput(loadDraft(id));
     try {
       const data = await apiFetch(`/api/agents/${id}/conversation`);
-      const msgs: (AgentMessage & { artifact?: AgentArtifact })[] = data.messages || [];
+      if (sequence !== historySequence.current) return;
+      const msgs: (AgentMessage & { artifact?: AgentArtifact; consulted?: AgentConsultation[] })[] = data.messages || [];
       setMessages(msgs);
       // Rouvrir la page sur le dernier document produit plutôt que de
       // forcer l'utilisateur à remonter toute la conversation pour le
@@ -186,13 +202,14 @@ export default function AgentChatPage() {
         if (msgs[i].artifact) { setSelectedArtifact(msgs[i].artifact!); break; }
       }
     } catch {
-      setMessages([]);
+      if (sequence === historySequence.current) setMessages([]);
     } finally {
-      setLoadingHistory(false);
+      if (sequence === historySequence.current) setLoadingHistory(false);
     }
+    if (sequence !== historySequence.current) return;
     try {
       const bal = await apiFetch('/api/agents/token-balance');
-      setTokenBalance(bal.balance_eur_cents ?? bal.balance ?? null);
+      if (sequence === historySequence.current) setTokenBalance(bal.balance_eur_cents ?? bal.balance ?? null);
     } catch {}
   }, []);
 
@@ -200,7 +217,8 @@ export default function AgentChatPage() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
 
   const sendMessage = async () => {
-    if (!input.trim() || !agentId || loading || resetBusy) return;
+    if (!input.trim() || !agentId || loading || loadingHistory || resetBusy || requestController.current) return;
+    const sequence = ++requestSequence.current;
     if (dictation.status !== 'idle') dictation.stop();
     speech.stop();
     const rawInput = input.trim();
@@ -217,24 +235,28 @@ export default function AgentChatPage() {
     setErrorMsg(null);
 
     const controller = new AbortController();
-    const hardTimeout = setTimeout(() => controller.abort(), 130000);
+    requestController.current = controller;
+    abortReason.current = null;
+    const hardTimeout = setTimeout(() => { abortReason.current = 'timeout'; controller.abort(); }, 130000);
     try {
       const res = await apiFetch(`/api/agents/${agentId}/chat`, {
         method: 'POST',
         body: JSON.stringify({ message: rawInput, document_ids: docsToSend.map(d => d.id) }),
         signal: controller.signal,
       });
-      const assistantMsg: AgentMessage & { artifact?: AgentArtifact } = {
+      if (sequence !== requestSequence.current) return;
+      const assistantMsg: AgentMessage & { artifact?: AgentArtifact; consulted?: AgentConsultation[] } = {
         id: crypto.randomUUID(), conversation_id: '', tenant_id: '', role: 'assistant',
-        content: res.reply, artifact: res.artifact, created_at: new Date().toISOString(),
+        content: res.reply, artifact: res.artifact, consulted: res.consulted, created_at: new Date().toISOString(),
       };
       setMessages(prev => [...prev, assistantMsg]);
       if (res.artifact) setSelectedArtifact(res.artifact);
       if (res.remaining_balance !== undefined) setTokenBalance(res.remaining_balance);
       saveDraft(agentId, '');
     } catch (e: any) {
+      if (sequence !== requestSequence.current) { saveDraft(agentId, rawInput); return; }
       const errText: string = e?.message ?? t('agent_chat_error');
-      if (e?.name === 'AbortError') setErrorMsg(t('agent_chat_timeout'));
+      if (e?.name === 'AbortError') setErrorMsg(t(abortReason.current === 'user' ? 'agent_chat_cancelled' : 'agent_chat_timeout'));
       else if (errText.includes('token') || errText.includes('NO_TOKENS')) setErrorMsg('tokens');
       else setErrorMsg(errText);
       setMessages(prev => prev.filter(m => m.id !== userMsg.id));
@@ -243,8 +265,11 @@ export default function AgentChatPage() {
       saveDraft(agentId, rawInput);
     } finally {
       clearTimeout(hardTimeout);
-      setLoading(false);
-      setTimeout(() => textareaRef.current?.focus(), 50);
+      if (sequence === requestSequence.current) {
+        requestController.current = null;
+        setLoading(false);
+        setTimeout(() => textareaRef.current?.focus(), 50);
+      }
     }
   };
 
@@ -363,26 +388,12 @@ export default function AgentChatPage() {
               </div>
             )}
             {messages.map(msg => (
-              <MessageBubble
-                key={msg.id}
-                msg={msg}
-                agentColor={activeAgent?.avatar_color ?? '#206bc4'}
-                speech={speech}
-                onPreviewArtifact={setSelectedArtifact}
-              />
+              <React.Fragment key={msg.id}>
+                <MessageBubble msg={msg} agentColor={activeAgent?.avatar_color ?? '#206bc4'} speech={speech} onPreviewArtifact={setSelectedArtifact} />
+                <ConsultedAgentLinks agents={msg.consulted} onOpen={switchAgent} disabled={loading || resetBusy} />
+              </React.Fragment>
             ))}
-            {loading && (
-              <div className="flex gap-2 justify-start">
-                <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: activeAgent?.avatar_color ?? '#206bc4' }}>
-                  <IconRobot size={13} color="white" />
-                </div>
-                <div className="px-3 py-2 rounded-xl flex gap-1 items-center" style={{ background: 'var(--tblr-surface-2)' }}>
-                  {[0, 1, 2].map(i => (
-                    <div key={i} className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: 'var(--tblr-muted)', animationDelay: `${i * 0.15}s` }} />
-                  ))}
-                </div>
-              </div>
-            )}
+            {loading && <ChatRequestStatus onStop={() => { abortReason.current = 'user'; requestController.current?.abort(); }} />}
             {errorMsg === 'tokens' ? (
               <div className="mx-2 p-3 rounded-lg border text-[12px]" style={{ background: '#fff4e6', borderColor: '#ffd8a8', color: '#f76707' }}>
                 <div className="flex items-center gap-2 font-semibold mb-1"><IconAlertTriangle size={14} /> {t('agent_tokens_exhausted')}</div>
@@ -428,7 +439,8 @@ export default function AgentChatPage() {
                 onChange={e => { setInput(e.target.value); if (agentId) saveDraft(agentId, e.target.value); }}
                 onKeyDown={handleKeyDown}
                 placeholder={t('agent_chat_placeholder') as string}
-                className="flex-1 resize-none rounded-lg px-3 py-2 text-[13px] outline-none border transition-colors"
+                aria-label={t('agent_chat_message_label')}
+                className="flex-1 resize-none rounded-lg px-3 py-2 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
                 style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', minHeight: 36, maxHeight: 140 }}
                 onInput={e => {
                   const el = e.currentTarget;
@@ -439,9 +451,10 @@ export default function AgentChatPage() {
               />
               <button
                 onClick={sendMessage}
-                disabled={!input.trim() || loading || resetBusy}
+                aria-label={t('agent_chat_send')}
+                disabled={!input.trim() || loading || loadingHistory || resetBusy}
                 className="p-2 rounded-lg transition-colors flex items-center justify-center"
-                style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading ? 0.5 : 1 }}
+                style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading || loadingHistory || resetBusy ? 0.5 : 1 }}
                 title={`${t('agent_chat_send')} (Ctrl+Entrée)`}
               >
                 <IconSend size={16} />
