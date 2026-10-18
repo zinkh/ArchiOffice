@@ -1,4 +1,15 @@
 export default {
+  "projectdetail_load_offline_cached": "Mode hors connexion. Les dernières données enregistrées sur cet appareil restent consultables.",
+  "projectdetail_load_offline": "Cette affaire n’est pas disponible hors connexion. Reconnectez-vous puis réessayez.",
+  "projectdetail_load_not_found": "Cette affaire est introuvable. Elle a peut-être été supprimée.",
+  "projectdetail_load_forbidden": "Vous n’avez plus accès à cette affaire. Vérifiez votre connexion et le cabinet sélectionné.",
+  "projectdetail_load_error": "L’actualisation de l’affaire a échoué. Vérifiez votre connexion puis réessayez.",
+  "projectdetail_load_cached": "La dernière copie locale est affichée.",
+  "projectdetail_visa_updating_named": "Enregistrement de « {{title}} »…",
+  "projectdetail_visa_updated_named": "Avis enregistré pour « {{title}} ».",
+  "projectdetail_visa_deleted_named": "VISA « {{title}} » supprimé.",
+  "projectdetail_visa_action_failed_named": "L’action sur « {{title}} » n’a pas été confirmée. Vérifiez votre connexion, actualisez les VISA puis réessayez.",
+
   "project_tab_title_notices": "Notices de l’opération",
   "projectnotice_title": "Notices de l’opération",
   "projectnotice_intro": "Rédigez les notices d’études à partir des données de l’affaire, du journal de phase et des pièces disponibles, puis relisez-les avant export.",

@@ -20,7 +20,7 @@ colors:
   dark-surface-sunken: "#1e2d40"
   dark-hairline: "#2d3f55"
   dark-ink: "#c8d3e1"
-  dark-ink-muted: "#6c7a91"
+  dark-ink-muted: "#98a7bd"
 typography:
   headline:
     fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif"

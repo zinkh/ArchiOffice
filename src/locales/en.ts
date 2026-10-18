@@ -1,4 +1,15 @@
 export default {
+  "projectdetail_load_offline_cached": "Offline. The last data saved on this device remains available.",
+  "projectdetail_load_offline": "This project is unavailable offline. Reconnect and try again.",
+  "projectdetail_load_not_found": "This project could not be found. It may have been deleted.",
+  "projectdetail_load_forbidden": "You no longer have access to this project. Check your sign-in and selected practice.",
+  "projectdetail_load_error": "The project could not be refreshed. Check your connection and try again.",
+  "projectdetail_load_cached": "The last local copy is displayed.",
+  "projectdetail_visa_updating_named": "Saving “{{title}}”…",
+  "projectdetail_visa_updated_named": "Review saved for “{{title}}”.",
+  "projectdetail_visa_deleted_named": "VISA “{{title}}” deleted.",
+  "projectdetail_visa_action_failed_named": "The action on “{{title}}” was not confirmed. Check your connection, refresh the VISA list and try again.",
+
   "project_tab_title_notices": "Project notices",
   "projectnotice_title": "Project notices",
   "projectnotice_intro": "Draft design-stage notices from project data, phase notes and available documents, then review them before export.",

@@ -1096,16 +1096,16 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     key={s.id}
                     className="flex items-start gap-2 p-2 rounded-lg"
                     style={{
-                      background: s.tone === 'danger' ? '#fff5f5' : '#fff4e6',
-                      border: `1px solid ${s.tone === 'danger' ? '#ffc9c9' : '#ffd8a8'}`,
+                      background: 'var(--tblr-surface-2)',
+                      border: '1px solid var(--tblr-border)',
                     }}
                   >
-                    <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? '#c92a2a' : '#e67700' }} />
+                    <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? 'var(--tblr-danger)' : 'var(--tblr-warning)' }} />
                     <div className="flex-1 min-w-0">
-                      <p className="text-[12px]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
+                      <p className="text-[0.75rem]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
                       <button
                         onClick={() => { setInput(s.draft); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                        className="mt-1 text-[11px] font-semibold hover:underline"
+                        className="mt-1 text-[0.6875rem] font-semibold hover:underline"
                         style={{ color: 'var(--tblr-primary)' }}
                       >
                         {t('ai_draft_reminder_btn')}
