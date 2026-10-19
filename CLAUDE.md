@@ -114,7 +114,7 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Optional | Web Push (PWA notifications). Generate once per instance with `node scripts/generate-vapid-keys.mjs`; unset means Web Push is off and nothing else breaks |
 | `VAPID_SUBJECT` | Optional | Contact address the push service uses to reach the operator (`mailto:` or `https:`). Falls back to `APP_URL` |
 | `AGENT_MAIL_INBOX_HOST/PORT/USERNAME/PASSWORD` | Optional | Shared IMAP mailbox for inbound "forward an email to an agent" (`server/agentMailInbox.ts`) — job inactive unless all four are set |
-| `AGENT_MAIL_INBOX_ALIAS_DOMAIN` | Optional | Domain used to compose each tenant's `agents+<slug>@…` alias, shown in `/settings` |
+| `AGENT_MAIL_INBOX_ALIAS_DOMAIN` | Optional | Fallback domain for the `agents+<slug>@…` alias, used only by a tenant that has not set its own (`settings.mail_inbox_domain`, `/settings` > Agents IA) |
 | `AGENT_MAIL_INBOX_FOLDER` / `AGENT_MAIL_INBOX_POLL_MINUTES` | Optional | IMAP folder polled (default `INBOX`) and poll cadence in minutes (default 3) |
 | `PORT` | Optional | Server port (default 8080 in Docker) |
 | `DISABLE_HMR` | Optional | Set `true` to disable Vite HMR |
@@ -2656,8 +2656,20 @@ tenant que le reste des références inter-ressources de cette table
 (`assertTenantEntity`, voir « Références inter-locataires non validées »).
 L'alias lui-même se déduit de `tenants.slug` (le seul identifiant
 réellement unique sur toute l'instance — `agents.slug` ne l'est que par
-cabinet) : `agents+<slug-cabinet>@<AGENT_MAIL_INBOX_ALIAS_DOMAIN>`
-(`buildMailInboxAlias()`), affiché en lecture seule dans la même carte.
+cabinet) : `agents+<slug-cabinet>@<domaine>` (`buildMailInboxAlias()`),
+affiché dans la même carte.
+
+**Le domaine se règle par cabinet, pas par l'instance.**
+`settings.mail_inbox_domain` (`supabase/migrate_mail_inbox_domain.sql`) est saisi
+par un administrateur dans la carte « Courrier entrant » (`/settings` > Agents IA),
+normalisé et validé côté serveur (`normalizeMailInboxDomain`, 400 si ce n'est pas
+un nom de domaine). Vide, il retombe sur `AGENT_MAIL_INBOX_ALIAS_DOMAIN`
+(simple repli d'instance, facultatif), sinon la carte affiche un champ à
+remplir et pas d'alias. `GET /api/settings` rend aussi `mailInboxAvailable`
+(boîte IMAP partagée configurée) pour avertir qu'un domaine saisi ne relève
+rien tant que l'opérateur n'a pas branché la boîte. Le routage ne lit que le
+slug du `To` : le domaine ne sert qu'à composer l'adresse, c'est au
+cabinet de le faire aboutir (MX ou redirection) vers la boîte partagée.
 
 **Prérequis hors code, à ne jamais perdre de vue.** Cette adresse ne
 fonctionne que si l'opérateur a réellement provisionné une boîte mail

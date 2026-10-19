@@ -2455,8 +2455,8 @@ export default function Settings() {
           {/* Bot Telegram : actions immédiates (générer un code, révoquer). */}
           <TelegramConnectionsCard />
 
-          {/* Courrier entrant : choisir l'agent de triage engage le cabinet. Ne s'affiche que
-              si l'instance a un domaine de réception configuré (server/agentMailInbox.ts). */}
+          {/* Courrier entrant : choisir l'agent de triage engage le cabinet. Le domaine de
+              l'alias se règle ici, par cabinet (settings.mail_inbox_domain). */}
           {isAdmin && <AgentMailInboxCard />}
 
           {/* Revue matinale des mails par un agent (server/agentMailReview.ts) :

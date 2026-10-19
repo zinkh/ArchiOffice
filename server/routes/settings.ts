@@ -7,7 +7,7 @@ import rateLimit from 'express-rate-limit';
 import { streamTenantExport } from '../tenantExport';
 import { createTenantBackupInBackground } from '../tenantBackup';
 import { assertTenantEntity } from '../assertTenantEntity';
-import { buildMailInboxAlias } from '../agentMailInbox';
+import { buildMailInboxAlias, isMailInboxConfigured, normalizeMailInboxDomain } from '../agentMailInbox';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -55,6 +55,7 @@ const toSnake: Record<string, string> = {
   notificationArchiveDays: 'notification_archive_days',
   googleContactsSyncCategories: 'google_contacts_sync_categories',
   mailTriageAgentId: 'mail_triage_agent_id',
+  mailInboxDomain: 'mail_inbox_domain',
 };
 const toCamel: Record<string, string> = Object.fromEntries(Object.entries(toSnake).map(([k, v]) => [v, k]));
 
@@ -68,11 +69,14 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       // moyen pour l'architecte de le connaître serait de deviner le format
       // (voir server/agentMailInbox.ts, AgentMailInboxCard).
       const { data: tenant } = await supabaseAdmin.from('tenants').select('slug').eq('id', tenantId).maybeSingle();
-      const mailInboxAlias = tenant?.slug ? buildMailInboxAlias(tenant.slug) : null;
-      if (!settings) { res.json({ tenant_id: tenantId, mailInboxAlias }); return; }
+      // Le domaine se règle par cabinet (settings.mail_inbox_domain), celui de
+      // l'instance ne sert que de repli.
+      const mailInboxAlias = tenant?.slug ? buildMailInboxAlias(tenant.slug, settings?.mail_inbox_domain) : null;
+      const mailInboxAvailable = isMailInboxConfigured();
+      if (!settings) { res.json({ tenant_id: tenantId, mailInboxAlias, mailInboxAvailable }); return; }
       // Return camelCase keys expected by the frontend, minus stored secrets
       // (only whether one is set, so the UI can show "configured").
-      const out: any = { mailInboxAlias };
+      const out: any = { mailInboxAlias, mailInboxAvailable };
       for (const [k, v] of Object.entries(settings)) {
         if (SECRET_COLS.has(k)) {
           out[`${toCamel[k] ?? k}Set`] = v != null && v !== '';
@@ -121,7 +125,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'notification_archive_days',
         'tender_boamp_enabled', 'tender_ted_enabled',
         'google_contacts_sync_categories',
-        'mail_triage_agent_id',
+        'mail_triage_agent_id', 'mail_inbox_domain',
       ]);
       const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits', 'invoice_payment_terms_days']);
       const filteredData: any = Object.fromEntries(
@@ -136,6 +140,14 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
       );
 
       if (Object.keys(filteredData).length === 0) { res.json({ success: true }); return; }
+
+      // Domaine de l'alias de courrier entrant : saisi par le cabinet, donc
+      // normalisé et validé avant d'être affiché comme adresse de réception.
+      if ('mail_inbox_domain' in filteredData) {
+        const domain = normalizeMailInboxDomain(filteredData.mail_inbox_domain);
+        if (domain === null) return res.status(400).json({ error: "Domaine de réception invalide (exemple : agents.moncabinet.fr)." });
+        filteredData.mail_inbox_domain = domain || null;
+      }
 
       // L'agent de triage référencé doit appartenir à CE cabinet — même
       // faille que documentée dans CLAUDE.md, « Références inter-locataires
