@@ -1,5 +1,5 @@
 // Remise en concurrence entre titulaires d'un accord-cadre (voir
-// supabase/migrate_accords_cadres_multi_titulaires.sql et src/lib/accordCadre.ts).
+// supabase/migrate_marches_subsequents_multi_titulaires.sql et src/lib/accordCadre.ts).
 //
 // Une consultation décrit ce qu'on veut commander (lignes du bordereau, quantités),
 // recueille le prix de chaque titulaire, puis l'attribution émet le marché subséquent

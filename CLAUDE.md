@@ -950,7 +950,7 @@ dont le maître d'ouvrage est public (`is_public_client`), à un ou plusieurs ti
   `accord_cadre_echeance` (fin dans 90 jours par défaut, réglable ; seulement s'il reste un minimum à atteindre
   ou du crédit à engager ; reste signalée 90 jours après la fin si le minimum n'est pas atteint). Les accords-cadres non
   signés, résiliés ou d'une affaire terminée sont ignorés.
-- **Plusieurs titulaires** (`supabase/migrate_accords_cadres_multi_titulaires.sql`) : un accord-cadre multi-attributaires
+- **Plusieurs titulaires** (`supabase/migrate_marches_subsequents_multi_titulaires.sql`) : un accord-cadre multi-attributaires
   reste un ensemble de lignes `accord_cadre`, UNE PAR TITULAIRE (son bordereau figé, sa signature, ses subséquents). Une
   ligne « de tête » porte les conditions communes ; les autres pointent sur elle par `accord_cadre_groupe_id` et n'ont aucune
   condition propre (409 si on tente de les régler). `POST .../accord-cadre` avec `groupe_avec: <tête>` fait rejoindre un marché
