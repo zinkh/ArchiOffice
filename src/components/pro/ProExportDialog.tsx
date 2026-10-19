@@ -6,7 +6,7 @@ import type { BPU } from '../../types/bpu';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ContexteCctp } from '../../lib/cctpVariables';
 import {
-  SANS_AFFECTATION_EXPORT, SELECTION_COMPLETE, cleLot, type ExportSelection,
+  AC_EXPORT, SANS_AFFECTATION_EXPORT, SELECTION_COMPLETE, cleLot, marcheDuChapitre, type ExportSelection,
 } from '../../lib/exportPerimetre';
 import {
   DOCUMENTS_DOSSIER, compterFichiers, produireDossier, type DocumentDossier, type FormatChoisi,
@@ -91,9 +91,22 @@ export const ProExportDialog: React.FC<Props> = ({
     return liste.length ? [...liste, { id: SANS_AFFECTATION_EXPORT, label: t('pro_export_dialog_no_phase') }] : [];
   }, [dpgf, bpu, t]);
 
+  // Accord-cadre et marchés subséquents du bordereau : proposés seulement s'il y en a.
+  const marches = useMemo(() => {
+    const codes = new Set<string>();
+    for (const lot of bpu?.lots ?? []) for (const chap of lot.chapitres) codes.add(marcheDuChapitre(chap));
+    if (codes.size < 2 || (codes.size === 1 && codes.has(AC_EXPORT))) return [] as Choix[];
+    const ms = [...codes].filter(c => c !== AC_EXPORT).sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+    return [
+      ...(codes.has(AC_EXPORT) ? [{ id: AC_EXPORT, label: t('pro_export_dialog_market_ac') }] : []),
+      ...ms.map(c => ({ id: c, label: c })),
+    ];
+  }, [bpu, t]);
+
   const [lotIds, setLotIds] = useState<Set<string>>(() => new Set(lots.map(l => l.id)));
   const [batIds, setBatIds] = useState<Set<string>>(() => new Set(batiments.map(b => b.id)));
   const [phaseIds, setPhaseIds] = useState<Set<string>>(() => new Set(phases.map(p => p.id)));
+  const [marcheIds, setMarcheIds] = useState<Set<string>>(() => new Set(marches.map(m => m.id)));
 
   const selection: ExportSelection = useMemo(() => {
     if (mode === 'all') return SELECTION_COMPLETE;
@@ -102,8 +115,9 @@ export const ProExportDialog: React.FC<Props> = ({
       lotNumeros: ou(lotIds, lots),
       batimentCodes: batiments.length ? ou(batIds, batiments) : null,
       phaseCodes: phases.length ? ou(phaseIds, phases) : null,
+      marches: marches.length ? ou(marcheIds, marches) : null,
     };
-  }, [mode, lotIds, batIds, phaseIds, lots, batiments, phases]);
+  }, [mode, lotIds, batIds, phaseIds, marcheIds, lots, batiments, phases, marches]);
 
   const nbFichiers = compterFichiers({ documents, selection, cctpParBatiment, dpgf });
   const nbDocuments = Object.keys(documents).length;
@@ -115,6 +129,7 @@ export const ProExportDialog: React.FC<Props> = ({
     if (selection.lotNumeros) parties.push(`${t('pro_export_dialog_lots')} ${noms(lotIds, lots).map(l => l.split(' ')[0]).join(', ')}`);
     if (selection.batimentCodes) parties.push(`${t('pro_export_dialog_buildings')} ${noms(batIds, batiments).join(', ')}`);
     if (selection.phaseCodes) parties.push(`${t('pro_export_dialog_phases')} ${noms(phaseIds, phases).join(', ')}`);
+    if (selection.marches) parties.push(noms(marcheIds, marches).join(', '));
     return parties.join(' - ');
   };
 
@@ -265,6 +280,7 @@ export const ProExportDialog: React.FC<Props> = ({
               {groupe(t('pro_export_dialog_lots'), lots, lotIds, setLotIds)}
               {batiments.length > 0 && groupe(t('pro_export_dialog_buildings'), batiments, batIds, setBatIds)}
               {phases.length > 0 && groupe(t('pro_export_dialog_phases'), phases, phaseIds, setPhaseIds)}
+              {marches.length > 0 && groupe(t('pro_export_dialog_markets'), marches, marcheIds, setMarcheIds)}
               {batiments.length > 0 && documents.cctp && (
                 <p className="text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_cctp_buildings_hint')}</p>
               )}

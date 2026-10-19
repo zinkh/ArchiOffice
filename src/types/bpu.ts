@@ -43,6 +43,14 @@ export interface BPULigne extends Ligne {
 export interface BPUChapitre extends Chapitre {
   lignes: BPULigne[];
   trancheId?: string;
+  /**
+   * Code du marché subséquent (« Ms1 ») auquel appartient ce chapitre. Absent :
+   * le chapitre relève de l'accord-cadre. Un lot porte ainsi côte à côte ses
+   * chapitres d'accord-cadre et ceux de chaque subséquent (« Ms1 Tranchée »),
+   * et un export peut isoler l'un ou l'autre. Aucune migration : le bordereau
+   * est un jsonb.
+   */
+  msCode?: string;
 }
 
 export interface BPULot extends Lot {

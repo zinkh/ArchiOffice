@@ -19,14 +19,26 @@ export interface ExportSelection {
   batimentCodes: string[] | null;
   /** Codes de phase retenus ; `null` : toutes. */
   phaseCodes: string[] | null;
+  /**
+   * Marchés retenus : `AC_EXPORT` pour l'accord-cadre, sinon le code d'un marché
+   * subséquent (« Ms1 »). Absent ou `null` : tous.
+   */
+  marches?: string[] | null;
 }
+
+/** Clé du groupe « accord-cadre » dans `ExportSelection.marches`. */
+export const AC_EXPORT = '__ac__';
+
+/** Marché d'un chapitre : son code de subséquent, sinon l'accord-cadre. */
+export const marcheDuChapitre = (chap: unknown): string =>
+  (chap as { msCode?: string }).msCode?.trim() || AC_EXPORT;
 
 export const SELECTION_COMPLETE: ExportSelection = { lotNumeros: null, batimentCodes: null, phaseCodes: null };
 
 export const cleLot = (numero: string): string => numero.trim().toUpperCase();
 
 export function estSelectionComplete(sel: ExportSelection): boolean {
-  return sel.lotNumeros === null && sel.batimentCodes === null && sel.phaseCodes === null;
+  return sel.lotNumeros === null && sel.batimentCodes === null && sel.phaseCodes === null && !sel.marches;
 }
 
 /** Ce qu'il faut d'un document pour le filtrer : le DPGF et le BPU y répondent. */
@@ -55,6 +67,7 @@ export function filtrerPourExport<D extends DocumentFiltrable>(doc: D, sel: Expo
   const lotsRetenus = sel.lotNumeros ? new Set(sel.lotNumeros.map(cleLot)) : null;
   const filtreBat = !cctp && doc.multiBatiments && sel.batimentCodes ? new Set(sel.batimentCodes) : null;
   const filtrePhase = doc.multiPhases && sel.phaseCodes ? new Set(sel.phaseCodes) : null;
+  const marchesRetenus = sel.marches ? new Set(sel.marches) : null;
   const codeBat = new Map((doc.batiments ?? []).map(b => [b.id, b.code]));
   const codePhase = new Map((doc.phases ?? []).map(p => [p.id, p.code]));
 
@@ -85,6 +98,7 @@ export function filtrerPourExport<D extends DocumentFiltrable>(doc: D, sel: Expo
     const chapitres: Chapitre[] = [];
     for (const chap of lot.chapitres) {
       if (chap.cctpOnly && !cctp) continue;
+      if (marchesRetenus && !marchesRetenus.has(marcheDuChapitre(chap))) continue;
       const lignes = chap.lignes.map(l => garder(lot, chap, l)).filter((l): l is Ligne => l !== null);
       // Un chapitre sans article d'origine (prescriptions générales) ne vaut que pour le CCTP.
       if (lignes.length > 0 || (cctp && (chap.cctpOnly || chap.lignes.length === 0))) chapitres.push({ ...chap, lignes });

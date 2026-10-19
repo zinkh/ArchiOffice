@@ -474,6 +474,19 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
   // Import d'un fichier dans un document encore vierge : le CCTP et le DPGF
   // partagent le même arbre, le DQE et le BPU aussi.
   const [importDocCible, setImportDocCible] = useState<'dpgf' | 'bpu' | null>(null);
+  // Fichier déposé par glisser-déposer sur le DQE/BPU : l'import s'ouvre dessus.
+  const [fichierDepose, setFichierDepose] = useState<File | null>(null);
+  const deposerFichierBpu = (fichier: File) => {
+    if (!/\.(xlsx|xls|ods|csv)$/i.test(fichier.name)) {
+      notify(fichier.name.toLowerCase().endsWith('.pdf')
+        ? "L'import d'un PDF n'est pas pris en charge : déposez le bordereau au format Excel, ODS ou CSV."
+        : 'Format non pris en charge : déposez un fichier Excel, ODS ou CSV.', { type: 'error' });
+      return;
+    }
+    setFichierDepose(fichier);
+    // Bordereau vierge : les lignes deviennent des articles ; sinon c'est une offre à rapprocher.
+    if (!bpu || bpu.lots.length === 0) setImportDocCible('bpu'); else setImportCible('bpu');
+  };
 
   /**
    * Les lignes du fichier deviennent des articles du document. `setDpgf`/`setBpu`
@@ -1010,6 +1023,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
                 onImportOffre={() => setImportCible('bpu')}
                 onImportDocument={() => setImportDocCible('bpu')}
+                onDropFichier={deposerFichierBpu}
                 onPushToAct={verserAuComparatifAct}
                 onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
                 onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}
@@ -1024,7 +1038,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
         <OffreImportDialog
           doc={bpu}
           docLabel="bordereau"
-          onClose={() => setImportCible(null)}
+          fichierInitial={fichierDepose ?? undefined}
+          onClose={() => { setImportCible(null); setFichierDepose(null); }}
           onConfirm={enregistrerOffre}
         />
       )}
@@ -1033,7 +1048,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
           mode="document"
           doc={(importDocCible === 'bpu' ? bpu : dpgf)!}
           docLabel={importDocCible === 'bpu' ? 'bordereau' : activeSubTab === 'CCTP' ? 'CCTP' : 'DPGF'}
-          onClose={() => setImportDocCible(null)}
+          fichierInitial={importDocCible === 'bpu' ? fichierDepose ?? undefined : undefined}
+          onClose={() => { setImportDocCible(null); setFichierDepose(null); }}
           onCreerPostes={creerArticlesDepuisFichier}
         />
       )}
