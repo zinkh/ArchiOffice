@@ -68,6 +68,8 @@ interface BPUWorkspaceProps {
   onImportOffre?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce bordereau (les lignes absentes deviennent des articles). */
   onImportDocument?: () => void;
+  /** Fichier (tableur) déposé par glisser-déposer sur le tableau. */
+  onDropFichier?: (fichier: File) => void;
   /** Trouvaille de la recherche à ouvrir et montrer. */
   searchTarget?: CibleRecherche | null;
   onPushToAct?: () => void;
@@ -126,8 +128,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   bpu, onChange, mode, projectName, offres = [], projectLots = [], notify,
   showTree: showTreeProp, onToggleTree, onDragStart, onDropExternal,
   onInitFromDpgf, onPushToDpgf, onOpenLibrary, onPushToLibrary,
-  onImportOffre, onImportDocument, onPushToAct, searchTarget,
+  onImportOffre, onImportDocument, onDropFichier, onPushToAct, searchTarget,
 }) => {
+  const [fichierSurvole, setFichierSurvole] = useState(false);
   const [colSet, setColSet] = useState<ColSet>(mode);
   // Le même atelier sert les onglets BPU et DQE : changer d'onglet change de colonnes.
   useEffect(() => { setColSet(mode); }, [mode]);
@@ -902,7 +905,26 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             isMobile={isMobile}
           />
         )}
-        <div ref={tableRef} className={`flex-1 overflow-auto ${selectionCount ? 'pb-20' : ''}`}>
+        <div ref={tableRef} className={`relative flex-1 overflow-auto ${selectionCount ? 'pb-20' : ''}`}
+          onDragOver={e => {
+            if (!onDropFichier || !e.dataTransfer.types.includes('Files')) return;
+            e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setFichierSurvole(true);
+          }}
+          onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFichierSurvole(false); }}
+          onDrop={e => {
+            setFichierSurvole(false);
+            const f = e.dataTransfer.files?.[0];
+            if (!onDropFichier || !f) return;
+            e.preventDefault();
+            onDropFichier(f);
+          }}>
+          {fichierSurvole && (
+            <div className="pointer-events-none sticky top-0 z-20 h-0">
+              <div className="absolute inset-x-2 top-2 flex h-24 items-center justify-center rounded-lg border-2 border-dashed border-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)] text-sm font-semibold text-[var(--tblr-primary)]">
+                Déposez le fichier (Excel, ODS ou CSV) pour l'importer
+              </div>
+            </div>
+          )}
           {horsFourchette && (
             <div className="px-3 py-2 text-xs bg-amber-50 border-b border-amber-200 text-amber-800">
               Le montant estimatif ({formatCurrency(bpu.totalHT)}) sort de la fourchette du marché
