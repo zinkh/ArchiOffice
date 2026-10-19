@@ -1,0 +1,92 @@
+import { describe, expect, it } from 'vitest';
+import {
+  consommation, libelleMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
+  type ConditionsAccordCadre, type LigneCommande,
+} from '../accordCadre';
+
+const cond = (extra: Partial<ConditionsAccordCadre> = {}): ConditionsAccordCadre => ({
+  montantMiniHT: null, montantMaxiHT: 1000, dateFin: null, ...extra,
+});
+const ligne = (extra: Partial<LigneCommande> = {}): LigneCommande => ({
+  articleId: 'a1', designation: 'Carrelage', unite: 'm²', quantite: 10, prixUnitaire: 45, ...extra,
+});
+
+describe('consommation', () => {
+  it('cumule les subséquents, ignore les résiliés et calcule le reste', () => {
+    const c = consommation(cond(), [{ montant_ht: 300 }, { montant_ht: 200, statut: 'resilie' }, { montant_ht: 100, statut: 'en_cours' }]);
+    expect(c).toMatchObject({ cumulHT: 400, resteMaxiHT: 600, pctMaxi: 40, statut: 'normal' });
+  });
+
+  it('signale la proximité à 80 %, l’atteinte et le dépassement', () => {
+    expect(consommation(cond(), [{ montant_ht: 800 }]).statut).toBe('proche');
+    expect(consommation(cond(), [{ montant_ht: 1000 }]).statut).toBe('atteint');
+    const depasse = consommation(cond(), [{ montant_ht: 1200 }]);
+    expect(depasse).toMatchObject({ statut: 'depasse', resteMaxiHT: 0 });
+  });
+
+  it('sans maximum, aucun plafond ; le minimum se suit à part', () => {
+    const c = consommation(cond({ montantMaxiHT: null, montantMiniHT: 500 }), [{ montant_ht: 200 }]);
+    expect(c).toMatchObject({ statut: 'sans_plafond', resteMaxiHT: null, pctMaxi: null, resteAuMiniHT: 300, miniAtteint: false });
+    expect(consommation(cond({ montantMiniHT: 100 }), [{ montant_ht: 200 }])).toMatchObject({ resteAuMiniHT: 0, miniAtteint: true });
+  });
+});
+
+describe('verifierEmission', () => {
+  const base = { signe: true, conditions: cond({ dateFin: '2027-12-31' }), cumulAutresHT: 400, montantHT: 600, dateNotification: '2026-10-20' };
+
+  it('accepte jusqu’au maximum exactement', () => {
+    expect(verifierEmission(base)).toEqual({ ok: true });
+  });
+
+  it('refuse au-delà du maximum', () => {
+    expect(verifierEmission({ ...base, montantHT: 600.01 })).toMatchObject({ ok: false, code: 'PLAFOND_DEPASSE' });
+  });
+
+  it('refuse un accord-cadre non signé avant tout autre motif', () => {
+    expect(verifierEmission({ ...base, signe: false, montantHT: 99999 })).toMatchObject({ ok: false, code: 'ACCORD_CADRE_NON_SIGNE' });
+  });
+
+  it('borne la notification, pas l’exécution', () => {
+    expect(verifierEmission({ ...base, dateNotification: '2028-01-01' })).toMatchObject({ ok: false, code: 'ACCORD_CADRE_ECHU' });
+    expect(verifierEmission({ ...base, dateNotification: '2027-12-31' })).toEqual({ ok: true });
+  });
+
+  it('refuse un montant négatif ou illisible', () => {
+    expect(verifierEmission({ ...base, montantHT: -1 })).toMatchObject({ code: 'MONTANT_INVALIDE' });
+    expect(verifierEmission({ ...base, montantHT: Number.NaN })).toMatchObject({ code: 'MONTANT_INVALIDE' });
+  });
+});
+
+describe('lignes de commande', () => {
+  it('calcule les montants au centime', () => {
+    expect(montantLigne(ligne({ quantite: 3, prixUnitaire: 0.1 }))).toBe(0.3);
+    expect(totalLignes([ligne(), ligne({ quantite: 2, prixUnitaire: 12.5 })])).toBe(475);
+  });
+
+  it('exige des lignes et des valeurs positives', () => {
+    expect(validerLignesCommande([], null).ok).toBe(false);
+    expect(validerLignesCommande([ligne({ quantite: -1 })], null).ok).toBe(false);
+    expect(validerLignesCommande([ligne({ designation: ' ' })], null).ok).toBe(false);
+  });
+
+  it('contrôle les prix contre le bordereau figé, sans en inventer', () => {
+    const bordereau = { a1: 45, a2: null };
+    expect(validerLignesCommande([ligne()], bordereau).ok).toBe(true);
+    expect(validerLignesCommande([ligne({ prixUnitaire: 50 })], bordereau).erreurs[0]).toContain('prix différent');
+    expect(validerLignesCommande([ligne({ articleId: 'a2' })], bordereau).erreurs[0]).toContain('absent du bordereau');
+    expect(validerLignesCommande([ligne({ articleId: undefined })], bordereau).ok).toBe(false);
+  });
+
+  it('ne contrôle pas les prix d’un accord-cadre saisi à la main', () => {
+    expect(validerLignesCommande([ligne({ prixUnitaire: 999 })], null).ok).toBe(true);
+    expect(validerLignesCommande([ligne({ prixUnitaire: 999 })], {}).ok).toBe(true);
+  });
+});
+
+describe('libelleMarche', () => {
+  it('distingue accord-cadre, subséquent et marché ordinaire', () => {
+    expect(libelleMarche({ type_marche: 'accord_cadre', lot_numero: '02', entreprise_nom: 'Dupont' })).toBe('AC lot 02 Dupont');
+    expect(libelleMarche({ type_marche: 'subsequent', numero_subsequent: 3, lot_numero: '02', entreprise_nom: 'Dupont' })).toBe('MS n°3 lot 02 Dupont');
+    expect(libelleMarche({ type_marche: 'marche', lot_numero: '02', entreprise_nom: 'Dupont' })).toBe('lot 02 Dupont');
+  });
+});

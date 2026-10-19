@@ -23,6 +23,11 @@ export interface RouteDeps {
 const COLONNES_ACT = [
   'act_lot_id', 'act_entreprise_id', 'offre_snapshot',
   'statut_signature', 'mode_signature', 'date_signature', 'acte_signe_document_id',
+  // Accords-cadres et subséquents : écrites par server/routes/marchesSubsequents.ts
+  // seulement, le plafond se contrôlant en base sous verrou.
+  'type_marche', 'parent_marche_id', 'numero_subsequent', 'mode_execution',
+  'montant_mini_ht', 'montant_maxi_ht', 'date_fin_accord_cadre',
+  'objet', 'lignes_commande', 'date_notification',
 ] as const;
 
 function sansColonnesAct(body: any): Record<string, unknown> {
@@ -74,8 +79,14 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
       if (req.body?.project_id && !(await assertTenantEntity(supabaseAdmin, 'projects', req.body.project_id, tenantId))) {
         return res.status(400).json({ error: "Projet introuvable pour ce cabinet." });
       }
+      const contenu = sansColonnesAct(req.body);
+      // Le montant d'un subséquent se déduit de ses lignes et se contrôle contre le
+      // plafond : il ne se modifie que par PUT .../subsequents/:subId.
+      const { data: existant } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .select('type_marche').eq('id', req.params.id).maybeSingle();
+      if (existant?.type_marche === 'subsequent') delete contenu.montant_ht;
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
-        .update({ ...sansColonnesAct(req.body), updated_at: new Date().toISOString() })
+        .update({ ...contenu, updated_at: new Date().toISOString() })
         .eq('id', req.params.id)
         .select()
         .single();
@@ -227,6 +238,16 @@ export function registerMarchesEntreprisesRoutes(app: Express, { supabaseAdmin, 
   app.delete("/api/marches-entreprises/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
+      const { data: cible } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+        .select('type_marche, statut_signature').eq('id', req.params.id).maybeSingle();
+      if (cible?.type_marche === 'accord_cadre') {
+        const { data: enfants } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+          .select('id').eq('parent_marche_id', req.params.id).limit(1);
+        if ((enfants ?? []).length > 0) return res.status(409).json({ error: "Des marchés subséquents dépendent de cet accord-cadre." });
+      }
+      if (cible?.type_marche === 'subsequent' && cible.statut_signature === 'signe') {
+        return res.status(409).json({ error: "Un marché subséquent signé ne peut pas être supprimé." });
+      }
       const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
         .delete()
         .eq('id', req.params.id);

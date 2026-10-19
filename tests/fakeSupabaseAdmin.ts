@@ -174,6 +174,58 @@ export class FakeSupabaseAdmin {
       this.docSequences.set(key, next);
       return { data: next, error: null };
     }
+    if (fnName === 'enregistrer_marche_subsequent') {
+      // Miroir de supabase/migrate_marches_subsequents.sql : synchrone, donc atomique
+      // comme le verrou de ligne sur l'accord-cadre l'est en SQL.
+      const fail = (message: string) => ({ data: null, error: { code: 'P0001', message } });
+      const marches = this.getTable('marches_entreprises');
+      const parent = marches.find(r => r.id === params.p_parent_id && r.tenant_id === params.p_tenant_id);
+      if (!parent) return fail('ACCORD_CADRE_INTROUVABLE');
+      if (parent.type_marche !== 'accord_cadre') return fail('ACCORD_CADRE_INVALIDE');
+      if (parent.statut_signature !== 'signe') return fail('ACCORD_CADRE_NON_SIGNE');
+      const row = params.p_row ?? {};
+      const montant = Number(row.montant_ht ?? 0);
+      if (!(montant >= 0)) return fail('MONTANT_INVALIDE');
+      const date = row.date_notification || new Date().toISOString().slice(0, 10);
+      let current: Row | undefined;
+      if (params.p_id) {
+        current = marches.find(r => r.id === params.p_id && r.tenant_id === params.p_tenant_id && r.parent_marche_id === params.p_parent_id);
+        if (!current) return fail('SUBSEQUENT_INTROUVABLE');
+        if (current.statut_signature === 'signe') return fail('SUBSEQUENT_SIGNE');
+      }
+      if (parent.date_fin_accord_cadre && date > parent.date_fin_accord_cadre) return fail('ACCORD_CADRE_ECHU');
+      const enfants = marches.filter(r => r.tenant_id === params.p_tenant_id && r.parent_marche_id === params.p_parent_id);
+      const cumul = enfants
+        .filter(r => (r.statut ?? 'en_cours') !== 'resilie' && (!params.p_id || r.id !== params.p_id))
+        .reduce((s, r) => s + Number(r.montant_ht || 0), 0);
+      if (parent.montant_maxi_ht != null && cumul + montant > Number(parent.montant_maxi_ht)) {
+        return fail(`PLAFOND_DEPASSE:${Math.max(Number(parent.montant_maxi_ht) - cumul, 0)}`);
+      }
+      const contenu = {
+        montant_ht: montant,
+        tva_rate: row.tva_rate ?? parent.tva_rate,
+        objet: row.objet || null,
+        lignes_commande: row.lignes_commande ?? null,
+        date_notification: row.date_notification || null,
+        duree_mois: row.duree_mois ?? null,
+        notes: row.notes || null,
+      };
+      if (current) {
+        Object.assign(current, contenu, { updated_at: new Date().toISOString() });
+        return { data: structuredClone(current), error: null };
+      }
+      const created: Row = {
+        id: crypto.randomUUID(), tenant_id: params.p_tenant_id, project_id: parent.project_id,
+        type_marche: 'subsequent', parent_marche_id: params.p_parent_id,
+        numero_subsequent: Math.max(0, ...enfants.map(r => Number(r.numero_subsequent || 0))) + 1,
+        entreprise_nom: parent.entreprise_nom, contact_id: parent.contact_id ?? null,
+        act_entreprise_id: parent.act_entreprise_id ?? null, lot_numero: parent.lot_numero, lot_titre: parent.lot_titre,
+        statut_signature: 'a_signer', statut: 'en_cours', offre_snapshot: null,
+        created_at: new Date().toISOString(), ...contenu,
+      };
+      this.seed('marches_entreprises', [created]);
+      return { data: structuredClone(created), error: null };
+    }
     return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
   }
 
