@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  articlesDuBordereau, conditionsDe, consommation, libelleMarche, lotDuMarche, mentionMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
+  articlesDuBordereau, classerOffres, conditionsDe, lignesCommandeDepuisOffre, membresDuGroupe, subsequentsDuGroupe, teteDuGroupe, totalOffre, verifierOffre, consommation, libelleMarche, lotDuMarche, mentionMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
   type ConditionsAccordCadre, type LigneCommande,
 } from '../accordCadre';
 
@@ -72,7 +72,8 @@ describe('lignes de commande', () => {
   it('contrôle les prix contre le bordereau figé, sans en inventer', () => {
     const bordereau = { a1: 45, a2: null };
     expect(validerLignesCommande([ligne()], bordereau).ok).toBe(true);
-    expect(validerLignesCommande([ligne({ prixUnitaire: 50 })], bordereau).erreurs[0]).toContain('prix différent');
+    expect(validerLignesCommande([ligne({ prixUnitaire: 50 })], bordereau).erreurs[0]).toContain('supérieur au bordereau');
+    expect(validerLignesCommande([ligne({ prixUnitaire: 40 })], bordereau).ok).toBe(true);
     expect(validerLignesCommande([ligne({ articleId: 'a2' })], bordereau).erreurs[0]).toContain('absent du bordereau');
     expect(validerLignesCommande([ligne({ articleId: undefined })], bordereau).ok).toBe(false);
   });
@@ -139,5 +140,48 @@ describe('libelleMarche', () => {
     expect(libelleMarche({ type_marche: 'accord_cadre', lot_numero: '02', entreprise_nom: 'Dupont' })).toBe('AC lot 02 Dupont');
     expect(libelleMarche({ type_marche: 'subsequent', numero_subsequent: 3, lot_numero: '02', entreprise_nom: 'Dupont' })).toBe('MS n°3 lot 02 Dupont');
     expect(libelleMarche({ type_marche: 'marche', lot_numero: '02', entreprise_nom: 'Dupont' })).toBe('lot 02 Dupont');
+  });
+});
+
+describe('groupe de titulaires', () => {
+  const tous: any[] = [
+    { id: 'a', type_marche: 'accord_cadre' },
+    { id: 'b', type_marche: 'accord_cadre', accord_cadre_groupe_id: 'a' },
+    { id: 'c', type_marche: 'accord_cadre' },
+    { id: 's1', type_marche: 'subsequent', parent_marche_id: 'b' },
+    { id: 's2', type_marche: 'subsequent', parent_marche_id: 'c' },
+  ];
+  it('retrouve la tête et les membres depuis n’importe quel titulaire', () => {
+    expect(teteDuGroupe(tous[1], tous).id).toBe('a');
+    expect(membresDuGroupe(tous[1], tous).map(x => x.id)).toEqual(['a', 'b']);
+    expect(membresDuGroupe(tous[2], tous).map(x => x.id)).toEqual(['c']);
+  });
+  it('réunit les subséquents de tout le groupe', () => {
+    expect(subsequentsDuGroupe(membresDuGroupe(tous[0], tous), tous).map(x => x.id)).toEqual(['s1']);
+  });
+});
+
+describe('remise en concurrence', () => {
+  const lignes = [
+    { articleId: 'a1', designation: 'Carrelage', unite: 'm²', quantite: 10 },
+    { articleId: 'a2', designation: 'Plinthe', unite: 'ml', quantite: 5 },
+  ];
+  const offre = (marche_id: string, p1: number | null, p2: number | null, extra = {}) => ({ marche_id, prix: { a1: p1, a2: p2 }, ...extra });
+
+  it('totalise une offre complète, null sinon ou si déclinée', () => {
+    expect(totalOffre(lignes, offre('x', 40, 8))).toBe(440);
+    expect(totalOffre(lignes, offre('x', 40, null))).toBeNull();
+    expect(totalOffre(lignes, offre('x', 40, 8, { declinee: true }))).toBeNull();
+  });
+  it('classe du moins-disant au plus cher, les incomplètes écartées', () => {
+    const r = classerOffres(lignes, [offre('cher', 50, 9), offre('inc', 1, null), offre('bon', 40, 8)]);
+    expect(r.map(x => x.offre.marche_id)).toEqual(['bon', 'cher']);
+  });
+  it('refuse un prix supérieur au bordereau du titulaire', () => {
+    expect(verifierOffre(lignes, { a1: 46, a2: 8 }, { a1: 45, a2: 8 }).ok).toBe(false);
+    expect(verifierOffre(lignes, { a1: 44, a2: 8 }, { a1: 45, a2: 8 }).ok).toBe(true);
+  });
+  it('compose les lignes de commande aux prix retenus', () => {
+    expect(lignesCommandeDepuisOffre(lignes, offre('x', 40, 8)).map(l => l.prixUnitaire)).toEqual([40, 8]);
   });
 });

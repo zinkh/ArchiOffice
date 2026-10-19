@@ -16,6 +16,8 @@ export type TypeMarche = 'marche' | 'accord_cadre' | 'subsequent';
 export interface MarcheAccordCadreChamps {
   type_marche?: TypeMarche | null;
   parent_marche_id?: string | null;
+  /** Accord-cadre à plusieurs titulaires : id de la ligne de tête qui porte les conditions communes. */
+  accord_cadre_groupe_id?: string | null;
   numero_subsequent?: number | null;
   mode_execution?: ModeExecution | null;
   montant_mini_ht?: number | string | null;
@@ -39,6 +41,27 @@ export function conditionsDe(m: MarcheAccordCadreChamps): ConditionsAccordCadre 
     montantMaxiHT: lire(m.montant_maxi_ht),
     dateFin: m.date_fin_accord_cadre ? String(m.date_fin_accord_cadre).slice(0, 10) : null,
   };
+}
+
+/** Ligne de tête du groupe d'un accord-cadre (lui-même s'il est seul ou en tête). */
+export function teteDuGroupe<T extends { id: string; accord_cadre_groupe_id?: string | null }>(m: T, tous: T[]): T {
+  return m.accord_cadre_groupe_id ? tous.find(x => x.id === m.accord_cadre_groupe_id) ?? m : m;
+}
+
+/** Tous les titulaires d'un groupe (tête comprise), à partir de n'importe lequel d'entre eux. */
+export function membresDuGroupe<T extends { id: string; type_marche?: TypeMarche | null; accord_cadre_groupe_id?: string | null }>(
+  m: T, tous: T[],
+): T[] {
+  const teteId = m.accord_cadre_groupe_id ?? m.id;
+  return tous.filter(x => x.type_marche === 'accord_cadre' && (x.id === teteId || x.accord_cadre_groupe_id === teteId));
+}
+
+/** Marchés subséquents émis par n'importe quel titulaire du groupe. */
+export function subsequentsDuGroupe<T extends { parent_marche_id?: string | null }>(
+  membres: { id: string }[], tous: T[],
+): T[] {
+  const ids = new Set(membres.map(x => x.id));
+  return tous.filter(x => x.parent_marche_id && ids.has(x.parent_marche_id));
 }
 
 /** Article du bordereau d'un accord-cadre : un article du lot, au prix de l'offre retenue. */
@@ -205,7 +228,8 @@ export interface ResultatLignes {
 
 /**
  * Contrôle des lignes d'un subséquent : quantités et prix positifs ou nuls et,
- * quand l'offre retenue est figée, prix identique à celui du bordereau. Une ligne
+ * quand l'offre retenue est figée, prix inférieur ou égal à celui du bordereau (une remise
+ * en concurrence peut faire baisser un prix, jamais l'augmenter). Une ligne
  * absente du bordereau est refusée : un subséquent ne crée pas de prix nouveau.
  * Sans bordereau figé (accord-cadre saisi à la main), les prix ne sont pas contrôlés.
  */
@@ -224,7 +248,7 @@ export function validerLignesCommande(
     if (!controle) return;
     const prix = l.articleId ? prixBordereau![l.articleId] : undefined;
     if (prix === undefined || prix === null) erreurs.push(`« ${nom} » : article absent du bordereau de l'accord-cadre.`);
-    else if (Math.abs(prix - l.prixUnitaire) > TOLERANCE_PRIX) erreurs.push(`« ${nom} » : prix différent du bordereau (${prix} € HT).`);
+    else if (l.prixUnitaire - prix > TOLERANCE_PRIX) erreurs.push(`« ${nom} » : prix supérieur au bordereau (${prix} € HT).`);
   });
   return { ok: erreurs.length === 0, erreurs };
 }
@@ -257,4 +281,69 @@ export function libelleMarche(m: {
   if (m.type_marche === 'accord_cadre') return ['AC', lot, m.entreprise_nom].filter(Boolean).join(' ');
   if (m.type_marche === 'subsequent') return ['MS', `n°${m.numero_subsequent ?? '?'}`, lot, m.entreprise_nom].filter(Boolean).join(' ');
   return [lot, m.entreprise_nom].filter(Boolean).join(' ');
+}
+
+// ── Remise en concurrence entre titulaires ───────────────────────────────────
+
+export interface LigneConsultation {
+  articleId: string;
+  refBpu?: string;
+  designation: string;
+  unite: string;
+  quantite: number;
+}
+
+export interface OffreConcurrence {
+  /** Ligne d'accord-cadre du titulaire consulté. */
+  marche_id: string;
+  prix: Record<string, number | null>;
+  delai_jours?: number | null;
+  remarques?: string;
+  recue_le?: string | null;
+  declinee?: boolean;
+}
+
+/** Total HT d'une offre ; `null` tant qu'une ligne n'est pas chiffrée. */
+export function totalOffre(lignes: LigneConsultation[], offre: OffreConcurrence): number | null {
+  if (offre.declinee || lignes.length === 0) return null;
+  let total = 0;
+  for (const l of lignes) {
+    const p = offre.prix[l.articleId];
+    if (typeof p !== 'number' || !Number.isFinite(p)) return null;
+    total += montantLigne({ quantite: l.quantite, prixUnitaire: p });
+  }
+  return arrondi(total);
+}
+
+/** Offres complètes classées du moins-disant au plus cher (à égalité, délai le plus court). */
+export function classerOffres(lignes: LigneConsultation[], offres: OffreConcurrence[]) {
+  return offres
+    .map(o => ({ offre: o, total: totalOffre(lignes, o) }))
+    .filter((x): x is { offre: OffreConcurrence; total: number } => x.total !== null)
+    .sort((a, b) => a.total - b.total || (a.offre.delai_jours ?? Infinity) - (b.offre.delai_jours ?? Infinity));
+}
+
+/** Une offre ne peut dépasser le prix du bordereau du titulaire, article par article. */
+export function verifierOffre(
+  lignes: LigneConsultation[],
+  prix: Record<string, number | null>,
+  bordereau: Record<string, number | null> | null | undefined,
+): ResultatLignes {
+  const erreurs: string[] = [];
+  for (const l of lignes) {
+    const p = prix[l.articleId];
+    if (p === undefined || p === null) continue;
+    if (!Number.isFinite(p) || p < 0) { erreurs.push(`« ${l.designation} » : prix invalide.`); continue; }
+    const ref = bordereau?.[l.articleId];
+    if (typeof ref === 'number' && p - ref > TOLERANCE_PRIX) erreurs.push(`« ${l.designation} » : prix supérieur au bordereau (${ref} € HT).`);
+  }
+  return { ok: erreurs.length === 0, erreurs };
+}
+
+/** Lignes de commande du subséquent, aux prix de l'offre retenue. */
+export function lignesCommandeDepuisOffre(lignes: LigneConsultation[], offre: OffreConcurrence): LigneCommande[] {
+  return lignes.map(l => ({
+    articleId: l.articleId, refBpu: l.refBpu, designation: l.designation, unite: l.unite,
+    quantite: l.quantite, prixUnitaire: Number(offre.prix[l.articleId]),
+  }));
 }

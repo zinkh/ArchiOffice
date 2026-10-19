@@ -55,6 +55,49 @@ function refusMetier(error: any): { status: number; code: string; message: strin
   return { status: 409, code, message: code === 'PLAFOND_DEPASSE' && m[2] ? `${message} Reste disponible : ${m[2]} € HT.` : message };
 }
 
+/**
+ * Émet (ou modifie) un marché subséquent sous un titulaire d'accord-cadre et répond.
+ * Partagé avec l'attribution d'une remise en concurrence : mêmes contrôles, même
+ * verrou en base, donc mêmes refus.
+ */
+export async function executerEmission(
+  supabaseAdmin: any, tenantId: string, ac: any, subId: string | null, corps: any, res: any,
+) {
+    const lignes = lireLignes(corps?.lignes);
+    if (!lignes) return res.status(400).json({ error: `Lignes absentes ou trop nombreuses (${MAX_LIGNES} au plus).` });
+    const controle = validerLignesCommande(lignes, ac.offre_snapshot?.prix);
+    if (!controle.ok) return res.status(400).json({ error: controle.erreurs[0], erreurs: controle.erreurs });
+
+    const tva = corps?.tva_rate === undefined ? undefined : nombre(corps.tva_rate);
+    if (tva !== undefined && (tva === null || Number.isNaN(tva) || tva > 100)) return res.status(400).json({ error: "Taux de TVA invalide." });
+    const dateNotification = corps?.date_notification ? corps.date_notification : null;
+    if (dateNotification !== null && !dateValide(dateNotification)) return res.status(400).json({ error: "Date de notification invalide." });
+    const duree = nombre(corps?.duree_mois);
+    if (Number.isNaN(duree)) return res.status(400).json({ error: "Durée invalide." });
+
+    const { data, error } = await supabaseAdmin.rpc('enregistrer_marche_subsequent', {
+      p_tenant_id: tenantId,
+      p_parent_id: ac.id,
+      p_row: {
+        objet: texte(corps?.objet, 500),
+        lignes_commande: lignes,
+        montant_ht: totalLignes(lignes),
+        tva_rate: tva,
+        date_notification: dateNotification,
+        duree_mois: duree === null ? null : Math.round(duree),
+        notes: texte(corps?.notes, 2000),
+      },
+      p_id: subId,
+    });
+    if (error) {
+      if (isMissingSequenceFunction(error)) return res.status(503).json({ error: "Les marchés subséquents ne sont pas disponibles : migration SQL à appliquer." });
+      const refus = refusMetier(error);
+      if (refus) return res.status(refus.status).json({ error: refus.message, code: refus.code });
+      throw error;
+    }
+    res.status(subId ? 200 : 201).json(data);
+}
+
 export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   async function lireMarche(tenantId: string, id: string) {
     const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
@@ -66,6 +109,18 @@ export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, 
       .select('*').eq('parent_marche_id', parentId).order('numero_subsequent', { ascending: true });
     if (error) throw error;
     return data ?? [];
+  }
+  /** Titulaires du groupe (tête comprise) d'un accord-cadre, à partir de n'importe lequel. */
+  async function lireGroupe(tenantId: string, ac: any): Promise<any[]> {
+    const teteId = ac.accord_cadre_groupe_id ?? ac.id;
+    const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+      .select('*').eq('project_id', ac.project_id).eq('type_marche', 'accord_cadre');
+    if (error) throw error;
+    return (data ?? []).filter((r: any) => r.id === teteId || r.accord_cadre_groupe_id === teteId);
+  }
+  async function lireSubsequentsDuGroupe(tenantId: string, membres: any[]) {
+    const lots = await Promise.all(membres.map(m => lireSubsequents(tenantId, m.id)));
+    return lots.flat().sort((a: any, b: any) => (a.numero_subsequent ?? 0) - (b.numero_subsequent ?? 0));
   }
   const conditions = (ac: any) => ({
     montantMiniHT: ac.montant_mini_ht == null ? null : Number(ac.montant_mini_ht),
@@ -88,6 +143,34 @@ export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, 
         return res.status(400).json({ error: "Les accords-cadres sont réservés aux marchés publics (maître d'ouvrage public)." });
       }
 
+      // Un titulaire de plus pour un accord-cadre existant : il hérite des conditions de la tête.
+      const groupeAvec = req.body?.groupe_avec ? String(req.body.groupe_avec) : null;
+      if (groupeAvec) {
+        if (marche.type_marche !== 'marche') return res.status(409).json({ error: "Seul un marché ordinaire peut rejoindre un accord-cadre." });
+        const tete = await lireMarche(tenantId, groupeAvec);
+        if (!tete || tete.type_marche !== 'accord_cadre' || tete.accord_cadre_groupe_id) {
+          return res.status(404).json({ error: "Accord-cadre à rejoindre introuvable." });
+        }
+        if (tete.project_id !== marche.project_id) return res.status(400).json({ error: "Les titulaires d'un accord-cadre relèvent de la même opération." });
+        const { data: situations } = await tenantScopedFrom(supabaseAdmin, tenantId, 'situations')
+          .select('id').eq('marche_id', marche.id).limit(1);
+        if ((situations ?? []).length > 0) {
+          return res.status(409).json({ error: "Ce marché porte déjà des situations de travaux : il ne peut plus devenir un accord-cadre." });
+        }
+        const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+          .update({
+            type_marche: 'accord_cadre', accord_cadre_groupe_id: tete.id, mode_execution: tete.mode_execution,
+            montant_mini_ht: null, montant_maxi_ht: null, date_fin_accord_cadre: null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', marche.id).select().single();
+        if (error) throw error;
+        return res.json(data);
+      }
+      if (marche.accord_cadre_groupe_id) {
+        return res.status(409).json({ error: "Les conditions d'un accord-cadre à plusieurs titulaires se règlent sur l'accord-cadre de tête." });
+      }
+
       const mode = String(req.body?.mode_execution ?? '') as ModeExecution;
       if (!MODES.includes(mode)) return res.status(400).json({ error: "Mode d'exécution inconnu (bons de commande, marchés subséquents ou mixte)." });
       const mini = nombre(req.body?.montant_mini_ht);
@@ -105,7 +188,10 @@ export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, 
         }
       } else {
         // Ajustement d'un accord-cadre existant : le plafond ne descend pas sous l'émis.
-        const emis = consommation({ montantMiniHT: null, montantMaxiHT: null, dateFin: null }, await lireSubsequents(tenantId, marche.id)).cumulHT;
+        const emis = consommation(
+          { montantMiniHT: null, montantMaxiHT: null, dateFin: null },
+          await lireSubsequentsDuGroupe(tenantId, await lireGroupe(tenantId, marche)),
+        ).cumulHT;
         if (maxi !== null && maxi < emis) {
           return res.status(409).json({ error: `Le maximum ne peut pas être inférieur au montant déjà émis (${emis} € HT).` });
         }
@@ -135,9 +221,17 @@ export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, 
       if ((await lireSubsequents(tenantId, marche.id)).length > 0) {
         return res.status(409).json({ error: "Des marchés subséquents dépendent de cet accord-cadre." });
       }
+      if (!marche.accord_cadre_groupe_id && (await lireGroupe(tenantId, marche)).length > 1) {
+        return res.status(409).json({ error: "D'autres titulaires partagent cet accord-cadre : retirez-les d'abord." });
+      }
+      const { data: consultations } = await tenantScopedFrom(supabaseAdmin, tenantId, 'accord_cadre_consultations')
+        .select('id, offres').eq('accord_cadre_id', marche.accord_cadre_groupe_id ?? marche.id);
+      if ((consultations ?? []).some((c: any) => (c.offres ?? []).some((o: any) => o.marche_id === marche.id))) {
+        return res.status(409).json({ error: "Ce titulaire figure dans une remise en concurrence." });
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
         .update({
-          type_marche: 'marche', mode_execution: null, montant_mini_ht: null, montant_maxi_ht: null,
+          type_marche: 'marche', accord_cadre_groupe_id: null, mode_execution: null, montant_mini_ht: null, montant_maxi_ht: null,
           date_fin_accord_cadre: null, updated_at: new Date().toISOString(),
         })
         .eq('id', marche.id).select().single();
@@ -154,8 +248,10 @@ export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, 
       const ac = await lireMarche(tenantId, req.params.id);
       if (!ac) return res.status(404).json({ error: "Accord-cadre introuvable." });
       if (ac.type_marche !== 'accord_cadre') return res.status(409).json({ error: "Ce marché n'est pas un accord-cadre." });
-      const subsequents = await lireSubsequents(tenantId, ac.id);
-      res.json({ accordCadre: ac, subsequents, consommation: consommation(conditions(ac), subsequents) });
+      const membres = await lireGroupe(tenantId, ac);
+      const tete = membres.find(m => m.id === (ac.accord_cadre_groupe_id ?? ac.id)) ?? ac;
+      const subsequents = await lireSubsequentsDuGroupe(tenantId, membres);
+      res.json({ accordCadre: ac, tete, titulaires: membres, subsequents, consommation: consommation(conditions(tete), subsequents) });
     } catch (e: any) {
       console.error("[GET /api/marches-entreprises/:id/subsequents]", e); res.status(500).json({ error: e.message }); }
   });
@@ -165,40 +261,7 @@ export function registerMarchesSubsequentsRoutes(app: Express, { supabaseAdmin, 
     const ac = await lireMarche(tenantId, req.params.id);
     if (!ac) return res.status(404).json({ error: "Accord-cadre introuvable." });
     if (ac.type_marche !== 'accord_cadre') return res.status(409).json({ error: "Ce marché n'est pas un accord-cadre." });
-
-    const lignes = lireLignes(req.body?.lignes);
-    if (!lignes) return res.status(400).json({ error: `Lignes absentes ou trop nombreuses (${MAX_LIGNES} au plus).` });
-    const controle = validerLignesCommande(lignes, ac.offre_snapshot?.prix);
-    if (!controle.ok) return res.status(400).json({ error: controle.erreurs[0], erreurs: controle.erreurs });
-
-    const tva = req.body?.tva_rate === undefined ? undefined : nombre(req.body.tva_rate);
-    if (tva !== undefined && (tva === null || Number.isNaN(tva) || tva > 100)) return res.status(400).json({ error: "Taux de TVA invalide." });
-    const dateNotification = req.body?.date_notification ? req.body.date_notification : null;
-    if (dateNotification !== null && !dateValide(dateNotification)) return res.status(400).json({ error: "Date de notification invalide." });
-    const duree = nombre(req.body?.duree_mois);
-    if (Number.isNaN(duree)) return res.status(400).json({ error: "Durée invalide." });
-
-    const { data, error } = await supabaseAdmin.rpc('enregistrer_marche_subsequent', {
-      p_tenant_id: tenantId,
-      p_parent_id: ac.id,
-      p_row: {
-        objet: texte(req.body?.objet, 500),
-        lignes_commande: lignes,
-        montant_ht: totalLignes(lignes),
-        tva_rate: tva,
-        date_notification: dateNotification,
-        duree_mois: duree === null ? null : Math.round(duree),
-        notes: texte(req.body?.notes, 2000),
-      },
-      p_id: subId,
-    });
-    if (error) {
-      if (isMissingSequenceFunction(error)) return res.status(503).json({ error: "Les marchés subséquents ne sont pas disponibles : migration SQL à appliquer." });
-      const refus = refusMetier(error);
-      if (refus) return res.status(refus.status).json({ error: refus.message, code: refus.code });
-      throw error;
-    }
-    res.status(subId ? 200 : 201).json(data);
+    await executerEmission(supabaseAdmin, tenantId, ac, subId, req.body, res);
   }
 
   app.post("/api/marches-entreprises/:id/subsequents", async (req: any, res: any) => {

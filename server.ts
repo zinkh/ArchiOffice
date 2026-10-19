@@ -68,6 +68,7 @@ import { registerAdminSupportRoutes } from "./server/routes/adminSupport";
 import { registerSupportRoutes } from "./server/routes/support";
 import { registerMarchesEntreprisesRoutes } from "./server/routes/marchesEntreprises";
 import { registerMarchesSubsequentsRoutes } from "./server/routes/marchesSubsequents";
+import { registerAccordCadreConsultationsRoutes } from "./server/routes/accordCadreConsultations";
 import { registerBillingRoutes } from "./server/routes/billing";
 import { registerZohoInvoiceRoutes } from "./server/routes/zohoInvoice";
 import { initOAuthStateStore } from "./server/oauthState";
@@ -1079,6 +1080,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerMarchesSubsequentsRoutes(app, { supabaseAdmin, getTenantId });
+  registerAccordCadreConsultationsRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

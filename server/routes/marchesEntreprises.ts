@@ -25,7 +25,7 @@ const COLONNES_ACT = [
   'statut_signature', 'mode_signature', 'date_signature', 'acte_signe_document_id',
   // Accords-cadres et subséquents : écrites par server/routes/marchesSubsequents.ts
   // seulement, le plafond se contrôlant en base sous verrou.
-  'type_marche', 'parent_marche_id', 'numero_subsequent', 'mode_execution',
+  'type_marche', 'parent_marche_id', 'accord_cadre_groupe_id', 'numero_subsequent', 'mode_execution',
   'montant_mini_ht', 'montant_maxi_ht', 'date_fin_accord_cadre',
   'objet', 'lignes_commande', 'date_notification',
 ] as const;

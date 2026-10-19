@@ -193,13 +193,19 @@ export class FakeSupabaseAdmin {
         if (!current) return fail('SUBSEQUENT_INTROUVABLE');
         if (current.statut_signature === 'signe') return fail('SUBSEQUENT_SIGNE');
       }
-      if (parent.date_fin_accord_cadre && date > parent.date_fin_accord_cadre) return fail('ACCORD_CADRE_ECHU');
-      const enfants = marches.filter(r => r.tenant_id === params.p_tenant_id && r.parent_marche_id === params.p_parent_id);
+      // Groupe de titulaires : les conditions et le cumul sont ceux de la tête (accord_cadre_groupe_id).
+      const tete = parent.accord_cadre_groupe_id
+        ? marches.find(r => r.id === parent.accord_cadre_groupe_id && r.tenant_id === params.p_tenant_id)
+        : parent;
+      if (!tete || tete.type_marche !== 'accord_cadre') return fail('ACCORD_CADRE_INTROUVABLE');
+      const groupe = marches.filter(r => r.tenant_id === params.p_tenant_id && (r.id === tete.id || r.accord_cadre_groupe_id === tete.id)).map(r => r.id);
+      if (tete.date_fin_accord_cadre && date > tete.date_fin_accord_cadre) return fail('ACCORD_CADRE_ECHU');
+      const enfants = marches.filter(r => r.tenant_id === params.p_tenant_id && r.type_marche === 'subsequent' && groupe.includes(r.parent_marche_id));
       const cumul = enfants
         .filter(r => (r.statut ?? 'en_cours') !== 'resilie' && (!params.p_id || r.id !== params.p_id))
         .reduce((s, r) => s + Number(r.montant_ht || 0), 0);
-      if (parent.montant_maxi_ht != null && cumul + montant > Number(parent.montant_maxi_ht)) {
-        return fail(`PLAFOND_DEPASSE:${Math.max(Number(parent.montant_maxi_ht) - cumul, 0)}`);
+      if (tete.montant_maxi_ht != null && cumul + montant > Number(tete.montant_maxi_ht)) {
+        return fail(`PLAFOND_DEPASSE:${Math.max(Number(tete.montant_maxi_ht) - cumul, 0)}`);
       }
       const contenu = {
         montant_ht: montant,
