@@ -4288,8 +4288,9 @@ export default function ProjectDetail() {
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.marche_id} onChange={e => handleMarcheChange(e.target.value)}>
                             <option value="">{t('projectdetail_os_contract_choose')}</option>
-                            {marchesTravaux.map((m: any) => (
-                              <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>
+                            {/* Un accord-cadre ne s'exécute pas lui-même : l'OS vise un de ses marchés subséquents. */}
+                            {marchesTravaux.filter((m: any) => m.type_marche !== 'accord_cadre').map((m: any) => (
+                              <option key={m.id} value={m.id}>{m.type_marche === 'subsequent' ? `MS n°${m.numero_subsequent ?? '?'} · ` : ''}{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>
                             ))}
                           </select>
                         </div>

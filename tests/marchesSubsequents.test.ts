@@ -168,6 +168,25 @@ describe('Marchés subséquents', () => {
   });
 });
 
+describe('Ordres de service', () => {
+  it('visent un marché subséquent, jamais l’accord-cadre lui-même', async () => {
+    const m = monter();
+    await m.erigir();
+    const a = await m.emettre([ligne(1)]);
+    const os = (marche_id: string, numero: string) => request(app).post('/api/ordres_de_service').set(m.auth)
+      .send({ project_id: m.projectId, marche_id, os_number: numero, title: 'Démarrage', date: '2026-10-20' });
+
+    const refus = await os(m.marcheId, 'OS-1');
+    expect(refus.status).toBe(400);
+    expect(refus.body.error).toContain('marché subséquent');
+    expect((await os(a.body.id, 'OS-2')).status).toBe(201);
+
+    const maj = await request(app).put(`/api/ordres_de_service/${(await os(a.body.id, 'OS-3')).body.id}`).set(m.auth)
+      .send({ marche_id: m.marcheId, os_number: 'OS-3', title: 'Démarrage' });
+    expect(maj.status).toBe(400);
+  });
+});
+
 describe('Suppression', () => {
   it('protège l’accord-cadre qui a des subséquents, et un subséquent signé', async () => {
     const m = monter();
