@@ -5,6 +5,7 @@
 //   manage_project_notices    notices d'études et réglementaires (scope projects)
 //   manage_consultation       entreprises consultées du module ACT (scope projects)
 //   create_invoice_from_note  facture brouillon d'une note d'honoraires (scope invoices)
+//   manage_accord_cadre       accords-cadres, marchés subséquents et remises en concurrence (scope marches_entreprises)
 //   manage_calendar           agenda : réunions, jalons, tâches et événements Google (scope meetings)
 //
 // Même contrat que projectWorkTools.ts : API REST avec le jeton de la personne, rejouer est
@@ -36,6 +37,7 @@ const confirmProp = { type: 'boolean', description: "Laisser vide au premier app
 
 export const BUSINESS_TOOL_SCOPES: Record<string, string> = {
   manage_situations: 'marches_entreprises',
+  manage_accord_cadre: 'marches_entreprises',
   manage_project_notices: 'projects',
   manage_consultation: 'projects',
   create_invoice_from_note: 'invoices',
@@ -73,6 +75,38 @@ const BUSINESS_TOOLS: FunctionDeclarationLike[] = [
         date_reception_situation: { type: 'string', description: 'YYYY-MM-DD' },
         date_certificat: { type: 'string', description: 'certify : YYYY-MM-DD (défaut : aujourd\'hui)' },
         notes_moe: { type: 'string' },
+        confirm: confirmProp,
+      },
+      required: ['project_id', 'action'],
+    },
+  },
+  {
+    name: 'manage_accord_cadre',
+    description:
+      "Suit les ACCORDS-CADRES (marchés à bons de commande, marchés publics) d'une opération et leurs MARCHÉS SUBSÉQUENTS. Un accord-cadre peut avoir plusieurs titulaires qui partagent un même plafond. " +
+      "list : accords-cadres par titulaire, plafond, consommé, reste et subséquents. " +
+      "emit : émet un marché subséquent sous le titulaire `marche` (marche_id ou nom) avec lignes = [{article_id, designation, unite, quantite, prix_unitaire}] aux prix de SON bordereau (un prix inférieur est admis, jamais supérieur) ; confirmation en deux temps avec le montant et le reste disponible. Le plafond est contrôlé en base : un dépassement est refusé. " +
+      "consult_list / consult_create (objet, lignes = [{article_id, designation, unite, quantite}], date_limite) / consult_offers (consultation_id, offres = [{marche, prix: {article_id: prix_unitaire}, delai_jours, declinee}]) / consult_award (consultation_id, marche retenu, motif_choix obligatoire si ce n'est pas le moins-disant ; confirmation en deux temps) / consult_abandon : remise en concurrence entre titulaires, l'attribution émet le subséquent aux prix de l'offre retenue. " +
+      "Ne crée pas l'accord-cadre ni ses conditions (maximum, minimum, fin) : cela se règle à l'écran, de même que la signature.",
+    parametersJsonSchema: {
+      type: 'object',
+      properties: {
+        project_id: projectId,
+        action: { type: 'string', enum: ['list', 'emit', 'consult_list', 'consult_create', 'consult_offers', 'consult_award', 'consult_abandon'] },
+        marche: { type: 'string', description: "Titulaire : marche_id ou nom de l'entreprise" },
+        objet: { type: 'string' },
+        date_limite: { type: 'string', description: 'YYYY-MM-DD' },
+        date_notification: { type: 'string', description: 'emit / consult_award : YYYY-MM-DD (défaut : aujourd\'hui)' },
+        lignes: {
+          type: 'array',
+          items: { type: 'object', properties: { article_id: { type: 'string' }, ref: { type: 'string' }, designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number' } } },
+        },
+        consultation_id: { type: 'string' },
+        offres: {
+          type: 'array',
+          items: { type: 'object', properties: { marche: { type: 'string' }, prix: { type: 'object' }, delai_jours: { type: 'number' }, remarques: { type: 'string' }, declinee: { type: 'boolean' } } },
+        },
+        motif_choix: { type: 'string' },
         confirm: confirmProp,
       },
       required: ['project_id', 'action'],
@@ -184,7 +218,7 @@ async function manageSituations(request: ToolRequest, pid: string, args: Json): 
   const view = (m: Json) => {
     let previous = 0;
     return {
-      marche_id: m.id, entreprise: m.entreprise_nom, lot: [m.lot_numero, m.lot_titre].filter(Boolean).join(' '), montant_marche_ht: m.montant_ht ?? null,
+      marche_id: m.id, type_marche: m.type_marche ?? 'marche', numero_subsequent: m.numero_subsequent ?? undefined, entreprise: m.entreprise_nom, lot: [m.lot_numero, m.lot_titre].filter(Boolean).join(' '), montant_marche_ht: m.montant_ht ?? null,
       situations: byMarche(m).map(s => {
         const cumul = admis(s); const periode = cumul - previous; previous = cumul;
         return { id: s.id, numero: s.numero_situation, etat: ETAT_LABELS[s.etat] || s.etat, mode: s.mode_saisie || 'simple', cumul_presente_ht: s.montant_presente_ht ?? null, cumul_admis_ht: cumul, periode_ht: periode, reference: s.reference_entreprise || null, date_certificat: s.date_certificat || null };
@@ -499,6 +533,122 @@ async function manageCalendar(request: ToolRequest, args: Json): Promise<Result>
   return failure('action doit valoir agenda, create_event, update_event ou delete_event.');
 }
 
+// ── Accords-cadres et marchés subséquents ────────────────────────────────────
+
+async function manageAccordCadre(request: ToolRequest, pid: string, args: Json): Promise<Result> {
+  const action = text(args.action);
+  const { res: mr, json: marches } = await request(`/api/marches-entreprises/${encodeURIComponent(pid)}`);
+  if (!mr.ok || !Array.isArray(marches)) return failure('Lecture des marchés impossible : opération introuvable ?');
+  const accords = marches.filter(m => m.type_marche === 'accord_cadre');
+  const recordUrl = buildRecordUrl('marches_entreprises', { id: pid, project_id: pid });
+  const findTitulaire = (v: unknown): { m?: Json; erreur?: string } => {
+    const w = norm(v);
+    if (!w) return { erreur: "marche est requis (marche_id ou nom de l'entreprise titulaire)." };
+    const m = accords.filter(x => String(x.id) === text(v) || norm(x.entreprise_nom) === w);
+    if (m.length === 1) return { m: m[0] };
+    return { erreur: m.length ? `plusieurs accords-cadres pour « ${v} » : précise marche_id` : `accord-cadre « ${v} » introuvable pour cette opération` };
+  };
+  const articleId = (l: Json) => text(l.article_id) || text(l.articleId);
+  const lignesDe = (brut: unknown) => asItems(brut).map(l => ({
+    articleId: articleId(l), refBpu: text(l.ref) || undefined, designation: text(l.designation), unite: text(l.unite),
+    quantite: Number(l.quantite), prixUnitaire: l.prix_unitaire === undefined ? undefined : Number(l.prix_unitaire),
+  }));
+
+  if (action === 'list') {
+    const tetes = accords.filter(a => !a.accord_cadre_groupe_id);
+    const vues = await Promise.all(tetes.map(async t => {
+      const { res, json } = await request(`/api/marches-entreprises/${encodeURIComponent(t.id)}/subsequents`);
+      if (!res.ok || !json) return { accord_cadre_id: t.id, erreur: json?.error || `HTTP ${res.status}` };
+      return {
+        accord_cadre_id: t.id, mode: t.mode_execution, maximum_ht: t.montant_maxi_ht ?? null, minimum_ht: t.montant_mini_ht ?? null, fin: t.date_fin_accord_cadre ?? null,
+        titulaires: (json.titulaires ?? [t]).map((x: Json) => ({ marche_id: x.id, entreprise: x.entreprise_nom, lot: x.lot_numero, signe: x.statut_signature === 'signe' })),
+        consomme_ht: json.consommation?.cumulHT, reste_ht: json.consommation?.resteMaxiHT, statut_plafond: json.consommation?.statut,
+        subsequents: (json.subsequents ?? []).map((s: Json) => ({ id: s.id, numero: s.numero_subsequent, titulaire: s.entreprise_nom, objet: s.objet, montant_ht: s.montant_ht, signe: s.statut_signature === 'signe' })),
+      };
+    }));
+    return { response: { project_id: pid, accords_cadres: vues, record_url: recordUrl } };
+  }
+
+  if (action === 'emit') {
+    const { m, erreur } = findTitulaire(args.marche);
+    if (!m) return failure(erreur!);
+    const lignes = lignesDe(args.lignes);
+    if (!lignes.length) return failure('lignes est requis.');
+    const { json: bordereau } = await request(`/api/marches-entreprises/${encodeURIComponent(m.id)}/subsequents`);
+    const prix = m.offre_snapshot?.prix ?? {};
+    const completes = lignes.map(l => ({ ...l, prixUnitaire: l.prixUnitaire ?? (typeof prix[l.articleId] === 'number' ? prix[l.articleId] : undefined) }));
+    if (completes.some(l => l.prixUnitaire === undefined)) return failure("prix_unitaire manquant et absent du bordereau du titulaire : précise article_id ou le prix.");
+    const total = Math.round(completes.reduce((t, l) => t + l.quantite * (l.prixUnitaire as number), 0) * 100) / 100;
+    const reste = bordereau?.consommation?.resteMaxiHT ?? null;
+    if (args.confirm !== true) return confirmation({ titulaire: m.entreprise_nom, objet: text(args.objet) || undefined, lignes: completes.length, montant_ht: total, reste_disponible_ht: reste });
+    const { res, json } = await request(`/api/marches-entreprises/${encodeURIComponent(m.id)}/subsequents`, 'POST', {
+      objet: text(args.objet), lignes: completes, date_notification: text(args.date_notification) || undefined,
+    });
+    if (!res.ok) return failure(json?.error || `Émission impossible (HTTP ${res.status}).`);
+    return { response: { success: true, subsequent: { id: json.id, numero: json.numero_subsequent, montant_ht: json.montant_ht }, record_url: recordUrl }, summary: `Marché subséquent n° ${json.numero_subsequent} émis pour ${m.entreprise_nom}` };
+  }
+
+  // Remise en concurrence : toutes les actions passent par la tête du groupe.
+  const tete = (accords.find(a => !a.accord_cadre_groupe_id && (!args.marche || String(a.id) === text(args.marche) || norm(a.entreprise_nom) === norm(args.marche)))) ?? accords[0];
+  const groupe = (m: Json) => accords.find(a => a.id === (m.accord_cadre_groupe_id ?? m.id));
+  const base = findTitulaire(args.marche).m ?? tete;
+  const head = base ? groupe(base) : undefined;
+  if (!head) return failure("Aucun accord-cadre dans cette opération.");
+  const listUrl = `/api/marches-entreprises/${encodeURIComponent(head.id)}/consultations`;
+  const nomDe = (id: string) => accords.find(a => a.id === id)?.entreprise_nom ?? id;
+  const resume = (c: Json) => ({
+    id: c.id, numero: c.numero, objet: c.objet, statut: c.statut, date_limite: c.date_limite ?? null, lignes: (c.lignes ?? []).length,
+    offres: (c.offres ?? []).map((o: Json) => ({ titulaire: nomDe(o.marche_id), declinee: !!o.declinee, delai_jours: o.delai_jours ?? null })),
+    retenue: c.retenue_marche_id ? nomDe(c.retenue_marche_id) : null, subsequent_id: c.subsequent_id ?? null,
+  });
+
+  if (action === 'consult_list') {
+    const { res, json } = await request(listUrl);
+    if (!res.ok || !Array.isArray(json)) return failure(json?.error || 'Lecture des remises en concurrence impossible.');
+    return { response: { consultations: json.map(resume), record_url: recordUrl } };
+  }
+  if (action === 'consult_create') {
+    const lignes = asItems(args.lignes).map(l => ({ articleId: articleId(l), refBpu: text(l.ref) || undefined, designation: text(l.designation), unite: text(l.unite), quantite: Number(l.quantite) }));
+    if (!lignes.length) return failure('lignes est requis.');
+    const { res, json } = await request(listUrl, 'POST', { objet: text(args.objet), date_limite: text(args.date_limite) || undefined, lignes });
+    if (!res.ok) return failure(json?.error || `Création impossible (HTTP ${res.status}).`);
+    return { response: { success: true, consultation: resume(json), record_url: recordUrl }, summary: `Remise en concurrence n° ${json.numero} ouverte` };
+  }
+  const cid = text(args.consultation_id);
+  if (!cid) return failure('consultation_id est requis.');
+  if (action === 'consult_offers') {
+    const { json: existantes } = await request(listUrl);
+    const c = Array.isArray(existantes) ? existantes.find((x: Json) => x.id === cid) : undefined;
+    if (!c) return failure('remise en concurrence introuvable.');
+    const offres: Json[] = [...(c.offres ?? [])];
+    for (const o of asItems(args.offres)) {
+      const { m, erreur } = findTitulaire(o.marche);
+      if (!m) return failure(erreur!);
+      const nouvelle = { marche_id: m.id, prix: o.prix ?? {}, delai_jours: o.delai_jours ?? null, remarques: text(o.remarques), declinee: !!o.declinee, recue_le: today() };
+      const i = offres.findIndex(x => x.marche_id === m.id);
+      if (i >= 0) offres[i] = { ...offres[i], ...nouvelle }; else offres.push(nouvelle);
+    }
+    const { res, json } = await request(`/api/accord-cadre-consultations/${encodeURIComponent(cid)}`, 'PUT', { offres });
+    if (!res.ok) return failure(json?.error || `Enregistrement impossible (HTTP ${res.status}).`);
+    return { response: { success: true, consultation: resume(json) }, summary: 'Offres enregistrées' };
+  }
+  if (action === 'consult_award') {
+    const { m, erreur } = findTitulaire(args.marche);
+    if (!m) return failure(erreur!);
+    if (args.confirm !== true) return confirmation({ consultation_id: cid, titulaire_retenu: m.entreprise_nom, motif_choix: text(args.motif_choix) || undefined });
+    const { res, json } = await request(`/api/accord-cadre-consultations/${encodeURIComponent(cid)}/attribuer`, 'POST', { marche_id: m.id, motif_choix: text(args.motif_choix), date_notification: text(args.date_notification) || undefined });
+    if (!res.ok) return failure(json?.error || `Attribution impossible (HTTP ${res.status}).`);
+    return { response: { success: true, subsequent: { id: json.subsequent?.id, numero: json.subsequent?.numero_subsequent, montant_ht: json.subsequent?.montant_ht }, record_url: recordUrl }, summary: `Marché subséquent attribué à ${m.entreprise_nom}` };
+  }
+  if (action === 'consult_abandon') {
+    if (args.confirm !== true) return confirmation({ consultation_id: cid, motif: text(args.motif_choix) || undefined });
+    const { res, json } = await request(`/api/accord-cadre-consultations/${encodeURIComponent(cid)}/abandonner`, 'POST', { motif: text(args.motif_choix) });
+    if (!res.ok) return failure(json?.error || `Abandon impossible (HTTP ${res.status}).`);
+    return { response: { success: true, consultation: resume(json) }, summary: 'Remise en concurrence abandonnée' };
+  }
+  return failure('action inconnue pour manage_accord_cadre.');
+}
+
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
 export async function executeBusinessTool(baseUrl: string, auth: InternalAuth, name: string, args: Json): Promise<Result> {
@@ -510,6 +660,7 @@ export async function executeBusinessTool(baseUrl: string, auth: InternalAuth, n
     if (!pid) return failure('project_id est requis.');
     switch (name) {
       case 'manage_situations': return await manageSituations(request, pid, args);
+      case 'manage_accord_cadre': return await manageAccordCadre(request, pid, args);
       case 'manage_project_notices': return await manageNotices(request, pid, args);
       case 'manage_consultation': return await manageConsultation(request, pid, args);
       default: return failure(`Fonction inconnue : ${name}`);

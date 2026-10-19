@@ -19,8 +19,11 @@ import { notifyTenantAdmins } from './mailer';
 import { notifyTenantAdminsPush } from './push';
 import { dispatchWebhookEvent } from './webhookDispatch';
 import { joursAvant, parContact, resumeQualifications, type Qualification } from '../src/lib/qualifications';
+import { conditionsDe, consommation, type MarcheAccordCadreChamps } from '../src/lib/accordCadre';
 
-const DEFAULT_CHECK_INTERVAL_HOURS = 6;
+// Une fois par semaine par défaut ; AGENT_ALERTS_INTERVAL_HOURS le règle. Une alerte dont la
+// cause disparaît se referme donc au cycle suivant, pas immédiatement.
+const DEFAULT_CHECK_INTERVAL_HOURS = 168;
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 
@@ -52,6 +55,8 @@ export interface TenantSnapshot {
   qualifications: Row[];
   /** `act_data` (project_id, consultation) : qui est consulté sur quelle affaire. */
   consultations: Row[];
+  /** `marches_entreprises` : marchés ordinaires, accords-cadres et marchés subséquents. */
+  marches: Row[];
 }
 
 export interface AlertRuleDef {
@@ -91,6 +96,47 @@ function firstPhaseEntry(snapshot: TenantSnapshot, projectId: string, phases: Se
     .filter(h => h.project_id === projectId && phases.has(String(h.phase || '').toUpperCase()))
     .sort((a, b) => String(a.entered_at).localeCompare(String(b.entered_at)));
   return rows[0] ?? null;
+}
+
+/** Après sa fin, un accord-cadre dont le minimum n'est pas atteint reste signalé ce nombre de jours. */
+const ECHEANCE_ACCORD_CADRE_JOURS_APRES = 90;
+
+const euros = (n: number): string => `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+
+const membresAccordCadre = (snapshot: TenantSnapshot, tete: Row): Row[] =>
+  snapshot.marches.filter(m => m.type_marche === 'accord_cadre' && (m.id === tete.id || String(m.accord_cadre_groupe_id) === String(tete.id)));
+
+/**
+ * Accords-cadres non résiliés, d'une affaire qui n'est pas terminée, dont au moins un titulaire a
+ * signé. Un accord-cadre à plusieurs titulaires compte pour UN : la ligne de tête porte le plafond,
+ * la fin et le minimum, partagés par tous.
+ */
+function accordsCadresSignes(snapshot: TenantSnapshot): Row[] {
+  const terminees = new Set(snapshot.projects.filter(p => p.status === 'Completed').map(p => String(p.id)));
+  return snapshot.marches.filter(m =>
+    m.type_marche === 'accord_cadre'
+    && !m.accord_cadre_groupe_id
+    && (m.statut ?? 'en_cours') !== 'resilie'
+    && !terminees.has(String(m.project_id))
+    && membresAccordCadre(snapshot, m).some(x => x.statut_signature === 'signe'));
+}
+
+const subsequentsDe = (snapshot: TenantSnapshot, ac: Row): { montant_ht: number; statut?: string | null }[] => {
+  const ids = new Set(membresAccordCadre(snapshot, ac).map(m => String(m.id)));
+  return snapshot.marches
+    .filter(m => m.type_marche === 'subsequent' && ids.has(String(m.parent_marche_id)))
+    .map(m => ({ montant_ht: Number(m.montant_ht) || 0, statut: m.statut }));
+};
+
+const accordCadreLabel = (ac: Row, snapshot?: TenantSnapshot): string => {
+  const titulaires = snapshot ? membresAccordCadre(snapshot, ac) : [ac];
+  const noms = titulaires.map(t => t.entreprise_nom).filter(Boolean).join(' / ');
+  return [ac.lot_numero ? `lot ${ac.lot_numero}` : '', noms].filter(Boolean).join(' ') || String(ac.id);
+};
+
+function projectLabelOf(snapshot: TenantSnapshot, ac: Row): string {
+  const project = snapshot.projects.find(p => String(p.id) === String(ac.project_id));
+  return project ? projectLabel(project) : 'affaire inconnue';
 }
 
 export const ALERT_RULES: AlertRuleDef[] = [
@@ -367,6 +413,72 @@ export const ALERT_RULES: AlertRuleDef[] = [
     },
   },
   {
+    code: 'accord_cadre_plafond',
+    label: "Plafond d'un accord-cadre bientôt atteint",
+    description:
+      "Les marchés subséquents émis sur un accord-cadre signé approchent de son montant maximum (80 %), l'atteignent ou le dépassent. " +
+      "Au-delà, plus aucune commande n'est possible sans avenant relevant le maximum. Seuil fixe, non réglable.",
+    defaultSeverity: 'warning',
+    defaultThresholdDays: null,
+    evaluate(snapshot) {
+      const alerts: DetectedAlert[] = [];
+      for (const ac of accordsCadresSignes(snapshot)) {
+        const c = consommation(conditionsDe(ac as MarcheAccordCadreChamps), subsequentsDe(snapshot, ac));
+        if (c.statut !== 'proche' && c.statut !== 'atteint' && c.statut !== 'depasse') continue;
+        const maxi = conditionsDe(ac as MarcheAccordCadreChamps).montantMaxiHT ?? 0;
+        const etat = c.statut === 'proche' ? `${c.pctMaxi} % du maximum` : c.statut === 'atteint' ? 'le maximum est atteint' : 'le maximum est dépassé';
+        alerts.push({
+          // Le statut fait partie de la clé : passer de « proche » à « atteint » ouvre une
+          // nouvelle alerte et referme la précédente, au lieu de rester sur un message périmé.
+          dedupKey: `accord_cadre_plafond:${ac.id}:${c.statut}`,
+          title: `Accord-cadre ${c.statut === 'proche' ? 'bientôt à son plafond' : 'au plafond'} : ${accordCadreLabel(ac, snapshot)}`,
+          message:
+            `L'accord-cadre ${accordCadreLabel(ac, snapshot)} (${projectLabelOf(snapshot, ac)}) a ${euros(c.cumulHT)} HT de marchés subséquents émis sur ${euros(maxi)} HT : ${etat}. ` +
+            (c.statut === 'proche'
+              ? `Il reste ${euros(c.resteMaxiHT ?? 0)} HT disponibles : anticiper un avenant si d'autres commandes sont prévues.`
+              : `Aucun nouveau marché subséquent ne peut être émis sans avenant relevant le maximum.`),
+          targetType: 'project',
+          targetId: String(ac.project_id),
+        });
+      }
+      return alerts;
+    },
+  },
+  {
+    code: 'accord_cadre_echeance',
+    label: "Fin d'un accord-cadre proche, minimum non atteint",
+    description:
+      "Un accord-cadre signé arrive à sa date de fin dans le délai réglé, ou l'a franchie depuis moins de 90 jours, " +
+      "alors que son montant minimum n'est pas atteint ou qu'il reste des crédits à engager.",
+    defaultSeverity: 'warning',
+    defaultThresholdDays: 90,
+    evaluate(snapshot, thresholdDays) {
+      const alerts: DetectedAlert[] = [];
+      for (const ac of accordsCadresSignes(snapshot)) {
+        const conditions = conditionsDe(ac as MarcheAccordCadreChamps);
+        const reste = daysUntil(conditions.dateFin, snapshot.now);
+        if (reste === null || reste > thresholdDays || reste < -ECHEANCE_ACCORD_CADRE_JOURS_APRES) continue;
+        const c = consommation(conditions, subsequentsDe(snapshot, ac));
+        // Une fin proche sans enjeu (minimum atteint, rien à engager) ne mérite pas d'alerte.
+        if (reste < 0 && c.miniAtteint !== false) continue;
+        if (reste >= 0 && c.miniAtteint !== false && !(c.resteMaxiHT && c.resteMaxiHT > 0)) continue;
+        const quand = reste < 0 ? `est échu depuis ${-reste} jours` : `prend fin dans ${reste} jours`;
+        const enjeux = [
+          c.miniAtteint === false ? `le minimum de ${euros(conditions.montantMiniHT ?? 0)} HT n'est pas atteint (reste ${euros(c.resteAuMiniHT ?? 0)} HT à commander)` : '',
+          c.resteMaxiHT ? `${euros(c.resteMaxiHT)} HT restent disponibles sous le maximum` : '',
+        ].filter(Boolean).join(' ; ');
+        alerts.push({
+          dedupKey: `accord_cadre_echeance:${ac.id}`,
+          title: `Fin d'accord-cadre : ${accordCadreLabel(ac, snapshot)}`,
+          message: `L'accord-cadre ${accordCadreLabel(ac, snapshot)} (${projectLabelOf(snapshot, ac)}) ${quand} : ${enjeux}.`,
+          targetType: 'project',
+          targetId: String(ac.project_id),
+        });
+      }
+      return alerts;
+    },
+  },
+  {
     code: 'tache_en_retard',
     label: 'Tâches en retard',
     description: "Des tâches ont dépassé leur date de fin sans être terminées.",
@@ -410,7 +522,7 @@ async function selectAll(supabaseAdmin: SupabaseClient, table: string, tenantId:
 }
 
 export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId: string, now = new Date()): Promise<TenantSnapshot> {
-  const [projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations] =
+  const [projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches] =
     await Promise.all([
       selectAll(supabaseAdmin, 'projects', tenantId, 'id, name, status, start_date, end_date, project_code'),
       selectAll(supabaseAdmin, 'project_phase_history', tenantId, 'project_id, phase, entered_at, exited_at'),
@@ -425,8 +537,12 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
       selectAll(supabaseAdmin, 'notes_honoraires', tenantId, 'id, project_id, contrat_id, date'),
       selectAll(supabaseAdmin, 'contact_qualifications', tenantId, 'id, contact_id, organisme, reference, date_fin, source, verified_at'),
       selectAll(supabaseAdmin, 'act_data', tenantId, 'project_id, consultation'),
+      selectAll(
+        supabaseAdmin, 'marches_entreprises', tenantId,
+        'id, project_id, type_marche, parent_marche_id, accord_cadre_groupe_id, entreprise_nom, lot_numero, montant_ht, statut, statut_signature, montant_mini_ht, montant_maxi_ht, date_fin_accord_cadre',
+      ),
     ]);
-  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations };
+  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches };
 }
 
 export interface RuleSetting {

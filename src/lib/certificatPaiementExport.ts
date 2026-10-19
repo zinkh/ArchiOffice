@@ -6,13 +6,13 @@ import { fetchAgencySettings, loadLogoDataUrl } from './pdfLetterhead';
 import { rendreCertificatPaiement, rendreDecompteCloture, type OperationInfo, type RenduPdf } from './certificatPaiementPdf';
 import type { MarcheTravaux, SituationTravaux } from './certificatPaiement';
 
-const nomFichier = (...parts: (string | number | null | undefined)[]): string =>
+export const nomFichier = (...parts: (string | number | null | undefined)[]): string =>
   parts.filter((p) => p !== null && p !== undefined && String(p).trim() !== '')
     .map((p) => String(p).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9-]+/g, '_'))
     .join('_')
     .slice(0, 120) + '.pdf';
 
-async function preparer(settings?: AgencySettings): Promise<RenduPdf> {
+export async function preparer(settings?: AgencySettings): Promise<RenduPdf> {
   const reglages = settings && Object.keys(settings).length ? settings : await fetchAgencySettings();
   const [{ jsPDF }, autoTableModule, logo] = await Promise.all([
     import('jspdf'),

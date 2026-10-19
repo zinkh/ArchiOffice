@@ -25,6 +25,10 @@ export interface MarcheTravaux {
   /** Retenue remplacée par une caution bancaire : rien n'est retenu. */
   retenue_garantie_bancaire?: boolean | null;
   revision_active?: boolean | null;
+  /** Marché subséquent d'un accord-cadre : le certificat le dit (voir marcheSubsequentPdf.ts). */
+  type_marche?: 'marche' | 'accord_cadre' | 'subsequent' | null;
+  numero_subsequent?: number | null;
+  objet?: string | null;
 }
 
 /** Valeurs stockées en base, inchangées : seul leur affichage se traduit. */

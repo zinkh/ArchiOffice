@@ -48,8 +48,11 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
       if (!marche_id) {
         return res.status(400).json({ error: "Un ordre de service doit être rattaché à un marché de travaux." });
       }
-      const { data: marche } = await supabaseAdmin.from('marches_entreprises').select('id, project_id').eq('id', marche_id).eq('tenant_id', tenantId).maybeSingle();
+      const { data: marche } = await supabaseAdmin.from('marches_entreprises').select('id, project_id, type_marche').eq('id', marche_id).eq('tenant_id', tenantId).maybeSingle();
       if (!marche) return res.status(400).json({ error: "Marché de travaux introuvable pour ce cabinet." });
+      if ((marche as any).type_marche === 'accord_cadre') {
+        return res.status(400).json({ error: "Un ordre de service vise un marché subséquent, pas l'accord-cadre lui-même." });
+      }
       if (project_id && (marche as any).project_id !== project_id) {
         return res.status(400).json({ error: "Ce marché n'appartient pas au projet de l'ordre de service." });
       }
@@ -85,8 +88,11 @@ export function registerOrdresDeServiceRoutes(app: Express, { supabaseAdmin, get
         delai_execution, delai_unit
       } = req.body;
       if (marche_id) {
-        const { data: marche } = await supabaseAdmin.from('marches_entreprises').select('id').eq('id', marche_id).eq('tenant_id', tenantId).maybeSingle();
+        const { data: marche } = await supabaseAdmin.from('marches_entreprises').select('id, type_marche').eq('id', marche_id).eq('tenant_id', tenantId).maybeSingle();
         if (!marche) return res.status(400).json({ error: "Marché de travaux introuvable pour ce cabinet." });
+        if ((marche as any).type_marche === 'accord_cadre') {
+          return res.status(400).json({ error: "Un ordre de service vise un marché subséquent, pas l'accord-cadre lui-même." });
+        }
       }
       const { error } = await supabaseAdmin.from('ordres_de_service').update({
         os_number, march_number, marche_id, title, date, description, lot, status, type: type || 'travaux',

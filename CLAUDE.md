@@ -907,6 +907,71 @@ Un bouton crée d'un coup un poste pour toutes les lignes non rattachées.
   modifié. `ProTab` écrit par `setDpgf`/`setBpu` et non `editDpgf`/`editBpu` : ceux-ci enverraient chaque
   nouvelle ligne à la bibliothèque d'ouvrages, que des centaines de lignes tierces n'ont pas à enrichir d'office.
 
+### Accords-cadres et marchés subséquents (onglet RDT)
+
+Un accord-cadre est une ligne de `marches_entreprises` (`type_marche = 'accord_cadre'`) ; chaque marché
+subséquent en est une ligne enfant (`type_marche = 'subsequent'`, `parent_marche_id`, `numero_subsequent`). Les
+OS, situations et certificats de paiement s'accrochent tous à `marche_id` : un subséquent se paie donc comme
+n'importe quel marché, sans code propre. Colonnes dans `supabase/migrate_marches_subsequents.sql`
+(`mode_execution`, `montant_mini_ht`, `montant_maxi_ht`, `date_fin_accord_cadre`, `objet`, `lignes_commande`,
+`date_notification`) ; toutes facultatives, un marché existant reste un marché ordinaire. Réservé aux affaires
+dont le maître d'ouvrage est public (`is_public_client`), à un ou plusieurs titulaires (voir plus bas).
+
+- **Le plafond se contrôle en base, jamais dans le code applicatif** : `enregistrer_marche_subsequent(tenant,
+  accord-cadre, ligne, id?)` prend un verrou de ligne sur l'accord-cadre, vérifie signature, fin et maximum,
+  numérote (`max + 1` sous ce même verrou, pas `document_sequences`) et écrit dans la même transaction. Deux
+  émissions simultanées ne franchissent donc pas le maximum (`tests/marchesSubsequents.test.ts`). Un
+  subséquent résilié (`statut = 'resilie'`) ne consomme plus le plafond ; la fonction est réservée au rôle serveur.
+- **Le montant d'un subséquent n'est jamais envoyé par le client** : `server/routes/marchesSubsequents.ts` le
+  recalcule depuis les lignes (quantité x prix). Quand l'offre de l'accord-cadre est figée (`offre_snapshot.prix`),
+  chaque ligne doit être un article du bordereau à un prix inférieur ou égal à celui du bordereau (`validerLignesCommande` : une
+  remise en concurrence peut le faire baisser, jamais monter) ; une ligne hors bordereau est refusée, un subséquent ne crée pas de prix. Les postes ajoutés par l'entreprise ne sont pas
+  commandables (absents de `offre_snapshot.prix`). Sans offre figée (accord-cadre saisi à la main), lignes libres.
+- **Garde-fous des routes génériques** : `COLONNES_ACT` retire les nouvelles colonnes du POST/PUT générique de
+  `marches_entreprises`, le PUT retire `montant_ht` d'un subséquent, le DELETE refuse un accord-cadre qui a des
+  subséquents et un subséquent signé. Un accord-cadre n'est pas convertible s'il porte déjà des situations ; son
+  maximum ne descend pas sous l'émis. Un accord-cadre doit être signé avant toute émission (dialogue de signature
+  papier ou électronique, mêmes routes `/signature` que les marchés de l'ACT).
+- **Logique pure** `src/lib/accordCadre.ts` (testée) : consommation (`sans_plafond`, `normal`, `proche` à 80 %,
+  `atteint`, `depasse`), `verifierEmission`, `validerLignesCommande`, `articlesDuBordereau`, `libelleMarche`
+  (« AC lot 02 », « MS n°3 »). Elle sert à l'aperçu à l'écran ; l'autorité reste la base.
+- **Écran** : `AccordCadrePanel` (jauge `role="progressbar"`, signature, liste des subséquents), `AccordCadreDialog`
+  (conditions), `SubsequentDialog` (lignes composées depuis le bordereau, total et plafond en direct),
+  branchés dans `SituationsTravaux.tsx`. Chaque subséquent a aussi son bloc de marché avec ses situations. Le total
+  « marchés » de l'onglet RDT exclut le montant de l'accord-cadre lui-même (le subséquent le porte déjà). Textes :
+  `accord_cadre_*` (fr et en).
+- **PDF** `src/lib/marcheSubsequentPdf.ts` (rendu partagé navigateur et Node, sur les briques de
+  `certificatPaiementPdf.ts`) : lignes, totaux, situation du plafond, signatures du titulaire et du pouvoir
+  adjudicateur ; téléchargement par `marcheSubsequentExport.ts`. Pas encore joint à une facture Chorus Pro.
+- **Ordres de service** : un OS ne vise jamais un accord-cadre (400 à la création comme à la modification) ; les
+  sélecteurs de marché n'offrent que les marchés exécutables et préfixent « MS n°N ».
+- **Alertes** (`server/agentAlerts.ts`, aucune migration) : `accord_cadre_plafond` (80 %, atteint, dépassé ; seuil
+  fixe, la clé d'alerte porte le statut pour que « proche » se referme quand « atteint » s'ouvre) et
+  `accord_cadre_echeance` (fin dans 90 jours par défaut, réglable ; seulement s'il reste un minimum à atteindre
+  ou du crédit à engager ; reste signalée 90 jours après la fin si le minimum n'est pas atteint). Les accords-cadres non
+  signés, résiliés ou d'une affaire terminée sont ignorés.
+- **Plusieurs titulaires** (`supabase/migrate_marches_subsequents_multi_titulaires.sql`) : un accord-cadre multi-attributaires
+  reste un ensemble de lignes `accord_cadre`, UNE PAR TITULAIRE (son bordereau figé, sa signature, ses subséquents). Une
+  ligne « de tête » porte les conditions communes ; les autres pointent sur elle par `accord_cadre_groupe_id` et n'ont aucune
+  condition propre (409 si on tente de les régler). `POST .../accord-cadre` avec `groupe_avec: <tête>` fait rejoindre un marché
+  ordinaire du même projet. `enregistrer_marche_subsequent` verrouille la tête PUIS le titulaire (même ordre partout, pas
+  d'interblocage), cumule et numérote sur TOUT le groupe : le plafond est partagé. La tête ne se défait pas tant que des
+  titulaires lui sont rattachés. `GET .../subsequents` rend `tete`, `titulaires`, tous les subséquents du groupe.
+- **Remise en concurrence** (`accord_cadre_consultations`, `server/routes/accordCadreConsultations.ts`,
+  `ConsultationsSection.tsx`, au moins deux titulaires) : lignes à commander (articles du bordereau + quantités), offre par titulaire
+  (`prix` par article, jamais au-dessus du bordereau du titulaire, `verifierOffre`), classement du moins-disant (`classerOffres`,
+  offres complètes seulement). `POST .../attribuer` réserve la consultation (`en_cours` -> `attribuee`, mise à jour
+  conditionnelle), émet le subséquent sous le titulaire retenu AUX PRIX DE SON OFFRE par la même `executerEmission` (donc le même
+  verrou et les mêmes refus, plafond compris) et rend la consultation à `en_cours` si l'émission échoue. Retenir une offre qui n'est
+  pas la moins-disante exige un motif. Une consultation attribuée ne se supprime pas. Instance non migrée : lecture vide, 503 à l'écriture.
+- **Alertes** : un groupe compte pour UN accord-cadre (plafond de la tête, subséquents de tous les titulaires). Le cycle d'alertes
+  est hebdomadaire (`AGENT_ALERTS_INTERVAL_HOURS`) ; pas de carte de tableau de bord, le blocage à l'émission reste immédiat.
+- **Agents et MCP** : `manage_accord_cadre` (`businessTools.ts`, scope `marches_entreprises`) : `list`, `emit` (confirmation en
+  deux temps avec montant et reste disponible), et la remise en concurrence (`consult_list|create|offers|award|abandon`, attribution
+  et abandon confirmés). Il ne crée pas l'accord-cadre ni ses conditions et ne signe rien : cela reste à l'écran.
+- **Chorus Pro et SuperPDP** : la pièce jointe d'une facture cite l'accord-cadre d'un subséquent (`mentionMarche`).
+- **Pas encore fait** : libellé propre aux bons de commande.
+
 ### Espace public de dépôt des offres (ACT)
 
 Une entreprise consultée reçoit un **lien personnel, sans compte** (`/depot/<jeton>`,
@@ -2322,7 +2387,8 @@ seul endroit qui traduit les colonnes en capacités, et il impose l'invariant
 
 Deux mécanismes tournent sans qu'on leur pose de question :
 
-- **Alertes métier** — `server/agentAlerts.ts`. Un cycle (6 h par défaut) relit
+- **Alertes métier** — `server/agentAlerts.ts`. Un cycle (hebdomadaire par défaut,
+  `AGENT_ALERTS_INTERVAL_HOURS` pour le changer) relit
   l'état de chaque cabinet et crée une alerte par situation anormale (études
   engagées sans contrat MOE signé, chantier sans OS, facture échue, réserves
   non levées, devis sans réponse, échéance d'AO, contrat signé non facturé,

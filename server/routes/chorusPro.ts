@@ -7,6 +7,7 @@
 // rather than tenantScopedFrom, matching the other integration modules.
 import type { Express } from 'express';
 import { certificatSituation, buildCertificatPdfBuffer } from '../etatAcompte';
+import { mentionMarche } from '../../src/lib/accordCadre';
 import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
@@ -386,7 +387,7 @@ export function registerChorusProRoutes(app: Express, { supabaseAdmin, getTenant
           identifiantFactureCPP: sit.chorus_pro_id,
           nomPieceJointe: `etat-acompte-${sit.numero_situation}.pdf`.slice(0, 50),
           contenuPieceJointe: pdfBuf.toString('base64'),
-          commentaire: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${marche.entreprise_nom}, lot ${marche.lot_numero}` : ''}`,
+          commentaire: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${mentionMarche(marche)}` : ''}`,
         },
       );
 

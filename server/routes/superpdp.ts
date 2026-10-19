@@ -8,6 +8,7 @@
 import type { Express } from 'express';
 import { buildEnInvoiceData } from '../../src/lib/facturX';
 import { certificatSituation, buildCertificatPdfBuffer } from '../etatAcompte';
+import { mentionMarche } from '../../src/lib/accordCadre';
 import { loadInvoiceClientContact } from '../invoiceClientContact';
 
 export interface RouteDeps {
@@ -317,7 +318,7 @@ export function registerSuperpdpRoutes(app: Express, { supabaseAdmin, getTenantI
         body: JSON.stringify({
           filename: `etat-acompte-${sit.numero_situation}.pdf`,
           content_base64: pdfBuf.toString('base64'),
-          comment: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${marche.entreprise_nom}, lot ${marche.lot_numero}` : ''}`,
+          comment: `État d'acompte MOE n°${sit.numero_situation}${marche ? ` — ${mentionMarche(marche)}` : ''}`,
         }),
       });
 
