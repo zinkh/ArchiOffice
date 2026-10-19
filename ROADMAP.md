@@ -140,6 +140,13 @@ recorded here so the reasoning doesn't have to be re-derived.
   externally stored file. Caching them locally is a feature in its own right.
 - **Per-provider direct upload.** See the memory-pressure gap above.
 
+### Inbound mail per tenant — partly built
+
+The alias domain is now set per tenant (`settings.mail_inbox_domain`, Réglages > Agents IA > Courrier entrant; `AGENT_MAIL_INBOX_ALIAS_DOMAIN` is only an instance fallback). The IMAP mailbox that receives the mail is still one shared, instance-wide mailbox (`AGENT_MAIL_INBOX_HOST/PORT/USERNAME/PASSWORD`).
+
+- **Per-tenant IMAP mailboxes — not built.** Each cabinet would store its own encrypted IMAP credentials and get its own poll, which removes the dependence on the operator wiring every tenant domain (MX or redirect) into one mailbox. Heavier: one poller per tenant, credential encryption like `email_connections`, and a failure mode per mailbox.
+- **Domain not verified.** The app cannot check that the domain a tenant enters actually delivers to the shared mailbox; routing reads only the `agents+<slug>` part of the recipient. A DNS or test-message check would close that gap.
+
 ### TTS per provider — planned
 
 `resolveSpeechProvider()` (`packages/archioffice-agents/src/server/llm/index.ts`) always returns Gemini today, whatever the tenant's active chat provider is — see CLAUDE.md's "Synthèse vocale". That's not an oversight to fix, it's a limit of what Anthropic and Mistral currently expose: neither publishes a public text-to-speech endpoint (Claude has none; Mistral's audio work, Voxtral, is speech-to-text only), so there is no Claude/Mistral adapter to route to yet.
