@@ -2369,7 +2369,8 @@ seul endroit qui traduit les colonnes en capacités, et il impose l'invariant
 
 Deux mécanismes tournent sans qu'on leur pose de question :
 
-- **Alertes métier** — `server/agentAlerts.ts`. Un cycle (6 h par défaut) relit
+- **Alertes métier** — `server/agentAlerts.ts`. Un cycle (hebdomadaire par défaut,
+  `AGENT_ALERTS_INTERVAL_HOURS` pour le changer) relit
   l'état de chaque cabinet et crée une alerte par situation anormale (études
   engagées sans contrat MOE signé, chantier sans OS, facture échue, réserves
   non levées, devis sans réponse, échéance d'AO, contrat signé non facturé,

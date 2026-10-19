@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  articlesDuBordereau, conditionsDe, consommation, libelleMarche, lotDuMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
+  articlesDuBordereau, conditionsDe, consommation, libelleMarche, lotDuMarche, mentionMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
   type ConditionsAccordCadre, type LigneCommande,
 } from '../accordCadre';
 
@@ -119,6 +119,18 @@ describe('bordereau de l’accord-cadre', () => {
     expect(conditionsDe({ montant_mini_ht: '200.00', montant_maxi_ht: 1000, date_fin_accord_cadre: '2027-12-31T00:00:00Z' }))
       .toEqual({ montantMiniHT: 200, montantMaxiHT: 1000, dateFin: '2027-12-31' });
     expect(conditionsDe({})).toEqual({ montantMiniHT: null, montantMaxiHT: null, dateFin: null });
+  });
+});
+
+describe('mentionMarche', () => {
+  it('garde la formule habituelle pour un marché ordinaire', () => {
+    expect(mentionMarche({ entreprise_nom: 'Dupont SARL', lot_numero: '02' })).toBe('Dupont SARL, lot 02');
+    expect(mentionMarche({ entreprise_nom: 'Dupont SARL' })).toBe('Dupont SARL');
+  });
+
+  it('cite l’accord-cadre pour un marché subséquent', () => {
+    expect(mentionMarche({ type_marche: 'subsequent', numero_subsequent: 3, entreprise_nom: 'Dupont SARL', lot_numero: '02' }))
+      .toBe("Dupont SARL, lot 02, marché subséquent n°3 de l'accord-cadre");
   });
 });
 

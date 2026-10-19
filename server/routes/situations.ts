@@ -18,6 +18,13 @@ export interface RouteDeps {
 }
 
 export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
+  /** Un accord-cadre ne s'exécute ni ne se paie lui-même : ses subséquents portent les situations. */
+  const estAccordCadre = async (tenantId: string, marcheId: string): Promise<boolean> => {
+    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
+      .select('type_marche').eq('id', marcheId).maybeSingle();
+    return data?.type_marche === 'accord_cadre';
+  };
+
   app.get('/api/situations/:projectId', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
@@ -111,6 +118,9 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
       if (row.marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', row.marche_id, tenantId))) {
         return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
       }
+      if (row.marche_id && await estAccordCadre(tenantId, row.marche_id)) {
+        return res.status(400).json({ error: "Un accord-cadre ne se paie pas lui-même : la situation vise un de ses marchés subséquents." });
+      }
       deduireCumul(row, null);
       // Numérotée par marché : la première situation d'une entreprise est la n°1.
       if (!row.numero_situation) {
@@ -144,6 +154,9 @@ export function registerSituationRoutes(app: Express, { supabaseAdmin, getTenant
       if (invalid) return res.status(400).json({ error: invalid });
       if (row.marche_id && !(await assertTenantEntity(supabaseAdmin, 'marches_entreprises', row.marche_id, tenantId))) {
         return res.status(400).json({ error: "Marché introuvable pour ce cabinet." });
+      }
+      if (row.marche_id && await estAccordCadre(tenantId, row.marche_id)) {
+        return res.status(400).json({ error: "Un accord-cadre ne se paie pas lui-même : la situation vise un de ses marchés subséquents." });
       }
       let modeActuel: string | null = null;
       if ('avancement_lignes' in row && !('mode_saisie' in row)) {

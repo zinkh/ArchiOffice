@@ -187,6 +187,21 @@ describe('Ordres de service', () => {
   });
 });
 
+describe('Situations de travaux', () => {
+  it('se rattachent à un marché subséquent, jamais à l’accord-cadre', async () => {
+    const m = monter();
+    await m.erigir();
+    const a = await m.emettre([ligne(1)]);
+    const sit = (marche_id: string) => request(app).post('/api/situations').set(m.auth)
+      .send({ project_id: m.projectId, marche_id, montant_presente_ht: 100 });
+
+    const refus = await sit(m.marcheId);
+    expect(refus.status).toBe(400);
+    expect(refus.body.error).toContain('accord-cadre');
+    expect((await sit(a.body.id)).status).toBe(201);
+  });
+});
+
 describe('Suppression', () => {
   it('protège l’accord-cadre qui a des subséquents, et un subséquent signé', async () => {
     const m = monter();

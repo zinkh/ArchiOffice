@@ -21,7 +21,9 @@ import { dispatchWebhookEvent } from './webhookDispatch';
 import { joursAvant, parContact, resumeQualifications, type Qualification } from '../src/lib/qualifications';
 import { conditionsDe, consommation, type MarcheAccordCadreChamps } from '../src/lib/accordCadre';
 
-const DEFAULT_CHECK_INTERVAL_HOURS = 6;
+// Une fois par semaine par défaut ; AGENT_ALERTS_INTERVAL_HOURS le règle. Une alerte dont la
+// cause disparaît se referme donc au cycle suivant, pas immédiatement.
+const DEFAULT_CHECK_INTERVAL_HOURS = 168;
 
 export type AlertSeverity = 'info' | 'warning' | 'critical';
 

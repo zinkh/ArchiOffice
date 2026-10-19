@@ -75,11 +75,14 @@ function blocIdentite(r: RenduPdf, y: number, marche: MarcheTravaux, operation: 
     ['Adresse', operation.adresse ?? ''],
     ["Maître d'ouvrage", operation.maitreOuvrage ?? ''],
   ].filter(([, v]) => v) as [string, string][];
+  const subsequent = marche.type_marche === 'subsequent';
   const lignesMarche: [string, string][] = [
     ['Entreprise', marche.entreprise_nom],
     ['SIRET', marche.entreprise_siret ?? ''],
     ['Lot', lotLibelle(marche)],
-    ['Montant du marché HT', Number(marche.montant_ht) ? euros(Number(marche.montant_ht)) : ''],
+    // Le maître d'ouvrage rattache la facture à un marché précis : un subséquent se cite avec son accord-cadre.
+    ['Accord-cadre', subsequent ? `Marché subséquent n° ${marche.numero_subsequent ?? ''}${marche.objet ? ` · ${marche.objet}` : ''}` : ''],
+    [subsequent ? 'Montant du marché subséquent HT' : 'Montant du marché HT', Number(marche.montant_ht) ? euros(Number(marche.montant_ht)) : ''],
   ].filter(([, v]) => v) as [string, string][];
   if (lignesOperation.length) y = tableauFiche(r, y, 'Opération', lignesOperation);
   return tableauFiche(r, y, 'Marché', lignesMarche);

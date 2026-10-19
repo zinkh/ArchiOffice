@@ -229,6 +229,23 @@ export function validerLignesCommande(
   return { ok: erreurs.length === 0, erreurs };
 }
 
+/**
+ * Désignation d'un marché dans une pièce jointe de facture (Chorus Pro, Super PDP) :
+ * « Dupont SARL, lot 02 », et pour un marché subséquent l'accord-cadre dont il relève,
+ * afin que le maître d'ouvrage rattache la facture au bon marché.
+ */
+export function mentionMarche(m: {
+  type_marche?: TypeMarche | null;
+  numero_subsequent?: number | null;
+  lot_numero?: string | null;
+  entreprise_nom?: string | null;
+}): string {
+  const base = [m.entreprise_nom, m.lot_numero ? `lot ${m.lot_numero}` : ''].filter(Boolean).join(', ');
+  return m.type_marche === 'subsequent'
+    ? `${base}, marché subséquent n°${m.numero_subsequent ?? '?'} de l'accord-cadre`
+    : base;
+}
+
 /** Libellé court d'un marché pour les sélecteurs (OS, situations) : « AC lot 02 / MS n°3 ». */
 export function libelleMarche(m: {
   type_marche?: TypeMarche | null;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { montantSubsequentHT, rendreMarcheSubsequent, type MarcheContrat } from '../marcheSubsequentPdf';
-import type { RenduPdf } from '../certificatPaiementPdf';
+import { rendreCertificatPaiement, type RenduPdf } from '../certificatPaiementPdf';
 
 /** Rendu réel jsPDF ; collecte le texte posé et les cellules des tableaux. */
 function rendu(): { r: RenduPdf; textes: string[]; cellules: string[] } {
@@ -35,6 +35,50 @@ const sub = (extra: Partial<MarcheContrat> & { id?: string } = {}): MarcheContra
     { articleId: 'a2', designation: 'Plinthe', unite: 'ml', quantite: 12.5, prixUnitaire: 8 },
   ],
   ...extra,
+});
+
+describe('certificat de paiement d’un marché subséquent', () => {
+  const situation: any = { id: 's1', marche_id: 'm1', numero_situation: 1, montant_presente_ht: 100 };
+  const marche = (extra: object = {}): any => ({
+    id: 'm1', entreprise_nom: 'Dupont SARL', lot_numero: '02', lot_titre: 'Carrelage', montant_ht: 550, ...extra,
+  });
+
+  it('cite le subséquent et son accord-cadre, pour que le maître d’ouvrage rattache la facture', () => {
+    const { r, cellules } = rendu();
+    rendreCertificatPaiement(r, situation, marche({ type_marche: 'subsequent', numero_subsequent: 2, objet: 'Carrelage salle B' }), [situation], {});
+    expect(cellules).toContain('Accord-cadre');
+    expect(cellules).toContain('Marché subséquent n° 2 · Carrelage salle B');
+    expect(cellules).toContain('Montant du marché subséquent HT');
+  });
+
+  it('ne change rien pour un marché ordinaire', () => {
+    const { r, cellules } = rendu();
+    rendreCertificatPaiement(r, situation, marche(), [situation], {});
+    expect(cellules).not.toContain('Accord-cadre');
+    expect(cellules).toContain('Montant du marché HT');
+  });
+});
+
+describe('certificat de paiement d’un marché subséquent', () => {
+  const situation: any = { id: 's1', marche_id: 'm1', numero_situation: 1, montant_presente_ht: 100 };
+  const marche = (extra: object = {}): any => ({
+    id: 'm1', entreprise_nom: 'Dupont SARL', lot_numero: '02', lot_titre: 'Carrelage', montant_ht: 550, ...extra,
+  });
+
+  it('cite le subséquent et son accord-cadre, pour que le maître d’ouvrage rattache la facture', () => {
+    const { r, cellules } = rendu();
+    rendreCertificatPaiement(r, situation, marche({ type_marche: 'subsequent', numero_subsequent: 2, objet: 'Carrelage salle B' }), [situation], {});
+    expect(cellules).toContain('Accord-cadre');
+    expect(cellules).toContain('Marché subséquent n° 2 · Carrelage salle B');
+    expect(cellules).toContain('Montant du marché subséquent HT');
+  });
+
+  it('ne change rien pour un marché ordinaire', () => {
+    const { r, cellules } = rendu();
+    rendreCertificatPaiement(r, situation, marche(), [situation], {});
+    expect(cellules).not.toContain('Accord-cadre');
+    expect(cellules).toContain('Montant du marché HT');
+  });
 });
 
 describe('rendreMarcheSubsequent', () => {
