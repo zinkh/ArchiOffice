@@ -84,7 +84,7 @@ function snapshot(over: Partial<TenantSnapshot> = {}): TenantSnapshot {
     tenantId: 't1', now: NOW,
     projects: [], phaseHistory: [], contrats: [], invoices: [], proposals: [],
     tenders: [], tasks: [], meetings: [], ordresDeService: [], reserves: [], notesHonoraires: [],
-    qualifications: [], consultations: [],
+    qualifications: [], consultations: [], marches: [],
     ...over,
   };
 }
@@ -93,6 +93,99 @@ function detect(code: string, snap: TenantSnapshot) {
   const settings = effectiveSettings([]).filter(s => s.code === code);
   return evaluateSnapshot(snap, settings).detected;
 }
+
+describe('règles des accords-cadres', () => {
+  const projet = { id: 'p1', name: 'Entretien bâtiments', status: 'In Progress' };
+  const ac = (extra: Record<string, unknown> = {}) => ({
+    id: 'ac1', project_id: 'p1', type_marche: 'accord_cadre', entreprise_nom: 'Dupont SARL', lot_numero: '02',
+    statut_signature: 'signe', statut: 'en_cours', montant_maxi_ht: 1000, montant_mini_ht: null, date_fin_accord_cadre: null, ...extra,
+  });
+  const sub = (id: string, montant: number, extra: Record<string, unknown> = {}) => ({
+    id, project_id: 'p1', type_marche: 'subsequent', parent_marche_id: 'ac1', montant_ht: montant, statut: 'en_cours', ...extra,
+  });
+
+  describe('plafond', () => {
+    it('reste silencieux sous 80 % du maximum', () => {
+      expect(detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac(), sub('s1', 790)] }))).toHaveLength(0);
+    });
+
+    it('signale à 80 % avec le reste disponible', () => {
+      const found = detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac(), sub('s1', 800)] }));
+      expect(found).toHaveLength(1);
+      expect(found[0].dedupKey).toBe('accord_cadre_plafond:ac1:proche');
+      expect(found[0].message).toContain('200,00 €');
+      expect(found[0].targetId).toBe('p1');
+    });
+
+    it('change de clé quand le statut change, pour refermer l’ancienne alerte', () => {
+      const atteint = detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac(), sub('s1', 1000)] }));
+      expect(atteint[0].dedupKey).toBe('accord_cadre_plafond:ac1:atteint');
+      expect(atteint[0].message).toContain('avenant');
+      const depasse = detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac(), sub('s1', 1200)] }));
+      expect(depasse[0].dedupKey).toBe('accord_cadre_plafond:ac1:depasse');
+    });
+
+    it('ignore un résilié, un accord-cadre non signé, sans maximum ou d’une affaire terminée', () => {
+      const pleins = [sub('s1', 950)];
+      expect(detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac(), sub('s1', 950, { statut: 'resilie' })] }))).toHaveLength(0);
+      expect(detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac({ statut_signature: 'a_signer' }), ...pleins] }))).toHaveLength(0);
+      expect(detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac({ montant_maxi_ht: null }), ...pleins] }))).toHaveLength(0);
+      expect(detect('accord_cadre_plafond', snapshot({ projects: [{ ...projet, status: 'Completed' }], marches: [ac(), ...pleins] }))).toHaveLength(0);
+      expect(detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac({ statut: 'resilie' }), ...pleins] }))).toHaveLength(0);
+    });
+
+    it('ne mélange pas les subséquents de deux accords-cadres', () => {
+      const autre = ac({ id: 'ac2', lot_numero: '03' });
+      const found = detect('accord_cadre_plafond', snapshot({
+        projects: [projet], marches: [ac(), autre, sub('s1', 900), { ...sub('s2', 100), parent_marche_id: 'ac2' }],
+      }));
+      expect(found.map(f => f.dedupKey)).toEqual(['accord_cadre_plafond:ac1:proche']);
+    });
+  });
+
+  describe('échéance', () => {
+    // NOW = 2026-06-01
+    const fin = (date: string, extra: Record<string, unknown> = {}) => ac({ date_fin_accord_cadre: date, ...extra });
+
+    it('signale une fin proche quand il reste du crédit à engager', () => {
+      const found = detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-07-15'), sub('s1', 100)] }));
+      expect(found).toHaveLength(1);
+      expect(found[0].dedupKey).toBe('accord_cadre_echeance:ac1');
+      expect(found[0].message).toContain('prend fin dans 44 jours');
+      expect(found[0].message).toContain('900,00 €');
+    });
+
+    it('signale le minimum non atteint, même une fois la fin passée', () => {
+      const proche = detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-07-15', { montant_mini_ht: 500 }), sub('s1', 100)] }));
+      expect(proche[0].message).toContain('minimum de 500,00 €');
+      expect(proche[0].message).toContain('400,00 €');
+      const passe = detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-05-01', { montant_mini_ht: 500 }), sub('s1', 100)] }));
+      expect(passe).toHaveLength(1);
+      expect(passe[0].message).toContain('échu depuis 31 jours');
+    });
+
+    it('se tait quand il n’y a plus d’enjeu ou que la fin est lointaine', () => {
+      // Plafond épuisé et minimum atteint : rien à engager.
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-07-15', { montant_mini_ht: 500 }), sub('s1', 1000)] }))).toHaveLength(0);
+      // Échu, minimum atteint.
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-05-01', { montant_mini_ht: 100 }), sub('s1', 400)] }))).toHaveLength(0);
+      // Fin à plus de 90 jours, ou échue depuis plus de 90 jours.
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2027-01-01')] }))).toHaveLength(0);
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-01-01', { montant_mini_ht: 500 })] }))).toHaveLength(0);
+      // Sans date de fin ou non signé.
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [ac()] }))).toHaveLength(0);
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches: [fin('2026-07-15', { statut_signature: 'a_signer' })] }))).toHaveLength(0);
+    });
+
+    it('respecte le délai réglé par le cabinet', () => {
+      const settings = effectiveSettings([{ code: 'accord_cadre_echeance', enabled: true, threshold_days: 30, severity: 'warning', notify_email: false }])
+        .filter(s => s.code === 'accord_cadre_echeance');
+      const marches = [fin('2026-07-15')];
+      expect(evaluateSnapshot(snapshot({ projects: [projet], marches }), settings).detected).toHaveLength(0);
+      expect(detect('accord_cadre_echeance', snapshot({ projects: [projet], marches }))).toHaveLength(1);
+    });
+  });
+});
 
 describe('règle « études engagées sans contrat signé »', () => {
   const project = { id: 'p1', name: 'Résidence Les Tilleuls', status: 'In Progress', start_date: '2026-01-10' };
