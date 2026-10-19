@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  consommation, libelleMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
+  articlesDuBordereau, conditionsDe, consommation, libelleMarche, lotDuMarche, montantLigne, totalLignes, validerLignesCommande, verifierEmission,
   type ConditionsAccordCadre, type LigneCommande,
 } from '../accordCadre';
 
@@ -80,6 +80,45 @@ describe('lignes de commande', () => {
   it('ne contrôle pas les prix d’un accord-cadre saisi à la main', () => {
     expect(validerLignesCommande([ligne({ prixUnitaire: 999 })], null).ok).toBe(true);
     expect(validerLignesCommande([ligne({ prixUnitaire: 999 })], {}).ok).toBe(true);
+  });
+});
+
+describe('bordereau de l’accord-cadre', () => {
+  const lot: any = {
+    id: 'l2', numero: '02', titre: 'Carrelage',
+    chapitres: [
+      { id: 'c1', numero: '1', titre: 'Sols', lignes: [
+        { id: 'a1', numero: '1.1', designation: 'Carrelage', unite: 'm²', quantite: 0, prixUnitaire: 0 },
+        { id: 'p', numero: '1.2', designation: 'Parent', unite: '', quantite: 0, prixUnitaire: 0, children: [
+          { id: 'a2', numero: '1.2.1', designation: 'Plinthe', unite: 'ml', quantite: 0, prixUnitaire: 0 },
+          { id: 'a3', numero: '1.2.2', designation: 'Non chiffré', unite: 'u', quantite: 0, prixUnitaire: 0 },
+        ] },
+      ] },
+      { id: 'c0', numero: '0', titre: 'Prescriptions', cctpOnly: true, lignes: [{ id: 'a9', numero: '0.1', designation: 'Texte', unite: '', quantite: 0, prixUnitaire: 0 }] },
+    ],
+  };
+
+  it('ne propose que les feuilles chiffrées hors chapitres CCTP', () => {
+    const articles = articlesDuBordereau(lot, { a1: 45, a2: 8.5, a3: null, a9: 10 });
+    expect(articles.map(a => [a.articleId, a.prixUnitaire])).toEqual([['a1', 45], ['a2', 8.5]]);
+  });
+
+  it('rend une liste vide sans lot ni prix', () => {
+    expect(articlesDuBordereau(undefined, { a1: 1 })).toEqual([]);
+    expect(articlesDuBordereau(lot, null)).toEqual([]);
+  });
+
+  it('retrouve le lot par numéro, « 2 » valant « 02 »', () => {
+    expect(lotDuMarche([lot], '2')?.id).toBe('l2');
+    expect(lotDuMarche([lot], '02')?.id).toBe('l2');
+    expect(lotDuMarche([lot], '03')).toBeUndefined();
+    expect(lotDuMarche([lot], undefined)).toBeUndefined();
+  });
+
+  it('lit les conditions depuis la ligne de marché', () => {
+    expect(conditionsDe({ montant_mini_ht: '200.00', montant_maxi_ht: 1000, date_fin_accord_cadre: '2027-12-31T00:00:00Z' }))
+      .toEqual({ montantMiniHT: 200, montantMaxiHT: 1000, dateFin: '2027-12-31' });
+    expect(conditionsDe({})).toEqual({ montantMiniHT: null, montantMaxiHT: null, dateFin: null });
   });
 });
 

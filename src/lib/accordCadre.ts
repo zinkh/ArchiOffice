@@ -7,8 +7,77 @@
 // (enregistrer_marche_subsequent) : ces fonctions servent à l'aperçu à l'écran
 // et à la validation des lignes, jamais à autoriser une écriture seules.
 
+import type { Lot, Ligne } from '../types/dpgf';
+
 export type ModeExecution = 'bons_de_commande' | 'marches_subsequents' | 'mixte';
 export type TypeMarche = 'marche' | 'accord_cadre' | 'subsequent';
+
+/** Colonnes d'accord-cadre / de subséquent d'une ligne de marches_entreprises. */
+export interface MarcheAccordCadreChamps {
+  type_marche?: TypeMarche | null;
+  parent_marche_id?: string | null;
+  numero_subsequent?: number | null;
+  mode_execution?: ModeExecution | null;
+  montant_mini_ht?: number | string | null;
+  montant_maxi_ht?: number | string | null;
+  date_fin_accord_cadre?: string | null;
+  objet?: string | null;
+  lignes_commande?: LigneCommande[] | null;
+  date_notification?: string | null;
+  statut?: string | null;
+  statut_signature?: 'a_constituer' | 'a_signer' | 'signe' | null;
+  mode_signature?: 'papier' | 'electronique' | null;
+  date_signature?: string | null;
+  offre_snapshot?: { prix?: Record<string, number | null> } | null;
+}
+
+/** Conditions d'un accord-cadre lues sur sa ligne de marché. */
+export function conditionsDe(m: MarcheAccordCadreChamps): ConditionsAccordCadre {
+  const lire = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+  return {
+    montantMiniHT: lire(m.montant_mini_ht),
+    montantMaxiHT: lire(m.montant_maxi_ht),
+    dateFin: m.date_fin_accord_cadre ? String(m.date_fin_accord_cadre).slice(0, 10) : null,
+  };
+}
+
+/** Article du bordereau d'un accord-cadre : un article du lot, au prix de l'offre retenue. */
+export interface ArticleBordereau {
+  articleId: string;
+  numero: string;
+  designation: string;
+  unite: string;
+  prixUnitaire: number;
+}
+
+/** Lot du DPGF qui correspond au numéro de lot d'un marché (« 2 » et « 02 » se valent). */
+export function lotDuMarche(lots: Lot[] | undefined, lotNumero: string | null | undefined): Lot | undefined {
+  const norme = (s: string) => s.trim().toUpperCase().replace(/^0+(?=\d)/, '');
+  if (!lots || !lotNumero) return undefined;
+  return lots.find(l => norme(l.numero) === norme(lotNumero));
+}
+
+/**
+ * Articles commandables : les feuilles du lot dont l'offre figée donne un prix.
+ * Les chapitres réservés au CCTP et les articles non chiffrés sont écartés.
+ */
+export function articlesDuBordereau(
+  lot: Lot | undefined,
+  prix: Record<string, number | null> | null | undefined,
+): ArticleBordereau[] {
+  if (!lot || !prix) return [];
+  const resultat: ArticleBordereau[] = [];
+  const parcourir = (lignes: Ligne[]) => {
+    for (const l of lignes) {
+      if (l.children?.length) { parcourir(l.children); continue; }
+      const p = prix[l.id];
+      if (typeof p !== 'number') continue;
+      resultat.push({ articleId: l.id, numero: l.numero, designation: l.designation, unite: l.unite ?? '', prixUnitaire: p });
+    }
+  };
+  for (const c of lot.chapitres) if (!c.cctpOnly) parcourir(c.lignes);
+  return resultat;
+}
 
 export const LIBELLE_MODE_EXECUTION: Record<ModeExecution, string> = {
   bons_de_commande: 'Bons de commande',

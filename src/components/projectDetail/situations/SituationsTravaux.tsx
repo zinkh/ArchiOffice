@@ -19,8 +19,12 @@ import { SituationDialog } from './SituationDialog';
 import { EtatSituationBadge } from './EtatSituationBadge';
 import type { Plateforme, SituationLiee } from './FactureEntrepriseLink';
 import type { DPGF, OffreDocument } from '../../../types/dpgf';
+import { articlesDuBordereau, lotDuMarche, type MarcheAccordCadreChamps } from '../../../lib/accordCadre';
+import { AccordCadreDialog, type ConditionsAccordCadreBody } from './AccordCadreDialog';
+import { AccordCadrePanel, SignatureDialog, type MarcheAC } from './AccordCadrePanel';
+import { SubsequentDialog } from './SubsequentDialog';
 
-type Marche = MarcheTravaux & { project_id?: string };
+type Marche = MarcheTravaux & MarcheAccordCadreChamps & { project_id?: string; duree_mois?: number | null; notes?: string | null };
 
 export interface SituationsTravauxProps {
   projectId: string;
@@ -46,6 +50,9 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   const [marcheEdite, setMarcheEdite] = useState<Marche | null | 'new'>(null);
   const [ouverte, setOuverte] = useState<string | null>(null);
   const [creating, setCreating] = useState<string | null>(null);
+  const [conditionsCible, setConditionsCible] = useState<Marche | null>(null);
+  const [subEdition, setSubEdition] = useState<{ ac: Marche; sub: Marche | null } | null>(null);
+  const [aSigner, setASigner] = useState<Marche | null>(null);
   // Situation créée par « Nouvelle situation » et jamais enregistrée depuis :
   // refermée vide, elle est retirée au lieu de laisser un numéro fantôme.
   const nouvelleId = useRef<string | null>(null);
@@ -100,13 +107,20 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
     ? (plateformes.chorus_pro ? 'chorus_pro' : null)
     : (plateformes.superpdp ? 'superpdp' : null);
 
+  // Un accord-cadre précède ses marchés subséquents, qui suivent dans l'ordre de leur numéro.
   const marchesTries = useMemo(
-    () => [...marches].sort((a, b) => String(a.lot_numero ?? '').localeCompare(String(b.lot_numero ?? ''), 'fr', { numeric: true })),
+    () => [...marches].sort((a, b) =>
+      String(a.lot_numero ?? '').localeCompare(String(b.lot_numero ?? ''), 'fr', { numeric: true })
+      || (a.numero_subsequent ?? 0) - (b.numero_subsequent ?? 0)),
     [marches],
   );
   const syntheses = useMemo(() => marchesTries.map((m) => syntheseMarche(m, situations)), [marchesTries, situations]);
   const totaux = useMemo(() => {
-    const marchesHt = syntheses.reduce((t2, s) => t2 + num(s.marche.montant_ht), 0);
+    // Le montant engagé d'un accord-cadre est la somme de ses subséquents : le compter
+    // lui aussi le ferait compter deux fois.
+    const marchesHt = syntheses
+      .filter((s) => (s.marche as Marche).type_marche !== 'accord_cadre')
+      .reduce((t2, s) => t2 + num(s.marche.montant_ht), 0);
     const admisHt = syntheses.reduce((t2, s) => t2 + s.cumulAdmisHt, 0);
     return {
       marchesHt,
@@ -162,6 +176,66 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
     } catch (e: any) {
       showToast(e?.message || t('situations_travaux_save_failed'), 'error');
     }
+  };
+
+  // ── Accords-cadres et marchés subséquents ──────────────────────────────────
+  const remplacer = (maj: Marche) => setMarches((prev) => (
+    prev.some((x) => x.id === maj.id) ? prev.map((x) => (x.id === maj.id ? { ...x, ...maj } : x)) : [...prev, maj]
+  ));
+  const subsDe = (acId: string) => marchesTries.filter((m) => m.parent_marche_id === acId);
+
+  const enregistrerConditions = async (body: ConditionsAccordCadreBody) => {
+    if (!conditionsCible) return;
+    const maj = await apiFetch<Marche>(`/api/marches-entreprises/${conditionsCible.id}/accord-cadre`, { method: 'POST', body: JSON.stringify(body) });
+    remplacer(maj);
+    setConditionsCible(null);
+    showToast(t('accord_cadre_saved'));
+  };
+
+  const retirerAccordCadre = async () => {
+    if (!conditionsCible) return;
+    const maj = await apiFetch<Marche>(`/api/marches-entreprises/${conditionsCible.id}/accord-cadre`, { method: 'DELETE' });
+    remplacer(maj);
+    setConditionsCible(null);
+    showToast(t('accord_cadre_removed'));
+  };
+
+  const enregistrerSubsequent = async (body: Record<string, unknown>) => {
+    if (!subEdition) return;
+    const { ac, sub } = subEdition;
+    const base = `/api/marches-entreprises/${ac.id}/subsequents`;
+    const maj = await apiFetch<Marche>(sub ? `${base}/${sub.id}` : base, { method: sub ? 'PUT' : 'POST', body: JSON.stringify(body) });
+    remplacer(maj);
+    setSubEdition(null);
+    showToast(t('accord_cadre_sub_saved'));
+  };
+
+  const supprimerSubsequent = async (s: Marche) => {
+    const ok = await confirm({
+      title: t('accord_cadre_sub_delete_title', { n: s.numero_subsequent }),
+      message: t('accord_cadre_sub_delete_message'),
+      confirmLabel: t('situations_travaux_delete'),
+      cancelLabel: t('projectdetail_dialog_cancel'),
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await apiFetch(`/api/marches-entreprises/${s.parent_marche_id}/subsequents/${s.id}`, { method: 'DELETE' });
+      setMarches((prev) => prev.filter((x) => x.id !== s.id));
+      showToast(t('accord_cadre_sub_deleted'));
+    } catch (e: any) {
+      showToast(e?.message || t('situations_travaux_save_failed'), 'error');
+    }
+  };
+
+  const enregistrerSignature = async ({ mode, date }: { mode: 'papier' | 'electronique'; date: string }) => {
+    if (!aSigner) return;
+    const maj = await apiFetch<Marche>(`/api/marches-entreprises/${aSigner.id}/signature`, {
+      method: 'POST', body: JSON.stringify({ mode, date_signature: date }),
+    });
+    remplacer(maj);
+    setASigner(null);
+    showToast(t('accord_cadre_sign_saved'));
   };
 
   const nouvelleSituation = async (m: Marche) => {
@@ -313,6 +387,13 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         const liste = situationsDuMarche(situations, m.id) as SituationLiee[];
         const certificats = certificatsDuMarche(m, situations);
         const pct = syn.avancementPct;
+        const estAC = m.type_marche === 'accord_cadre';
+        const estSub = m.type_marche === 'subsequent';
+        const titreBase = [m.lot_numero ? t('situations_travaux_lot_short', { n: m.lot_numero }) : '', m.lot_titre].filter(Boolean).join(' · ') || m.entreprise_nom;
+        const titre = estSub
+          ? [t('accord_cadre_sub_short', { n: m.numero_subsequent }), m.objet || titreBase].join(' · ')
+          : titreBase;
+        const parentAC = estSub ? marches.find((x) => x.id === m.parent_marche_id) ?? null : null;
         return (
           <section
             key={m.id}
@@ -323,12 +404,12 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
             <div className="px-4 sm:px-5 py-4 flex flex-wrap items-start gap-x-6 gap-y-3">
               <div className="min-w-0 flex-1 basis-72">
                 <h3 id={`marche-${m.id}`} className="text-sm font-bold text-[var(--tblr-text)]">
-                  {[m.lot_numero ? t('situations_travaux_lot_short', { n: m.lot_numero }) : '', m.lot_titre].filter(Boolean).join(' · ') || m.entreprise_nom}
+                  {titre}
                 </h3>
                 <p className="text-xs text-[var(--tblr-muted)] mt-0.5">
                   {m.entreprise_nom}{num(m.montant_ht) ? ` · ${t('situations_travaux_marche_of', { amount: formatEuros(num(m.montant_ht)) })}` : ''}
                 </p>
-                {pct !== null && (
+                {pct !== null && !estAC && (
                   <div className="mt-2 flex items-center gap-2 max-w-sm">
                     <div
                       className="h-1.5 flex-1 rounded-full bg-[var(--tblr-surface-2)] overflow-hidden"
@@ -341,6 +422,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                   </div>
                 )}
               </div>
+              {!estAC && (
               <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto">
                 <button type="button" className={boutonPrincipal + ' flex-1 md:flex-none justify-center'} onClick={() => nouvelleSituation(m)} disabled={creating === m.id}>
                   {creating === m.id ? <IconLoader2 size={14} className="animate-spin" /> : <IconPlus size={14} />}
@@ -351,23 +433,46 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                     <IconFileInvoice size={14} /> {t('situations_travaux_closing')}
                   </button>
                 )}
-                <button type="button" className={boutonSecondaire + ' px-2'} onClick={() => setMarcheEdite(m)} aria-label={t('situations_travaux_marche_edit_named', { company: m.entreprise_nom })}>
+                {isPublicClient && !estSub && liste.length === 0 && (
+                  <button type="button" className={boutonSecondaire} onClick={() => setConditionsCible(m)} aria-label={t('accord_cadre_make_named', { company: m.entreprise_nom })}>
+                    {t('accord_cadre_make')}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={boutonSecondaire + ' px-2'}
+                  onClick={() => (estSub && parentAC ? setSubEdition({ ac: parentAC, sub: m }) : setMarcheEdite(m))}
+                  disabled={estSub && (!parentAC || m.statut_signature === 'signe')}
+                  aria-label={estSub ? t('accord_cadre_sub_edit_named', { n: m.numero_subsequent }) : t('situations_travaux_marche_edit_named', { company: m.entreprise_nom })}
+                >
                   <IconEdit size={14} />
                 </button>
                 <button
                   type="button"
                   className={boutonSecondaire + ' px-2'}
-                  onClick={() => supprimerMarche(m)}
-                  disabled={liste.length > 0}
+                  onClick={() => (estSub ? supprimerSubsequent(m) : supprimerMarche(m))}
+                  disabled={liste.length > 0 || (estSub && m.statut_signature === 'signe')}
                   title={liste.length > 0 ? t('situations_travaux_marche_delete_blocked') : undefined}
-                  aria-label={t('situations_travaux_marche_delete_named', { company: m.entreprise_nom })}
+                  aria-label={estSub ? t('accord_cadre_sub_delete_named', { n: m.numero_subsequent }) : t('situations_travaux_marche_delete_named', { company: m.entreprise_nom })}
                 >
                   <IconTrash size={14} />
                 </button>
               </div>
+              )}
             </div>
 
-            {liste.length === 0 ? (
+            {estAC ? (
+              <AccordCadrePanel
+                marche={m as MarcheAC}
+                subsequents={subsDe(m.id) as MarcheAC[]}
+                onEditConditions={() => setConditionsCible(m)}
+                onSign={() => setASigner(m)}
+                onNewSubsequent={() => setSubEdition({ ac: m, sub: null })}
+                onEditSubsequent={(s) => setSubEdition({ ac: m, sub: s as Marche })}
+                onSignSubsequent={(s) => setASigner(s as Marche)}
+                onDeleteSubsequent={(s) => supprimerSubsequent(s as Marche)}
+              />
+            ) : liste.length === 0 ? (
               <p className="px-5 pb-4 text-sm text-[var(--tblr-muted)]">{t('situations_travaux_no_situation')}</p>
             ) : (
               <>
@@ -457,6 +562,39 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
         lots={lots.filter((l) => !!(l.lot_number || l.lot_title) && (montantLot(l) > 0 || !!l.contact_name))}
         onClose={() => setMarcheEdite(null)}
         onSave={enregistrerMarche}
+      />
+      <AccordCadreDialog
+        open={conditionsCible !== null}
+        marche={conditionsCible}
+        canRemove={conditionsCible ? subsDe(conditionsCible.id).length === 0 : false}
+        onClose={() => setConditionsCible(null)}
+        onSave={enregistrerConditions}
+        onRemove={retirerAccordCadre}
+      />
+      {subEdition && (() => {
+        const { ac, sub } = subEdition;
+        const prix = ac.offre_snapshot?.prix ?? null;
+        const cumulAutresHT = subsDe(ac.id)
+          .filter((s) => s.id !== sub?.id && (s.statut ?? 'en_cours') !== 'resilie')
+          .reduce((somme, s) => somme + num(s.montant_ht), 0);
+        return (
+          <SubsequentDialog
+            open
+            accordCadre={ac}
+            sub={sub}
+            articles={articlesDuBordereau(lotDuMarche(dpgf?.lots, ac.lot_numero), prix)}
+            bordereauFige={!!prix && Object.keys(prix).length > 0}
+            cumulAutresHT={cumulAutresHT}
+            onClose={() => setSubEdition(null)}
+            onSave={enregistrerSubsequent}
+          />
+        );
+      })()}
+      <SignatureDialog
+        open={aSigner !== null}
+        subtitle={aSigner?.entreprise_nom ?? ''}
+        onClose={() => setASigner(null)}
+        onSave={enregistrerSignature}
       />
       <SituationDialog
         situation={situationOuverte}
