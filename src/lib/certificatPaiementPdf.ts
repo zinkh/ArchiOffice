@@ -43,7 +43,7 @@ export function euros(n: number): string {
 const signe = (n: number): string => (n < 0 ? `- ${euros(-n)}` : euros(n));
 const moins = (n: number): string => (n === 0 ? euros(0) : `- ${euros(n)}`);
 
-function dateFr(value?: string | null): string {
+export function dateFr(value?: string | null): string {
   if (!value) return '';
   const d = new Date(value.length === 10 ? `${value}T12:00:00` : value);
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString('fr-FR');
@@ -52,10 +52,10 @@ function dateFr(value?: string | null): string {
 const lotLibelle = (m: MarcheTravaux): string =>
   [m.lot_numero ? `Lot ${m.lot_numero}` : '', m.lot_titre ?? ''].filter(Boolean).join(' · ');
 
-const finY = (pdf: any, repli: number): number => (pdf as any).lastAutoTable?.finalY ?? repli;
+export const finY = (pdf: any, repli: number): number => (pdf as any).lastAutoTable?.finalY ?? repli;
 
 /** Tableau à deux colonnes libellé / valeur, sans entête. */
-function tableauFiche(r: RenduPdf, y: number, titre: string, lignes: [string, string][]): number {
+export function tableauFiche(r: RenduPdf, y: number, titre: string, lignes: [string, string][]): number {
   r.autoTable(r.pdf, {
     ...tableauGris(MARGE),
     startY: y,
@@ -86,7 +86,7 @@ function blocIdentite(r: RenduPdf, y: number, marche: MarcheTravaux, operation: 
 }
 
 /** Tableau de montants : libellé à gauche, montant à droite, lignes clés en gras. */
-function tableauMontants(r: RenduPdf, y: number, titre: string, lignes: [string, string, boolean?][]): number {
+export function tableauMontants(r: RenduPdf, y: number, titre: string, lignes: [string, string, boolean?][]): number {
   r.autoTable(r.pdf, {
     ...tableauGris(MARGE),
     startY: y,

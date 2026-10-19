@@ -2928,6 +2928,7 @@ export default {
       "accord_cadre_sub_situations": "Payment statements",
       "accord_cadre_sub_edit_named": "Edit subsequent contract no. {{n}}",
       "accord_cadre_sub_delete_named": "Delete subsequent contract no. {{n}}",
+      "accord_cadre_sub_pdf_named": "Download the PDF of subsequent contract no. {{n}}",
       "accord_cadre_sub_sign_named": "Record the signature of subsequent contract no. {{n}}",
       "accord_cadre_sub_delete_title": "Delete subsequent contract no. {{n}}?",
       "accord_cadre_sub_delete_message": "Its amount will be available again under the framework agreement ceiling.",

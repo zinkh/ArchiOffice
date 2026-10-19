@@ -187,6 +187,8 @@ interface MarcheTravaux {
   entreprise_nom: string;
   lot_numero?: string;
   lot_titre?: string;
+  type_marche?: 'marche' | 'accord_cadre' | 'subsequent' | null;
+  numero_subsequent?: number | null;
 }
 
 export default function OrdresDeService() {
@@ -691,7 +693,8 @@ export default function OrdresDeService() {
                         className={inputCls} style={inputStyle}
                       >
                         <option value="">{form.project_id ? '— Choisir un marché —' : '— Choisir une affaire d\'abord —'}</option>
-                        {marches.map(m => <option key={m.id} value={m.id}>{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>)}
+                        {/* Un accord-cadre ne s'exécute pas lui-même : l'OS vise un de ses marchés subséquents. */}
+                        {marches.filter(m => m.type_marche !== 'accord_cadre').map(m => <option key={m.id} value={m.id}>{m.type_marche === 'subsequent' ? `MS n°${m.numero_subsequent ?? '?'} · ` : ''}{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>)}
                       </select>
                       {form.project_id && marches.length === 0 && !isAddingMarche && (
                         <button type="button" onClick={() => setIsAddingMarche(true)} className="mt-1.5 text-xs font-bold" style={{ color: 'var(--tblr-primary)' }}>

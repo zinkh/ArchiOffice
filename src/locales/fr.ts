@@ -3072,6 +3072,7 @@ export default {
       "accord_cadre_sub_situations": "Situations",
       "accord_cadre_sub_edit_named": "Modifier le marché subséquent n°{{n}}",
       "accord_cadre_sub_delete_named": "Supprimer le marché subséquent n°{{n}}",
+      "accord_cadre_sub_pdf_named": "Télécharger le PDF du marché subséquent n°{{n}}",
       "accord_cadre_sub_sign_named": "Enregistrer la signature du marché subséquent n°{{n}}",
       "accord_cadre_sub_delete_title": "Supprimer le marché subséquent n°{{n}} ?",
       "accord_cadre_sub_delete_message": "Son montant sera de nouveau disponible sous le plafond de l'accord-cadre.",

@@ -20,6 +20,7 @@ import { EtatSituationBadge } from './EtatSituationBadge';
 import type { Plateforme, SituationLiee } from './FactureEntrepriseLink';
 import type { DPGF, OffreDocument } from '../../../types/dpgf';
 import { articlesDuBordereau, lotDuMarche, type MarcheAccordCadreChamps } from '../../../lib/accordCadre';
+import { telechargerMarcheSubsequent } from '../../../lib/marcheSubsequentExport';
 import { AccordCadreDialog, type ConditionsAccordCadreBody } from './AccordCadreDialog';
 import { AccordCadrePanel, SignatureDialog, type MarcheAC } from './AccordCadrePanel';
 import { SubsequentDialog } from './SubsequentDialog';
@@ -225,6 +226,16 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
       showToast(t('accord_cadre_sub_deleted'));
     } catch (e: any) {
       showToast(e?.message || t('situations_travaux_save_failed'), 'error');
+    }
+  };
+
+  const pdfSubsequent = async (s: Marche) => {
+    const ac = marches.find((x) => x.id === s.parent_marche_id);
+    if (!ac) return;
+    try {
+      await telechargerMarcheSubsequent(ac, s, subsDe(ac.id), operation);
+    } catch (e: any) {
+      showToast(e?.message || t('situations_travaux_pdf_failed'), 'error');
     }
   };
 
@@ -471,6 +482,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
                 onEditSubsequent={(s) => setSubEdition({ ac: m, sub: s as Marche })}
                 onSignSubsequent={(s) => setASigner(s as Marche)}
                 onDeleteSubsequent={(s) => supprimerSubsequent(s as Marche)}
+                onPdfSubsequent={(s) => pdfSubsequent(s as Marche)}
               />
             ) : liste.length === 0 ? (
               <p className="px-5 pb-4 text-sm text-[var(--tblr-muted)]">{t('situations_travaux_no_situation')}</p>

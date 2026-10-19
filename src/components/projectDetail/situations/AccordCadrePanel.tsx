@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconEdit, IconPlus, IconSignature, IconTrash } from '@tabler/icons-react';
+import { IconDownload, IconEdit, IconPlus, IconSignature, IconTrash } from '@tabler/icons-react';
 import { conditionsDe, consommation, type MarcheAccordCadreChamps, type StatutConsommation } from '../../../lib/accordCadre';
 import { Champ, DialogShell, boutonPrincipal, boutonSecondaire, formatEuros, inputClass } from './DialogShell';
 
@@ -87,7 +87,7 @@ export function SignatureDialog({
  * dans l'onglet, avec ses situations de travaux.
  */
 export function AccordCadrePanel({
-  marche, subsequents, onEditConditions, onSign, onNewSubsequent, onEditSubsequent, onSignSubsequent, onDeleteSubsequent,
+  marche, subsequents, onEditConditions, onSign, onNewSubsequent, onEditSubsequent, onSignSubsequent, onDeleteSubsequent, onPdfSubsequent,
 }: {
   marche: MarcheAC;
   subsequents: MarcheAC[];
@@ -97,6 +97,7 @@ export function AccordCadrePanel({
   onEditSubsequent: (s: MarcheAC) => void;
   onSignSubsequent: (s: MarcheAC) => void;
   onDeleteSubsequent: (s: MarcheAC) => void;
+  onPdfSubsequent: (s: MarcheAC) => void;
 }) {
   const { t } = useTranslation();
   const conditions = conditionsDe(marche);
@@ -182,6 +183,7 @@ export function AccordCadrePanel({
                   <p className="text-sm font-bold tabular-nums text-[var(--tblr-text)]">{formatEuros(Number(s.montant_ht) || 0)}</p>
                   <div className="flex items-center gap-1">
                     <a href={`#marche-${s.id}`} className={boutonSecondaire + ' text-xs'}>{t('accord_cadre_sub_situations')}</a>
+                    <button type="button" className={boutonSecondaire + ' px-2 min-h-11 min-w-11'} onClick={() => onPdfSubsequent(s)} aria-label={t('accord_cadre_sub_pdf_named', { n })}><IconDownload size={14} /></button>
                     {!signeS && (
                       <>
                         <button type="button" className={boutonSecondaire + ' px-2 min-h-11 min-w-11'} onClick={() => onSignSubsequent(s)} aria-label={t('accord_cadre_sub_sign_named', { n })}><IconSignature size={14} /></button>
