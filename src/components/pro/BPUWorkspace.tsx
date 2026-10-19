@@ -1,4 +1,5 @@
 import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
+import { marcheDuChapitre, AC_EXPORT } from '../../lib/exportPerimetre';
 import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey } from './hierarchyOps';
 import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
@@ -9,7 +10,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
   IconBuildingStore, IconFileImport, IconFileExport,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
-  IconPencil, IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
+  IconPencil, IconFilter, IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
 } from '@tabler/icons-react';
 import { useProToolbar } from './toolbar/proToolbar';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
@@ -158,10 +159,28 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   const bpuRef = useRef(bpu);
   bpuRef.current = bpu;
 
-  const flatRows = useMemo<FlatRow<BPULot, BPUChapitre, BPULigne>[]>(
-    () => buildFlatRows(bpu.lots, { expandedLots, expandedChaps, expandedLignes }),
-    [bpu.lots, expandedLots, expandedChaps, expandedLignes],
-  );
+  // Vue : tout le bordereau, l'accord-cadre seul, ou les marchés subséquents seuls.
+  const [vueMarche, setVueMarche] = useState<'tout' | 'ac' | 'ms'>('tout');
+  const flatRows = useMemo<FlatRow<BPULot, BPUChapitre, BPULigne>[]>(() => {
+    const rows = buildFlatRows<BPULot, BPUChapitre, BPULigne>(bpu.lots, { expandedLots, expandedChaps, expandedLignes });
+    if (vueMarche === 'tout') return rows;
+    return rows.filter(r => {
+      if (r.chapIdx === undefined) return true;
+      const ms = marcheDuChapitre(bpu.lots[r.lotIdx]?.chapitres[r.chapIdx]) !== AC_EXPORT;
+      return vueMarche === 'ms' ? ms : !ms;
+    });
+  }, [bpu.lots, expandedLots, expandedChaps, expandedLignes, vueMarche]);
+  // Codes de marchés subséquents déjà utilisés, pour proposer le suivant (Ms1, Ms2…).
+  const codesMs = useMemo(() => {
+    const codes = new Set<string>();
+    bpu.lots.forEach(l => l.chapitres.forEach(c => { if (c.msCode?.trim()) codes.add(c.msCode.trim()); }));
+    return [...codes].sort((a, b) => a.localeCompare(b, 'fr', { numeric: true }));
+  }, [bpu.lots]);
+  const prochainCodeMs = () => {
+    let n = codesMs.length + 1;
+    while (codesMs.includes(`Ms${n}`)) n++;
+    return `Ms${n}`;
+  };
   const rowKey = rowKeyOf;
 
   // Trouvaille choisie dans la recherche : dépliée, sélectionnée, puis montrée.
@@ -250,6 +269,35 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       } as BPUChapitre],
     }));
     setExpandedChaps(prev => new Set([...prev, id]));
+  };
+
+  /** Nouveau chapitre rattaché à un marché subséquent (« Ms1 Tranchée »), dans le lot visé. */
+  const addChapitreMs = (code?: string) => {
+    if (!selectedLotId) return;
+    const id = newId();
+    mutateLots(lots => lots.map(lot => lot.id !== selectedLotId ? lot : {
+      ...lot,
+      chapitres: [...lot.chapitres, {
+        id, numero: numeroDeChapitre(lot.chapitres.length),
+        titre: 'Nouveau chapitre', lignes: [], msCode: code ?? prochainCodeMs(),
+      } as BPUChapitre],
+    }));
+    setExpandedChaps(prev => new Set([...prev, id]));
+    setExpandedLots(prev => new Set([...prev, selectedLotId]));
+    const lotIdx = bpu.lots.findIndex(l => l.id === selectedLotId);
+    const chapIdx = bpu.lots[lotIdx]?.chapitres.length ?? 0;
+    setEditingCell({ rowKey: `chap-${lotIdx}-${chapIdx}`, field: 'titre', value: 'Nouveau chapitre' });
+  };
+
+  /** Rattache les chapitres sélectionnés à un marché subséquent, ou les remet dans l'accord-cadre. */
+  const setMsSelection = (code: string | undefined) => {
+    const idx = parseSelection(selectedRowKeys).filter(k => k.kind === 'chapitre');
+    if (!idx.length) return;
+    mutateLots(lots => lots.map((lot, li) => ({
+      ...lot,
+      chapitres: lot.chapitres.map((c, ci) =>
+        idx.some(k => k.lotIdx === li && k.chapIdx === ci) ? { ...c, msCode: code } : c),
+    })));
   };
 
   const makeLigne = (numero: string): BPULigne => ({
@@ -629,6 +677,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       entries: [
         { id: 'bpu-add-lot', label: t('pro_add_lot'), icon: <IconFolderPlus size={16} />, onClick: addLot },
         { id: 'bpu-add-chap', label: t('pro_add_chapter'), icon: <IconStackPush size={16} />, onClick: addChapitre, disabled: !selectedLotId, hint: selectedLotId ? undefined : t('pro_add_lot_first') },
+        { id: 'bpu-add-chap-ms', label: 'Chapitre de marché subséquent', icon: <IconStackPush size={16} />, onClick: () => addChapitreMs(), disabled: !selectedLotId, hint: selectedLotId ? undefined : t('pro_add_lot_first') },
         { id: 'bpu-add-art', label: t('pro_add_article'), icon: <IconRowInsertBottom size={16} />, onClick: () => addLigne(targetLotIdx, targetChapIdx), disabled: targetChapIdx < 0, hint: targetChapIdx < 0 ? t('pro_add_chapter_first') : undefined },
       ],
     },
@@ -644,6 +693,10 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         { id: 'bpu-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, checked: showDecoupage, onClick: () => setShowDecoupage(v => !v) },
         { id: 'bpu-lettres', label: t('pro_bpu_prices_in_words'), icon: <IconAbc size={16} />, checked: !!bpu.prixEnLettres, onClick: () => patchBpu({ prixEnLettres: !bpu.prixEnLettres }) },
         { id: 'bpu-compare', label: t('pro_bpu_compare_offers'), icon: <IconScale size={16} />, checked: colSet === 'comparatif', onClick: () => setColSet(c => c === 'comparatif' ? mode : 'comparatif'), disabled: offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
+        { id: 'bpu-vue-heading', heading: 'Afficher' },
+        { id: 'bpu-vue-tout', label: 'Tout le bordereau', icon: <IconFilter size={16} />, checked: vueMarche === 'tout', onClick: () => setVueMarche('tout') },
+        { id: 'bpu-vue-ac', label: 'Accord-cadre seul', icon: <IconFilter size={16} />, checked: vueMarche === 'ac', onClick: () => setVueMarche('ac') },
+        { id: 'bpu-vue-ms', label: 'Marchés subséquents seuls', icon: <IconFilter size={16} />, checked: vueMarche === 'ms', onClick: () => setVueMarche('ms') },
         { id: 'bpu-market-sep', separator: true },
         { id: 'bpu-from-dpgf', label: t('pro_bpu_init_from_dpgf'), icon: <IconArrowsExchange size={16} />, onClick: () => onInitFromDpgf?.(), disabled: !onInitFromDpgf },
         { id: 'bpu-to-dpgf', label: t('pro_bpu_push_to_dpgf'), icon: <IconArrowsExchange size={16} />, onClick: () => onPushToDpgf?.(), disabled: !onPushToDpgf },
@@ -673,6 +726,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, onClick: copySelected, disabled: !hasLigneSelected, hint: hasLigneSelected ? undefined : t('pro_copy_articles_only') },
     { id: 'paste', label: t('pro_paste'), icon: <IconClipboard size={16} />, iconOnly: true, onClick: pasteLigne, disabled: !clipboard.length || !pasteTarget || pasteTarget.kind === 'lot' },
     { id: 'to-library', label: t('pro_bpu_send_to_library'), icon: <IconFileArrowRight size={16} />, onClick: () => onPushToLibrary?.(selectedLignes()), disabled: !onPushToLibrary || !hasLigneSelected },
+    { id: 'ms-set', label: 'Marché subséquent', icon: <IconStackPush size={16} />, groupStart: true, onClick: () => setMsSelection(prochainCodeMs()), disabled: !selection.some(s => s.kind === 'chapitre'), hint: 'Sélectionnez un chapitre' },
+    { id: 'ms-unset', label: 'Accord-cadre', icon: <IconArrowBarToLeft size={16} />, onClick: () => setMsSelection(undefined), disabled: !selection.some(s => s.kind === 'chapitre'), hint: 'Sélectionnez un chapitre' },
     { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !selectionCount },
   ];
 
@@ -961,7 +1016,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   return (
                     <tr key={rKey} data-search-id={row.chapitre!.id}
                         onClick={() => { setSelectedChap({ lotIdx: row.lotIdx, chapIdx: row.chapIdx! }); setSelectedLotId(row.lot.id); setSelectedRowKeys(new Set([rKey])); }}
-                        className={`bg-[#edf1f7] dark:bg-zinc-800/40 border-b border-zinc-200 cursor-pointer
+                        className={`${row.chapitre!.msCode ? 'bg-violet-50' : 'bg-[#edf1f7]'} dark:bg-zinc-800/40 border-b border-zinc-200 cursor-pointer
                           ${isDropTarget ? 'ring-1 ring-blue-400' : ''}
                           ${selectedRowKeys.has(rKey) ? 'ring-1 ring-inset ring-blue-500' : ''}
                           ${showLibrary && selectedChap?.lotIdx === row.lotIdx && selectedChap?.chapIdx === row.chapIdx ? 'ring-1 ring-blue-500' : ''}`}
@@ -977,7 +1032,14 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       <td className="px-2 py-1 text-xs text-zinc-500"><EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} /></td>
                       <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={nbCols - 4}
                           onDoubleClick={() => startEdit(rKey, 'titre', row.chapitre!.titre)}>
-                        <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} />
+                        <div className="flex items-center gap-2">
+                          {row.chapitre!.msCode && (
+                            <span className="shrink-0 rounded px-1.5 py-0.5 text-[0.6875rem] font-bold bg-violet-100 text-violet-800" title="Marché subséquent : modifiable par double-clic">
+                              <EditableCell rKey={rKey} field="msCode" value={row.chapitre!.msCode} />
+                            </span>
+                          )}
+                          <div className="flex-1 min-w-0"><EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} /></div>
+                        </div>
                       </td>
                       {(bpu.multiBatiments || bpu.multiPhases) && (
                         <td className="px-1 py-1" colSpan={(bpu.multiBatiments ? 1 : 0) + (bpu.multiPhases ? 1 : 0)}>
@@ -1025,6 +1087,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       onClick={e => toggleSelect(rKey, e.ctrlKey || e.metaKey)}
                       className={`border-b border-zinc-100 dark:border-zinc-800 cursor-pointer
                         ${isSelected ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-[var(--tblr-surface-2)]'}
+                        ${bpu.lots[row.lotIdx]?.chapitres[row.chapIdx!]?.msCode ? 'border-l-2 border-l-violet-400' : ''}
                         ${l.type === 'titre' ? 'bg-zinc-50 italic text-zinc-500' : ''}
                         ${l.type === 'commentaire' ? 'text-zinc-400' : ''}`}>
                     {checkboxCell(rKey, l.numero)}

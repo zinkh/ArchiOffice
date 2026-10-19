@@ -188,6 +188,8 @@ export default {
   "pro_export_dialog_lots": "Lots",
   "pro_export_dialog_buildings": "Buildings",
   "pro_export_dialog_phases": "Phases",
+  "pro_export_dialog_markets": "Contracts (framework agreement, subsequent contracts)",
+  "pro_export_dialog_market_ac": "Framework agreement",
   "pro_export_dialog_no_building": "No building",
   "pro_export_dialog_no_phase": "No phase",
   "pro_export_dialog_select_all": "Select all",

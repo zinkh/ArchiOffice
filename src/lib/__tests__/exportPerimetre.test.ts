@@ -76,3 +76,26 @@ describe('filtrerPourExport', () => {
     expect(compterArticles(filtrerPourExport(doc, sel({ lotNumeros: [] })))).toBe(0);
   });
 });
+
+describe('marchés subséquents', () => {
+  const bordereau = {
+    ...doc,
+    lots: [{
+      id: 'l1', numero: '01', titre: 'Gros oeuvre', sousTotal: 0,
+      chapitres: [
+        { id: 'c1', numero: '1', titre: 'Terrassement', lignes: [{ id: 'a1', numero: '1.1', designation: 'Fouille', unite: 'm3', quantite: 1, prixUnitaire: 10, prixTotal: 10, type: 'ouvrage' }] },
+        { id: 'c2', numero: '2', titre: 'Tranchée', msCode: 'Ms1', lignes: [{ id: 'a2', numero: '2.1', designation: 'Tranchée', unite: 'ml', quantite: 1, prixUnitaire: 20, prixTotal: 20, type: 'ouvrage' }] },
+      ],
+    }],
+  } as any;
+
+  it('isole un marché subséquent', () => {
+    const r = filtrerPourExport(bordereau, sel({ marches: ['Ms1'] }));
+    expect(r.lots[0].chapitres.map((c: any) => c.titre)).toEqual(['Tranchée']);
+  });
+
+  it("isole l'accord-cadre", () => {
+    const r = filtrerPourExport(bordereau, sel({ marches: ['__ac__'] }));
+    expect(r.lots[0].chapitres.map((c: any) => c.titre)).toEqual(['Terrassement']);
+  });
+});
