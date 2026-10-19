@@ -9,7 +9,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
   IconBuildingStore, IconFileImport, IconFileExport,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
-  IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
+  IconPencil, IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
 } from '@tabler/icons-react';
 import { useProToolbar } from './toolbar/proToolbar';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
@@ -183,7 +183,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   // distingue d'un DPGF, et l'afficher serait l'erreur métier à ne pas commettre.
   const showTotaux = colSet !== 'bpu';
 
-  const nbCols = 4 + (showQte ? 1 : 0) + 1 + (showMontant ? 1 : 0)
+  const nbCols = 5 + (showQte ? 1 : 0) + 1 + (showMontant ? 1 : 0)
     + (showLettres ? 1 : 0) + (showOffres ? offres.length + 1 : 0) + 1;
   // Colonnes ajoutées en queue de tableau par le découpage (bâtiment, phase —
   // chacune conditionnelle — et localisation, toujours présente), en plus de
@@ -427,6 +427,21 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       return toggleIn(prev, rKey);
     });
   };
+
+  const visibleKeys = flatRows.map(rowKey);
+  const allChecked = visibleKeys.length > 0 && visibleKeys.every(k => selectedRowKeys.has(k));
+  const someChecked = !allChecked && visibleKeys.some(k => selectedRowKeys.has(k));
+  const checkboxCell = (rKey: string, label: string) => (
+    <td className="pl-3 pr-1 py-1 w-8" onClick={e => e.stopPropagation()}>
+      <input
+        type="checkbox"
+        checked={selectedRowKeys.has(rKey)}
+        onChange={() => toggleSelect(rKey, true)}
+        aria-label={t('pro_select_row', { numero: label })}
+        className="w-4 h-4 align-middle accent-[var(--tblr-primary)]"
+      />
+    </td>
+  );
 
   const selectedLignes = (): BPULigne[] =>
     flatRows.filter(r => r.kind === 'ligne' && selectedRowKeys.has(rowKey(r)))
@@ -844,6 +859,16 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
           <table className="w-full border-collapse text-sm" style={{ minWidth: showOffres ? 900 : 720 }}>
             <thead className="sticky top-0 z-10">
               <tr className="text-xs" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', boxShadow: 'inset 0 -1px 0 var(--tblr-border)' }}>
+                <th className="pl-3 pr-1 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allChecked}
+                    ref={el => { if (el) el.indeterminate = someChecked; }}
+                    onChange={() => setSelectedRowKeys(allChecked ? new Set() : new Set(visibleKeys))}
+                    aria-label={t('pro_select_all')}
+                    className="w-4 h-4 align-middle accent-[var(--tblr-primary)]"
+                  />
+                </th>
                 <th className="px-2 py-2 text-left font-semibold w-8"></th>
                 <th className="px-2 py-2 text-left font-semibold w-20">N°</th>
                 <th className="px-2 py-2 text-left font-semibold">Désignation</th>
@@ -875,6 +900,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                     <tr key={rKey} data-lot-id={row.lot.id} data-search-id={row.lot.id}
                         onClick={() => { setSelectedRowKeys(new Set([rKey])); setSelectedLotId(row.lot.id); }}
                         className={`border-b border-[#9ab0cb] ${isDropTarget ? 'bg-blue-100' : 'bg-[#c8d8ec] dark:bg-blue-900/30'} font-bold`}>
+                      {checkboxCell(rKey, row.lot.numero)}
                       <td className="px-2 py-2">
                         <button onClick={() => toggleLot(row.lot.id)} className="text-zinc-600">
                           {expandedLots.has(row.lot.id) ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
@@ -942,13 +968,15 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = dragSource ? 'move' : 'copy'; setDropTarget(rKey); }}
                         onDragLeave={() => setDropTarget(null)}
                         onDrop={e => handleDrop(e, row)}>
+                      {checkboxCell(rKey, row.chapitre!.numero)}
                       <td className="px-2 py-1 pl-6">
                         <button onClick={() => toggleChap(row.chapitre!.id)} className="text-zinc-500">
                           {expandedChaps.has(row.chapitre!.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
                         </button>
                       </td>
                       <td className="px-2 py-1 text-xs text-zinc-500"><EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} /></td>
-                      <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={nbCols - 3}>
+                      <td className="px-2 py-1 font-semibold text-xs text-zinc-700 dark:text-zinc-300" colSpan={nbCols - 4}
+                          onDoubleClick={() => startEdit(rKey, 'titre', row.chapitre!.titre)}>
                         <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} />
                       </td>
                       {(bpu.multiBatiments || bpu.multiPhases) && (
@@ -964,6 +992,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       )}
                       <td />{/* pas de localisation au niveau chapitre */}
                       <td className="px-1 py-1 text-right">
+                        <button onClick={e => { e.stopPropagation(); startEdit(rKey, 'titre', row.chapitre!.titre); }} className="text-zinc-500 hover:text-zinc-800 opacity-50 hover:opacity-100 mr-1" title="Modifier le chapitre" aria-label={`Modifier le chapitre ${row.chapitre!.numero}`}>
+                          <IconPencil size={12} />
+                        </button>
                         <button onClick={() => addLigne(row.lotIdx, row.chapIdx!)} className="text-blue-500 hover:text-blue-700 opacity-50 hover:opacity-100 mr-1" title="Ajouter un article">
                           <IconPlus size={12} />
                         </button>
@@ -996,6 +1027,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         ${isSelected ? 'bg-[var(--tblr-primary-lt)]' : 'hover:bg-[var(--tblr-surface-2)]'}
                         ${l.type === 'titre' ? 'bg-zinc-50 italic text-zinc-500' : ''}
                         ${l.type === 'commentaire' ? 'text-zinc-400' : ''}`}>
+                    {checkboxCell(rKey, l.numero)}
                     <td className="px-2 py-0.5" style={{ paddingLeft: 8 + row.depth * 12 }}>
                       {hasChildren && (
                         <button onClick={e => { e.stopPropagation(); toggleLigne(l.id); }} className="text-zinc-400">
@@ -1122,7 +1154,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   </tr>
                   {showOffres && (
                     <tr className="font-bold text-xs border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                      <td colSpan={4 + (showQte ? 1 : 0) + 1} className="px-4 py-2 text-right">TOTAL DE L'OFFRE</td>
+                      <td colSpan={5 + (showQte ? 1 : 0) + 1} className="px-4 py-2 text-right">TOTAL DE L'OFFRE</td>
                       {offres.map(o => (
                         <td key={o.id} className="px-2 py-2 text-right font-mono">{formatCurrency(totauxOffres.get(o.id) ?? 0)}</td>
                       ))}
