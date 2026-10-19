@@ -63,11 +63,26 @@ function inboxConnection(): ImapConnectionRow {
   };
 }
 
-/** Alias affiché à l'architecte depuis /settings (AgentMailInboxCard) — null
- *  si le domaine de réception n'est pas configuré. Pure, sans accès réseau,
- *  pour rester appelable aussi bien depuis settings.ts que depuis un test. */
-export function buildMailInboxAlias(tenantSlug: string): string | null {
-  const domain = env('AGENT_MAIL_INBOX_ALIAS_DOMAIN');
+const DOMAIN_RE = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** Normalise un domaine saisi par un cabinet (« @Agents.AAZS.fr » devient
+ *  « agents.aazs.fr »). `''` pour un champ vide (retour au domaine de
+ *  l'instance), `null` si la valeur n'est pas un nom de domaine valide. Pure. */
+export function normalizeMailInboxDomain(raw: unknown): string | null {
+  if (raw == null) return '';
+  if (typeof raw !== 'string') return null;
+  const domain = raw.trim().replace(/^@+/, '').toLowerCase();
+  if (!domain) return '';
+  return DOMAIN_RE.test(domain) ? domain : null;
+}
+
+/** Alias affiché à l'architecte depuis /settings (AgentMailInboxCard).
+ *  Le domaine propre au cabinet (settings.mail_inbox_domain) l'emporte ; à
+ *  défaut, celui de l'instance (AGENT_MAIL_INBOX_ALIAS_DOMAIN). null si ni
+ *  l'un ni l'autre n'existe. Pure, sans accès réseau, pour rester appelable
+ *  aussi bien depuis settings.ts que depuis un test. */
+export function buildMailInboxAlias(tenantSlug: string, tenantDomain?: string | null): string | null {
+  const domain = normalizeMailInboxDomain(tenantDomain) || env('AGENT_MAIL_INBOX_ALIAS_DOMAIN');
   if (!domain || !tenantSlug) return null;
   return `agents+${tenantSlug}@${domain}`;
 }

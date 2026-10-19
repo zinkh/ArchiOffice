@@ -10,6 +10,7 @@ import {
   extractTenantSlugFromRecipient,
   extractSenderEmail,
   buildMailInboxAlias,
+  normalizeMailInboxDomain,
   resolveSenderMembership,
   alreadyProcessed,
   markProcessed,
@@ -61,6 +62,45 @@ describe('buildMailInboxAlias', () => {
   it('renvoie null sans domaine configuré', () => {
     delete process.env.AGENT_MAIL_INBOX_ALIAS_DOMAIN;
     expect(buildMailInboxAlias('aazs')).toBeNull();
+  });
+
+  it('utilise le domaine du cabinet sans variable d\'environnement', () => {
+    delete process.env.AGENT_MAIL_INBOX_ALIAS_DOMAIN;
+    expect(buildMailInboxAlias('aazs', 'agents.aazs.fr')).toBe('agents+aazs@agents.aazs.fr');
+  });
+
+  it('préfère le domaine du cabinet à celui de l\'instance', () => {
+    process.env.AGENT_MAIL_INBOX_ALIAS_DOMAIN = 'archioffice.app';
+    expect(buildMailInboxAlias('aazs', 'agents.aazs.fr')).toBe('agents+aazs@agents.aazs.fr');
+  });
+
+  it('retombe sur le domaine de l\'instance quand celui du cabinet est vide ou invalide', () => {
+    process.env.AGENT_MAIL_INBOX_ALIAS_DOMAIN = 'archioffice.app';
+    expect(buildMailInboxAlias('aazs', '')).toBe('agents+aazs@archioffice.app');
+    expect(buildMailInboxAlias('aazs', null)).toBe('agents+aazs@archioffice.app');
+    expect(buildMailInboxAlias('aazs', 'pas un domaine')).toBe('agents+aazs@archioffice.app');
+  });
+});
+
+describe('normalizeMailInboxDomain', () => {
+  it('met en minuscules et retire l\'arobase et les espaces', () => {
+    expect(normalizeMailInboxDomain('  @Agents.AAZS.fr ')).toBe('agents.aazs.fr');
+  });
+
+  it('rend une chaîne vide pour un champ vide (retour au domaine de l\'instance)', () => {
+    expect(normalizeMailInboxDomain('')).toBe('');
+    expect(normalizeMailInboxDomain('   ')).toBe('');
+    expect(normalizeMailInboxDomain(null)).toBe('');
+    expect(normalizeMailInboxDomain(undefined)).toBe('');
+  });
+
+  it('refuse ce qui n\'est pas un nom de domaine', () => {
+    expect(normalizeMailInboxDomain('aazs')).toBeNull();
+    expect(normalizeMailInboxDomain('agents@aazs.fr')).toBeNull();
+    expect(normalizeMailInboxDomain('https://aazs.fr')).toBeNull();
+    expect(normalizeMailInboxDomain('aazs.fr/agents')).toBeNull();
+    expect(normalizeMailInboxDomain('-aazs.fr')).toBeNull();
+    expect(normalizeMailInboxDomain(42)).toBeNull();
   });
 });
 
