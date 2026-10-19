@@ -34,6 +34,47 @@ describe('outils métier : situations, notices, consultation, facture, agenda', 
     expect(names(['contacts'])).not.toEqual(expect.arrayContaining(['manage_situations']));
   });
 
+  describe('accords-cadres', () => {
+    const accords = [
+      { id: 'ac1', type_marche: 'accord_cadre', entreprise_nom: 'Dupont SARL', lot_numero: '02', mode_execution: 'marches_subsequents', montant_maxi_ht: 1000, statut_signature: 'signe', offre_snapshot: { prix: { a1: 45 } } },
+      { id: 'ac2', type_marche: 'accord_cadre', accord_cadre_groupe_id: 'ac1', entreprise_nom: 'Martin SAS', lot_numero: '02', statut_signature: 'signe', offre_snapshot: { prix: { a1: 48 } } },
+    ];
+    const suivi = { accordCadre: accords[0], titulaires: accords, subsequents: [{ id: 's1', numero_subsequent: 1, entreprise_nom: 'Dupont SARL', montant_ht: 450 }], consommation: { cumulHT: 450, resteMaxiHT: 550, statut: 'normal' } };
+
+    it('est proposé avec le périmètre des marchés', () => {
+      expect(buildAgentTools(caps(['marches_entreprises'])).map(t => t.name)).toContain('manage_accord_cadre');
+    });
+
+    it('liste le plafond partagé et les titulaires', async () => {
+      stub({ 'GET /api/marches-entreprises/p1': accords, 'GET /api/marches-entreprises/ac1/subsequents': suivi });
+      const r = await run(['marches_entreprises'], 'manage_accord_cadre', { project_id: 'p1', action: 'list' });
+      expect(r.response.accords_cadres).toHaveLength(1);
+      expect(r.response.accords_cadres[0]).toMatchObject({ maximum_ht: 1000, consomme_ht: 450, reste_ht: 550 });
+      expect(r.response.accords_cadres[0].titulaires).toHaveLength(2);
+    });
+
+    it('émet un subséquent en deux temps, aux prix du bordereau', async () => {
+      const m = stub({ 'GET /api/marches-entreprises/p1': accords, 'GET /api/marches-entreprises/ac1/subsequents': suivi, 'POST /api/marches-entreprises/ac1/subsequents': { id: 's2', numero_subsequent: 2, montant_ht: 90 } });
+      const args = { project_id: 'p1', action: 'emit', marche: 'dupont sarl', objet: 'Salle B', lignes: [{ article_id: 'a1', designation: 'Carrelage', unite: 'm²', quantite: 2 }] };
+      const first = await run(['marches_entreprises'], 'manage_accord_cadre', args);
+      expect(first.response).toMatchObject({ needs_confirmation: true, concerne: { montant_ht: 90, reste_disponible_ht: 550 } });
+      expect(sent(m, 'POST', '/subsequents')).toHaveLength(0);
+      const ok = await run(['marches_entreprises'], 'manage_accord_cadre', { ...args, confirm: true });
+      expect(ok.response.success).toBe(true);
+      expect(sent(m, 'POST', '/subsequents')[0].lignes[0]).toMatchObject({ articleId: 'a1', prixUnitaire: 45 });
+    });
+
+    it('attribue une remise en concurrence après confirmation', async () => {
+      const m = stub({ 'GET /api/marches-entreprises/p1': accords, 'POST /api/accord-cadre-consultations/c1/attribuer': { subsequent: { id: 's3', numero_subsequent: 3, montant_ht: 500 } } });
+      const args = { project_id: 'p1', action: 'consult_award', consultation_id: 'c1', marche: 'martin sas' };
+      expect((await run(['marches_entreprises'], 'manage_accord_cadre', args)).response.needs_confirmation).toBe(true);
+      expect(sent(m, 'POST', '/attribuer')).toHaveLength(0);
+      const ok = await run(['marches_entreprises'], 'manage_accord_cadre', { ...args, confirm: true });
+      expect(ok.response.subsequent).toMatchObject({ numero: 3 });
+      expect(sent(m, 'POST', '/attribuer')[0]).toMatchObject({ marche_id: 'ac2' });
+    });
+  });
+
   describe('situations', () => {
     const marches = [{ id: 'mk1', entreprise_nom: 'SARL Martin', lot_numero: '02', lot_titre: 'GROS OEUVRE', montant_ht: 100000 }];
     const situations = [{ id: 's1', marche_id: 'mk1', numero_situation: 1, etat: 'Validée', montant_presente_ht: 30000, montant_admis_ht: 28000, mode_saisie: 'simple' }];

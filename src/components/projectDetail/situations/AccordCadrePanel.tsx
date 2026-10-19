@@ -87,10 +87,16 @@ export function SignatureDialog({
  * dans l'onglet, avec ses situations de travaux.
  */
 export function AccordCadrePanel({
-  marche, subsequents, onEditConditions, onSign, onNewSubsequent, onEditSubsequent, onSignSubsequent, onDeleteSubsequent, onPdfSubsequent,
+  marche, subsequents, tete, subsequentsGroupe, titulaires, onEditConditions, onSign, onNewSubsequent, onEditSubsequent, onSignSubsequent, onDeleteSubsequent, onPdfSubsequent,
 }: {
   marche: MarcheAC;
   subsequents: MarcheAC[];
+  /** Accord-cadre de tête quand `marche` n'est qu'un titulaire de plus : il porte les conditions communes. */
+  tete?: MarcheAC;
+  /** Subséquents de tous les titulaires : le plafond est partagé. */
+  subsequentsGroupe?: MarcheAC[];
+  /** Les titulaires du groupe (au moins deux pour parler de plafond partagé). */
+  titulaires?: MarcheAC[];
   onEditConditions: () => void;
   onSign: () => void;
   onNewSubsequent: () => void;
@@ -100,8 +106,9 @@ export function AccordCadrePanel({
   onPdfSubsequent: (s: MarcheAC) => void;
 }) {
   const { t } = useTranslation();
-  const conditions = conditionsDe(marche);
-  const c = consommation(conditions, subsequents.map((s) => ({ montant_ht: Number(s.montant_ht) || 0, statut: s.statut })));
+  const conditions = conditionsDe(tete ?? marche);
+  const partage = (titulaires?.length ?? 0) > 1;
+  const c = consommation(conditions, (subsequentsGroupe ?? subsequents).map((s) => ({ montant_ht: Number(s.montant_ht) || 0, statut: s.statut })));
   const signe = marche.statut_signature === 'signe';
   const pctAffiche = Math.min(100, c.pctMaxi ?? 0);
 
@@ -118,6 +125,11 @@ export function AccordCadrePanel({
           </button>
         </div>
 
+        {partage && (
+          <p className="text-xs text-[var(--tblr-muted)]">
+            {t('accord_cadre_holders', { names: (titulaires ?? []).map((x) => x.entreprise_nom).join(', ') })}
+          </p>
+        )}
         <div className="max-w-xl space-y-1">
           <p className="text-sm text-[var(--tblr-text)]">
             {conditions.montantMaxiHT === null

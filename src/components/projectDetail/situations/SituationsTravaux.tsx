@@ -19,11 +19,12 @@ import { SituationDialog } from './SituationDialog';
 import { EtatSituationBadge } from './EtatSituationBadge';
 import type { Plateforme, SituationLiee } from './FactureEntrepriseLink';
 import type { DPGF, OffreDocument } from '../../../types/dpgf';
-import { articlesDuBordereau, lotDuMarche, type MarcheAccordCadreChamps } from '../../../lib/accordCadre';
+import { articlesDuBordereau, lotDuMarche, membresDuGroupe, subsequentsDuGroupe, teteDuGroupe, type MarcheAccordCadreChamps } from '../../../lib/accordCadre';
 import { telechargerMarcheSubsequent } from '../../../lib/marcheSubsequentExport';
 import { AccordCadreDialog, type ConditionsAccordCadreBody } from './AccordCadreDialog';
 import { AccordCadrePanel, SignatureDialog, type MarcheAC } from './AccordCadrePanel';
 import { SubsequentDialog } from './SubsequentDialog';
+import { ConsultationsSection } from './ConsultationsSection';
 
 type Marche = MarcheTravaux & MarcheAccordCadreChamps & { project_id?: string; duree_mois?: number | null; notes?: string | null };
 
@@ -184,6 +185,13 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
     prev.some((x) => x.id === maj.id) ? prev.map((x) => (x.id === maj.id ? { ...x, ...maj } : x)) : [...prev, maj]
   ));
   const subsDe = (acId: string) => marchesTries.filter((m) => m.parent_marche_id === acId);
+  // Un accord-cadre peut avoir plusieurs titulaires : tête, membres et subséquents du groupe.
+  const tetesRejoignables = useMemo(
+    () => marches.filter((m) => m.type_marche === 'accord_cadre' && !m.accord_cadre_groupe_id),
+    [marches],
+  );
+  const groupeDe = (m: Marche) => membresDuGroupe(m, marches);
+  const subsDuGroupe = (m: Marche) => subsequentsDuGroupe(groupeDe(m), marchesTries) as Marche[];
 
   const enregistrerConditions = async (body: ConditionsAccordCadreBody) => {
     if (!conditionsCible) return;
@@ -473,17 +481,31 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
             </div>
 
             {estAC ? (
+              <>
               <AccordCadrePanel
-                marche={m as MarcheAC}
-                subsequents={subsDe(m.id) as MarcheAC[]}
-                onEditConditions={() => setConditionsCible(m)}
-                onSign={() => setASigner(m)}
-                onNewSubsequent={() => setSubEdition({ ac: m, sub: null })}
-                onEditSubsequent={(s) => setSubEdition({ ac: m, sub: s as Marche })}
-                onSignSubsequent={(s) => setASigner(s as Marche)}
-                onDeleteSubsequent={(s) => supprimerSubsequent(s as Marche)}
-                onPdfSubsequent={(s) => pdfSubsequent(s as Marche)}
+                  marche={m as MarcheAC}
+                  subsequents={subsDe(m.id) as MarcheAC[]}
+                  tete={teteDuGroupe(m, marches) as MarcheAC}
+                  subsequentsGroupe={subsDuGroupe(m) as MarcheAC[]}
+                  titulaires={groupeDe(m) as MarcheAC[]}
+                  onEditConditions={() => setConditionsCible(m)}
+                  onSign={() => setASigner(m)}
+                  onNewSubsequent={() => setSubEdition({ ac: m, sub: null })}
+                  onEditSubsequent={(s) => setSubEdition({ ac: m, sub: s as Marche })}
+                  onSignSubsequent={(s) => setASigner(s as Marche)}
+                  onDeleteSubsequent={(s) => supprimerSubsequent(s as Marche)}
+                  onPdfSubsequent={(s) => pdfSubsequent(s as Marche)}
               />
+                {!m.accord_cadre_groupe_id && groupeDe(m).length > 1 && (
+                  <ConsultationsSection
+                    teteId={m.id}
+                    titulaires={groupeDe(m).map((x) => ({ id: x.id, entreprise_nom: x.entreprise_nom }))}
+                    articles={articlesDuBordereau(lotDuMarche(dpgf?.lots, m.lot_numero), m.offre_snapshot?.prix ?? null)}
+                    onAwarded={charger}
+                    showToast={showToast}
+                  />
+                )}
+              </>
             ) : liste.length === 0 ? (
               <p className="px-5 pb-4 text-sm text-[var(--tblr-muted)]">{t('situations_travaux_no_situation')}</p>
             ) : (
@@ -578,7 +600,9 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
       <AccordCadreDialog
         open={conditionsCible !== null}
         marche={conditionsCible}
-        canRemove={conditionsCible ? subsDe(conditionsCible.id).length === 0 : false}
+        canRemove={conditionsCible ? subsDe(conditionsCible.id).length === 0
+          && (!!conditionsCible.accord_cadre_groupe_id || groupeDe(conditionsCible).length <= 1) : false}
+        tetes={tetesRejoignables.map((x) => ({ id: x.id, label: [x.lot_numero ? t('situations_travaux_lot_short', { n: x.lot_numero }) : '', x.entreprise_nom].filter(Boolean).join(' · ') }))}
         onClose={() => setConditionsCible(null)}
         onSave={enregistrerConditions}
         onRemove={retirerAccordCadre}
@@ -586,13 +610,18 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
       {subEdition && (() => {
         const { ac, sub } = subEdition;
         const prix = ac.offre_snapshot?.prix ?? null;
-        const cumulAutresHT = subsDe(ac.id)
+        const tete = teteDuGroupe(ac, marches);
+        const cumulAutresHT = subsDuGroupe(ac)
           .filter((s) => s.id !== sub?.id && (s.statut ?? 'en_cours') !== 'resilie')
           .reduce((somme, s) => somme + num(s.montant_ht), 0);
         return (
           <SubsequentDialog
             open
-            accordCadre={ac}
+            accordCadre={{
+              ...ac,
+              montant_mini_ht: tete.montant_mini_ht, montant_maxi_ht: tete.montant_maxi_ht,
+              date_fin_accord_cadre: tete.date_fin_accord_cadre, mode_execution: tete.mode_execution,
+            }}
             sub={sub}
             articles={articlesDuBordereau(lotDuMarche(dpgf?.lots, ac.lot_numero), prix)}
             bordereauFige={!!prix && Object.keys(prix).length > 0}

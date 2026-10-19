@@ -117,6 +117,18 @@ describe('règles des accords-cadres', () => {
       expect(found[0].targetId).toBe('p1');
     });
 
+    it('cumule les subséquents de tous les titulaires contre le plafond de la tête, en une seule alerte', () => {
+      const membre = ac({ id: 'ac2', accord_cadre_groupe_id: 'ac1', entreprise_nom: 'Martin SAS', montant_maxi_ht: null, statut_signature: 'signe' });
+      const found = detect('accord_cadre_plafond', snapshot({
+        projects: [projet],
+        marches: [ac(), membre, sub('s1', 500), sub('s2', 350, { parent_marche_id: 'ac2' })],
+      }));
+      expect(found).toHaveLength(1);
+      expect(found[0].dedupKey).toBe('accord_cadre_plafond:ac1:proche');
+      expect(found[0].message).toContain('Dupont SARL / Martin SAS');
+      expect(found[0].message).toContain('150,00 €');
+    });
+
     it('change de clé quand le statut change, pour refermer l’ancienne alerte', () => {
       const atteint = detect('accord_cadre_plafond', snapshot({ projects: [projet], marches: [ac(), sub('s1', 1000)] }));
       expect(atteint[0].dedupKey).toBe('accord_cadre_plafond:ac1:atteint');

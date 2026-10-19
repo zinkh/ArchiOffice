@@ -103,23 +103,36 @@ const ECHEANCE_ACCORD_CADRE_JOURS_APRES = 90;
 
 const euros = (n: number): string => `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
-/** Accords-cadres signés, non résiliés, d'une affaire qui n'est pas terminée. */
+const membresAccordCadre = (snapshot: TenantSnapshot, tete: Row): Row[] =>
+  snapshot.marches.filter(m => m.type_marche === 'accord_cadre' && (m.id === tete.id || String(m.accord_cadre_groupe_id) === String(tete.id)));
+
+/**
+ * Accords-cadres non résiliés, d'une affaire qui n'est pas terminée, dont au moins un titulaire a
+ * signé. Un accord-cadre à plusieurs titulaires compte pour UN : la ligne de tête porte le plafond,
+ * la fin et le minimum, partagés par tous.
+ */
 function accordsCadresSignes(snapshot: TenantSnapshot): Row[] {
   const terminees = new Set(snapshot.projects.filter(p => p.status === 'Completed').map(p => String(p.id)));
   return snapshot.marches.filter(m =>
     m.type_marche === 'accord_cadre'
-    && m.statut_signature === 'signe'
+    && !m.accord_cadre_groupe_id
     && (m.statut ?? 'en_cours') !== 'resilie'
-    && !terminees.has(String(m.project_id)));
+    && !terminees.has(String(m.project_id))
+    && membresAccordCadre(snapshot, m).some(x => x.statut_signature === 'signe'));
 }
 
-const subsequentsDe = (snapshot: TenantSnapshot, ac: Row): { montant_ht: number; statut?: string | null }[] =>
-  snapshot.marches
-    .filter(m => m.type_marche === 'subsequent' && String(m.parent_marche_id) === String(ac.id))
+const subsequentsDe = (snapshot: TenantSnapshot, ac: Row): { montant_ht: number; statut?: string | null }[] => {
+  const ids = new Set(membresAccordCadre(snapshot, ac).map(m => String(m.id)));
+  return snapshot.marches
+    .filter(m => m.type_marche === 'subsequent' && ids.has(String(m.parent_marche_id)))
     .map(m => ({ montant_ht: Number(m.montant_ht) || 0, statut: m.statut }));
+};
 
-const accordCadreLabel = (ac: Row): string =>
-  [ac.lot_numero ? `lot ${ac.lot_numero}` : '', ac.entreprise_nom].filter(Boolean).join(' ') || String(ac.id);
+const accordCadreLabel = (ac: Row, snapshot?: TenantSnapshot): string => {
+  const titulaires = snapshot ? membresAccordCadre(snapshot, ac) : [ac];
+  const noms = titulaires.map(t => t.entreprise_nom).filter(Boolean).join(' / ');
+  return [ac.lot_numero ? `lot ${ac.lot_numero}` : '', noms].filter(Boolean).join(' ') || String(ac.id);
+};
 
 function projectLabelOf(snapshot: TenantSnapshot, ac: Row): string {
   const project = snapshot.projects.find(p => String(p.id) === String(ac.project_id));
@@ -418,9 +431,9 @@ export const ALERT_RULES: AlertRuleDef[] = [
           // Le statut fait partie de la clé : passer de « proche » à « atteint » ouvre une
           // nouvelle alerte et referme la précédente, au lieu de rester sur un message périmé.
           dedupKey: `accord_cadre_plafond:${ac.id}:${c.statut}`,
-          title: `Accord-cadre ${c.statut === 'proche' ? 'bientôt à son plafond' : 'au plafond'} : ${accordCadreLabel(ac)}`,
+          title: `Accord-cadre ${c.statut === 'proche' ? 'bientôt à son plafond' : 'au plafond'} : ${accordCadreLabel(ac, snapshot)}`,
           message:
-            `L'accord-cadre ${accordCadreLabel(ac)} (${projectLabelOf(snapshot, ac)}) a ${euros(c.cumulHT)} HT de marchés subséquents émis sur ${euros(maxi)} HT : ${etat}. ` +
+            `L'accord-cadre ${accordCadreLabel(ac, snapshot)} (${projectLabelOf(snapshot, ac)}) a ${euros(c.cumulHT)} HT de marchés subséquents émis sur ${euros(maxi)} HT : ${etat}. ` +
             (c.statut === 'proche'
               ? `Il reste ${euros(c.resteMaxiHT ?? 0)} HT disponibles : anticiper un avenant si d'autres commandes sont prévues.`
               : `Aucun nouveau marché subséquent ne peut être émis sans avenant relevant le maximum.`),
@@ -456,8 +469,8 @@ export const ALERT_RULES: AlertRuleDef[] = [
         ].filter(Boolean).join(' ; ');
         alerts.push({
           dedupKey: `accord_cadre_echeance:${ac.id}`,
-          title: `Fin d'accord-cadre : ${accordCadreLabel(ac)}`,
-          message: `L'accord-cadre ${accordCadreLabel(ac)} (${projectLabelOf(snapshot, ac)}) ${quand} : ${enjeux}.`,
+          title: `Fin d'accord-cadre : ${accordCadreLabel(ac, snapshot)}`,
+          message: `L'accord-cadre ${accordCadreLabel(ac, snapshot)} (${projectLabelOf(snapshot, ac)}) ${quand} : ${enjeux}.`,
           targetType: 'project',
           targetId: String(ac.project_id),
         });
@@ -526,7 +539,7 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
       selectAll(supabaseAdmin, 'act_data', tenantId, 'project_id, consultation'),
       selectAll(
         supabaseAdmin, 'marches_entreprises', tenantId,
-        'id, project_id, type_marche, parent_marche_id, entreprise_nom, lot_numero, montant_ht, statut, statut_signature, montant_mini_ht, montant_maxi_ht, date_fin_accord_cadre',
+        'id, project_id, type_marche, parent_marche_id, accord_cadre_groupe_id, entreprise_nom, lot_numero, montant_ht, statut, statut_signature, montant_mini_ht, montant_maxi_ht, date_fin_accord_cadre',
       ),
     ]);
   return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches };
