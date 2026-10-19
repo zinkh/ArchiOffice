@@ -14,6 +14,7 @@ Status legend: ✅ Implemented · 🟡 Partial / experimental · ⏳ Planned (UI
 | Contracts (*contrats MOE*) | ✅ | Co-traitants/sous-traitants, status workflow. |
 | CCTP (technical specifications) | ✅ | Lives in the same lot/chapitre/article tree as the DPGF (`cctpDescription`/`cctpOnly` fields, `/api/projects/:id/dpgf`) — no separate CCTP resource. The former `/api/specifications` table/route was removed. |
 | DPGF (cost breakdown), XML import | ✅ | Import of existing DPGF XML files works. |
+| DQE / BPU: framework agreement and subsequent contracts (*accord-cadre*, *marchés subséquents*) | 🟡 | A DQE chapter can belong to a subsequent contract (`msCode`, « Ms1 », « Ms2 »...), so a lot holds its framework-agreement chapters and its subsequent ones side by side (« Lot 01 - Gros œuvre - Ms1 Tranchée »). View filter (all / framework agreement / subsequent contracts), and an export perimeter by contract to send all subsequent contracts, or a single one, to the companies. Row checkboxes and select-all, chapter editing (pencil or double-click), and drag-and-drop of a spreadsheet onto the table to import it. Not built yet: linking the DQE subsequent chapters to the issuing dialog and ceiling of the RDT tab, and importing a **PDF** bordereau (only Excel, ODS and CSV are read). |
 | Situations / progress billing (*états d'acompte*) | ✅ | Includes PDF export of the *état d'acompte*. |
 | Invoicing (Factur-X / EN 16931) | ✅ | |
 | Site reports, meeting minutes, ordres de service, observations, reserves | ✅ | Meeting minutes export to real DOCX via the `docx` library. |

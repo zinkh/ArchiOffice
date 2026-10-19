@@ -907,6 +907,10 @@ Un bouton crée d'un coup un poste pour toutes les lignes non rattachées.
   modifié. `ProTab` écrit par `setDpgf`/`setBpu` et non `editDpgf`/`editBpu` : ceux-ci enverraient chaque
   nouvelle ligne à la bibliothèque d'ouvrages, que des centaines de lignes tierces n'ont pas à enrichir d'office.
 
+### DQE : chapitres de marché subséquent, sélection, dépôt de fichier
+
+`BPUChapitre.msCode` (« Ms1 », jsonb, aucune migration) rattache un chapitre du bordereau à un marché subséquent ; sans code, le chapitre relève de l'accord-cadre. Un lot porte côte à côte ses chapitres d'accord-cadre et ceux de chaque subséquent. Menu Ajouter > « Chapitre de marché subséquent » (code suivant proposé), actions de sélection « Marché subséquent » / « Accord-cadre », vue filtrable (menu Marché > Afficher). `ExportSelection.marches` (`AC_EXPORT` ou code Ms) isole un marché à l'export (`filtrerPourExport`, `marcheDuChapitre`, `src/lib/exportPerimetre.ts`, testé) ; la fenêtre d'export n'offre la section que si le bordereau en contient. Le lien avec l'émission d'un subséquent de l'onglet RDT n'est pas fait. Le tableau a des cases à cocher et « Tout sélectionner », un crayon pour modifier un chapitre, et reçoit un tableur déposé (`onDropFichier` : bordereau vierge, lignes en articles ; sinon offre à rapprocher). Un PDF est refusé avec un message : seul Excel, ODS et CSV sont lus.
+
 ### Accords-cadres et marchés subséquents (onglet RDT)
 
 Un accord-cadre est une ligne de `marches_entreprises` (`type_marche = 'accord_cadre'`) ; chaque marché
