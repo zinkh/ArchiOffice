@@ -1,4 +1,8 @@
 export default {
+  "aor_nav_label": "Acceptance sections",
+  "aor_section_doe": "As-built file",
+  "aor_section_pv": "Acceptance",
+  "aor_section_plans": "Drawings",
   "doe_desc": "Request documents from companies, remind them automatically, review and stamp their documents, then send the archive to the client.",
   "doe_loading": "Loading the as-built file workshop…",
   "doe_retry": "Retry",

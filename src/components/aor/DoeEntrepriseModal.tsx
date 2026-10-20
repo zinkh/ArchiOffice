@@ -22,6 +22,7 @@ import {
 } from '../../lib/doeAtelier';
 import type { DoeAtelierApi, DoeDocumentVue, DoeEntrepriseVue, ResultatAnalyseDoc } from '../../hooks/useDoeAtelier';
 import { CHAMP_DOE, usePieceLabel } from './DoeDialogs';
+import { TOUCH_TARGET } from '../chantier/fields';
 import { cn } from '../../lib/utils';
 
 export const STATUT_STYLE: Record<DoeStatut, string> = {
@@ -150,7 +151,7 @@ export function DoeEntrepriseModal({ entreprise, api, onClose, onVisa, notify }:
           {!!demande?.reminder_count && <p>{t('doe_reminders_count', { count: demande.reminder_count, date: dateFr(demande.last_reminder_at) })}</p>}
           {entreprise.prochaine_relance && <p>{t('doe_next_reminder', { date: dateFr(entreprise.prochaine_relance) })}</p>}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:flex sm:flex-wrap [&>.btn]:justify-center [&>.btn]:pointer-coarse:min-h-11">
           {entreprise.statut === 'a_solliciter' || !demande?.sent_at ? (
             <button type="button" className="btn btn-primary" disabled={occupe !== null || !peutRelancer} onClick={() => solliciter('sollicitation')}>
               <IconSend size={15} aria-hidden /> {t('doe_request_send')}
@@ -198,13 +199,13 @@ export function DoeEntrepriseModal({ entreprise, api, onClose, onVisa, notify }:
       <section aria-label={t('doe_documents_section')} className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold uppercase tracking-wider">{t('doe_documents_section')}</h3>
-          <div className="flex flex-wrap items-center gap-2">
-            <select aria-label={t('doe_upload_piece')} className={cn(CHAMP_DOE, '!w-auto')} value={pieceDepot} onChange={e => setPieceDepot(e.target.value as DoePieceKey | '')}>
+          <div className="grid grid-cols-1 gap-2 w-full sm:flex sm:w-auto sm:flex-wrap sm:items-center [&>.btn]:justify-center [&>.btn]:pointer-coarse:min-h-11">
+            <select aria-label={t('doe_upload_piece')} className={cn(CHAMP_DOE, 'sm:!w-auto', TOUCH_TARGET)} value={pieceDepot} onChange={e => setPieceDepot(e.target.value as DoePieceKey | '')}>
               <option value="">{t('doe_unclassified')}</option>
               {DOE_PIECES.map(p => <option key={p.key} value={p.key}>{labelPiece(p.key)}</option>)}
             </select>
             {entreprise.lots.length > 1 && (
-              <select aria-label={t('doe_upload_lot')} className={cn(CHAMP_DOE, '!w-auto')} value={lotDepot} onChange={e => setLotDepot(e.target.value)}>
+              <select aria-label={t('doe_upload_lot')} className={cn(CHAMP_DOE, 'sm:!w-auto', TOUCH_TARGET)} value={lotDepot} onChange={e => setLotDepot(e.target.value)}>
                 <option value="">{t('doe_all_lots')}</option>
                 {entreprise.lots.map(l => <option key={l.id} value={l.id}>Lot {l.lot_number} {l.lot_title}</option>)}
               </select>
@@ -240,7 +241,7 @@ export function DoeEntrepriseModal({ entreprise, api, onClose, onVisa, notify }:
       <section aria-label={t('doe_visa_section')} className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold uppercase tracking-wider">{t('doe_visa_section')}</h3>
-          <button type="button" className="btn btn-primary" disabled={occupe !== null || !entreprise.documents.length} onClick={onVisa}>
+          <button type="button" className={cn('btn btn-primary justify-center w-full sm:w-auto', TOUCH_TARGET)} disabled={occupe !== null || !entreprise.documents.length} onClick={onVisa}>
             <IconRubberStamp size={15} aria-hidden /> {t('doe_visa_open')}
           </button>
         </div>
@@ -286,9 +287,10 @@ function LigneDocument({ doc, analyse, occupe, onModifier, onSupprimer }: {
   const bouton = (a: DoeAvisDocument, Icone: typeof IconCheck, cle: string, couleur: string) => (
     <button type="button" disabled={occupe} aria-pressed={avis === a} title={t(cle)} aria-label={`${t(cle)} : ${doc.name}`}
       onClick={() => donnerAvis(a)}
-      className={cn('p-2 rounded-lg border transition-colors min-h-9 min-w-9 disabled:opacity-50',
+      className={cn('flex flex-1 sm:flex-none flex-col sm:flex-row items-center justify-center gap-0.5 p-2 rounded-lg border transition-colors min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 disabled:opacity-50',
         avis === a ? couleur : 'border-[var(--tblr-border)] text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)]')}>
-      <Icone size={15} aria-hidden />
+      <Icone size={16} aria-hidden />
+      <span className="sm:hidden text-[0.6875rem] leading-tight text-center font-semibold" aria-hidden>{t(cle)}</span>
     </button>
   );
 
@@ -304,19 +306,19 @@ function LigneDocument({ doc, analyse, occupe, onModifier, onSupprimer }: {
             {doc.size_bytes ? ` · ${formatOctets(doc.size_bytes)}` : ''}
           </p>
         </div>
-        <select aria-label={`${t('doe_document_piece')} : ${doc.name}`} className={cn(CHAMP_DOE, '!w-auto max-w-full')} disabled={occupe}
+        <select aria-label={`${t('doe_document_piece')} : ${doc.name}`} className={cn(CHAMP_DOE, 'sm:!w-auto max-w-full basis-full sm:basis-auto', TOUCH_TARGET)} disabled={occupe}
           value={pieceConnue(doc.doe_piece) ? doc.doe_piece : ''}
           onChange={e => onModifier({ doe_piece: (e.target.value || null) as DoePieceKey | null })}>
           <option value="">{t('doe_unclassified')}</option>
           {DOE_PIECES.map(p => <option key={p.key} value={p.key}>{labelPiece(p.key)}</option>)}
         </select>
         <span className={cn('px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase', AVIS_STYLE[avis])}>{t(`doe_avis_doc_${avis}`)}</span>
-        <div className="flex items-center gap-1" role="group" aria-label={`${t('doe_avis_group')} : ${doc.name}`}>
+        <div className="flex items-stretch gap-1 basis-full sm:basis-auto" role="group" aria-label={`${t('doe_avis_group')} : ${doc.name}`}>
           {bouton('approved', IconCheck, 'doe_avis_doc_approved', AVIS_STYLE.approved + ' border-transparent')}
           {bouton('commented', IconMessageDots, 'doe_avis_doc_commented', AVIS_STYLE.commented + ' border-transparent')}
           {bouton('rejected', IconX, 'doe_avis_doc_rejected', AVIS_STYLE.rejected + ' border-transparent')}
           <button type="button" disabled={occupe} title={t('projectdetail_doe_delete')} aria-label={t('projectdetail_doe_delete_named', { name: doc.name })}
-            onClick={onSupprimer} className="p-2 rounded-lg text-[var(--tblr-muted)] hover:text-red-600 hover:bg-[var(--tblr-surface-2)] min-h-9 min-w-9">
+            onClick={onSupprimer} className="p-2 rounded-lg text-[var(--tblr-muted)] hover:text-red-600 hover:bg-[var(--tblr-surface-2)] min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 flex items-center justify-center">
             <IconTrash size={15} aria-hidden />
           </button>
         </div>

@@ -61,7 +61,9 @@ import type { Project, ProjectStakeholder, Milestone, Invoice, ProjectCategory, 
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { ReprendreObservationsBanner } from '../components/pro/ReprendreObservationsBanner';
 import { DoeAtelier } from '../components/aor/DoeAtelier';
-import { RESERVE_STATUSES, reserveStatusKey } from '../components/pro/reserveShared';
+import { RESERVE_STATUSES, reserveStatusKey, isReserveClosed } from '../components/pro/reserveShared';
+import { AorLayout } from '../components/aor/AorLayout';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
 import { isProjectDirty } from '../lib/projectDirty';
@@ -445,6 +447,9 @@ export default function ProjectDetail() {
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
   const [planUploading, setPlanUploading] = useState(false);
   const planInputRef = useRef<HTMLInputElement>(null);
+  const [doeATraiter, setDoeATraiter] = useState<number | null>(null);
+  const plansEnCartes = useMediaQuery('(max-width: 767px)');
+  const reservesOuvertes = reserves.filter(r => !isReserveClosed(r)).length + gpaReserves.filter(r => !isReserveClosed(r)).length;
 
   // Reception PV form state
   const [showPvForm, setShowPvForm] = useState(false);
@@ -5001,7 +5006,8 @@ export default function ProjectDetail() {
               </div>
             )}
             {activeTab === 'AOR' && (
-              <div className="space-y-8">
+              <AorLayout sections={[
+                { id: 'reserves', label: t('projectdetail_reserves_title'), count: reservesOuvertes, alert: true, children: (<>
                 <ReprendreObservationsBanner projectId={id || ''} onReservesChanged={fetchReserves} />
 
                 <ReserveTracker
@@ -5028,10 +5034,11 @@ export default function ProjectDetail() {
                   project={project}
                   settings={settings}
                 />
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  <div className="lg:col-span-2 space-y-8">
-                {/* PV de réception */}
+                </>) },
+                { id: 'doe', label: t('aor_section_doe'), count: doeATraiter, alert: true, children: (
+                  <DoeAtelier projectId={id || ''} onSummary={setDoeATraiter} />
+                ) },
+                { id: 'pv', label: t('aor_section_pv'), count: receptions.length, children: (<>
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconClipboardCheck}
@@ -5442,15 +5449,12 @@ export default function ProjectDetail() {
                     </table>
                   </div>
                 </div>
-
-                {/* DOE : atelier de sollicitation, d'analyse, de visa et d'archive */}
-                <DoeAtelier projectId={id || ''} />
-
-                {/* Plans de l'opération */}
+                </>) },
+                { id: 'plans', label: t('aor_section_plans'), count: plans.filter(p => p.category === 'AOR' || !p.category).length, children: (<>
                 {(() => {
                   const aorPlans = plans.filter(p => p.category === 'AOR' || !p.category);
                   return (
-                    <div className="rounded-lg overflow-hidden mt-8" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+                    <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <CardHeader
                         className="p-4 sm:p-6"
                         icon={IconClipboardCheck}
@@ -5480,6 +5484,35 @@ export default function ProjectDetail() {
                         </div>
                         }
                       />
+                      {plansEnCartes ? (
+                        <ul className="divide-y divide-[var(--tblr-border)]">
+                          {[...aorPlans].sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()).map(plan => (
+                            <li key={plan.id} className="flex items-center gap-2 px-4 py-3">
+                              <div className="flex-1 min-w-0">
+                                <p className="font-bold text-sm break-words">{plan.name}</p>
+                                <p className="text-xs text-[var(--tblr-muted)]">
+                                  {t('projectdetail_ff_index')} {plan.index || 'A'} · {new Date(plan.uploaded_at).toLocaleDateString('fr-FR')}
+                                </p>
+                              </div>
+                              <button type="button" onClick={() => { setUpdatingPlanId(plan.id); planInputRef.current?.click(); }} disabled={planUploading}
+                                aria-label={t('projectdetail_plans_new_index_named', { name: plan.name })}
+                                className="flex items-center justify-center min-h-11 min-w-11 text-[var(--tblr-muted)] disabled:opacity-50"><IconRefresh size={18} /></button>
+                              <button type="button" onClick={() => openSignedUrl(plan.file_url)} aria-label={t('projectdetail_plans_open_named', { name: plan.name })}
+                                className="flex items-center justify-center min-h-11 min-w-11 text-[var(--tblr-muted)]"><IconExternalLink size={18} /></button>
+                              <button type="button" aria-label={t('projectdetail_plans_delete_named', { name: plan.name })}
+                                onClick={async () => {
+                                  if (!(await confirmDelete('projectdetail_confirm_delete_plan'))) return;
+                                  try {
+                                    const res = await fetch(`/api/plans/${plan.id}`, { method: 'DELETE' });
+                                    if (res.ok) setPlans(prev => prev.filter(p => p.id !== plan.id));
+                                  } catch (err) { console.error(err); }
+                                }}
+                                className="flex items-center justify-center min-h-11 min-w-11 text-[var(--tblr-muted)]"><IconTrash size={18} /></button>
+                            </li>
+                          ))}
+                          {aorPlans.length === 0 && <li className="px-4 py-6 text-sm italic text-[var(--tblr-muted)]">{t('projectdetail_plans_empty')}</li>}
+                        </ul>
+                      ) : (
                       <div className="overflow-x-auto">
                         <table className="min-w-full text-sm">
                           <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
@@ -5549,12 +5582,12 @@ export default function ProjectDetail() {
                           </tbody>
                         </table>
                       </div>
+                      )}
                     </div>
                   );
                 })()}
-              </div>
-              </div>
-              </div>
+                </>) },
+              ]} />
             )}
             </div>
           </div>

@@ -1,4 +1,8 @@
 export default {
+  "aor_nav_label": "Sections de la réception",
+  "aor_section_doe": "DOE",
+  "aor_section_pv": "Réception",
+  "aor_section_plans": "Plans",
   "doe_desc": "Sollicitez les entreprises, relancez-les automatiquement, analysez et visez leurs documents, puis transmettez l'archive au maître d'ouvrage.",
   "doe_loading": "Chargement de l'atelier DOE…",
   "doe_retry": "Réessayer",
