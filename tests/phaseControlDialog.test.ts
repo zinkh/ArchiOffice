@@ -48,4 +48,32 @@ describe('phase checklist dialog', () => {
     await act(async () => { status.value = 'done'; status.dispatchEvent(new Event('change', { bubbles: true })); });
     expect(button('pc_continue').disabled).toBe(false);
   });
+  it('forces the change only with a written reason, then sends it and no task creation', async () => {
+    const { fetchMock, onComplete } = await render(true);
+    expect(button('pc_tasks_continue').disabled).toBe(true);
+    const toggle = container.querySelector('input[type=checkbox]') as HTMLInputElement;
+    await act(async () => toggle.click());
+    expect(button('pc_force_continue').disabled).toBe(true);
+    const reason = [...container.querySelectorAll('label')].find(l => l.textContent?.includes('pc_force_reason'))!.querySelector('textarea')!;
+    const type = async (value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(reason, value);
+      reason.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await type('trop bref');
+    expect(button('pc_force_continue').disabled).toBe(true);
+    await type('Contrôle sans objet : mission sans sol');
+    expect(button('pc_force_continue').disabled).toBe(false);
+    await act(async () => button('pc_force_continue').click());
+    const body = JSON.parse(fetchMock.mock.calls[1][1].body);
+    expect(body).toMatchObject({ createTasks: false, forceReason: 'Contrôle sans objet : mission sans sol' });
+    expect(onComplete).toHaveBeenCalledOnce();
+  });
+  it('never offers forcing to someone who cannot configure the controls', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    const config = controlConfigSchema.parse(defaults); config.rules = [config.rules.find(r => r.id === 'geotechnique')!];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ config, context: {}, from: 'ESQ', to: 'APS', revision: 'a'.repeat(64), expectedCurrentId: 'esq', documents: [] }) }));
+    container = document.createElement('div'); document.body.append(container); root = createRoot(container);
+    await act(async () => root!.render(React.createElement(PhaseControlDialog, { projectId: 'p', phase: 'APS', members: [], canConfigure: false, onClose: vi.fn(), onComplete: vi.fn() })));
+    expect(container.textContent).not.toContain('pc_force_toggle');
+  });
 });

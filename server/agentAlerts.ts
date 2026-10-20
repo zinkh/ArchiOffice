@@ -20,6 +20,9 @@ import { notifyTenantAdminsPush } from './push';
 import { dispatchWebhookEvent } from './webhookDispatch';
 import { joursAvant, parContact, resumeQualifications, type Qualification } from '../src/lib/qualifications';
 import { conditionsDe, consommation, type MarcheAccordCadreChamps } from '../src/lib/accordCadre';
+import { normalizeEvidence } from '../src/lib/phaseControls';
+import phaseControlDefaults from './config/phaseControls.json';
+import { selectAllPages } from './selectAllPages';
 
 // Une fois par semaine par défaut ; AGENT_ALERTS_INTERVAL_HOURS le règle. Une alerte dont la
 // cause disparaît se referme donc au cycle suivant, pas immédiatement.
@@ -57,6 +60,8 @@ export interface TenantSnapshot {
   consultations: Row[];
   /** `marches_entreprises` : marchés ordinaires, accords-cadres et marchés subséquents. */
   marches: Row[];
+  /** Documents rattachés à une affaire (nom et statut seulement) : preuves cherchées par les alertes. */
+  documents: Row[];
 }
 
 export interface AlertRuleDef {
@@ -96,6 +101,34 @@ function firstPhaseEntry(snapshot: TenantSnapshot, projectId: string, phases: Se
     .filter(h => h.project_id === projectId && phases.has(String(h.phase || '').toUpperCase()))
     .sort((a, b) => String(a.entered_at).localeCompare(String(b.entered_at)));
   return rows[0] ?? null;
+}
+
+// La DOC se contrôle à l'entrée en VISA (règle `doc-ouverture-chantier` des contrôles de phase) :
+// l'alerte couvre la préparation de chantier et le chantier, pas la réception.
+const DOC_RULE_ID = 'doc-ouverture-chantier';
+const DOC_PHASES = new Set(['VISA', 'DET']);
+const DOC_TERMS: string[] = phaseControlDefaults.rules.find(r => r.id === DOC_RULE_ID)?.evidenceTerms ?? [];
+
+/**
+ * La DOC est traitée quand un document de l'affaire la désigne, ou quand l'architecte a répondu au contrôle
+ * de phase (fait, ou sans objet justifié) ou forcé le passage : la dispense vaut décision, l'alerte se tait.
+ */
+function docOuvertureTraitee(snapshot: TenantSnapshot, projectId: string): boolean {
+  const aUnDocument = snapshot.documents.some(doc => {
+    if (String(doc.project_id) !== projectId || doc.doc_statut === 'perime') return false;
+    const haystack = ` ${normalizeEvidence([doc.name, doc.description, doc.doc_type].filter(Boolean).join(' '))} `;
+    return DOC_TERMS.some(term => haystack.includes(` ${normalizeEvidence(term)} `));
+  });
+  if (aUnDocument) return true;
+  return snapshot.phaseHistory.some(h => {
+    if (String(h.project_id) !== projectId) return false;
+    const audit = h.control_audit;
+    if (!audit || typeof audit !== 'object') return false;
+    if (Array.isArray(audit.forced?.rule_ids) && audit.forced.rule_ids.includes(DOC_RULE_ID)) return true;
+    return Array.isArray(audit.controls) && audit.controls.some((c: Row) =>
+      c?.rule?.id === DOC_RULE_ID
+      && (c.answer?.status === 'done' || (c.answer?.status === 'not_required' && String(c.answer?.justification ?? '').trim() !== '')));
+  });
 }
 
 /** Après sa fin, un accord-cadre dont le minimum n'est pas atteint reste signalé ce nombre de jours. */
@@ -507,6 +540,39 @@ export const ALERT_RULES: AlertRuleDef[] = [
       });
     },
   },
+  {
+    code: 'doc_ouverture_chantier_manquante',
+    label: "Ouverture de chantier sans DOC déposée",
+    description:
+      "Une affaire est entrée en préparation de chantier (VISA) ou en chantier (DET) sans qu'aucune déclaration d'ouverture de chantier (DOC) ne figure dans ses documents, " +
+      "et sans que le contrôle de changement de phase ait été validé, déclaré sans objet ou forcé.",
+    defaultSeverity: 'warning',
+    defaultThresholdDays: 14,
+    evaluate(snapshot, thresholdDays) {
+      const alerts: DetectedAlert[] = [];
+      for (const project of snapshot.projects) {
+        if (project.status === 'Completed') continue;
+        const projectId = String(project.id);
+        const current = snapshot.phaseHistory.find(h => String(h.project_id) === projectId && !h.exited_at);
+        if (!current || !DOC_PHASES.has(String(current.phase || '').toUpperCase())) continue;
+        if (docOuvertureTraitee(snapshot, projectId)) continue;
+        const entry = firstPhaseEntry(snapshot, projectId, DOC_PHASES);
+        const elapsed = daysSince(entry?.entered_at, snapshot.now);
+        if (elapsed === null || elapsed < thresholdDays) continue;
+        alerts.push({
+          dedupKey: `doc_ouverture_chantier_manquante:${project.id}`,
+          title: `DOC non déposée : ${projectLabel(project)}`,
+          message:
+            `L'affaire « ${projectLabel(project)} » est en phase ${current.phase} depuis ${elapsed} jours ` +
+            `sans déclaration d'ouverture de chantier (DOC, CERFA 13407) dans ses documents. ` +
+            `Déposez-la en mairie et ajoutez-la aux documents de l'affaire, ou indiquez dans le contrôle de phase qu'elle est sans objet.`,
+          targetType: 'project',
+          targetId: projectId,
+        });
+      }
+      return alerts;
+    },
+  },
 ];
 
 export const ALERT_RULES_BY_CODE = new Map(ALERT_RULES.map(r => [r.code, r]));
@@ -522,10 +588,10 @@ async function selectAll(supabaseAdmin: SupabaseClient, table: string, tenantId:
 }
 
 export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId: string, now = new Date()): Promise<TenantSnapshot> {
-  const [projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches] =
+  const [projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches, documents] =
     await Promise.all([
       selectAll(supabaseAdmin, 'projects', tenantId, 'id, name, status, start_date, end_date, project_code'),
-      selectAll(supabaseAdmin, 'project_phase_history', tenantId, 'project_id, phase, entered_at, exited_at'),
+      selectAll(supabaseAdmin, 'project_phase_history', tenantId, 'project_id, phase, entered_at, exited_at, control_audit'),
       selectAll(supabaseAdmin, 'contrats_moe', tenantId, 'id, project_id, status, numero, intitule_projet, date_debut, created_at'),
       selectAll(supabaseAdmin, 'invoices', tenantId, 'id, project_id, status, due_date, invoice_number, amount, total_amount'),
       selectAll(supabaseAdmin, 'proposals', tenantId, 'id, title, status, created_at, date_modification'),
@@ -541,8 +607,14 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
         supabaseAdmin, 'marches_entreprises', tenantId,
         'id, project_id, type_marche, parent_marche_id, accord_cadre_groupe_id, entreprise_nom, lot_numero, montant_ht, statut, statut_signature, montant_mini_ht, montant_maxi_ht, date_fin_accord_cadre',
       ),
+      // Plus de 1 000 documents par cabinet est courant : lecture par pages (voir selectAllPages).
+      selectAllPages(() => supabaseAdmin.from('documents').select('id, project_id, name, description, doc_type, doc_statut').eq('tenant_id', tenantId).not('project_id', 'is', null) as any)
+        .then(({ data, error }) => {
+          if (error) console.error(`[agentAlerts] lecture de documents impossible pour ${tenantId}: ${error.message}`);
+          return data as Row[];
+        }),
     ]);
-  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches };
+  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches, documents };
 }
 
 export interface RuleSetting {
