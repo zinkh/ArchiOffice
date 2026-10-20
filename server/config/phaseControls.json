@@ -375,6 +375,21 @@
       "dueOffsetDays": 0
     },
     {
+      "id": "doc-ouverture-chantier",
+      "title": "Déclaration d’ouverture de chantier (DOC) déposée en mairie",
+      "from": "VISA",
+      "to": "DET",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "ouverture de chantier",
+        "déclaration d’ouverture",
+        "CERFA 13407"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
       "id": "os",
       "title": "Ordre de service de démarrage",
       "from": "VISA",

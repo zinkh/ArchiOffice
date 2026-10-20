@@ -17,6 +17,23 @@ describe('phase control engine', () => {
     c.context.erp = true;
     expect(applicableRules(c, 'APS', 'APD').some(r => r.id === 'securite')).toBe(true);
   });
+  it('reminds to file the déclaration d’ouverture de chantier before entering the works phase', () => {
+    const c = config();
+    const missing = evaluateControls(c, 'VISA', 'DET', []).find(r => r.rule.id === 'doc-ouverture-chantier')!;
+    expect(missing.rule.required).toBe(true);
+    // Sans réponse : à vérifier, jamais conforme d'office, et aucune preuve suggérée.
+    expect(missing.group).toBe('verify');
+    expect(missing.candidates).toEqual([]);
+    // Aucune alerte avant la fin de la consultation, ni en revenant en arrière.
+    expect(applicableRules(c, 'ACT', 'VISA').some(r => r.id === 'doc-ouverture-chantier')).toBe(false);
+    expect(applicableRules(c, 'DET', 'VISA')).toEqual([]);
+    // Un fichier déposé n'est qu'une preuve suggérée : jamais validé d'office.
+    const found = evaluateControls(c, 'VISA', 'DET', [{ id: 'd1', name: 'Déclaration d’ouverture de chantier.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!;
+    expect(found.candidates.map(d => d.id)).toEqual(['d1']);
+    expect(found.group).toBe('verify');
+    // Un nom de fichier qui contient seulement « doc » ne compte pas.
+    expect(evaluateControls(c, 'VISA', 'DET', [{ id: 'd2', name: 'doc.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!.candidates).toEqual([]);
+  });
   it('supports any / all predicates', () => {
     const c = config(); c.rules[0].when = { any: ['erp', 'abf'], all: ['existing'] };
     c.context = { erp: false, abf: false, existing: true };

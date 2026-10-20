@@ -17,7 +17,7 @@ Les responsables de projet (`pm`), managers et administrateurs disposent d’un 
 
 ## Scénarios et correspondance avec les phases existantes
 
-Le catalogue initial est dans `server/config/phaseControls.json`, séparé du moteur. Il couvre DIAG→ESQ, ESQ→APS, APS→APD, APD→PC, PRO→DCE, ACT→VISA, VISA→DET et DET→AOR. Le modèle existant ne possède pas de phases séparées « marchés » et « réception » : les marchés sont contrôlés à l’entrée en VISA, et les OPR/essais/DOE/DIUO/PV/réserves/DGD à l’entrée en AOR. Aucun nouvel état métier n’est imposé aux documents ou contrats existants.
+Le catalogue initial est dans `server/config/phaseControls.json`, séparé du moteur. Il couvre DIAG→ESQ, ESQ→APS, APS→APD, APD→PC, PRO→DCE, ACT→VISA, VISA→DET et DET→AOR. Le modèle existant ne possède pas de phases séparées « marchés » et « réception » : les marchés sont contrôlés à l’entrée en VISA, le dépôt de la déclaration d’ouverture de chantier (DOC) à l’entrée en DET, et les OPR/essais/DOE/DIUO/PV/réserves/DGD à l’entrée en AOR. Aucun nouvel état métier n’est imposé aux documents ou contrats existants.
 
 Un saut ESQ→APD inclut aussi les contrôles de l’entrée en APS. Un retour vers une phase précédente est historisé, sans contrôles de passage en avant. Lors d’un nouveau passage en avant, une nouvelle checklist est réalisée. Sans historique, la phase de départ est ESQ.
 
