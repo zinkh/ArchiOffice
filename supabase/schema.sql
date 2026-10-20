@@ -1,4 +1,4 @@
--- =====================================================
+-- ============================================================
 -- ArchiOffice SaaS — Schema Supabase PostgreSQL
 -- À exécuter dans le SQL Editor du dashboard Supabase
 -- ============================================================
@@ -1519,7 +1519,7 @@ DROP POLICY IF EXISTS "tenant_isolation" ON project_site_panels;
 CREATE POLICY "tenant_isolation" ON project_site_panels
   USING (tenant_id = my_tenant_id());
 -- Les colonnes de mentions de `permits` sont ajoutées par migrate_panneaux.sql (la table permits est créée par une migration).
-=======
+
 -- ============================================================
 -- MIGRATION : atelier DOE (onglet AOR)
 -- Sollicitation des entreprises, relances automatiques, analyse et visa des
