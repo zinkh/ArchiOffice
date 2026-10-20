@@ -472,6 +472,23 @@
       "dueOffsetDays": 0
     },
     {
+      "id": "daact",
+      "title": "Déclaration attestant l’achèvement et la conformité des travaux (DAACT) déposée en mairie",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "DAACT",
+        "achèvement et la conformité",
+        "achèvement et conformité",
+        "déclaration d’achèvement",
+        "CERFA 13408"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
       "id": "opr",
       "title": "OPR réalisées avant réception",
       "from": "DET",
