@@ -39,6 +39,7 @@ import { useSettings } from './hooks/useSettings';
 // upfront bundle.
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const DepotOffres = lazy(() => import('./pages/DepotOffres'));
+const DepotDoe = lazy(() => import('./pages/DepotDoe'));
 const Projects = lazy(() => import('./pages/Projects'));
 const Proposals = lazy(() => import('./pages/Proposals'));
 const Invoices = lazy(() => import('./pages/Invoices'));
@@ -671,6 +672,8 @@ export default function App() {
             <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
             {/* Espace de dépôt des offres : page publique, accessible par lien personnel sans compte. */}
             <Route path="/depot/:token" element={<DepotOffres />} />
+            {/* Dépôt du DOE par une entreprise : même principe, lien personnel sans compte. */}
+            <Route path="/doe/:token" element={<DepotDoe />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />

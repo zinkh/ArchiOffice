@@ -17,8 +17,9 @@ import { useTranslation } from 'react-i18next';
 import {
   IconArrowLeft, IconRobot, IconChevronDown, IconAlertTriangle, IconSend, IconDownload,
   IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconX, IconMicrophone,
-  IconPlayerStopFilled, IconRefresh,
+  IconPlayerStopFilled, IconMessagePlus,
 } from '@tabler/icons-react';
+import { AttachedDocChips } from './AttachedDocChips.js';
 import { apiFetch } from '@/src/lib/api';
 import {
   AgentAvatar, MessageBubble, DocumentPicker, downloadArtifact, ARTIFACT_TYPE_LABELS,
@@ -142,6 +143,7 @@ export default function AgentChatPage() {
   const [loading, setLoading] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [uploadingFile, setUploadingFile] = useState<string | null>(null);
   const [tokenBalance, setTokenBalance] = useState<number | null>(null);
   const [attachedDocs, setAttachedDocs] = useState<DocMeta[]>([]);
   const [selectedArtifact, setSelectedArtifact] = useState<AgentArtifact | null>(null);
@@ -353,7 +355,7 @@ export default function AgentChatPage() {
         </div>
         {tokenBalance !== null && (
           <div className="hidden sm:block text-[11px] shrink-0" style={{ color: 'var(--tblr-muted)' }}>
-            {(tokenBalance / 100).toFixed(2)} € de crédits IA restants
+            {t('agent_chat_credits', { amount: (tokenBalance / 100).toFixed(2) })}
           </div>
         )}
         <button
@@ -362,7 +364,7 @@ export default function AgentChatPage() {
           className="min-h-11 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[0.75rem] shrink-0 hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
           style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
         >
-          <IconRefresh size={13} /> {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
+          <IconMessagePlus size={15} style={{ color: 'var(--tblr-primary)' }} /> {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
         </button>
       </div>
 
@@ -417,21 +419,31 @@ export default function AgentChatPage() {
                 <span className="truncate">{dictation.interim || t(dictation.status === 'transcribing' ? 'agent_voice_transcribing' : 'agent_voice_listening')}</span>
               </div>
             )}
-            <div className="flex gap-2 items-end">
+            {uploadingFile && (
+              <div className="flex items-center gap-2 text-[11px] mb-1.5" style={{ color: 'var(--tblr-muted)' }}>
+                <div className="w-3 h-3 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
+                {t('agent_chat_uploading', { name: uploadingFile })}
+              </div>
+            )}
+            <AttachedDocChips attached={attachedDocs} onDetach={id => setAttachedDocs(prev => prev.filter(d => d.id !== id))} />
+            <div className="flex gap-1 items-end">
               <DocumentPicker
                 attached={attachedDocs}
                 onAttach={doc => setAttachedDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc])}
                 onDetach={id => setAttachedDocs(prev => prev.filter(d => d.id !== id))}
+                onUploading={setUploadingFile}
+                onError={setErrorMsg}
               />
               {dictation.supported && (
                 <button
                   onClick={dictation.toggle}
                   disabled={loading || dictation.status === 'transcribing'}
-                  className="p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+                  className="inline-flex items-center justify-center w-11 h-11 shrink-0 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
                   title={t(dictation.status === 'listening' ? 'agent_voice_stop' : 'agent_voice_start') as string}
+                  aria-label={t(dictation.status === 'listening' ? 'agent_voice_stop' : 'agent_voice_start') as string}
                   style={{ color: dictation.status === 'listening' ? '#c92a2a' : 'var(--tblr-muted)' }}
                 >
-                  {dictation.status === 'listening' ? <IconPlayerStopFilled size={15} /> : <IconMicrophone size={15} />}
+                  {dictation.status === 'listening' ? <IconPlayerStopFilled size={18} /> : <IconMicrophone size={20} />}
                 </button>
               )}
               <textarea
@@ -442,8 +454,8 @@ export default function AgentChatPage() {
                 onKeyDown={handleKeyDown}
                 placeholder={t('agent_chat_placeholder') as string}
                 aria-label={t('agent_chat_message_label')}
-                className="flex-1 resize-none rounded-lg px-3 py-2 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
-                style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', minHeight: 36, maxHeight: 140 }}
+                className="flex-1 min-w-0 resize-none rounded-lg px-3 py-[9px] text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
+                style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)', minHeight: 44, maxHeight: 140 }}
                 onInput={e => {
                   const el = e.currentTarget;
                   el.style.height = 'auto';
@@ -455,11 +467,11 @@ export default function AgentChatPage() {
                 onClick={sendMessage}
                 aria-label={t('agent_chat_send')}
                 disabled={!input.trim() || loading || loadingHistory || resetBusy}
-                className="p-2 rounded-lg transition-colors flex items-center justify-center"
+                className="w-11 h-11 shrink-0 rounded-lg transition-colors flex items-center justify-center"
                 style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading || loadingHistory || resetBusy ? 0.5 : 1 }}
                 title={`${t('agent_chat_send')} (Ctrl+Entrée)`}
               >
-                <IconSend size={16} />
+                <IconSend size={20} />
               </button>
             </div>
           </div>

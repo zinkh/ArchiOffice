@@ -108,7 +108,7 @@ export function tableauMontants(r: RenduPdf, y: number, titre: string, lignes: [
   return finY(r.pdf, y) + 5;
 }
 
-function paragraphe(r: RenduPdf, y: number, titre: string, texte: string): number {
+export function paragraphe(r: RenduPdf, y: number, titre: string, texte: string): number {
   const pdf = r.pdf;
   const largeur = pdf.internal.pageSize.getWidth() - MARGE * 2;
   const lignes = pdf.splitTextToSize(texte, largeur) as string[];

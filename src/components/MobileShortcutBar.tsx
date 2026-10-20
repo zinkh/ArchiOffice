@@ -35,7 +35,9 @@ const SHORTCUTS = [
  * concurrente — ce bouton global se masque sur mobile (voir AgentChat.tsx)
  * précisément parce que cette pastille le remplace. N'apparaît pas sur les
  * routes plein écran (fiche projet, chat d'agent) qui gèrent déjà tout leur
- * espace vertical.
+ * espace vertical. Boutons de 48 px et icônes de 24 px (pastille d'environ
+ * 60 px de haut) : le pouce, d'une main et en extérieur. Le panneau du chat
+ * se tient 88 px au-dessus du bas de l'écran pour ne pas la recouvrir.
  */
 export function MobileShortcutBar() {
   const location = useLocation();
@@ -56,7 +58,7 @@ export function MobileShortcutBar() {
   }, [currentUser?.email]);
 
   const itemClass = (isActive: boolean) => cn(
-    'relative flex items-center justify-center w-10 h-10 rounded-full transition-colors shrink-0',
+    'relative flex items-center justify-center w-12 h-12 rounded-full transition-colors shrink-0',
     isActive ? 'bg-white text-zinc-900' : 'text-white/85 hover:text-white'
   );
 
@@ -66,7 +68,7 @@ export function MobileShortcutBar() {
       style={{ bottom: 'calc(14px + env(safe-area-inset-bottom, 0px))' }}
     >
       <div
-        className="flex items-center gap-1 px-1.5 py-1.5 rounded-full pointer-events-auto"
+        className="flex items-center gap-0.5 px-1.5 py-1.5 rounded-full pointer-events-auto"
         style={{ background: '#15171c', boxShadow: '0 8px 24px rgba(0,0,0,.28)' }}
       >
         {SHORTCUTS.map(item => {
@@ -74,7 +76,7 @@ export function MobileShortcutBar() {
           const Icon = item.icon;
           return (
             <Link key={item.path} to={item.path} aria-label={item.label} className={itemClass(isActive)}>
-              <Icon size={19} />
+              <Icon size={24} />
               {item.path === '/messages' && unreadMessages > 0 && (
                 <span
                   className="absolute -top-0.5 -right-0.5 min-w-[13px] h-[13px] px-[3px] rounded-full text-[0.6875rem] font-bold text-white flex items-center justify-center leading-none"
@@ -87,7 +89,7 @@ export function MobileShortcutBar() {
           );
         })}
         <button type="button" onClick={() => openChat()} aria-label="Agents" className={itemClass(false)}>
-          <IconRobot size={19} />
+          <IconRobot size={24} />
         </button>
       </div>
     </nav>

@@ -116,6 +116,7 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `AGENT_MAIL_INBOX_HOST/PORT/USERNAME/PASSWORD` | Optional | Shared IMAP mailbox for inbound "forward an email to an agent" (`server/agentMailInbox.ts`) — job inactive unless all four are set |
 | `AGENT_MAIL_INBOX_ALIAS_DOMAIN` | Optional | Fallback domain for the `agents+<slug>@…` alias, used only by a tenant that has not set its own (`settings.mail_inbox_domain`, `/settings` > Agents IA) |
 | `AGENT_MAIL_INBOX_FOLDER` / `AGENT_MAIL_INBOX_POLL_MINUTES` | Optional | IMAP folder polled (default `INBOX`) and poll cadence in minutes (default 3) |
+| `DOE_REMINDERS_INTERVAL_HOURS` | Optional | Cadence du cycle des relances automatiques de l'atelier DOE (défaut 6 h) |
 | `PORT` | Optional | Server port (default 8080 in Docker) |
 | `DISABLE_HMR` | Optional | Set `true` to disable Vite HMR |
 
@@ -377,6 +378,66 @@ Les deux lisent maintenant `invoice.client_id` via `loadInvoiceClientContact`
 (`InvoiceGenerator.tsx` pour l'export local, `buildEnInvoice` pour l'envoi
 SuperPDP) ; Chorus Pro (B2G, identifié par SIRET seul) gagne le même repli
 en plus de celui déjà existant sur `projects.client_siret`.
+
+### Atelier DOE (onglet AOR)
+
+L'ancienne carte « Dossier des ouvrages exécutés » (un tableau de documents, un avis à la main) est remplacée par
+`src/components/aor/DoeAtelier.tsx` : le cabinet **sollicite** les entreprises, **relance** automatiquement, **analyse et
+valide** les documents reçus, **vise** chaque dossier et **transmet une archive** au maître d'ouvrage. Migration
+`supabase/migrate_doe_atelier.sql` (trois tables hors `SYNC_TABLES`, quatre colonnes sur `documents`). Une instance non
+migrée lit un atelier vide (`disponible: false`) et refuse l'écriture en 503.
+
+- **Les fichiers restent des lignes de `documents`** (`doc_type = 'DOE'`, `contact_id` = clé de l'entreprise comme avant) :
+  même stockage (Supabase ou espace du cabinet via `storeBusinessFile`, rangés sous `<affaire>/AOR/DOE/<entreprise>`), même
+  quota, même suppression (`DELETE /api/documents/:id`). Colonnes ajoutées : `doe_piece`, `doe_lot_id`, `doe_request_id`,
+  `doe_source` (`entreprise` | `cabinet`). Le visa est un document `DOE_VISA`, l'archive un document `DOE_ARCHIVE` : ils
+  n'entrent jamais dans la liste des documents d'une entreprise.
+- **Le statut se déduit, il n'est jamais saisi** (`statutEntreprise`, `src/lib/doeAtelier.ts`, testé) : à solliciter,
+  sollicitée, incomplet, à analyser, à corriger, conforme, visé. Une entreprise = un `contact_id` (ou nom) des lots du projet,
+  lus par `server/doe/dossier.ts` (`chargerDossier`, seule lecture partagée par l'écran, les relances, le visa et l'archive).
+  Un visa **défavorable** laisse le dossier « à corriger » ; un document déposé **après** un visa rouvre l'analyse.
+- **Pièces attendues** (`DOE_PIECES` : plans conformes à l'exécution, notices, fiches techniques, PV d'essais, attestations,
+  garanties) : exigées par défaut sauf attestations, réglables par opération (`doe_settings.required_pieces`).
+- **Sollicitation par lien personnel sans compte** (`/doe/:token`, `src/pages/DepotDoe.tsx`, route publique hors
+  `ProtectedLayout`), sur le patron du dépôt des offres : jeton `doe_…` dont seul le SHA-256 est stocké, un seul lien actif par
+  entreprise (index unique partiel), **renvoyer le lien en crée un nouveau et révoque l'ancien**. Contrairement au dépôt des
+  offres, **aucune condition de plan, de marché ou de stockage externe** : un DOE se remet aussi en marché public. Le portail
+  contrôle les octets (`server/doe/fileRules.ts` : PDF, Word, Excel, ODS, ODT, plus JPEG et PNG vérifiés à leur signature,
+  jamais DWG ni DXF), refuse un lot étranger, accuse réception par e-mail, prévient les personnes de l'affaire, **n'écrit
+  que dans `documents`** et **ne refuse jamais un dépôt tardif**. Une entreprise ne retire que ses propres documents non
+  encore analysés. Le quota de documents du cabinet s'applique (503 neutre sinon).
+- **Relances automatiques** (`server/doe/relances.ts`, `startDoeReminders`, toutes les 6 h, `DOE_REMINDERS_INTERVAL_HOURS`) :
+  une relance part quand l'intervalle est écoulé (7 jours par défaut, 2 à 60) depuis la dernière, tant que le dossier attend
+  l'entreprise (`sollicitee`, `partiel`, `a_corriger`), dans la limite du plafond (4 par défaut, 10 au plus), et jamais pour une
+  demande jamais envoyée, révoquée, expirée, sans adresse, ou d'un cabinet suspendu. Chaque relance **crée un nouveau lien**
+  (le jeton n'est pas conservé), cite les pièces encore manquantes et les observations sur les documents refusés. La demande
+  est « prise » par une mise à jour conditionnelle (`revoked_at IS NULL`) : deux processus ne l'envoient pas deux fois. **Si le
+  message ne part pas, l'ancien lien est rendu valable et rien n'est compté.** L'envoi passe par le SMTP du cabinet
+  (`server/doe/mail.ts`), jamais par un compte personnel : une relance part sans session humaine.
+- **Analyse = suggestion, jamais avis** (`POST /api/projects/:id/doe/analyser`, sans modèle ni coût, lecture du texte par
+  `lireTexteDepot`) : reconnaît la pièce d'après le nom et le texte (`classerPiece`), classe un document **non classé**
+  quand la confiance atteint 0,5, signale scan sans texte, texte très court, pièce non reconnue ou différente de celle
+  déclarée, plan DWG/DXF et doublon. L'avis par document (favorable, avec observations, défavorable, `validation_status`)
+  et ses observations (`validation_comments`, transmises à l'entreprise sur la page de dépôt) restent un geste de
+  l'architecte (`PUT /api/doe/documents/:id`).
+- **Visa** (`POST /api/projects/:id/doe/visas`) : avis favorable, favorable avec observations ou défavorable. Un visa
+  favorable **exige** toutes les pièces exigées et un avis sur chaque document (409 sinon) ; le défavorable est toujours
+  possible. Le numéro `DOE-AAAA-NNN` est **réservé par l'insertion de la ligne** (index unique `(tenant_id, numero)`, nouvel essai
+  au conflit), pas par `next_document_number` dont la liste de séries est fermée côté SQL ; le numéro réservé est rendu si le PDF
+  ou son dépôt échoue. Le PDF (`src/lib/doePdf.ts`, charte du cabinet, « P1|2 ») photographie les pièces et les avis au moment
+  du visa, il est déposé comme document de l'affaire, et peut partir par e-mail à l'entreprise (avec, pour un défavorable, un
+  nouveau lien de correction qui ne compte pas comme une relance).
+- **Archive pour le maître d'ouvrage** (`POST /api/projects/:id/doe/archive`, `server/doe/archive.ts`, `jszip`) :
+  `00 - Bordereau de transmission.pdf`, `01 - Plans de la maitrise d'oeuvre/` (plans AOR les plus récents, ou tous : un plan
+  remplacé par une version suivante via `parent_id` n'est pas joint), `02 - DOE des entreprises/<lots> - <entreprise>/<pièce>/`
+  (jamais un document refusé), `03 - Visas/`. **Seuls les dossiers visés y entrent** ; en joindre d'autres est un choix explicite,
+  et transmettre sans eux demande une confirmation (409 `dossiers_non_vises`). Les réserves (dossier non visé, visé avec
+  observations, fichier introuvable) sont portées au bordereau. Plafond de 300 Mo en mémoire (413 sinon) ; l'archive est
+  enregistrée comme document, téléchargeable, et envoyée en pièce jointe seulement sous 20 Mo, sinon l'écran le dit.
+- **Tests** : `src/lib/__tests__/doeAtelier.test.ts` (statuts, relances, classement, archive, messages) et
+  `tests/doeAtelier.test.ts` (routes du cabinet et portail public sur un drive en mémoire, nodemailer remplacé).
+- **Pas encore fait** : lecture OCR des DOE scannés (ils sont signalés « sans texte », pas lus), pièces attendues propres à
+  chaque lot, visa groupé de plusieurs entreprises, envoi du lien par un compte mail personnel.
 
 ### Réserves de chantier : fiche, photos, export PDF
 
@@ -4018,6 +4079,17 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   toléré que dans une pastille de taille fixe (initiales dans un cercle
   `w-5 h-5`). `--tracking-wider` est ramené à 0,03 em dans `@theme`, et `h1`/
   `h2` sont légèrement resserrés. Les majuscules et couleurs Tabler restent.
+
+### Chat des agents : pièces jointes, rappels, nouvelle discussion
+
+Panneau (`AgentChat.tsx`) et page (`AgentChatPage.tsx`) partagent les mêmes briques. Règles à garder :
+
+- **Trombone = menu** (`DocumentPicker`) : prendre une photo (`capture`, visible au doigt seulement, `pointer-coarse:`), choisir un fichier, ou reprendre un document de la GED. Le téléversement passe par `uploadChatDocument` (`chatUpload.ts`, `POST /api/documents`, catégorie « Assistant IA »). Avant, seul le glisser-déposer envoyait un fichier : rien n'existait sur téléphone. Les pièces jointes sont une rangée dans le flux (`AttachedDocChips`), pas une couche en position absolue.
+- **Contrôles de saisie à 44 px** (trombone, micro, champ, envoi) sur un même axe ; libellé du champ « Votre message… » (16 px au doigt, donc on raccourcit le texte plutôt que la police).
+- **Rappels IA repliés** derrière une ligne d'alerte avec une flèche (état mémorisé dans `localStorage`, `agent_chat_suggestions_open`) ; cliquer « Rédiger un rappel » referme la liste et remplit le champ.
+- **« Nouvelle discussion »** (clé `agent_chat_clear`, bouton d'en-tête) **supprime** la conversation en cours après confirmation : l'historique des discussions n'existe pas encore (voir ROADMAP.md, « Saved conversation history »). Ne pas laisser croire à un archivage.
+- **Bouton « Arrêter »** (`ChatRequestStatus`) : petite pastille, zone de touche de 44 px par `before:-inset-2`.
+- **Le bouton flottant « Assistants IA » est masqué sur `/agents/:id/chat`** (il recouvrait l'envoi). Le panneau se tient 88 px au-dessus du bas, au-dessus de la pastille mobile de 60 px (`MobileShortcutBar`, boutons de 48 px).
 
 ### Maps
 

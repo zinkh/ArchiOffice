@@ -73,6 +73,7 @@ Model calls go through one provider-neutral layer, `packages/archioffice-agents/
 | "Latest" / "Default" model alias per provider (Gemini, Mistral, Claude) | ⏳ | Planned, not built. Today every selectable model is a pinned id in `MODEL_CATALOG`, so following a provider's new release means a code change. See "Latest and default model aliases" below. |
 | BYOK (tenants bringing their own API key) | ⏳ | Designed, not built — see below. |
 | Speech synthesis (TTS) native per provider | ⏳ | Always Gemini today, regardless of the tenant's active chat provider — see below. |
+| Saved conversation history per agent | ⏳ | Planned, not built. "Nouvelle discussion" deletes the current conversation for good; there is no list of past discussions. See "Saved conversation history" below. |
 
 ### Latest and default model aliases — planned
 
@@ -84,6 +85,17 @@ Goal: let the operator (and later a tenant) pick "Latest" or "Default" for Gemin
 - **Fallback.** If a `latest` alias is rejected by the provider (retired or renamed), fall back to that provider's `default` instead of failing the request, and report it in `/admin`.
 - **Admin UI.** Add "Latest" and "Default" entries to the model picker of **Fournisseur IA** in `/admin`, with a short note that "Latest" can change behaviour and cost without a deployment.
 - **Open question.** Whether `latest` should be allowed for a tenant-level choice, or stay a platform operator setting only, given its effect on billing.
+
+### Saved conversation history — planned
+
+Goal: starting a "Nouvelle discussion" with an agent should keep the previous one, so the architect can find an earlier exchange (a proposal drafted, a decision, a figure) instead of losing it. Today there is one conversation per person and agent, and **"Nouvelle discussion" deletes it irreversibly** (`DELETE /api/agents/:id/conversation`, after a confirmation that says so). Nothing is built.
+
+- **Archive instead of delete.** Starting a new discussion closes the current conversation (an archived state, with a date and an automatic title taken from the first message) and opens an empty one. The confirmation dialog can then drop the "irreversible" warning.
+- **A history screen.** A list of past discussions per agent in the chat panel and on `/agents/:id/chat` (date, title, number of messages), read-only by default, with "reprendre cette discussion" to continue one. Search by keyword across a person's own discussions.
+- **Same rights as today.** A conversation stays private to the person who held it, within the active tenant (`X-Tenant-Id`); an agent never reads another person's history. Tools already called keep their own audit trail through the activity log.
+- **Cost and context.** Only the resumed conversation is sent to the model; archived ones cost nothing. Resuming a very long one needs a cap or a summary so the context window and the prepaid AI credit (reserve, run, settle) stay predictable.
+- **Retention and GDPR.** Define a retention period (and an owner-controlled "supprimer définitivement" per discussion). Archived conversations must be included in the tenant export and in the purge on tenant closure (`server/tenantExport.ts`, `server/tenantPurge.ts`).
+- **To check before building.** How `agent_conversations` and `agent_messages` are keyed today (one row per person and agent, which this would replace by many), and how the offline cache and the draft saved in `localStorage` per agent behave across several conversations.
 
 ### Project sharing with a co-contractor — planned
 
