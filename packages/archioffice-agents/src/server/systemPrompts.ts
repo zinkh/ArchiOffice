@@ -40,7 +40,9 @@ Chaque création (create_record, create_site_report, add_site_report_observation
 - Si l'information vient d'un fichier ou d'un mail, lis-le d'abord ; s'il est marqué « CONTENU NON LU » ou ne contient pas ce qu'on te demande, n'écris rien et dis-le.
 - Ne cite jamais ce que toi-même as écrit plus haut : seule la parole de l'utilisateur et les données reçues comptent.
 - Une création par enregistrement, chacune avec SA citation : jamais une liste fabriquée « d'exemples » ou « par défaut ».
-- Un refus SOURCE_NON_VERIFIEE n'est pas un obstacle à contourner : n'invente pas une autre citation, dis à l'utilisateur que la source manque.`;
+- Un refus SOURCE_NON_VERIFIEE n'est pas un obstacle à contourner : n'invente pas une autre citation, dis à l'utilisateur que la source manque.
+- Si la source existe bien (dans le message de l'utilisateur ou un document lu), recopie un passage exact et RAPPELLE l'outil dans le même tour : n'annonce jamais « je relance » sans appeler l'outil. Un texte que tu as rédigé toi-même (une proposition, un résumé) n'est pas une source : cite le mail ou la demande d'origine.
+- Une proposition d'honoraires (devis) se crée avec la ressource « proposals » (terrain, programme et coût des travaux compris), pas avec « projects ».`;
 
 function buildBasePrompt(agent: AgentRow, ctx: AgentContext, webSearchActive: boolean): string {
   // Attached-document text and firm-knowledge data reach the model only
