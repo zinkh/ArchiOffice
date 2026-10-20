@@ -60,6 +60,7 @@ import { db } from '../db';
 import type { Project, ProjectStakeholder, Milestone, Invoice, ProjectCategory, OrdreDeService, AvenantMoe, Visa, Reception, Tender, Reserve, GpaReserve, Permit, Rfi, Plan, DocumentPhase, ProjectPhaseHistoryEntry } from '../types';
 import { ReserveTracker } from '../components/pro/ReserveTracker';
 import { ReprendreObservationsBanner } from '../components/pro/ReprendreObservationsBanner';
+import { DoeAtelier } from '../components/aor/DoeAtelier';
 import { RESERVE_STATUSES, reserveStatusKey } from '../components/pro/reserveShared';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
@@ -495,15 +496,6 @@ export default function ProjectDetail() {
     setShowPvForm(true);
   };
 
-  // DOE documents state
-  const [doeDocuments, setDoeDocuments] = useState<any[]>([]);
-  const doeInputRef = useRef<HTMLInputElement>(null);
-  const [doeUploading, setDoeUploading] = useState(false);
-  const [doeContactId, setDoeContactId] = useState('');
-  const [doeExpandedGroups, setDoeExpandedGroups] = useState<Record<string, boolean>>({});
-  const [editingDoeId, setEditingDoeId] = useState<string | null>(null);
-  const [editDoeContactId, setEditDoeContactId] = useState('');
-  const [editDoeComments, setEditDoeComments] = useState('');
 
   useEffect(() => {
     if (project && !project.is_chantier && (CHANTIER_ONLY_TABS as readonly string[]).includes(activeTab)) {
@@ -796,12 +788,6 @@ export default function ProjectDetail() {
     };
   }, [id]);
 
-  useEffect(() => {
-    if (activeTab === 'AOR' && id) {
-      fetchDoeDocuments();
-    }
-  }, [activeTab, id]);
-
   // Memoized derived data — these were recomputed inline with filter()/reduce()
   // in several places in the JSX below (up to 4x for the MOE avenants alone),
   // rescanning ordresDeService/invoices/reserves on every render even when
@@ -1000,18 +986,6 @@ export default function ProjectDetail() {
     try {
       const res = await fetch(`/api/plans?project_id=${id}`);
       if (res.ok) setPlans(await res.json());
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const fetchDoeDocuments = async () => {
-    try {
-      const res = await fetch(`/api/documents?project_id=${id}&doc_type=DOE`);
-      if (res.ok) {
-        const data = await res.json();
-        setDoeDocuments(data.filter((d: any) => d.doc_type === 'DOE'));
-      }
     } catch (err) {
       console.error(err);
     }
@@ -5469,259 +5443,8 @@ export default function ProjectDetail() {
                   </div>
                 </div>
 
-                {/* DOE — Dossier des Ouvrages Exécutés */}
-                {(() => {
-                  // Dedupe the project lots down to one entry per entreprise (contact),
-                  // for the "assign entreprise" picker.
-                  const doeEntreprises = Object.values(
-                    (project.lots_list || []).filter(l => l.contact_name).reduce((acc, l) => {
-                      const key = l.contact_id || l.contact_name!;
-                      if (!acc[key]) acc[key] = { id: key, name: l.contact_name! };
-                      return acc;
-                    }, {} as Record<string, { id: string; name: string }>)
-                  );
-                  const doeGroups = doeDocuments.reduce<Record<string, any[]>>((acc, doc) => {
-                    const key = doc.contact_name || t('projectdetail_doe_unassigned');
-                    if (!acc[key]) acc[key] = [];
-                    acc[key].push(doc);
-                    return acc;
-                  }, {});
-
-                  const updateDoeValidation = async (doc: any, fields: { validation_status?: string; validation_comments?: string; contact_id?: string; contact_name?: string }) => {
-                    const form = new FormData();
-                    form.append('name', doc.name);
-                    form.append('category', doc.category || 'DOE');
-                    form.append('description', doc.description || '');
-                    form.append('validation_status', fields.validation_status ?? doc.validation_status ?? 'pending');
-                    form.append('validation_comments', fields.validation_comments ?? doc.validation_comments ?? '');
-                    form.append('contact_id', fields.contact_id !== undefined ? fields.contact_id : (doc.contact_id || ''));
-                    form.append('contact_name', fields.contact_name !== undefined ? fields.contact_name : (doc.contact_name || ''));
-                    try {
-                      const res = await fetch(`/api/documents/${doc.id}`, { method: 'PUT', body: form });
-                      if (res.ok) await fetchDoeDocuments();
-                    } catch (err) { console.error(err); }
-                  };
-
-                  return (
-                  <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                    <CardHeader
-                      icon={IconClipboardCheck}
-                      title={t('projectdetail_doe_title')}
-                      description={t('projectdetail_doe_desc')}
-                      action={
-                      <div className="flex items-center gap-2">
-                        <select
-                          aria-label={t('projectdetail_doe_company')}
-                          value={doeContactId}
-                          onChange={e => setDoeContactId(e.target.value)}
-                          className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                        >
-                          <option value="">{t('projectdetail_doe_company_none')}</option>
-                          {doeEntreprises.map(c => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                        <input type="file" className="hidden" ref={doeInputRef} onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file || !id) return;
-                          setDoeUploading(true);
-                          try {
-                            const selected = doeEntreprises.find(c => c.id === doeContactId);
-                            const form = new FormData();
-                            form.append('file', file);
-                            form.append('name', file.name);
-                            form.append('project_id', id);
-                            form.append('doc_type', 'DOE');
-                            form.append('category', 'DOE');
-                            if (selected) {
-                              form.append('contact_id', selected.id);
-                              form.append('contact_name', selected.name);
-                            }
-                            const res = await fetch('/api/documents', { method: 'POST', body: form });
-                            if (res.ok) {
-                              await fetchDoeDocuments();
-                            } else {
-                              const err = await res.json().catch(() => null);
-                              showToast(t('projectdetail_doe_upload_failed_detail', { error: err?.error || res.statusText }), 'error', { duration: 6000 });
-                            }
-                          } catch (err) {
-                            console.error(err);
-                            showToast(t('projectdetail_doe_upload_failed'), 'error', { duration: 6000 });
-                          } finally {
-                            setDoeUploading(false);
-                            if (doeInputRef.current) doeInputRef.current.value = '';
-                          }
-                        }} />
-                        <button
-                          type="button"
-                          onClick={() => doeInputRef.current?.click()}
-                          disabled={doeUploading}
-                          aria-busy={doeUploading}
-                          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
-                        >
-                          <IconFilePlus size={14} />
-                          {doeUploading ? t('projectdetail_doe_uploading') : t('projectdetail_doe_add')}
-                        </button>
-                      </div>
-                      }
-                    />
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-sm">
-                        <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
-                          <tr>
-                            <th className="px-6 py-3 text-left">{t('projectdetail_doe_col_name')}</th>
-                            <th className="px-6 py-3 text-left">{t('projectdetail_visa_opinion')}</th>
-                            <th className="px-6 py-3 text-left">{t('projectdetail_visa_observations')}</th>
-                            <th className="px-6 py-3 text-left">{t('projectdetail_doe_col_date')}</th>
-                            <th className="px-6 py-3 text-right w-32"><span className="sr-only">{t('projectdetail_col_actions')}</span></th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-[var(--tblr-border)]">
-                          {Object.entries(doeGroups).map(([groupKey, groupDocs]) => (
-                            <React.Fragment key={groupKey}>
-                              <tr
-                                className="bg-zinc-50/50 dark:bg-zinc-800/20 hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors">
-                                <td colSpan={5} className="p-0">
-                                  <button type="button" aria-expanded={!!doeExpandedGroups[groupKey]} onClick={() => setDoeExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }))} className="w-full flex items-center gap-2 px-6 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500">
-                                    {doeExpandedGroups[groupKey] ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
-                                    <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
-                                    <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">{t('projectdetail_doe_count', { count: groupDocs.length })}</span>
-                                  </button>
-                                </td>
-                              </tr>
-                              {doeExpandedGroups[groupKey] && groupDocs.map((doc) => (
-                                <tr key={doc.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
-                                  <td className="px-6 py-4 font-medium text-[var(--tblr-text)]">{doc.name}</td>
-                                  <td className="px-6 py-4">
-                                    <span className={cn(
-                                      "px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider",
-                                      doc.validation_status === 'approved' ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" :
-                                      doc.validation_status === 'rejected' ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400" :
-                                      doc.validation_status === 'commented' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" :
-                                      "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-[var(--tblr-muted)]"
-                                    )}>
-                                      {t(`projectdetail_visa_status_${['approved', 'rejected', 'commented'].includes(doc.validation_status) ? doc.validation_status : 'pending'}`)}
-                                    </span>
-                                  </td>
-                                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 max-w-xs">
-                                    {editingDoeId === doc.id ? (
-                                      <textarea
-                                        rows={2}
-                                        autoFocus
-                                        aria-label={t('projectdetail_visa_observations')}
-                                        value={editDoeComments}
-                                        onChange={e => setEditDoeComments(e.target.value)}
-                                        className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs resize-none"
-                                      />
-                                    ) : (
-                                      <span className="truncate block max-w-48" title={doc.validation_comments}>{doc.validation_comments || <span className="italic text-[var(--tblr-muted)]">—</span>}</span>
-                                    )}
-                                  </td>
-                                  <td className="px-6 py-4 text-zinc-600 dark:text-zinc-300 text-xs">{new Date(doc.uploaded_at).toLocaleDateString('fr-FR')}</td>
-                                  <td className="px-6 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 pointer-coarse:opacity-100 transition-opacity">
-                                      {editingDoeId === doc.id ? (
-                                        <>
-                                          <select
-                                            aria-label={t('projectdetail_doe_company')}
-                                            value={editDoeContactId}
-                                            onChange={e => setEditDoeContactId(e.target.value)}
-                                            className="bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded p-1 text-xs mr-1"
-                                          >
-                                            <option value="">{t('projectdetail_doe_unassigned')}</option>
-                                            {doeEntreprises.map(c => (
-                                              <option key={c.id} value={c.id}>{c.name}</option>
-                                            ))}
-                                          </select>
-                                          <button
-                                            type="button"
-                                            title={t('projectdetail_doe_save')}
-                                            aria-label={t('projectdetail_doe_save')}
-                                            onClick={async () => {
-                                              const selected = doeEntreprises.find(c => c.id === editDoeContactId);
-                                              await updateDoeValidation(doc, {
-                                                validation_comments: editDoeComments,
-                                                contact_id: selected?.id || '',
-                                                contact_name: selected?.name || '',
-                                              });
-                                              setEditingDoeId(null);
-                                            }}
-                                            className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded"
-                                          >
-                                            <IconCheck size={14} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            title={t('projectdetail_dialog_cancel')}
-                                            aria-label={t('projectdetail_dialog_cancel')}
-                                            onClick={() => setEditingDoeId(null)}
-                                            className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                                          >
-                                            <IconX size={14} />
-                                          </button>
-                                        </>
-                                      ) : (
-                                        <>
-                                          {doc.validation_status !== 'approved' && (
-                                            <button type="button" title={t('projectdetail_visa_quick_approve')} aria-label={t('projectdetail_visa_quick_approve_named', { title: doc.name })} onClick={() => updateDoeValidation(doc, { validation_status: 'approved' })} className="p-1.5 text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors">
-                                              <IconCheck size={15} />
-                                            </button>
-                                          )}
-                                          {doc.validation_status !== 'rejected' && (
-                                            <button type="button" title={t('projectdetail_visa_quick_reject')} aria-label={t('projectdetail_visa_quick_reject_named', { title: doc.name })} onClick={() => updateDoeValidation(doc, { validation_status: 'rejected' })} className="p-1.5 text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">
-                                              <IconX size={15} />
-                                            </button>
-                                          )}
-                                          <button
-                                            type="button"
-                                            title={t('projectdetail_doe_edit')}
-                                            aria-label={t('projectdetail_doe_edit_named', { name: doc.name })}
-                                            onClick={() => {
-                                              setEditingDoeId(doc.id);
-                                              setEditDoeContactId(doc.contact_id || '');
-                                              setEditDoeComments(doc.validation_comments || '');
-                                            }}
-                                            className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded"
-                                          >
-                                            <IconEdit size={15} />
-                                          </button>
-                                          <button type="button" onClick={() => openSignedUrl(doc.file_url)} className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 transition-colors" title={t('projectdetail_doe_open')} aria-label={t('projectdetail_doe_open_named', { name: doc.name })}>
-                                            <IconExternalLink size={15} />
-                                          </button>
-                                          <button
-                                            type="button"
-                                            aria-label={t('projectdetail_doe_delete_named', { name: doc.name })}
-                                            onClick={async () => {
-                                              if (!(await confirmDelete('projectdetail_confirm_delete_doe_document'))) return;
-                                              try {
-                                                const res = await fetch(`/api/documents/${doc.id}`, { method: 'DELETE' });
-                                                if (res.ok) setDoeDocuments(prev => prev.filter(d => d.id !== doc.id));
-                                              } catch (err) { console.error(err); }
-                                            }}
-                                            className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
-                                            title={t('projectdetail_doe_delete')}
-                                          >
-                                            <IconTrash size={15} />
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
-                            </React.Fragment>
-                          ))}
-                          {doeDocuments.length === 0 && (
-                            <tr>
-                              <td colSpan={5} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">{t('projectdetail_doe_empty')}</span></td>
-                            </tr>
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                  );
-                })()}
+                {/* DOE : atelier de sollicitation, d'analyse, de visa et d'archive */}
+                <DoeAtelier projectId={id || ''} />
 
                 {/* Plans de l'opération */}
                 {(() => {

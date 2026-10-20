@@ -98,6 +98,9 @@ import { registerOrdresDeServiceRoutes } from "./server/routes/ordresDeService";
 import { registerAvenantsMoeRoutes } from "./server/routes/avenantsMoe";
 import { registerVisaRoutes } from "./server/routes/visas";
 import { registerReceptionRoutes } from "./server/routes/receptions";
+import { registerDoeAtelierRoutes } from "./server/routes/doeAtelier";
+import { registerDoeAtelierPublicRoutes } from "./server/routes/doeAtelierPublic";
+import { startDoeReminders } from "./server/doe/relances";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
 import { registerReservePhotoRoutes } from "./server/reservePhotos";
@@ -1106,6 +1109,8 @@ export async function createApp() {
   registerAvenantsMoeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerVisaRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile });
   registerReceptionRoutes(app, { supabaseAdmin, getTenantId });
+  registerDoeAtelierRoutes(app, { supabaseAdmin, getTenantId, getUserName, checkQuota, storeBusinessFile, removeBusinessFile });
+  registerDoeAtelierPublicRoutes(app, { supabaseAdmin, checkQuota, storeBusinessFile, removeBusinessFile });
   registerReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
   registerGpaReserveRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, deleteFromStorage });
   registerReservePhotoRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, deleteFromStorage });
@@ -1355,6 +1360,9 @@ async function startServer() {
     // Relance de paiement (dunning) — notice immédiate dans le webhook
     // Stancer, relance différée ici si toujours non résolu (server/dunning.ts).
     startDunning(supabaseAdmin);
+    // Relances automatiques des entreprises qui n'ont pas remis leur DOE
+    // (atelier DOE de l'onglet AOR, server/doe/relances.ts).
+    startDoeReminders(supabaseAdmin);
     // Alertes métier des agents (situations à signaler sans qu'on les
     // demande : études sans contrat signé, facture échue, réserves non
     // levées...) et exécutions planifiées d'agents.

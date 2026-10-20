@@ -25,7 +25,7 @@ export async function certificatSituation(supabaseAdmin: any, tenantId: string, 
   return calculerCertificat(sit, marche as MarcheTravaux | null, soeurs.filter((s) => s.marche_id === sit.marche_id));
 }
 
-async function chargerCharte(supabaseAdmin: any, tenantId: string): Promise<{ settings: AgencySettings; logo: any }> {
+export async function chargerCharte(supabaseAdmin: any, tenantId: string): Promise<{ settings: AgencySettings; logo: any }> {
   const { data } = await supabaseAdmin
     .from('settings')
     .select('agency_name, address, phone, email, siret, vat_number, ape, oa_number, architect_name')
@@ -54,7 +54,7 @@ async function chargerCharte(supabaseAdmin: any, tenantId: string): Promise<{ se
   return { settings, logo };
 }
 
-async function chargerOperation(supabaseAdmin: any, tenantId: string, projectId: string): Promise<OperationInfo> {
+export async function chargerOperation(supabaseAdmin: any, tenantId: string, projectId: string): Promise<OperationInfo> {
   if (!projectId) return {};
   const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects')
     .select('name, project_code, address, client')
