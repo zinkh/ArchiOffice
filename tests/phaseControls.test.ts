@@ -17,22 +17,25 @@ describe('phase control engine', () => {
     c.context.erp = true;
     expect(applicableRules(c, 'APS', 'APD').some(r => r.id === 'securite')).toBe(true);
   });
-  it('reminds to file the déclaration d’ouverture de chantier before entering the works phase', () => {
+  it('reminds to file the déclaration d’ouverture de chantier before entering the site preparation (VISA)', () => {
     const c = config();
-    const missing = evaluateControls(c, 'VISA', 'DET', []).find(r => r.rule.id === 'doc-ouverture-chantier')!;
+    const missing = evaluateControls(c, 'ACT', 'VISA', []).find(r => r.rule.id === 'doc-ouverture-chantier')!;
     expect(missing.rule.required).toBe(true);
     // Sans réponse : à vérifier, jamais conforme d'office, et aucune preuve suggérée.
     expect(missing.group).toBe('verify');
     expect(missing.candidates).toEqual([]);
-    // Aucune alerte avant la fin de la consultation, ni en revenant en arrière.
-    expect(applicableRules(c, 'ACT', 'VISA').some(r => r.id === 'doc-ouverture-chantier')).toBe(false);
-    expect(applicableRules(c, 'DET', 'VISA')).toEqual([]);
+    // Pas avant la fin de la consultation, plus une fois en VISA, ni en revenant en arrière.
+    expect(applicableRules(c, 'PRO', 'DCE').some(r => r.id === 'doc-ouverture-chantier')).toBe(false);
+    expect(applicableRules(c, 'VISA', 'DET').some(r => r.id === 'doc-ouverture-chantier')).toBe(false);
+    expect(applicableRules(c, 'VISA', 'ACT')).toEqual([]);
+    // Un saut de phase (ACT vers DET) ne contourne pas ce contrôle.
+    expect(applicableRules(c, 'ACT', 'DET').some(r => r.id === 'doc-ouverture-chantier')).toBe(true);
     // Un fichier déposé n'est qu'une preuve suggérée : jamais validé d'office.
-    const found = evaluateControls(c, 'VISA', 'DET', [{ id: 'd1', name: 'Déclaration d’ouverture de chantier.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!;
+    const found = evaluateControls(c, 'ACT', 'VISA', [{ id: 'd1', name: 'Déclaration d’ouverture de chantier.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!;
     expect(found.candidates.map(d => d.id)).toEqual(['d1']);
     expect(found.group).toBe('verify');
     // Un nom de fichier qui contient seulement « doc » ne compte pas.
-    expect(evaluateControls(c, 'VISA', 'DET', [{ id: 'd2', name: 'doc.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!.candidates).toEqual([]);
+    expect(evaluateControls(c, 'ACT', 'VISA', [{ id: 'd2', name: 'doc.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!.candidates).toEqual([]);
   });
   it('reminds to file the DAACT before entering the reception phase', () => {
     const c = config();
