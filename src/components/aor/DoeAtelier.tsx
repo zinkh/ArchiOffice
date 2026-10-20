@@ -7,7 +7,7 @@
 //   4. transmet au maître d'ouvrage une archive : plans de la maîtrise d'œuvre,
 //      DOE des entreprises, visas et bordereau.
 // Le statut de chaque entreprise est déduit côté serveur (jamais saisi).
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -26,11 +26,14 @@ import { cn } from '../../lib/utils';
 
 const dateFr = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('fr-FR') : '');
 
-export function DoeAtelier({ projectId }: { projectId: string }) {
+export function DoeAtelier({ projectId, onSummary }: { projectId: string; onSummary?: (aTraiter: number | null) => void }) {
   const { t } = useTranslation();
   const labelPiece = usePieceLabel();
   const api = useDoeAtelier(projectId);
   const { etat, chargement, erreur } = api;
+  // Nombre de dossiers qui attendent le cabinet, repris dans la barre de l'onglet AOR.
+  const aTraiter = etat?.disponible ? etat.synthese.aSolliciter + etat.synthese.aAnalyser + etat.synthese.aCorriger : null;
+  useEffect(() => { onSummary?.(aTraiter); }, [aTraiter, onSummary]);
   const { toast, showToast } = useToastWithUndo();
   const [ouvert, setOuvert] = useState<string | null>(null);
   const [visaPour, setVisaPour] = useState<string | null>(null);
