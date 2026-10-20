@@ -81,11 +81,31 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
   // Delete only actually succeeds server-side while status is Draft — a
   // proposal that's already been sent can't be deleted, only rejected.
   { key: 'proposals', label: 'Devis', basePath: '/api/proposals', create: true, update: true, delete: true, list: true, identityField: 'title',
-    knownFields: ['title', 'client_id', 'amount', 'status', 'description', 'notes', 'reference', 'vat_rate'],
+    knownFields: [
+      'title', 'client_id', 'amount', 'status', 'description', 'notes', 'reference', 'vat_rate',
+      // Opération : le terrain, le programme et le coût des travaux se saisissent ICI, sur la proposition
+      // (ils passent à l'affaire à l'acceptation) : pas besoin de créer un « projet » avant l'accord du client.
+      'projet_detail', 'type_projet', 'categorie_projet', 'surface_plancher', 'surface_plancher_ext', 'construction_cost',
+      'adresse_terrain', 'cp_ville_terrain', 'ref_cadastrale', 'zone_plu', 'surface_parcelle',
+      // Maître d'ouvrage
+      'is_entreprise', 'nom_societe', 'rcs', 'representant', 'qualite',
+      'adresse_client', 'cp_client', 'ville_client', 'telephone', 'portable', 'email_client',
+    ],
     required: ['title'],
     enums: { status: ['Draft', 'Sent', 'Accepted', 'Rejected'] },
     defaults: { status: 'Draft', amount: 0 },
-    fields: 'title*, client_id, amount, status (Draft/Sent/Accepted/Rejected), description, notes, vat_rate' },
+    fieldAliases: {
+      programme: 'projet_detail', address: 'adresse_terrain', adresse: 'adresse_terrain', adresse_projet: 'adresse_terrain',
+      parcelle: 'ref_cadastrale', surface_terrain: 'surface_parcelle', budget_travaux: 'construction_cost', cout_travaux: 'construction_cost',
+      client_email: 'email_client', client_phone: 'telephone', client_telephone: 'telephone', client_mobile: 'portable',
+      client_address: 'adresse_client', client_zip: 'cp_client', client_city: 'ville_client',
+    },
+    fields: 'title*, client_id (id du contact, à créer avant si besoin), amount (honoraires HT), status (Draft/Sent/Accepted/Rejected), description, notes, vat_rate. ' +
+      'Opération : projet_detail (programme), type_projet, categorie_projet, surface_plancher, construction_cost (coût prévisionnel des travaux). ' +
+      'Terrain : adresse_terrain, cp_ville_terrain, ref_cadastrale, zone_plu, surface_parcelle. ' +
+      "Maître d'ouvrage : adresse_client, cp_client, ville_client, telephone, portable, email_client, is_entreprise, nom_societe, rcs, representant, qualite. " +
+      "Une proposition d'honoraires (devis) se crée ICI et jamais dans « projects », réservé aux affaires acceptées. " +
+      "La répartition des honoraires par mission n'est pas écrite par l'agent : elle se règle à l'écran." },
   { key: 'projects', label: 'Projets', basePath: '/api/projects', create: true, update: true, delete: true, list: true, identityField: 'name',
     knownFields: [
       'name', 'client', 'status', 'client_id', 'budget', 'category', 'start_date', 'end_date', 'description', 'address', 'ref_cadastrale',

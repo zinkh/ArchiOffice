@@ -569,6 +569,27 @@ describe('préparation des écritures', () => {
     expect(Object.keys(prepared.data).sort()).toEqual(['amount', 'client_id', 'description', 'notes', 'status', 'title']);
   });
 
+  it('garde le terrain, le programme et le maître d\'ouvrage d\'une proposition', () => {
+    const prepared = prepareRecord(proposals, {
+      title: 'Cabinet médical, Dieulouard',
+      programme: '3 à 4 box de consultation, deux salles d\'attente',
+      adresse: '30, allée Docteur Mansuy',
+      cp_ville_terrain: '54380 Dieulouard',
+      parcelle: 'AA 618',
+      surface_terrain: '418',
+      client_email: 'moa@example.fr',
+    });
+    expect(prepared.ignoredFields).toEqual([]);
+    expect(prepared.data).toMatchObject({
+      projet_detail: '3 à 4 box de consultation, deux salles d\'attente',
+      adresse_terrain: '30, allée Docteur Mansuy',
+      cp_ville_terrain: '54380 Dieulouard',
+      ref_cadastrale: 'AA 618',
+      surface_parcelle: '418',
+      email_client: 'moa@example.fr',
+    });
+  });
+
   it('ramène un statut à sa casse canonique plutôt que de le faire rejeter', () => {
     const prepared = prepareRecord(proposals, INVENTED);
     expect(prepared.data.status).toBe('Draft');

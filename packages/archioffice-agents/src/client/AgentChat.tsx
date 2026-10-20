@@ -1,10 +1,12 @@
 import { ChatRequestStatus, ConsultedAgentLinks, type AgentConsultation } from './ChatRequestStatus.js';
+import { AttachedDocChips } from './AttachedDocChips.js';
+import { uploadChatDocument } from './chatUpload.js';
 import { useConversationReset } from './useConversationReset.js';
 import React, { useState, useEffect, useRef, createContext, useContext, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { projectIdFromPath, useOpenProjectTabs } from '@/src/lib/openProjectTabs';
 import { motion, AnimatePresence } from 'motion/react';
-import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink, IconNote, IconPencil, IconBulb } from '@tabler/icons-react';
+import { IconRobot, IconX, IconSend, IconChevronDown, IconAlertTriangle, IconPaperclip, IconFileSpreadsheet, IconFileText, IconFileTypeCsv, IconFileTypePdf, IconDownload, IconX as IconClose, IconUpload, IconArrowsMaximize, IconArrowsMinimize, IconMicrophone, IconPlayerStopFilled, IconVolume, IconExternalLink, IconNote, IconPencil, IconBulb, IconCamera, IconFolderOpen, IconMessagePlus, IconArrowLeft } from '@tabler/icons-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '@/src/lib/api';
 import { useEscapeKey } from '@/src/hooks/useEscapeKey';
@@ -381,94 +383,145 @@ export function appendDictated(current: string, addition: string): string {
   return /\s$/.test(current) ? current + clean : `${current} ${clean}`;
 }
 
-export function DocumentPicker({ attached, onAttach, onDetach }: {
+const PICKER_ROW = 'w-full min-h-11 items-center gap-3 px-3 text-[0.8125rem] text-left hover:bg-[var(--tblr-surface-2)] transition-colors';
+const UPLOAD_ACCEPT = 'image/*,.pdf,.doc,.docx,.xls,.xlsx,.xlsm,.ods,.odt,.csv,.txt';
+
+/**
+ * Trombone du chat : un petit menu plutôt qu'une simple liste. Sur téléphone il
+ * n'y avait aucun moyen d'envoyer un fichier (seul le glisser-déposer existait,
+ * et la liste ne montrait que des documents déjà dans la GED). Trois entrées :
+ * prendre une photo (appareil, téléphone seulement), choisir un fichier, ou
+ * reprendre un document du cabinet. Les pièces jointes s'affichent à part, par
+ * AttachedDocChips.
+ */
+export function DocumentPicker({ attached, onAttach, onDetach, onUploading, onError }: {
   attached: DocMeta[];
   onAttach: (doc: DocMeta) => void;
-  onDetach: (id: string) => void;
+  onDetach?: (id: string) => void;
+  /** Nom du fichier en cours d'envoi, null une fois terminé. */
+  onUploading?: (name: string | null) => void;
+  onError?: (message: string) => void;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<'menu' | 'library'>('menu');
   const [docs, setDocs] = useState<DocMeta[]>([]);
+  const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+
+  const close = () => { setOpen(false); setView('menu'); };
+  useEscapeKey(open, close);
+
+  useEffect(() => {
+    if (!open || view !== 'library') return;
+    apiFetch('/api/documents?limit=30').then((d: any) => setDocs(d?.data ?? d ?? [])).catch(() => {});
+  }, [open, view]);
 
   useEffect(() => {
     if (!open) return;
-    apiFetch('/api/documents?limit=30').then((d: any) => setDocs(d?.data ?? d ?? [])).catch(() => {});
+    const onOutside = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    document.addEventListener('pointerdown', onOutside);
+    return () => document.removeEventListener('pointerdown', onOutside);
   }, [open]);
 
-  useEffect(() => {
-    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
+  const uploadFiles = async (input: HTMLInputElement) => {
+    const files = Array.from(input.files || []);
+    input.value = '';
+    if (files.length === 0) return;
+    close();
+    setBusy(true);
+    try {
+      for (const file of files) {
+        onUploading?.(file.name);
+        try { onAttach(await uploadChatDocument(file)); }
+        catch { onError?.(t('agent_chat_upload_error') as string); }
+      }
+    } finally {
+      setBusy(false);
+      onUploading?.(null);
+    }
+  };
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative shrink-0" ref={ref}>
       <button
-        onClick={() => setOpen(o => !o)}
-        className="min-h-11 min-w-11 inline-flex items-center justify-center p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)]"
-        title={t('agent_document_attach')}
+        type="button"
+        onClick={() => (open ? close() : setOpen(true))}
+        disabled={busy}
+        className="relative inline-flex items-center justify-center w-11 h-11 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-60"
+        title={t('agent_document_attach') as string}
         aria-label={t('agent_document_attach')}
+        aria-haspopup="menu"
         aria-expanded={open}
         style={{ color: attached.length > 0 ? 'var(--tblr-primary)' : 'var(--tblr-muted)' }}
       >
-        <IconPaperclip size={15} />
-        {attached.length > 0 && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[0.6875rem] font-bold flex items-center justify-center text-white" style={{ background: 'var(--tblr-primary)' }}>
+        {busy
+          ? <span className="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: 'var(--tblr-primary) transparent transparent transparent' }} />
+          : <IconPaperclip size={20} />}
+        {attached.length > 0 && !busy && (
+          <span className="absolute top-1 right-1 min-w-4 h-4 px-1 rounded-full text-[0.6875rem] font-bold leading-none flex items-center justify-center text-white" style={{ background: 'var(--tblr-primary)' }}>
             {attached.length}
           </span>
         )}
       </button>
+      <input ref={fileInputRef} type="file" multiple accept={UPLOAD_ACCEPT} className="hidden" tabIndex={-1} onChange={e => uploadFiles(e.currentTarget)} />
+      <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" tabIndex={-1} onChange={e => uploadFiles(e.currentTarget)} />
 
       <AnimatePresence>
         {open && (
           <motion.div
+            role="menu"
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
             className="absolute bottom-full mb-2 left-0 w-72 rounded-xl shadow-xl border overflow-hidden z-10"
             style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
           >
-            <div className="px-3 py-2 border-b text-[11px] font-semibold uppercase tracking-wider" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>
-              Documents disponibles
-            </div>
-            <div className="max-h-48 overflow-y-auto">
-              {docs.length === 0 && <p className="px-3 py-2 text-[12px]" style={{ color: 'var(--tblr-muted)' }}>Aucun document.</p>}
-              {docs.map(doc => {
-                const isAttached = attached.some(a => a.id === doc.id);
-                return (
-                  <button
-                    key={doc.id}
-                    onClick={() => { isAttached ? onDetach(doc.id) : onAttach(doc); setOpen(false); }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-left hover:bg-[var(--tblr-surface-2)] transition-colors"
-                    style={{ color: isAttached ? 'var(--tblr-primary)' : 'var(--tblr-text)' }}
-                  >
-                    <IconFileText size={13} />
-                    <span className="truncate flex-1">{doc.name}</span>
-                    {doc.phase && <span className="text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{doc.phase}</span>}
-                    {isAttached && <span className="text-[0.6875rem] font-semibold" style={{ color: 'var(--tblr-primary)' }}>✓</span>}
-                  </button>
-                );
-              })}
-            </div>
+            {view === 'menu' ? (
+              <>
+                {/* L'appareil photo n'a de sens qu'au doigt : sur un poste de bureau, « capture » ouvre le sélecteur de fichiers. */}
+                <button type="button" role="menuitem" onClick={() => cameraInputRef.current?.click()} className={`${PICKER_ROW} hidden pointer-coarse:flex`}>
+                  <IconCamera size={18} style={{ color: 'var(--tblr-muted)' }} /> {t('agent_attach_photo')}
+                </button>
+                <button type="button" role="menuitem" onClick={() => fileInputRef.current?.click()} className={`${PICKER_ROW} flex`}>
+                  <IconUpload size={18} style={{ color: 'var(--tblr-muted)' }} /> {t('agent_attach_file')}
+                </button>
+                <button type="button" role="menuitem" onClick={() => setView('library')} className={`${PICKER_ROW} flex`}>
+                  <IconFolderOpen size={18} style={{ color: 'var(--tblr-muted)' }} /> {t('agent_attach_library')}
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" onClick={() => setView('menu')} className={`${PICKER_ROW} flex border-b font-semibold`} style={{ borderColor: 'var(--tblr-border)' }}>
+                  <IconArrowLeft size={16} style={{ color: 'var(--tblr-muted)' }} /> {t('agent_attach_library')}
+                </button>
+                <div className="max-h-52 overflow-y-auto">
+                  {docs.length === 0 && <p className="px-3 py-3 text-[0.75rem]" style={{ color: 'var(--tblr-muted)' }}>{t('agent_attach_library_empty')}</p>}
+                  {docs.map(doc => {
+                    const isAttached = attached.some(a => a.id === doc.id);
+                    return (
+                      <button
+                        key={doc.id}
+                        type="button"
+                        onClick={() => { if (isAttached) onDetach?.(doc.id); else onAttach(doc); close(); }}
+                        className={`${PICKER_ROW} flex`}
+                        style={{ color: isAttached ? 'var(--tblr-primary)' : 'var(--tblr-text)' }}
+                      >
+                        <IconFileText size={16} className="shrink-0" />
+                        <span className="truncate flex-1">{doc.name}</span>
+                        {doc.phase && <span className="text-[0.6875rem] shrink-0" style={{ color: 'var(--tblr-muted)' }}>{doc.phase}</span>}
+                        {isAttached && <span className="text-[0.6875rem] font-semibold">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Attached chips */}
-      {attached.length > 0 && (
-        <div className="absolute bottom-full mb-2 left-8 flex flex-wrap gap-1" style={{ display: open ? 'none' : 'flex' }}>
-          {attached.map(doc => (
-            <div key={doc.id} className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] border" style={{ background: 'var(--tblr-surface-2)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}>
-              <IconFileText size={10} />
-              <span className="max-w-[100px] truncate">{doc.name}</span>
-              <button type="button" onClick={() => onDetach(doc.id)} aria-label={t('agent_document_remove_named', { name: doc.name })} className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-full hover:opacity-70">
-                <IconClose size={9} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -506,6 +559,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   // intervienne dessus par défaut (le serveur la revérifie dans le cabinet).
   const location = useLocation();
   const activeProjectId = projectIdFromPath(location.pathname);
+  const onAgentChatPage = /^\/agents\/[^/]+\/chat$/.test(location.pathname);
   const activeProjectTab = useOpenProjectTabs().find(tab => tab.id === activeProjectId);
   const [isOpen, setIsOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -526,7 +580,15 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
   const [copilotSuggestions, setCopilotSuggestions] = useState<CopilotSuggestion[]>([]);
-  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+  // Les rappels restent repliés derrière une seule ligne d'alerte ; le choix
+  // de les dérouler est mémorisé sur l'appareil.
+  const [suggestionsOpen, setSuggestionsOpen] = useState(() => {
+    try { return localStorage.getItem('agent_chat_suggestions_open') === '1'; } catch { return false; }
+  });
+  const setSuggestionsOpenRemembered = (open: boolean) => {
+    setSuggestionsOpen(open);
+    try { localStorage.setItem('agent_chat_suggestions_open', open ? '1' : '0'); } catch { /* stockage indisponible : sans conséquence */ }
+  };
   // Feedback modal state
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
@@ -596,13 +658,6 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     loadCopilotSuggestions();
   }, [loadCopilotSuggestions]);
-
-  // Dismissing the suggestions banner only hides it for the current viewing
-  // — reopening the panel later re-surfaces it if the underlying alerts
-  // (overdue milestones, unpaid invoices...) are still there.
-  useEffect(() => {
-    if (isOpen) setSuggestionsDismissed(false);
-  }, [isOpen]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -774,14 +829,8 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
     setUploadingFile(file.name);
     setErrorMsg(null);
     try {
-      const form = new FormData();
-      form.append('file', file);
-      form.append('name', file.name);
-      form.append('category', 'Assistant IA');
-      const res = await fetch('/api/documents', { method: 'POST', body: form });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setAttachedDocs(prev => prev.some(d => d.id === data.id) ? prev : [...prev, { id: data.id, name: file.name }]);
+      const doc = await uploadChatDocument(file);
+      setAttachedDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc]);
     } catch {
       setErrorMsg(t('agent_chat_upload_error'));
     } finally {
@@ -890,23 +939,26 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
       {/* Floating trigger — desktop only : sur mobile, l'icône Agents de la
           pastille de raccourcis (MobileShortcutBar, src/App.tsx) rouvre ce
           même panneau via useAgentChat() plutôt que de dupliquer ce bouton. */}
-      <button
-        onClick={() => setIsOpen(o => !o)}
-        className="hidden md:flex fixed bottom-6 right-6 z-40 items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
-        style={{ background: 'var(--tblr-primary)', color: 'white' }}
-        title={copilotSuggestions.length > 0 ? t('agent_chat_suggestions_badge', { count: copilotSuggestions.length }) : t('agents')}
-      >
-        <IconRobot size={18} />
-        <span className="hidden sm:inline">{t('agents')}</span>
-        {copilotSuggestions.length > 0 && (
-          <span
-            className="absolute -top-1 -right-1 flex items-center justify-center rounded-full text-[0.6875rem] font-bold"
-            style={{ background: '#e03131', color: 'white', minWidth: 18, height: 18, padding: '0 4px' }}
-          >
-            {copilotSuggestions.length}
-          </span>
-        )}
-      </button>
+      {/* Masqué sur la page de chat plein écran : posé en bas à droite, il recouvrait le bouton d'envoi. */}
+      {!onAgentChatPage && (
+        <button
+          onClick={() => setIsOpen(o => !o)}
+          className="hidden md:flex fixed bottom-6 right-6 z-40 items-center gap-2 px-4 py-2.5 rounded-full shadow-lg font-medium text-[13px] transition-transform hover:scale-105 active:scale-95"
+          style={{ background: 'var(--tblr-primary)', color: 'white' }}
+          title={copilotSuggestions.length > 0 ? t('agent_chat_suggestions_badge', { count: copilotSuggestions.length }) : t('agents')}
+        >
+          <IconRobot size={18} />
+          <span className="hidden sm:inline">{t('agents')}</span>
+          {copilotSuggestions.length > 0 && (
+            <span
+              className="absolute -top-1 -right-1 flex items-center justify-center rounded-full text-[0.6875rem] font-bold"
+              style={{ background: '#e03131', color: 'white', minWidth: 18, height: 18, padding: '0 4px' }}
+            >
+              {copilotSuggestions.length}
+            </span>
+          )}
+        </button>
+      )}
 
       {/* Chat panel */}
       <AnimatePresence>
@@ -918,19 +970,20 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
             transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
             className="fixed right-3 md:right-6 z-50 flex flex-col shadow-2xl rounded-xl overflow-hidden"
             style={expanded ? {
-              bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
+              bottom: 'calc(88px + env(safe-area-inset-bottom, 0px))',
               width: 'min(900px, calc(100vw - 24px))',
-              height: 'min(88dvh, calc(100dvh - 100px - env(safe-area-inset-bottom, 0px)))',
+              height: 'min(88dvh, calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             } : {
               // Sur mobile, ce panneau s'ouvre depuis la pastille de
               // raccourcis flottante en bas d'écran (MobileShortcutBar) et
               // non plus depuis un bouton juste en dessous : il lui faut
-              // une marge basse plus généreuse pour ne pas la recouvrir.
-              bottom: 'calc(76px + env(safe-area-inset-bottom, 0px))',
+              // une marge basse plus généreuse pour ne pas la recouvrir
+              // (pastille de 60 px à 14 px du bas : 88 px de marge).
+              bottom: 'calc(88px + env(safe-area-inset-bottom, 0px))',
               width: 'min(420px, calc(100vw - 24px))',
-              height: 'min(640px, calc(100dvh - 100px - env(safe-area-inset-bottom, 0px)))',
+              height: 'min(640px, calc(100dvh - 112px - env(safe-area-inset-bottom, 0px)))',
               background: 'var(--tblr-surface)',
               border: '1px solid var(--tblr-border)',
             }}
@@ -959,7 +1012,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
             {/* Header */}
             <div
-              className="flex items-center gap-3 px-4 py-3 border-b shrink-0"
+              className="flex items-center gap-2 px-4 py-2 border-b shrink-0"
               style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)' }}
             >
               {activeAgent && <AgentAvatar agent={activeAgent} size={32} />}
@@ -978,30 +1031,47 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     {activeAgent?.name ?? t('agents')}
                   </div>
                 )}
-                <div className="text-[11px]" style={{ color: 'var(--tblr-muted)' }}>
-                  {activeAgent ? activeAgent.role_title : ''}
+                <div className="text-[11px] truncate" style={{ color: 'var(--tblr-muted)' }}>
+                  {[
+                    activeAgent?.role_title,
+                    tokenBalance !== null ? t('agent_chat_credits', { amount: (tokenBalance / 100).toFixed(2) }) : null,
+                  ].filter(Boolean).join(' · ')}
                 </div>
               </div>
+              {/* « Nouvelle discussion » supprime la conversation en cours, après confirmation. */}
+              <button
+                type="button"
+                onClick={resetConversation}
+                disabled={loading || loadingHistory || resetBusy}
+                className="shrink-0 inline-flex items-center gap-1.5 min-h-11 px-2 rounded-lg text-[0.75rem] font-medium hover:bg-[var(--tblr-surface-2)] disabled:opacity-50 disabled:cursor-wait transition-colors"
+                style={{ color: 'var(--tblr-text)' }}
+              >
+                <IconMessagePlus size={18} style={{ color: 'var(--tblr-primary)' }} />
+                {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
+              </button>
+              {/* Dédié au poste de bureau : sur téléphone le panneau occupe déjà la largeur de l'écran. */}
               {activeAgent && (
                 <button
                   onClick={() => { closeChat(); navigate(`/agents/${activeAgent.id}/chat`); }}
-                  className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors"
+                  className="hidden md:inline-flex items-center justify-center min-h-9 min-w-9 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
                   title={t('agent_chat_open_page') as string}
+                  aria-label={t('agent_chat_open_page')}
                 >
                   <IconExternalLink size={16} style={{ color: 'var(--tblr-muted)' }} />
                 </button>
               )}
               <button
                 onClick={() => setExpanded(e => !e)}
-                className="p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors"
+                className="hidden md:inline-flex items-center justify-center min-h-9 min-w-9 rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors"
                 title={(expanded ? t('agent_chat_collapse') : t('agent_chat_expand')) as string}
+                aria-label={(expanded ? t('agent_chat_collapse') : t('agent_chat_expand')) as string}
               >
                 {expanded
                   ? <IconArrowsMinimize size={16} style={{ color: 'var(--tblr-muted)' }} />
                   : <IconArrowsMaximize size={16} style={{ color: 'var(--tblr-muted)' }} />}
               </button>
-              <button onClick={closeChat} aria-label={t('close')} className="min-h-11 min-w-11 inline-flex items-center justify-center p-1 rounded hover:bg-[var(--tblr-surface-2)] transition-colors">
-                <IconX size={16} style={{ color: 'var(--tblr-muted)' }} />
+              <button onClick={closeChat} aria-label={t('close')} className="shrink-0 min-h-11 min-w-11 inline-flex items-center justify-center rounded-lg hover:bg-[var(--tblr-surface-2)] transition-colors">
+                <IconX size={18} style={{ color: 'var(--tblr-muted)' }} />
               </button>
             </div>
 
@@ -1034,7 +1104,7 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -8 }}
-                  className="absolute top-[58px] left-0 right-0 z-10 border-b shadow-sm"
+                  className="absolute top-[60px] left-0 right-0 z-10 border-b shadow-sm"
                   style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
                 >
                   {agents.map(a => (
@@ -1057,42 +1127,55 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
 
             {/* Proactive suggestions — passive only: clicking prefills the
                 draft below, the user still has to review and send it. */}
-            {copilotSuggestions.length > 0 && !suggestionsDismissed && (
-              <div className="border-b px-4 py-3 space-y-2 shrink-0" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                <div className="flex items-center justify-between">
-                  <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: 'var(--tblr-muted)' }}>
-                    {t('dashboard_ai_suggestions')}
-                  </div>
-                  <button
-                    onClick={() => setSuggestionsDismissed(true)}
-                    className="p-0.5 rounded hover:bg-[var(--tblr-surface)] transition-colors"
-                    title={t('agent_chat_dismiss_suggestions') as string}
-                  >
-                    <IconX size={12} style={{ color: 'var(--tblr-muted)' }} />
-                  </button>
-                </div>
-                {copilotSuggestions.map(s => (
-                  <div
-                    key={s.id}
-                    className="flex items-start gap-2 p-2 rounded-lg"
-                    style={{
-                      background: 'var(--tblr-surface-2)',
-                      border: '1px solid var(--tblr-border)',
-                    }}
-                  >
-                    <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? 'var(--tblr-danger)' : 'var(--tblr-warning)' }} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[0.75rem]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
-                      <button
-                        onClick={() => { setInput(s.draft); setTimeout(() => textareaRef.current?.focus(), 50); }}
-                        className="mt-1 text-[0.6875rem] font-semibold hover:underline"
-                        style={{ color: 'var(--tblr-primary)' }}
-                      >
-                        {t('ai_draft_reminder_btn')}
-                      </button>
-                    </div>
-                  </div>
-                ))}
+            {copilotSuggestions.length > 0 && (
+              <div className="border-b shrink-0" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
+                {/* Une seule ligne d'alerte ; la flèche déroule les rappels. */}
+                <button
+                  type="button"
+                  onClick={() => setSuggestionsOpenRemembered(!suggestionsOpen)}
+                  aria-expanded={suggestionsOpen}
+                  aria-controls="agent-chat-suggestions"
+                  className="w-full min-h-11 flex items-center gap-2.5 px-4 text-left text-[0.75rem] font-medium"
+                  style={{ color: 'var(--tblr-text)' }}
+                >
+                  <IconAlertTriangle size={16} className="shrink-0" style={{ color: copilotSuggestions.some(s => s.tone === 'danger') ? 'var(--tblr-danger)' : 'var(--tblr-warning)' }} />
+                  <span className="flex-1 truncate">{t('agent_chat_suggestions_count', { count: copilotSuggestions.length })}</span>
+                  <IconChevronDown size={16} className={`shrink-0 transition-transform duration-200 ${suggestionsOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--tblr-muted)' }} />
+                </button>
+                <AnimatePresence initial={false}>
+                  {suggestionsOpen && (
+                    <motion.div
+                      id="agent-chat-suggestions"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: 'auto', opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
+                      className="overflow-hidden"
+                    >
+                      <ul className="px-3 pb-3 space-y-2 max-h-[40dvh] overflow-y-auto">
+                        {copilotSuggestions.map(s => (
+                          <li
+                            key={s.id}
+                            className="flex items-start gap-2 p-2 rounded-lg border"
+                            style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)' }}
+                          >
+                            <IconAlertTriangle size={14} className="mt-0.5 shrink-0" style={{ color: s.tone === 'danger' ? 'var(--tblr-danger)' : 'var(--tblr-warning)' }} />
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[0.75rem]" style={{ color: 'var(--tblr-text)' }}>{s.text}</p>
+                              <button
+                                onClick={() => { setInput(s.draft); setSuggestionsOpenRemembered(false); setTimeout(() => textareaRef.current?.focus(), 50); }}
+                                className="mt-1 min-h-8 text-[0.75rem] font-semibold hover:underline"
+                                style={{ color: 'var(--tblr-primary)' }}
+                              >
+                                {t('ai_draft_reminder_btn')}
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             )}
 
@@ -1107,8 +1190,8 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 <div className="flex flex-col items-center justify-center h-full gap-3 py-12">
                   {activeAgent && <AgentAvatar agent={activeAgent} size={48} />}
                   <p className="text-[13px] text-center" style={{ color: 'var(--tblr-muted)' }}>{t('agent_chat_empty')}</p>
-                  <p className="text-[11px] text-center" style={{ color: 'var(--tblr-muted)' }}>
-                    💡 Joignez un document avec 📎, ou glissez-déposez-le ici
+                  <p className="text-[0.75rem] text-center px-6" style={{ color: 'var(--tblr-muted)' }}>
+                    {t('agent_chat_empty_hint')}
                   </p>
                 </div>
               )}
@@ -1155,11 +1238,6 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   {t('agent_chat_uploading', { name: uploadingFile })}
                 </div>
               )}
-              {tokenBalance !== null && (
-                <div className="text-[0.6875rem] mb-1.5 text-right" style={{ color: 'var(--tblr-muted)' }}>
-                  {(tokenBalance / 100).toFixed(2)} € de crédits IA restants
-                </div>
-              )}
               {/* Ce que la reconnaissance entend en ce moment, pas encore
                   arrêté : affiché à part, en gris, pour qu'on voie que la
                   machine suit sans que ces mots provisoires se mêlent au
@@ -1191,11 +1269,14 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                     : t('agent_speech_error')}
                 </div>
               )}
-              <div className="flex gap-2 items-end">
+              <AttachedDocChips attached={attachedDocs} onDetach={id => setAttachedDocs(prev => prev.filter(d => d.id !== id))} />
+              <div className="flex gap-1 items-end">
                 <DocumentPicker
                   attached={attachedDocs}
                   onAttach={doc => setAttachedDocs(prev => prev.some(d => d.id === doc.id) ? prev : [...prev, doc])}
                   onDetach={id => setAttachedDocs(prev => prev.filter(d => d.id !== id))}
+                  onUploading={setUploadingFile}
+                  onError={setErrorMsg}
                 />
                 {/* Rien à afficher sur un poste qui ne sait ni reconnaître ni
                     enregistrer : un bouton inerte vaut moins que pas de
@@ -1204,15 +1285,15 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   <button
                     onClick={dictation.toggle}
                     disabled={loading || dictation.status === 'transcribing'}
-                    className="p-1.5 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
+                    className="inline-flex items-center justify-center w-11 h-11 shrink-0 rounded-lg transition-colors hover:bg-[var(--tblr-surface-2)] disabled:opacity-40"
                     title={t(dictation.status === 'listening' ? 'agent_voice_stop' : 'agent_voice_start')}
                     aria-label={t(dictation.status === 'listening' ? 'agent_voice_stop' : 'agent_voice_start')}
                     aria-pressed={dictation.status === 'listening'}
                     style={{ color: dictation.status === 'listening' ? '#c92a2a' : 'var(--tblr-muted)' }}
                   >
                     {dictation.status === 'listening'
-                      ? <IconPlayerStopFilled size={15} />
-                      : <IconMicrophone size={15} />}
+                      ? <IconPlayerStopFilled size={18} />
+                      : <IconMicrophone size={20} />}
                   </button>
                 )}
                 <textarea
@@ -1227,12 +1308,12 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                   onKeyDown={handleKeyDown}
                   placeholder={t('agent_chat_placeholder')}
                   aria-label={t('agent_chat_message_label')}
-                  className="flex-1 resize-none rounded-lg px-3 py-2 text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
+                  className="flex-1 min-w-0 resize-none rounded-lg px-3 py-[9px] text-[0.8125rem] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] border transition-colors"
                   style={{
                     background: 'var(--tblr-surface-2)',
                     borderColor: 'var(--tblr-border)',
                     color: 'var(--tblr-text)',
-                    minHeight: 36,
+                    minHeight: 44,
                     maxHeight: 100,
                   }}
                   onInput={(e: React.FormEvent<HTMLTextAreaElement>) => {
@@ -1245,21 +1326,14 @@ export function AgentChatProvider({ children }: { children: React.ReactNode }) {
                 <button
                   onClick={sendMessage}
                   disabled={!input.trim() || loading || loadingHistory || resetBusy}
-                  className="p-2 rounded-lg transition-colors flex items-center justify-center"
+                  className="w-11 h-11 shrink-0 rounded-lg transition-colors flex items-center justify-center"
                   style={{ background: 'var(--tblr-primary)', color: 'white', opacity: !input.trim() || loading || loadingHistory || resetBusy ? 0.5 : 1 }}
                   title={`${t('agent_chat_send')} (Ctrl+Entrée)`}
+                  aria-label={t('agent_chat_send')}
                 >
-                  <IconSend size={16} />
+                  <IconSend size={20} />
                 </button>
               </div>
-              <button
-                onClick={resetConversation}
-                disabled={loading || loadingHistory || resetBusy}
-                className="min-h-11 text-[0.6875rem] mt-1.5 hover:underline disabled:opacity-50 disabled:cursor-wait"
-                style={{ color: 'var(--tblr-muted)' }}
-              >
-                {t(clearing ? 'agent_chat_clearing' : 'agent_chat_clear')}
-              </button>
             </div>
           </motion.div>
         )}

@@ -4063,6 +4063,17 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   `w-5 h-5`). `--tracking-wider` est ramené à 0,03 em dans `@theme`, et `h1`/
   `h2` sont légèrement resserrés. Les majuscules et couleurs Tabler restent.
 
+### Chat des agents : pièces jointes, rappels, nouvelle discussion
+
+Panneau (`AgentChat.tsx`) et page (`AgentChatPage.tsx`) partagent les mêmes briques. Règles à garder :
+
+- **Trombone = menu** (`DocumentPicker`) : prendre une photo (`capture`, visible au doigt seulement, `pointer-coarse:`), choisir un fichier, ou reprendre un document de la GED. Le téléversement passe par `uploadChatDocument` (`chatUpload.ts`, `POST /api/documents`, catégorie « Assistant IA »). Avant, seul le glisser-déposer envoyait un fichier : rien n'existait sur téléphone. Les pièces jointes sont une rangée dans le flux (`AttachedDocChips`), pas une couche en position absolue.
+- **Contrôles de saisie à 44 px** (trombone, micro, champ, envoi) sur un même axe ; libellé du champ « Votre message… » (16 px au doigt, donc on raccourcit le texte plutôt que la police).
+- **Rappels IA repliés** derrière une ligne d'alerte avec une flèche (état mémorisé dans `localStorage`, `agent_chat_suggestions_open`) ; cliquer « Rédiger un rappel » referme la liste et remplit le champ.
+- **« Nouvelle discussion »** (clé `agent_chat_clear`, bouton d'en-tête) **supprime** la conversation en cours après confirmation : l'historique des discussions n'existe pas encore (voir ROADMAP.md, « Saved conversation history »). Ne pas laisser croire à un archivage.
+- **Bouton « Arrêter »** (`ChatRequestStatus`) : petite pastille, zone de touche de 44 px par `before:-inset-2`.
+- **Le bouton flottant « Assistants IA » est masqué sur `/agents/:id/chat`** (il recouvrait l'envoi). Le panneau se tient 88 px au-dessus du bas, au-dessus de la pastille mobile de 60 px (`MobileShortcutBar`, boutons de 48 px).
+
 ### Maps
 
 - `MapLibreCadastre.tsx` — Cadastral parcels via IGN WMTS tiles
