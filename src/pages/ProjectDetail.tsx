@@ -41,6 +41,7 @@ import {
   IconRubberStamp,
   IconTools,
   IconClipboardCheck,
+  IconSignRight,
   } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
@@ -114,6 +115,8 @@ import { InspirationBoards } from '../components/projectDetail/InspirationBoards
 import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
 import { ResourceAttachments } from '../components/ResourceAttachments';
+import { PanneauPermisDialog } from '../components/PanneauPermisDialog';
+import { generatePermitDraftPanel } from '../lib/panneaux';
 
 import { useTranslation } from 'react-i18next';
 
@@ -396,6 +399,7 @@ export default function ProjectDetail() {
   const [isAddingPermit, setIsAddingPermit] = useState(false);
   const [newPermit, setNewPermit] = useState({ type: 'PC' as 'PC' | 'DP' | 'AT', reference: '', submission_date: '', decision_date: '', status: 'en_instruction' as Permit['status'], notes: '' });
   const [expandedPermitId, setExpandedPermitId] = useState<string | null>(null);
+  const [panneauPermit, setPanneauPermit] = useState<Permit | null>(null);
   const [isAddingRfi, setIsAddingRfi] = useState(false);
   const [newRfi, setNewRfi] = useState({ question: '', asked_by: '', due_date: '' });
   const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
@@ -4212,6 +4216,12 @@ export default function ProjectDetail() {
                                 setPermits(prev => [...prev, data]);
                                 setIsAddingPermit(false);
                                 setNewPermit({ type: 'PC', reference: '', submission_date: '', decision_date: '', status: 'en_instruction', notes: '' });
+                                // Dépôt d'un PC : brouillon du panneau d'affichage, à compléter à la délivrance. Meilleur effort.
+                                if (data.type === 'PC') {
+                                  generatePermitDraftPanel(data.id)
+                                    .then(() => showToast(t('panneau_permit_draft_generated')))
+                                    .catch(() => showToast(t('panneau_permit_draft_failed'), 'error', { duration: 6000 }));
+                                }
                               }
                             } catch (err) { console.error(err); }
                           }}
@@ -4223,6 +4233,16 @@ export default function ProjectDetail() {
                       </div>
                     </div>
                   )}
+                  <AnimatePresence>
+                    {panneauPermit && (
+                      <PanneauPermisDialog
+                        key="panneau-permis"
+                        permit={panneauPermit}
+                        onClose={() => setPanneauPermit(null)}
+                        onUpdated={updated => setPermits(prev => prev.map(x => (x.id === updated.id ? { ...x, ...updated } : x)))}
+                      />
+                    )}
+                  </AnimatePresence>
                   <div className="p-4">
                     {permits.length === 0 ? (
                       <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">{t('projectdetail_permits_empty')}</p>
@@ -4251,11 +4271,27 @@ export default function ProjectDetail() {
                                   onChange={async (e) => {
                                     const status = e.target.value;
                                     const res = await fetch(`/api/permits/${p.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, status }) });
-                                    if (res.ok) setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
+                                    if (res.ok) {
+                                      setPermits(prev => prev.map(x => x.id === p.id ? { ...x, status: status as any } : x));
+                                      if (status === 'accorde' && p.type !== 'AT') {
+                                        showToast(t('panneau_permit_granted_prompt'), 'success', { duration: 9000, action: { label: t('panneau_permit_open'), onClick: () => setPanneauPermit({ ...p, status: 'accorde' }) } });
+                                      }
+                                    }
                                   }}
                                 >
                                   {(['en_instruction', 'accorde', 'refuse', 'recours'] as const).map(s => <option key={s} value={s}>{t(`project_permit_status_${s}`)}</option>)}
                                 </select>
+                                {p.type !== 'AT' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setPanneauPermit(p)}
+                                    className="p-1 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] rounded"
+                                    title={t('panneau_permit_open')}
+                                    aria-label={t('panneau_permit_open_named', { ref: p.reference || p.type })}
+                                  >
+                                    <IconSignRight size={14} />
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={async () => {

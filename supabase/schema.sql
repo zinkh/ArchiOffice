@@ -1504,6 +1504,22 @@ DROP POLICY IF EXISTS "tenant_isolation" ON reference_sheets;
 CREATE POLICY "tenant_isolation" ON reference_sheets
   USING (tenant_id = my_tenant_id());
 
+-- Panneaux d'affichage (supabase/migrate_panneaux.sql)
+CREATE TABLE IF NOT EXISTS project_site_panels (
+  id          TEXT PRIMARY KEY,
+  tenant_id   UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id  TEXT REFERENCES projects(id) ON DELETE CASCADE NOT NULL,
+  settings    JSONB NOT NULL DEFAULT '{}'::jsonb,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_project_site_panels_project
+  ON project_site_panels(tenant_id, project_id);
+ALTER TABLE project_site_panels ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "tenant_isolation" ON project_site_panels;
+CREATE POLICY "tenant_isolation" ON project_site_panels
+  USING (tenant_id = my_tenant_id());
+-- Les colonnes de mentions de `permits` sont ajoutées par migrate_panneaux.sql (la table permits est créée par une migration).
+
 -- ============================================================
 -- MIGRATION : atelier DOE (onglet AOR)
 -- Sollicitation des entreprises, relances automatiques, analyse et visa des

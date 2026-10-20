@@ -21,6 +21,7 @@ import { registerReferentielRoutes } from "./server/routes/referentiels";
 import { registerSituationRoutes } from "./server/routes/situations";
 import { registerCustomReferenceRoutes } from "./server/routes/customReferences";
 import { registerReferencesDossierRoutes } from "./server/routes/referencesDossier";
+import { registerPanneauxRoutes } from "./server/routes/panneaux";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
@@ -1035,6 +1036,7 @@ export async function createApp() {
   registerSituationRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCustomReferenceRoutes(app, { supabaseAdmin, getTenantId });
   registerReferencesDossierRoutes(app, { supabaseAdmin, getTenantId });
+  registerPanneauxRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
