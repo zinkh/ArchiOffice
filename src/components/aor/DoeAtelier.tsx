@@ -21,6 +21,7 @@ import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { formatOctets } from '../../lib/consultationDepot';
 import { DoeArchiveDialog, DoeSettingsDialog, DoeVisaDialog, CHAMP_DOE, usePieceLabel } from './DoeDialogs';
 import { DoeEntrepriseModal, StatutDoe } from './DoeEntrepriseModal';
+import { TOUCH_TARGET } from '../chantier/fields';
 import { cn } from '../../lib/utils';
 
 const dateFr = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('fr-FR') : '');
@@ -67,14 +68,14 @@ export function DoeAtelier({ projectId }: { projectId: string }) {
         title={t('projectdetail_doe_title')}
         description={t('doe_desc')}
         action={etat?.disponible ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" className="btn btn-secondary" onClick={() => setReglages(true)}>
+          <div className="grid grid-cols-2 gap-2 w-full sm:flex sm:w-auto sm:flex-wrap sm:items-center">
+            <button type="button" className={cn('btn btn-secondary justify-center', TOUCH_TARGET)} onClick={() => setReglages(true)}>
               <IconSettings size={15} aria-hidden /> {t('doe_settings_open')}
             </button>
-            <button type="button" className="btn btn-secondary disabled:opacity-60" disabled={occupe || etat.synthese.aSolliciter === 0} onClick={toutSolliciter}>
+            <button type="button" className={cn('btn btn-secondary justify-center disabled:opacity-60', TOUCH_TARGET)} disabled={occupe || etat.synthese.aSolliciter === 0} onClick={toutSolliciter}>
               <IconSend size={15} aria-hidden /> {t('doe_request_all')}
             </button>
-            <button type="button" className="btn btn-primary" onClick={() => setArchive(true)}>
+            <button type="button" className={cn('btn btn-primary justify-center col-span-2 sm:col-span-1', TOUCH_TARGET)} onClick={() => setArchive(true)}>
               <IconPackageExport size={15} aria-hidden /> {t('doe_archive_open')}
             </button>
           </div>
@@ -93,7 +94,7 @@ export function DoeAtelier({ projectId }: { projectId: string }) {
         <div>
           {/* Avancement */}
           <div className="px-4 sm:px-6 py-4 space-y-2 border-b border-[var(--tblr-border)]">
-            <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm">
+            <div className="grid grid-cols-3 gap-x-2 gap-y-3 text-sm sm:flex sm:flex-wrap sm:gap-x-5 sm:gap-y-1">
               <Chiffre valeur={etat.synthese.entreprises} libelle={t('doe_kpi_companies')} />
               <Chiffre valeur={etat.synthese.aSolliciter} libelle={t('doe_kpi_to_request')} />
               <Chiffre valeur={etat.synthese.enAttente} libelle={t('doe_kpi_waiting')} />
@@ -124,21 +125,23 @@ export function DoeAtelier({ projectId }: { projectId: string }) {
                 return (
                   <li key={e.key}>
                     <button type="button" onClick={() => setOuvert(e.key)} aria-label={t('doe_open_company', { nom: e.nom })}
-                      className="w-full flex flex-wrap items-center gap-x-4 gap-y-2 px-4 sm:px-6 py-3 text-left hover:bg-[var(--tblr-surface-2)] transition-colors min-h-14">
-                      <span className="flex-1 basis-56 min-w-0">
+                      className="w-full grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 sm:px-6 py-3.5 text-left hover:bg-[var(--tblr-surface-2)] active:bg-[var(--tblr-surface-2)] transition-colors min-h-14 sm:flex sm:flex-wrap sm:gap-x-4">
+                      <span className="min-w-0 sm:flex-1 sm:basis-56">
                         <span className="block font-semibold text-sm break-words">{e.nom}</span>
-                        <span className="block text-xs text-[var(--tblr-muted)]">
+                        <span className="block text-xs text-[var(--tblr-muted)] line-clamp-2 sm:line-clamp-none">
                           {e.lots.map(l => `Lot ${l.lot_number} ${l.lot_title}`).join(' ; ') || t('doe_no_lot')}
                         </span>
                       </span>
-                      <StatutDoe statut={e.statut} />
-                      <span className="text-xs text-[var(--tblr-muted)] whitespace-nowrap">{t('doe_pieces_progress', { done: couvertes, total: requises })}</span>
-                      <span className="text-xs text-[var(--tblr-muted)] basis-full sm:basis-48 sm:text-right">
+                      <IconChevronRight size={18} className="shrink-0 text-[var(--tblr-muted)] sm:order-last" aria-hidden />
+                      <span className="col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1 sm:contents">
+                        <StatutDoe statut={e.statut} />
+                        <span className="text-xs text-[var(--tblr-muted)] whitespace-nowrap">{t('doe_pieces_progress', { done: couvertes, total: requises })}</span>
+                      </span>
+                      <span className="col-span-2 text-xs text-[var(--tblr-muted)] empty:hidden sm:basis-48 sm:text-right">
                         {e.visa ? `${e.visa.numero} · ${t(`doe_avis_visa_${e.visa.avis}`)}`
                           : e.prochaine_relance ? t('doe_next_reminder', { date: dateFr(e.prochaine_relance) })
                           : e.request?.sent_at ? t('doe_request_sent_on', { date: dateFr(e.request.sent_at) }) : ''}
                       </span>
-                      <IconChevronRight size={16} className="shrink-0 text-[var(--tblr-muted)]" aria-hidden />
                     </button>
                   </li>
                 );
@@ -155,7 +158,7 @@ export function DoeAtelier({ projectId }: { projectId: string }) {
                 {etat.non_affectes.map(d => (
                   <li key={d.id} className="flex flex-wrap items-center gap-2 text-sm">
                     <button type="button" className="flex-1 basis-56 min-w-0 text-left hover:underline break-words" onClick={() => void openSignedUrl(d.file_url)}>{d.name}</button>
-                    <select aria-label={t('projectdetail_doe_company')} className={cn(CHAMP_DOE, '!w-auto')} value=""
+                    <select aria-label={t('projectdetail_doe_company')} className={cn(CHAMP_DOE, 'sm:!w-auto', TOUCH_TARGET)} value=""
                       onChange={ev => { if (ev.target.value) void api.modifierDocument(d.id, { entreprise_key: ev.target.value }).catch((er: any) => notify(er?.message, 'error')); }}>
                       <option value="">{t('doe_assign_company')}</option>
                       {etat.entreprises.map(e => <option key={e.key} value={e.key}>{e.nom}</option>)}
@@ -217,8 +220,9 @@ export function DoeAtelier({ projectId }: { projectId: string }) {
 
 function Chiffre({ valeur, libelle }: { valeur: number; libelle: string }) {
   return (
-    <span className="whitespace-nowrap">
-      <strong className="text-base">{valeur}</strong> <span className="text-xs text-[var(--tblr-muted)]">{libelle}</span>
+    <span className="flex flex-col sm:block sm:whitespace-nowrap">
+      <strong className="text-lg sm:text-base leading-tight">{valeur}</strong>{' '}
+      <span className="text-[0.6875rem] sm:text-xs leading-tight text-[var(--tblr-muted)]">{libelle}</span>
     </span>
   );
 }
