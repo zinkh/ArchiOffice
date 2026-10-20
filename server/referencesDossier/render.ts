@@ -30,13 +30,33 @@ export async function resolveChromiumPath(): Promise<string | null> {
 // Un seul rendu à la fois : un Chromium par requête saturerait vite la mémoire d'une petite instance.
 let queue: Promise<unknown> = Promise.resolve();
 
-export function renderPdf(html: string, orientation: DossierOrientation): Promise<Buffer> {
-  const run = queue.then(() => renderNow(html, orientation));
+export interface PdfPageSize {
+  width: string;
+  height: string;
+}
+
+export interface PdfRenderResult {
+  pdf: Buffer;
+  /** Vrai si le contenu de `.body` dépasse la zone prévue (rien n'est rogné en silence : l'appelant avertit). */
+  overflow: boolean;
+}
+
+/** Rendu générique (file partagée avec les panneaux) : page de taille libre, détection de débordement. */
+export function renderHtmlToPdf(html: string, size: PdfPageSize): Promise<PdfRenderResult> {
+  const run = queue.then(() => renderNow(html, size));
   queue = run.catch(() => undefined);
   return run;
 }
 
-async function renderNow(html: string, orientation: DossierOrientation): Promise<Buffer> {
+export async function renderPdf(html: string, orientation: DossierOrientation): Promise<Buffer> {
+  const { pdf } = await renderHtmlToPdf(html, {
+    width: orientation === 'portrait' ? '210mm' : '297mm',
+    height: orientation === 'portrait' ? '297mm' : '210mm',
+  });
+  return pdf;
+}
+
+async function renderNow(html: string, size: PdfPageSize): Promise<PdfRenderResult> {
   const executablePath = await resolveChromiumPath();
   if (!executablePath) throw new ChromiumUnavailableError();
   const browser = await (await loadPlaywright()).launch({ executablePath, headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
@@ -46,13 +66,17 @@ async function renderNow(html: string, orientation: DossierOrientation): Promise
     await page.route('**/*', route => (route.request().url().startsWith('data:') ? route.continue() : route.abort()));
     await page.setContent(html, { waitUntil: 'load' });
     await page.evaluate(() => (document as any).fonts.ready);
+    const overflow = await page.evaluate(() => {
+      const body = document.querySelector('.body') as HTMLElement | null;
+      return !!body && (body.scrollHeight > body.clientHeight + 2 || body.scrollWidth > body.clientWidth + 2);
+    });
     const pdf = await page.pdf({
       printBackground: true,
       preferCSSPageSize: true,
-      width: orientation === 'portrait' ? '210mm' : '297mm',
-      height: orientation === 'portrait' ? '297mm' : '210mm',
+      width: size.width,
+      height: size.height,
     });
-    return Buffer.from(pdf);
+    return { pdf: Buffer.from(pdf), overflow };
   } finally {
     await browser.close();
   }

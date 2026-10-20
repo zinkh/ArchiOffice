@@ -148,6 +148,16 @@ export const depotWriteLimiter = rateLimit({
   message: { error: 'Trop de dépôts en peu de temps. Veuillez réessayer dans quelques minutes.' },
 });
 
+// Panneaux de chantier et de permis : un rendu A0 lance Chromium, plafond par personne.
+export const panneauxLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 6,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de générations de panneau. Veuillez patienter avant de réessayer.' },
+});
+
 // Dossier de références : un rendu PDF lance Chromium, bien plus coûteux qu'une
 // requête ordinaire. Plafond par personne.
 export const referencesDossierLimiter = rateLimit({

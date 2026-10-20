@@ -18,7 +18,10 @@ import {
   IconCalendarEvent,
   IconCheck,
   IconPhone,
+  IconSignRight,
 } from '@tabler/icons-react';
+import { AnimatePresence } from 'motion/react';
+import { PanneauChantierDialog } from '../PanneauChantierDialog';
 import { formatCurrency } from '../../lib/utils';
 import { useTasks } from '../../hooks/useTasks';
 import LinkedMeetings from '../LinkedMeetings';
@@ -149,6 +152,7 @@ export function ProjectOverview({
   isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase, phaseNotes, journalPhases,
 }: ProjectOverviewProps) {
   const navigate = useNavigate();
+  const [panneauOpen, setPanneauOpen] = useState(false);
   const { t } = useTranslation();
 
   // The project's actual current phase (Column A badge) — never changed by
@@ -513,7 +517,21 @@ export function ProjectOverview({
             <IconDots size={17} style={{ color: 'var(--tblr-muted)' }} />
             <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_documents')}</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setPanneauOpen(true)}
+            title={t('project_overview_action_panel_title')}
+            className="col-span-2 flex items-center justify-center gap-2 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
+            style={{ borderColor: 'var(--tblr-border)' }}
+          >
+            <IconSignRight size={17} style={{ color: 'var(--tblr-muted)' }} />
+            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_panel')}</span>
+          </button>
         </div>
+
+        <AnimatePresence>
+          {panneauOpen && <PanneauChantierDialog key="panneau-chantier" projectId={project.id} onClose={() => setPanneauOpen(false)} />}
+        </AnimatePresence>
 
         <div className="text-[0.6875rem] font-bold uppercase tracking-wider mb-2.5" style={{ color: 'var(--tblr-muted)' }}>{t('project_overview_next_tasks')}</div>
 

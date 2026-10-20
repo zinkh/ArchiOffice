@@ -549,6 +549,15 @@ export interface Permit {
   status: 'en_instruction' | 'accorde' | 'refuse' | 'recours';
   notes?: string;
   created_at?: string;
+  // Mentions du panneau d'affichage (supabase/migrate_panneaux.sql).
+  nature_projet?: string | null;
+  superficie_terrain_m2?: number | null;
+  surface_plancher_m2?: number | null;
+  nombre_logements?: number | null;
+  hauteur_m?: number | null;
+  mairie_nom?: string | null;
+  mairie_adresse?: string | null;
+  numero_decision?: string | null;
 }
 
 export interface Rfi {
