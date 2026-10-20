@@ -28,9 +28,13 @@ export const answerSchema = z.object({
   documentId: identifier.nullable().default(null),
   assigneeId: identifier.nullable().default(null),
 }).strict();
+/** Longueur minimale du motif d'un passage forcé : un « ok » ne justifie rien. */
+export const FORCE_REASON_MIN_LENGTH = 10;
 export const transitionSchema = z.object({
   phase, expectedCurrentId: identifier.nullable(), revision: z.string().length(64),
   answers: z.array(answerSchema).max(200), createTasks: z.boolean().default(false),
+  // Passage forcé : lève les contrôles non résolus, au motif obligatoire et conservé dans l'audit.
+  forceReason: z.string().trim().min(FORCE_REASON_MIN_LENGTH).max(2000).optional(),
 }).strict();
 export type ControlRule = z.infer<typeof controlRuleSchema>;
 export type ControlConfig = z.infer<typeof controlConfigSchema>;

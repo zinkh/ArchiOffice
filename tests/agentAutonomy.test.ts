@@ -84,7 +84,7 @@ function snapshot(over: Partial<TenantSnapshot> = {}): TenantSnapshot {
     tenantId: 't1', now: NOW,
     projects: [], phaseHistory: [], contrats: [], invoices: [], proposals: [],
     tenders: [], tasks: [], meetings: [], ordresDeService: [], reserves: [], notesHonoraires: [],
-    qualifications: [], consultations: [], marches: [],
+    qualifications: [], consultations: [], marches: [], documents: [],
     ...over,
   };
 }
@@ -253,6 +253,42 @@ describe('règle « études engagées sans contrat signé »', () => {
       projects: [{ id: 'p2', name: 'Sans date', status: 'In Progress', start_date: null }],
     }));
     expect(found).toEqual([]);
+  });
+});
+
+describe('règle « ouverture de chantier sans DOC »', () => {
+  const projet = { id: 'p1', name: 'Villa Martin', status: 'In Progress' };
+  const visa = (extra: Record<string, unknown> = {}) => ({ project_id: 'p1', phase: 'VISA', entered_at: '2026-05-01T00:00:00Z', exited_at: null, ...extra });
+  const run = (over: Partial<TenantSnapshot>) => detect('doc_ouverture_chantier_manquante', snapshot({ projects: [projet], ...over }));
+
+  it('signale une affaire en VISA depuis plus de 14 jours sans DOC', () => {
+    const found = run({ phaseHistory: [visa()] });
+    expect(found).toHaveLength(1);
+    expect(found[0].dedupKey).toBe('doc_ouverture_chantier_manquante:p1');
+    expect(found[0].message).toContain('CERFA 13407');
+  });
+  it('attend la fin du délai, ignore les autres phases et les affaires terminées', () => {
+    expect(run({ phaseHistory: [visa({ entered_at: '2026-05-25T00:00:00Z' })] })).toEqual([]);
+    expect(run({ phaseHistory: [visa({ phase: 'ACT' })] })).toEqual([]);
+    expect(run({ phaseHistory: [visa({ phase: 'AOR' })] })).toEqual([]);
+    expect(run({ projects: [{ ...projet, status: 'Completed' }], phaseHistory: [visa()] })).toEqual([]);
+  });
+  it('se tait quand un document désigne la DOC, mais pas pour un simple « doc.pdf » ni un document périmé', () => {
+    const doc = (name: string, extra: Record<string, unknown> = {}) => ({ id: 'd1', project_id: 'p1', name, ...extra });
+    expect(run({ phaseHistory: [visa()], documents: [doc('Déclaration d’ouverture de chantier.pdf')] })).toEqual([]);
+    expect(run({ phaseHistory: [visa()], documents: [doc('CERFA 13407 signé.pdf')] })).toEqual([]);
+    expect(run({ phaseHistory: [visa()], documents: [doc('doc.pdf')] })).toHaveLength(1);
+    expect(run({ phaseHistory: [visa()], documents: [doc('Ouverture de chantier.pdf', { doc_statut: 'perime' })] })).toHaveLength(1);
+    expect(run({ phaseHistory: [visa()], documents: [{ ...doc('Ouverture de chantier.pdf'), project_id: 'autre' }] })).toHaveLength(1);
+  });
+  it('se tait quand le contrôle de phase a été traité ou le passage forcé', () => {
+    const audit = (controls: unknown[], forced?: unknown) => visa({ phase: 'VISA', control_audit: { controls, ...(forced ? { forced } : {}) } });
+    const control = (answer: Record<string, unknown>) => ({ rule: { id: 'doc-ouverture-chantier' }, answer });
+    expect(run({ phaseHistory: [visa({ phase: 'ACT', exited_at: '2026-05-01T00:00:00Z' }), audit([control({ status: 'done', justification: '' })])] })).toEqual([]);
+    expect(run({ phaseHistory: [audit([control({ status: 'not_required', justification: 'Travaux sans autorisation' })])] })).toEqual([]);
+    expect(run({ phaseHistory: [audit([control({ status: 'not_required', justification: '  ' })])] })).toHaveLength(1);
+    expect(run({ phaseHistory: [audit([control({ status: 'unchecked', justification: '' })], { rule_ids: ['doc-ouverture-chantier'] })] })).toEqual([]);
+    expect(run({ phaseHistory: [audit([control({ status: 'unchecked', justification: '' })], { rule_ids: ['autre'] })] })).toHaveLength(1);
   });
 });
 

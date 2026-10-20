@@ -17,7 +17,7 @@ Les responsables de projet (`pm`), managers et administrateurs disposent d’un 
 
 ## Scénarios et correspondance avec les phases existantes
 
-Le catalogue initial est dans `server/config/phaseControls.json`, séparé du moteur. Il couvre DIAG→ESQ, ESQ→APS, APS→APD, APD→PC, PRO→DCE, ACT→VISA, VISA→DET et DET→AOR. Le modèle existant ne possède pas de phases séparées « marchés » et « réception » : les marchés sont contrôlés à l’entrée en VISA, et les OPR/essais/DOE/DIUO/PV/réserves/DGD à l’entrée en AOR. Aucun nouvel état métier n’est imposé aux documents ou contrats existants.
+Le catalogue initial est dans `server/config/phaseControls.json`, séparé du moteur. Il couvre DIAG→ESQ, ESQ→APS, APS→APD, APD→PC, PRO→DCE, ACT→VISA, VISA→DET et DET→AOR. Le modèle existant ne possède pas de phases séparées « marchés » et « réception » : les marchés et le dépôt de la déclaration d’ouverture de chantier (DOC) sont contrôlés à l’entrée en VISA (la préparation de chantier), et la DAACT (déclaration attestant l’achèvement et la conformité des travaux), les OPR/essais/DOE/DIUO/PV/réserves/DGD à l’entrée en AOR. Aucun nouvel état métier n’est imposé aux documents ou contrats existants.
 
 Un saut ESQ→APD inclut aussi les contrôles de l’entrée en APS. Un retour vers une phase précédente est historisé, sans contrôles de passage en avant. Lors d’un nouveau passage en avant, une nouvelle checklist est réalisée. Sans historique, la phase de départ est ESQ.
 
@@ -33,6 +33,10 @@ Appliquer `supabase/migrate_phase_transition_controls.sql` avant de déployer le
 - `PUT /api/projects/:id/phase-controls/config` : configuration validée et limitée aux rôles autorisés.
 - `POST /api/projects/:id/phase` : phase, `expectedCurrentId`, `revision`, `answers`, `createTasks`.
 - `GET /api/projects/:id/phase-history` expose aussi `control_audit` : règles et réponses au moment du passage, justification, documents, utilisateur, échéances et tâches créées.
+
+**Passage forcé.** Quand un contrôle n'a pas d'objet pour une affaire, un responsable (`admin`, `manager`, `pm`, comme pour la configuration) peut forcer le passage : `forceReason` (10 caractères au moins) dans `POST /api/projects/:id/phase`. Les contrôles non résolus, blocants compris, sont levés sans créer de tâche ; le serveur refuse le motif absent ou trop court (400) et tout autre rôle (403). L'audit (`control_audit`) garde `forced: { by, at, reason, rule_ids }`, seulement si un contrôle a réellement été levé. Les réponses saisies (fait, sans objet justifié) restent prioritaires, et une phase déjà atteinte, la révision et la phase attendue sont revérifiées comme pour un passage ordinaire.
+
+**Alerte DOC.** La règle d'alerte `doc_ouverture_chantier_manquante` (`server/agentAlerts.ts`, cycle hebdomadaire, seuil réglable, 14 jours par défaut) signale une affaire en VISA ou DET depuis ce délai sans DOC dans ses documents. Elle se tait si un document désigne la DOC (mêmes termes que le contrôle), si le contrôle de phase a été répondu « fait » ou « sans objet » justifié, ou si le passage a été forcé en levant ce contrôle.
 
 La configuration utilise un schéma versionné : `version: 1`, `rules`, `context`, `phaseDeadlines`. Chaque règle définit `id`, `title`, `from`, `to`, `required`, `severity`, `when: { all, any }`, `evidenceTerms`, `defaultAssigneeId`, `dueOffsetDays`. Les conditions utilisent une liste fermée de propriétés, sans évaluation de code.
 

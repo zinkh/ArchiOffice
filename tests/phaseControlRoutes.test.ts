@@ -53,6 +53,30 @@ describe('phase checklist API', () => {
     const result = await submit({ answers: body.controls.map((c: any) => ({ ...c.answer, status: 'not_required', justification: 'Mission sans travaux de sol' })), createTasks: false });
     expect(result.status).toBe(201); expect(db.getTable('tasks')).toHaveLength(0);
   });
+  it('forces the change with a reason: no task, blocking checks waived, audit keeps who, why and which checks', async () => {
+    const { db, config, submit } = setup(); config.rules.find(r => r.id === 'geotechnique')!.severity = 'blocking';
+    db.getTable('projects')[0].phase_control_config = config;
+    const result = await submit({ createTasks: false, forceReason: 'Mission sans étude de sol, sol connu' });
+    expect(result.status).toBe(201);
+    expect(db.getTable('tasks')).toHaveLength(0);
+    expect(result.body.control_audit.forced).toMatchObject({ by: 'u', reason: 'Mission sans étude de sol, sol connu' });
+    expect(result.body.control_audit.forced.rule_ids).toContain('geotechnique');
+  });
+  it('refuses a forced change without a real reason, or from a collaborator', async () => {
+    const { db, submit } = setup();
+    expect((await submit({ createTasks: false, forceReason: 'ok' })).status).toBe(400);
+    expect((await submit({ createTasks: false, forceReason: '          ' })).status).toBe(400);
+    const viewer = setup('user');
+    expect((await viewer.submit({ createTasks: false, forceReason: 'Motif suffisant pour forcer' })).status).toBe(403);
+    expect(db.getTable('project_phase_history')).toHaveLength(0);
+    expect(viewer.db.getTable('project_phase_history')).toHaveLength(0);
+  });
+  it('records no forcing when every check was answered', async () => {
+    const { preview, submit } = setup(); const { body } = await preview();
+    const result = await submit({ answers: body.controls.map((c: any) => ({ ...c.answer, status: 'not_required', justification: 'Sans objet' })), createTasks: false, forceReason: 'Motif suffisant pour forcer' });
+    expect(result.status).toBe(201);
+    expect(result.body.control_audit.forced).toBeUndefined();
+  });
   it('rejects another project document or cabinet assignee', async () => {
     const { db, submit } = setup();
     db.seed('documents', [{ id: 'foreign', project_id: 'other', tenant_id: 'a', name: 'Sol' }]);

@@ -66,18 +66,26 @@ export function registerProjectPhaseHistoryRoutes(app: Express, { supabaseAdmin,
       const initializing = !state.current && req.body.phase === 'ESQ';
       const parsed = transitionSchema.safeParse(req.body);
       if (!initializing && !parsed.success) throw new PhaseControlError(400, 'Ouvrez et renseignez la checklist avant de changer de phase.');
-      const input = parsed.success ? parsed.data : { phase: 'ESQ', expectedCurrentId: null, revision: state.revision, answers: [] as ControlAnswer[], createTasks: false };
+      const input = parsed.success ? parsed.data : { phase: 'ESQ', expectedCurrentId: null, revision: state.revision, answers: [] as ControlAnswer[], createTasks: false, forceReason: undefined as string | undefined };
+      // Forcer le passage est une décision de responsable : même périmètre que la configuration des contrôles.
+      if (input.forceReason) {
+        const member = await findMembership(supabaseAdmin, req.user.id, tenantId);
+        if (!member || !['admin', 'manager', 'pm'].includes(member.systemRole ?? '')) throw new PhaseControlError(403, 'Le passage forcé est réservé aux responsables de projet.');
+      }
       if (input.expectedCurrentId !== state.expectedCurrentId || input.revision !== state.revision) throw new PhaseControlError(409, 'La phase ou la configuration a changé. Rechargez les contrôles.');
       const controls = evaluateControls(state.config, state.from, input.phase, state.documents, input.answers, new Date(), state.context);
       const expected = new Set(controls.map(c => c.rule.id));
       if (new Set(input.answers.map(a => a.ruleId)).size !== input.answers.length || input.answers.some(a => !expected.has(a.ruleId))) throw new PhaseControlError(400, 'Réponses dupliquées ou contrôle inconnu.');
       const tasks: Record<string, unknown>[] = [];
+      const forcedRuleIds: string[] = [];
       for (const control of controls) {
         const { rule, answer } = control;
         if (answer.status === 'not_required' && !answer.justification.trim()) throw new PhaseControlError(400, `Justification requise : ${rule.title}`);
         if (answer.documentId && !state.documents.some(d => d.id === answer.documentId)) throw new PhaseControlError(400, 'La preuve ne fait pas partie des documents de ce projet.');
         if (answer.assigneeId && !(await findMembership(supabaseAdmin, answer.assigneeId, tenantId))) throw new PhaseControlError(400, 'Responsable inconnu dans ce cabinet.');
         if (control.group === 'compliant') continue;
+        // Passage forcé : le contrôle non résolu est levé, sans tâche, et tracé dans l'audit.
+        if (input.forceReason) { forcedRuleIds.push(rule.id); continue; }
         if (rule.severity === 'blocking') throw new PhaseControlError(422, `Contrôle bloquant à résoudre : ${rule.title}`);
         if (!rule.required) continue;
         if (!input.createTasks) throw new PhaseControlError(422, 'Créez les tâches manquantes ou complétez les contrôles requis.');
@@ -91,6 +99,8 @@ export function registerProjectPhaseHistoryRoutes(app: Express, { supabaseAdmin,
       }
       const audit = { version: 1, from: state.from, to: input.phase, revision: state.revision,
         checked_by: req.user.id, checked_at: new Date().toISOString(), context: state.context,
+        // Seulement si un contrôle a réellement été levé : un motif sans contrôle à lever n'est pas un forçage.
+        ...(forcedRuleIds.length ? { forced: { by: req.user.id, at: new Date().toISOString(), reason: input.forceReason, rule_ids: forcedRuleIds } } : {}),
         controls: controls.map(({ candidates: _candidates, ...control }) => control) };
       const { data: created, error } = await supabaseAdmin.rpc('commit_phase_transition', {
         p_tenant_id: tenantId, p_project_id: projectId, p_expected_id: state.expectedCurrentId,
@@ -101,7 +111,7 @@ export function registerProjectPhaseHistoryRoutes(app: Express, { supabaseAdmin,
       if (error) throw error;
       try {
         const userName = await getUserName(tenantId, req.user.id, req.user.email);
-        await logActivity(tenantId, req.user.id, userName, `Passage du projet "${state.project.name}" en phase ${input.phase} (${tasks.length} tâches)`, state.project.name, projectId, 'project', 'Projets');
+        await logActivity(tenantId, req.user.id, userName, `Passage du projet "${state.project.name}" en phase ${input.phase} (${forcedRuleIds.length ? `forcé, ${forcedRuleIds.length} contrôle(s) levé(s)` : `${tasks.length} tâches`})`, state.project.name, projectId, 'project', 'Projets');
         dispatchWebhookEvent(supabaseAdmin, tenantId, 'project.phase_changed', {
           project_id: projectId, project_name: state.project.name, phase: input.phase, previous_phase: state.current?.phase ?? null,
         });

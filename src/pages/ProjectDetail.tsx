@@ -69,6 +69,7 @@ import { ProjectTabBar } from '../components/projectDetail/ProjectTabBar';
 import { useUnsavedChangesGuard } from '../hooks/useUnsavedChangesGuard';
 import { useEscapeKey } from '../hooks/useEscapeKey';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
+import { coverImageProblem, isDateRangeInverted, MAX_SURFACE, parseNumericInput } from '../lib/numericField';
 import { Toast } from '../components/ui/Toast';
 import { useConfirmDialog } from '../components/ui/ConfirmDialog';
 import { usePhaseNotes } from '../hooks/usePhaseNotes';
@@ -317,6 +318,12 @@ export default function ProjectDetail() {
       label: overrun ? t('phase_journal_badge_overrun', { count }) : t('phase_journal_badge', { count }),
     }])
   ), [phaseNotes.summary, t]);
+  // Date d'entrée dans la phase en cours, lue dans l'historique ; vide si absente ou illisible.
+  const currentPhaseSince = (() => {
+    const entered = phaseHistory.find(p => !p.exited_at)?.entered_at;
+    const date = entered ? new Date(entered) : null;
+    return date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString('fr-FR') : '';
+  })();
   const advancePhase = async () => {
     if (upcomingPhase) await handleSetPhase(upcomingPhase);
   };
@@ -1764,11 +1771,19 @@ export default function ProjectDetail() {
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !project) return;
+    // Permet de rechoisir le même fichier après une erreur.
+    e.target.value = '';
+    const problem = coverImageProblem(file);
+    if (problem) {
+      showToast(t(problem === 'type' ? 'projectdetail_cover_invalid_type' : 'projectdetail_cover_too_large'), 'error', { duration: 6000 });
+      return;
+    }
     try {
       const optimizedBase64 = await optimizeImage(file);
-      setProject({ ...project, image_url: optimizedBase64 });
+      setProject(prev => (prev ? { ...prev, image_url: optimizedBase64 } : prev));
     } catch (err) {
       console.error(err);
+      showToast(t('projectdetail_cover_failed'), 'error', { duration: 6000 });
     }
   };
 
@@ -2124,7 +2139,7 @@ export default function ProjectDetail() {
                                 <input id="honos-initiaux" type="number" readOnly={verrouille} title={origine}
                                   className={verrouille ? readOnlyCls : editCls}
                                   value={project.remuneration || 0}
-                                  onChange={e => setProject({...project, remuneration: Number(e.target.value)})} />
+                                  onChange={e => setProject({...project, remuneration: parseNumericInput(e.target.value)})} />
                               </div>
                             </div>
                             <div className="space-y-2">
@@ -2134,7 +2149,7 @@ export default function ProjectDetail() {
                                 <input id="honos-cout-travaux" type="number" readOnly={verrouille} title={origine}
                                   className={verrouille ? readOnlyCls : editCls}
                                   value={project.construction_cost || 0}
-                                  onChange={e => setProject({...project, construction_cost: Number(e.target.value)})} />
+                                  onChange={e => setProject({...project, construction_cost: parseNumericInput(e.target.value)})} />
                               </div>
                             </div>
                             <div className="space-y-2">
@@ -3394,7 +3409,8 @@ export default function ProjectDetail() {
                         <div className="relative p-4 pt-16 sm:p-8 space-y-3 sm:space-y-4">
                           <input 
                             type="text"
-                            className="w-full bg-transparent border-none text-2xl sm:text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0"
+                            className="w-full min-w-0 bg-transparent border-none text-2xl sm:text-4xl font-bold text-white placeholder:text-white/40 focus:ring-0 p-0 truncate"
+                            maxLength={200}
                             value={project.name}
                             onChange={e => setProject({...project, name: e.target.value})}
                             aria-label={t('projectdetail_full_name')}
@@ -3436,6 +3452,7 @@ export default function ProjectDetail() {
                             <textarea
                               id="fiche-description"
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-4 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] min-h-[120px] max-h-[40dvh] resize-none [field-sizing:content]"
+                              maxLength={5000}
                               value={project.description}
                               onChange={e => setProject({...project, description: e.target.value})}
                               placeholder={t('project_overview_objet_placeholder')}
@@ -3463,69 +3480,86 @@ export default function ProjectDetail() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 pt-8 border-t border-[var(--tblr-border)]">
+                        <div className="grid grid-cols-1 md:grid-cols-5 gap-6 pt-8 border-t border-[var(--tblr-border)] md:items-end">
                           <div className="space-y-2">
-                            <label htmlFor="fiche-surface" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_surface')}</label>
+                            <label htmlFor="fiche-surface" className="flex items-end min-h-[2.5rem] text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_surface')}</label>
                             <input
                               id="fiche-surface"
                               type="number"
+                              min="0"
+                              max={MAX_SURFACE}
+                              step="any"
+                              inputMode="decimal"
+                              onWheel={e => e.currentTarget.blur()}
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                               value={project.surface || 0}
-                              onChange={e => setProject({...project, surface: Number(e.target.value)})}
+                              onChange={e => setProject({...project, surface: parseNumericInput(e.target.value, { max: MAX_SURFACE })})}
                             />
                           </div>
                           <div className="space-y-2">
-                            <label htmlFor="fiche-cout-travaux" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_works_cost_input')}</label>
+                            <label htmlFor="fiche-cout-travaux" className="flex items-end min-h-[2.5rem] text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_works_cost_input')}</label>
                             <div className="relative">
                               <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
                               <input
                                 id="fiche-cout-travaux"
                                 type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                onWheel={e => e.currentTarget.blur()}
                                 readOnly={!!contratHonoraires}
                                 title={contratHonoraires ? t('projectdetail_fees_locked') : undefined}
                                 className={cn('w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold', contratHonoraires && 'opacity-70 cursor-default')}
                                 value={project.construction_cost || 0}
-                                onChange={e => setProject({...project, construction_cost: Number(e.target.value)})}
+                                onChange={e => setProject({...project, construction_cost: parseNumericInput(e.target.value)})}
                               />
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <label htmlFor="fiche-remuneration" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_initial_input')}</label>
+                            <label htmlFor="fiche-remuneration" className="flex items-end min-h-[2.5rem] text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_fees_initial_input')}</label>
                             <div className="relative">
                               <span aria-hidden className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)] font-bold">€</span>
                               <input
                                 id="fiche-remuneration"
                                 type="number"
+                                min="0"
+                                step="any"
+                                inputMode="decimal"
+                                onWheel={e => e.currentTarget.blur()}
                                 readOnly={!!contratHonoraires}
                                 title={contratHonoraires ? t('projectdetail_fees_locked') : undefined}
                                 className={cn('w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold', contratHonoraires && 'opacity-70 cursor-default')}
                                 value={project.remuneration || 0}
-                                onChange={e => setProject({...project, remuneration: Number(e.target.value)})}
+                                onChange={e => setProject({...project, remuneration: parseNumericInput(e.target.value)})}
                               />
                             </div>
                           </div>
                           <div className="space-y-2">
-                            <label htmlFor="fiche-progression" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_progress')}</label>
+                            <label htmlFor="fiche-progression" className="flex items-end min-h-[2.5rem] text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_progress')}</label>
                             <input
                               id="fiche-progression"
                               type="number"
                               min="0"
                               max="100"
+                              step="1"
+                              inputMode="numeric"
+                              onWheel={e => e.currentTarget.blur()}
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                               readOnly={milestones.length > 0}
                               title={milestones.length > 0 ? t('projectdetail_progress_auto') : undefined}
                               value={project.progression || 0}
-                              onChange={e => setProject({...project, progression: Number(e.target.value)})}
+                              onChange={e => setProject({...project, progression: parseNumericInput(e.target.value, { max: 100, integer: true })})}
                             />
                             {milestones.length > 0 && (
                               <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_progress_auto')}</p>
                             )}
                           </div>
                           <div className="space-y-2">
-                            <label htmlFor="fiche-code" className="text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_code')}</label>
+                            <label htmlFor="fiche-code" className="flex items-end min-h-[2.5rem] text-xs font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('projectdetail_full_code')}</label>
                             <input
                               id="fiche-code"
                               type="text"
+                              maxLength={40}
                               className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
                               value={project.project_code || ''}
                               onChange={e => setProject({...project, project_code: e.target.value})}
@@ -3938,8 +3972,12 @@ export default function ProjectDetail() {
                             id="fiche-budget"
                             type="number"
                             className="w-full pl-8 pr-4 py-3 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)] font-bold"
+                            min="0"
+                            step="any"
+                            inputMode="decimal"
+                            onWheel={e => e.currentTarget.blur()}
                             value={project.budget || 0}
-                            onChange={e => setProject({...project, budget: Number(e.target.value)})}
+                            onChange={e => setProject({...project, budget: parseNumericInput(e.target.value)})}
                           />
                         </div>
                       </div>
@@ -3960,11 +3998,17 @@ export default function ProjectDetail() {
                             id="fiche-echeance"
                             type="date"
                             className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg p-3 text-xs outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)]"
+                            min={project.start_date || undefined}
+                            aria-invalid={isDateRangeInverted(project.start_date, project.end_date) || undefined}
+                            aria-describedby={isDateRangeInverted(project.start_date, project.end_date) ? 'fiche-dates-erreur' : undefined}
                             value={project.end_date}
                             onChange={e => setProject({...project, end_date: e.target.value})}
                           />
                         </div>
                       </div>
+                      {isDateRangeInverted(project.start_date, project.end_date) && (
+                        <p id="fiche-dates-erreur" role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">{t('projectdetail_dates_inverted')}</p>
+                      )}
                       <div className="space-y-4 pt-4 border-t border-[var(--tblr-border)]">
                         <div className="flex items-center gap-2">
                           <input 
@@ -4015,13 +4059,48 @@ export default function ProjectDetail() {
                     </div>
 
                     <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
-                      <PhaseStepper
-                        steps={missionPhases.map(phase => ({ id: phase, label: phase, description: t(`mission_phase_${phase}`) }))}
-                        currentId={actualCurrentPhase}
-                        badges={phaseBadges}
-                        onSelect={phase => handleSetPhase(phase as DocumentPhase)}
-                      />
+                      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</p>
+                      {/* Le stepper de l'en-tête montre déjà toutes les phases : cette carte
+                          dit ce que celui-ci ne dit pas (nom complet, depuis quand, suite). */}
+                      {actualCurrentPhase ? (
+                        <div className="space-y-3">
+                          <div className="flex items-baseline gap-3 min-w-0">
+                            <span className="text-3xl font-bold leading-none tabular-nums" style={{ color: 'var(--tblr-primary)' }}>{actualCurrentPhase}</span>
+                            <span className="text-base font-semibold truncate min-w-0" style={{ color: 'var(--tblr-text)' }}>{t(`mission_phase_${actualCurrentPhase}`)}</span>
+                          </div>
+                          <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                            {t('project_phase_position', { index: missionPhases.indexOf(actualCurrentPhase) + 1, total: missionPhases.length })}
+                            {currentPhaseSince && ` · ${t('project_phase_since', { date: currentPhaseSince })}`}
+                          </p>
+                          {upcomingPhase && (
+                            <button
+                              type="button"
+                              onClick={() => { void advancePhase(); }}
+                              title={t('project_phase_advance_title', { phase: upcomingPhase })}
+                              className="w-full min-h-11 px-3 inline-flex items-center justify-between gap-2 rounded-lg border text-sm font-semibold transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                              style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+                            >
+                              <span className="truncate">{t('project_phase_advance', { phase: upcomingPhase })}</span>
+                              <IconChevronRight size={16} aria-hidden className="shrink-0" />
+                            </button>
+                          )}
+                          <div className="space-y-1">
+                            <label htmlFor="fiche-phase-select" className="text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_set_label')}</label>
+                            <select
+                              id="fiche-phase-select"
+                              className="w-full min-h-11 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500 text-[var(--tblr-text)]"
+                              value={actualCurrentPhase}
+                              onChange={e => { if (e.target.value !== actualCurrentPhase) void handleSetPhase(e.target.value as DocumentPhase); }}
+                            >
+                              {missionPhases.map(phase => (
+                                <option key={phase} value={phase}>{phase} · {t(`mission_phase_${phase}`)}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_none')}</p>
+                      )}
                       {phaseHistory.length > 0 && (
                         <div className="pt-3 border-t border-[var(--tblr-border)] space-y-1.5">
                           <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_history')}</p>

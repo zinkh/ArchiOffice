@@ -17,6 +17,41 @@ describe('phase control engine', () => {
     c.context.erp = true;
     expect(applicableRules(c, 'APS', 'APD').some(r => r.id === 'securite')).toBe(true);
   });
+  it('reminds to file the déclaration d’ouverture de chantier before entering the site preparation (VISA)', () => {
+    const c = config();
+    const missing = evaluateControls(c, 'ACT', 'VISA', []).find(r => r.rule.id === 'doc-ouverture-chantier')!;
+    expect(missing.rule.required).toBe(true);
+    // Sans réponse : à vérifier, jamais conforme d'office, et aucune preuve suggérée.
+    expect(missing.group).toBe('verify');
+    expect(missing.candidates).toEqual([]);
+    // Pas avant la fin de la consultation, plus une fois en VISA, ni en revenant en arrière.
+    expect(applicableRules(c, 'PRO', 'DCE').some(r => r.id === 'doc-ouverture-chantier')).toBe(false);
+    expect(applicableRules(c, 'VISA', 'DET').some(r => r.id === 'doc-ouverture-chantier')).toBe(false);
+    expect(applicableRules(c, 'VISA', 'ACT')).toEqual([]);
+    // Un saut de phase (ACT vers DET) ne contourne pas ce contrôle.
+    expect(applicableRules(c, 'ACT', 'DET').some(r => r.id === 'doc-ouverture-chantier')).toBe(true);
+    // Un fichier déposé n'est qu'une preuve suggérée : jamais validé d'office.
+    const found = evaluateControls(c, 'ACT', 'VISA', [{ id: 'd1', name: 'Déclaration d’ouverture de chantier.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!;
+    expect(found.candidates.map(d => d.id)).toEqual(['d1']);
+    expect(found.group).toBe('verify');
+    // Un nom de fichier qui contient seulement « doc » ne compte pas.
+    expect(evaluateControls(c, 'ACT', 'VISA', [{ id: 'd2', name: 'doc.pdf' }]).find(r => r.rule.id === 'doc-ouverture-chantier')!.candidates).toEqual([]);
+  });
+  it('reminds to file the DAACT before entering the reception phase', () => {
+    const c = config();
+    const pending = evaluateControls(c, 'DET', 'AOR', []).find(r => r.rule.id === 'daact')!;
+    expect(pending.rule.required).toBe(true);
+    expect(pending.group).toBe('verify');
+    expect(pending.candidates).toEqual([]);
+    // Pas avant la phase chantier, ni en revenant en arrière.
+    expect(applicableRules(c, 'VISA', 'DET').some(r => r.id === 'daact')).toBe(false);
+    expect(applicableRules(c, 'AOR', 'DET')).toEqual([]);
+    for (const name of ['DAACT mairie.pdf', 'Déclaration attestant l’achèvement et la conformité des travaux.pdf', 'CERFA 13408.pdf']) {
+      expect(evaluateControls(c, 'DET', 'AOR', [{ id: 'd1', name }]).find(r => r.rule.id === 'daact')!.candidates.map(d => d.id)).toEqual(['d1']);
+    }
+    // Le seul mot « achèvement » (planning, PV...) ne vaut pas preuve.
+    expect(evaluateControls(c, 'DET', 'AOR', [{ id: 'd2', name: 'Planning achèvement.pdf' }]).find(r => r.rule.id === 'daact')!.candidates).toEqual([]);
+  });
   it('supports any / all predicates', () => {
     const c = config(); c.rules[0].when = { any: ['erp', 'abf'], all: ['existing'] };
     c.context = { erp: false, abf: false, existing: true };

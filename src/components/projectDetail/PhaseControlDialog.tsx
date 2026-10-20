@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CONTROL_PHASES, CONTEXT_FLAGS, CONTROL_STATUSES, evaluateControls, type ControlAnswer, type ControlConfig, type ControlRule, type EvidenceDocument } from '../../lib/phaseControls';
+import { CONTROL_PHASES, CONTEXT_FLAGS, CONTROL_STATUSES, FORCE_REASON_MIN_LENGTH, evaluateControls, type ControlAnswer, type ControlConfig, type ControlRule, type EvidenceDocument } from '../../lib/phaseControls';
 import { DialogShell, inputClass, boutonPrincipal, boutonSecondaire } from './situations/DialogShell';
 
 interface Preview {
@@ -18,6 +18,8 @@ export function PhaseControlDialog({ projectId, phase, members, canConfigure, on
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState(false);
+  const [force, setForce] = useState(false);
+  const [forceReason, setForceReason] = useState('');
   async function load() {
     const response = await fetch(`/api/projects/${projectId}/phase-controls?to=${encodeURIComponent(phase)}`);
     const data = await response.json();
@@ -32,6 +34,9 @@ export function PhaseControlDialog({ projectId, phase, members, canConfigure, on
   const needsTasks = unresolved.some(c => c.rule.required);
   const missingDate = unresolved.some(c => c.rule.required && !c.dueDate);
   const missingReason = controls.some(c => c.answer.status === 'not_required' && !c.answer.justification.trim());
+  // Forcer lève les contrôles non résolus (blocants compris) : réservé aux responsables, motif obligatoire.
+  const forcing = canConfigure && force && unresolved.length > 0;
+  const forceReasonMissing = forcing && forceReason.trim().length < FORCE_REASON_MIN_LENGTH;
   function answer(ruleId: string, patch: Partial<ControlAnswer>) {
     const original = controls.find(c => c.rule.id === ruleId)!.answer;
     setAnswers(prev => [...prev.filter(a => a.ruleId !== ruleId), { ...original, ...patch }]);
@@ -50,7 +55,7 @@ export function PhaseControlDialog({ projectId, phase, members, canConfigure, on
     setBusy(true); setError('');
     try {
       const response = await fetch(`/api/projects/${projectId}/phase`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phase, revision: preview.revision, expectedCurrentId: preview.expectedCurrentId, answers: controls.map(c => c.answer), createTasks: needsTasks }) });
+        body: JSON.stringify({ phase, revision: preview.revision, expectedCurrentId: preview.expectedCurrentId, answers: controls.map(c => c.answer), createTasks: needsTasks && !forcing, ...(forcing ? { forceReason: forceReason.trim() } : {}) }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || t('pc_error'));
       onComplete();
@@ -63,14 +68,19 @@ export function PhaseControlDialog({ projectId, phase, members, canConfigure, on
   return <DialogShell open wide title={t('pc_title')} subtitle={`${preview?.from ?? '…'} → ${phase}`} onClose={onClose} busy={busy} footer={<>
     <button className={boutonSecondaire} disabled={busy} onClick={onClose}>{t('pc_cancel')}</button>
     <button className={boutonSecondaire} disabled={busy} onClick={() => { setBusy(true); setError(''); load().catch(e => setError(e.message)).finally(() => setBusy(false)); }}>{t('pc_reload')}</button>
-    <button className={boutonPrincipal} disabled={busy || !preview || dirty || blocking || missingReason || missingDate} onClick={submit}>{t(needsTasks ? 'pc_tasks_continue' : 'pc_continue')}</button>
+    <button className={boutonPrincipal} disabled={busy || !preview || dirty || (!forcing && (blocking || missingDate)) || missingReason || forceReasonMissing} onClick={submit}>{t(forcing ? 'pc_force_continue' : needsTasks ? 'pc_tasks_continue' : 'pc_continue')}</button>
   </>}>
     {error && <p role="alert" className="text-red-600 mb-3">{error}</p>}
     {preview && <>
       <p className="mb-3 text-sm">{t('pc_summary', { compliant: controls.filter(c => c.group === 'compliant').length, verify: controls.filter(c => c.group === 'verify').length, missing: controls.filter(c => c.group === 'missing').length })}</p>
       <p className="text-sm text-[var(--tblr-muted)] mb-4">{t('pc_evidence_hint')}</p>
-      {blocking && <p role="alert" className="text-red-600">{t('pc_blocked')}</p>}
-      {missingDate && <p role="alert" className="text-amber-700">{t('pc_missing_date')}</p>}
+      {blocking && !forcing && <p role="alert" className="text-red-600">{t('pc_blocked')}</p>}
+      {missingDate && !forcing && <p role="alert" className="text-amber-700">{t('pc_missing_date')}</p>}
+      {canConfigure && unresolved.length > 0 && <div className="border border-[var(--tblr-border)] rounded-lg p-3 my-3 space-y-2">
+        <label className="flex items-start gap-2 text-sm font-semibold"><input type="checkbox" className="mt-1" checked={force} disabled={busy} onChange={e => setForce(e.target.checked)} />{t('pc_force_toggle')}</label>
+        <p className="text-xs text-[var(--tblr-muted)]">{t('pc_force_hint')}</p>
+        {force && <label className="text-sm block">{t('pc_force_reason')}<textarea className={inputClass} maxLength={2000} required value={forceReason} disabled={busy} onChange={e => setForceReason(e.target.value)} /></label>}
+      </div>}
       {controls.map(c => <fieldset key={c.rule.id} disabled={busy} className="border border-[var(--tblr-border)] rounded-lg p-3 my-3 space-y-2">
         <legend className="px-1 font-semibold">{c.rule.title}</legend>
         <p className="text-xs text-[var(--tblr-muted)]">{c.rule.from} → {c.rule.to} · {t(`pc_${c.rule.severity}`)} · {t(c.rule.required ? 'pc_required' : 'pc_optional')} · {c.dueDate ? t('pc_due', { date: c.dueDate, days: c.overdueDays }) : t('pc_no_date')}</p>

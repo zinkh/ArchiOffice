@@ -348,6 +348,21 @@
       "dueOffsetDays": 0
     },
     {
+      "id": "doc-ouverture-chantier",
+      "title": "Déclaration d’ouverture de chantier (DOC) déposée en mairie",
+      "from": "ACT",
+      "to": "VISA",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "ouverture de chantier",
+        "déclaration d’ouverture",
+        "CERFA 13407"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
       "id": "assurances",
       "title": "Assurances des entreprises vérifiées",
       "from": "ACT",
@@ -452,6 +467,23 @@
         "SPS",
         "PGC",
         "PPSPS"
+      ],
+      "defaultAssigneeId": null,
+      "dueOffsetDays": 0
+    },
+    {
+      "id": "daact",
+      "title": "Déclaration attestant l’achèvement et la conformité des travaux (DAACT) déposée en mairie",
+      "from": "DET",
+      "to": "AOR",
+      "severity": "important",
+      "required": true,
+      "evidenceTerms": [
+        "DAACT",
+        "achèvement et la conformité",
+        "achèvement et conformité",
+        "déclaration d’achèvement",
+        "CERFA 13408"
       ],
       "defaultAssigneeId": null,
       "dueOffsetDays": 0
