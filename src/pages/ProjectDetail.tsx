@@ -4059,7 +4059,7 @@ export default function ProjectDetail() {
                     </div>
 
                     <div className="p-6 rounded-lg space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
-                      <label className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</label>
+                      <p className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('project_phase_current')}</p>
                       {/* Le stepper de l'en-tête montre déjà toutes les phases : cette carte
                           dit ce que celui-ci ne dit pas (nom complet, depuis quand, suite). */}
                       {actualCurrentPhase ? (
