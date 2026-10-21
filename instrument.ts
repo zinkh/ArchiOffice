@@ -72,7 +72,18 @@ if (dsn) {
     dsn,
     environment: process.env.NODE_ENV || 'production',
     tracesSampleRate: 0.1,
-    sendDefaultPii: false,
+    // v11 a remplacé sendDefaultPii par dataCollection, dont les valeurs par
+    // défaut collectent tout : on garde l'équivalent de l'ancien `false`.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+      databaseQueryData: false,
+      queues: false,
+      stackFrameVariables: false,
+    },
     // Every existing console.error/warn across server.ts and the agents
     // package becomes a Sentry event without touching each call site —
     // most routes already catch their own errors and just log them.
