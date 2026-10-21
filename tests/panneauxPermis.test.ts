@@ -217,12 +217,33 @@ describe('routes', () => {
       { id: 'lp2', tenant_id: tenant, project_id: 'projPublic01', lot_number: '02', lot_title: 'Charpente', contact_id: null },
     ]);
     fakeSupabaseAdmin.seed('contacts', [{ id: 'ent1', tenant_id: tenant, company_name: 'BATI NANCY', address_work_street: '1 rue X', address_work_zip: '54000', address_work_city: 'Nancy', logo: 'data:image/png;base64,AAAA' }]);
+    fakeSupabaseAdmin.seed('marches_entreprises', [{ id: 'mk1', tenant_id: tenant, project_id: 'projPublic01', entreprise_nom: 'BATI NANCY', lot_numero: '1', lot_titre: 'Gros œuvre', contact_id: 'ent1' }]);
+    fakeSupabaseAdmin.seed('marche_sous_traitants', [{ id: 'st1', tenant_id: tenant, project_id: 'projPublic01', marche_id: 'mk1', nom: 'FERRAILLAGE LORRAIN', adresse: '2 rue Y, 54000 Nancy', objet: 'Armatures', created_at: '2026-01-01' }]);
     const ok = await request(app).get(`/api/public/chantier/${signChantierToken('projPublic01')}`);
     expect(ok.status).toBe(200);
+    expect(ok.body.sousTraitants).toEqual([{ lot: '1', intitule: 'Gros œuvre', entreprise: 'BATI NANCY', nom: 'FERRAILLAGE LORRAIN', adresse: ['2 rue Y, 54000 Nancy'], objet: 'Armatures' }]);
     expect(ok.body.operation).toBe('École publique');
     expect(ok.body.entreprises).toEqual([{ lot: '01', intitule: 'Gros œuvre', nom: 'BATI NANCY', adresse: ['1 rue X', '54000 Nancy'] }]);
     expect(JSON.stringify(ok.body)).not.toContain('data:image');
     expect((await request(app).get(`/api/public/chantier/${signChantierToken('projPublic01').slice(0, -2)}xx`)).status).toBe(404);
     expect((await request(app).get(`/api/public/chantier/${signChantierToken('inconnu-0001')}`)).status).toBe(404);
+  });
+  it('sous-traitants du marché : ajout, lecture, retrait, isolation entre cabinets', async () => {
+    const tenant = makeTenant(); const { token } = makeUser(tenant);
+    fakeSupabaseAdmin.seed('marches_entreprises', [{ id: 'mkST', tenant_id: tenant, project_id: 'projST', entreprise_nom: 'ENT', lot_numero: '2' }]);
+    const bad = await request(app).post('/api/marches-entreprises/mkST/sous-traitants').set(authHeader(token)).send({ nom: '  ' });
+    expect(bad.status).toBe(400);
+    const add = await request(app).post('/api/marches-entreprises/mkST/sous-traitants').set(authHeader(token)).send({ nom: 'PEINTURE X', adresse: '1 rue Z', siret: '123' });
+    expect(add.status).toBe(201);
+    expect(add.body).toMatchObject({ nom: 'PEINTURE X', project_id: 'projST', marche_id: 'mkST' });
+    const list = await request(app).get('/api/projects/projST/sous-traitants').set(authHeader(token));
+    expect(list.body).toHaveLength(1);
+    const other = makeUser(makeTenant());
+    expect((await request(app).post('/api/marches-entreprises/mkST/sous-traitants').set(authHeader(other.token)).send({ nom: 'X' })).status).toBe(404);
+    expect((await request(app).get('/api/projects/projST/sous-traitants').set(authHeader(other.token))).body).toHaveLength(0);
+    expect((await request(app).delete(`/api/sous-traitants/${add.body.id}`).set(authHeader(other.token))).status).toBe(200);
+    expect((await request(app).get('/api/projects/projST/sous-traitants').set(authHeader(token))).body).toHaveLength(1);
+    await request(app).delete(`/api/sous-traitants/${add.body.id}`).set(authHeader(token));
+    expect((await request(app).get('/api/projects/projST/sous-traitants').set(authHeader(token))).body).toHaveLength(0);
   });
 });

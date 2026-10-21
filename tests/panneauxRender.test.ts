@@ -16,7 +16,7 @@ const chantier = (n: number): ChantierPanelData => ({
   maitriseOuvrage: [{ key: 'moa', role: 'Maître d’ouvrage', name: 'REVI', address: [], logo: null, contactId: null }],
   maitriseOeuvre: [{ key: 'moe', role: 'Architecte', name: 'AAZS', address: [], logo: null, contactId: null }],
   lots: Array.from({ length: n }, (_, i) => ({ key: `lot:${i}`, number: String(i), title: 'Couverture tuiles, zinc, étanchéité', company: `ENTREPRISE ${i}`, address: ['1 rue X', '54000 NANCY'], logo: null, contactId: null })),
-  warnings: [],
+  sousTraitants: [], warnings: [],
 });
 const permis: PermisPanelData = {
   agency, permitType: 'PC', etat: 'brouillon', beneficiaire: 'REVI', architecte: 'K. S.', numero: 'PC 1', dateDelivrance: null, natureProjet: 'École',

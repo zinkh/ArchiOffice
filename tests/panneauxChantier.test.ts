@@ -27,7 +27,7 @@ const lot = (i: number, over: Partial<PanelLot> = {}): PanelLot => ({
 const party = (key: string, name: string, over: Partial<PanelParty> = {}): PanelParty => ({ key, role: 'Rôle', name, address: [], logo: null, contactId: null, ...over });
 const data = (lots: PanelLot[], over: Partial<ChantierPanelData> = {}): ChantierPanelData => ({
   agency, projectName: 'École VIP-TC', kicker: 'Chantier', facts: [], image: null,
-  maitriseOuvrage: [party('moa', 'REVI')], maitriseOeuvre: [party('moe', 'AAZS')], lots, warnings: [], ...over,
+  maitriseOuvrage: [party('moa', 'REVI')], maitriseOeuvre: [party('moe', 'AAZS')], lots, sousTraitants: [], warnings: [], ...over,
 });
 const opts = (over: Partial<ChantierPanelOptions> = {}): ChantierPanelOptions => ({
   page: pageSpec('A0', 'portrait'), logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set(), ...over,

@@ -153,7 +153,6 @@ export function registerPanneauxRoutes(app: Express, { supabaseAdmin, getTenantI
       const { pdf, overflow } = await renderHtmlToPdf(html, { width: `${page.widthMm}mm`, height: `${page.heightMm}mm` });
 
       const warnings = [...data.warnings];
-      if (s.qrCode) warnings.push('Le QR code renvoie à la liste des entreprises titulaires des lots : les sous-traitants, que la réglementation inclut, n’y figurent pas encore.');
       if (overflow) warnings.push('Le contenu dépasse la page : masquez des lignes ou choisissez un format plus grand, le bas du panneau est rogné.');
       // Définition à l'impression : une image ou un logo trop petit sera flou.
       const imageWidthMm = (page.orientation === 'portrait' ? 450 : 400) * page.zoom;
@@ -194,6 +193,7 @@ export function registerPanneauxRoutes(app: Express, { supabaseAdmin, getTenantI
         permis: data.facts.find(f => f.label === 'Permis de construire')?.value ?? null,
         architecte: data.agency.name,
         entreprises: data.lots.filter(l => l.company).map(l => ({ lot: l.number, intitule: l.title, nom: l.company, adresse: l.address })),
+        sousTraitants: data.sousTraitants.map(st => ({ lot: st.lot, intitule: st.lotTitle, entreprise: st.entreprise, nom: st.nom, adresse: st.adresse, objet: st.objet })),
       });
     } catch (e: any) {
       console.error('[GET /api/public/chantier/:token]', e);

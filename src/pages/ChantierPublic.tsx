@@ -11,6 +11,7 @@ interface Liste {
   permis: string | null;
   architecte: string | null;
   entreprises: Array<{ lot: string; intitule: string; nom: string; adresse: string[] }>;
+  sousTraitants: Array<{ lot: string; intitule: string; entreprise: string; nom: string; adresse: string[]; objet: string | null }>;
 }
 
 export default function ChantierPublic() {
@@ -53,6 +54,25 @@ export default function ChantierPublic() {
                 </li>
               ))}
             </ul>
+          )}
+          {liste.sousTraitants.length > 0 && (
+            <>
+              <p className="mt-8 text-xs font-bold uppercase tracking-widest opacity-70">Sous-traitants</p>
+              <ul className="mt-2 divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
+                {liste.sousTraitants.map((st, i) => (
+                  <li key={`${st.entreprise}-${st.nom}-${i}`} className="py-3">
+                    <div className="text-xs font-bold uppercase tracking-wide opacity-70">
+                      {st.lot ? `Lot ${st.lot}${st.intitule ? ` · ${st.intitule}` : ''}` : 'Sous-traitant'}
+                    </div>
+                    <div className="font-bold">{st.nom}</div>
+                    {st.adresse.length > 0 && <div className="text-sm opacity-80">{st.adresse.join(', ')}</div>}
+                    <div className="text-sm opacity-80">
+                      {[st.objet, st.entreprise ? `pour ${st.entreprise}` : null].filter(Boolean).join(' · ')}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
           {liste.architecte && <p className="mt-8 text-xs opacity-60">Liste établie par {liste.architecte}, maître d’œuvre.</p>}
         </>
