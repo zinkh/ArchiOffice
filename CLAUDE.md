@@ -652,6 +652,12 @@ Vérifiée en 390, 820 et 1366 px. Règles à garder :
   `en` en permanence, d'où une lecture d'écran et une césure anglaises.
 - Un jalon sans date n'est plus pris pour la prochaine échéance (« Invalid Date »).
 
+### Onglet AOR : onglets et échelle de texte
+
+- **Une seule barre, pas de doublon** (`AorLayout.tsx`) : Réserves, DOE, Réception, Plans. Sous 1024 px c'est un jeu d'onglets (un seul bloc affiché, le dernier consulté mémorisé sous `aor:tab`) ; au bureau tous les blocs restent affichés et la barre mène au bloc voulu. Les anciens titres repliables par bloc (`aor:section:<id>`) n'existent plus.
+- **Échelle de texte des cartes** : titre de carte 16 px (`text-base`), contrôles et texte courant 14 px (`text-sm`, comme `.btn` et les champs), informations secondaires 12 px (`text-xs`), pastilles et étiquettes en capitales 11 px (`text-[0.6875rem]`, jamais en dessous). Un contrôle n'est pas une information secondaire : bouton, champ, sélecteur et filtre restent à 14 px, cibles de 44 px au doigt (`pointer-coarse:min-h-11`).
+- **Les fenêtres (`ModalShell`) sont montées à la racine de la page** (portail) : un parent transformé ou filtré devient le repère d'un élément `fixed` et la fenêtre prenait sa taille au lieu de celle de l'écran.
+
 ### Situations de travaux et certificats de paiement (onglet RDT)
 
 L'onglet RDT listait les factures de l'AGENCE et en déduisait un « reste à
