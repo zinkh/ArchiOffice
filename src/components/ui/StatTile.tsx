@@ -36,11 +36,12 @@ export function StatTile({ label, value, sub, color = 'neutral', icon: Icon, cla
           style={isNeutral ? { color: 'var(--tblr-text)' } : undefined}
         />
       )}
-      <div className="relative flex items-center gap-2 mb-1">
+      {/* Icône calée sur la première ligne d'un libellé qui passe sur plusieurs lignes ; pas de césure automatique en capitales. */}
+      <div className="relative flex items-start gap-2 mb-1">
         {Icon && (
-          <Icon size={16} className={isNeutral ? undefined : ACCENT_STYLES[color].icon} style={isNeutral ? { color: 'var(--tblr-muted)' } : undefined} />
+          <Icon size={16} className={cn('shrink-0 mt-px', !isNeutral && ACCENT_STYLES[color].icon)} style={isNeutral ? { color: 'var(--tblr-muted)' } : undefined} />
         )}
-        <span className="text-[0.6875rem] font-bold uppercase tracking-wider break-words hyphens-auto min-w-0" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
+        <span className="text-[0.6875rem] font-bold uppercase tracking-wider break-words min-w-0 leading-snug" style={{ color: 'var(--tblr-muted)' }}>{label}</span>
       </div>
       {/* Un montant tient sur deux colonnes de téléphone : plus petit sous 640 px. */}
       <div className="relative text-lg sm:text-2xl font-bold tabular-nums leading-tight" style={{ color: 'var(--tblr-text)' }}>{value}</div>

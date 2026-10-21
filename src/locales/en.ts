@@ -3323,6 +3323,7 @@ export default {
       "reserve_status_lift_refused": "Lift refused by the design team",
       "projectdetail_reserves_title": "Snags",
       "projectdetail_reserves_gpa_title": "Defects liability snags",
+      "projectdetail_reserves_gpa_short": "GPA snags",
       "projectdetail_pv_title": "Handover reports",
       "projectdetail_pv_new": "New handover report",
       "projectdetail_pv_reference": "Report reference",

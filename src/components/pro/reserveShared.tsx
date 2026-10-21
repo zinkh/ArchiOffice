@@ -63,7 +63,7 @@ export function parseJsonList(value: unknown): string[] {
 export function StatusSelect({ value, onChange, className }: { value: ReserveStatus; onChange: (s: ReserveStatus) => void; className?: string }) {
   return (
     <select
-      className={cn(statusPillClass(value), className)}
+      className={cn('pill-select', statusPillClass(value), className)}
       value={value}
       onClick={e => e.stopPropagation()}
       onChange={e => onChange(e.target.value as ReserveStatus)}
