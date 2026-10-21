@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   formatCurrency, formatPercent, buildDefaultTemplate, loadStoredTemplate,
-  mapProposalToPdfData, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS,
+  mapProposalToPdfData, planifierCalendrier, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS,
 } from '../proposalExport';
 import type { Proposal } from '../../types';
 
@@ -87,6 +87,69 @@ describe('densité des tableaux', () => {
     expect(hauteurMarges(dense.cellPadding)).toBeLessThan(hauteurMarges(compact.cellPadding));
     expect(parseFloat(dense.cellFont)).toBeLessThan(parseFloat(normal.cellFont));
     expect(dense.cellLineHeight).toBeLessThan(normal.cellLineHeight);
+  });
+});
+
+describe('planifierCalendrier', () => {
+  const liste = (...noms: Array<[string, string]>) => noms.map(([id, designation]) => ({ id, designation }));
+  // Les identifiants de la répartition d'honoraires par défaut.
+  const standard = liste(
+    ['esquisse', 'Esquisse'], ['aps', 'A.P.S.'], ['apd', 'A.P.D.'], ['projet', 'Projet'], ['act', 'A.C.T.'],
+    ['visa', 'VISA'], ['det', 'D.E.T.'], ['aor', 'A.O.R.'], ['opc', 'OPC'],
+  );
+  const par = (items: ReturnType<typeof planifierCalendrier>, id: string) => items.find(i => i.id === 'c_' + id)!;
+
+  it('enchaîne les phases : chacune démarre quand la précédente finit', () => {
+    const items = planifierCalendrier(standard);
+    expect(par(items, 'esquisse')).toMatchObject({ debutJours: 0, apres: '' });
+    expect(par(items, 'aps')).toMatchObject({ debutJours: 15, apres: 'c_esquisse' });
+    expect(par(items, 'apd')).toMatchObject({ debutJours: 30, apres: 'c_aps' });
+    expect(par(items, 'act')).toMatchObject({ debutJours: 60, apres: 'c_projet' });
+  });
+
+  it("la DET suit l'ACT et l'AOR suit la DET, sans passer par le VISA ni l'OPC", () => {
+    const items = planifierCalendrier(standard);
+    expect(par(items, 'det')).toMatchObject({ debutJours: 75, apres: 'c_act' });
+    expect(par(items, 'aor')).toMatchObject({ debutJours: 90, apres: 'c_det' });
+  });
+
+  it('le VISA démarre en même temps que la DET', () => {
+    const visa = par(planifierCalendrier(standard), 'visa');
+    expect(visa).toMatchObject({ debutJours: 75, apres: '', avec: ['c_det'] });
+  });
+
+  it("l'OPC court en parallèle de la DET et de l'AOR, du début de l'une à la fin de l'autre", () => {
+    const items = planifierCalendrier(standard);
+    const aor = par(items, 'aor');
+    const opc = par(items, 'opc');
+    expect(opc.debutJours).toBe(par(items, 'det').debutJours);
+    expect(opc.debutJours + opc.dureeJours).toBe(aor.debutJours + aor.dureeJours);
+    expect(opc.avec).toEqual(['c_det', 'c_aor']);
+  });
+
+  it("mène l'EXE en parallèle de la DET", () => {
+    const items = planifierCalendrier(liste(['pro', 'Projet'], ['exe', 'EXE'], ['det', 'D.E.T.'], ['aor', 'A.O.R.']));
+    expect(par(items, 'exe')).toMatchObject({ debutJours: 15, avec: ['c_det'] });
+    expect(par(items, 'det')).toMatchObject({ debutJours: 15, apres: 'c_pro' });
+  });
+
+  it('reconnaît une phase renommée par son sigle ou son intitulé', () => {
+    const items = planifierCalendrier(liste(
+      ['m1', 'Dossier de permis'], ['m2', "Direction de l'exécution des travaux (DET)"],
+      ['m3', 'Visa des études'], ['m4', 'Assistance aux opérations de réception (AOR)'],
+    ));
+    expect(par(items, 'm3')).toMatchObject({ debutJours: 15, avec: ['c_m2'] });
+    expect(par(items, 'm4')).toMatchObject({ debutJours: 30, apres: 'c_m2' });
+  });
+
+  it('enchaîne tout quand il n\'y a pas de DET : rien ne peut être parallèle', () => {
+    const items = planifierCalendrier(liste(['esquisse', 'Esquisse'], ['visa', 'VISA'], ['opc', 'OPC']));
+    expect(items.map(i => i.debutJours)).toEqual([0, 15, 30]);
+    expect(items.every(i => i.avec.length === 0)).toBe(true);
+  });
+
+  it('rend un calendrier vide sans mission', () => {
+    expect(planifierCalendrier([])).toEqual([]);
   });
 });
 

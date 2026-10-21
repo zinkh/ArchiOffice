@@ -163,36 +163,34 @@ function Td({ style, ...rest }: React.TdHTMLAttributes<HTMLTableCellElement>) {
 // l'aperçu mais jamais dans le PDF, et que l'aperçu avait une page de plus que lui.
 function GanttChart({ data }: { data: ProposalPdfData }) {
   const missions = data.calendrier;
-  // Mêmes proportions que l'ancien dessin : un repère de 600 unités, 150 pour les libellés.
+  // Un repère de 600 unités, 150 pour les libellés ; l'axe du temps s'adapte à la durée
+  // totale du planning (un repère par mois de 30 jours).
   const chartWidth = 600;
   const labelWidth = 150;
   const timelineWidth = chartWidth - labelWidth;
   const percent = (value: number) => `${(value / chartWidth) * 100}%`;
 
-  const timeline = missions.map((m, i) => {
-    let start = 0;
-    if (m.apres) {
-      const prevIdx = missions.findIndex(ms => ms.id === m.apres);
-      if (prevIdx !== -1) start = (prevIdx + 1) * 15;
-    } else {
-      start = i * 5;
-    }
-    const width = Math.max(m.dureeJours / 1.5, 30);
+  const totalDays = Math.max(1, ...missions.map(m => m.debutJours + m.dureeJours));
+  const months = Math.min(36, Math.max(1, Math.ceil(totalDays / 30)));
+  const axisDays = months * 30;
+  const toX = (days: number) => labelWidth + (days / axisDays) * timelineWidth;
+
+  const timeline = missions.map(m => {
     const missionData = data.missions.find(ms => ms.designation === m.mission);
     let color = '#3b82f6';
     if (missionData?.categorie === 'execution') color = '#22c55e';
     if (missionData?.categorie === 'complementaire') color = '#f59e0b';
-    return { name: m.mission, x: labelWidth + start, width, color };
+    return { name: m.mission, x: toX(m.debutJours), width: Math.max(toX(m.dureeJours) - labelWidth, 3), color };
   });
 
   return (
     <div style={{ position: 'relative', width: '100%', paddingTop: '6mm', overflow: 'hidden' }}>
-      {Array.from({ length: 13 }, (_, i) => {
-        const x = labelWidth + (i * timelineWidth) / 12;
+      {Array.from({ length: months + 1 }, (_, i) => {
+        const x = toX(i * 30);
         return (
           <React.Fragment key={i}>
             <div style={{ position: 'absolute', top: 0, bottom: 0, left: percent(x), width: '0.2mm', background: '#e5e7eb' }} />
-            <div style={{ position: 'absolute', top: '1mm', left: percent(x + 2), fontSize: '5.5pt', color: '#999' }}>M{i + 1}</div>
+            {i < months && <div style={{ position: 'absolute', top: '1mm', left: percent(x + 2), fontSize: '5.5pt', color: '#999' }}>M{i + 1}</div>}
           </React.Fragment>
         );
       })}
@@ -668,13 +666,19 @@ const renderCalendrier: SectionRenderer = (d, t, _ctx, newPage) => (
     <Table>
       <thead><tr><Th template={t}>Mission</Th><Th template={t}>Durée (jours)</Th><Th template={t}>Précédent</Th></tr></thead>
       <tbody>
-        {d.calendrier.map(c => (
-          <tr key={c.id}>
-            <Td>{c.mission}</Td>
-            <Td>{c.dureeJours} jours</Td>
-            <Td>{c.apres ? d.calendrier.find(ms => ms.id === c.apres)?.mission : 'Début'}</Td>
-          </tr>
-        ))}
+        {d.calendrier.map(c => {
+          const nom = (id: string) => d.calendrier.find(ms => ms.id === id)?.mission ?? '';
+          const precedent = c.avec.length > 0
+            ? `En parallèle de ${c.avec.map(nom).join(' et ')}`
+            : c.apres ? nom(c.apres) : 'Début';
+          return (
+            <tr key={c.id}>
+              <Td>{c.mission}</Td>
+              <Td>{c.dureeJours} jours</Td>
+              <Td>{precedent}</Td>
+            </tr>
+          );
+        })}
       </tbody>
     </Table>
   </Section>

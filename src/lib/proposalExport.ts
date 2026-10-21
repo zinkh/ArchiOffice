@@ -62,7 +62,82 @@ export interface CalendrierItem {
   id: string;
   mission: string;
   dureeJours: number;
-  apres: string; // id of the previous mission, '' if first
+  /** Jour de démarrage depuis le début de la mission (0 = premier jour). */
+  debutJours: number;
+  /** Id de la mission qui précède, '' pour la première. Vide aussi quand la mission est menée en parallèle. */
+  apres: string;
+  /** Ids des missions avec lesquelles celle-ci est menée en parallèle (VISA, EXE, OPC). */
+  avec: string[];
+}
+
+type PhaseMop = 'det' | 'aor' | 'visa' | 'exe' | 'opc';
+
+// Reconnaît une phase par son identifiant, par son sigle (« D.E.T. », « (DET) ») ou,
+// à défaut, par son intitulé : les missions d'une proposition sont renommables.
+function phaseOf(id: string, designation: string): PhaseMop | null {
+  const connues: PhaseMop[] = ['det', 'aor', 'visa', 'exe', 'opc'];
+  const parId = id.toLowerCase();
+  if ((connues as string[]).includes(parId)) return parId as PhaseMop;
+  const sigles = (designation.match(/\b(?:[A-Za-z]\.){2,}|\b[A-Z]{2,5}\b/g) ?? []).map(s => s.replace(/\./g, '').toLowerCase());
+  const parSigle = connues.find(p => sigles.includes(p));
+  if (parSigle) return parSigle;
+  if (/direction de l.ex[ée]cution/i.test(designation)) return 'det';
+  if (/op[ée]rations de r[ée]ception/i.test(designation)) return 'aor';
+  if (/^visa\b/i.test(designation)) return 'visa';
+  if (/ordonnancement/i.test(designation)) return 'opc';
+  if (/[ée]tudes? d.ex[ée]cution/i.test(designation)) return 'exe';
+  return null;
+}
+
+/** Durée par défaut d'une mission, en jours : l'architecte l'ajuste ensuite à la main. */
+export const DUREE_MISSION_PAR_DEFAUT_JOURS = 15;
+
+/**
+ * Enchaînement par défaut des missions : chacune démarre quand la précédente
+ * s'achève (APS après ESQ, APD après APS...), sauf quatre qui se mènent pendant le
+ * chantier : le VISA démarre avec la DET, l'EXE est mené en parallèle de la DET et
+ * l'OPC en parallèle de la DET et de l'AOR (il court du début de la DET à la fin de
+ * l'AOR). Sans DET dans la liste, rien n'est parallèle : tout s'enchaîne.
+ */
+export function planifierCalendrier(
+  missions: Array<{ id: string; designation: string }>,
+  duree = DUREE_MISSION_PAR_DEFAUT_JOURS,
+): CalendrierItem[] {
+  const phases = missions.map(m => phaseOf(m.id, m.designation));
+  const detIndex = phases.indexOf('det');
+  const parallele = (phase: PhaseMop | null) => detIndex !== -1 && (phase === 'visa' || phase === 'exe' || phase === 'opc');
+
+  const items: CalendrierItem[] = missions.map(m => ({
+    id: 'c_' + m.id, mission: m.designation, dureeJours: duree, debutJours: 0, apres: '', avec: [],
+  }));
+
+  // La chaîne : toutes les missions qui ne sont pas menées en parallèle, dans l'ordre de la liste.
+  let fin = 0;
+  let precedent = '';
+  items.forEach((item, i) => {
+    if (parallele(phases[i])) return;
+    item.debutJours = fin;
+    item.apres = precedent;
+    fin += item.dureeJours;
+    precedent = item.id;
+  });
+
+  // Les missions parallèles partent avec la DET ; l'OPC court jusqu'à la fin de l'AOR.
+  if (detIndex !== -1) {
+    const det = items[detIndex];
+    const aorIndex = phases.indexOf('aor');
+    items.forEach((item, i) => {
+      if (!parallele(phases[i])) return;
+      item.debutJours = det.debutJours;
+      item.avec = [det.id];
+      if (phases[i] === 'opc') {
+        const aor = aorIndex !== -1 ? items[aorIndex] : null;
+        item.dureeJours = Math.max(det.dureeJours, (aor ? aor.debutJours + aor.dureeJours : det.debutJours + det.dureeJours) - det.debutJours);
+        if (aor) item.avec = [det.id, aor.id];
+      }
+    });
+  }
+  return items;
 }
 
 export interface ProposalPdfData {
@@ -456,7 +531,7 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
       contactId: s.contact_id || undefined,
     })),
     missions,
-    calendrier: missions.map(m => ({ id: 'c_' + m.id, mission: m.designation, dureeJours: 15, apres: '' })),
+    calendrier: planifierCalendrier(missions),
     notes: p.notes || '',
 
     agenceNom: settings.agencyName || '',
