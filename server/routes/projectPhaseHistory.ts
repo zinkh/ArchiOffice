@@ -4,6 +4,7 @@ import { dispatchWebhookEvent } from '../webhookDispatch';
 import { findMembership } from '../tenantMemberships';
 import { CONTROL_PHASES, controlConfigSchema, evaluateControls, transitionSchema, type ControlAnswer } from '../../src/lib/phaseControls';
 import { loadPhaseControls, PhaseControlError } from '../phaseControls';
+import { phaseTransitionLimiter } from '../rateLimit';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -56,7 +57,7 @@ export function registerProjectPhaseHistoryRoutes(app: Express, { supabaseAdmin,
     } catch (error) { fail(res, error); }
   });
 
-  app.post('/api/projects/:id/phase', async (req: any, res: any) => {
+  app.post('/api/projects/:id/phase', phaseTransitionLimiter, async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: projectId } = req.params;
@@ -107,7 +108,11 @@ export function registerProjectPhaseHistoryRoutes(app: Express, { supabaseAdmin,
         p_expected_config: state.project.phase_control_config ?? null,
         p_phase: input.phase, p_id: crypto.randomUUID(), p_audit: audit, p_tasks: tasks,
       });
-      if (error?.code === '40001') throw new PhaseControlError(409, 'Le projet a changé. Rechargez les contrôles.');
+      if (error?.code === '40001') {
+        // Trace l'origine : un rejeu massif de cet échec a été observé côté base sans appelant identifié.
+        console.warn('[phase controls] conflit 40001', { tenantId, projectId, userId: req.user.id, phase: input.phase, ip: req.ip, userAgent: req.get?.('user-agent'), message: error.message });
+        throw new PhaseControlError(409, 'Le projet a changé. Rechargez les contrôles.');
+      }
       if (error) throw error;
       try {
         const userName = await getUserName(tenantId, req.user.id, req.user.email);
