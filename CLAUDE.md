@@ -4134,6 +4134,12 @@ Les animations suivent les principes d'interface fluide d'Apple, sans toucher
   `w-5 h-5`). `--tracking-wider` est ramené à 0,03 em dans `@theme`, et `h1`/
   `h2` sont légèrement resserrés. Les majuscules et couleurs Tabler restent.
 
+### Suggestions IA : un moteur de règles, pas un seul type d'alerte
+
+`src/lib/copilotSuggestions.ts` (testé, `src/lib/__tests__/copilotSuggestions.test.ts`) alimente la carte « Suggestions IA » du tableau de bord ET la pastille du chat (`GET /api/copilot/suggestions`). Sans appel au modèle ni crédit : des règles sur les données déjà lues. Neuf règles, par ordre de priorité : factures en retard, tâches en retard (par projet, ou internes sans projet), jalons en retard, appels d'offres à remettre sous 7 jours (urgent à 2 jours), tâches à échéance sous 3 jours, projets en retard d'avancement, factures à échéance sous 7 jours, devis envoyés sans réponse depuis 15 jours, factures restées en brouillon depuis 7 jours.
+
+Deux garde-fous à ne pas défaire : un plafond par type (3) et un tour de rôle entre les règles, sinon un type bavard (une carte par affaire en retard de jalons) occupait toute la liste ; 8 suggestions au plus. Une date absente ou illisible n'est jamais un retard. Chaque suggestion ouvre le chat avec un brouillon que la personne relit : l'IA n'agit jamais seule. Textes : `ai_suggestion_*` et `ai_draft_*` (fr et en).
+
 ### Chat des agents : pièces jointes, rappels, nouvelle discussion
 
 Panneau (`AgentChat.tsx`) et page (`AgentChatPage.tsx`) partagent les mêmes briques. Règles à garder :

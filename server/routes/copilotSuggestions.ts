@@ -18,14 +18,18 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
     try {
       const tenantId = await getTenantId(req.user.id);
 
-      const [projectsRes, milestonesRes, invoicesRes] = await Promise.all([
+      const [projectsRes, milestonesRes, invoicesRes, tasksRes, proposalsRes, tendersRes] = await Promise.all([
         tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name, client, status, end_date, progression'),
         tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').select('id, project_id, title, due_date, completed'),
-        supabaseAdmin.from('invoices').select('id, invoice_number, status, total_amount, amount, projects(name)').eq('tenant_id', tenantId),
+        supabaseAdmin.from('invoices').select('id, invoice_number, status, total_amount, amount, due_date, issue_date, created_at, projects(name)').eq('tenant_id', tenantId),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').select('id, project_id, title, status, progress, due_date, end_date'),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'proposals').select('id, title, reference, nom_societe, status, created_at'),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'tenders').select('id, title, client, status, submission_deadline, archived'),
       ]);
       if (projectsRes.error) throw projectsRes.error;
       if (milestonesRes.error) throw milestonesRes.error;
       if (invoicesRes.error) throw invoicesRes.error;
+      // Tâches, devis et appels d'offres enrichissent seulement les suggestions : un échec n'empêche pas les autres.
 
       const invoices = (invoicesRes.data || []).map((inv: any) => {
         const { projects: p, ...rest } = inv;
@@ -36,6 +40,9 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
         projects: projectsRes.data || [],
         milestones: milestonesRes.data || [],
         invoices,
+        tasks: tasksRes.error ? [] : tasksRes.data || [],
+        proposals: proposalsRes.error ? [] : proposalsRes.data || [],
+        tenders: tendersRes.error ? [] : tendersRes.data || [],
       });
       res.json(suggestions);
     } catch (e: any) {

@@ -19,7 +19,7 @@ import {
 import { cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
 import { computeCopilotSuggestions, formatCopilotSuggestion } from '../lib/copilotSuggestions';
-import type { Project, Milestone } from '../types';
+import type { Project, Milestone, Task } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
 import MyTasksWidget from '../components/dashboard/MyTasksWidget';
@@ -90,6 +90,7 @@ function AdminDashboardView() {
   const [tenders,    setTenders]    = useState<any[]>([]);
   const [invoices,   setInvoices]   = useState<any[]>([]);
   const [proposals,  setProposals]  = useState<any[]>([]);
+  const [tasks,      setTasks]      = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -97,18 +98,21 @@ function AdminDashboardView() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [projectsData, milestonesData, tendersData, invoicesData, proposalsData] = await Promise.all([
+      const [projectsData, milestonesData, tendersData, invoicesData, proposalsData, tasksData] = await Promise.all([
         fetchJson('/api/projects'),
         fetchJson('/api/milestones'),
         fetchJson('/api/tenders'),
         fetchJson('/api/invoices'),
         fetchJson('/api/proposals'),
+        // Les tâches nourrissent seulement les suggestions : leur échec ne doit pas vider le tableau de bord.
+        fetchJson('/api/tasks').catch(() => []),
       ]);
       setProjects(Array.isArray(projectsData) ? projectsData : []);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
       setTenders(Array.isArray(tendersData) ? tendersData : []);
       setInvoices(Array.isArray(invoicesData) ? invoicesData : []);
       setProposals(Array.isArray(proposalsData) ? proposalsData : []);
+      setTasks(Array.isArray(tasksData) ? tasksData : []);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
       setLoadError(err instanceof Error ? err.message : String(err));
@@ -165,8 +169,8 @@ function AdminDashboardView() {
   // the AI never acts without the user's go-ahead. Rules live in
   // src/lib/copilotSuggestions.ts, shared with the global chat badge. ──
   const suggestions = React.useMemo(
-    () => computeCopilotSuggestions({ projects, milestones, invoices }).map(raw => formatCopilotSuggestion(raw, t)),
-    [milestones, projects, invoices, t]
+    () => computeCopilotSuggestions({ projects, milestones, invoices, tasks, proposals, tenders }).map(raw => formatCopilotSuggestion(raw, t)),
+    [milestones, projects, invoices, tasks, proposals, tenders, t]
   );
 
   const dashboardHeader = (
