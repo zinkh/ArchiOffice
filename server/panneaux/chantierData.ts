@@ -6,7 +6,7 @@ import { Jimp } from 'jimp';
 import { cleanText } from '../referencesDossier/format';
 import { loadAgency, resolveReferences } from '../referencesDossier/data';
 import { prepareLogo } from './logos';
-import type { ChantierPanelData, PanelFact, PanelLogo, PanelLot, PanelParty } from './types';
+import type { ChantierPanelData, PanelFact, PanelLogo, PanelLot, PanelParty, PanelSousTraitant } from './types';
 
 type Db = any;
 
@@ -56,6 +56,8 @@ async function safeSelect(db: Db, table: string, build: (q: any) => any): Promis
 export interface ChantierLoadInput {
   imageId?: string | null;
   withImage?: boolean;
+  /** Faux : les logos ne sont pas décodés (liste publique, sans rendu). */
+  withLogos?: boolean;
   /** Informations libres du panneau (début et durée des travaux...). */
   startDate?: string | null;
   durationText?: string | null;
@@ -69,12 +71,14 @@ export async function loadChantierPanel(
   const warnings: string[] = [];
   const agency = await loadAgency(db, tenantId);
 
-  const [cotraitants, stakeholders, lotRows, marches, permits] = await Promise.all([
+  const [cotraitants, stakeholders, lotRows, marches, permits, sousTraitantRows] = await Promise.all([
     safeSelect(db, 'project_cotraitants', q => q.select('id, specialty, contact_id').eq('tenant_id', tenantId).eq('project_id', projectId)),
     safeSelect(db, 'project_stakeholders', q => q.select('id, name, role, contact_id').eq('tenant_id', tenantId).eq('project_id', projectId)),
     safeSelect(db, 'project_lots', q => q.select('id, lot_number, lot_title, contact_id').eq('tenant_id', tenantId).eq('project_id', projectId)),
     safeSelect(db, 'marches_entreprises', q => q.select('*').eq('tenant_id', tenantId).eq('project_id', projectId)),
     safeSelect(db, 'permits', q => q.select('*').eq('tenant_id', tenantId).eq('project_id', projectId)),
+    // Instance sans la migration : liste vide (safeSelect).
+    safeSelect(db, 'marche_sous_traitants', q => q.select('*').eq('tenant_id', tenantId).eq('project_id', projectId).order('created_at', { ascending: true })),
   ]);
 
   const usableMarches = marches.filter(m => m.type_marche !== 'subsequent' && m.statut !== 'resilie');
@@ -95,7 +99,7 @@ export async function loadChantierPanel(
 
   const logoFor = async (label: string, contactId: string | null | undefined): Promise<PanelLogo | null> => {
     const c = contactId ? contacts.get(contactId) : undefined;
-    if (!c?.logo) return null;
+    if (input.withLogos === false || !c?.logo) return null;
     const res = await prepareLogo(c.logo);
     if (res.logo) return res.logo;
     if (res.reason !== 'absent') warnings.push(`Logo ignoré pour « ${label} » : ${res.reason}.`);
@@ -122,7 +126,7 @@ export async function loadChantierPanel(
     if (name) maitriseOuvrage.push(await party(`amo:${s.id}`, 'AMO', name, contactAddress(c), s.contact_id ?? null));
   }
 
-  const agencyLogo = agency.logoDataUrl ? await prepareLogo(agency.logoDataUrl) : { logo: null };
+  const agencyLogo = agency.logoDataUrl && input.withLogos !== false ? await prepareLogo(agency.logoDataUrl) : { logo: null };
   maitriseOeuvre.push({
     key: 'moe', role: 'Architecte', name: agency.name,
     address: agency.address ? [agency.address] : [], logo: agencyLogo.logo, contactId: null,
@@ -159,6 +163,24 @@ export async function loadChantierPanel(
   }
   if (lots.length === 0) warnings.push('Aucun lot sur cette affaire : la liste des entreprises est vide.');
 
+  // Sous-traitants saisis dans RDT, rattachés à leur marché (donc à leur entreprise et à leur lot).
+  const marcheById = new Map<string, any>(usableMarches.map(m => [m.id, m]));
+  const lotTitleByNumber = new Map<string, string>(lotRows.map(l => [normalizeLotNumber(l.lot_number), String(l.lot_title ?? '')]));
+  const sousTraitants: PanelSousTraitant[] = [];
+  for (const st of sousTraitantRows) {
+    const marche = marcheById.get(st.marche_id);
+    const nom = cleanText(st.nom);
+    if (!marche || !nom) continue;
+    const address = cleanText(st.adresse);
+    sousTraitants.push({
+      lot: String(marche.lot_numero ?? ''),
+      lotTitle: lotTitleByNumber.get(normalizeLotNumber(marche.lot_numero)) ?? cleanText(marche.lot_titre) ?? '',
+      entreprise: cleanText(marche.entreprise_nom) ?? '',
+      nom, adresse: address ? [address] : [], objet: cleanText(st.objet),
+    });
+  }
+  sousTraitants.sort((a, b) => compareLotNumbers(a.lot, b.lot) || a.nom.localeCompare(b.nom, 'fr'));
+
   // Mentions de l'opération : seulement ce qui est connu.
   const facts: PanelFact[] = [];
   const pc = permits.find(p => p.type === 'PC' && (p.status === 'accorde' || p.decision_date)) ?? permits.find(p => p.type === 'PC');
@@ -194,6 +216,6 @@ export async function loadChantierPanel(
     agency,
     projectName: cleanText(project.name) ?? 'Opération',
     kicker: cleanText(project.type_projet) ?? 'Chantier',
-    facts, image, maitriseOuvrage, maitriseOeuvre, lots, warnings,
+    facts, image, maitriseOuvrage, maitriseOeuvre, lots, sousTraitants, warnings,
   };
 }

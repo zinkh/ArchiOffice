@@ -30,6 +30,16 @@ export interface PanelLot {
   contactId: string | null;
 }
 
+/** Sous-traitant d'une entreprise titulaire (onglet RDT) : lu pour la liste publique du QR code, jamais imprimé sur le panneau. */
+export interface PanelSousTraitant {
+  lot: string;
+  lotTitle: string;
+  entreprise: string;
+  nom: string;
+  adresse: string[];
+  objet: string | null;
+}
+
 export interface PanelFact {
   label: string;
   value: string;
@@ -44,6 +54,7 @@ export interface ChantierPanelData {
   maitriseOuvrage: PanelParty[];
   maitriseOeuvre: PanelParty[];
   lots: PanelLot[];
+  sousTraitants: PanelSousTraitant[];
   warnings: string[];
 }
 
@@ -59,6 +70,8 @@ export interface ChantierPanelOptions {
   hiddenLogos: ReadonlySet<string>;
   /** Titre libre remplaçant le nom de l'affaire. */
   title?: string | null;
+  /** Adresse encodée dans le QR code (liste publique des entreprises) ; absente = pas de QR code. */
+  qrUrl?: string | null;
 }
 
 export type PermisEtat = 'brouillon' | 'definitif';

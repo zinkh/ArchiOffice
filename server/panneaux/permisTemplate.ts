@@ -3,7 +3,7 @@
 // Deux états : brouillon (champs à compléter en pointillés, bandeau « brouillon »)
 // et définitif (aucun bandeau). Un format dont un côté fait 80 cm ou moins n'est
 // pas réglementaire : il reçoit un filigrane « aperçu non réglementaire ».
-import { escapeHtml, footerHtml, headerHtml, htmlShell } from './common';
+import { escapeHtml, headerHtml, htmlShell } from './common';
 import { formatSurface } from '../referencesDossier/format';
 import { AFFICHAGE_LISIBLE, DROIT_DE_RECOURS_TEXTE, DROIT_DE_RECOURS_TITRE, TITRES_PERMIS } from './mentionsLegales';
 import { isRegulatorySize, type PageSpec } from './pageSpec';
@@ -50,7 +50,7 @@ export function buildPermisHtml(d: PermisPanelData, spec: PageSpec): string {
   <div class="top"><div class="kicker">Autorisation d’urbanisme</div><h1>${escapeHtml(TITRES_PERMIS[d.permitType])}</h1></div>
   <div class="rows">${rendered}</div>
   <div class="recours"><div class="rt">${escapeHtml(DROIT_DE_RECOURS_TITRE)}</div><p>${escapeHtml(DROIT_DE_RECOURS_TEXTE)}</p><p class="lisible">${escapeHtml(AFFICHAGE_LISIBLE)}</p></div>
-</div>${marks ? `<div class="wmbox">${marks}</div>` : ''}${footerHtml(d.agency)}`;
+</div>${marks ? `<div class="wmbox">${marks}</div>` : ''}`;
 
   const css = `
 .body{display:flex;flex-direction:column;gap:${landscape ? 8 : 14}mm}

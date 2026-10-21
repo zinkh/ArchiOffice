@@ -7,6 +7,8 @@ import { pageSpec } from '../server/panneaux/pageSpec';
 import { buildChantierHtml, density, lotColumns } from '../server/panneaux/chantierTemplate';
 import { compareLotNumbers, loadChantierPanel, normalizeLotNumber } from '../server/panneaux/chantierData';
 import { logoDpi, prepareLogo } from '../server/panneaux/logos';
+import { qrSvg } from '../server/panneaux/qr';
+import { chantierPublicUrl, signChantierToken, verifyChantierToken } from '../server/panneaux/publicLink';
 import type { ChantierPanelData, ChantierPanelOptions, PanelLot, PanelParty } from '../server/panneaux/types';
 
 let pngDataUrl = '';
@@ -25,7 +27,7 @@ const lot = (i: number, over: Partial<PanelLot> = {}): PanelLot => ({
 const party = (key: string, name: string, over: Partial<PanelParty> = {}): PanelParty => ({ key, role: 'Rôle', name, address: [], logo: null, contactId: null, ...over });
 const data = (lots: PanelLot[], over: Partial<ChantierPanelData> = {}): ChantierPanelData => ({
   agency, projectName: 'École VIP-TC', kicker: 'Chantier', facts: [], image: null,
-  maitriseOuvrage: [party('moa', 'REVI')], maitriseOeuvre: [party('moe', 'AAZS')], lots, warnings: [], ...over,
+  maitriseOuvrage: [party('moa', 'REVI')], maitriseOeuvre: [party('moe', 'AAZS')], lots, sousTraitants: [], warnings: [], ...over,
 });
 const opts = (over: Partial<ChantierPanelOptions> = {}): ChantierPanelOptions => ({
   page: pageSpec('A0', 'portrait'), logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set(), ...over,
@@ -79,10 +81,12 @@ describe('gabarit du panneau de chantier', () => {
     const html = buildChantierHtml(data([lot(1)]), opts());
     expect(html).not.toContain('<img class="llogo"');
   });
-  it('paysage : même contenu, structure en deux colonnes ; pagination P1|1', () => {
+  it('paysage : même contenu, structure en deux colonnes ; ni pied de page ni pagination', () => {
     const html = buildChantierHtml(data([lot(1)]), opts({ page: pageSpec('A0', 'paysage') }));
     expect(html).toContain('class="body ls"');
-    expect(html).toContain('P1|1');
+    expect(html).not.toContain('P1|1');
+    expect(html).not.toContain('class="foot"');
+    expect(html).not.toContain('contact@aazs.fr');
     expect(html).toContain('size:1189mm 841mm');
   });
   it('titre libre prioritaire sur le nom de l’affaire', () => {
@@ -173,5 +177,40 @@ describe('résolution depuis l’affaire', () => {
     expect(panel!.lots[0].company).toBe('SVG SA');
     expect(panel!.lots[0].logo).toBeNull();
     expect(panel!.warnings.join(' ')).toContain('Logo ignoré');
+  });
+});
+
+describe('QR code de la liste des entreprises', () => {
+  beforeAll(() => { process.env.MAIL_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64'); });
+
+  it('sans pied de page : ni coordonnées de l’agence ni pagination, QR code en bas à droite avec son texte', () => {
+    const html = buildChantierHtml(data([lot(1)]), opts({ qrUrl: 'https://app.test/chantier/abc' }));
+    expect(html).not.toContain('class="foot"');
+    expect(html).not.toContain('P1|1');
+    expect(html).not.toContain('SIRET');
+    expect(html).toContain('class="qr"');
+    expect(html).toContain('<svg');
+    expect(html).toContain('Flashez ce code');
+  });
+  it('sans adresse publique, pas de QR code', () => {
+    expect(buildChantierHtml(data([lot(1)]), opts())).not.toContain('class="qr"');
+  });
+  it('le QR code est un SVG vectoriel noir sur blanc avec sa zone de silence', () => {
+    const svg = qrSvg('https://app.test/chantier/abc');
+    expect(svg).toMatch(/^<svg[^>]+viewBox="0 0 \d+ \d+"/);
+    expect(svg).toContain('fill="#fff"');
+    expect(svg).toContain('fill="#000"');
+  });
+  it('le jeton public est stable, lié à l’affaire et infalsifiable', () => {
+    const t = signChantierToken('proj-0001-abcd');
+    expect(signChantierToken('proj-0001-abcd')).toBe(t);
+    expect(verifyChantierToken(t)).toBe('proj-0001-abcd');
+    expect(verifyChantierToken(signChantierToken('proj-0002-abcd'))).toBe('proj-0002-abcd');
+    const [body, tag] = t.split('.');
+    expect(verifyChantierToken(`${body}.${tag.slice(0, -1)}A`)).toBeNull();
+    expect(verifyChantierToken(`${Buffer.from('proj-0002-abcd').toString('base64url')}.${tag}`)).toBeNull();
+    expect(verifyChantierToken('n’importe quoi')).toBeNull();
+    expect(verifyChantierToken(undefined)).toBeNull();
+    expect(chantierPublicUrl('https://app.test/', 'proj-0001-abcd')).toBe(`https://app.test/chantier/${t}`);
   });
 });

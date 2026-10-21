@@ -1,6 +1,7 @@
 // Gabarit HTML du panneau de chantier (A0 de référence, portrait ou paysage).
 // Fonctions pures, testées : tests/panneauxChantier.test.ts.
-import { escapeHtml, footerHtml, headerHtml, htmlShell } from './common';
+import { escapeHtml, headerHtml, htmlShell } from './common';
+import { qrSvg } from './qr';
 import type { ChantierPanelData, ChantierPanelOptions, PanelLogo, PanelParty } from './types';
 import type { PanneauOrientation } from './pageSpec';
 
@@ -61,11 +62,14 @@ export function buildChantierHtml(data: ChantierPanelData, opts: ChantierPanelOp
   }).join('');
   const lotsSection = lots.length ? section('Lots et entreprises', `<div class="grid lots">${lotCards}</div>`) : '';
 
+  const qrBlock = opts.qrUrl
+    ? `<div class="qr"><div class="qrtxt"><b>Liste des entreprises intervenant sur le chantier</b>Flashez ce code pour consulter, gratuitement et sans compte, le nom et l’adresse des entreprises présentes sur ce chantier.</div><div class="qrimg">${qrSvg(opts.qrUrl)}</div></div>`
+    : '';
   const inner = landscape
-    ? `${headerHtml(data.agency, 'Panneau de chantier')}<div class="body ls"><div class="colL">${hero}${moaSection}</div><div class="colR">${moeSection}${lotsSection}</div></div>${footerHtml(data.agency)}`
-    : `${headerHtml(data.agency, 'Panneau de chantier')}<div class="body pt">${hero}${moaSection}${moeSection}${lotsSection}</div>${footerHtml(data.agency)}`;
+    ? `${headerHtml(data.agency, 'Panneau de chantier')}<div class="body ls"><div class="colL">${hero}${moaSection}</div><div class="colR">${moeSection}${lotsSection}</div></div>${qrBlock}`
+    : `${headerHtml(data.agency, 'Panneau de chantier')}<div class="body pt">${hero}${moaSection}${moeSection}${lotsSection}</div>${qrBlock}`;
 
-  return htmlShell(`Panneau de chantier ${data.projectName}`, opts.page, chantierCss(opts, cols, density(cols)), inner);
+  return htmlShell(`Panneau de chantier ${data.projectName}`, opts.page, chantierCss(opts, cols, density(cols)), inner, opts.qrUrl ? (landscape ? 90 : 120) : undefined);
 }
 
 function chantierCss(opts: ChantierPanelOptions, cols: number, dens: 'm' | 's' | 'xs'): string {
@@ -110,6 +114,11 @@ h1.t-l{font-size:${landscape ? 64 : 104}pt}h1.t-m{font-size:${landscape ? 52 : 8
 .lot .name{font-size:${lot.name}pt}.lot .adr{font-size:${lot.adr}pt;margin-top:1mm}
 .llogo{flex:0 0 auto;height:${logoH}mm;max-width:${Math.round(logoH * 2.4)}mm;object-fit:contain;align-self:flex-start}
 .tbd{font-size:${lot.name - 3}pt;font-style:italic;color:#888;margin-top:1mm}
+.qr{position:absolute;right:38mm;bottom:${landscape ? 14 : 20}mm;display:flex;align-items:center;gap:8mm;border-top:1.2mm solid #111;padding-top:6mm;left:38mm;justify-content:flex-end}
+.qrtxt{max-width:${landscape ? 330 : 520}mm;text-align:right;font-size:${landscape ? 17 : 22}pt;line-height:1.35;color:#222}
+.qrtxt b{display:block;font-size:${landscape ? 20 : 27}pt;text-transform:uppercase;letter-spacing:.08em;margin-bottom:2mm;color:#111}
+.qrimg{flex:0 0 auto;width:${landscape ? 60 : 80}mm;height:${landscape ? 60 : 80}mm;border:.6mm solid #111}
+.qrimg svg{display:block;width:100%;height:100%}
 ${opts.colorLogos ? '' : '.plogo,.llogo,.brand-logo{filter:grayscale(1) contrast(1.05)}'}
 `;
 }

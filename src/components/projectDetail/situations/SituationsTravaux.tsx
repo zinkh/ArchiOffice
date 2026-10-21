@@ -15,6 +15,7 @@ import { useConfirmDialog } from '../../ui/ConfirmDialog';
 import { CardHeader } from '../../ui/Card';
 import { boutonPrincipal, boutonSecondaire, formatEuros } from './DialogShell';
 import { MarcheDialog, marcheDepuisLot, montantLot } from './MarcheDialog';
+import { SousTraitantsMarche, type SousTraitantMarche } from './SousTraitantsMarche';
 import { SituationDialog } from './SituationDialog';
 import { EtatSituationBadge } from './EtatSituationBadge';
 import type { Plateforme, SituationLiee } from './FactureEntrepriseLink';
@@ -47,6 +48,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
   const { confirm, dialog } = useConfirmDialog();
   const [marches, setMarches] = useState<Marche[]>([]);
   const [situations, setSituations] = useState<SituationLiee[]>([]);
+  const [sousTraitants, setSousTraitants] = useState<SousTraitantMarche[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [marcheEdite, setMarcheEdite] = useState<Marche | null | 'new'>(null);
@@ -64,12 +66,14 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
 
   const charger = useCallback(async () => {
     try {
-      const [m, s] = await Promise.all([
+      const [m, s, st] = await Promise.all([
         apiFetch<Marche[]>(`/api/marches-entreprises/${projectId}`),
         apiFetch<SituationLiee[]>(`/api/situations/${projectId}`),
+        apiFetch<SousTraitantMarche[]>(`/api/projects/${projectId}/sous-traitants`).catch(() => []),
       ]);
       setMarches(m ?? []);
       setSituations(s ?? []);
+      setSousTraitants(Array.isArray(st) ? st : []);
       setLoadError('');
     } catch (e: any) {
       setLoadError(e?.message || t('situations_travaux_load_failed'));
@@ -479,6 +483,15 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
               </div>
               )}
             </div>
+
+            {!estAC && (
+              <SousTraitantsMarche
+                marcheId={m.id}
+                liste={sousTraitants.filter((st) => st.marche_id === m.id)}
+                onChange={charger}
+                showToast={showToast}
+              />
+            )}
 
             {estAC ? (
               <>

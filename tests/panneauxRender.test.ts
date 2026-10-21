@@ -16,7 +16,7 @@ const chantier = (n: number): ChantierPanelData => ({
   maitriseOuvrage: [{ key: 'moa', role: 'Maître d’ouvrage', name: 'REVI', address: [], logo: null, contactId: null }],
   maitriseOeuvre: [{ key: 'moe', role: 'Architecte', name: 'AAZS', address: [], logo: null, contactId: null }],
   lots: Array.from({ length: n }, (_, i) => ({ key: `lot:${i}`, number: String(i), title: 'Couverture tuiles, zinc, étanchéité', company: `ENTREPRISE ${i}`, address: ['1 rue X', '54000 NANCY'], logo: null, contactId: null })),
-  warnings: [],
+  sousTraitants: [], warnings: [],
 });
 const permis: PermisPanelData = {
   agency, permitType: 'PC', etat: 'brouillon', beneficiaire: 'REVI', architecte: 'K. S.', numero: 'PC 1', dateDelivrance: null, natureProjet: 'École',
@@ -41,7 +41,7 @@ describe.skipIf(!chromium)('rendu Chromium des panneaux', () => {
   for (const [name, n, f, o] of cases) {
     it(`panneau de chantier, ${name} : une page, à la bonne taille, sans débordement`, async () => {
       const spec = pageSpec(f, o);
-      const r = await render(buildChantierHtml(chantier(n), { page: spec, logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set() }), f, o);
+      const r = await render(buildChantierHtml(chantier(n), { page: spec, logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set(), qrUrl: 'https://app.test/chantier/abcdefghijklmnopqrstuv.wxyz0123456789' }), f, o);
       expect(r.pages).toBe(1);
       expect(r.overflow).toBe(false);
       expect(Math.abs(r.widthMm - spec.widthMm)).toBeLessThan(2);
