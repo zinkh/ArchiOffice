@@ -110,6 +110,31 @@ describe('génération par l’IA', () => {
     expect(prompt).toContain('Pas de travaux en août');
   });
 
+  it('part du DPGF et du CCTP de l’opération quand ils existent', async () => {
+    const { tenantId, token, projectId, lot1 } = seed();
+    fakeSupabaseAdmin.seed('dpgfs', [{
+      id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId,
+      data: JSON.stringify({
+        multiBatiments: true, batiments: [{ id: 'b1', code: 'A', libelle: 'Bâtiment A' }], lots: [{
+          numero: '1', projectLotId: lot1, cctpDescription: 'Cure du béton 7 jours avant chargement.',
+          chapitres: [{ numero: '2', titre: 'Fondations', lignes: [{ type: 'ouvrage', designation: 'Fouilles en rigole', unite: 'm3', quantite: 120, prixTotal: 6000 }] }],
+        }],
+      }),
+    }]);
+    chat.mockResolvedValueOnce(reply('{"taches":[{"lot_numero":"01","libelle":"Fondations","semaine_debut":1,"duree_semaines":2}]}'));
+    const res = await generate(token, projectId, { date_debut: '2026-03-02' });
+    expect(res.body.sources).toEqual({ dpgf: true, cctp: true });
+    const prompt = chat.mock.calls[0][0].messages[0].content as string;
+    expect(prompt).toContain('2 Fondations (6000 € HT) : Fouilles en rigole (120 m3)');
+    expect(prompt).toContain('Cure du béton 7 jours');
+    expect(prompt).toContain('Bâtiments, dans l\'ordre du document : Bâtiment A');
+
+    chat.mockResolvedValueOnce(reply('{"taches":[{"lot_numero":"01","libelle":"x","semaine_debut":1,"duree_semaines":1}]}'));
+    const sans = await generate(token, projectId, { date_debut: '2026-03-02', depuis_dpgf: false });
+    expect(sans.body.sources).toEqual({ dpgf: false, cctp: false });
+    expect(chat.mock.calls[1][0].messages[0].content).not.toContain('Fouilles en rigole');
+  });
+
   it('se limite aux lots demandés', async () => {
     const { token, projectId, lot2 } = seed();
     chat.mockResolvedValueOnce(reply('{"taches":[{"lot_numero":"02","libelle":"Charpente","semaine_debut":1,"duree_semaines":2}]}'));

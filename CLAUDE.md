@@ -2251,8 +2251,11 @@ vide (`available: false`) et refuse l'écriture en 503.
 
 - **Une tâche** : lot (`project_lots.id`, vide = tâche générale), dates AAAA-MM-JJ calculées en UTC, avancement,
   `source` (`ia` | `manuel`), jalon. L'état (à venir, en cours, terminée, en retard) **se déduit** (`etatTache`), jamais saisi.
-- **Génération IA** : le serveur compose le contexte (lots, entreprise titulaire et montant du marché, `duree_mois`,
-  pièces choisies de l'affaire) ; le modèle rend des **semaines**, jamais des dates (`planningDepuisReponse` pose
+- **Génération IA** : le serveur part du **DPGF et du CCTP de l'opération** quand ils existent (`server/planningSources.ts`,
+  testé : par lot, chapitres de travaux avec montant et principaux ouvrages, prescriptions `cctpDescription`, bâtiments et
+  phases du registre ; option, variante et pour mémoire exclus ; montant du DPGF si le marché n'est pas chiffré ; case
+  « Partir du DPGF et du CCTP » de la fenêtre, `depuis_dpgf`, réponse `sources`), puis ajoute lots, entreprise titulaire et
+  montant du marché, `duree_mois`, pièces choisies de l'affaire ; le modèle rend des **semaines**, jamais des dates (`planningDepuisReponse` pose
   lundi à vendredi). Un lot inconnu est écarté, le planning ne crée jamais de lot. La route **ne propose qu'une
   proposition** : `appliquerGeneration` remplace les tâches IA des lots générés et garde, au choix, le manuel.
   Modifier une tâche IA la fait passer en `manuel`. Facturé en réserve → exécute → règle, `endpoint_type = 'planning_generation'`.

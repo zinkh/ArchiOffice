@@ -25,7 +25,11 @@ interface Props {
   onClose: () => void;
 }
 
-interface Proposition extends PlanningGenere { lot_ids: string[]; documents_read: number; ignored: string[] }
+interface Proposition extends PlanningGenere {
+  lot_ids: string[]; documents_read: number; ignored: string[];
+  /** Ce que le DPGF et le CCTP de l'opération ont apporté. */
+  sources?: { dpgf: boolean; cctp: boolean };
+}
 
 const LISIBLES = /\.(pdf|docx|pptx|xlsx|png|jpe?g|tiff?|webp|txt|csv)$/i;
 const champ = 'w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] px-3 py-2 text-sm pointer-coarse:min-h-11';
@@ -44,6 +48,7 @@ export function PlanningGenerateDialog({ projectId, debutProjet, lots, aDuManuel
   const [pieces, setPieces] = useState<Set<string>>(new Set());
   const [consignes, setConsignes] = useState('');
   const [garderManuel, setGarderManuel] = useState(true);
+  const [depuisDpgf, setDepuisDpgf] = useState(true);
   const [enCours, setEnCours] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [proposition, setProposition] = useState<Proposition | null>(null);
@@ -69,6 +74,7 @@ export function PlanningGenerateDialog({ projectId, debutProjet, lots, aDuManuel
           date_debut: dateDebut,
           duree_cible_semaines: Number(duree) > 0 ? Number(duree) : undefined,
           lot_ids: [...lotIds],
+          depuis_dpgf: depuisDpgf,
           document_ids: [...pieces],
           instructions: consignes.trim() || undefined,
         }),
@@ -130,6 +136,13 @@ export function PlanningGenerateDialog({ projectId, debutProjet, lots, aDuManuel
                 {lotsConcernes?.size ?? 0} lot{(lotsConcernes?.size ?? 0) > 1 ? 's' : ''}
                 {bornes ? `, du ${fmt(bornes.debut)} au ${fmt(bornes.fin)}` : ''}.
               </p>
+              <p className="text-xs text-[var(--tblr-muted)]">
+                {proposition.sources?.dpgf || proposition.sources?.cctp
+                  ? `Établi à partir ${[proposition.sources.dpgf && 'du DPGF', proposition.sources.cctp && 'du CCTP'].filter(Boolean).join(' et ')} de l’opération.`
+                  : depuisDpgf
+                    ? 'Aucun DPGF ni CCTP exploitable pour ces lots : planning établi d’après les lots, les marchés et les pièces.'
+                    : 'DPGF et CCTP non utilisés.'}
+              </p>
               {proposition.ecartees > 0 && (
                 <p className="text-xs text-amber-700">{proposition.ecartees} tâche{proposition.ecartees > 1 ? 's' : ''} écartée{proposition.ecartees > 1 ? 's' : ''} (lot inconnu ou durée illisible).</p>
               )}
@@ -168,6 +181,16 @@ export function PlanningGenerateDialog({ projectId, debutProjet, lots, aDuManuel
                   )}
                 </div>
               </div>
+
+              <label className="flex items-start gap-2 text-sm text-[var(--tblr-text)]">
+                <input type="checkbox" className="mt-1" checked={depuisDpgf} onChange={e => setDepuisDpgf(e.target.checked)} />
+                <span>
+                  Partir du DPGF et du CCTP de l’opération
+                  <span className="block text-xs text-[var(--tblr-muted)]">
+                    Les chapitres, quantités et montants de chaque lot, et les prescriptions du CCTP, dimensionnent les tâches et leur enchaînement. Sans DPGF, le planning part des lots et des marchés.
+                  </span>
+                </span>
+              </label>
 
               <fieldset>
                 <legend className={etiquette}>Lots à planifier</legend>

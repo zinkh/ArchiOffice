@@ -18,6 +18,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import {
   PLANNING_VIDE, estDateIso, planningDepuisReponse, sanitizePlanning, type LotPlanifiable,
 } from '../../src/lib/planningChantier';
+import { sourcesPourPlanning, texteSourceLot } from '../planningSources';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -71,7 +72,10 @@ const PLANNING_SCHEMA = {
 };
 
 const SYSTEM_PROMPT = `Tu es un maître d'œuvre d'exécution (OPC) qui établit le planning d'un chantier de bâtiment en France.
-À partir des lots, des entreprises titulaires, des montants de marché et des pièces fournies, propose un planning de travaux réaliste :
+À partir du DPGF et du CCTP de l'opération (quand ils sont fournis), des lots, des entreprises titulaires, des montants de marché et des pièces, propose un planning de travaux réaliste :
+- quand un lot a un DPGF, ses chapitres sont la trame de ses phases d'intervention (une tâche par chapitre significatif, les petits chapitres regroupés), et les quantités et montants des ouvrages dimensionnent les durées ;
+- les prescriptions du CCTP (délais de séchage ou de cure, mise en œuvre par phases, conditions d'accès, essais préalables, coordination avec d'autres lots) s'imposent à l'enchaînement et sont rappelées dans les hypothèses quand elles ont pesé ;
+- quand l'opération compte plusieurs bâtiments ou phases, le planning les suit dans l'ordre indiqué ;
 - l'enchaînement usuel d'un chantier (installation et préparation, gros œuvre, clos et couvert, second œuvre, lots techniques, finitions, essais, opérations préalables à la réception, réception) ;
 - pour chaque lot demandé, de 2 à 6 phases d'intervention (approvisionnement et préparation, exécution par zone, finitions...) dont les durées sont proportionnées au montant du marché et au contenu du lot ;
 - des recouvrements entre lots quand ils sont possibles sur un vrai chantier, et jamais deux interventions incompatibles au même endroit ;
@@ -176,6 +180,20 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
       const lots = (await chargerLots(tenantId, projectId, lotIds)).slice(0, MAX_LOTS);
       if (!lots.length) return res.status(400).json({ error: 'Aucun lot à planifier : renseignez d’abord les lots de l’opération.' });
 
+      // Le DPGF et le CCTP de l'opération sont le point de départ quand ils existent.
+      // Meilleur effort : un document illisible ne bloque pas la génération.
+      let sources = sourcesPourPlanning(null, []);
+      if (req.body?.depuis_dpgf !== false) {
+        const { data: ligneDpgf } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgfs').select('data').eq('project_id', projectId).maybeSingle();
+        try {
+          const brut = (ligneDpgf as any)?.data;
+          sources = sourcesPourPlanning(typeof brut === 'string' ? JSON.parse(brut) : brut, lots);
+        } catch { /* document non lisible : génération sans lui */ }
+      }
+      const sourceDuLot = new Map(sources.lots.map(s => [s.lotId, s]));
+      // Sans marché chiffré, le montant du DPGF dimensionne le lot.
+      for (const l of lots) if (!l.montant_ht && sourceDuLot.get(l.id)?.montantHt) l.montant_ht = sourceDuLot.get(l.id)!.montantHt;
+
       // Seules les pièces de CETTE affaire : un identifiant étranger est écarté.
       const documentIds: string[] = Array.isArray(req.body?.document_ids)
         ? req.body.document_ids.filter((id: unknown) => typeof id === 'string').slice(0, MAX_DOCUMENTS)
@@ -195,14 +213,18 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
         }
       }
 
-      const lignesLots = lots.map(l => [
-        `Lot ${l.lot_number} : ${l.lot_title}`,
-        l.contact_name ? `entreprise ${l.contact_name}` : 'entreprise à désigner',
-        l.montant_ht ? `marché ${l.montant_ht} € HT` : null,
-        l.duree_mois ? `durée de marché ${l.duree_mois} mois` : null,
-      ].filter(Boolean).join(' ; '));
+      const lignesLots = lots.map(l => {
+        const entete = [
+          `Lot ${l.lot_number} : ${l.lot_title}`,
+          l.contact_name ? `entreprise ${l.contact_name}` : 'entreprise à désigner',
+          l.montant_ht ? `marché ${l.montant_ht} € HT` : null,
+          l.duree_mois ? `durée de marché ${l.duree_mois} mois` : null,
+        ].filter(Boolean).join(' ; ');
+        const detail = texteSourceLot(sourceDuLot.get(l.id));
+        return detail ? `${entete}\n${detail}` : entete;
+      });
       const prompt = `Opération : ${project.name || 'sans nom'}${project.address ? ` (${project.address})` : ''}.
-Démarrage des travaux : semaine du ${dateDebut} (semaine 1).${dureeCible > 0 ? `\nDurée totale visée : environ ${dureeCible} semaines, réception comprise.` : ''}${instructions ? `\nConsignes de l'architecte : ${instructions}` : ''}
+Démarrage des travaux : semaine du ${dateDebut} (semaine 1).${dureeCible > 0 ? `\nDurée totale visée : environ ${dureeCible} semaines, réception comprise.` : ''}${sources.batiments.length ? `\nBâtiments, dans l'ordre du document : ${sources.batiments.join(', ')}.` : ''}${sources.phases.length ? `\nPhases de l'opération : ${sources.phases.join(', ')}.` : ''}${instructions ? `\nConsignes de l'architecte : ${instructions}` : ''}
 
 Lots à planifier :
 ${lignesLots.join('\n')}
@@ -233,7 +255,10 @@ ${JSON.stringify(PLANNING_SCHEMA)}`;
       const planifiables: LotPlanifiable[] = lots.map(({ id, lot_number, lot_title, contact_name }) => ({ id, lot_number, lot_title, contact_name }));
       const genere = planningDepuisReponse(brut, planifiables, dateDebut, randomUUID);
       if (!genere.taches.length) return res.status(502).json({ error: 'Réponse IA invalide : aucune tâche exploitable.' });
-      res.json({ ...genere, lot_ids: lots.map(l => l.id), documents_read: documentsRead, ignored });
+      res.json({
+        ...genere, lot_ids: lots.map(l => l.id), documents_read: documentsRead, ignored,
+        sources: { dpgf: sources.aDpgf, cctp: sources.aCctp },
+      });
     } catch (e: any) {
       if (e?.code === 'LLM_NOT_CONFIGURED') return res.status(503).json({ error: e.message });
       console.error('[POST /api/projects/:projectId/planning-chantier/generate]', e?.message);
