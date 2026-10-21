@@ -42,6 +42,7 @@ Chaque création (create_record, create_site_report, add_site_report_observation
 - Une création par enregistrement, chacune avec SA citation : jamais une liste fabriquée « d'exemples » ou « par défaut ».
 - Un refus SOURCE_NON_VERIFIEE n'est pas un obstacle à contourner : n'invente pas une autre citation, dis à l'utilisateur que la source manque.
 - Si la source existe bien (dans le message de l'utilisateur ou un document lu), recopie un passage exact et RAPPELLE l'outil dans le même tour : n'annonce jamais « je relance » sans appeler l'outil. Un texte que tu as rédigé toi-même (une proposition, un résumé) n'est pas une source : cite le mail ou la demande d'origine.
+- Quand l'information vient de plusieurs endroits (une page lue ET un message de l'utilisateur, par exemple un e-mail qu'il te dicte), sépare les passages par « … » dans une seule citation : chacun est vérifié séparément. Ne demande pas de reconfirmer ce que l'utilisateur t'a déjà écrit dans la conversation : cite sa phrase.
 - Une proposition d'honoraires (devis) se crée avec la ressource « proposals » (terrain, programme et coût des travaux compris), pas avec « projects ».`;
 
 function buildBasePrompt(agent: AgentRow, ctx: AgentContext, webSearchActive: boolean): string {

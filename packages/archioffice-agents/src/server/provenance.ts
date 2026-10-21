@@ -64,7 +64,8 @@ export const SOURCE_PARAMETER_SCHEMA = {
     },
     citation: {
       type: 'string',
-      description: `Extrait exact (entre ${MIN_CITATION_CHARS} et 500 caractères) copié depuis la source, qui justifie cet enregistrement.`,
+      description: `Extrait exact (entre ${MIN_CITATION_CHARS} et 500 caractères) copié depuis la source, qui justifie cet enregistrement. ` +
+        "Si l'information vient de plusieurs endroits (page lue + message de l'utilisateur), sépare les passages par « … » : chacun est vérifié séparément.",
       minLength: MIN_CITATION_CHARS,
       maxLength: 500,
     },
@@ -87,6 +88,19 @@ export function normalizeForMatch(text: string): string {
     .trim();
 }
 
+/** Toutes les valeurs textuelles et numériques d'un résultat d'outil, à plat. */
+function collectStrings(value: unknown, out: string[] = [], depth = 0): string[] {
+  if (depth > 12 || value === null || value === undefined) return out;
+  if (typeof value === 'string') out.push(value);
+  else if (typeof value === 'number' || typeof value === 'boolean') out.push(String(value));
+  else if (Array.isArray(value)) for (const v of value) collectStrings(v, out, depth + 1);
+  else if (typeof value === 'object') for (const v of Object.values(value as object)) collectStrings(v, out, depth + 1);
+  return out;
+}
+
+/** Une citation peut réunir plusieurs passages (site + message) séparés par « … ». */
+const PASSAGE_SEPARATOR = /\s*(?:…|\.{3}|\[…\])\s*/;
+
 /** Ce que l'agent a réellement reçu pendant ce tour. */
 export class SourceCorpus {
   private parts: string[] = [];
@@ -100,7 +114,11 @@ export class SourceCorpus {
   addToolResult(toolName: string, response: unknown): void {
     if (NON_SOURCE_TOOLS.has(toolName)) return;
     if (response && typeof (response as any).error === 'string') return;
-    try { this.add(JSON.stringify(response)); } catch { /* non sérialisable : pas une source */ }
+    // Les chaînes sont ajoutées telles quelles, jamais via JSON.stringify : un
+    // retour à la ligne y devient « \n » littéral, que la normalisation lit comme
+    // un « n » collé au mot suivant, et une citation multiligne copiée depuis la
+    // page ne correspondait plus jamais (cas SIBE, octobre 2026).
+    this.add(collectStrings(response).join('\n'));
   }
 
   private add(text: string): void {
@@ -114,9 +132,12 @@ export class SourceCorpus {
     return this.cache;
   }
 
+  /** Chaque passage (séparés par « … ») doit figurer tel quel dans le corpus. */
   contains(citation: string): boolean {
-    const needle = normalizeForMatch(citation);
-    return needle.length >= MIN_CITATION_CHARS && this.normalized().includes(needle);
+    const passages = citation.split(PASSAGE_SEPARATOR).map(normalizeForMatch).filter(Boolean);
+    if (passages.join(' ').length < MIN_CITATION_CHARS) return false;
+    const haystack = this.normalized();
+    return passages.every(p => haystack.includes(p));
   }
 }
 

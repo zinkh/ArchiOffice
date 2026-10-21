@@ -48,6 +48,26 @@ describe('pas de création sans source', () => {
     expect(c.contains('Remplacement des interrupteurs défectueux')).toBe(true);
   });
 
+  it('retrouve une citation multiligne dans une page lue (cas SIBE)', () => {
+    const c = corpus();
+    c.addToolResult('fetch_url', {
+      url: 'https://exemple.fr',
+      text: "SIBE Bureau d'études VRD\n7 chemin de la Moselle\n57160 SCY-CHAZELLES\nTél. 03.87.18.11.40",
+    });
+    const citation = "SIBE Bureau d'études VRD\n7 chemin de la Moselle\n57160 SCY-CHAZELLES";
+    expect(checkSource({ source: { type: 'web', citation } }, c).ok).toBe(true);
+  });
+
+  it('accepte plusieurs passages séparés par « … », chacun vérifié', () => {
+    const c = corpus();
+    c.addToolResult('fetch_url', { text: "SIBE Bureau d'études VRD\n7 chemin de la Moselle\nTél. 03.87.18.11.40" });
+    c.addUserText("Je confirme que betsibe@orange.fr est l'email de SIBE Bureau d'études VRD à Scy-Chazelles.");
+    const mixte = "7 chemin de la Moselle … betsibe@orange.fr est l'email de SIBE";
+    expect(checkSource({ source: { type: 'web', citation: mixte } }, c).ok).toBe(true);
+    const invente = '7 chemin de la Moselle … fax 03.87.18.19.37 du bureau';
+    expect(checkSource({ source: { type: 'web', citation: invente } }, c).ok).toBe(false);
+  });
+
   it('image_jointe n\'est acceptée que si une image est jointe', () => {
     const c = corpus();
     expect(checkSource({ source: { type: 'image_jointe', citation: '' } }, c).ok).toBe(false);
