@@ -158,6 +158,18 @@ export const panneauxLimiter = rateLimit({
   message: { error: 'Trop de générations de panneau. Veuillez patienter avant de réessayer.' },
 });
 
+// Passage de phase : un geste humain (checklist, confirmation). Un rejeu en boucle
+// (script, client qui réessaie) ferait tomber la base sous des milliers d'appels
+// à `commit_phase_transition` par minute. Plafond par personne.
+export const phaseTransitionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: any) => req.user?.id || ipKeyGenerator(req.ip || ''),
+  message: { error: 'Trop de changements de phase en peu de temps. Veuillez patienter avant de réessayer.' },
+});
+
 // Dossier de références : un rendu PDF lance Chromium, bien plus coûteux qu'une
 // requête ordinaire. Plafond par personne.
 export const referencesDossierLimiter = rateLimit({
