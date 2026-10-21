@@ -10,7 +10,7 @@
 // formatCopilotSuggestion() — the server never needs a translation layer.
 import type { Project, Milestone } from '../types';
 
-const MAX_SUGGESTIONS = 8;
+const MAX_SUGGESTIONS = 10;
 // Plafond par type de suggestion : sans lui, un type très bavard (une carte par
 // affaire en retard de jalons) occupait toute la liste et masquait les autres.
 const MAX_PER_TYPE = 3;
@@ -25,6 +25,13 @@ const DRAFT_INVOICE_STALE_DAYS = 7;
 const MAX_TITLES = 3;
 // Données qu'une fiche d'affaire en cours doit porter ; une clé = `ai_field_<clé>`.
 const PROJECT_REQUIRED_FIELDS = ['address', 'start_date', 'end_date', 'project_code', 'project_manager', 'surface', 'construction_cost'] as const;
+const MEETING_MINUTES_DAYS = 3;
+const RESERVE_DONE_STATUSES = ['Levée', 'Quitus Transmis'];
+const CONTRACT_NOT_INVOICED_DAYS = 45;
+const PERMIT_ALERT_DAYS = 10;
+const PERMIT_ALERT_PAST_DAYS = 30;
+// Délais d'instruction de droit commun (mois), à vérifier selon le dossier.
+const PERMIT_DELAY_MONTHS: Record<string, number> = { DP: 1, PC: 3, AT: 4 };
 const DAY_MS = 86400000;
 
 // `status` is typed loosely (not the `Invoice` interface's capitalized enum)
@@ -42,6 +49,7 @@ export interface CopilotInvoiceInput {
   due_date?: string | null;
   issue_date?: string | null;
   created_at?: string | null;
+  project_id?: string | null;
 }
 
 export interface CopilotTaskInput {
@@ -52,6 +60,7 @@ export interface CopilotTaskInput {
   progress?: number | null;
   due_date?: string | null;
   end_date?: string | null;
+  assignee_id?: string | null;
 }
 
 export interface CopilotProposalInput {
@@ -73,6 +82,13 @@ export interface CopilotTenderInput {
   archived?: boolean | null;
 }
 
+export interface CopilotMeetingInput { id: string; title?: string | null; date?: string | null; notes?: string | null }
+export interface CopilotReserveInput { id: string; project_id?: string | null; status?: string | null; due_date?: string | null }
+export interface CopilotContractInput { id: string; project_id?: string | null; status?: string | null; intitule_projet?: string | null; numero?: string | null; date_debut?: string | null; created_at?: string | null }
+export interface CopilotFeeNoteInput { project_id?: string | null; contrat_id?: string | null }
+export interface CopilotPermitInput { id: string; project_id?: string | null; type?: string | null; reference?: string | null; submission_date?: string | null; status?: string | null }
+export interface CopilotLotInput { project_id?: string | null; contact_id?: string | null }
+
 export type CopilotSuggestionRaw =
   | { id: string; tone: 'danger'; type: 'overdue_milestone'; params: { project: string; client: string; count: number; titles: string } }
   | { id: string; tone: 'warning'; type: 'project_behind'; params: { project: string; client: string; progress: number; days: number } }
@@ -82,6 +98,13 @@ export type CopilotSuggestionRaw =
   | { id: string; tone: 'warning'; type: 'proposal_no_answer'; params: { title: string; client: string; days: number } }
   | { id: string; tone: 'danger' | 'warning'; type: 'tender_deadline'; params: { title: string; client: string; days: number } }
   | { id: string; tone: 'warning'; type: 'invoice_due_soon'; params: { count: number; amount: number; numbers: string } }
+  | { id: string; tone: 'warning'; type: 'meeting_no_minutes'; params: { title: string; days: number } }
+  | { id: string; tone: 'danger'; type: 'reserves_open'; params: { project: string; count: number } }
+  | { id: string; tone: 'warning'; type: 'contract_not_invoiced'; params: { title: string; days: number } }
+  | { id: string; tone: 'warning'; type: 'project_no_contract'; params: { project: string } }
+  | { id: string; tone: 'warning'; type: 'task_unassigned'; params: { count: number; titles: string } }
+  | { id: string; tone: 'danger' | 'warning'; type: 'permit_deadline'; params: { reference: string; kind: string; days: number } }
+  | { id: string; tone: 'warning'; type: 'lots_without_company'; params: { project: string; count: number } }
   | { id: string; tone: 'warning'; type: 'project_incomplete'; params: { project: string; fields: string[] } }
   | { id: string; tone: 'warning'; type: 'invoice_draft_stale'; params: { count: number; amount: number; numbers: string } };
 
@@ -149,6 +172,103 @@ function projectsBehind(projects: Project[], now: Date): CopilotSuggestionRaw[] 
       }
     });
   return list;
+}
+
+function meetingsWithoutMinutes(meetings: CopilotMeetingInput[], now: Date): CopilotSuggestionRaw[] {
+  const list: CopilotSuggestionRaw[] = [];
+  meetings.forEach(m => {
+    if ((m.notes ?? '').trim()) return;
+    const d = parseDate(m.date);
+    if (!d) return;
+    const days = daysBetween(d, now);
+    if (days < MEETING_MINUTES_DAYS) return;
+    list.push({ id: `meeting-no-minutes-${m.id}`, tone: 'warning', type: 'meeting_no_minutes', params: { title: m.title || '', days } });
+  });
+  return list.sort((a, b) => (a.params as { days: number }).days - (b.params as { days: number }).days);
+}
+
+function overdueReserves(projects: Project[], reserves: CopilotReserveInput[], now: Date): CopilotSuggestionRaw[] {
+  const byProject = new Map<string, number>();
+  reserves.forEach(r => {
+    if (RESERVE_DONE_STATUSES.includes(r.status ?? '')) return;
+    const d = parseDate(r.due_date);
+    if (!d || d >= now) return;
+    const key = r.project_id || '';
+    byProject.set(key, (byProject.get(key) || 0) + 1);
+  });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [projectId, count] of byProject) {
+    const project = projects.find(p => p.id === projectId);
+    if (!project) continue;
+    list.push({ id: `reserves-open-${projectId}`, tone: 'danger', type: 'reserves_open', params: { project: project.name, count } });
+  }
+  return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
+}
+
+function contractsNotInvoiced(
+  contracts: CopilotContractInput[], notes: CopilotFeeNoteInput[], invoices: CopilotInvoiceInput[], now: Date,
+): CopilotSuggestionRaw[] {
+  const billedProjects = new Set([...invoices.map(i => i.project_id), ...notes.map(n => n.project_id)].filter(Boolean));
+  const billedContracts = new Set(notes.map(n => n.contrat_id).filter(Boolean));
+  const list: CopilotSuggestionRaw[] = [];
+  contracts.forEach(c => {
+    if (c.status !== 'Signé' || billedContracts.has(c.id) || (c.project_id && billedProjects.has(c.project_id))) return;
+    const d = parseDate(c.date_debut || c.created_at);
+    if (!d) return;
+    const days = daysBetween(d, now);
+    if (days < CONTRACT_NOT_INVOICED_DAYS) return;
+    list.push({ id: `contract-not-invoiced-${c.id}`, tone: 'warning', type: 'contract_not_invoiced', params: { title: c.intitule_projet || c.numero || '', days } });
+  });
+  return list.sort((a, b) => (b.params as { days: number }).days - (a.params as { days: number }).days);
+}
+
+function projectsWithoutContract(projects: Project[], contracts: CopilotContractInput[]): CopilotSuggestionRaw[] {
+  const withContract = new Set(contracts.map(c => c.project_id).filter(Boolean));
+  return projects
+    .filter(p => p.status === 'In Progress' && !withContract.has(p.id))
+    .map(p => ({ id: `project-no-contract-${p.id}`, tone: 'warning' as const, type: 'project_no_contract' as const, params: { project: p.name } }));
+}
+
+function unassignedTasks(tasks: CopilotTaskInput[]): CopilotSuggestionRaw[] {
+  const open = tasks.filter(t => isOpenTask(t) && !t.assignee_id);
+  if (open.length === 0) return [];
+  return [{ id: 'tasks-unassigned', tone: 'warning', type: 'task_unassigned', params: { count: open.length, titles: joinTitles(open.map(t => t.title)) } }];
+}
+
+function permitsDue(permits: CopilotPermitInput[], now: Date): CopilotSuggestionRaw[] {
+  const list: CopilotSuggestionRaw[] = [];
+  permits.forEach(p => {
+    if (p.status !== 'en_instruction') return;
+    const months = PERMIT_DELAY_MONTHS[p.type ?? ''];
+    const submitted = parseDate(p.submission_date);
+    if (!months || !submitted) return;
+    const limit = new Date(submitted);
+    limit.setMonth(limit.getMonth() + months);
+    const days = Math.ceil((limit.getTime() - now.getTime()) / DAY_MS);
+    if (days > PERMIT_ALERT_DAYS || days < -PERMIT_ALERT_PAST_DAYS) return;
+    list.push({
+      id: `permit-deadline-${p.id}`,
+      tone: days <= 3 ? 'danger' : 'warning',
+      type: 'permit_deadline',
+      params: { reference: p.reference || '', kind: p.type || '', days },
+    });
+  });
+  return list.sort((a, b) => (a.params as { days: number }).days - (b.params as { days: number }).days);
+}
+
+function lotsWithoutCompany(projects: Project[], lots: CopilotLotInput[]): CopilotSuggestionRaw[] {
+  const missing = new Map<string, number>();
+  lots.forEach(l => {
+    if (l.contact_id || !l.project_id) return;
+    missing.set(l.project_id, (missing.get(l.project_id) || 0) + 1);
+  });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [projectId, count] of missing) {
+    const project = projects.find(p => p.id === projectId);
+    if (!project || project.status !== 'In Progress') continue;
+    list.push({ id: `lots-no-company-${projectId}`, tone: 'warning', type: 'lots_without_company', params: { project: project.name, count } });
+  }
+  return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
 }
 
 function incompleteProjects(projects: Project[]): CopilotSuggestionRaw[] {
@@ -316,32 +436,49 @@ export function computeCopilotSuggestions(input: {
   tasks?: CopilotTaskInput[];
   proposals?: CopilotProposalInput[];
   tenders?: CopilotTenderInput[];
+  // Absent = donnée non lue : la règle correspondante se tait plutôt que de
+  // signaler à tort une affaire « sans contrat » ou un lot « sans entreprise ».
+  meetings?: CopilotMeetingInput[];
+  reserves?: CopilotReserveInput[];
+  contracts?: CopilotContractInput[];
+  feeNotes?: CopilotFeeNoteInput[];
+  permits?: CopilotPermitInput[];
+  lots?: CopilotLotInput[];
   now?: Date;
 }): CopilotSuggestionRaw[] {
   const { projects, milestones, invoices, tasks = [], proposals = [], tenders = [] } = input;
+  const { meetings, reserves, contracts, feeNotes, permits, lots } = input;
   const now = input.now ?? new Date();
 
   const groups: CopilotSuggestionRaw[][] = [
     overdueInvoices(invoices),
     overdueTasks(projects, tasks, now),
     overdueMilestones(projects, milestones, now),
+    reserves ? overdueReserves(projects, reserves, now) : [],
+    permits ? permitsDue(permits, now) : [],
     tendersClosingSoon(tenders, now),
     tasksDueSoon(tasks, now),
     projectsBehind(projects, now),
     invoicesDueSoon(invoices, now),
+    meetings ? meetingsWithoutMinutes(meetings, now) : [],
     proposalsWithoutAnswer(proposals, now),
+    contracts ? contractsNotInvoiced(contracts, feeNotes ?? [], invoices, now) : [],
+    unassignedTasks(tasks),
+    contracts ? projectsWithoutContract(projects, contracts) : [],
+    lots ? lotsWithoutCompany(projects, lots) : [],
     incompleteProjects(projects),
     staleDraftInvoices(invoices, now),
   ].map(g => g.slice(0, MAX_PER_TYPE));
 
   // Tour de rôle entre les règles : chacune a sa place avant qu'une seule
-  // ne prenne la deuxième.
-  const list: CopilotSuggestionRaw[] = [];
-  for (let round = 0; round < MAX_PER_TYPE && list.length < MAX_SUGGESTIONS; round++) {
-    for (const g of groups) {
-      if (g[round] && list.length < MAX_SUGGESTIONS) list.push(g[round]);
-    }
+  // ne prenne la deuxième. Puis le rouge (retard, échéance imminente) passe
+  // avant l'orange, à ordre égal conservé.
+  const interleaved: CopilotSuggestionRaw[] = [];
+  for (let round = 0; round < MAX_PER_TYPE; round++) {
+    for (const g of groups) if (g[round]) interleaved.push(g[round]);
   }
+  const list = [...interleaved.filter(x => x.tone === 'danger'), ...interleaved.filter(x => x.tone !== 'danger')]
+    .slice(0, MAX_SUGGESTIONS);
   return list;
 }
 
@@ -410,6 +547,51 @@ export function formatCopilotSuggestion(
         tone: raw.tone,
         text: t('ai_suggestion_invoice_due_soon', { count: raw.params.count, days: INVOICE_DUE_SOON_DAYS }),
         draft: t('ai_draft_invoice_due_soon', { count: raw.params.count, numbers: raw.params.numbers, amount: formatEur(raw.params.amount), days: INVOICE_DUE_SOON_DAYS }),
+      };
+    case 'meeting_no_minutes':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_meeting_no_minutes', { title: raw.params.title, days: raw.params.days }),
+        draft: t('ai_draft_meeting_no_minutes', { title: raw.params.title, days: raw.params.days }),
+      };
+    case 'reserves_open':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_reserves_open', { project: raw.params.project, count: raw.params.count }),
+        draft: t('ai_draft_reserves_open', { project: raw.params.project, count: raw.params.count }),
+      };
+    case 'contract_not_invoiced':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_contract_not_invoiced', { title: raw.params.title, days: raw.params.days }),
+        draft: t('ai_draft_contract_not_invoiced', { title: raw.params.title, days: raw.params.days }),
+      };
+    case 'project_no_contract':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_project_no_contract', { project: raw.params.project }),
+        draft: t('ai_draft_project_no_contract', { project: raw.params.project }),
+      };
+    case 'task_unassigned':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_task_unassigned', { count: raw.params.count }),
+        draft: t('ai_draft_task_unassigned', { count: raw.params.count, titles: raw.params.titles }),
+      };
+    case 'permit_deadline': {
+      const key = raw.params.days < 0 ? 'passed' : 'soon';
+      const vars = { kind: raw.params.kind, reference: raw.params.reference, days: Math.abs(raw.params.days) };
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t(`ai_suggestion_permit_deadline_${key}`, vars),
+        draft: t(`ai_draft_permit_deadline_${key}`, vars),
+      };
+    }
+    case 'lots_without_company':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_lots_without_company', { project: raw.params.project, count: raw.params.count }),
+        draft: t('ai_draft_lots_without_company', { project: raw.params.project, count: raw.params.count }),
       };
     case 'project_incomplete':
       return {

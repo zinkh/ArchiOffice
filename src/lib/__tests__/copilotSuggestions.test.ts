@@ -20,10 +20,10 @@ describe('computeCopilotSuggestions', () => {
       ...base,
       projects: [project('p1')],
       tasks: [
-        { id: 't1', project_id: 'p1', title: 'Plans', due_date: day(-3) },
-        { id: 't2', project_id: 'p1', title: 'Coupes', end_date: day(-1), status: 'in_progress' },
-        { id: 't3', project_id: 'p1', title: 'Faite', due_date: day(-5), status: 'done' },
-        { id: 't4', project_id: 'p1', title: 'À 100 %', due_date: day(-5), progress: 100 },
+        { id: 't1', assignee_id: 'u', project_id: 'p1', title: 'Plans', due_date: day(-3) },
+        { id: 't2', assignee_id: 'u', project_id: 'p1', title: 'Coupes', end_date: day(-1), status: 'in_progress' },
+        { id: 't3', assignee_id: 'u', project_id: 'p1', title: 'Faite', due_date: day(-5), status: 'done' },
+        { id: 't4', assignee_id: 'u', project_id: 'p1', title: 'À 100 %', due_date: day(-5), progress: 100 },
       ],
     });
     expect(list).toHaveLength(1);
@@ -31,7 +31,7 @@ describe('computeCopilotSuggestions', () => {
   });
 
   it('regroupe les tâches internes en retard sans projet', () => {
-    const list = computeCopilotSuggestions({ ...base, tasks: [{ id: 't1', project_id: null, title: 'Archivage', due_date: day(-2) }] });
+    const list = computeCopilotSuggestions({ ...base, tasks: [{ id: 't1', assignee_id: 'u', project_id: null, title: 'Archivage', due_date: day(-2) }] });
     expect(list[0]).toMatchObject({ type: 'task_overdue', params: { project: '', count: 1 } });
   });
 
@@ -39,8 +39,8 @@ describe('computeCopilotSuggestions', () => {
     const list = computeCopilotSuggestions({
       ...base,
       tasks: [
-        { id: 't1', title: 'Sans date' },
-        { id: 't2', title: 'Date cassée', due_date: 'pas une date' },
+        { id: 't1', assignee_id: 'u', title: 'Sans date' },
+        { id: 't2', assignee_id: 'u', title: 'Date cassée', due_date: 'pas une date' },
       ],
     });
     expect(list).toEqual([]);
@@ -50,8 +50,8 @@ describe('computeCopilotSuggestions', () => {
     const list = computeCopilotSuggestions({
       ...base,
       tasks: [
-        { id: 't1', title: 'Demain', due_date: day(1) },
-        { id: 't2', title: 'Loin', due_date: day(20) },
+        { id: 't1', assignee_id: 'u', title: 'Demain', due_date: day(1) },
+        { id: 't2', assignee_id: 'u', title: 'Loin', due_date: day(20) },
       ],
     });
     expect(list).toHaveLength(1);
@@ -121,14 +121,14 @@ describe('computeCopilotSuggestions', () => {
       ...base,
       projects,
       milestones: projects.map((p, i) => milestone(`m${i}`, p.id, -2)),
-      tasks: [{ id: 't1', project_id: 'p1', title: 'Plans', due_date: day(-1) }],
+      tasks: [{ id: 't1', assignee_id: 'u', project_id: 'p1', title: 'Plans', due_date: day(-1) }],
       proposals: [{ id: 'a', title: 'Villa', status: 'Sent', created_at: day(-30) }],
     });
     expect(types(list)).toEqual(expect.arrayContaining(['overdue_milestone', 'task_overdue', 'proposal_no_answer']));
     expect(list.filter(s => s.type === 'overdue_milestone')).toHaveLength(3);
   });
 
-  it('ne dépasse jamais 8 suggestions', () => {
+  it('ne dépasse jamais 10 suggestions', () => {
     const projects = ['p1', 'p2', 'p3', 'p4'].map(id => project(id));
     const list = computeCopilotSuggestions({
       ...base,
@@ -139,7 +139,7 @@ describe('computeCopilotSuggestions', () => {
       proposals: [1, 2, 3, 4].map(n => ({ id: `${n}`, title: `D${n}`, status: 'Sent', created_at: day(-30) })),
       tenders: [1, 2, 3, 4].map(n => ({ id: `${n}`, title: `AO${n}`, status: 'Draft', submission_deadline: day(2) })),
     });
-    expect(list).toHaveLength(8);
+    expect(list).toHaveLength(10);
   });
 
   it('propose de compléter une fiche d\'affaire en cours, pas une affaire terminée', () => {
@@ -154,6 +154,86 @@ describe('computeCopilotSuggestions', () => {
     });
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ type: 'project_incomplete', params: { project: 'Projet p1', fields: ['address', 'surface'] } });
+  });
+
+  it('signale une réunion passée sans compte rendu', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      meetings: [
+        { id: 'a', title: 'OPR', date: day(-5), notes: '' },
+        { id: 'b', title: 'Rédigée', date: day(-5), notes: 'ok' },
+        { id: 'c', title: 'Hier', date: day(-1), notes: '' },
+      ],
+    });
+    expect(list.map(s => s.id)).toEqual(['meeting-no-minutes-a']);
+  });
+
+  it('signale les réserves dont l\'échéance est dépassée, par projet', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      projects: [project('p1')],
+      reserves: [
+        { id: '1', project_id: 'p1', status: 'Ouverte', due_date: day(-3) },
+        { id: '2', project_id: 'p1', status: 'Levée', due_date: day(-3) },
+        { id: '3', project_id: 'p1', status: 'Ouverte', due_date: day(5) },
+        { id: '4', project_id: 'p1', status: 'Ouverte' },
+      ],
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: 'reserves_open', params: { count: 1 } });
+  });
+
+  it('signale un contrat signé non facturé, sauf si une note ou facture existe', () => {
+    const contracts = [
+      { id: 'c1', project_id: 'p1', status: 'Signé', numero: 'C1', date_debut: day(-60) },
+      { id: 'c2', project_id: 'p2', status: 'Signé', numero: 'C2', date_debut: day(-60) },
+      { id: 'c3', project_id: 'p3', status: 'Brouillon', numero: 'C3', date_debut: day(-60) },
+    ];
+    const list = computeCopilotSuggestions({ ...base, contracts, feeNotes: [{ project_id: 'p2', contrat_id: 'c2' }] });
+    expect(list.map(s => s.id)).toEqual(['contract-not-invoiced-c1']);
+  });
+
+  it('se tait sur les contrats et les lots tant que ces données ne sont pas lues', () => {
+    const list = computeCopilotSuggestions({ ...base, projects: [project('p1', { status: 'In Progress' })] });
+    expect(types(list)).toEqual([]);
+    const withData = computeCopilotSuggestions({
+      ...base,
+      projects: [project('p1', { status: 'In Progress' })],
+      contracts: [],
+      lots: [{ project_id: 'p1', contact_id: null }, { project_id: 'p1', contact_id: 'x' }],
+    });
+    expect(types(withData).sort()).toEqual(['lots_without_company', 'project_no_contract']);
+  });
+
+  it('signale les tâches sans responsable', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      tasks: [{ id: 't1', title: 'A' }, { id: 't2', title: 'B', assignee_id: 'u1' }, { id: 't3', title: 'C', status: 'done' }],
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: 'task_unassigned', params: { count: 1 } });
+  });
+
+  it('signale un permis dont le délai d\'instruction expire, ou vient d\'expirer', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      permits: [
+        { id: 'a', type: 'DP', status: 'en_instruction', submission_date: '2026-09-22', reference: 'DP1' },
+        { id: 'b', type: 'PC', status: 'en_instruction', submission_date: '2026-10-01', reference: 'PC2' },
+        { id: 'c', type: 'DP', status: 'accorde', submission_date: '2026-09-25', reference: 'DP3' },
+      ],
+    });
+    expect(list.map(s => s.id)).toEqual(['permit-deadline-a']);
+    expect(list[0].tone).toBe('danger');
+  });
+
+  it('place le rouge avant l\'orange', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      tasks: [{ id: 't1', assignee_id: 'u', title: 'A', due_date: day(-1) }],
+      proposals: [{ id: 'a', title: 'V', status: 'Sent', created_at: day(-30) }],
+    });
+    expect(list.map(s => s.tone)).toEqual(['danger', 'warning']);
   });
 
   it('reste compatible avec un appel sans tâches, devis ni appels d\'offres', () => {
