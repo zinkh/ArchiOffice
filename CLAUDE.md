@@ -2240,6 +2240,26 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   l'imprime sous la description, avec la colonne « Bât. / phase » quand le chantier a un registre et
   qu'une observation y est affectée (`opts.decoupage`).
 
+### Planning de chantier (onglet DET > Planning)
+
+Gantt décomposé par lot, entre « OS & situations » et « Photos » (`PlanningChantierTab.tsx`, sous « Plus » sur
+téléphone). Table `project_chantier_planning` (`supabase/migrate_chantier_planning.sql`, une ligne par affaire,
+jsonb `PlanningChantier`, hors `SYNC_TABLES`) ; routes `server/routes/planningChantier.ts`
+(`GET/PUT /api/projects/:id/planning-chantier`, `POST .../generate`, `tests/planningChantier.test.ts`) ; logique pure
+partagée écran / PDF / serveur dans `src/lib/planningChantier.ts` (testée). Une instance non migrée lit un planning
+vide (`available: false`) et refuse l'écriture en 503.
+
+- **Une tâche** : lot (`project_lots.id`, vide = tâche générale), dates AAAA-MM-JJ calculées en UTC, avancement,
+  `source` (`ia` | `manuel`), jalon. L'état (à venir, en cours, terminée, en retard) **se déduit** (`etatTache`), jamais saisi.
+- **Génération IA** : le serveur compose le contexte (lots, entreprise titulaire et montant du marché, `duree_mois`,
+  pièces choisies de l'affaire) ; le modèle rend des **semaines**, jamais des dates (`planningDepuisReponse` pose
+  lundi à vendredi). Un lot inconnu est écarté, le planning ne crée jamais de lot. La route **ne propose qu'une
+  proposition** : `appliquerGeneration` remplace les tâches IA des lots générés et garde, au choix, le manuel.
+  Modifier une tâche IA la fait passer en `manuel`. Facturé en réserve → exécute → règle, `endpoint_type = 'planning_generation'`.
+- **Enregistrement automatique** (1,2 s, écritures chaînées, rien avant la fin de la lecture), comme la consultation ACT.
+- **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise.
+- **Pas encore fait** : glisser-déposer des barres, dépendances entre tâches, liaison avec les jalons de mission.
+
 ### Documents joints à l'export PDF du compte-rendu
 
 « Joindre un document au PDF » (en-tête du compte-rendu, `ChantierModule.tsx`) ajoute à la suite du
