@@ -521,6 +521,11 @@ button, [role="button"], [role="tab"], .btn {
   [contenteditable="true"] {
     font-size: 16px;
   }
+  /* Pastille de statut : un sélecteur qui a l'allure d'une étiquette (« A FAIRE »)
+     reste à la taille des autres pastilles au lieu de passer à 16 px. */
+  select.pill-select {
+    font-size: 0.75rem;
+  }
 }
 
 /* Éléments déplaçables au pointeur (useDragToZone, useBarDrag) : un appui
