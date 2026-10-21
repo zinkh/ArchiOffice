@@ -296,6 +296,92 @@ export async function loadCotraitantLogos(
   }
 }
 
+// ── Identité d'un cotraitant ─────────────────────────────────────────────────
+
+/** Ce qu'on imprime d'un cotraitant : de quoi l'identifier et le joindre. */
+export interface CotraitantIdentity {
+  contactId: string;
+  /** Raison sociale, à défaut le nom de la personne. */
+  titre: string;
+  /** La personne, quand la raison sociale occupe déjà le titre. */
+  sousTitre: string;
+  adresse: string;
+  telephone: string;
+  email: string;
+  siret: string;
+  logo: LogoImage | null;
+}
+
+/** Champs de la fiche contact dont l'identité est tirée (réponse de GET /api/contacts). */
+export interface ContactIdentitySource {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  company_name?: string | null;
+  job_title?: string | null;
+  email?: string | null;
+  email_work?: string | null;
+  phone?: string | null;
+  phone_work?: string | null;
+  phone_main?: string | null;
+  phone_mobile?: string | null;
+  address?: string | null;
+  zip?: string | null;
+  city?: string | null;
+  address_work_street?: string | null;
+  address_work_zip?: string | null;
+  address_work_city?: string | null;
+  siret?: string | null;
+  logo?: string | null;
+}
+
+const texte = (value: string | null | undefined): string => (value ?? '').trim();
+
+/** Identité imprimable d'une fiche contact. Rien n'est inventé : un champ vide reste vide. */
+export function identityFromContact(c: ContactIdentitySource): Omit<CotraitantIdentity, 'logo'> {
+  const personne = [texte(c.first_name), texte(c.last_name)].filter(Boolean).join(' ');
+  const societe = texte(c.company_name);
+
+  const rue = texte(c.address_work_street) || texte(c.address);
+  const ville = [texte(c.address_work_zip) || texte(c.zip), texte(c.address_work_city) || texte(c.city)]
+    .filter(Boolean).join(' ');
+
+  return {
+    contactId: c.id,
+    titre: societe || personne,
+    sousTitre: societe ? [personne, texte(c.job_title)].filter(Boolean).join(', ') : texte(c.job_title),
+    adresse: [rue, ville].filter(Boolean).join(', '),
+    telephone: texte(c.phone_work) || texte(c.phone_main) || texte(c.phone_mobile) || texte(c.phone),
+    email: texte(c.email_work) || texte(c.email),
+    siret: texte(c.siret),
+  };
+}
+
+/**
+ * Identités (raison sociale, coordonnées, SIRET, logo) des cotraitants d'un
+ * document, dans l'ordre du groupement, sans doublon. Comme pour les logos seuls,
+ * un échec réseau ne doit jamais empêcher un export : la liste est alors vide.
+ */
+export async function loadCotraitantIdentities(
+  members: GroupementMember[] | undefined | null,
+): Promise<CotraitantIdentity[]> {
+  const ids = [...new Set((members ?? []).map(m => m.contact_id).filter((id): id is string => !!id))];
+  if (ids.length === 0) return [];
+  try {
+    const r = await fetch('/api/contacts');
+    if (!r.ok) return [];
+    const contacts = (await r.json()) as ContactIdentitySource[];
+    const parId = new Map(contacts.map(c => [c.id, c]));
+    return await Promise.all(ids.flatMap(id => {
+      const contact = parId.get(id);
+      if (!contact) return [];
+      return [loadLogoDataUrl(contact.logo || undefined).then(logo => ({ ...identityFromContact(contact), logo }))];
+    }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Dessine le pied de page sur TOUTES les pages. À appeler une fois le contenu
  * terminé, quand le nombre de pages est connu.

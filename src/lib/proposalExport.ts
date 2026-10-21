@@ -12,6 +12,8 @@
 import type { Proposal, ProposalSpecialty } from '../types';
 import { autoSaveDocument } from './autoSaveDocument';
 import { compressImage } from './imageCompression';
+import { paginateFlow } from './pdfPagination';
+import type { CotraitantIdentity } from './pdfLetterhead';
 
 // ─── Agency settings (as returned by GET /api/settings) ────────────────────
 // server.ts's toCamel map only covers a subset of columns (see
@@ -60,7 +62,82 @@ export interface CalendrierItem {
   id: string;
   mission: string;
   dureeJours: number;
-  apres: string; // id of the previous mission, '' if first
+  /** Jour de démarrage depuis le début de la mission (0 = premier jour). */
+  debutJours: number;
+  /** Id de la mission qui précède, '' pour la première. Vide aussi quand la mission est menée en parallèle. */
+  apres: string;
+  /** Ids des missions avec lesquelles celle-ci est menée en parallèle (VISA, EXE, OPC). */
+  avec: string[];
+}
+
+type PhaseMop = 'det' | 'aor' | 'visa' | 'exe' | 'opc';
+
+// Reconnaît une phase par son identifiant, par son sigle (« D.E.T. », « (DET) ») ou,
+// à défaut, par son intitulé : les missions d'une proposition sont renommables.
+function phaseOf(id: string, designation: string): PhaseMop | null {
+  const connues: PhaseMop[] = ['det', 'aor', 'visa', 'exe', 'opc'];
+  const parId = id.toLowerCase();
+  if ((connues as string[]).includes(parId)) return parId as PhaseMop;
+  const sigles = (designation.match(/\b(?:[A-Za-z]\.){2,}|\b[A-Z]{2,5}\b/g) ?? []).map(s => s.replace(/\./g, '').toLowerCase());
+  const parSigle = connues.find(p => sigles.includes(p));
+  if (parSigle) return parSigle;
+  if (/direction de l.ex[ée]cution/i.test(designation)) return 'det';
+  if (/op[ée]rations de r[ée]ception/i.test(designation)) return 'aor';
+  if (/^visa\b/i.test(designation)) return 'visa';
+  if (/ordonnancement/i.test(designation)) return 'opc';
+  if (/[ée]tudes? d.ex[ée]cution/i.test(designation)) return 'exe';
+  return null;
+}
+
+/** Durée par défaut d'une mission, en jours : l'architecte l'ajuste ensuite à la main. */
+export const DUREE_MISSION_PAR_DEFAUT_JOURS = 15;
+
+/**
+ * Enchaînement par défaut des missions : chacune démarre quand la précédente
+ * s'achève (APS après ESQ, APD après APS...), sauf quatre qui se mènent pendant le
+ * chantier : le VISA démarre avec la DET, l'EXE est mené en parallèle de la DET et
+ * l'OPC en parallèle de la DET et de l'AOR (il court du début de la DET à la fin de
+ * l'AOR). Sans DET dans la liste, rien n'est parallèle : tout s'enchaîne.
+ */
+export function planifierCalendrier(
+  missions: Array<{ id: string; designation: string }>,
+  duree = DUREE_MISSION_PAR_DEFAUT_JOURS,
+): CalendrierItem[] {
+  const phases = missions.map(m => phaseOf(m.id, m.designation));
+  const detIndex = phases.indexOf('det');
+  const parallele = (phase: PhaseMop | null) => detIndex !== -1 && (phase === 'visa' || phase === 'exe' || phase === 'opc');
+
+  const items: CalendrierItem[] = missions.map(m => ({
+    id: 'c_' + m.id, mission: m.designation, dureeJours: duree, debutJours: 0, apres: '', avec: [],
+  }));
+
+  // La chaîne : toutes les missions qui ne sont pas menées en parallèle, dans l'ordre de la liste.
+  let fin = 0;
+  let precedent = '';
+  items.forEach((item, i) => {
+    if (parallele(phases[i])) return;
+    item.debutJours = fin;
+    item.apres = precedent;
+    fin += item.dureeJours;
+    precedent = item.id;
+  });
+
+  // Les missions parallèles partent avec la DET ; l'OPC court jusqu'à la fin de l'AOR.
+  if (detIndex !== -1) {
+    const det = items[detIndex];
+    const aorIndex = phases.indexOf('aor');
+    items.forEach((item, i) => {
+      if (!parallele(phases[i])) return;
+      item.debutJours = det.debutJours;
+      item.avec = [det.id];
+      if (phases[i] === 'opc') {
+        const aor = aorIndex !== -1 ? items[aorIndex] : null;
+        item.dureeJours = Math.max(det.dureeJours, (aor ? aor.debutJours + aor.dureeJours : det.debutJours + det.dureeJours) - det.debutJours);
+        if (aor) item.avec = [det.id, aor.id];
+      }
+    });
+  }
+  return items;
 }
 
 export interface ProposalPdfData {
@@ -117,7 +194,9 @@ export interface ProposalPdfData {
   montantTVA: number;
   montantTTC: number;
 
-  cotraitants: Array<{ specialite: string; contact: string; role: string }>;
+  cotraitants: Array<{ specialite: string; contact: string; role: string; contactId?: string }>;
+  /** Identité de chaque cotraitant (fiche contact), par identifiant de contact. Chargée à part. */
+  cotraitantIdentites?: Record<string, CotraitantIdentityPdf>;
   missions: MissionLine[];
   calendrier: CalendrierItem[];
   notes: string;
@@ -131,7 +210,12 @@ export interface ProposalPdfData {
   oaNumber: string;
 }
 
+/** Identité d'un cotraitant telle que le PDF l'imprime : le logo est une data URL déjà réduite. */
+export type CotraitantIdentityPdf = Omit<CotraitantIdentity, 'logo'> & { logo?: string };
+
 // ─── Template (sections + clauses + visual style) ──────────────────────────
+
+export type TableDensity = 'normal' | 'compact' | 'dense';
 
 export type ProposalSectionId =
   | 'garde' | 'objet' | 'surfaces' | 'honoraires' | 'repartition'
@@ -155,7 +239,56 @@ export interface ProposalTemplate {
     logoPosition: 'left' | 'center';
     lineHeight: number;
   };
+  layout: {
+    /** Une section commence sur une nouvelle page. Décoché : les sections se suivent. */
+    sectionBreaks: boolean;
+    /** Place prise par les tableaux : hauteur des lignes, corps du texte, espacements. */
+    tableDensity: TableDensity;
+    /** Raison sociale, coordonnées, SIRET et logo de chaque cotraitant. */
+    cotraitantIdentity: boolean;
+  };
 }
+
+/**
+ * Mesures des tableaux selon la densité choisie. Utilisées en style en ligne par
+ * les primitives du PDF (voir ProposalExportModal) : jamais en classe CSS, que le
+ * Preflight de Tailwind écraserait.
+ */
+export interface DensityTokens {
+  cellPadding: string;
+  cellFont: string;
+  headFont: string;
+  cellLineHeight: number;
+  tableMarginBottom: string;
+  headingMarginTop: string;
+  headingMarginBottom: string;
+  blockGap: string;
+}
+
+// Les marges des cellules sont plus grandes en bas qu'en haut à dessein : jsPDF
+// imprime le texte environ 1 mm plus bas que sa position à l'écran, et un texte
+// symétriquement margé finit collé au filet du bas (queues des p, g, j coupées).
+// La somme haut + bas est celle d'une marge symétrique.
+export const DENSITY_TOKENS: Record<TableDensity, DensityTokens> = {
+  normal: {
+    cellPadding: '1.8mm 3.5mm 3.2mm', cellFont: '9.5pt', headFont: '8pt', cellLineHeight: 1.5,
+    tableMarginBottom: '6mm', headingMarginTop: '7mm', headingMarginBottom: '3mm', blockGap: '10mm',
+  },
+  compact: {
+    cellPadding: '0.8mm 2.5mm 1.8mm', cellFont: '8.5pt', headFont: '7.5pt', cellLineHeight: 1.3,
+    tableMarginBottom: '4mm', headingMarginTop: '5mm', headingMarginBottom: '2mm', blockGap: '6mm',
+  },
+  dense: {
+    cellPadding: '0.3mm 2mm 1.1mm', cellFont: '8pt', headFont: '7pt', cellLineHeight: 1.2,
+    tableMarginBottom: '3mm', headingMarginTop: '4mm', headingMarginBottom: '1.5mm', blockGap: '4mm',
+  },
+};
+
+export const TABLE_DENSITY_OPTIONS: { value: TableDensity; label: string }[] = [
+  { value: 'normal', label: 'Normale' },
+  { value: 'compact', label: 'Compacte' },
+  { value: 'dense', label: 'Très compacte' },
+];
 
 export const PROPOSAL_SECTION_DEFS: { id: ProposalSectionId; label: string }[] = [
   { id: 'garde', label: 'Page de garde' },
@@ -214,6 +347,13 @@ export function buildDefaultTemplate(detailLevel: 'court' | 'detaille' = 'detail
       logoPosition: 'left',
       lineHeight: 1.5,
     },
+    layout: {
+      // Les sauts de page entre sections sont la mise en page historique : on ne
+      // les retire que sur demande. Les tableaux, eux, sortent compacts d'office.
+      sectionBreaks: true,
+      tableDensity: 'compact',
+      cotraitantIdentity: true,
+    },
   };
 }
 
@@ -231,6 +371,7 @@ export function loadStoredTemplate(): ProposalTemplate {
       pages: { ...defaults.pages, ...parsed.pages },
       clauses: { ...defaults.clauses, ...parsed.clauses },
       visual: { ...defaults.visual, ...parsed.visual },
+      layout: { ...defaults.layout, ...parsed.layout },
     };
   } catch {
     return defaults;
@@ -247,12 +388,19 @@ export function applyPreset(t: ProposalTemplate, level: 'court' | 'detaille'): P
 
 // ─── Formatting helpers ─────────────────────────────────────────────────────
 
+// Intl sépare les milliers par une espace fine insécable (U+202F) et colle le « € »
+// par une insécable (U+00A0). Les polices standard de jsPDF n'ont pas la première
+// (elle sort en « / » : « 46 /000,00€ ») et rendent la seconde sans largeur. Une
+// espace ordinaire est un caractère WinAnsi correctement mesuré ; les cellules qui
+// ne doivent pas se couper portent `white-space: nowrap`.
+const espacesOrdinaires = (texte: string): string => texte.replace(/[  ]/g, ' ');
+
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount || 0);
+  return espacesOrdinaires(new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount || 0));
 }
 
 export function formatPercent(value: number): string {
-  return new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0) + ' %';
+  return espacesOrdinaires(new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value || 0)) + ' %';
 }
 
 // ─── DB mapper ───────────────────────────────────────────────────────────────
@@ -380,9 +528,10 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
       specialite: s.specialty_name,
       contact: s.contact_name || '',
       role: '',
+      contactId: s.contact_id || undefined,
     })),
     missions,
-    calendrier: missions.map(m => ({ id: 'c_' + m.id, mission: m.designation, dureeJours: 15, apres: '' })),
+    calendrier: planifierCalendrier(missions),
     notes: p.notes || '',
 
     agenceNom: settings.agencyName || '',
@@ -405,8 +554,12 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
 const LOGO_MAX_W = 1200;
 const LOGO_MAX_H = 560;
 
-export async function compressProposalLogo(dataUrlOrUrl: string): Promise<string | null> {
-  const result = await compressImage(dataUrlOrUrl, LOGO_MAX_W, LOGO_MAX_H, 0.92, 'image/png');
+export async function compressProposalLogo(
+  dataUrlOrUrl: string,
+  maxWidth = LOGO_MAX_W,
+  maxHeight = LOGO_MAX_H,
+): Promise<string | null> {
+  const result = await compressImage(dataUrlOrUrl, maxWidth, maxHeight, 0.92, 'image/png');
   return result?.dataUrl ?? null;
 }
 
@@ -428,38 +581,41 @@ export const getPdfStyles = (): string => `
 `;
 
 // ─── jsPDF export pipeline ──────────────────────────────────────────────────
-// Standardizes on jsPDF's pdf.html() against real DOM .pdf-page nodes — the
-// same pattern already used by InvoiceGenerator.tsx and the former
-// ProposalGenerator.tsx — instead of ProposalModule's iframe+window.print(),
-// which never produced a Blob and so could never reach autoSaveDocument.
+// Standardizes on jsPDF's pdf.html() against a real DOM node (the same pattern
+// already used by InvoiceGenerator.tsx and the former ProposalGenerator.tsx)
+// instead of ProposalModule's iframe+window.print(), which never produced a Blob
+// and so could never reach autoSaveDocument.
 //
-// Known limitation (shared with every pdf.html()-based exporter in this
-// app): pages don't auto-flow — a .pdf-page whose rendered content exceeds
-// one A4 height can get clipped. Each section renders on its own page to
-// keep this risk low; genuinely oversized sections (many missions/cotraitants)
-// should be checked manually after export.
+// Le document est UN SEUL bloc `[data-pdf-flow]` haut de N pages A4. Il est mis en
+// page par paginateFlow() (src/lib/pdfPagination.ts) : chaque bloc qui ne tient
+// pas est repoussé sur la page suivante, donc la coupure de jsPDF, tous les 297 mm,
+// tombe toujours dans une marge. Avant, chaque section était une page fixe et tout
+// ce qui dépassait était tronqué. L'en-tête et le pied de page (avec « P1|N ») sont
+// du HTML posé par le composant, ils font partie de la capture.
 export async function exportProposalPdf(container: HTMLElement, data: ProposalPdfData): Promise<void> {
-  const icons = container.querySelectorAll('svg');
-  icons.forEach(icon => ((icon as unknown as HTMLElement).style.display = 'none'));
+  const flow = container.querySelector<HTMLElement>('[data-pdf-flow]');
+  if (!flow) throw new Error('Document introuvable : rien à exporter.');
+
+  // Les icônes SVG ne sont pas rendues par jsPDF, et les repères de page ne
+  // s'impriment pas. Masquer change les hauteurs : il faut repaginer ensuite.
+  const hidden = [
+    ...Array.from(container.querySelectorAll<HTMLElement | SVGElement>('svg')),
+    ...Array.from(container.querySelectorAll<HTMLElement>('[data-pdf-screen-only]')),
+  ] as unknown as HTMLElement[];
+  hidden.forEach(node => { node.style.display = 'none'; });
 
   try {
+    paginateFlow(flow);
     const { default: jsPDF } = await import('jspdf');
     const pdf = new jsPDF('p', 'mm', 'a4');
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pages = container.querySelectorAll('[data-pdf-page]');
-
-    for (let i = 0; i < pages.length; i++) {
-      const page = pages[i] as HTMLElement;
-      if (i > 0) pdf.addPage();
-      await pdf.html(page, {
-        x: 0,
-        y: 0,
-        width: pdfWidth,
-        windowWidth: page.scrollWidth,
-        margin: [0, 0, 0, 0],
-        autoPaging: false,
-      });
-    }
+    await pdf.html(flow, {
+      x: 0,
+      y: 0,
+      width: pdf.internal.pageSize.getWidth(),
+      windowWidth: flow.scrollWidth,
+      margin: [0, 0, 0, 0],
+      autoPaging: 'slice',
+    });
 
     const clientLabel = (data.entreprise ? data.nomSociete : data.clientNom) || 'Client';
     const filename = `Proposition_${data.reference.replace(/\s+/g, '_')}_${clientLabel.replace(/\s+/g, '_')}.pdf`;
@@ -472,6 +628,7 @@ export async function exportProposalPdf(container: HTMLElement, data: ProposalPd
       category: 'Contract',
     });
   } finally {
-    icons.forEach(icon => ((icon as unknown as HTMLElement).style.display = ''));
+    hidden.forEach(node => { node.style.display = ''; });
+    paginateFlow(flow);
   }
 }
