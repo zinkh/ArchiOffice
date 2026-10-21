@@ -1828,6 +1828,52 @@ pagination « P1|2 ». Indice et date vivent dans `proposals.feasibility_indice`
 écrits par `PUT /api/proposals/:id/feasibility-meta` ; sans valeur, l'export
 prend « A » et la date du jour. Le Word reste modifiable (texte, puces, images).
 
+### Export PDF d'une proposition : mise en page continue
+
+`ProposalExportModal.tsx` ne fabrique plus « une section = une page fixe » (tout ce qui dépassait
+une page était tronqué : fin du tableau des caractéristiques, missions proposées). Le document est UN
+bloc `[data-pdf-flow]`, haut d'un nombre entier de pages A4, capturé par `jsPDF.html()` en une fois.
+`src/lib/pdfPagination.ts` (`paginateFlow`, appelée après chaque rendu et par l'export) repousse sur la
+page suivante chaque bloc qui ne tient pas : la coupure de jsPDF, tous les 297 mm, tombe donc toujours
+dans une marge. La partie pure (`pageShiftMm`, `pageCountForHeight`) est testée
+(`src/lib/__tests__/pdfPagination.test.ts`) ; la partie DOM ne se teste qu'en navigateur.
+
+- **Géométrie** : bande haute de 26 mm (en-tête), bande basse de 20 mm (pied et « P1|N »), contenu entre
+  les deux. En-tête, pied et pagination sont du HTML posé par-dessus, page après page (`PageChrome`) ; les
+  repères de coupure de l'aperçu portent `data-pdf-screen-only` et sont masqués à l'export. La page de
+  garde est une page entière à part (`data-pdf-cover`), hors pagination.
+- **Ce qu'on ne coupe pas** : tout bloc `data-pdf-keep`, chaque ligne de tableau (`tbody > tr`,
+  `tfoot > tr`), chaque `<P>`. Un titre (`data-pdf-heading`) suit le premier vrai bloc qui le suit (les
+  autres titres et les blocs vides sont traversés), une ligne `data-pdf-keep-next` suit sa voisine. Un
+  tableau coupé répète son en-tête sur la page suivante. Un bloc plus haut qu'une page entière n'est pas
+  déplacé. Le nombre de pages se lit sur le bas du DERNIER contenu, jamais sur la marge basse du corps
+  (page blanche sinon). Un espaceur est un `div` (ou une `tr`) `data-pdf-spacer` retiré à chaque
+  repagination : ne jamais en garder de référence.
+- **Trois réglages** (`ProposalTemplate.layout`, `localStorage['proposalTemplate']`, panneau « Mise en
+  page » ; un modèle déjà enregistré reçoit les valeurs par défaut par fusion) : `sectionBreaks` (une
+  section s'ouvre sur une page neuve ; vrai par défaut, la première section s'ouvre toujours sur une page
+  neuve), `tableDensity` (`normal` | `compact` | `dense`, **compact par défaut**, `DENSITY_TOKENS` :
+  marges et corps des cellules, interlignes, espacements des titres) et `cotraitantIdentity` (vrai par
+  défaut).
+- **Identité des cotraitants** : `loadCotraitantIdentities` / `identityFromContact`
+  (`src/lib/pdfLetterhead.ts`, testés) lisent la fiche contact (raison sociale, personne, adresse de
+  travail à défaut l'adresse générale, téléphone, e-mail, SIRET, logo) sans rien inventer. La section 05
+  devient un tableau Logo / Spécialité / Société et contact / Coordonnées ; les logos de la page de garde
+  suivent le même réglage. Les logos sont réduits à 600 x 300 px (`compressProposalLogo`) : jsPDF
+  embarque les images à leur résolution native.
+- **Tableaux** : « Calcul des honoraires » n'a plus de colonne « Catégorie » (vide sur chaque ligne de
+  mission, elle écrasait la désignation) : la catégorie est une ligne de titre. Le tableau de répartition
+  est en mise en page automatique, ses montants ne se coupent pas, et ses marges se resserrent dès trois
+  intervenants.
+- **Pièges propres à jsPDF, à ne pas défaire** : l'espace fine (U+202F) que `Intl` met dans les milliers
+  s'imprime « / » et l'insécable avant « € » sans largeur (« 46 /000,00€ ») : `formatCurrency` et
+  `formatPercent` n'emploient que des espaces ordinaires, et les cellules de montant portent
+  `white-space: nowrap`. Le texte est imprimé environ 1 mm plus bas que sa boîte : les marges de cellule
+  sont plus grandes en bas qu'en haut, et aucun texte ne porte `overflow: hidden` (il serait rogné).
+  Les SVG sont masqués à l'export (ce sont les icônes), donc le diagramme de Gantt est dessiné en HTML ;
+  ☑ et ☐ n'existent pas dans la police du PDF (ils sortaient en « & ») : ce sont des carrés dessinés.
+  L'export repagine après avoir masqué ces éléments et après les avoir rétablis.
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres

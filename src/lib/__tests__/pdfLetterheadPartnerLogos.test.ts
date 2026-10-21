@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { drawAgencyHeader, loadCotraitantLogos, type LogoImage } from '../pdfLetterhead';
+import {
+  drawAgencyHeader, loadCotraitantLogos, loadCotraitantIdentities, identityFromContact, type LogoImage,
+} from '../pdfLetterhead';
 
 function fakePdf() {
   return {
@@ -54,6 +56,72 @@ describe('loadCotraitantLogos', () => {
   it('rend une liste vide si la lecture des contacts échoue', async () => {
     const spy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('réseau'));
     expect(await loadCotraitantLogos([{ contact_id: 'c1' }])).toEqual([]);
+    spy.mockRestore();
+  });
+});
+
+describe('identityFromContact', () => {
+  it('met la raison sociale en titre et la personne en sous-titre', () => {
+    const identite = identityFromContact({
+      id: 'c1', first_name: 'Anne', last_name: 'Durand', company_name: 'BET Durand', job_title: 'Gérante',
+      email_work: 'a@bet.fr', email: 'perso@x.fr',
+      phone_work: '0383000000', phone: '0600000000',
+      address_work_street: '1 rue X', address_work_zip: '54000', address_work_city: 'Nancy',
+      siret: ' 12345678900012 ',
+    });
+    expect(identite).toEqual({
+      contactId: 'c1', titre: 'BET Durand', sousTitre: 'Anne Durand, Gérante',
+      adresse: '1 rue X, 54000 Nancy', telephone: '0383000000', email: 'a@bet.fr', siret: '12345678900012',
+    });
+  });
+
+  it("prend la personne pour titre quand il n'y a pas de société", () => {
+    const identite = identityFromContact({ id: 'c2', first_name: 'Paul', last_name: 'Martin', email: 'p@m.fr' });
+    expect(identite.titre).toBe('Paul Martin');
+    expect(identite.sousTitre).toBe('');
+    expect(identite.email).toBe('p@m.fr');
+  });
+
+  it('retombe sur les champs génériques et laisse vide ce qui manque', () => {
+    const identite = identityFromContact({ id: 'c3', company_name: 'Acoustique SA', address: '2 av Y', zip: '75001', city: 'Paris', phone: '0100000000' });
+    expect(identite.adresse).toBe('2 av Y, 75001 Paris');
+    expect(identite.telephone).toBe('0100000000');
+    expect(identite.siret).toBe('');
+    expect(identite.email).toBe('');
+  });
+
+  it("n'imprime pas de virgule orpheline quand seule la ville est connue", () => {
+    expect(identityFromContact({ id: 'c4', company_name: 'X', city: 'Metz' }).adresse).toBe('Metz');
+  });
+});
+
+describe('loadCotraitantIdentities', () => {
+  it('ne contacte pas le serveur sans cotraitant rattaché à une fiche', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    expect(await loadCotraitantIdentities([{}, { contact_id: undefined }])).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('rend une liste vide si la lecture des contacts échoue', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('réseau'));
+    expect(await loadCotraitantIdentities([{ contact_id: 'c1' }])).toEqual([]);
+    spy.mockRestore();
+  });
+
+  it("garde l'ordre du groupement, sans doublon, et ignore une fiche introuvable", async () => {
+    const contacts = [
+      { id: 'a', company_name: 'Alpha' },
+      { id: 'b', company_name: 'Beta' },
+    ];
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      { ok: true, json: async () => contacts } as unknown as Response,
+    );
+    const identites = await loadCotraitantIdentities([
+      { contact_id: 'b' }, { contact_id: 'inconnu' }, { contact_id: 'a' }, { contact_id: 'b' },
+    ]);
+    expect(identites.map(i => i.titre)).toEqual(['Beta', 'Alpha']);
+    expect(identites.every(i => i.logo === null)).toBe(true);
     spy.mockRestore();
   });
 });
