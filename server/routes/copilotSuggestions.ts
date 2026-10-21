@@ -19,7 +19,7 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
       const tenantId = await getTenantId(req.user.id);
 
       const [projectsRes, milestonesRes, invoicesRes, tasksRes, proposalsRes, tendersRes] = await Promise.all([
-        tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name, client, status, end_date, progression'),
+        tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name, client, status, start_date, end_date, progression, address, project_code, project_manager, surface, construction_cost'),
         tenantScopedFrom(supabaseAdmin, tenantId, 'milestones').select('id, project_id, title, due_date, completed'),
         supabaseAdmin.from('invoices').select('id, invoice_number, status, total_amount, amount, due_date, issue_date, created_at, projects(name)').eq('tenant_id', tenantId),
         tenantScopedFrom(supabaseAdmin, tenantId, 'tasks').select('id, project_id, title, status, progress, due_date, end_date'),

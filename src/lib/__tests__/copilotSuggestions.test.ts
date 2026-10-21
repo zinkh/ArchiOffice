@@ -5,8 +5,9 @@ import type { Project, Milestone } from '../../types';
 const NOW = new Date('2026-10-21T10:00:00Z');
 const day = (offset: number) => new Date(NOW.getTime() + offset * 86400000).toISOString();
 
+const COMPLETE = { address: 'a', start_date: '2026-01-01', end_date: '2027-01-01', project_code: 'c', project_manager: 'm', surface: 1, construction_cost: 1 };
 const project = (id: string, extra: Partial<Project> = {}) =>
-  ({ id, name: `Projet ${id}`, client: 'Client', status: 'Planning', ...extra }) as Project;
+  ({ id, name: `Projet ${id}`, client: 'Client', status: 'Planning', ...COMPLETE, ...extra }) as Project;
 const milestone = (id: string, projectId: string, offset: number) =>
   ({ id, project_id: projectId, title: `Jalon ${id}`, due_date: day(offset), completed: false }) as Milestone;
 
@@ -139,6 +140,20 @@ describe('computeCopilotSuggestions', () => {
       tenders: [1, 2, 3, 4].map(n => ({ id: `${n}`, title: `AO${n}`, status: 'Draft', submission_deadline: day(2) })),
     });
     expect(list).toHaveLength(8);
+  });
+
+  it('propose de compléter une fiche d\'affaire en cours, pas une affaire terminée', () => {
+    const full = {};
+    const list = computeCopilotSuggestions({
+      ...base,
+      projects: [
+        project('p1', { ...full, address: '', surface: 0 }),
+        project('p2', full),
+        project('p3', { status: 'Completed', address: '' }),
+      ],
+    });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: 'project_incomplete', params: { project: 'Projet p1', fields: ['address', 'surface'] } });
   });
 
   it('reste compatible avec un appel sans tâches, devis ni appels d\'offres', () => {

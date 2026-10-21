@@ -23,6 +23,8 @@ const TENDER_DEADLINE_URGENT_DAYS = 2;
 const INVOICE_DUE_SOON_DAYS = 7;
 const DRAFT_INVOICE_STALE_DAYS = 7;
 const MAX_TITLES = 3;
+// Données qu'une fiche d'affaire en cours doit porter ; une clé = `ai_field_<clé>`.
+const PROJECT_REQUIRED_FIELDS = ['address', 'start_date', 'end_date', 'project_code', 'project_manager', 'surface', 'construction_cost'] as const;
 const DAY_MS = 86400000;
 
 // `status` is typed loosely (not the `Invoice` interface's capitalized enum)
@@ -80,6 +82,7 @@ export type CopilotSuggestionRaw =
   | { id: string; tone: 'warning'; type: 'proposal_no_answer'; params: { title: string; client: string; days: number } }
   | { id: string; tone: 'danger' | 'warning'; type: 'tender_deadline'; params: { title: string; client: string; days: number } }
   | { id: string; tone: 'warning'; type: 'invoice_due_soon'; params: { count: number; amount: number; numbers: string } }
+  | { id: string; tone: 'warning'; type: 'project_incomplete'; params: { project: string; fields: string[] } }
   | { id: string; tone: 'warning'; type: 'invoice_draft_stale'; params: { count: number; amount: number; numbers: string } };
 
 export interface CopilotSuggestion {
@@ -146,6 +149,23 @@ function projectsBehind(projects: Project[], now: Date): CopilotSuggestionRaw[] 
       }
     });
   return list;
+}
+
+function incompleteProjects(projects: Project[]): CopilotSuggestionRaw[] {
+  const list: CopilotSuggestionRaw[] = [];
+  projects
+    .filter(p => !['completed', 'termine', 'livre', 'clos', 'archive'].some(k => strip(p.status).startsWith(k)))
+    .forEach(p => {
+      const record = p as unknown as Record<string, unknown>;
+      const fields = PROJECT_REQUIRED_FIELDS.filter(f => {
+        const v = record[f];
+        return v === undefined || v === null || (typeof v === 'string' && !v.trim()) || (typeof v === 'number' && v <= 0);
+      });
+      if (fields.length === 0) return;
+      list.push({ id: `incomplete-project-${p.id}`, tone: 'warning', type: 'project_incomplete', params: { project: p.name, fields: [...fields] } });
+    });
+  // Les fiches les plus lacunaires d'abord.
+  return list.sort((a, b) => (b.params as { fields: string[] }).fields.length - (a.params as { fields: string[] }).fields.length);
 }
 
 function overdueInvoices(invoices: CopilotInvoiceInput[]): CopilotSuggestionRaw[] {
@@ -310,6 +330,7 @@ export function computeCopilotSuggestions(input: {
     projectsBehind(projects, now),
     invoicesDueSoon(invoices, now),
     proposalsWithoutAnswer(proposals, now),
+    incompleteProjects(projects),
     staleDraftInvoices(invoices, now),
   ].map(g => g.slice(0, MAX_PER_TYPE));
 
@@ -389,6 +410,13 @@ export function formatCopilotSuggestion(
         tone: raw.tone,
         text: t('ai_suggestion_invoice_due_soon', { count: raw.params.count, days: INVOICE_DUE_SOON_DAYS }),
         draft: t('ai_draft_invoice_due_soon', { count: raw.params.count, numbers: raw.params.numbers, amount: formatEur(raw.params.amount), days: INVOICE_DUE_SOON_DAYS }),
+      };
+    case 'project_incomplete':
+      return {
+        id: raw.id,
+        tone: raw.tone,
+        text: t('ai_suggestion_project_incomplete', { project: raw.params.project, count: raw.params.fields.length, fields: raw.params.fields.map(f => t(`ai_field_${f}`)).join(', ') }),
+        draft: t('ai_draft_project_incomplete', { project: raw.params.project, fields: raw.params.fields.map(f => t(`ai_field_${f}`)).join(', ') }),
       };
     case 'invoice_draft_stale':
       return {
