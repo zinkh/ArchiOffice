@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { IconX } from '@tabler/icons-react';
@@ -99,7 +100,11 @@ export function ModalShell({
     launchOriginRef(el);
   };
 
-  return (
+  // Monté à la racine de la page : un parent qui porte une transformation, un
+  // filtre ou un `contain` devient le repère d'un élément `fixed`, et la fenêtre
+  // prenait alors la taille de ce parent (plus large que l'écran, pied de page
+  // hors champ) au lieu de celle de l'écran.
+  return createPortal(
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -163,6 +168,7 @@ export function ModalShell({
         )}
       </motion.div>
       {dialog}
-    </motion.div>
+    </motion.div>,
+    document.body,
   );
 }

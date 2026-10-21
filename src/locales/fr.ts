@@ -3473,6 +3473,7 @@ export default {
       "reserve_status_lift_refused": "Levée refusée par la maîtrise d'œuvre",
       "projectdetail_reserves_title": "Réserves",
       "projectdetail_reserves_gpa_title": "Réserves de parfait achèvement (GPA)",
+      "projectdetail_reserves_gpa_short": "Réserves GPA",
       "projectdetail_pv_title": "Procès-verbaux de réception",
       "projectdetail_pv_new": "Nouveau procès-verbal",
       "projectdetail_pv_reference": "Référence du PV",

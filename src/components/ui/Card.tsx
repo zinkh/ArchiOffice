@@ -39,9 +39,10 @@ export function CardHeader({ className, icon: Icon, title, description, action, 
           </div>
         )}
         <div className="min-w-0">
-          <h3 className="text-base font-bold truncate" style={{ color: 'var(--tblr-text)' }}>{title}</h3>
+          {/* Deux lignes sur téléphone : « Réserves de parfait achève... » n'avait aucun sens tronqué. */}
+          <h3 className="text-base font-bold break-words line-clamp-2 sm:line-clamp-1" style={{ color: 'var(--tblr-text)' }}>{title}</h3>
           {description && (
-            <p className="text-sm line-clamp-2 sm:line-clamp-none sm:truncate" style={{ color: 'var(--tblr-muted)' }}>{description}</p>
+            <p className="text-sm line-clamp-3 sm:line-clamp-none sm:truncate" style={{ color: 'var(--tblr-muted)' }}>{description}</p>
           )}
         </div>
       </div>

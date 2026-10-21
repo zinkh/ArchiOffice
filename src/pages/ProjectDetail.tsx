@@ -474,6 +474,20 @@ export default function ProjectDetail() {
   });
   const [pvForm, setPvForm] = useState(defaultPvForm());
 
+  // Export PDF et suppression d'un PV de réception : partagés par le tableau
+  // (bureau) et la liste de cartes (téléphone) de l'onglet AOR.
+  const exportReceptionPdf = (rec: Reception, pvReserves: Reserve[]) => {
+    const signataires: { nom: string; role: string }[] = rec.signataires ? JSON.parse(rec.signataires) : [];
+    generatePvPdf(rec, pvReserves, project?.name || 'Projet', signataires);
+  };
+  const deleteReception = async (rec: Reception) => {
+    if (!(await confirmDelete('projectdetail_confirm_delete_pv_reception'))) return;
+    try {
+      const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
+      if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
+    } catch (err) { console.error(err); }
+  };
+
   // Extrait de l'onClick « Modifier » d'un PV de réception (onglet AOR) pour
   // être réutilisable depuis le lien direct d'un agent (?open=receptions:<id>
   // sur cette page, voir recordLinks.ts et l'effet de lien direct plus bas).
@@ -5063,6 +5077,7 @@ export default function ProjectDetail() {
                   projectId={id || ''}
                   apiBase="/api/gpa-reserves"
                   title={t('projectdetail_reserves_gpa_title')}
+                  shortTitle={t('projectdetail_reserves_gpa_short')}
                   reserves={gpaReserves}
                   setReserves={setGpaReserves}
                   plans={plans}
@@ -5274,7 +5289,66 @@ export default function ProjectDetail() {
                     </div>
                   )}
 
-                  <div className="overflow-x-auto">
+                  {/* Téléphone : une carte par PV au lieu d'un tableau de huit colonnes à faire défiler. */}
+                  <div className="md:hidden divide-y divide-[var(--tblr-border)]">
+                    {receptions.map(rec => {
+                      const pvReserves = reservesByReceptionId.get(rec.id) ?? [];
+                      const reservesLevees = pvReserves.filter(r => r.status === 'Levée' || r.status === 'Quitus Transmis').length;
+                      const dlimit = rec.date_limite_levee ? new Date(rec.date_limite_levee) : null;
+                      const isUrgent = !!dlimit && (dlimit.getTime() - Date.now()) < 30 * 24 * 60 * 60 * 1000;
+                      const action = 'inline-flex items-center justify-center w-11 h-11 rounded-lg text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] transition-colors';
+                      return (
+                        <div key={rec.id} className="px-4 py-3 space-y-2">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="font-mono text-xs font-bold text-[var(--tblr-text)] break-words">{rec.reference_pv || '—'}</div>
+                              <div className="text-xs text-[var(--tblr-muted)]">
+                                {new Date(rec.date).toLocaleDateString('fr-FR')}{rec.lieu ? ` · ${rec.lieu}` : ''}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap justify-end gap-1 shrink-0">
+                              <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", rec.type === 'definitive' ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")}>
+                                {rec.type === 'provisoire' ? t('projectdetail_pv_type_provisoire_short') : t('projectdetail_pv_type_definitive_short')}
+                              </span>
+                              <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", rec.pv_valide ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-zinc-100 text-[var(--tblr-muted)] dark:bg-zinc-800")}>
+                                {rec.pv_valide ? t('projectdetail_pv_status_signed') : t('projectdetail_os_status_draft')}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                            <span className={cn("px-2 py-1 rounded-full text-[0.6875rem] font-bold uppercase tracking-wider", pvReserves.length > 0 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" : "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400")}>
+                              {pvReserves.length > 0
+                                ? `${t('projectdetail_pv_reserves_count', { count: pvReserves.length })} · ${t('projectdetail_pv_reserves_lifted', { count: reservesLevees })}`
+                                : t('projectdetail_pv_no_reserves')}
+                            </span>
+                            {dlimit && (
+                              <span className={cn("font-medium", isUrgent ? "text-orange-600 dark:text-orange-400 font-bold" : "text-[var(--tblr-muted)]")}>
+                                {t('projectdetail_pv_col_deadline')} : {dlimit.toLocaleDateString('fr-FR')}
+                                {isUrgent && <span className="sr-only"> {t('projectdetail_pv_deadline_near')}</span>}
+                                {isUrgent && <span aria-hidden> ⚠</span>}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-end gap-1 -mb-1">
+                            <button type="button" className={action} title={t('projectdetail_pv_export_pdf')} aria-label={t('projectdetail_pv_export_pdf')} onClick={() => exportReceptionPdf(rec, pvReserves)}>
+                              <IconFileDownload size={18} />
+                            </button>
+                            <button type="button" className={action} title={t('projectdetail_pv_edit')} aria-label={t('projectdetail_pv_edit')} onClick={() => openReceptionForm(rec)}>
+                              <IconEdit size={18} />
+                            </button>
+                            <button type="button" className={cn(action, 'hover:text-red-600')} title={t('projectdetail_pv_delete')} aria-label={t('projectdetail_pv_delete')} onClick={() => deleteReception(rec)}>
+                              <IconTrash size={18} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {receptions.length === 0 && (
+                      <p className="px-4 py-8 text-sm italic text-[var(--tblr-muted)]">{t('projectdetail_pv_empty')}</p>
+                    )}
+                  </div>
+
+                  <div className="hidden md:block overflow-x-auto">
                     <table className="min-w-full text-sm">
                       <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
                         <tr>
@@ -5344,10 +5418,7 @@ export default function ProjectDetail() {
                                     type="button"
                                     title={t('projectdetail_pv_export_pdf')}
                                     aria-label={t('projectdetail_pv_export_pdf')}
-                                    onClick={() => {
-                                      const signataires: { nom: string; role: string }[] = rec.signataires ? JSON.parse(rec.signataires) : [];
-                                      generatePvPdf(rec, pvReserves, project?.name || 'Projet', signataires);
-                                    }}
+                                    onClick={() => exportReceptionPdf(rec, pvReserves)}
                                     className="p-1.5 text-[var(--tblr-muted)] hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
                                   >
                                     <IconFileDownload size={15} />
@@ -5367,13 +5438,7 @@ export default function ProjectDetail() {
                                     type="button"
                                     title={t('projectdetail_pv_delete')}
                                     aria-label={t('projectdetail_pv_delete')}
-                                    onClick={async () => {
-                                      if (!(await confirmDelete('projectdetail_confirm_delete_pv_reception'))) return;
-                                      try {
-                                        const res = await fetch(`/api/receptions/${rec.id}`, { method: 'DELETE' });
-                                        if (res.ok) setReceptions(prev => prev.filter(r => r.id !== rec.id));
-                                      } catch (err) { console.error(err); }
-                                    }}
+                                    onClick={() => deleteReception(rec)}
                                     className="p-1.5 text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
                                   >
                                     <IconTrash size={15} />

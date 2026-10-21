@@ -34,6 +34,8 @@ interface ReserveTrackerProps {
   projectId: string;
   apiBase: '/api/reserves' | '/api/gpa-reserves';
   title: string;
+  /** Intitulé court des tuiles de synthèse quand le titre est long (« GPA »). */
+  shortTitle?: string;
   reserves: ReserveLike[];
   setReserves: React.Dispatch<React.SetStateAction<any[]>>;
   plans: Plan[];
@@ -65,7 +67,7 @@ const FILTERS: { id: Filter; label: string }[] = [
  * avec la photo prise sur place. L'export PDF (lib/reservesExport.ts) sort
  * la liste filtrée à l'écran.
  */
-export function ReserveTracker({ projectId, apiBase, title, reserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
+export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
   const { t } = useTranslation();
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
@@ -205,7 +207,7 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatTile label={`${title} ouvertes`} color="blue" icon={IconAlertTriangle} value={reserveStats.ouvertes} sub="A faire + En cours" />
+        <StatTile label={`${shortTitle ?? title} ouvertes`} color="blue" icon={IconAlertTriangle} value={reserveStats.ouvertes} sub="A faire + En cours" />
         <StatTile label="En retard" color="red" icon={IconAlertCircle} value={reserveStats.retard} sub="Échéance dépassée" />
         <StatTile label="Urgentes" color="orange" icon={IconClock} value={reserveStats.urgentes} sub="Dans les 7 jours" />
         <StatTile label="Levées" color="green" icon={IconCheck} value={reserveStats.levees} sub="Levée + Quitus" />
@@ -216,10 +218,12 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
           icon={IconClipboardCheck}
           title={title}
           action={
-            <div className="flex items-center gap-2 flex-wrap justify-end">
+            // Sur téléphone, les trois commandes remplissent la ligne sous le titre au lieu de se tasser à droite.
+            <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto sm:justify-end">
               {plans.length > 0 && (
                 <select
-                  className="bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 text-xs font-bold outline-none max-w-[160px]"
+                  aria-label="Plan"
+                  className="flex-1 min-w-0 sm:flex-none bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 pointer-coarse:min-h-11 text-xs font-bold outline-none sm:max-w-[160px]"
                   value={selectedPlanId || ''}
                   onChange={e => { setSelectedPlanId(e.target.value || null); setAnnotationCoords(null); }}
                 >
@@ -230,15 +234,16 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
               <button
                 onClick={handleExport}
                 disabled={!!exporting || reserves.length === 0}
-                className="flex items-center gap-2 px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
+                className="flex items-center justify-center gap-2 px-3 py-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-xs font-bold transition disabled:opacity-50"
                 title="Exporter la liste de réserves en PDF"
+                aria-label="Exporter la liste de réserves en PDF"
               >
                 {exporting ? <IconLoader2 size={14} className="animate-spin" /> : <IconFileTypePdf size={14} />}
                 <span className="hidden sm:inline">{exporting || 'Exporter PDF'}</span>
               </button>
               <button
                 onClick={openForCreation}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
+                className="flex flex-1 sm:flex-none items-center justify-center gap-2 whitespace-nowrap px-4 py-2 pointer-coarse:min-h-11 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition"
               >
                 <IconPlus size={14} />
                 Créer une réserve
@@ -310,11 +315,13 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
             const entreprises = parseJsonList(res.entreprises);
             const lots = parseJsonList(res.lots);
             return (
+              // Le statut est un <select> : il ne peut pas vivre dans le <button> qui ouvre la fiche
+              // (contrôles imbriqués) et sa pastille, large comme la plus longue option, débordait de la carte.
+              <div key={res.id} className={cn('px-3 py-3', retard > 0 && 'bg-red-50/40 dark:bg-red-950/10')}>
               <button
-                key={res.id}
                 type="button"
                 onClick={() => setOpenReserveId(res.id)}
-                className={cn('w-full text-left px-3 py-3 flex gap-3 active:bg-[var(--tblr-surface-2)]', retard > 0 && 'bg-red-50/40 dark:bg-red-950/10')}
+                className="w-full text-left flex gap-3 active:bg-[var(--tblr-surface-2)]"
               >
                 {renderThumb(res, 'w-16 h-16 shrink-0')}
                 <div className="min-w-0 flex-1 space-y-1">
@@ -328,15 +335,19 @@ export function ReserveTracker({ projectId, apiBase, title, reserves, setReserve
                   <div className="text-[0.6875rem] text-[var(--tblr-muted)] truncate">
                     {[entreprises.join(', ') || lots.join(', '), [res.batiment, res.local].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || '—'}
                   </div>
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
                     <span className={cn('text-[0.6875rem] font-medium', retard > 0 ? 'text-red-600' : 'text-[var(--tblr-muted)]')}>
                       {res.due_date ? new Date(res.due_date).toLocaleDateString('fr-FR') : 'Sans échéance'}
                       {retard > 0 && <span className="ml-1 px-1 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 text-[0.6875rem] font-bold">+{retard}j</span>}
                     </span>
-                    <StatusSelect value={res.status} onChange={s => changeStatus(res, s)} />
                   </div>
                 </div>
               </button>
+              {/* Aligné sur la colonne de texte : vignette de 4 rem + espacement de 0,75 rem. */}
+              <div className="mt-2 pl-[4.75rem]">
+                <StatusSelect value={res.status} onChange={s => changeStatus(res, s)} className="max-w-full min-h-9 pointer-coarse:min-h-11 px-3" />
+              </div>
+              </div>
             );
           })}
           {mobileList.length === 0 && (
