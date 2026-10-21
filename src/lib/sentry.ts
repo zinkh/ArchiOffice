@@ -58,7 +58,15 @@ export function initSentry(): void {
     dsn,
     environment: import.meta.env.MODE,
     tracesSampleRate: 0.1,
-    sendDefaultPii: false,
+    // v11 a remplacé sendDefaultPii par dataCollection, dont les valeurs par
+    // défaut collectent tout : on garde l'équivalent de l'ancien `false`.
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: false,
+      httpBodies: [],
+      urlQueryParams: false,
+    },
     // Mirrors the backend: every existing console.error across the app
     // becomes a Sentry event without touching each call site.
     integrations: [Sentry.captureConsoleIntegration({ levels: ['error'] })],
