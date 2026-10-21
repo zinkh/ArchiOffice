@@ -66,7 +66,8 @@ describe('gabarit du panneau de permis', () => {
     expect(html).toMatch(/3\s200\sm²/);
     expect(html).not.toContain('Brouillon');
     expect(html).not.toContain('class="wm"');
-    expect(html).toContain('P1|1');
+    expect(html).not.toContain('P1|1');
+    expect(html).not.toContain('class="foot"');
   });
   it('brouillon : champs obligatoires vides en pointillés, bandeau, jamais de valeur inventée', () => {
     const html = buildPermisHtml(complete({ etat: 'brouillon', dateDelivrance: null, mairieNom: null, mairieAdresse: null }), pageSpec('A0', 'portrait'));
@@ -206,5 +207,22 @@ describe('routes', () => {
     expect((await request(app).get('/api/projects/projRoute/panneau-chantier').set(authHeader(intruder.token))).status).toBe(404);
     expect((await request(app).put('/api/projects/projRoute/panneau-chantier').set(authHeader(intruder.token)).send({})).status).toBe(404);
     expect((await request(app).post('/api/projects/projRoute/panneau-chantier/pdf').set(authHeader(intruder.token)).send({})).status).toBe(404);
+  });
+  it('liste publique des entreprises : sans compte, par jeton ; jeton falsifié refusé', async () => {
+    const { signChantierToken } = await import('../server/panneaux/publicLink');
+    const tenant = makeTenant();
+    fakeSupabaseAdmin.seed('projects', [{ id: 'projPublic01', tenant_id: tenant, name: 'École publique', client: 'C' }]);
+    fakeSupabaseAdmin.seed('project_lots', [
+      { id: 'lp1', tenant_id: tenant, project_id: 'projPublic01', lot_number: '01', lot_title: 'Gros œuvre', contact_id: 'ent1' },
+      { id: 'lp2', tenant_id: tenant, project_id: 'projPublic01', lot_number: '02', lot_title: 'Charpente', contact_id: null },
+    ]);
+    fakeSupabaseAdmin.seed('contacts', [{ id: 'ent1', tenant_id: tenant, company_name: 'BATI NANCY', address_work_street: '1 rue X', address_work_zip: '54000', address_work_city: 'Nancy', logo: 'data:image/png;base64,AAAA' }]);
+    const ok = await request(app).get(`/api/public/chantier/${signChantierToken('projPublic01')}`);
+    expect(ok.status).toBe(200);
+    expect(ok.body.operation).toBe('École publique');
+    expect(ok.body.entreprises).toEqual([{ lot: '01', intitule: 'Gros œuvre', nom: 'BATI NANCY', adresse: ['1 rue X', '54000 Nancy'] }]);
+    expect(JSON.stringify(ok.body)).not.toContain('data:image');
+    expect((await request(app).get(`/api/public/chantier/${signChantierToken('projPublic01').slice(0, -2)}xx`)).status).toBe(404);
+    expect((await request(app).get(`/api/public/chantier/${signChantierToken('inconnu-0001')}`)).status).toBe(404);
   });
 });

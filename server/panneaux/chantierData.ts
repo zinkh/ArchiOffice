@@ -56,6 +56,8 @@ async function safeSelect(db: Db, table: string, build: (q: any) => any): Promis
 export interface ChantierLoadInput {
   imageId?: string | null;
   withImage?: boolean;
+  /** Faux : les logos ne sont pas décodés (liste publique, sans rendu). */
+  withLogos?: boolean;
   /** Informations libres du panneau (début et durée des travaux...). */
   startDate?: string | null;
   durationText?: string | null;
@@ -95,7 +97,7 @@ export async function loadChantierPanel(
 
   const logoFor = async (label: string, contactId: string | null | undefined): Promise<PanelLogo | null> => {
     const c = contactId ? contacts.get(contactId) : undefined;
-    if (!c?.logo) return null;
+    if (input.withLogos === false || !c?.logo) return null;
     const res = await prepareLogo(c.logo);
     if (res.logo) return res.logo;
     if (res.reason !== 'absent') warnings.push(`Logo ignoré pour « ${label} » : ${res.reason}.`);
@@ -122,7 +124,7 @@ export async function loadChantierPanel(
     if (name) maitriseOuvrage.push(await party(`amo:${s.id}`, 'AMO', name, contactAddress(c), s.contact_id ?? null));
   }
 
-  const agencyLogo = agency.logoDataUrl ? await prepareLogo(agency.logoDataUrl) : { logo: null };
+  const agencyLogo = agency.logoDataUrl && input.withLogos !== false ? await prepareLogo(agency.logoDataUrl) : { logo: null };
   maitriseOeuvre.push({
     key: 'moe', role: 'Architecte', name: agency.name,
     address: agency.address ? [agency.address] : [], logo: agencyLogo.logo, contactId: null,

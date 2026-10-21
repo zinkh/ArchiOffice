@@ -59,6 +59,8 @@ export interface ChantierPanelOptions {
   hiddenLogos: ReadonlySet<string>;
   /** Titre libre remplaçant le nom de l'affaire. */
   title?: string | null;
+  /** Adresse encodée dans le QR code (liste publique des entreprises) ; absente = pas de QR code. */
+  qrUrl?: string | null;
 }
 
 export type PermisEtat = 'brouillon' | 'definitif';

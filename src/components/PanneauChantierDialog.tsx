@@ -36,6 +36,7 @@ export function PanneauChantierDialog({ projectId, onClose }: { projectId: strin
   const [orientation, setOrientation] = useState<PanneauOrientation>('portrait');
   const [logos, setLogos] = useState(true);
   const [colorLogos, setColorLogos] = useState(false);
+  const [qrCode, setQrCode] = useState(true);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [hiddenLogos, setHiddenLogos] = useState<Set<string>>(new Set());
   const [imageId, setImageId] = useState('');
@@ -55,6 +56,7 @@ export function PanneauChantierDialog({ projectId, onClose }: { projectId: strin
           if (s.orientation === 'paysage') setOrientation('paysage');
           setLogos(s.logos !== false);
           setColorLogos(s.colorLogos === true);
+          setQrCode(s.qrCode !== false);
           setHidden(new Set(s.hidden || []));
           setHiddenLogos(new Set(s.hiddenLogos || []));
           setImageId(s.imageId || '');
@@ -78,7 +80,7 @@ export function PanneauChantierDialog({ projectId, onClose }: { projectId: strin
   const missingLogos = withCompany.filter(l => !l.hasLogo);
 
   const settingsBody = () => ({
-    format, orientation, logos, colorLogos, hidden: [...hidden], hiddenLogos: [...hiddenLogos],
+    format, orientation, logos, colorLogos, qrCode, hidden: [...hidden], hiddenLogos: [...hiddenLogos],
     imageId: imageId || null, title: title || null, startDate: startDate || null, durationText: durationText || null,
   });
 
@@ -174,6 +176,7 @@ export function PanneauChantierDialog({ projectId, onClose }: { projectId: strin
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <label className="flex items-center gap-2"><input type="checkbox" checked={logos} onChange={e => setLogos(e.target.checked)} />{t('panneau_logos_all')}</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={colorLogos} disabled={!logos} onChange={e => setColorLogos(e.target.checked)} />{t('panneau_logos_color')}</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={qrCode} onChange={e => setQrCode(e.target.checked)} />{t('panneau_qr_code')}</label>
           </div>
 
           {withCompany.length > 0 && (

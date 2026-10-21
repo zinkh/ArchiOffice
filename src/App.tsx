@@ -40,6 +40,7 @@ import { useSettings } from './hooks/useSettings';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const DepotOffres = lazy(() => import('./pages/DepotOffres'));
 const DepotDoe = lazy(() => import('./pages/DepotDoe'));
+const ChantierPublic = lazy(() => import('./pages/ChantierPublic'));
 const Projects = lazy(() => import('./pages/Projects'));
 const Proposals = lazy(() => import('./pages/Proposals'));
 const Invoices = lazy(() => import('./pages/Invoices'));
@@ -674,6 +675,8 @@ export default function App() {
             <Route path="/depot/:token" element={<DepotOffres />} />
             {/* Dépôt du DOE par une entreprise : même principe, lien personnel sans compte. */}
             <Route path="/doe/:token" element={<DepotDoe />} />
+            {/* Liste des entreprises d'un chantier, cible du QR code du panneau : publique, sans compte. */}
+            <Route path="/chantier/:token" element={<ChantierPublic />} />
             <Route element={<ProtectedLayout />}>
               <Route path="/" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />

@@ -3934,6 +3934,7 @@ export default {
       "panneau_duration": "Expected duration",
       "panneau_duration_placeholder": "E.g. 18 months",
       "panneau_logos_all": "Show contractor and stakeholder logos",
+      "panneau_qr_code": "Add a QR code linking to the list of companies (viewable without an account)",
       "panneau_logos_color": "Colour logos (otherwise greyscale)",
       "panneau_logo_summary": "{{with}} of {{total}} contractors have a logo.",
       "panneau_logo_missing": "No logo: {{list}}. Add it on the contact record.",

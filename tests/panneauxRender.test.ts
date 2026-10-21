@@ -41,7 +41,7 @@ describe.skipIf(!chromium)('rendu Chromium des panneaux', () => {
   for (const [name, n, f, o] of cases) {
     it(`panneau de chantier, ${name} : une page, à la bonne taille, sans débordement`, async () => {
       const spec = pageSpec(f, o);
-      const r = await render(buildChantierHtml(chantier(n), { page: spec, logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set() }), f, o);
+      const r = await render(buildChantierHtml(chantier(n), { page: spec, logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set(), qrUrl: 'https://app.test/chantier/abcdefghijklmnopqrstuv.wxyz0123456789' }), f, o);
       expect(r.pages).toBe(1);
       expect(r.overflow).toBe(false);
       expect(Math.abs(r.widthMm - spec.widthMm)).toBeLessThan(2);

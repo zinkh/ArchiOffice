@@ -4084,6 +4084,7 @@ export default {
       "panneau_duration": "Durée prévisionnelle",
       "panneau_duration_placeholder": "Ex. 18 mois",
       "panneau_logos_all": "Afficher les logos des entreprises et intervenants",
+      "panneau_qr_code": "Ajouter un QR code vers la liste des entreprises (consultable sans compte)",
       "panneau_logos_color": "Logos en couleur (sinon niveaux de gris)",
       "panneau_logo_summary": "{{with}} entreprises sur {{total}} ont un logo.",
       "panneau_logo_missing": "Sans logo : {{list}}. Ajoutez-le sur la fiche contact.",

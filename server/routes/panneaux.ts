@@ -3,12 +3,13 @@
 // et génération du PDF. Voir server/panneaux/.
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
-import { panneauxLimiter } from '../rateLimit';
+import { depotReadLimiter, panneauxLimiter } from '../rateLimit';
 import { listImageCandidates } from '../referencesDossier/data';
 import { ChromiumUnavailableError, renderHtmlToPdf } from '../referencesDossier/render';
 import { loadChantierPanel } from '../panneaux/chantierData';
 import { buildChantierHtml } from '../panneaux/chantierTemplate';
 import { logoDpi } from '../panneaux/logos';
+import { chantierPublicUrl, verifyChantierToken } from '../panneaux/publicLink';
 import {
   CHANTIER_FORMATS, PERMIS_FORMATS, isPanneauFormat, isRegulatorySize, pageSpec,
   type PanneauFormat, type PanneauOrientation,
@@ -52,6 +53,7 @@ export function sanitizePanelSettings(body: any): Record<string, unknown> {
   out.orientation = asOrientation(body?.orientation);
   out.logos = body?.logos !== false;
   out.colorLogos = body?.colorLogos === true;
+  out.qrCode = body?.qrCode !== false;
   out.hidden = asKeys(body?.hidden);
   out.hiddenLogos = asKeys(body?.hiddenLogos);
   out.imageId = asText(body?.imageId, 120);
@@ -59,6 +61,12 @@ export function sanitizePanelSettings(body: any): Record<string, unknown> {
   out.startDate = asIsoDate(body?.startDate);
   out.durationText = asText(body?.durationText, 80);
   return out;
+}
+
+/** Adresse publique de l'application : APP_URL, à défaut l'hôte de la requête. */
+function publicBase(req: any): string {
+  const configured = (process.env.APP_URL || '').trim();
+  return configured || `${req.protocol}://${req.get('host')}`;
 }
 
 function fileSlug(value: string): string {
@@ -141,10 +149,11 @@ export function registerPanneauxRoutes(app: Express, { supabaseAdmin, getTenantI
       if (!data) return res.status(404).json({ error: 'Affaire introuvable.' });
       const hidden = new Set<string>(s.hidden);
       const hiddenLogos = new Set<string>(s.hiddenLogos);
-      const html = buildChantierHtml(data, { page, logos: s.logos, colorLogos: s.colorLogos, hidden, hiddenLogos, title: s.title });
+      const html = buildChantierHtml(data, { page, logos: s.logos, colorLogos: s.colorLogos, hidden, hiddenLogos, title: s.title, qrUrl: s.qrCode ? chantierPublicUrl(publicBase(req), projectId) : null });
       const { pdf, overflow } = await renderHtmlToPdf(html, { width: `${page.widthMm}mm`, height: `${page.heightMm}mm` });
 
       const warnings = [...data.warnings];
+      if (s.qrCode) warnings.push('Le QR code renvoie à la liste des entreprises titulaires des lots : les sous-traitants, que la réglementation inclut, n’y figurent pas encore.');
       if (overflow) warnings.push('Le contenu dépasse la page : masquez des lignes ou choisissez un format plus grand, le bas du panneau est rogné.');
       // Définition à l'impression : une image ou un logo trop petit sera flou.
       const imageWidthMm = (page.orientation === 'portrait' ? 450 : 400) * page.zoom;
@@ -164,6 +173,31 @@ export function registerPanneauxRoutes(app: Express, { supabaseAdmin, getTenantI
       if (e instanceof ChromiumUnavailableError) return res.status(503).json({ error: e.message });
       console.error('[POST /api/projects/:id/panneau-chantier/pdf]', e);
       res.status(500).json({ error: 'Impossible de générer le panneau de chantier.' });
+    }
+  });
+
+  // Liste publique des entreprises, cible du QR code : sans compte, le jeton (HMAC de l'affaire) en est la clé.
+  app.get('/api/public/chantier/:token', depotReadLimiter, async (req: any, res: any) => {
+    try {
+      const projectId = verifyChantierToken(req.params.token);
+      const notFound = () => res.status(404).json({ error: 'Liste introuvable.' });
+      if (!projectId) return notFound();
+      const { data: project, error } = await supabaseAdmin.from('projects').select('tenant_id').eq('id', projectId).maybeSingle();
+      if (error) throw error;
+      if (!project?.tenant_id) return notFound();
+      const data = await loadChantierPanel(supabaseAdmin, project.tenant_id, projectId, { withImage: false, withLogos: false });
+      if (!data) return notFound();
+      res.setHeader('Cache-Control', 'no-store');
+      res.json({
+        operation: data.projectName,
+        adresse: data.facts.find(f => f.label === 'Adresse du chantier')?.value ?? null,
+        permis: data.facts.find(f => f.label === 'Permis de construire')?.value ?? null,
+        architecte: data.agency.name,
+        entreprises: data.lots.filter(l => l.company).map(l => ({ lot: l.number, intitule: l.title, nom: l.company, adresse: l.address })),
+      });
+    } catch (e: any) {
+      console.error('[GET /api/public/chantier/:token]', e);
+      res.status(500).json({ error: 'Liste momentanément indisponible.' });
     }
   });
 
