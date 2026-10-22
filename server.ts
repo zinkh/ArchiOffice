@@ -59,6 +59,7 @@ import { registerProposalFeasibilityRoutes } from "./server/routes/proposalFeasi
 import { registerProposalFeasibilityAiRoutes } from "./server/routes/proposalFeasibilityAi";
 import { loadFeasibilitySiteData } from "./server/feasibilitySiteData";
 import { registerCctpGenerationRoutes } from "./server/routes/cctpGeneration";
+import { registerPlanningChantierRoutes } from "./server/routes/planningChantier";
 import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerContactRoutes } from "./server/routes/contacts";
@@ -555,7 +556,7 @@ export async function createApp() {
   async function settleAiCredit(params: {
     tenantId: string; userId: string;
     agentId: string | null; conversationId: string | null;
-    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation' | 'proposal_ai';
+    endpointType: 'agent' | 'suggest_articles' | 'transcription' | 'speech' | 'tender_ai' | 'cctp_generation' | 'proposal_ai' | 'planning_generation';
     provider: string; model: string;
     reservedCents: number;
     inputTokens: number; outputTokens: number;
@@ -1076,6 +1077,7 @@ export async function createApp() {
   registerProposalFeasibilityRoutes(app, { supabaseAdmin, getTenantId, loadSiteData: loadFeasibilitySiteData });
   registerProposalFeasibilityAiRoutes(app, { supabaseAdmin, getTenantId, getTenantPlan, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents, loadSiteData: loadFeasibilitySiteData });
   registerCctpGenerationRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
+  registerPlanningChantierRoutes(app, { supabaseAdmin, getTenantId, reserveAiCredit, settleAiCredit, refundAiCredit, estimateReserveCents });
   registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

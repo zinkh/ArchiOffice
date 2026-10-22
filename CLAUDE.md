@@ -1319,7 +1319,7 @@ Deux PDF A0 générés par Chromium (même mécanique que le dossier de référe
 
 **Formats et mise à l'échelle** (`pageSpec.ts`). Les gabarits sont dessinés une fois à la taille d'un A0 (841 mm en portrait, 1189 mm en paysage) puis mis à l'échelle par `zoom` : un A1 est un A0 réduit, pas une autre mise en page. Chantier : A0, A1, A2, A3, portrait ou paysage. Permis : A0, 80 x 120, 100 x 150 (réglementaires) et A3, A4 (aperçu). Chaque rendu mesure le débordement de `.body` et le remonte en avertissement (`X-Panneau-Warnings`), jamais un contenu rogné en silence.
 
-**Panneau de chantier** (`GET/PUT /api/projects/:id/panneau-chantier`, `POST .../pdf`, `PanneauChantierDialog.tsx`, bouton « Panneau de chantier » du plan d'actions de la fiche affaire). Rien n'est ressaisi : maître d'ouvrage (fiche du client), AMO et intervenants (`project_stakeholders`), cotraitants, architecte (réglages du cabinet), lots (`project_lots`, ordre naturel) et entreprises relus à chaque génération. L'entreprise d'un lot vient du marché (`marches_entreprises`, numéro de lot normalisé : « 02 » = « 2 »), à défaut de la fiche du lot ; un marché subséquent ou résilié est ignoré. Un lot sans entreprise s'affiche « Entreprise à désigner ». Le nombre de colonnes de lots s'adapte (3 jusqu'à 27 lots, 4 jusqu'à 48 en portrait et 40 en paysage, 5 au-delà). Le client n'envoie que des réglages (format, orientation, lignes masquées, image, titre, logos), validés par liste blanche (`sanitizePanelSettings`), mémorisés par affaire dans `project_site_panels` (jsonb). Une instance sans la table lit des réglages vides et refuse l'écriture en 503.
+**Panneau de chantier** (`GET/PUT /api/projects/:id/panneau-chantier`, `POST .../pdf`, `PanneauChantierDialog.tsx`, bouton « Panneau de chantier » du plan d'actions de la fiche affaire). Rien n'est ressaisi : maître d'ouvrage (fiche du client), AMO et intervenants (`project_stakeholders`), cotraitants, architecte (réglages du cabinet), lots (`project_lots`, ordre naturel) et entreprises relus à chaque génération. L'entreprise d'un lot vient du marché (`marches_entreprises`), rapproché du lot par intitulé (`associerMarches`, `server/planningSources.ts`, le numéro ne faisant que départager : sur une affaire réelle le marché 09 « Peinture » répond au lot 07), à défaut de la fiche du lot ; un marché subséquent ou résilié est ignoré. Un lot sans entreprise s'affiche « Entreprise à désigner ». Le nombre de colonnes de lots s'adapte (3 jusqu'à 27 lots, 4 jusqu'à 48 en portrait et 40 en paysage, 5 au-delà). Le client n'envoie que des réglages (format, orientation, lignes masquées, image, titre, logos), validés par liste blanche (`sanitizePanelSettings`), mémorisés par affaire dans `project_site_panels` (jsonb). Une instance sans la table lit des réglages vides et refuse l'écriture en 503.
 
 **Logos** : celui de la fiche contact (`contacts.logo`, data URL saisie avec `ContactLogoField`), relu côté serveur par identifiant et jamais pris dans la requête. Validation sur les octets (`logos.ts`) : PNG, JPEG ou WebP, jamais SVG (scripts, références externes), 1,5 Mo au plus. Un logo invalide est ignoré et signalé, il ne fait jamais échouer le rendu. Niveaux de gris par défaut (charte du cabinet), couleur sur option ; masquables par ligne ou en bloc ; une entreprise sans logo ne réserve aucun espace. Avertissement sous 100 dpi à la taille imprimée. Un contact d'un autre cabinet n'est jamais lu (nom, adresse et logo compris).
 
@@ -2239,6 +2239,37 @@ pièces vivent dans `src/components/chantier/`. Règles à garder :
   ligne dépliée de l'onglet Observations (flèche à gauche, point si une réponse existe). L'export PDF du CR
   l'imprime sous la description, avec la colonne « Bât. / phase » quand le chantier a un registre et
   qu'une observation y est affectée (`opts.decoupage`).
+
+### Planning de chantier (onglet DET > Planning)
+
+Gantt décomposé par lot, entre « OS & situations » et « Photos » (`PlanningChantierTab.tsx`, sous « Plus » sur
+téléphone). Table `project_chantier_planning` (`supabase/migrate_chantier_planning.sql`, une ligne par affaire,
+jsonb `PlanningChantier`, hors `SYNC_TABLES`) ; routes `server/routes/planningChantier.ts`
+(`GET/PUT /api/projects/:id/planning-chantier`, `POST .../generate`, `tests/planningChantier.test.ts`) ; logique pure
+partagée écran / PDF / serveur dans `src/lib/planningChantier.ts` (testée). Une instance non migrée lit un planning
+vide (`available: false`) et refuse l'écriture en 503.
+
+- **Une tâche** : lot (`project_lots.id`, vide = tâche générale), dates AAAA-MM-JJ calculées en UTC, avancement,
+  `source` (`ia` | `manuel`), jalon. L'état (à venir, en cours, terminée, en retard) **se déduit** (`etatTache`), jamais saisi.
+- **Génération IA** : le serveur part du **DPGF et du CCTP de l'opération** quand ils existent (`server/planningSources.ts`,
+  testé : par lot, chapitres de travaux avec montant et principaux ouvrages, prescriptions `cctpDescription`, bâtiments et
+  phases du registre ; option, variante et pour mémoire exclus ; montant du DPGF si le marché n'est pas chiffré ; case
+  « Partir du DPGF et du CCTP » de la fenêtre, `depuis_dpgf`, réponse `sources`), puis ajoute lots, entreprise titulaire et
+  montant du marché, `duree_mois`, pièces choisies de l'affaire ; le modèle rend des **semaines**, jamais des dates (`planningDepuisReponse` pose
+  lundi à vendredi). Un lot inconnu est écarté, le planning ne crée jamais de lot. La route **ne propose qu'une
+  proposition** : `appliquerGeneration` remplace les tâches IA des lots générés et garde, au choix, le manuel.
+  Modifier une tâche IA la fait passer en `manuel`. Facturé en réserve → exécute → règle, `endpoint_type = 'planning_generation'`.
+- **Marchés rapprochés des lots par intitulé, pas par numéro** (`associerMarches`, `server/planningSources.ts`, testé sur les vrais
+  lots d'une affaire où le marché 09 « Peinture » répond au lot 07 et les marchés 10 et 11 au lot 09) : chaque marché va au lot
+  dont l'intitulé lui ressemble le plus (le numéro identique ne fait que départager, et seul un marché sans intitulé se rapproche
+  par son numéro), les marchés d'un même lot s'additionnent, un marché sans lot (installation de chantier) est donné au modèle
+  comme tâche générale. `GET .../planning-chantier` rend `entreprises` (lot → titulaires) pour l'écran.
+- **Un DPGF peu chiffré reste exploitable** : aucun « (0 € HT) », un groupe de sous-articles compte pour un poste (« Couverture
+  métallique (3 postes) »), les lignes « Nouvel article » sont ignorées, et dans le texte du CCTP les prescriptions des ouvrages
+  passent avant le texte générique des chapitres réservés au CCTP (que le plafond de 900 caractères coupe en dernier).
+- **Enregistrement automatique** (1,2 s, écritures chaînées, rien avant la fin de la lecture), comme la consultation ACT.
+- **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise.
+- **Pas encore fait** : glisser-déposer des barres, dépendances entre tâches, liaison avec les jalons de mission.
 
 ### Documents joints à l'export PDF du compte-rendu
 
