@@ -6,11 +6,11 @@
 // listed live on demand, never stored beyond an explicit attach.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil, IconSearch, IconStar, IconStarFilled } from '@tabler/icons-react';
+import { IconBrandGoogle, IconBrandWindows, IconMailbox, IconLoader2, IconLink, IconX, IconRefresh, IconArchive, IconTrash, IconPencil, IconSearch, IconStar, IconStarFilled, IconArrowBackUp, IconArrowForwardUp } from '@tabler/icons-react';
 import { apiFetch, fetchJson } from '../lib/api';
 import type { Project, Proposal, Tender } from '../types';
 import { useMailAccounts, type MailAccount, type MailProvider } from '../hooks/useMailAccounts';
-import MailMessageView from '../components/MailMessageView';
+import MailMessageView, { type MailViewAction } from '../components/MailMessageView';
 import MailFolderSidebar from '../components/MailFolderSidebar';
 import MailComposeModal from '../components/MailComposeModal';
 import { archiveMailMessage, deleteMailMessage } from '../lib/mailActions';
@@ -58,6 +58,9 @@ export default function Mailbox() {
   const [attachTarget, setAttachTarget] = useState<Message | null>(null);
   const [attachedKeys, setAttachedKeys] = useState<Set<string>>(new Set());
   const [readTarget, setReadTarget] = useState<Message | null>(null);
+  // Geste demandé depuis la liste (répondre, transférer) : le message s'ouvre avec le composeur prêt.
+  const [readAction, setReadAction] = useState<MailViewAction | undefined>(undefined);
+  const openMessage = (m: Message, action?: MailViewAction) => { setReadAction(action); setReadTarget(m); };
   const [selectedFolders, setSelectedFolders] = useState<Record<string, string>>({});
   const [composing, setComposing] = useState(false);
 
@@ -490,7 +493,7 @@ export default function Mailbox() {
             return (
               <div
                 key={key}
-                onClick={() => setReadTarget(m)}
+                onClick={() => openMessage(m)}
                 className="flex items-center justify-between gap-3 p-3 rounded-lg text-sm cursor-pointer hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
                 style={{ border: '1px solid var(--tblr-border)' }}
               >
@@ -499,6 +502,24 @@ export default function Mailbox() {
                   <div className="truncate text-xs" style={{ color: 'var(--tblr-muted)' }}>{m.from} → {m.to} · {m.date ? new Date(m.date).toLocaleString('fr-FR') : ''}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    onClick={e => { e.stopPropagation(); openMessage(m, 'reply'); }}
+                    title={t('mailbox_reply') as string}
+                    aria-label={t('mailbox_reply') as string}
+                    className="p-1.5 rounded-lg"
+                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  >
+                    <IconArrowBackUp size={13} />
+                  </button>
+                  <button
+                    onClick={e => { e.stopPropagation(); openMessage(m, 'forward'); }}
+                    title={t('mail_forward') as string}
+                    aria-label={t('mail_forward') as string}
+                    className="p-1.5 rounded-lg"
+                    style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  >
+                    <IconArrowForwardUp size={13} />
+                  </button>
                   <button
                     onClick={e => { e.stopPropagation(); setAttachTarget(m); }}
                     disabled={attachedKeys.has(key)}
@@ -563,7 +584,8 @@ export default function Mailbox() {
           messageId={readTargetProps.messageId}
           folder={'folder' in readTargetProps ? readTargetProps.folder : undefined}
           accounts={accounts}
-          onClose={() => setReadTarget(null)}
+          initialAction={readAction}
+          onClose={() => { setReadTarget(null); setReadAction(undefined); }}
         />
       )}
 

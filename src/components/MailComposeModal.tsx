@@ -1,4 +1,4 @@
-// Compose/reply window — sends via the connected account's own API (Gmail
+// Compose/reply/forward window — sends via the connected account's own API (Gmail
 // messages.send, Outlook sendMail/reply), or via /api/send-email for an IMAP
 // account that has its own SMTP configured (Réglages → Mes boîtes mail).
 // Kept deliberately simple — a plain <textarea>, no rich-text editor —
@@ -7,11 +7,17 @@
 // Depuis le support multi-comptes, le sélecteur liste des ADRESSES (une par
 // compte connecté), pas des fournisseurs : deux comptes Gmail se
 // distinguent par leur adresse, chacun choisissable comme expéditeur.
-import { useState } from 'react';
+//
+// Trois usages d'un message reçu : répondre (fil conservé), répondre à tous
+// (À + Cc) et transférer (nouveau message, pièces jointes d'origine
+// seulement sur case cochée). Les destinataires se saisissent à la main ou se
+// choisissent dans les contacts du cabinet.
+import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconX, IconPaperclip, IconLoader2, IconSend, IconBrandGoogle, IconBrandWindows, IconMailbox } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
+import { applyTenantHeader } from '../lib/activeTenant';
 import { fileToEmailAttachment } from '../lib/emailAttachments';
 import type { MailAccount, MailProvider } from '../hooks/useMailAccounts';
 import { useUser } from '../UserContext';
@@ -24,22 +30,40 @@ export interface MailReplyContext {
   messageIdHeader?: string | null; // Gmail only — becomes In-Reply-To/References
   subject: string;
   fromAddress: string; // becomes the "to" field
+  /** « Répondre à tous » : À et Cc modifiables, et chez Outlook un envoi normal (la réponse native ne vise que l'expéditeur). */
+  replyAll?: boolean;
 }
 
 /** Valeurs de départ d'un nouveau message (ex. envoi du DCE depuis le module ACT). */
 export interface MailComposeInitial {
   to?: string;
+  cc?: string;
   subject?: string;
   body?: string;
+  /** Texte cité ou transféré, posé SOUS la signature. */
+  quote?: string;
+}
+
+/** Pièce jointe d'un message reçu, proposée au transfert (jamais jointe sans case cochée). */
+export interface MailForwardAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  url: string;
 }
 
 interface MailComposeModalProps {
   accounts: MailAccount[];
   replyTo?: MailReplyContext | null;
   initial?: MailComposeInitial;
+  forwardAttachments?: MailForwardAttachment[];
+  title?: string;
   onClose: () => void;
   onSent?: () => void;
 }
+
+interface ContactOption { id: string; label: string; email: string }
 
 const PROVIDER_ICON: Record<MailProvider, typeof IconBrandGoogle> = {
   google: IconBrandGoogle,
@@ -59,7 +83,68 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
   return data;
 }
 
-export default function MailComposeModal({ accounts, replyTo, initial, onClose, onSent }: MailComposeModalProps) {
+/** Télécharge une pièce jointe du message d'origine (même route que son ouverture) pour la ré-attacher. */
+async function downloadAttachment(att: MailForwardAttachment): Promise<File> {
+  const headers = new Headers();
+  const token = await getAccessToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  applyTenantHeader(headers);
+  const fetchFn = (window as any)._originalFetch || window.fetch;
+  const res = await fetchFn(att.url, { headers });
+  if (!res.ok) throw new Error(`${res.status}`);
+  const blob = await res.blob();
+  return new File([blob], att.filename, { type: att.mimeType || blob.type });
+}
+
+const formatSize = (bytes: number): string => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} Ko` : `${(bytes / (1024 * 1024)).toFixed(1)} Mo`);
+
+function RecipientField({ label, value, onChange, disabled, required, contacts }: {
+  label: string; value: string; onChange: (v: string) => void; disabled?: boolean; required?: boolean; contacts: ContactOption[];
+}) {
+  const { t } = useTranslation();
+  const [picked, setPicked] = useState('');
+  const listId = `mail-contacts-${label}`;
+  const add = (raw: string) => {
+    const match = contacts.find(c => c.label === raw);
+    if (!match) { setPicked(raw); return; }
+    const current = value.split(',').map(a => a.trim()).filter(Boolean);
+    if (!current.some(a => a.toLowerCase() === match.email.toLowerCase())) onChange([...current, match.email].join(', '));
+    setPicked('');
+  };
+  return (
+    <div className="space-y-1.5">
+      <input
+        required={required}
+        type="text"
+        aria-label={label}
+        placeholder={label}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full p-2 rounded-lg text-sm disabled:opacity-60"
+        style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+      />
+      {!disabled && contacts.length > 0 && (
+        <>
+          <input
+            list={listId}
+            aria-label={`${label} : ${t('mail_compose_add_contact')}`}
+            placeholder={t('mail_compose_add_contact') as string}
+            value={picked}
+            onChange={e => add(e.target.value)}
+            className="w-full p-1.5 rounded-lg text-xs"
+            style={{ background: 'var(--tblr-bg)', border: '1px dashed var(--tblr-border)', color: 'var(--tblr-text)' }}
+          />
+          <datalist id={listId}>
+            {contacts.map(c => <option key={c.id} value={c.label} />)}
+          </datalist>
+        </>
+      )}
+    </div>
+  );
+}
+
+export default function MailComposeModal({ accounts, replyTo, initial, forwardAttachments, title, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const sendable = accounts.filter(canSendNatively);
@@ -70,17 +155,44 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
   );
   const account = sendable.find(a => a.id === accountId) || null;
   const [to, setTo] = useState(replyTo?.fromAddress || initial?.to || '');
+  const [cc, setCc] = useState(initial?.cc || '');
   const [subject, setSubject] = useState(
     replyTo ? (/^re\s*:/i.test(replyTo.subject) ? replyTo.subject : `Re: ${replyTo.subject}`) : initial?.subject || ''
   );
   // La signature personnelle (Réglages → Mon profil) est posée d'office sous
-  // le corps, modifiable ou supprimable avant l'envoi.
-  const [body, setBody] = useState(`${initial?.body || ''}${currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : ''}`);
+  // le corps, modifiable ou supprimable avant l'envoi ; le texte cité ou
+  // transféré vient après elle.
+  const [body, setBody] = useState(`${initial?.body || ''}${currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : ''}${initial?.quote || ''}`);
   const [files, setFiles] = useState<File[]>([]);
+  const [forwardIds, setForwardIds] = useState<Set<string>>(new Set());
+  const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    apiFetch<any[]>('/api/contacts')
+      .then(rows => setContacts((rows || []).flatMap((c): ContactOption[] => {
+        const email = c.email || c.email_work;
+        if (!email) return [];
+        const person = [c.first_name, c.last_name].filter(Boolean).join(' ');
+        const name = c.company_name ? `${c.company_name}${person ? ` (${person})` : ''}` : person;
+        return [{ id: c.id, email, label: `${name || email} <${email}>` }];
+      }).slice(0, 500)))
+      .catch(() => {});
+  }, []);
+
   const isNativeReply = !!replyTo && replyTo.accountId === accountId;
+  // Répondre (simple) fige À et l'objet ; répondre à tous et transférer les laissent libres.
+  const lockFields = isNativeReply && !replyTo?.replyAll;
+  const nativeOutlookReply = isNativeReply && account?.provider === 'microsoft' && !replyTo?.replyAll;
+  const heading = title || (replyTo ? (replyTo.replyAll ? t('mail_compose_reply_all_title') : t('mail_compose_reply_title')) : t('mail_compose_new_title'));
+  const contactList = useMemo(() => contacts, [contacts]);
+
+  const toggleForward = (id: string) => setForwardIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const send = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,6 +200,15 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
     setSending(true);
     setError(null);
     try {
+      // Pièces jointes d'origine cochées : récupérées d'abord, l'envoi est refusé si l'une manque
+      // (un transfert partirait sinon sans la pièce annoncée).
+      const forwarded: File[] = [];
+      for (const att of (forwardAttachments || []).filter(a => forwardIds.has(a.id))) {
+        try { forwarded.push(await downloadAttachment(att)); }
+        catch { throw new Error(t('mail_forward_attachment_error', { name: att.filename }) as string); }
+      }
+      const allFiles = [...forwarded, ...files];
+
       if (!account) {
         // Aucun compte ne peut envoyer nativement (IMAP sans SMTP propre,
         // ou aucun compte connecté du tout) : POST /api/send-email retombe
@@ -95,14 +216,15 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
         // comme avant le support multi-comptes. Les pièces jointes voyagent
         // en base64 dans le même appel (nodemailer les relaie telles
         // quelles) — jusqu'ici silencieusement perdues sur ce chemin.
-        const attachments = files.length > 0 ? await Promise.all(files.map(fileToEmailAttachment)) : undefined;
+        const attachments = allFiles.length > 0 ? await Promise.all(allFiles.map(fileToEmailAttachment)) : undefined;
         await apiFetch('/api/send-email', {
           method: 'POST',
-          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, attachments }),
+          body: JSON.stringify({ to, cc: cc.trim() || undefined, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, attachments }),
         });
       } else if (account.provider === 'google') {
         const fd = new FormData();
         fd.set('to', to);
+        if (cc.trim()) fd.set('cc', cc);
         fd.set('subject', subject);
         fd.set('text', body);
         fd.set('accountId', account.id);
@@ -111,29 +233,30 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
           fd.set('inReplyTo', replyTo.messageIdHeader);
           fd.set('references', replyTo.messageIdHeader);
         }
-        files.forEach(f => fd.append('attachments', f));
+        allFiles.forEach(f => fd.append('attachments', f));
         await postForm('/api/gmail/send', fd);
-      } else if (account.provider === 'microsoft' && isNativeReply) {
+      } else if (nativeOutlookReply) {
         const fd = new FormData();
         fd.set('comment', body);
         fd.set('accountId', account.id);
-        files.forEach(f => fd.append('attachments', f));
+        allFiles.forEach(f => fd.append('attachments', f));
         await postForm(`/api/outlook/messages/${encodeURIComponent(replyTo!.messageId)}/reply`, fd);
       } else if (account.provider === 'microsoft') {
         const fd = new FormData();
         fd.set('to', to);
+        if (cc.trim()) fd.set('cc', cc);
         fd.set('subject', subject);
         fd.set('text', body);
         fd.set('accountId', account.id);
-        files.forEach(f => fd.append('attachments', f));
+        allFiles.forEach(f => fd.append('attachments', f));
         await postForm('/api/outlook/send', fd);
       } else {
         // Compte IMAP avec son propre SMTP configuré (Réglages → Mes boîtes
         // mail) : /api/send-email sait aiguiller vers ce compte précis.
-        const attachments = files.length > 0 ? await Promise.all(files.map(fileToEmailAttachment)) : undefined;
+        const attachments = allFiles.length > 0 ? await Promise.all(allFiles.map(fileToEmailAttachment)) : undefined;
         await apiFetch('/api/send-email', {
           method: 'POST',
-          body: JSON.stringify({ to, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, accountId: account.id, attachments }),
+          body: JSON.stringify({ to, cc: cc.trim() || undefined, subject, text: body, html: `<p>${body.replace(/\n/g, '<br/>')}</p>`, accountId: account.id, attachments }),
         });
       }
       onSent?.();
@@ -146,7 +269,7 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4" onClick={onClose}>
       <form
         onSubmit={send}
         className="rounded-xl shadow-xl w-full max-w-lg max-h-[85dvh] flex flex-col"
@@ -154,10 +277,8 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
         onClick={e => e.stopPropagation()}
       >
         <div className="p-4 flex justify-between items-center" style={{ borderBottom: '1px solid var(--tblr-border)' }}>
-          <h3 className="text-base font-bold" style={{ color: 'var(--tblr-text)' }}>
-            {replyTo ? t('mail_compose_reply_title') : t('mail_compose_new_title')}
-          </h3>
-          <button type="button" onClick={onClose} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>
+          <h3 className="text-base font-bold" style={{ color: 'var(--tblr-text)' }}>{heading}</h3>
+          <button type="button" onClick={onClose} aria-label={t('btn_close') as string} style={{ color: 'var(--tblr-muted)' }}><IconX size={18} /></button>
         </div>
 
         <div className="p-4 space-y-3 flex-1 overflow-y-auto">
@@ -188,35 +309,45 @@ export default function MailComposeModal({ accounts, replyTo, initial, onClose, 
             </p>
           )}
 
+          <RecipientField label={t('mail_to') as string} value={to} onChange={setTo} disabled={lockFields} required contacts={contactList} />
+          {!lockFields && (
+            <RecipientField label={t('mail_compose_cc') as string} value={cc} onChange={setCc} contacts={contactList} />
+          )}
           <input
             required
             type="text"
-            placeholder={t('mail_to') as string}
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            disabled={isNativeReply}
-            className="w-full p-2 rounded-lg text-sm disabled:opacity-60"
-            style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
-          />
-          <input
-            required
-            type="text"
+            aria-label={t('mailbox_compose_subject') as string}
             placeholder={t('mailbox_compose_subject') as string}
             value={subject}
             onChange={e => setSubject(e.target.value)}
-            disabled={isNativeReply}
+            disabled={lockFields}
             className="w-full p-2 rounded-lg text-sm disabled:opacity-60"
             style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
           <textarea
             required
-            rows={8}
+            rows={10}
+            aria-label={t('mailbox_compose_body') as string}
             placeholder={t('mailbox_compose_body') as string}
             value={body}
             onChange={e => setBody(e.target.value)}
             className="w-full p-2 rounded-lg text-sm resize-none"
             style={{ background: 'var(--tblr-bg)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
           />
+
+          {forwardAttachments && forwardAttachments.length > 0 && (
+            <fieldset className="space-y-1.5">
+              <legend className="text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('mail_forward_attachments')}</legend>
+              {forwardAttachments.map(a => (
+                <label key={a.id} className="flex items-center gap-2 text-sm px-2.5 py-1.5 rounded-lg cursor-pointer" style={{ border: '1px solid var(--tblr-border)' }}>
+                  <input type="checkbox" checked={forwardIds.has(a.id)} onChange={() => toggleForward(a.id)} />
+                  <IconPaperclip size={14} className="shrink-0" />
+                  <span className="truncate flex-1">{a.filename}</span>
+                  <span className="text-xs shrink-0" style={{ color: 'var(--tblr-muted)' }}>{formatSize(a.size)}</span>
+                </label>
+              ))}
+            </fieldset>
+          )}
 
           <div className="flex items-center gap-2 flex-wrap">
             <label className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer" style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}>

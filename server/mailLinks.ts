@@ -13,7 +13,7 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
 }
 
-const LOCAL_TYPES = new Set(['project', 'contact', 'tender', 'proposal']);
+const LOCAL_TYPES = new Set(['project', 'contact', 'tender', 'proposal', 'task']);
 
 export function registerMailLinkRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   // POST /api/mail/links — attach an external message to a local record.
