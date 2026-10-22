@@ -421,6 +421,49 @@ async function fetchResourceList(baseUrl: string, auth: InternalAuth, resource: 
   }
 }
 
+const norm = (s: unknown): string =>
+  String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+interface MeetingParent { kind: 'project' | 'proposal' | 'tender'; label: string; haystack: string }
+
+/**
+ * Une réunion se rattache à une affaire, un devis (visite de proposition) ou un
+ * appel d'offres, et son titre (« Visite du Site ») ne dit rien de l'opération.
+ * Sans ce rattachement, chercher « 9 rue des Michottes » dans les réunions ne
+ * trouvait jamais rien. Lecture seule, avec le jeton de la personne : seuls
+ * l'intitulé et l'adresse servent à retrouver la réunion, rien d'autre n'est rendu.
+ */
+async function loadMeetingParents(baseUrl: string, auth: InternalAuth): Promise<Map<string, MeetingParent>> {
+  const defs = [
+    { kind: 'project' as const, key: 'projects', fields: ['name', 'client', 'address', 'adresse_terrain', 'cp_ville_terrain'] },
+    { kind: 'proposal' as const, key: 'proposals', fields: ['title', 'reference', 'adresse_terrain', 'cp_ville_terrain', 'nom_societe'] },
+    { kind: 'tender' as const, key: 'tenders', fields: ['title', 'client', 'ville_execution'] },
+  ];
+  const lists = await Promise.all(defs.map(async d => {
+    const res = AGENT_RESOURCES.find(r => r.key === d.key);
+    return res ? fetchResourceList(baseUrl, auth, res) : [];
+  }));
+  const parents = new Map<string, MeetingParent>();
+  defs.forEach((d, i) => {
+    for (const row of lists[i]) {
+      const id = String((row as any).id || '');
+      if (!id) continue;
+      const label = String((row as any)[d.fields[0]] || '').trim();
+      const haystack = norm(d.fields.map(f => (row as any)[f]).filter(Boolean).join(' '));
+      parents.set(`${d.kind}:${id}`, { kind: d.kind, label, haystack });
+    }
+  });
+  return parents;
+}
+
+function meetingParentOf(row: Record<string, unknown>, parents: Map<string, MeetingParent>): MeetingParent | undefined {
+  for (const kind of ['project', 'proposal', 'tender'] as const) {
+    const id = row[`${kind}_id`];
+    if (id) return parents.get(`${kind}:${id}`);
+  }
+  return undefined;
+}
+
 // A meeting date more than ~13 months from "now" is virtually never what the
 // user actually asked for — in practice it's the model computing a weekday
 // (e.g. "lundi 17 août") against a year it remembers from training instead of
@@ -688,6 +731,28 @@ export async function executeAgentAction(
     if (resource.listParam && !parentId) return { response: { error: `parent_id est requis pour « ${resource.label} » : l'identifiant du parent (${resource.listParam}).` } };
     const list = await fetchResourceList(baseUrl, auth, resource, parentId);
     const wanted = parseFieldList(args.fields);
+    if (resourceKey === 'meetings') {
+      // Titre, date OU fiche rattachée (affaire, devis, appel d'offres : nom et adresse) ;
+      // chaque mot de la recherche doit se retrouver quelque part.
+      const parents = await loadMeetingParents(baseUrl, auth);
+      const tokens = norm(q).split(/\s+/).filter(Boolean);
+      const found = list
+        .map(row => {
+          const parent = meetingParentOf(row, parents);
+          const hay = norm(`${(row as any).title || ''} ${(row as any).date || ''} ${parent?.haystack || ''}`);
+          return { row, parent, hit: tokens.every(t => hay.includes(t)) };
+        })
+        .filter(m => m.hit)
+        .slice(0, 10)
+        .map(({ row, parent }) => ({
+          id: String((row as any).id),
+          identity: getRecordIdentity(resourceKey, resource, row),
+          date: (row as any).date,
+          ...(parent ? { rattache_a: { type: parent.kind, intitule: parent.label } } : {}),
+          ...(wanted ? { fields: slimRecord(row, wanted) } : {}),
+        }));
+      return { response: { count: found.length, matches: found, aide: "Pour lire les notes d'une réunion, appelle get_record sur meetings avec son id : le champ notes contient le compte-rendu." } };
+    }
     const matches = list
       .map(r => ({ row: r, id: String((r as any).id), identity: getRecordIdentity(resourceKey, resource, r) }))
       .filter(r => r.identity && r.identity.toLowerCase().includes(q))
@@ -705,6 +770,10 @@ export async function executeAgentAction(
     const list = await fetchResourceList(baseUrl, auth, resource, parentId);
     const record = list.find(r => String((r as any).id) === id);
     if (!record) return { response: { error: `Aucun enregistrement "${id}" dans « ${resource.label} ».` } };
+    if (resourceKey === 'meetings') {
+      const parent = meetingParentOf(record, await loadMeetingParents(baseUrl, auth));
+      return { response: { record: slimRecord(record, parseFieldList(args.fields)), ...(parent ? { rattache_a: { type: parent.kind, intitule: parent.label } } : {}) } };
+    }
     return { response: { record: slimRecord(record, parseFieldList(args.fields)) } };
   }
 

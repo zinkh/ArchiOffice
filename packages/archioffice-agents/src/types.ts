@@ -209,7 +209,7 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     defaults: { type: 'projet' },
     // Les comptes-rendus de chantier de l'onglet DET vivent dans site_reports,
     // pas dans meetings. L'outil create_site_report les crée explicitement.
-    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, notes. Réunion classique uniquement : pour une réunion/visite de chantier ou un CR dans l'onglet DET, utiliser create_site_report." },
+    fields: "title*, date*, type (projet/visite_candidature/visite_proposition), project_id, proposal_id (devis), tender_id (appel d'offres), notes (compte-rendu). Recherche : par titre, date, ou nom/adresse de l'affaire, du devis ou de l'appel d'offres rattaché. Réunion classique uniquement : pour une réunion/visite de chantier ou un CR dans l'onglet DET, utiliser create_site_report." },
   { key: 'contrats_moe', label: 'Contrats MOE', basePath: '/api/contrats_moe', create: true, update: true, delete: true, list: true, identityField: 'intitule_projet',
     knownFields: ['client_id', 'project_id', 'type_contrat', 'type_moa', 'montant_honoraires', 'intitule_projet', 'status', 'adresse_travaux', 'notes', 'numero', 'missions_list'],
     enums: { status: ['Brouillon', 'Envoyé', 'Signé', 'Résilié'] },
