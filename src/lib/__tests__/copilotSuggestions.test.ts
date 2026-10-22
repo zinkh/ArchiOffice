@@ -282,6 +282,32 @@ describe('computeCopilotSuggestions', () => {
     expect(list[0].tone).toBe('danger');
   });
 
+  it('signale les entreprises notifiées sans attestation d\'assurance', () => {
+    const markets = [
+      { id: 'm1', project_id: 'p1', entreprise_nom: 'Dupont', contact_id: 'c1', act_entreprise_id: 'e1', date_notification: '2026-10-01' },
+      { id: 'm2', project_id: 'p1', entreprise_nom: 'Martin', contact_id: 'c2', act_entreprise_id: 'e2', statut_signature: 'signe' },
+      { id: 'm3', project_id: 'p1', entreprise_nom: 'Bernard', contact_id: 'c3', act_entreprise_id: 'e3', statut_signature: 'signe' },
+      { id: 'm4', project_id: 'p1', entreprise_nom: 'Non notifiée', contact_id: 'c4', statut_signature: 'a_signer' },
+      { id: 'm5', project_id: 'p1', entreprise_nom: 'Résilié', contact_id: 'c5', statut_signature: 'signe', statut: 'resilie' },
+    ];
+    const consultations = [{ project_id: 'p1', consultation: { pieces_admin: [{ id: 'assurance', nom: 'Attestation assurance décennale' }], pieces_recues: { e2: ['assurance'] } } }];
+    const documents = [{ project_id: 'p1', contact_id: 'c3', name: 'Attestation décennale 2026.pdf' }];
+    const list = computeCopilotSuggestions({ ...base, projects: [project('p1')], markets, consultations, documents });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: 'insurance_missing', params: { project: 'Projet p1', count: 1, names: 'Dupont' } });
+  });
+
+  it('retrouve une attestation par le nom de l\'entreprise quand la fiche n\'est pas liée', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      projects: [project('p1')],
+      markets: [{ id: 'm1', project_id: 'p1', entreprise_nom: 'Dupont SARL', statut_signature: 'signe' }],
+      consultations: [],
+      documents: [{ project_id: 'p1', name: 'Assurance Dupont SARL.pdf' }],
+    });
+    expect(list).toEqual([]);
+  });
+
   it('signale une charge excessive au-delà de 15 tâches ouvertes', () => {
     const many = Array.from({ length: 16 }, (_, i) => ({ id: `t${i}`, title: 'T', assignee_id: 'u1' }));
     const list = computeCopilotSuggestions({ ...base, tasks: many, people: [{ id: 'u1', name: 'Sophie' }] });

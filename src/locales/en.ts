@@ -2382,6 +2382,8 @@ export default {
       "ai_draft_qualification_soon": "The best qualification of {{company}} expires in {{days}} day(s). Draft a request for an up-to-date certificate, to review before sending.",
       "ai_suggestion_qualification_expired": "The qualification of \"{{company}}\" expired {{days}} day(s) ago.",
       "ai_draft_qualification_expired": "The best qualification of {{company}} expired {{days}} day(s) ago. Draft a request for an up-to-date certificate before any lot is awarded, to review before sending.",
+      "ai_suggestion_insurance_missing": "{{count}} contractor(s) notified on project \"{{project}}\" with no insurance certificate: {{names}}.",
+      "ai_draft_insurance_missing": "On project {{project}}, {{count}} notified contractor(s) have no insurance certificate on file ({{names}}). Draft a request for valid certificates (ten-year and public liability) for each, to review before sending, and remind me where to file them.",
       "ai_suggestion_workload": "{{name}} has {{count}} open tasks: workload to rebalance.",
       "ai_suggestion_workload_anon": "A team member has {{count}} open tasks: workload to rebalance.",
       "ai_draft_workload": "{{name}} has {{count}} open tasks. Review them by project and deadline and suggest a split with the rest of the team, without reassigning anything before I confirm.",

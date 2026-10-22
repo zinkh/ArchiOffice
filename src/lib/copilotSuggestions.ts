@@ -103,6 +103,12 @@ export interface CopilotContactInput {
 export interface CopilotOrderInput { id: string; project_id?: string | null; status?: string | null; date?: string | null }
 export interface CopilotSituationInput { id: string; project_id?: string | null; etat?: string | null; date_situation?: string | null }
 export interface CopilotObservationInput { id: string; project_id?: string | null; statut?: string | null; due_date?: string | null }
+export interface CopilotMarketInput {
+  id: string; project_id?: string | null; entreprise_nom?: string | null; contact_id?: string | null; act_entreprise_id?: string | null;
+  type_marche?: string | null; statut?: string | null; statut_signature?: string | null; date_notification?: string | null;
+}
+export interface CopilotConsultationInput { project_id?: string | null; consultation?: { pieces_admin?: { id: string; nom?: string }[]; pieces_recues?: Record<string, string[]> } | null }
+export interface CopilotDocumentInput { project_id?: string | null; contact_id?: string | null; name?: string | null; description?: string | null; doc_type?: string | null }
 export interface CopilotPersonInput { id: string; name?: string | null }
 
 export type CopilotSuggestionRaw =
@@ -127,6 +133,7 @@ export type CopilotSuggestionRaw =
   | { id: string; tone: 'warning'; type: 'situation_to_verify'; params: { project: string; count: number; days: number } }
   | { id: string; tone: 'danger'; type: 'observations_overdue'; params: { project: string; count: number } }
   | { id: string; tone: 'danger' | 'warning'; type: 'qualification_expiring'; params: { company: string; days: number } }
+  | { id: string; tone: 'warning'; type: 'insurance_missing'; params: { project: string; count: number; names: string } }
   | { id: string; tone: 'warning'; type: 'workload'; params: { name: string; count: number } }
   | { id: string; tone: 'warning'; type: 'project_incomplete'; params: { project: string; fields: string[] } }
   | { id: string; tone: 'warning'; type: 'invoice_draft_stale'; params: { count: number; amount: number; numbers: string } };
@@ -389,6 +396,44 @@ function expiringQualifications(
   return list.sort((a, b) => (a.params as { days: number }).days - (b.params as { days: number }).days);
 }
 
+const INSURANCE_PATTERN = /assurance|decennale/;
+
+// Une entreprise notifiée (marché notifié ou signé, ni résilié ni subséquent) doit
+// justifier de son assurance avant d'exécuter : pièce cochée dans l'ACT, ou
+// document de l'affaire rattaché à l'entreprise (fiche ou nom cité).
+function missingInsurance(
+  projects: Project[], markets: CopilotMarketInput[], consultations: CopilotConsultationInput[], documents: CopilotDocumentInput[],
+): CopilotSuggestionRaw[] {
+  const insuranceDocs = documents.filter(d => INSURANCE_PATTERN.test(strip(`${d.name ?? ''} ${d.description ?? ''} ${d.doc_type ?? ''}`)));
+  const byProject = new Map<string, string[]>();
+  markets.forEach(m => {
+    const notified = !!m.date_notification || m.statut_signature === 'signe';
+    if (!notified || strip(m.statut) === 'resilie' || m.type_marche === 'subsequent' || !m.project_id) return;
+    const consultation = consultations.find(c => c.project_id === m.project_id)?.consultation;
+    const insurancePieceIds = (consultation?.pieces_admin ?? [])
+      .filter(p => p.id === 'assurance' || INSURANCE_PATTERN.test(strip(p.nom)))
+      .map(p => p.id);
+    const received = (m.act_entreprise_id && consultation?.pieces_recues?.[m.act_entreprise_id]) || [];
+    if (insurancePieceIds.some(id => received.includes(id))) return;
+    const company = strip(m.entreprise_nom);
+    const hasDocument = insuranceDocs.some(d => d.project_id === m.project_id
+      && ((!!m.contact_id && d.contact_id === m.contact_id) || (company.length >= 3 && strip(`${d.name ?? ''} ${d.description ?? ''}`).includes(company))));
+    if (hasDocument) return;
+    byProject.set(m.project_id, [...(byProject.get(m.project_id) || []), m.entreprise_nom || '—']);
+  });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [projectId, names] of byProject) {
+    const project = projectName(projects, projectId);
+    if (!project) continue;
+    const unique = [...new Set(names)];
+    list.push({
+      id: `insurance-missing-${projectId}`, tone: 'warning', type: 'insurance_missing',
+      params: { project, count: unique.length, names: unique.slice(0, MAX_NAMES).join(', ') + (unique.length > MAX_NAMES ? '…' : '') },
+    });
+  }
+  return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
+}
+
 function overloadedPeople(tasks: CopilotTaskInput[], people: CopilotPersonInput[]): CopilotSuggestionRaw[] {
   const counts = new Map<string, number>();
   tasks.filter(isOpenTask).forEach(t => { if (t.assignee_id) counts.set(t.assignee_id, (counts.get(t.assignee_id) || 0) + 1); });
@@ -578,12 +623,16 @@ export function computeCopilotSuggestions(input: {
   situations?: CopilotSituationInput[];
   observations?: CopilotObservationInput[];
   qualifications?: Qualification[];
+  markets?: CopilotMarketInput[];
+  consultations?: CopilotConsultationInput[];
+  documents?: CopilotDocumentInput[];
   people?: CopilotPersonInput[];
   now?: Date;
 }): CopilotSuggestionRaw[] {
   const { projects, milestones, invoices, tasks = [], proposals = [], tenders = [] } = input;
   const { meetings, reserves, contracts, feeNotes, permits, lots } = input;
   const { contacts, orders, situations, observations, qualifications, people = [] } = input;
+  const { markets, consultations, documents } = input;
   const now = input.now ?? new Date();
 
   const groups: CopilotSuggestionRaw[][] = [
@@ -594,6 +643,7 @@ export function computeCopilotSuggestions(input: {
     observations ? overdueObservations(projects, observations, now) : [],
     permits ? permitsDue(permits, now) : [],
     lots && contacts && qualifications ? expiringQualifications(lots, contacts, qualifications, now) : [],
+    markets && consultations && documents ? missingInsurance(projects, markets, consultations, documents) : [],
     orders ? unacknowledgedOrders(projects, orders, now) : [],
     situations ? situationsToVerify(projects, situations, now) : [],
     tendersClosingSoon(tenders, now),
@@ -751,6 +801,12 @@ export function formatCopilotSuggestion(
       const vars = { company: raw.params.company, days: Math.abs(raw.params.days) };
       return { id: raw.id, tone: raw.tone, text: t(`ai_suggestion_qualification_${key}`, vars), draft: t(`ai_draft_qualification_${key}`, vars) };
     }
+    case 'insurance_missing':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: t('ai_suggestion_insurance_missing', { project: raw.params.project, count: raw.params.count, names: raw.params.names }),
+        draft: t('ai_draft_insurance_missing', { project: raw.params.project, count: raw.params.count, names: raw.params.names }),
+      };
     case 'workload':
       return {
         id: raw.id, tone: raw.tone,

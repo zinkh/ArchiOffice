@@ -2545,6 +2545,8 @@ export default {
       "ai_draft_qualification_soon": "La meilleure qualification de {{company}} expire dans {{days}} jour(s). Prépare une demande de certificat à jour, à relire avant envoi.",
       "ai_suggestion_qualification_expired": "La qualification de « {{company}} » a expiré il y a {{days}} jour(s).",
       "ai_draft_qualification_expired": "La meilleure qualification de {{company}} a expiré il y a {{days}} jour(s). Prépare une demande de certificat à jour avant toute attribution de lot, à relire avant envoi.",
+      "ai_suggestion_insurance_missing": "{{count}} entreprise(s) notifiée(s) du projet « {{project}} » sans attestation d'assurance : {{names}}.",
+      "ai_draft_insurance_missing": "Sur le projet {{project}}, {{count}} entreprise(s) notifiée(s) n'ont pas d'attestation d'assurance enregistrée ({{names}}). Prépare une demande d'attestations en cours de validité (décennale et responsabilité civile) pour chacune, à relire avant envoi, et rappelle-moi où les enregistrer.",
       "ai_suggestion_workload": "{{name}} a {{count}} tâches ouvertes : charge à rééquilibrer.",
       "ai_suggestion_workload_anon": "Un collaborateur a {{count}} tâches ouvertes : charge à rééquilibrer.",
       "ai_draft_workload": "{{name}} a {{count}} tâches ouvertes. Analyse-les par projet et par échéance et propose une répartition avec les autres membres de l'équipe, sans rien réassigner avant ma confirmation.",

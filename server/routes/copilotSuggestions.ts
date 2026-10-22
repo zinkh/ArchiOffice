@@ -67,6 +67,19 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
       const contacts = lots ? await byIds('contacts', 'id, first_name, last_name, company_name, email, email_work, phone, phone_mobile, phone_work, siret') : undefined;
       const qualifications = lots ? await byIds('contact_qualifications', 'id, contact_id, organisme, reference, date_fin, source, verified_at') : undefined;
 
+      // Assurances : marchés notifiés, pièces reçues de l'ACT et documents d'assurance de ces affaires.
+      const markets = await optional('marches_entreprises', 'id, project_id, entreprise_nom, contact_id, act_entreprise_id, type_marche, statut, statut_signature, date_notification');
+      const consultations = markets ? await optional('act_data', 'project_id, consultation') : undefined;
+      const marketProjectIds = [...new Set((markets || []).map((m: any) => m.project_id).filter(Boolean))] as string[];
+      let documents: any[] | undefined = [];
+      if (markets && marketProjectIds.length > 0) {
+        const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents')
+          .select('project_id, contact_id, name, description, doc_type')
+          .in('project_id', marketProjectIds)
+          .or('name.ilike.%assurance%,name.ilike.%décennale%,name.ilike.%decennale%,description.ilike.%assurance%,description.ilike.%décennale%,doc_type.ilike.%assurance%');
+        documents = error ? undefined : data || [];
+      }
+
       // Noms des personnes surchargées : seulement celles qui dépassent le seuil.
       const openByAssignee = new Map<string, number>();
       (tasksRes.data || []).forEach((t: any) => {
@@ -80,7 +93,7 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
       }
 
       const suggestions = computeCopilotSuggestions({
-        contacts, qualifications, orders, situations, observations, people,
+        contacts, qualifications, orders, situations, observations, people, markets, consultations, documents,
         meetings, reserves, contracts, feeNotes, permits, lots,
         projects: projectsRes.data || [],
         milestones: milestonesRes.data || [],
