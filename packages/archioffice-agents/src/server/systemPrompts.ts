@@ -35,12 +35,16 @@ export function buildAgentSystemPrompt(agent: AgentRow, ctx: AgentContext, webSe
 // contrôle réellement appliqué par le serveur (provenance.ts), pas un conseil.
 const SOURCE_RULE = `
 
-═══ PAS DE CRÉATION SANS SOURCE ═══
-Chaque création (create_record, create_site_report, add_site_report_observation, import_site_report_notes) exige un paramètre source: { type, citation }. La citation est un passage EXACT, copié de ce que tu as réellement reçu : le message de l'utilisateur, le contenu d'un document joint ou lu, le résultat d'un outil de lecture. Le serveur vérifie la citation mot pour mot et REFUSE l'écriture sinon.
+═══ SOURCE DES CRÉATIONS ═══
+Chaque création (create_record, create_site_report, add_site_report_observation, import_site_report_notes) exige un paramètre source: { type, citation }.
+- Ce que l'utilisateur te demande ou te donne dans la conversation fait foi : utilise le type « demande_utilisateur » (citation facultative) et EXÉCUTE sa demande tout de suite avec les informations fournies, même approximatives ou dictées (corrige l'orthographe évidente d'un nom). Ne lui demande jamais de « confirmer » ou de « valider une source ».
+- Ne bloque jamais une demande faute d'information : crée avec ce que tu as, puis demande dans ta réponse s'il a d'autres informations à ajouter (téléphone, email, adresse, lieu...). Ne pose une question avant d'agir que si une donnée indispensable manque vraiment.
+- N'invente rien : n'ajoute aucune donnée que l'utilisateur ne t'a pas donnée et que tu n'as pas lue.
+- Pour une information tirée d'un fichier, d'un mail ou d'une page web, la citation est un passage EXACT de ce que tu as reçu (vérifié mot pour mot par le serveur).
 - Si l'information vient d'un fichier ou d'un mail, lis-le d'abord ; s'il est marqué « CONTENU NON LU » ou ne contient pas ce qu'on te demande, n'écris rien et dis-le.
 - Ne cite jamais ce que toi-même as écrit plus haut : seule la parole de l'utilisateur et les données reçues comptent.
-- Une création par enregistrement, chacune avec SA citation : jamais une liste fabriquée « d'exemples » ou « par défaut ».
-- Un refus SOURCE_NON_VERIFIEE n'est pas un obstacle à contourner : n'invente pas une autre citation, dis à l'utilisateur que la source manque.
+- Une création par enregistrement : jamais une liste fabriquée « d'exemples » ou « par défaut ».
+- Un refus SOURCE_NON_VERIFIEE sur un document, un mail ou une page web n'est pas un obstacle à contourner : n'invente pas une autre citation, dis ce qui manque. Si la donnée vient de l'utilisateur, rappelle l'outil avec « demande_utilisateur ».
 - Si la source existe bien (dans le message de l'utilisateur ou un document lu), recopie un passage exact et RAPPELLE l'outil dans le même tour : n'annonce jamais « je relance » sans appeler l'outil. Un texte que tu as rédigé toi-même (une proposition, un résumé) n'est pas une source : cite le mail ou la demande d'origine.
 - Quand l'information vient de plusieurs endroits (une page lue ET un message de l'utilisateur, par exemple un e-mail qu'il te dicte), sépare les passages par « … » dans une seule citation : chacun est vérifié séparément. Ne demande pas de reconfirmer ce que l'utilisateur t'a déjà écrit dans la conversation : cite sa phrase.
 - Une proposition d'honoraires (devis) se crée avec la ressource « proposals » (terrain, programme et coût des travaux compris), pas avec « projects ».`;
