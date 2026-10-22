@@ -34,9 +34,20 @@ describe('pas de création sans source', () => {
     expect(checkSource({ source: { type: 'document_joint', citation, location: 'x' } }, corpus()).ok).toBe(true);
   });
 
-  it('refuse l\'absence de source et les citations trop courtes', () => {
+  it('refuse l\'absence de source et les citations trop courtes sur un document', () => {
     expect(checkSource({}, corpus()).ok).toBe(false);
-    expect(checkSource({ source: { type: 'demande_utilisateur', citation: 'Gros œuvre' } }, corpus()).ok).toBe(false);
+    expect(checkSource({ source: { type: 'document_joint', citation: 'Gros œuvre' } }, corpus()).ok).toBe(false);
+  });
+
+  it('la demande de l\'utilisateur fait foi, sans citation exacte (dictée approximative)', () => {
+    const c = new SourceCorpus();
+    c.addUserText('ajouter un rendez-vous demain à 15h avec hugur simsac Simsek');
+    expect(checkSource({ source: { type: 'demande_utilisateur' } }, c).ok).toBe(true);
+    expect(checkSource({ source: { type: 'demande_utilisateur', citation: 'Ugur Simsek, demain 15h' } }, c).ok).toBe(true);
+  });
+
+  it('demande_utilisateur reste refusée sans aucun message de la personne', () => {
+    expect(checkSource({ source: { type: 'demande_utilisateur' } }, new SourceCorpus()).ok).toBe(false);
   });
 
   it('ne laisse pas l\'agent se citer lui-même ni citer un résultat d\'écriture', () => {

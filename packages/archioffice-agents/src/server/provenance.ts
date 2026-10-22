@@ -64,9 +64,8 @@ export const SOURCE_PARAMETER_SCHEMA = {
     },
     citation: {
       type: 'string',
-      description: `Extrait exact (entre ${MIN_CITATION_CHARS} et 500 caractères) copié depuis la source, qui justifie cet enregistrement. ` +
+      description: `Facultatif pour demande_utilisateur (ce que la personne demande ou donne fait foi). Pour un document, un mail ou le web : extrait exact (entre ${MIN_CITATION_CHARS} et 500 caractères) copié depuis la source, qui justifie cet enregistrement. ` +
         "Si l'information vient de plusieurs endroits (page lue + message de l'utilisateur), sépare les passages par « … » : chacun est vérifié séparément.",
-      minLength: MIN_CITATION_CHARS,
       maxLength: 500,
     },
     location: {
@@ -75,7 +74,7 @@ export const SOURCE_PARAMETER_SCHEMA = {
       maxLength: 200,
     },
   },
-  required: ['type', 'citation'],
+  required: ['type'],
 } as const;
 
 /** Minuscules, sans accents, ponctuation et espaces réduits à un seul espace. */
@@ -107,7 +106,11 @@ export class SourceCorpus {
   private cache: string | null = null;
   hasImages = false;
 
-  addUserText(text: string): void { this.add(text); }
+  hasUserText = false;
+  addUserText(text: string): void {
+    if (String(text || '').trim()) this.hasUserText = true;
+    this.add(text);
+  }
   addDocumentText(text: string): void { this.add(text); }
 
   /** Résultat d'un outil : ignoré s'il vient d'un outil d'écriture ou d'une erreur. */
@@ -152,8 +155,9 @@ const refusal = (error: string, instruction: string): SourceCheck => ({
 });
 
 const COMMON_INSTRUCTION =
-  "N'écris RIEN. Si l'information vient d'un fichier ou d'un mail, relis-le (read_document, read_email_attachment...) puis cite un passage réel ; " +
-  "si tu ne peux pas la justifier par un passage réel, dis à l'utilisateur que tu n'as pas la source et demande-la-lui.";
+  "Si l'information vient d'un fichier ou d'un mail, relis-le (read_document, read_email_attachment...) puis cite un passage réel ; " +
+  "si elle vient de la demande de l'utilisateur, utilise le type demande_utilisateur ; " +
+  "sinon n'écris pas cet enregistrement et dis-lui ce qui manque.";
 
 /** Vérifie la source d'une création. Sans corpus (liaison MCP), aucun contrôle. */
 export function checkSource(args: Record<string, unknown>, corpus: SourceCorpus | undefined): SourceCheck {
@@ -170,6 +174,14 @@ export function checkSource(args: Record<string, unknown>, corpus: SourceCorpus 
 
   if (!(SOURCE_TYPES as readonly string[]).includes(type)) {
     return refusal(`Création refusée : type de source inconnu « ${type} ».`, `Types acceptés : ${SOURCE_TYPES.join(', ')}.`);
+  }
+  // Ce que la personne demande ou donne fait foi : pas de citation exacte exigée
+  // (dictée approximative, nom ou heure donnés en langage naturel). Le contrôle
+  // mot pour mot reste pour les documents, mails et pages web.
+  if (type === 'demande_utilisateur') {
+    return corpus.hasUserText
+      ? { ok: true }
+      : refusal('Création refusée : aucun message de la personne dans cette conversation.', COMMON_INSTRUCTION);
   }
   if (type === 'image_jointe') {
     return corpus.hasImages
