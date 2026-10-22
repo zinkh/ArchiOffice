@@ -52,7 +52,35 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
         optional('project_lots', 'project_id, contact_id'),
       ]);
 
+      // Entreprises titulaires d'un lot : leurs fiches et qualifications seulement.
+      const lotContactIds = [...new Set((lots || []).map((l: any) => l.contact_id).filter(Boolean))] as string[];
+      const byIds = async (table: string, columns: string) => {
+        if (lotContactIds.length === 0) return [];
+        const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, table).select(columns).in(table === 'contacts' ? 'id' : 'contact_id', lotContactIds);
+        return error ? undefined : data || [];
+      };
+      const [orders, situations, observations] = await Promise.all([
+        optional('ordres_de_service', 'id, project_id, status, date'),
+        optional('situations', 'id, project_id, etat, date_situation'),
+        optional('observations', 'id, project_id, statut, due_date'),
+      ]);
+      const contacts = lots ? await byIds('contacts', 'id, first_name, last_name, company_name, email, email_work, phone, phone_mobile, phone_work, siret') : undefined;
+      const qualifications = lots ? await byIds('contact_qualifications', 'id, contact_id, organisme, reference, date_fin, source, verified_at') : undefined;
+
+      // Noms des personnes surchargées : seulement celles qui dépassent le seuil.
+      const openByAssignee = new Map<string, number>();
+      (tasksRes.data || []).forEach((t: any) => {
+        if (t.assignee_id && t.status !== 'done' && (t.progress ?? 0) < 100) openByAssignee.set(t.assignee_id, (openByAssignee.get(t.assignee_id) || 0) + 1);
+      });
+      const busyIds = [...openByAssignee].filter(([, n]) => n > 15).map(([id]) => id);
+      let people: { id: string; name: string }[] = [];
+      if (busyIds.length) {
+        const { data } = await supabaseAdmin.from('profiles').select('id, name').in('id', busyIds);
+        people = data || [];
+      }
+
       const suggestions = computeCopilotSuggestions({
+        contacts, qualifications, orders, situations, observations, people,
         meetings, reserves, contracts, feeNotes, permits, lots,
         projects: projectsRes.data || [],
         milestones: milestonesRes.data || [],

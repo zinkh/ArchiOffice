@@ -9,6 +9,7 @@
 // than final text, so the i18n formatting stays entirely on the client via
 // formatCopilotSuggestion() — the server never needs a translation layer.
 import type { Project, Milestone } from '../types';
+import { resumeQualifications, parContact, joursAvant, normaliserSiret, type Qualification } from './qualifications';
 
 const MAX_SUGGESTIONS = 10;
 // Plafond par type de suggestion : sans lui, un type très bavard (une carte par
@@ -32,6 +33,11 @@ const PERMIT_ALERT_DAYS = 10;
 const PERMIT_ALERT_PAST_DAYS = 30;
 // Délais d'instruction de droit commun (mois), à vérifier selon le dossier.
 const PERMIT_DELAY_MONTHS: Record<string, number> = { DP: 1, PC: 3, AT: 4 };
+const OS_UNACKNOWLEDGED_DAYS = 7;
+const SITUATION_TO_VERIFY_DAYS = 10;
+const WORKLOAD_MAX_OPEN_TASKS = 15;
+const QUALIFICATION_ALERT_DAYS = 30;
+const MAX_NAMES = 3;
 const DAY_MS = 86400000;
 
 // `status` is typed loosely (not the `Invoice` interface's capitalized enum)
@@ -89,6 +95,16 @@ export interface CopilotFeeNoteInput { project_id?: string | null; contrat_id?: 
 export interface CopilotPermitInput { id: string; project_id?: string | null; type?: string | null; reference?: string | null; submission_date?: string | null; status?: string | null }
 export interface CopilotLotInput { project_id?: string | null; contact_id?: string | null }
 
+export interface CopilotContactInput {
+  id: string; first_name?: string | null; last_name?: string | null; company_name?: string | null;
+  email?: string | null; email_work?: string | null; phone?: string | null; phone_mobile?: string | null; phone_work?: string | null;
+  siret?: string | null;
+}
+export interface CopilotOrderInput { id: string; project_id?: string | null; status?: string | null; date?: string | null }
+export interface CopilotSituationInput { id: string; project_id?: string | null; etat?: string | null; date_situation?: string | null }
+export interface CopilotObservationInput { id: string; project_id?: string | null; statut?: string | null; due_date?: string | null }
+export interface CopilotPersonInput { id: string; name?: string | null }
+
 export type CopilotSuggestionRaw =
   | { id: string; tone: 'danger'; type: 'overdue_milestone'; params: { project: string; client: string; count: number; titles: string } }
   | { id: string; tone: 'warning'; type: 'project_behind'; params: { project: string; client: string; progress: number; days: number } }
@@ -105,6 +121,13 @@ export type CopilotSuggestionRaw =
   | { id: string; tone: 'warning'; type: 'task_unassigned'; params: { count: number; titles: string } }
   | { id: string; tone: 'danger' | 'warning'; type: 'permit_deadline'; params: { reference: string; kind: string; days: number } }
   | { id: string; tone: 'warning'; type: 'lots_without_company'; params: { project: string; count: number } }
+  | { id: string; tone: 'warning'; type: 'company_no_contact'; params: { count: number; names: string } }
+  | { id: string; tone: 'warning'; type: 'company_no_siret'; params: { count: number; names: string } }
+  | { id: string; tone: 'warning'; type: 'os_unacknowledged'; params: { project: string; count: number } }
+  | { id: string; tone: 'warning'; type: 'situation_to_verify'; params: { project: string; count: number; days: number } }
+  | { id: string; tone: 'danger'; type: 'observations_overdue'; params: { project: string; count: number } }
+  | { id: string; tone: 'danger' | 'warning'; type: 'qualification_expiring'; params: { company: string; days: number } }
+  | { id: string; tone: 'warning'; type: 'workload'; params: { name: string; count: number } }
   | { id: string; tone: 'warning'; type: 'project_incomplete'; params: { project: string; fields: string[] } }
   | { id: string; tone: 'warning'; type: 'invoice_draft_stale'; params: { count: number; amount: number; numbers: string } };
 
@@ -267,6 +290,112 @@ function lotsWithoutCompany(projects: Project[], lots: CopilotLotInput[]): Copil
     const project = projects.find(p => p.id === projectId);
     if (!project || project.status !== 'In Progress') continue;
     list.push({ id: `lots-no-company-${projectId}`, tone: 'warning', type: 'lots_without_company', params: { project: project.name, count } });
+  }
+  return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
+}
+
+const contactName = (c: CopilotContactInput) =>
+  (c.company_name || `${c.first_name ?? ''} ${c.last_name ?? ''}`).trim() || '—';
+const namesOf = (list: CopilotContactInput[]) => {
+  const shown = list.slice(0, MAX_NAMES).map(contactName).join(', ');
+  return list.length > MAX_NAMES ? `${shown}…` : shown;
+};
+const lotHolders = (lots: CopilotLotInput[], contacts: CopilotContactInput[]) => {
+  const ids = new Set(lots.map(l => l.contact_id).filter(Boolean));
+  return contacts.filter(c => ids.has(c.id));
+};
+
+function companiesWithoutContact(lots: CopilotLotInput[], contacts: CopilotContactInput[]): CopilotSuggestionRaw[] {
+  const missing = lotHolders(lots, contacts).filter(c =>
+    !(c.email || c.email_work || '').trim() && !(c.phone || c.phone_mobile || c.phone_work || '').trim());
+  if (missing.length === 0) return [];
+  return [{ id: 'companies-no-contact', tone: 'warning', type: 'company_no_contact', params: { count: missing.length, names: namesOf(missing) } }];
+}
+
+function companiesWithoutSiret(lots: CopilotLotInput[], contacts: CopilotContactInput[]): CopilotSuggestionRaw[] {
+  const missing = lotHolders(lots, contacts).filter(c => normaliserSiret(c.siret).length !== 14);
+  if (missing.length === 0) return [];
+  return [{ id: 'companies-no-siret', tone: 'warning', type: 'company_no_siret', params: { count: missing.length, names: namesOf(missing) } }];
+}
+
+const projectName = (projects: Project[], id: string | null | undefined) => projects.find(p => p.id === id)?.name;
+
+function unacknowledgedOrders(projects: Project[], orders: CopilotOrderInput[], now: Date): CopilotSuggestionRaw[] {
+  const byProject = new Map<string, number>();
+  orders.forEach(o => {
+    if (strip(o.status) !== 'submitted') return;
+    const d = parseDate(o.date);
+    if (!d || daysBetween(d, now) < OS_UNACKNOWLEDGED_DAYS) return;
+    byProject.set(o.project_id || '', (byProject.get(o.project_id || '') || 0) + 1);
+  });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [projectId, count] of byProject) {
+    const project = projectName(projects, projectId);
+    if (project) list.push({ id: `os-unacknowledged-${projectId}`, tone: 'warning', type: 'os_unacknowledged', params: { project, count } });
+  }
+  return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
+}
+
+function situationsToVerify(projects: Project[], situations: CopilotSituationInput[], now: Date): CopilotSuggestionRaw[] {
+  const byProject = new Map<string, { count: number; days: number }>();
+  situations.forEach(s => {
+    if (strip(s.etat) !== 'brouillon') return;
+    const d = parseDate(s.date_situation);
+    if (!d) return;
+    const days = daysBetween(d, now);
+    if (days < SITUATION_TO_VERIFY_DAYS) return;
+    const cur = byProject.get(s.project_id || '') || { count: 0, days: 0 };
+    byProject.set(s.project_id || '', { count: cur.count + 1, days: Math.max(cur.days, days) });
+  });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [projectId, v] of byProject) {
+    const project = projectName(projects, projectId);
+    if (project) list.push({ id: `situation-to-verify-${projectId}`, tone: 'warning', type: 'situation_to_verify', params: { project, ...v } });
+  }
+  return list.sort((a, b) => (b.params as { days: number }).days - (a.params as { days: number }).days);
+}
+
+function overdueObservations(projects: Project[], observations: CopilotObservationInput[], now: Date): CopilotSuggestionRaw[] {
+  const byProject = new Map<string, number>();
+  observations.forEach(o => {
+    if (strip(o.statut) === 'levee') return;
+    const d = parseDate(o.due_date);
+    if (!d || d >= now) return;
+    byProject.set(o.project_id || '', (byProject.get(o.project_id || '') || 0) + 1);
+  });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [projectId, count] of byProject) {
+    const project = projectName(projects, projectId);
+    if (project) list.push({ id: `observations-overdue-${projectId}`, tone: 'danger', type: 'observations_overdue', params: { project, count } });
+  }
+  return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
+}
+
+function expiringQualifications(
+  lots: CopilotLotInput[], contacts: CopilotContactInput[], qualifications: Qualification[], now: Date,
+): CopilotSuggestionRaw[] {
+  const today = now.toISOString().slice(0, 10);
+  const byContact = parContact(qualifications);
+  const list: CopilotSuggestionRaw[] = [];
+  lotHolders(lots, contacts).forEach(c => {
+    // Sans aucune qualification enregistrée : on ne sait rien, on ne signale rien.
+    const resume = resumeQualifications(byContact[c.id] || [], today);
+    const fin = resume.principale?.date_fin;
+    if (!fin || (resume.statut !== 'expiree' && resume.statut !== 'bientot')) return;
+    const days = joursAvant(fin, today);
+    if (days > QUALIFICATION_ALERT_DAYS) return;
+    list.push({ id: `qualification-expiring-${c.id}`, tone: days < 0 ? 'danger' : 'warning', type: 'qualification_expiring', params: { company: contactName(c), days } });
+  });
+  return list.sort((a, b) => (a.params as { days: number }).days - (b.params as { days: number }).days);
+}
+
+function overloadedPeople(tasks: CopilotTaskInput[], people: CopilotPersonInput[]): CopilotSuggestionRaw[] {
+  const counts = new Map<string, number>();
+  tasks.filter(isOpenTask).forEach(t => { if (t.assignee_id) counts.set(t.assignee_id, (counts.get(t.assignee_id) || 0) + 1); });
+  const list: CopilotSuggestionRaw[] = [];
+  for (const [id, count] of counts) {
+    if (count <= WORKLOAD_MAX_OPEN_TASKS) continue;
+    list.push({ id: `workload-${id}`, tone: 'warning', type: 'workload', params: { name: people.find(p => p.id === id)?.name || '', count } });
   }
   return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
 }
@@ -444,10 +573,17 @@ export function computeCopilotSuggestions(input: {
   feeNotes?: CopilotFeeNoteInput[];
   permits?: CopilotPermitInput[];
   lots?: CopilotLotInput[];
+  contacts?: CopilotContactInput[];
+  orders?: CopilotOrderInput[];
+  situations?: CopilotSituationInput[];
+  observations?: CopilotObservationInput[];
+  qualifications?: Qualification[];
+  people?: CopilotPersonInput[];
   now?: Date;
 }): CopilotSuggestionRaw[] {
   const { projects, milestones, invoices, tasks = [], proposals = [], tenders = [] } = input;
   const { meetings, reserves, contracts, feeNotes, permits, lots } = input;
+  const { contacts, orders, situations, observations, qualifications, people = [] } = input;
   const now = input.now ?? new Date();
 
   const groups: CopilotSuggestionRaw[][] = [
@@ -455,7 +591,11 @@ export function computeCopilotSuggestions(input: {
     overdueTasks(projects, tasks, now),
     overdueMilestones(projects, milestones, now),
     reserves ? overdueReserves(projects, reserves, now) : [],
+    observations ? overdueObservations(projects, observations, now) : [],
     permits ? permitsDue(permits, now) : [],
+    lots && contacts && qualifications ? expiringQualifications(lots, contacts, qualifications, now) : [],
+    orders ? unacknowledgedOrders(projects, orders, now) : [],
+    situations ? situationsToVerify(projects, situations, now) : [],
     tendersClosingSoon(tenders, now),
     tasksDueSoon(tasks, now),
     projectsBehind(projects, now),
@@ -464,6 +604,9 @@ export function computeCopilotSuggestions(input: {
     proposalsWithoutAnswer(proposals, now),
     contracts ? contractsNotInvoiced(contracts, feeNotes ?? [], invoices, now) : [],
     unassignedTasks(tasks),
+    overloadedPeople(tasks, people),
+    lots && contacts ? companiesWithoutContact(lots, contacts) : [],
+    lots && contacts ? companiesWithoutSiret(lots, contacts) : [],
     contracts ? projectsWithoutContract(projects, contracts) : [],
     lots ? lotsWithoutCompany(projects, lots) : [],
     incompleteProjects(projects),
@@ -592,6 +735,27 @@ export function formatCopilotSuggestion(
         id: raw.id, tone: raw.tone,
         text: t('ai_suggestion_lots_without_company', { project: raw.params.project, count: raw.params.count }),
         draft: t('ai_draft_lots_without_company', { project: raw.params.project, count: raw.params.count }),
+      };
+    case 'company_no_contact':
+      return { id: raw.id, tone: raw.tone, text: t('ai_suggestion_company_no_contact', { count: raw.params.count }), draft: t('ai_draft_company_no_contact', { count: raw.params.count, names: raw.params.names }) };
+    case 'company_no_siret':
+      return { id: raw.id, tone: raw.tone, text: t('ai_suggestion_company_no_siret', { count: raw.params.count }), draft: t('ai_draft_company_no_siret', { count: raw.params.count, names: raw.params.names }) };
+    case 'os_unacknowledged':
+      return { id: raw.id, tone: raw.tone, text: t('ai_suggestion_os_unacknowledged', { project: raw.params.project, count: raw.params.count, days: OS_UNACKNOWLEDGED_DAYS }), draft: t('ai_draft_os_unacknowledged', { project: raw.params.project, count: raw.params.count }) };
+    case 'situation_to_verify':
+      return { id: raw.id, tone: raw.tone, text: t('ai_suggestion_situation_to_verify', { project: raw.params.project, count: raw.params.count, days: raw.params.days }), draft: t('ai_draft_situation_to_verify', { project: raw.params.project, count: raw.params.count }) };
+    case 'observations_overdue':
+      return { id: raw.id, tone: raw.tone, text: t('ai_suggestion_observations_overdue', { project: raw.params.project, count: raw.params.count }), draft: t('ai_draft_observations_overdue', { project: raw.params.project, count: raw.params.count }) };
+    case 'qualification_expiring': {
+      const key = raw.params.days < 0 ? 'expired' : 'soon';
+      const vars = { company: raw.params.company, days: Math.abs(raw.params.days) };
+      return { id: raw.id, tone: raw.tone, text: t(`ai_suggestion_qualification_${key}`, vars), draft: t(`ai_draft_qualification_${key}`, vars) };
+    }
+    case 'workload':
+      return {
+        id: raw.id, tone: raw.tone,
+        text: raw.params.name ? t('ai_suggestion_workload', { name: raw.params.name, count: raw.params.count }) : t('ai_suggestion_workload_anon', { count: raw.params.count }),
+        draft: t('ai_draft_workload', { name: raw.params.name || t('ai_a_colleague'), count: raw.params.count }),
       };
     case 'project_incomplete':
       return {

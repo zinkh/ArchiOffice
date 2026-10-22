@@ -236,6 +236,59 @@ describe('computeCopilotSuggestions', () => {
     expect(list.map(s => s.tone)).toEqual(['danger', 'warning']);
   });
 
+  it('signale les entreprises titulaires d\'un lot sans coordonnées ou sans SIRET valide', () => {
+    const lots = [{ project_id: 'p1', contact_id: 'c1' }, { project_id: 'p1', contact_id: 'c2' }, { project_id: 'p1', contact_id: null }];
+    const contacts = [
+      { id: 'c1', company_name: 'Dupont SARL', siret: '12345678901234', email: 'a@b.fr' },
+      { id: 'c2', company_name: 'Martin SAS', siret: '123' },
+      { id: 'c3', company_name: 'Hors lot' },
+    ];
+    const list = computeCopilotSuggestions({ ...base, lots, contacts });
+    expect(list.map(s => s.type).sort()).toEqual(['company_no_contact', 'company_no_siret']);
+    expect(list.find(s => s.type === 'company_no_contact')).toMatchObject({ params: { count: 1, names: 'Martin SAS' } });
+  });
+
+  it('signale les OS sans accusé, les situations à vérifier et les observations en retard', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      projects: [project('p1')],
+      orders: [
+        { id: 'o1', project_id: 'p1', status: 'submitted', date: day(-10) },
+        { id: 'o2', project_id: 'p1', status: 'approved', date: day(-10) },
+        { id: 'o3', project_id: 'p1', status: 'submitted', date: day(-2) },
+      ],
+      situations: [
+        { id: 's1', project_id: 'p1', etat: 'Brouillon', date_situation: day(-12) },
+        { id: 's2', project_id: 'p1', etat: 'Validée', date_situation: day(-30) },
+      ],
+      observations: [
+        { id: 'b1', project_id: 'p1', statut: 'À faire', due_date: day(-1) },
+        { id: 'b2', project_id: 'p1', statut: 'Levée', due_date: day(-9) },
+      ],
+    });
+    expect(list.map(s => s.type).sort()).toEqual(['observations_overdue', 'os_unacknowledged', 'situation_to_verify']);
+    expect(list.find(s => s.type === 'os_unacknowledged')).toMatchObject({ params: { count: 1 } });
+  });
+
+  it('signale une qualification expirée ou proche, jamais l\'absence de qualification', () => {
+    const lots = [{ project_id: 'p1', contact_id: 'c1' }, { project_id: 'p1', contact_id: 'c2' }, { project_id: 'p1', contact_id: 'c3' }];
+    const contacts = [{ id: 'c1', company_name: 'A' }, { id: 'c2', company_name: 'B' }, { id: 'c3', company_name: 'C' }];
+    const qualifications = [
+      { id: 'q1', contact_id: 'c1', organisme: 'qualibat', date_fin: '2026-10-01' },
+      { id: 'q2', contact_id: 'c2', organisme: 'qualibat', date_fin: '2028-01-01' },
+    ] as any;
+    const list = computeCopilotSuggestions({ ...base, lots, contacts, qualifications }).filter(s => s.type === 'qualification_expiring');
+    expect(list.map(s => s.id)).toEqual(['qualification-expiring-c1']);
+    expect(list[0].tone).toBe('danger');
+  });
+
+  it('signale une charge excessive au-delà de 15 tâches ouvertes', () => {
+    const many = Array.from({ length: 16 }, (_, i) => ({ id: `t${i}`, title: 'T', assignee_id: 'u1' }));
+    const list = computeCopilotSuggestions({ ...base, tasks: many, people: [{ id: 'u1', name: 'Sophie' }] });
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ type: 'workload', params: { name: 'Sophie', count: 16 } });
+  });
+
   it('reste compatible avec un appel sans tâches, devis ni appels d\'offres', () => {
     const list = computeCopilotSuggestions({ ...base, projects: [project('p1')], milestones: [milestone('m1', 'p1', -4)] });
     expect(list).toHaveLength(1);
