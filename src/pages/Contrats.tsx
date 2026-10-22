@@ -404,11 +404,23 @@ function ContratModal({
     setForm(f => ({ ...f, ...contratFieldsFromProject(project, f, contacts) }));
   };
 
+  // Un préréglage ne se contente pas de cocher les missions présentes : une
+  // mission standard supprimée (ou une liste réduite à « Nouvelle mission »)
+  // est rétablie, sinon le bouton n'avait aucun effet visible. Les missions
+  // existantes gardent leur intitulé et leur part ; les missions
+  // personnalisées sont conservées à la suite.
   const applyPreset = (cats: readonly ContratMissionCategory[]) => {
-    setForm(f => ({
-      ...f,
-      missions_list: (f.missions_list || DEFAULT_MISSIONS).map(m => ({ ...m, incluse: cats.includes(missionCategory(m)) })),
-    }));
+    setForm(f => {
+      const current = f.missions_list || DEFAULT_MISSIONS;
+      const currentById = new Map(current.map(m => [m.id, m]));
+      const standard = DEFAULT_MISSIONS.map(d => currentById.get(d.id) ?? d);
+      const defaultIds = new Set(DEFAULT_MISSIONS.map(d => d.id));
+      const custom = current.filter(m => !defaultIds.has(m.id));
+      return {
+        ...f,
+        missions_list: [...standard, ...custom].map(m => ({ ...m, incluse: cats.includes(missionCategory(m)) })),
+      };
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -633,11 +645,11 @@ function ContratModal({
                   sous-total, et le montant HT déduit de la part. */}
               {tab === 'missions' && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>Préréglages :</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold whitespace-nowrap" style={{ color: 'var(--tblr-muted)' }}>Préréglages :</span>
                     {PRESETS.map(p => (
                       <button key={p.label} type="button" onClick={() => applyPreset(p.cats)}
-                        className="px-2.5 py-1 text-xs rounded-lg border font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        className="px-2.5 py-1 text-xs rounded-lg border font-medium whitespace-nowrap hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
                         style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-primary)' }}>
                         {p.label}
                       </button>
@@ -1241,7 +1253,7 @@ export default function Contrats() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-3 mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
           {[
             { label: 'Total', value: stats.total, icon: IconFileText, color: '#6c7a91' },
             { label: 'Envoyés', value: stats.envoyes, icon: IconSend, color: '#206bc4' },
@@ -1249,10 +1261,10 @@ export default function Contrats() {
             { label: 'Honoraires signés', value: fmt(stats.montantTotal), icon: IconCurrencyEuro, color: '#ae3ec9' },
           ].map(s => (
             <div key={s.label} className="flex items-center gap-3 p-3 rounded-lg" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
-              <s.icon size={20} style={{ color: s.color }} />
-              <div>
-                <p className="text-lg font-bold leading-none" style={{ color: 'var(--tblr-text)' }}>{s.value}</p>
-                <p className="text-[0.6875rem] mt-0.5" style={{ color: 'var(--tblr-muted)' }}>{s.label}</p>
+              <s.icon size={20} className="shrink-0" style={{ color: s.color }} />
+              <div className="min-w-0">
+                <p className="text-lg font-bold leading-none truncate" style={{ color: 'var(--tblr-text)' }}>{s.value}</p>
+                <p className="text-[0.6875rem] mt-0.5 truncate" style={{ color: 'var(--tblr-muted)' }}>{s.label}</p>
               </div>
             </div>
           ))}
