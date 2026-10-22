@@ -13,11 +13,17 @@ vi.mock('nodemailer', async (importOriginal) => {
   return { ...actual, createTransport, default: { ...actual.default, createTransport } };
 });
 
+const sendViaAccount = vi.fn();
+vi.mock('../server/mailSend', () => ({ sendViaAccount: (...args: any[]) => sendViaAccount(...args) }));
+
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
 
 let app: Express;
 beforeAll(async () => { app = await getTestApp(); });
-beforeEach(() => { sendMail.mockReset(); sendMail.mockResolvedValue({ messageId: 'm1' }); });
+beforeEach(() => {
+  sendMail.mockReset(); sendMail.mockResolvedValue({ messageId: 'm1' });
+  sendViaAccount.mockReset(); sendViaAccount.mockResolvedValue({ id: 'g1' });
+});
 
 const PDF = Buffer.from('%PDF-1.4\n%contenu de test\n');
 
@@ -129,6 +135,37 @@ describe('POST /api/reports/:reportId/diffuse', () => {
     expect(res.body.sent).toHaveLength(1);
     expect(res.body.failed.map((f: any) => f.email)).toEqual(['bet@ent.test']);
     expect(res.body.statut).toBe('diffuse');
+  });
+
+  it('envoie par la boîte Gmail connectée, PDF joint, sans SMTP de cabinet', async () => {
+    const tenantId = makeTenant();
+    const { token, userId } = makeUser(tenantId) as any;
+    const { reportId } = seedOperation(tenantId);
+    const settings = fakeSupabaseAdmin.getTable('settings').find((s: any) => s.tenant_id === tenantId);
+    Object.assign(settings!, { smtp_host: null, smtp_user: null, smtp_pass: null });
+    fakeSupabaseAdmin.seed('email_connections', [{ id: `e-${tenantId}`, tenant_id: tenantId, user_id: userId, provider: 'google', is_default: true, external_account_email: 'moi@gmail.test' }]);
+
+    const res = await diffuse(token, reportId, [`c1-${tenantId}`]);
+    expect(res.status).toBe(200);
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(sendViaAccount).toHaveBeenCalledTimes(1);
+    const params = sendViaAccount.mock.calls[0][2];
+    expect(params.to).toBe('durand@ent.test');
+    expect(params.attachments[0].filename).toBe('CR_12.pdf');
+    expect(fakeSupabaseAdmin.getTable('site_reports').find((r: any) => r.id === reportId)?.statut).toBe('diffuse');
+  });
+
+  it('répond 500 explicite quand ni boîte connectée ni SMTP ne sont disponibles', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const { reportId } = seedOperation(tenantId);
+    const settings = fakeSupabaseAdmin.getTable('settings').find((s: any) => s.tenant_id === tenantId);
+    Object.assign(settings!, { smtp_host: null, smtp_user: null, smtp_pass: null });
+    delete process.env.SMTP_HOST;
+
+    const res = await diffuse(token, reportId, [`c1-${tenantId}`]);
+    expect(res.status).toBe(500);
+    expect(res.body.error).toContain('connectez votre boîte mail');
   });
 
   it('refuse un fichier qui n\'est pas un PDF, ou l\'absence de PDF', async () => {

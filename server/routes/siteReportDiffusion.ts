@@ -18,6 +18,7 @@ import { sendEmailLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
+import { sendViaAccount } from '../mailSend';
 import {
   buildDiffusionMail, buildDiffusionRecipients, MAX_DIFFUSION_RECIPIENTS,
   type DiffusionRecipient,
@@ -115,10 +116,15 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
       const smtpPort = settings.smtp_port || process.env.SMTP_PORT || '587';
       const smtpUser = settings.smtp_user || process.env.SMTP_USER;
       const smtpPass = settings.smtp_pass || process.env.SMTP_PASS;
-      if (!smtpHost || !smtpUser || !smtpPass) {
-        return res.status(500).json({ error: 'Configuration SMTP manquante : renseignez le serveur d\'envoi dans les réglages du cabinet.' });
+      // Boîte connectée par défaut de la personne (Gmail, Outlook, IMAP avec son SMTP) : essayée en
+      // premier, le SMTP du cabinet ne servant que de repli (ou seul chemin quand aucune boîte n'est connectée).
+      const { data: defaultAccount } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')
+        .select('*').eq('user_id', req.user.id).eq('is_default', true).maybeSingle();
+      const smtpConfigured = !!(smtpHost && smtpUser && smtpPass);
+      if (!defaultAccount && !smtpConfigured) {
+        return res.status(500).json({ error: 'Aucun moyen d\'envoi : connectez votre boîte mail (Gmail, Outlook) dans la messagerie, ou renseignez le serveur SMTP dans les réglages du cabinet.' });
       }
-      const transporter = nodemailer.createTransport({
+      const transporter = smtpConfigured ? nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(String(smtpPort)),
         secure: String(smtpPort) === '465',
@@ -128,7 +134,7 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
         connectionTimeout: SMTP_CONNECT_TIMEOUT_MS,
         greetingTimeout: SMTP_CONNECT_TIMEOUT_MS,
         socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
-      });
+      }) : null;
 
       // Même expéditeur que POST /api/send-email : adresse générale de l'agence ou adresse
       // personnelle de la personne dans CE cabinet (server/emailSender.ts).
@@ -154,12 +160,26 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
       // dépasse pas le délai de la passerelle quand il y a plusieurs destinataires.
       const send = async (r: DiffusionRecipient) => {
         const mail = buildDiffusionMail(r, ctx);
+        const attachments = [{ filename, content: file.buffer, contentType: 'application/pdf' }];
         try {
-          await transporter.sendMail({
-            from, replyTo, to: r.email,
-            subject: mail.subject, text: mail.text, html: mail.html,
-            attachments: [{ filename, content: file.buffer, contentType: 'application/pdf' }],
-          });
+          let viaAccount = false;
+          if (defaultAccount) {
+            try {
+              await sendViaAccount(supabaseAdmin, defaultAccount, { to: r.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
+              viaAccount = true;
+            } catch (accountErr: any) {
+              // Jeton révoqué, IMAP sans SMTP propre, pièce trop lourde : repli sur le SMTP du cabinet s'il existe.
+              console.warn('[POST /api/reports/:reportId/diffuse] envoi via la boîte connectée impossible', accountErr?.message);
+              if (!transporter) throw accountErr;
+            }
+          }
+          if (!viaAccount) {
+            await transporter!.sendMail({
+              from, replyTo, to: r.email,
+              subject: mail.subject, text: mail.text, html: mail.html,
+              attachments,
+            });
+          }
           sent.push({ contact_id: r.contactId, name: r.name, email: r.email, observations: r.observations.length });
         } catch (err: any) {
           console.error('[POST /api/reports/:reportId/diffuse] envoi impossible', r.contactId, err?.message);

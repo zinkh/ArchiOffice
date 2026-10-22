@@ -29,10 +29,10 @@ export interface RouteDeps {
 export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.post("/api/send-email", sendEmailLimiter, async (req: any, res: any) => {
     try {
-      const { to, subject, text, html } = req.body;
+      const { to, cc: ccField, subject, text, html } = req.body;
       const hasCrlf = (v: unknown): boolean =>
         Array.isArray(v) ? v.some(hasCrlf) : typeof v === 'string' && /[\r\n]/.test(v);
-      if (hasCrlf(to) || hasCrlf(subject)) {
+      if (hasCrlf(to) || hasCrlf(ccField) || hasCrlf(subject)) {
         return res.status(400).json({ error: "Invalid characters in email fields" });
       }
 
@@ -49,7 +49,7 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
           .select('*').eq('user_id', req.user.id).eq('is_default', true).maybeSingle();
         if (defaultAccount) {
           try {
-            const result = await sendViaAccount(supabaseAdmin, defaultAccount, { to, subject, text, html });
+            const result = await sendViaAccount(supabaseAdmin, defaultAccount, { to, cc: ccField || undefined, subject, text, html });
             return res.json({ success: true, id: result.id, via: defaultAccount.provider });
           } catch (err: any) {
             // Le compte par défaut ne peut pas envoyer (IMAP sans SMTP
@@ -94,7 +94,8 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
       await transporter.sendMail({
         from: sender.from,
         to,
-        cc: sender.cc,
+        // Copie de l'agence (adresse personnelle) + Cc demandés par l'appelant.
+        cc: [sender.cc, ccField].filter(Boolean).join(', ') || undefined,
         replyTo: sender.replyTo,
         subject,
         text,
