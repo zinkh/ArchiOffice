@@ -841,7 +841,7 @@ export default {
       "project_overview_delay": "Retard",
       "project_overview_deadline": "Échéance dans",
       "project_overview_days": "jours",
-      "project_overview_action_proposal": "Devis",
+      "project_overview_action_site_meeting": "Réunion de chantier",
       "project_overview_action_letter": "Courrier",
       "project_overview_action_meeting": "Réunion",
       "project_overview_action_call": "Appel",

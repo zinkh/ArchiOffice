@@ -9,7 +9,7 @@ import {
   IconTrash,
   IconFlag,
   IconPlus,
-  IconReceipt,
+  IconClipboardList,
   IconMail,
   IconFileInvoice,
   IconDots,
@@ -462,15 +462,20 @@ export function ProjectOverview({
       <div className="w-full xl:w-[260px] xl:shrink-0 overflow-visible xl:overflow-y-auto p-4" style={{ background: 'var(--tblr-surface)' }}>
         <div className="font-bold text-base mb-3.5" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_plan')}</div>
         <div className="grid grid-cols-2 gap-2 mb-5">
-          <button
-            type="button"
-            onClick={() => navigate('/proposals')}
-            className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
-            style={{ borderColor: 'var(--tblr-border)' }}
-          >
-            <IconReceipt size={17} style={{ color: 'var(--tblr-muted)' }} />
-            <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_proposal')}</span>
-          </button>
+          {/* Ouvre le formulaire « Nouveau compte-rendu » de l'onglet DET (?newReport=1,
+              consommé par ChantierModule). Seulement en mission de chantier : sans elle,
+              l'onglet DET n'existe pas. */}
+          {project.is_chantier && (
+            <button
+              type="button"
+              onClick={() => navigate(`/projects/${encodeURIComponent(project.id)}?tab=DET&newReport=1`)}
+              className="flex flex-col items-center gap-1.5 py-2.5 px-1.5 rounded-lg border text-center transition-colors hover:bg-[var(--tblr-surface-2)]"
+              style={{ borderColor: 'var(--tblr-border)' }}
+            >
+              <IconClipboardList size={17} style={{ color: 'var(--tblr-muted)' }} />
+              <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_site_meeting')}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => navigate(`/document_templates?project=${encodeURIComponent(project.id)}`)}

@@ -792,7 +792,7 @@ export default {
       "project_overview_delay": "Overdue by",
       "project_overview_deadline": "Due in",
       "project_overview_days": "days",
-      "project_overview_action_proposal": "Proposal",
+      "project_overview_action_site_meeting": "Site meeting",
       "project_overview_action_letter": "Letter",
       "project_overview_action_meeting": "Meeting",
       "project_overview_action_call": "Call",

@@ -1,4 +1,5 @@
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from './ui/Toast';
@@ -124,6 +125,21 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [isDecoupageOpen, setIsDecoupageOpen] = useState(false);
   const [filtreDecoupage, setFiltreDecoupage] = useState<FiltreDecoupage>({ batimentId: '', phaseId: '' });
   const [newReportDecoupage, setNewReportDecoupage] = useState<{ batiment_id?: string | null; phase_id?: string | null }>({});
+
+  // Raccourci « Réunion de chantier » du plan d'actions de l'aperçu
+  // (?tab=DET&newReport=1) : ouvre le formulaire de nouveau compte-rendu, puis
+  // retire le paramètre pour qu'un rechargement ne le rouvre pas.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('newReport') !== '1') return;
+    setActiveTab('comptes-rendus');
+    setIsModalOpen(true);
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete('newReport');
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
   const aDecoupage = batimentsActifs(decoupage).length + phasesActives(decoupage).length > 0;
 
   const saveDecoupage = async (next: DecoupageChantier) => {
