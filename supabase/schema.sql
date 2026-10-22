@@ -511,6 +511,8 @@ CREATE TABLE IF NOT EXISTS ordres_de_service (
   montant_devis_accepte NUMERIC, date_signature TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ordres_de_service_tenant_project ON ordres_de_service(tenant_id, project_id);
+-- Marchés visés par un OS adressé à plusieurs entreprises, FTM et devis de travaux
+-- modificatifs : supabase/migrate_os_multi_entreprises_ftm.sql
 
 -- pageformat/meetingnotes/nextmeeting predate this schema's snake_case
 -- convention: the columns were created unquoted from camelCase source, so

@@ -46,7 +46,7 @@ export const ATTACHABLE_RESOURCE_TYPES: string[] = [
   'projects', 'contacts', 'proposals', 'tenders', 'permits', 'meetings',
   'receptions', 'reserves', 'contrats_moe', 'ordres_de_service', 'visas',
   'notes_honoraires', 'marches_entreprises', 'tasks', 'milestones', 'agents',
-  'agency_library', 'custom_references',
+  'agency_library', 'custom_references', 'ftm', 'devis_travaux_modificatifs',
 ];
 
 export interface RouteDeps {
