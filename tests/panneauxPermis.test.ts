@@ -221,7 +221,7 @@ describe('routes', () => {
     fakeSupabaseAdmin.seed('marche_sous_traitants', [{ id: 'st1', tenant_id: tenant, project_id: 'projPublic01', marche_id: 'mk1', nom: 'FERRAILLAGE LORRAIN', adresse: '2 rue Y, 54000 Nancy', objet: 'Armatures', created_at: '2026-01-01' }]);
     const ok = await request(app).get(`/api/public/chantier/${signChantierToken('projPublic01')}`);
     expect(ok.status).toBe(200);
-    expect(ok.body.sousTraitants).toEqual([{ lot: '1', intitule: 'Gros œuvre', entreprise: 'BATI NANCY', nom: 'FERRAILLAGE LORRAIN', adresse: ['2 rue Y, 54000 Nancy'], objet: 'Armatures' }]);
+    expect(ok.body.sousTraitants).toEqual([{ lot: '01', intitule: 'Gros œuvre', entreprise: 'BATI NANCY', nom: 'FERRAILLAGE LORRAIN', adresse: ['2 rue Y, 54000 Nancy'], objet: 'Armatures' }]);
     expect(ok.body.operation).toBe('École publique');
     expect(ok.body.entreprises).toEqual([{ lot: '01', intitule: 'Gros œuvre', nom: 'BATI NANCY', adresse: ['1 rue X', '54000 Nancy'] }]);
     expect(JSON.stringify(ok.body)).not.toContain('data:image');
