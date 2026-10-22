@@ -3513,6 +3513,31 @@ Le sélecteur (`src/components/TenantSwitcher.tsx`) n'apparaît qu'à partir de
 deux cabinets ; un compte à cabinet unique ne voit rien changer, hormis
 l'entrée « Rejoindre ou créer un cabinet » qui mène à `/agency-setup?add=1`.
 
+### Connecteur MCP : changer d'agence sans reconnecter
+
+Un architecte qui exerce dans plusieurs structures (AAZS, AACZ) change d'agence depuis le connecteur par trois outils
+(`packages/archioffice-agents/src/server/mcp/agencyTools.ts`) : `list_agencies` (seulement les agences dont la personne est
+membre, son rôle, l'agence active), `get_active_agency` et `switch_agency` (`agency_id` exact, ou `query` : nom, code court ou
+sigle, ex. « AACZ »). Plusieurs correspondances : `needs_clarification` avec les candidats, rien n'est choisi.
+
+- **Persistance** : `mcp_connections.active_tenant_id` (`supabase/migrate_mcp_active_agency.sql`), propre à UNE connexion.
+  NULL = jamais changé : la connexion reste sur le cabinet du consentement (`tenant_id`, celui affiché dans l'interface
+  web à ce moment), donc les liaisons existantes ne changent pas. Le cabinet affiché dans le navigateur n'est jamais relu.
+  Le renouvellement du jeton conserve la sélection. Instance non migrée : `switch_agency` échoue proprement (rien ne change).
+- **Droits revérifiés à chaque appel** (`resolveAccessToken`, annuaire `server/mcpAgencyDirectory.ts` sur
+  `tenantMemberships.ts`) : la colonne est une préférence, jamais une autorisation. Appartenance perdue : `AGENCY_ACCESS_DENIED`
+  sur les outils de données comme sur `/api` (403), sans repli sur une autre agence ; les trois outils d'agence restent utilisables
+  pour en sortir. Codes : `AGENCY_UNKNOWN`, `AGENCY_ACCESS_DENIED`, `AGENCY_NOT_SELECTED`, `AGENCY_SWITCH_NOT_CONFIRMED`,
+  `AGENCY_MISMATCH`, `AGENCY_CONFIRMATION_REQUIRED`.
+- **Une agence stable par appel** (`mcp/dispatch.ts`) : instantané pris au début de l'appel, transmis aux appels internes par
+  `X-Tenant-Id` ; le middleware `/api` n'accepte cet en-tête pour un jeton `mcp_at_` que si la personne est membre maintenant.
+  Un `switch_agency` en cours d'exécution ne redirige donc pas un appel déjà démarré. Le ticket `create_upload_url` reprend ce même cabinet.
+- **Garde-fou `agency_id`** sur chaque outil de données (refus si différent de l'agence active). Une fois qu'une connexion a
+  changé d'agence, `confirm: true` EXIGE `agency_id`. Curseur de `list_projects` préfixé par le cabinet (`AGENCY_MISMATCH` ailleurs).
+- **Réponses** : `_meta.agency` ({ id, name, slug }) toujours, champ `agency` en tête d'un résultat objet, second bloc de
+  contenu pour une liste (le premier bloc garde sa forme). Instructions MCP : `MCP_INSTRUCTIONS` (`httpServer.ts`).
+- Tests : `tests/mcpAgencySwitching.test.ts` (vrai endpoint `/mcp`, données fictives).
+
 ### Visibilité des contacts personnels
 
 `contacts.is_personal` (`migrate_contacts_is_personal.sql`) existait déjà

@@ -36,6 +36,7 @@ import { extractDocumentText, MAX_EXTRACTED_TEXT_CHARS, withTextExtractionTimeou
 import { fetchBinaryUrlSafely } from '../webFetch.js';
 import { slimRecord } from '../tools.js';
 import { issueUploadUrl } from './uploadUrl.js';
+import { AGENCY_TOOLS, AGENCY_TOOL_NAMES, agencyError, AGENCY_ERROR, type McpToolResult } from './agencyTools.js';
 import { DOCUMENT_RESOURCE_TYPES, toSummary, fetchAttachedDocuments, depositDocument, downloadAttachedDocumentBytes } from '../documentTools.js';
 
 async function callApi(baseUrl: string, auth: InternalAuth, method: string, path: string, body?: unknown) {
@@ -487,6 +488,7 @@ const RICH_TOOL_NAMES = RICH_TOOLS.map(t => t.name);
 
 const LIST_PROJECTS_DEFAULT_LIMIT = 50;
 const LIST_PROJECTS_MAX_LIMIT = 100;
+const CURSOR_SEPARATOR = '~';
 
 // GET /api/projects rend la ligne entière, image_url (data-URI base64) comprise :
 // plusieurs centaines de milliers de caractères par affaire. On ne garde ici que
@@ -496,7 +498,17 @@ async function listProjects(baseUrl: string, auth: InternalAuth, args: Record<st
   const limit = Math.min(Math.max(Number.isFinite(requested) && requested > 0 ? Math.floor(requested) : LIST_PROJECTS_DEFAULT_LIMIT, 1), LIST_PROJECTS_MAX_LIMIT);
   const query = String(args.query || '').trim().toLowerCase();
   const matches: Record<string, unknown>[] = [];
-  let cursor: string | null = args.cursor ? String(args.cursor) : null;
+  // Un curseur est propre à son agence : préfixé par l'identifiant du cabinet,
+  // il est refusé tel quel après un changement d'agence (jamais réinterprété
+  // dans une autre liste). Un curseur sans préfixe (clients antérieurs) reste accepté.
+  let cursor: string | null = null;
+  if (args.cursor) {
+    const raw = String(args.cursor);
+    const sep = raw.indexOf(CURSOR_SEPARATOR);
+    if (sep === -1) cursor = raw;
+    else if (auth.tenantId && raw.slice(0, sep) === auth.tenantId) cursor = raw.slice(sep + 1);
+    else return agencyError(AGENCY_ERROR.mismatch, "Ce curseur provient d'une autre agence : relance la liste sans cursor.", null);
+  }
   let exhausted = false;
 
   // Avec un filtre, une page de l'API peut ne rien contenir de pertinent : on
@@ -520,7 +532,7 @@ async function listProjects(baseUrl: string, auth: InternalAuth, args: Record<st
     exhausted = !cursor;
   }
   const hasMore = matches.length === limit && !exhausted ? true : !!cursor && !exhausted;
-  return { content: [{ type: 'text' as const, text: JSON.stringify({ projects: matches, count: matches.length, next_cursor: hasMore ? cursor : null }) }] };
+  return { content: [{ type: 'text' as const, text: JSON.stringify({ projects: matches, count: matches.length, next_cursor: hasMore && cursor ? (auth.tenantId ? `${auth.tenantId}${CURSOR_SEPARATOR}${cursor}` : cursor) : null }) }] };
 }
 
 async function executeRichTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>) {
@@ -612,19 +624,34 @@ function genericTools(): FunctionDeclarationLike[] {
     ));
 }
 
-export const MCP_TOOLS: FunctionDeclarationLike[] = [...RICH_TOOLS, ...DOCUMENT_TOOLS, ...genericTools()];
+// Garde-fou d'agence, ajouté à chaque outil de données : si agency_id est fourni
+// et diffère de l'agence active, l'appel est refusé avant toute lecture ou
+// écriture (voir dispatch.ts). À passer pour toute écriture et obligatoire pour
+// un `confirm: true` une fois que la connexion a changé d'agence.
+const AGENCY_GUARD_PROPERTY = {
+  type: 'string',
+  description: "Optionnel — identifiant de l'agence pour laquelle tu agis (celui de agency.id dans les réponses). L'appel est refusé si l'agence active est différente ; indispensable pour confirmer (confirm: true) une action après un changement d'agence.",
+};
+
+function withAgencyGuard(tool: FunctionDeclarationLike): FunctionDeclarationLike {
+  const schema = tool.parametersJsonSchema as { properties?: Record<string, unknown> };
+  return { ...tool, parametersJsonSchema: { ...schema, type: 'object', properties: { ...(schema.properties || {}), agency_id: AGENCY_GUARD_PROPERTY } } };
+}
+
+export const MCP_TOOLS: FunctionDeclarationLike[] = [
+  ...AGENCY_TOOLS,
+  ...[...RICH_TOOLS, ...DOCUMENT_TOOLS, ...genericTools()].map(withAgencyGuard),
+];
 export const MCP_TOOL_NAMES = MCP_TOOLS.map(t => t.name);
 
-export type McpToolResult = {
-  [x: string]: unknown;
-  content: { type: 'text'; text: string }[];
-  isError?: boolean;
-};
+export type { McpToolResult };
 
 export async function executeMcpTool(baseUrl: string, auth: InternalAuth, name: string, args: Record<string, any>): Promise<McpToolResult> {
   if (name === 'delete_record') {
     return { content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Action non autorisée depuis cette liaison.' }) }], isError: true };
   }
+  // Les outils d'agence ont besoin de la connexion (dispatch.ts) : sans elle, rien à choisir.
+  if (AGENCY_TOOL_NAMES.includes(name)) return agencyError(AGENCY_ERROR.notSelected, "Le choix d'agence n'est disponible que depuis une connexion MCP authentifiée.", null);
   if (RICH_TOOL_NAMES.includes(name)) return executeRichTool(baseUrl, auth, name, args);
   if (DOCUMENT_TOOL_NAMES.includes(name)) return executeDocumentTool(baseUrl, auth, name, args);
 
