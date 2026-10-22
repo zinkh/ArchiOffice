@@ -9,6 +9,7 @@ import { mcpOAuthLimiter, mcpToolLimiter } from "./server/rateLimit";
 import { registerTelegramRoutes } from "./server/routes/telegram";
 import { registerMcpUploadRoute, MCP_UPLOAD_MAX_BYTES } from "./server/routes/mcpUpload";
 import { signMcpUploadTicket, MCP_UPLOAD_TICKET_TTL_SECONDS } from "./server/mcpUploadTicket";
+import { createMcpAgencyDirectory } from "./server/mcpAgencyDirectory";
 import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
 import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
 import { resolveAutomationApiKey } from "./server/automationApiKeys";
@@ -835,11 +836,22 @@ export async function createApp() {
       // donc pas de lookup en base pour un JWT Supabase mal formé.
       if (token.startsWith('mcp_at_')) {
         const { resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
-        const resolved = await resolveMcpAccessToken(supabaseAdmin, token);
-        if (resolved) {
+        // L'en-tête X-Tenant-Id n'est pas une autorisation : il fige l'agence
+        // d'un outil déjà démarré (voir mcp/dispatch.ts), et n'est retenu que si
+        // la personne est membre de ce cabinet MAINTENANT. Sans lui, c'est
+        // l'agence sélectionnée pour cette connexion, elle aussi revérifiée.
+        const pinned = (req.headers[TENANT_HEADER] as string | undefined)?.trim() || null;
+        const resolved = await resolveMcpAccessToken(supabaseAdmin, token, { pinnedTenantId: pinned });
+        if (resolved?.tenantId) {
           req.user = { id: resolved.userId };
           req.activeTenantId = resolved.tenantId;
           return proceed(resolved.userId, resolved.tenantId);
+        }
+        if (resolved) {
+          return res.status(403).json({
+            error: resolved.agencyState === 'access_lost' ? "Accès refusé à l'agence de cette connexion MCP." : "Aucune agence sélectionnée pour cette connexion MCP.",
+            code: resolved.agencyState === 'access_lost' ? 'AGENCY_ACCESS_DENIED' : 'AGENCY_NOT_SELECTED',
+          });
         }
       }
       // Même principe pour le bot Telegram (server/telegramBot.ts) : le
@@ -1157,7 +1169,7 @@ export async function createApp() {
 
   // ── Agents IA ─────────────────────────────────────────────────────────────
   // Logique métier dans @zinkh/archioffice-agents (package privé, licence propriétaire)
-  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint, setMcpUploadUrlIssuer, resolveMcpAccessToken } = await import('@zinkh/archioffice-agents/server');
+  const { registerAgentRoutes, registerAgentScheduleRoutes, setExternalFileReader, setDocumentParserSettingsClient, registerMcpOAuthRoutes, registerMcpEndpoint, setMcpUploadUrlIssuer, resolveMcpAccessToken, setMcpAgencyDirectory } = await import('@zinkh/archioffice-agents/server');
   // Le package agents n'importe rien depuis server/ (module propriétaire
   // autonome) et ne peut donc pas construire lui-même un adaptateur de
   // stockage. On lui en dépose un, comme initOAuthStateStore() le fait pour les
@@ -1218,6 +1230,7 @@ export async function createApp() {
     console.warn('[mcp] APP_URL non défini — le lien Gemini/MCP ne fonctionnera pas tant que cette variable ne pointe pas sur le domaine public HTTPS de cette instance.');
   }
   const mcpBaseUrl = process.env.APP_URL || `http://127.0.0.1:${PORT}`;
+  setMcpAgencyDirectory(createMcpAgencyDirectory(supabaseAdmin));
   registerMcpOAuthRoutes(app, supabaseAdmin, getTenantId, mcpBaseUrl);
   registerMcpEndpoint(app, supabaseAdmin, `http://127.0.0.1:${PORT}`);
   // create_upload_url : l'URL signée pointe sur le domaine public (APP_URL),
@@ -1226,8 +1239,10 @@ export async function createApp() {
     const publicBase = process.env.APP_URL?.replace(/\/$/, '');
     if (!publicBase) return { error: "APP_URL n'est pas configuré sur cette instance : utilise file_url à la place." };
     const token = request.authorization.startsWith('Bearer ') ? request.authorization.slice(7) : '';
-    const resolved = token ? await resolveMcpAccessToken(supabaseAdmin, token) : null;
-    if (!resolved) return { error: 'Session MCP invalide.' };
+    // L'agence du ticket est celle de l'appel d'outil en cours (figée), pas celle
+    // qu'une sélection ultérieure aurait pu remplacer ; son appartenance est revérifiée.
+    const resolved = token ? await resolveMcpAccessToken(supabaseAdmin, token, { pinnedTenantId: request.tenantId || null }) : null;
+    if (!resolved?.tenantId) return { error: 'Session MCP invalide ou accès à cette agence refusé.' };
     const ticket = signMcpUploadTicket({
       t: resolved.tenantId, u: resolved.userId, r: request.resource, i: request.resourceId,
       n: request.fileName, m: request.mimeType, c: request.category, d: request.description,

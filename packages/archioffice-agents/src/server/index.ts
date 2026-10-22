@@ -9,7 +9,7 @@ export { setExternalFileReader, type ExternalFileReader } from './externalFiles.
 export { registerMcpOAuthRoutes } from './mcp/oauthRoutes.js';
 export { registerMcpEndpoint } from './mcp/httpServer.js';
 export { setMcpUploadUrlIssuer, type UploadUrlIssuer, type UploadUrlRequest } from './mcp/uploadUrl.js';
-export { resolveAccessToken as resolveMcpAccessToken } from './mcp/store.js';
+export { resolveAccessToken as resolveMcpAccessToken, setMcpAgencyDirectory, type McpAgencyDirectory, type McpAgency } from './mcp/store.js';
 export { extractDocumentText, withTextExtractionTimeout, MAX_EXTRACTED_TEXT_CHARS } from './documentTextExtraction.js';
 export {
   describeDocumentParser, setDocumentParserEngine, setDocumentParserSettingsClient,
