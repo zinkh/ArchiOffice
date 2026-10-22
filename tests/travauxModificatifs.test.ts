@@ -28,15 +28,15 @@ describe('Ordres de service multi-entreprises', () => {
     const b = await post('tm-p1-m2', 'OS B');
     const c = await post('tm-p1-m1', 'OS C');
     expect(a.status).toBe(201);
-    // Chaque entreprise a sa suite : Petit démarre à 001 alors que Durand en est à 002.
-    expect(a.body.os_number).toBe('001');
-    expect(b.body.os_number).toBe('001');
-    expect(c.body.os_number).toBe('002');
+    // Chaque entreprise a sa suite, préfixée du lot : Petit démarre à 05-001 alors que Durand en est à 04-002.
+    expect(a.body.os_number).toBe('04-001');
+    expect(b.body.os_number).toBe('05-001');
+    expect(c.body.os_number).toBe('04-002');
     const durand = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1', marche_ids: 'tm-p1-m1' }).set(authHeader(token));
     const petit = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1', marche_ids: 'tm-p1-m2' }).set(authHeader(token));
     const global = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1' }).set(authHeader(token));
-    expect(durand.body.next).toBe('003');
-    expect(petit.body.next).toBe('002');
+    expect(durand.body.next).toBe('04-003');
+    expect(petit.body.next).toBe('05-002');
     expect(global.body.next).toBe('003');
   });
 
@@ -47,7 +47,7 @@ describe('Ordres de service multi-entreprises', () => {
       project_id: 'tm-p2', marche_ids: ['tm-p2-m1', 'tm-p2-m2'], title: 'Reprise de la dalle', date: '2026-10-02',
     });
     expect(res.status).toBe(201);
-    expect(res.body.os_number).toBe('002 / 001');
+    expect(res.body.os_number).toBe('04-002 / 05-001');
     expect(res.body.marche_id).toBe('tm-p2-m1');
     expect(res.body.marche_ids).toEqual(['tm-p2-m1', 'tm-p2-m2']);
     expect(res.body.numeros_entreprises.map((n: any) => n.numero)).toEqual([2, 1]);
@@ -121,7 +121,7 @@ describe('FTM et devis de travaux modificatifs', () => {
     const emis = await request(app).post(`/api/ftm/${ftm.body.id}/ordre-service`).set(authHeader(token));
     expect(emis.status).toBe(201);
     const os = emis.body.ordre;
-    expect(os.os_number).toBe('002 / 001');
+    expect(os.os_number).toBe('04-002 / 05-001');
     expect(os.title).toBe('Reprise de la dalle');
     expect(os.objet).toBe('Reprise de la dalle du R+1');
     expect(os.status).toBe('draft');

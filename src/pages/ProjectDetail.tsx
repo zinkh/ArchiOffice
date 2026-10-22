@@ -115,7 +115,7 @@ import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
 import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
-import { attribuerNumeros, cleEntreprise, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros } from '../lib/numerotationEntreprise';
+import { attribuerNumeros, cleEntrepriseLot, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros } from '../lib/numerotationEntreprise';
 import TravauxModificatifsTab from '../components/chantier/TravauxModificatifsTab';
 import { ResourceAttachments, uploadResourceFiles } from '../components/ResourceAttachments';
 import { PanneauPermisDialog } from '../components/PanneauPermisDialog';
@@ -1134,8 +1134,8 @@ export default function ProjectDetail() {
       const nums = travaux.map(o => parseInt(String(o.os_number), 10)).filter(n => Number.isFinite(n));
       return formatNumeroOs((nums.length ? Math.max(...nums) : 0) + 1);
     }
-    const cles = new Map<string, string>(marchesTravaux.map((m: any) => [m.id, cleEntreprise(m)]));
-    return resumeNumeros(attribuerNumeros(travaux, entreprisesDistinctes(visees), mid => cles.get(mid), numeroHeriteOs), formatNumeroOs);
+    const cles = new Map<string, string>(marchesTravaux.map((m: any) => [m.id, cleEntrepriseLot(m)]));
+    return resumeNumeros(attribuerNumeros(travaux, entreprisesDistinctes(visees, cleEntrepriseLot), mid => cles.get(mid), numeroHeriteOs), formatNumeroOs);
   };
 
   // Un OS peut s'adresser à plusieurs entreprises : une case par marché de travaux.

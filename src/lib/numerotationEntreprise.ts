@@ -108,13 +108,18 @@ export function resumeNumeros(numeros: NumeroEntreprise[], formater: (n: number,
   return numeros.map(n => formater(n.numero, n)).join(' / ');
 }
 
-export const formatNumeroOs = (n: number): string => String(n).padStart(3, '0');
+/** « 01-002 » : lot 01, deuxième OS de l'entreprise sur ce lot. Sans lot connu (aperçu à l'affaire) : « 002 ». */
+export const formatNumeroOs = (n: number, entree?: Pick<NumeroEntreprise, 'lot'>): string =>
+  entree ? `${lotPourNumero(entree.lot)}-${String(n).padStart(3, '0')}` : String(n).padStart(3, '0');
 /** « FTM-01-02 » : lot 01, deuxième fiche de ce lot (sans lot : « FTM-00-02 »). */
 export const formatNumeroFtm = (n: number, entree?: Pick<NumeroEntreprise, 'lot'>): string =>
   `FTM-${lotPourNumero(entree?.lot)}-${String(n).padStart(2, '0')}`;
 
-/** Numéro lu dans la colonne texte d'un OS (« 004 », « 002 / 001 » : le premier). */
-export const numeroHeriteOs = (l: LigneNumerotee & { os_number?: unknown }): number => parseInt(String(l.os_number ?? ''), 10) || 0;
+/** Numéro lu dans la colonne texte d'un OS : dernier groupe de chiffres du premier numéro (« 004 » : 4, « 01-002 / 02-001 » : 2). */
+export const numeroHeriteOs = (l: LigneNumerotee & { os_number?: unknown }): number => {
+  const m = String(l.os_number ?? '').split('/')[0].match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+};
 /** Numéro lu dans la colonne texte d'une FTM : le dernier groupe de chiffres du premier numéro (« FTM-01-02 » : 2). */
 export const numeroHeriteFtm = (l: LigneNumerotee & { numero?: unknown }): number => {
   const premier = String(l.numero ?? '').split('/')[0];

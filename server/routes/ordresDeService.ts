@@ -8,7 +8,7 @@ import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 import {
-  attribuerNumeros, cleEntreprise, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros, type NumeroEntreprise,
+  attribuerNumeros, cleEntrepriseLot, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros, type NumeroEntreprise,
 } from '../../src/lib/numerotationEntreprise';
 
 export interface RouteDeps {
@@ -44,12 +44,13 @@ export function marcheIdsVises(marcheId: unknown, marcheIds: unknown): string[] 
 async function numerosPourMarches(supabaseAdmin: any, tenantId: string, projectId: string, marches: any[]): Promise<NumeroEntreprise[]> {
   const [{ data: osRows }, { data: marchesProjet }] = await Promise.all([
     supabaseAdmin.from('ordres_de_service').select('*').eq('tenant_id', tenantId).eq('project_id', projectId),
-    supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom').eq('tenant_id', tenantId).eq('project_id', projectId),
+    supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom, lot_numero').eq('tenant_id', tenantId).eq('project_id', projectId),
   ]);
-  const cles = new Map<string, string>(((marchesProjet || []) as any[]).map(m => [m.id, cleEntreprise(m)]));
-  for (const m of marches) cles.set(m.id, cleEntreprise(m));
+  // Une suite par entreprise ET par lot : OS 01-001 pour le lot 01, 02-001 pour le lot 02.
+  const cles = new Map<string, string>(((marchesProjet || []) as any[]).map(m => [m.id, cleEntrepriseLot(m)]));
+  for (const m of marches) cles.set(m.id, cleEntrepriseLot(m));
   const travaux = ((osRows || []) as any[]).filter(r => !r.type || r.type === 'travaux');
-  return attribuerNumeros(travaux, entreprisesDistinctes(marches), id => cles.get(id), numeroHeriteOs);
+  return attribuerNumeros(travaux, entreprisesDistinctes(marches, cleEntrepriseLot), id => cles.get(id), numeroHeriteOs);
 }
 
 /**
@@ -58,7 +59,7 @@ async function numerosPourMarches(supabaseAdmin: any, tenantId: string, projectI
  */
 export async function prochainNumeroOs(supabaseAdmin: any, tenantId: string, projectId: string | undefined, marcheIds: string[] = []): Promise<string> {
   if (projectId && marcheIds.length) {
-    const { data } = await supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom').in('id', marcheIds).eq('tenant_id', tenantId);
+    const { data } = await supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom, lot_numero').in('id', marcheIds).eq('tenant_id', tenantId);
     const marches = marcheIds.map(id => ((data || []) as any[]).find(m => m.id === id)).filter(Boolean);
     if (marches.length) return resumeNumeros(await numerosPourMarches(supabaseAdmin, tenantId, projectId, marches), formatNumeroOs);
   }
@@ -67,8 +68,8 @@ export async function prochainNumeroOs(supabaseAdmin: any, tenantId: string, pro
   const { data } = await query;
   const nums = ((data || []) as any[])
     .filter(r => !r.type || r.type === 'travaux')
-    .map(r => parseInt(String(r.os_number), 10))
-    .filter(n => Number.isFinite(n));
+    .map(r => numeroHeriteOs(r))
+    .filter(n => n > 0);
   return formatNumeroOs((nums.length ? Math.max(...nums) : 0) + 1);
 }
 

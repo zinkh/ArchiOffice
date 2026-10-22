@@ -33,7 +33,7 @@ describe('numérotation par entreprise', () => {
     ] }];
     const numeros = attribuerNumeros(lignes, entreprisesDistinctes(marches), cleDe, numeroHeriteOs);
     expect(numeros.map(n => n.numero)).toEqual([6, 3]);
-    expect(resumeNumeros(numeros, formatNumeroOs)).toBe('006 / 003');
+    expect(resumeNumeros(numeros, formatNumeroOs)).toBe('00-006 / 00-003');
   });
 
   it('formate et relit les numéros', () => {
@@ -42,6 +42,9 @@ describe('numérotation par entreprise', () => {
     expect(numeroHeriteFtm({ numero: 'FTM-02-07' } as any)).toBe(7);
     expect(numeroHeriteFtm({ numero: 'FTM-02-07 / FTM-01-03' } as any)).toBe(7);
     expect(numeroHeriteOs({ os_number: '002 / 001' } as any)).toBe(2);
+    expect(numeroHeriteOs({ os_number: '04-012 / 05-001' } as any)).toBe(12);
+    expect(formatNumeroOs(2, { lot: '4' })).toBe('04-002');
+    expect(formatNumeroOs(2)).toBe('002');
     expect(numeroHeriteOs({} as any)).toBe(0);
   });
 
