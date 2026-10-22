@@ -18,7 +18,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import {
   PLANNING_VIDE, estDateIso, planningDepuisReponse, sanitizePlanning, type LotPlanifiable,
 } from '../../src/lib/planningChantier';
-import { sourcesPourPlanning, texteSourceLot } from '../planningSources';
+import { associerMarches, sourcesPourPlanning, texteSourceLot, type MarcheLigne } from '../planningSources';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -107,7 +107,12 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
       if (error) return isMissingTable(error)
         ? res.json({ available: false, planning: PLANNING_VIDE, updated_at: null })
         : res.status(500).json({ error: 'Lecture impossible.' });
-      res.json({ available: true, planning: sanitizePlanning((data as any)?.data), updated_at: (data as any)?.updated_at ?? null });
+      // Entreprises titulaires par lot (marchés rapprochés des lots) : la fiche du lot n'en porte pas toujours.
+      const entreprises: Record<string, string> = {};
+      try {
+        for (const l of (await chargerLots(tenantId, req.params.projectId, null)).lots) if (l.contact_name) entreprises[l.id] = l.contact_name;
+      } catch { /* complément : jamais une raison de refuser la lecture */ }
+      res.json({ available: true, planning: sanitizePlanning((data as any)?.data), updated_at: (data as any)?.updated_at ?? null, entreprises });
     } catch (error) {
       console.error('[GET /api/projects/:projectId/planning-chantier]', error);
       res.status(500).json({ error: 'Lecture impossible.' });
@@ -147,21 +152,27 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
     }
     // Les marchés sont un complément : leur absence (instance non migrée) ne bloque pas la génération.
     const { data: marchesRows } = await tenantScopedFrom(supabaseAdmin, tenantId, 'marches_entreprises')
-      .select('entreprise_nom, lot_numero, montant_ht, duree_mois, date_os, statut').eq('project_id', projectId);
-    const marches: any[] = (marchesRows as any[]) || [];
-    const normal = (n: unknown) => String(n ?? '').trim().replace(/^0+(?=\d)/, '');
-    return lots.map(l => {
-      const marche = marches.find(m => normal(m.lot_numero) === normal(l.lot_number) && m.statut !== 'resilie');
-      const montant = Number(marche?.montant_ht) || (Number(l.base_amount) || 0) + (Number(l.options_amount) || 0) + (Number(l.amendments_amount) || 0);
-      return {
-        id: l.id as string,
-        lot_number: String(l.lot_number ?? ''),
-        lot_title: String(l.lot_title ?? ''),
-        contact_name: marche?.entreprise_nom || (l.contact_id ? noms.get(l.contact_id) : undefined) || l.contact_name || undefined,
-        montant_ht: montant > 0 ? Math.round(montant) : null,
-        duree_mois: Number(marche?.duree_mois) > 0 ? Number(marche.duree_mois) : null,
-      };
-    });
+      .select('entreprise_nom, lot_numero, lot_titre, montant_ht, duree_mois, statut').eq('project_id', projectId);
+    // Rapprochement par intitulé (le numéro d'un marché ne suit pas toujours celui du lot), voir planningSources.ts.
+    const { parLot, sansLot } = associerMarches(
+      lots.map(l => ({ id: l.id, lot_number: String(l.lot_number ?? ''), lot_title: String(l.lot_title ?? '') })),
+      (marchesRows as MarcheLigne[]) || [],
+    );
+    return {
+      sansLot,
+      lots: lots.map(l => {
+        const marche = parLot.get(l.id);
+        const montant = marche?.montantHt || (Number(l.base_amount) || 0) + (Number(l.options_amount) || 0) + (Number(l.amendments_amount) || 0);
+        return {
+          id: l.id as string,
+          lot_number: String(l.lot_number ?? ''),
+          lot_title: String(l.lot_title ?? ''),
+          contact_name: marche?.entreprises.join(' / ') || (l.contact_id ? noms.get(l.contact_id) : undefined) || l.contact_name || undefined,
+          montant_ht: montant > 0 ? Math.round(montant) : null,
+          duree_mois: marche?.dureeMois ?? null,
+        };
+      }),
+    };
   }
 
   app.post('/api/projects/:projectId/planning-chantier/generate', aiGenerationLimiter, async (req: any, res: any) => {
@@ -177,7 +188,8 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
       const instructions = str(req.body?.instructions, MAX_INSTRUCTIONS_CHARS);
       const lotIds = Array.isArray(req.body?.lot_ids) ? new Set<string>(req.body.lot_ids.filter((id: unknown) => typeof id === 'string')) : null;
 
-      const lots = (await chargerLots(tenantId, projectId, lotIds)).slice(0, MAX_LOTS);
+      const { lots: tousLots, sansLot: marchesHorsLot } = await chargerLots(tenantId, projectId, lotIds);
+      const lots = tousLots.slice(0, MAX_LOTS);
       if (!lots.length) return res.status(400).json({ error: 'Aucun lot à planifier : renseignez d’abord les lots de l’opération.' });
 
       // Le DPGF et le CCTP de l'opération sont le point de départ quand ils existent.
@@ -227,7 +239,7 @@ export function registerPlanningChantierRoutes(app: Express, deps: RouteDeps) {
 Démarrage des travaux : semaine du ${dateDebut} (semaine 1).${dureeCible > 0 ? `\nDurée totale visée : environ ${dureeCible} semaines, réception comprise.` : ''}${sources.batiments.length ? `\nBâtiments, dans l'ordre du document : ${sources.batiments.join(', ')}.` : ''}${sources.phases.length ? `\nPhases de l'opération : ${sources.phases.join(', ')}.` : ''}${instructions ? `\nConsignes de l'architecte : ${instructions}` : ''}
 
 Lots à planifier :
-${lignesLots.join('\n')}
+${lignesLots.join('\n')}${marchesHorsLot.length ? `\n\nMarchés sans lot (tâches générales du chantier) : ${marchesHorsLot.map(m => `${m.lot_titre || 'sans intitulé'}${m.entreprise_nom ? ` (${m.entreprise_nom})` : ''}${Number(m.montant_ht) > 0 ? `, ${Math.round(Number(m.montant_ht))} € HT` : ''}`).join(' ; ')}.` : ''}
 ${pieces ? `\nPièces de l'affaire (planning d'entreprise, notices, phasage) :${pieces}\n` : ''}
 Réponds UNIQUEMENT avec un JSON valide (sans markdown) conforme à ce schéma :
 ${JSON.stringify(PLANNING_SCHEMA)}`;

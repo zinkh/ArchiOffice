@@ -58,9 +58,11 @@ export default function PlanningChantierTab({ project, lots, settings, showToast
   const [enExport, setEnExport] = useState<string | null>(null);
 
   const base = `/api/projects/${encodeURIComponent(project.id)}/planning-chantier`;
+  // Entreprises titulaires issues des marchés, rapprochés des lots par le serveur : la fiche du lot n'en porte pas toujours.
+  const [entreprises, setEntreprises] = useState<Record<string, string>>({});
   const lotsPlanif = useMemo(
-    () => lots.map(l => ({ id: l.id, lot_number: String(l.lot_number ?? ''), lot_title: l.lot_title, contact_name: l.contact_name })),
-    [lots],
+    () => lots.map(l => ({ id: l.id, lot_number: String(l.lot_number ?? ''), lot_title: l.lot_title, contact_name: l.contact_name || entreprises[l.id] })),
+    [lots, entreprises],
   );
 
   // ── Lecture et enregistrement automatique ──
@@ -95,12 +97,12 @@ export default function PlanningChantierTab({ project, lots, settings, showToast
   useEffect(() => {
     let annule = false;
     setLu(false); setErreurLecture(null);
-    apiFetch<{ available: boolean; planning: unknown }>(base)
+    apiFetch<{ available: boolean; planning: unknown; entreprises?: Record<string, string> }>(base)
       .then(r => {
         if (annule) return;
         const relu = sanitizePlanning(r.planning);
         dernier.current = relu; version.current = 0; enregistree.current = 0;
-        setPlanning(relu); setDisponible(r.available !== false); setLu(true);
+        setPlanning(relu); setDisponible(r.available !== false); setEntreprises(r.entreprises ?? {}); setLu(true);
       })
       .catch((e: any) => { if (!annule) setErreurLecture(e?.message || 'Lecture du planning impossible.'); });
     return () => { annule = true; void vider(); };
@@ -261,11 +263,15 @@ export default function PlanningChantierTab({ project, lots, settings, showToast
                 <div key={ligne.lot?.id ?? 'general'}>
                   <div className="flex" style={{ background: surface2, borderBottom: '1px solid var(--tblr-border)' }}>
                     <div className="shrink-0 sticky left-0 z-[5] px-3 py-1.5 w-[var(--etiq)]" style={{ background: surface2 }}>
-                      <div className="text-xs font-bold text-[var(--tblr-text)] truncate">
+                      <div className="text-xs font-bold text-[var(--tblr-text)] truncate" title={ligne.lot ? `Lot ${ligne.lot.lot_number} · ${ligne.lot.lot_title}` : undefined}>
                         {ligne.lot ? `Lot ${ligne.lot.lot_number} · ${ligne.lot.lot_title}` : 'Tâches générales'}
                       </div>
+                      {ligne.lot && (
+                        <div className="text-[0.6875rem] text-[var(--tblr-muted)] truncate" title={ligne.lot.contact_name || undefined}>
+                          {ligne.lot.contact_name || 'Entreprise à désigner'}
+                        </div>
+                      )}
                       <div className="flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)]">
-                        <span className="truncate">{ligne.lot?.contact_name || (ligne.lot ? 'Entreprise à désigner' : '')}</span>
                         <span className="shrink-0">{ligne.avancement} %</span>
                         <button type="button" className="shrink-0 px-1 rounded hover:underline pointer-coarse:min-h-11 pointer-coarse:px-2"
                           aria-label={`Ajouter une tâche au ${ligne.lot ? `lot ${ligne.lot.lot_number}` : 'chantier'}`}
@@ -348,7 +354,8 @@ export default function PlanningChantierTab({ project, lots, settings, showToast
       {genererOuvert && (
         <PlanningGenerateDialog
           projectId={project.id}
-          debutProjet={project.start_date}
+          // Une fiche dont le début et la fin sont identiques n'a pas de vraies dates de travaux.
+          debutProjet={project.start_date && project.end_date && project.end_date > project.start_date ? project.start_date : undefined}
           lots={lotsPlanif}
           aDuManuel={planning.taches.some(t => t.source === 'manuel')}
           onApply={appliquerIa}

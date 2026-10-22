@@ -2259,6 +2259,14 @@ vide (`available: false`) et refuse l'écriture en 503.
   lundi à vendredi). Un lot inconnu est écarté, le planning ne crée jamais de lot. La route **ne propose qu'une
   proposition** : `appliquerGeneration` remplace les tâches IA des lots générés et garde, au choix, le manuel.
   Modifier une tâche IA la fait passer en `manuel`. Facturé en réserve → exécute → règle, `endpoint_type = 'planning_generation'`.
+- **Marchés rapprochés des lots par intitulé, pas par numéro** (`associerMarches`, `server/planningSources.ts`, testé sur les vrais
+  lots d'une affaire où le marché 09 « Peinture » répond au lot 07 et les marchés 10 et 11 au lot 09) : chaque marché va au lot
+  dont l'intitulé lui ressemble le plus (le numéro identique ne fait que départager, et seul un marché sans intitulé se rapproche
+  par son numéro), les marchés d'un même lot s'additionnent, un marché sans lot (installation de chantier) est donné au modèle
+  comme tâche générale. `GET .../planning-chantier` rend `entreprises` (lot → titulaires) pour l'écran.
+- **Un DPGF peu chiffré reste exploitable** : aucun « (0 € HT) », un groupe de sous-articles compte pour un poste (« Couverture
+  métallique (3 postes) »), les lignes « Nouvel article » sont ignorées, et dans le texte du CCTP les prescriptions des ouvrages
+  passent avant le texte générique des chapitres réservés au CCTP (que le plafond de 900 caractères coupe en dernier).
 - **Enregistrement automatique** (1,2 s, écritures chaînées, rien avant la fin de la lecture), comme la consultation ACT.
 - **PDF** (`planningChantierPdf.ts`, charte du cabinet, « P1|2 ») : complet, ou un lot seul à remettre à son entreprise.
 - **Pas encore fait** : glisser-déposer des barres, dépendances entre tâches, liaison avec les jalons de mission.

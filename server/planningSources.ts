@@ -25,29 +25,114 @@ export interface SourcesPlanning {
 }
 
 const MAX_CHAPITRES = 12;
-const MAX_OUVRAGES = 5;
+const MAX_OUVRAGES = 6;
 const MAX_CCTP_CHARS = 900;
 
 const normal = (n: unknown) => String(n ?? '').trim().toLowerCase().replace(/^lot\s*/, '').replace(/^0+(?=\d)/, '');
 const nombre = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 const propre = (t: unknown) => String(t ?? '').replace(/\s+/g, ' ').trim();
 
-/** Lignes d'ouvrage comptées en base (ni option, ni variante, ni pour mémoire), sous-articles compris. */
+// ── Marchés ↔ lots ───────────────────────────────────────────────────────────
+// Le numéro d'un marché ne suit pas toujours celui du lot (sur une affaire réelle :
+// marché 09 « Peinture » pour le lot 07, marchés 10 et 11 pour le lot 09 CVC-plomberie,
+// marché 12 « Électricité » pour le lot 10). Le rapprochement par numéro seul attachait
+// donc la mauvaise entreprise et le mauvais montant : on compare les intitulés, le
+// numéro identique ne faisant que départager.
+
+export interface MarcheLigne {
+  entreprise_nom?: string | null;
+  lot_numero?: string | null;
+  lot_titre?: string | null;
+  montant_ht?: number | string | null;
+  duree_mois?: number | string | null;
+  statut?: string | null;
+}
+
+export interface MarcheDuLot { entreprises: string[]; montantHt: number | null; dureeMois: number | null }
+
+const MOTS_VIDES = new Set(['des', 'les', 'aux', 'pour', 'sur', 'avec', 'dans', 'une', 'travaux', 'lot', 'ouvrages']);
+const mots = (t: unknown): Set<string> => new Set(
+  String(t ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().split(/[^a-z0-9]+/)
+    .filter(m => m.length >= 3 && !MOTS_VIDES.has(m)),
+);
+const SEUIL_RAPPROCHEMENT = 0.5;
+
+function scoreMarche(lot: LotPlanifiable, marche: MarcheLigne): number {
+  const a = mots(lot.lot_title);
+  const b = mots(marche.lot_titre);
+  const memeNumero = normal(lot.lot_number) === normal(marche.lot_numero);
+  // Sans intitulé à comparer, seul le numéro peut rapprocher.
+  if (!a.size || !b.size) return memeNumero ? 1 : 0;
+  const communs = [...a].filter(m => b.has(m)).length;
+  return communs / Math.min(a.size, b.size) + (memeNumero ? 0.4 : 0);
+}
+
+/** Chaque marché va au lot qui lui ressemble le plus ; un marché sans lot est rendu à part (installation de chantier...). */
+export function associerMarches(lots: LotPlanifiable[], marches: MarcheLigne[]): { parLot: Map<string, MarcheDuLot>; sansLot: MarcheLigne[] } {
+  const brut = new Map<string, MarcheLigne[]>();
+  const sansLot: MarcheLigne[] = [];
+  for (const m of marches) {
+    if (m.statut === 'resilie') continue;
+    let meilleur: { lot: LotPlanifiable; score: number } | null = null;
+    for (const lot of lots) {
+      const score = scoreMarche(lot, m);
+      if (score >= SEUIL_RAPPROCHEMENT && (!meilleur || score > meilleur.score)) meilleur = { lot, score };
+    }
+    if (!meilleur) { sansLot.push(m); continue; }
+    brut.set(meilleur.lot.id, [...(brut.get(meilleur.lot.id) ?? []), m]);
+  }
+  const parLot = new Map<string, MarcheDuLot>();
+  for (const [lotId, liste] of brut) {
+    const montant = liste.reduce((n, m) => n + nombre(m.montant_ht), 0);
+    const duree = Math.max(0, ...liste.map(m => nombre(m.duree_mois)));
+    parLot.set(lotId, {
+      entreprises: [...new Set(liste.map(m => propre(m.entreprise_nom)).filter(Boolean))],
+      montantHt: montant > 0 ? Math.round(montant) : null,
+      dureeMois: duree > 0 ? duree : null,
+    });
+  }
+  return { parLot, sansLot };
+}
+
+const PLACEHOLDER = /^\s*(nouvel article|nouveau chapitre)\s*$/i;
+
+/** Feuilles chiffrables en base (ni option, ni variante, ni pour mémoire, ni ligne vide par défaut), sous-articles compris. */
 function ouvragesDe(lignes: any[], sortie: any[] = []): any[] {
   for (const l of lignes ?? []) {
     if (l?.cctpOnly) continue;
     if (Array.isArray(l?.children) && l.children.length) ouvragesDe(l.children, sortie);
-    else if (l?.type === 'ouvrage' || l?.type === undefined) {
+    else if ((l?.type === 'ouvrage' || l?.type === undefined) && !PLACEHOLDER.test(String(l?.designation ?? ''))) {
       if ((l?.nature ?? 'base') === 'base' && !l?.pourMemoire) sortie.push(l);
     }
   }
   return sortie;
 }
 
-function textesCctp(lignes: any[], sortie: string[] = []): string[] {
+interface PosteChapitre { libelle: string; montant: number }
+
+/** Les postes d'un chapitre, tels qu'on les lit dans le DPGF : un groupe (« Couverture métallique ») compte pour un, avec ses sous-articles. */
+function postesDe(lignes: any[]): PosteChapitre[] {
+  const postes: PosteChapitre[] = [];
   for (const l of lignes ?? []) {
-    if (l?.cctpDescription) sortie.push(propre(l.cctpDescription));
-    if (Array.isArray(l?.children)) textesCctp(l.children, sortie);
+    const feuilles = ouvragesDe([l]);
+    if (!feuilles.length) continue;
+    const nom = propre(l?.designation);
+    const montant = feuilles.reduce((n, o) => n + nombre(o.prixTotal), 0);
+    const groupe = Array.isArray(l?.children) && l.children.length > 0;
+    const libelle = groupe
+      ? `${nom} (${feuilles.length} poste${feuilles.length > 1 ? 's' : ''})`
+      : `${nom}${nombre(l.quantite) > 0 ? ` (${nombre(l.quantite)}${propre(l.unite) ? ` ${propre(l.unite)}` : ''})` : ''}`;
+    postes.push({ libelle: libelle.slice(0, 120), montant });
+  }
+  return postes;
+}
+
+/** Prescriptions CCTP portées par les articles, chacune précédée de l'ouvrage qu'elle décrit. */
+function prescriptionsDes(lignes: any[], sortie: string[] = []): string[] {
+  for (const l of lignes ?? []) {
+    const texte = propre(l?.cctpDescription);
+    if (texte) sortie.push(l?.designation && !PLACEHOLDER.test(String(l.designation)) ? `${propre(l.designation)} : ${texte}` : texte);
+    if (Array.isArray(l?.children)) prescriptionsDes(l.children, sortie);
   }
   return sortie;
 }
@@ -65,23 +150,30 @@ export function sourcesPourPlanning(dpgf: any, lots: LotPlanifiable[]): SourcesP
     const lot = (lotDoc?.projectLotId && parId.get(lotDoc.projectLotId)) || parNumero.get(normal(lotDoc?.numero));
     if (!lot) continue;
     const chapitres: SourceLot['chapitres'] = [];
-    const cctp: string[] = lotDoc?.cctpDescription ? [propre(lotDoc.cctpDescription)] : [];
+    // Du plus utile au plus générique : les prescriptions des ouvrages décrits d'abord, le texte général des
+    // chapitres réservés au CCTP (objet du document, conditions contractuelles...) en dernier, où le plafond le coupe.
+    const prescriptions: string[] = [];
+    const generales: string[] = [];
+    const generalesLot: string[] = lotDoc?.cctpDescription ? [propre(lotDoc.cctpDescription)] : [];
     for (const chap of lotDoc?.chapitres ?? []) {
-      if (chap?.cctpDescription) cctp.push(propre(chap.cctpDescription));
-      cctp.push(...textesCctp(chap?.lignes ?? []));
-      if (chap?.cctpOnly) continue;
-      const ouvrages = ouvragesDe(chap?.lignes ?? []);
-      if (!ouvrages.length) continue;
-      const tries = [...ouvrages].sort((a, b) => nombre(b.prixTotal) - nombre(a.prixTotal));
+      if (chap?.cctpOnly) {
+        if (chap?.cctpDescription) generales.push(propre(chap.cctpDescription));
+        generales.push(...prescriptionsDes(chap?.lignes ?? []));
+        continue;
+      }
+      if (chap?.cctpDescription) generalesLot.push(propre(chap.cctpDescription));
+      prescriptions.push(...prescriptionsDes(chap?.lignes ?? []));
+      const postes = postesDe(chap?.lignes ?? []);
+      if (!postes.length) continue;
+      const tries = [...postes].sort((x, y) => y.montant - x.montant);
       chapitres.push({
         numero: propre(chap?.numero),
         titre: propre(chap?.titre),
-        montantHt: Math.round(ouvrages.reduce((n, o) => n + nombre(o.prixTotal), 0)),
-        ouvrages: tries.slice(0, MAX_OUVRAGES).map(o =>
-          `${propre(o.designation)}${nombre(o.quantite) > 0 ? ` (${nombre(o.quantite)} ${propre(o.unite)})` : ''}`.slice(0, 120)),
+        montantHt: Math.round(postes.reduce((n, o) => n + o.montant, 0)),
+        ouvrages: tries.slice(0, MAX_OUVRAGES).map(o => o.libelle),
       });
     }
-    const texte = cctp.filter(Boolean).join(' ');
+    const texte = [...new Set([...prescriptions, ...generalesLot, ...generales].filter(Boolean))].join(' ');
     if (texte) aCctp = true;
     if (!chapitres.length && !texte) continue;
     sortie.push({
@@ -106,7 +198,7 @@ export function sourcesPourPlanning(dpgf: any, lots: LotPlanifiable[]): SourcesP
 /** Le bloc de texte donné au modèle pour un lot. */
 export function texteSourceLot(source: SourceLot | undefined): string {
   if (!source) return '';
-  const lignes = source.chapitres.map(c => `  - ${c.numero ? `${c.numero} ` : ''}${c.titre} (${c.montantHt} € HT) : ${c.ouvrages.join(' ; ')}`);
+  const lignes = source.chapitres.map(c => `  - ${c.numero ? `${c.numero} ` : ''}${c.titre}${c.montantHt > 0 ? ` (${c.montantHt} € HT)` : ''} : ${c.ouvrages.join(' ; ')}`);
   return [
     source.chapitres.length ? `  DPGF, ${source.chapitres.length} chapitre${source.chapitres.length > 1 ? 's' : ''} :` : '',
     ...lignes,
