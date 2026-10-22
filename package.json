@@ -119,7 +119,7 @@
     "@types/sanitize-html": "^2.16.2",
     "@types/supertest": "^7.2.1",
     "@types/web-push": "^3.6.4",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "^6.1.2",
     "autoprefixer": "^10.6.1",
     "electron": "^44.7.0",
     "electron-builder": "^26.15.3",
