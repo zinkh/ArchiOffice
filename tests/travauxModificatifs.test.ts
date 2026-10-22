@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
-import { prochainNumeroFtm } from '../server/routes/travauxModificatifs';
 import { marcheIdsVises } from '../server/routes/ordresDeService';
 
 let app: Express;
@@ -22,26 +21,36 @@ function setup(projectId: string) {
 }
 
 describe('Ordres de service multi-entreprises', () => {
-  it('numérote automatiquement, sans tenir compte du numéro envoyé', async () => {
+  it('numérote automatiquement par entreprise, sans tenir compte du numéro envoyé', async () => {
     const { token } = setup('tm-p1');
-    const a = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({ project_id: 'tm-p1', marche_id: 'tm-p1-m1', os_number: '999', title: 'OS A', date: '2026-10-01' });
-    const b = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({ project_id: 'tm-p1', marche_id: 'tm-p1-m2', title: 'OS B', date: '2026-10-02' });
+    const post = (marche: string, title: string, extra: any = {}) => request(app).post('/api/ordres_de_service').set(authHeader(token)).send({ project_id: 'tm-p1', marche_id: marche, title, date: '2026-10-01', ...extra });
+    const a = await post('tm-p1-m1', 'OS A', { os_number: '999' });
+    const b = await post('tm-p1-m2', 'OS B');
+    const c = await post('tm-p1-m1', 'OS C');
     expect(a.status).toBe(201);
+    // Chaque entreprise a sa suite : Petit démarre à 001 alors que Durand en est à 002.
     expect(a.body.os_number).toBe('001');
-    expect(b.body.os_number).toBe('002');
-    const next = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1' }).set(authHeader(token));
-    expect(next.body.next).toBe('003');
+    expect(b.body.os_number).toBe('001');
+    expect(c.body.os_number).toBe('002');
+    const durand = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1', marche_ids: 'tm-p1-m1' }).set(authHeader(token));
+    const petit = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1', marche_ids: 'tm-p1-m2' }).set(authHeader(token));
+    const global = await request(app).get('/api/ordres_de_service/next-number').query({ project_id: 'tm-p1' }).set(authHeader(token));
+    expect(durand.body.next).toBe('003');
+    expect(petit.body.next).toBe('002');
+    expect(global.body.next).toBe('003');
   });
 
-  it('adresse un OS à plusieurs entreprises, un seul numéro', async () => {
+  it('adresse un OS à plusieurs entreprises : un numéro dans la suite de chacune', async () => {
     const { token } = setup('tm-p2');
+    await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({ project_id: 'tm-p2', marche_id: 'tm-p2-m1', title: 'Premier', date: '2026-10-01' });
     const res = await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({
-      project_id: 'tm-p2', marche_ids: ['tm-p2-m1', 'tm-p2-m2'], title: 'Reprise de la dalle', date: '2026-10-01',
+      project_id: 'tm-p2', marche_ids: ['tm-p2-m1', 'tm-p2-m2'], title: 'Reprise de la dalle', date: '2026-10-02',
     });
     expect(res.status).toBe(201);
-    expect(res.body.os_number).toBe('001');
+    expect(res.body.os_number).toBe('002 / 001');
     expect(res.body.marche_id).toBe('tm-p2-m1');
     expect(res.body.marche_ids).toEqual(['tm-p2-m1', 'tm-p2-m2']);
+    expect(res.body.numeros_entreprises.map((n: any) => n.numero)).toEqual([2, 1]);
     expect(res.body.entreprise).toBe('Maçonnerie Durand ; Charpente Petit');
     expect(res.body.destinataire_os).toBe('Maçonnerie Durand ; Charpente Petit');
   });
@@ -63,14 +72,17 @@ describe('Ordres de service multi-entreprises', () => {
 });
 
 describe('FTM et devis de travaux modificatifs', () => {
-  it('numérote les FTM par affaire et rattache les devis', async () => {
+  it('numérote les FTM par entreprise et rattache les devis', async () => {
     const { token } = setup('tm-p4');
-    const f1 = await request(app).post('/api/projects/tm-p4/ftm').set(authHeader(token)).send({ title: 'Reprise en sous-oeuvre', marche_ids: ['tm-p4-m1'], origine: 'aleas' });
-    const f2 = await request(app).post('/api/projects/tm-p4/ftm').set(authHeader(token)).send({ title: 'Renfort charpente', numero: 'FTM-99' });
+    const creer = (corps: any) => request(app).post('/api/projects/tm-p4/ftm').set(authHeader(token)).send(corps);
+    const f1 = await creer({ title: 'Reprise en sous-oeuvre', marche_ids: ['tm-p4-m1'], origine: 'aleas' });
+    const f2 = await creer({ title: 'Renfort charpente', marche_ids: ['tm-p4-m2'], numero: 'FTM-99' });
+    const f3 = await creer({ title: 'Seconde pour Durand', marche_ids: ['tm-p4-m1'] });
+    const f4 = await creer({ title: 'Commune aux deux', marche_ids: ['tm-p4-m1', 'tm-p4-m2'] });
+    const f5 = await creer({ title: 'Sans entreprise' });
     expect(f1.status).toBe(201);
-    expect(f1.body.numero).toBe('FTM-01');
     expect(f1.body.status).toBe('brouillon');
-    expect(f2.body.numero).toBe('FTM-02');
+    expect([f1, f2, f3, f4, f5].map(f => f.body.numero)).toEqual(['FTM-01', 'FTM-01', 'FTM-02', 'FTM-03 / FTM-02', 'FTM-01']);
 
     const devis = await request(app).post('/api/projects/tm-p4/devis-travaux-modificatifs').set(authHeader(token)).send({
       objet: 'Micropieux supplémentaires', marche_id: 'tm-p4-m1', montant_ht: 12500, date_reception: '2026-10-15', ftm_id: f1.body.id,
@@ -90,6 +102,49 @@ describe('FTM et devis de travaux modificatifs', () => {
     expect(liste.body[0].ftm_id).toBeNull();
   });
 
+  it('émet un OS prérempli depuis une FTM validée, numéroté dans la suite de chaque entreprise', async () => {
+    const { token } = setup('tm-p6');
+    // Un OS déjà émis à Durand : le suivant sera le 002 de Durand et le 001 de Petit.
+    await request(app).post('/api/ordres_de_service').set(authHeader(token)).send({ project_id: 'tm-p6', marche_id: 'tm-p6-m1', title: 'Déjà émis', date: '2026-10-01' });
+    const ftm = await request(app).post('/api/projects/tm-p6/ftm').set(authHeader(token)).send({
+      title: 'Reprise de la dalle', objet: 'Reprise de la dalle du R+1', motif: 'Défaut de planéité', description: 'Ragréage fibré',
+      marche_ids: ['tm-p6-m1', 'tm-p6-m2'], origine: 'entreprise', incidence_delai_jours: 5, montant_estime_ht: 9000,
+    });
+    await request(app).post('/api/projects/tm-p6/devis-travaux-modificatifs').set(authHeader(token)).send({ objet: 'Devis A', marche_id: 'tm-p6-m1', montant_ht: 4000, statut: 'accepte', ftm_id: ftm.body.id });
+    await request(app).post('/api/projects/tm-p6/devis-travaux-modificatifs').set(authHeader(token)).send({ objet: 'Devis B', marche_id: 'tm-p6-m2', montant_ht: 3500, statut: 'accepte', ftm_id: ftm.body.id });
+
+    // Brouillon : pas encore d'OS.
+    const trop_tot = await request(app).post(`/api/ftm/${ftm.body.id}/ordre-service`).set(authHeader(token));
+    expect(trop_tot.status).toBe(409);
+
+    await request(app).put(`/api/ftm/${ftm.body.id}`).set(authHeader(token)).send({ status: 'validee' });
+    const emis = await request(app).post(`/api/ftm/${ftm.body.id}/ordre-service`).set(authHeader(token));
+    expect(emis.status).toBe(201);
+    const os = emis.body.ordre;
+    expect(os.os_number).toBe('002 / 001');
+    expect(os.title).toBe('Reprise de la dalle');
+    expect(os.objet).toBe('Reprise de la dalle du R+1');
+    expect(os.status).toBe('draft');
+    expect(os.marche_ids).toEqual(['tm-p6-m1', 'tm-p6-m2']);
+    expect(os.origine_demande).toBe('autres');
+    expect(os.incidences_delais_type).toBe('oui');
+    // Aucun montant décidé sur la fiche : somme des devis acceptés.
+    expect(Number(os.montant_devis_presente)).toBe(7500);
+    expect(os.description).toContain('Défaut de planéité');
+    expect(emis.body.ftm.ordre_service_id).toBe(os.id);
+
+    const deuxieme = await request(app).post(`/api/ftm/${ftm.body.id}/ordre-service`).set(authHeader(token));
+    expect(deuxieme.status).toBe(409);
+  });
+
+  it('refuse l\'émission d\'un OS pour une FTM sans entreprise', async () => {
+    const { token } = setup('tm-p7');
+    const ftm = await request(app).post('/api/projects/tm-p7/ftm').set(authHeader(token)).send({ title: 'Sans entreprise' });
+    await request(app).put(`/api/ftm/${ftm.body.id}`).set(authHeader(token)).send({ status: 'validee' });
+    const res = await request(app).post(`/api/ftm/${ftm.body.id}/ordre-service`).set(authHeader(token));
+    expect(res.status).toBe(400);
+  });
+
   it('refuse un devis sans objet, un statut inconnu et un marché d\'une autre affaire', async () => {
     const { token } = setup('tm-p5');
     setup('tm-p5b');
@@ -102,8 +157,4 @@ describe('FTM et devis de travaux modificatifs', () => {
     expect(statut.status).toBe(400);
   });
 
-  it('prochainNumeroFtm reprend après le plus grand numéro', () => {
-    expect(prochainNumeroFtm([])).toBe('FTM-01');
-    expect(prochainNumeroFtm(['FTM-01', 'FTM-07', null])).toBe('FTM-08');
-  });
 });

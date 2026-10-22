@@ -115,6 +115,7 @@ import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
 import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
+import { attribuerNumeros, cleEntreprise, entreprisesDistinctes, formatNumeroOs, numeroHeriteOs, resumeNumeros } from '../lib/numerotationEntreprise';
 import TravauxModificatifsTab from '../components/chantier/TravauxModificatifsTab';
 import { ResourceAttachments, uploadResourceFiles } from '../components/ResourceAttachments';
 import { PanneauPermisDialog } from '../components/PanneauPermisDialog';
@@ -1124,14 +1125,17 @@ export default function ProjectDetail() {
     }
   }, [project]);
 
-  // Numérotation automatique : le numéro est attribué par le serveur (plus grand numéro de
-  // l'affaire + 1) ; cet aperçu n'est qu'indicatif, il n'est jamais envoyé.
+  // Numérotation automatique PAR ENTREPRISE : le numéro est attribué par le serveur (dans la suite de
+  // chaque entreprise visée) ; cet aperçu n'est qu'indicatif, il n'est jamais envoyé.
   const prochainNumeroOs = () => {
-    const nums = ordresDeService
-      .filter(o => !o.type || o.type === 'travaux')
-      .map(o => parseInt(String(o.os_number), 10))
-      .filter(n => Number.isFinite(n));
-    return String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
+    const visees = newOs.marche_ids.map(mid => marchesTravaux.find((m: any) => m.id === mid)).filter(Boolean) as any[];
+    const travaux = ordresDeService.filter(o => !o.type || o.type === 'travaux');
+    if (visees.length === 0) {
+      const nums = travaux.map(o => parseInt(String(o.os_number), 10)).filter(n => Number.isFinite(n));
+      return formatNumeroOs((nums.length ? Math.max(...nums) : 0) + 1);
+    }
+    const cles = new Map<string, string>(marchesTravaux.map((m: any) => [m.id, cleEntreprise(m)]));
+    return resumeNumeros(attribuerNumeros(travaux, entreprisesDistinctes(visees), mid => cles.get(mid), numeroHeriteOs), formatNumeroOs);
   };
 
   // Un OS peut s'adresser à plusieurs entreprises : une case par marché de travaux.
@@ -1618,7 +1622,7 @@ export default function ProjectDetail() {
       doc.text(`Reçu le : ${os.date_ar}  |  Exécution prévue le : ${os.date_execution ?? '—'}`, 14, arY + 14);
     }
     drawAgencyFooters(doc, agence, letterhead);
-    doc.save(`OS_${os.os_number}_${(project?.name ?? '').replace(/\s+/g, '_')}.pdf`);
+    doc.save(`OS_${String(os.os_number).replace(/[\s/]+/g, '-')}_${(project?.name ?? '').replace(/\s+/g, '_')}.pdf`);
   };
 
   const generatePvPdf = async (rec: Reception, pvReserves: Reserve[], projectName: string, signataires: { nom: string; role: string }[]) => {
@@ -4364,7 +4368,7 @@ export default function ProjectDetail() {
                 ordresDeService={ordresDeService}
                 contacts={contacts}
                 settings={settings}
-                travauxModificatifsContent={id ? <TravauxModificatifsTab projectId={id} marches={marchesTravaux} ordresDeService={ordresDeService} /> : undefined}
+                travauxModificatifsContent={id ? <TravauxModificatifsTab projectId={id} project={project} marches={marchesTravaux} ordresDeService={ordresDeService} onOrdreEmis={() => { void fetchOrdresDeService(); }} /> : undefined}
                 osSituationsContent={
               <div className="space-y-8">
                 {/* Ordres de Service Travaux */}

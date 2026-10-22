@@ -1087,7 +1087,7 @@ export async function createApp() {
   registerSupportRoutes(app, { supabaseAdmin, getTenantId, getUserName, uploadToStorage });
   registerMarchesEntreprisesRoutes(app, { supabaseAdmin, getTenantId });
   registerMarcheSousTraitantsRoutes(app, { supabaseAdmin, getTenantId });
-  registerTravauxModificatifsRoutes(app, { supabaseAdmin, getTenantId });
+  registerTravauxModificatifsRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMarchesSubsequentsRoutes(app, { supabaseAdmin, getTenantId });
   registerAccordCadreConsultationsRoutes(app, { supabaseAdmin, getTenantId });
   registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });

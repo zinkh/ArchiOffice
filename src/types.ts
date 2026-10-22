@@ -421,6 +421,8 @@ export interface OrdreDeService {
   marche_id?: string | null;
   /** Marchés visés quand l'OS s'adresse à plusieurs entreprises (marche_id est le premier). */
   marche_ids?: string[];
+  /** Numéro dans la suite de chaque entreprise visée (os_number en est le résumé). */
+  numeros_entreprises?: Array<{ marche_id: string; cle: string; entreprise: string; numero: number }>;
   os_number: string;
   march_number?: string;
   title: string;

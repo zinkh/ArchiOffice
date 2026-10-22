@@ -6,6 +6,9 @@
 -- Un OS peut viser plusieurs marchés (donc plusieurs entreprises). marche_id reste
 -- le marché principal (premier de la liste) pour ne rien casser en lecture.
 ALTER TABLE ordres_de_service ADD COLUMN IF NOT EXISTS marche_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- Numérotation PAR ENTREPRISE : [{ marche_id, cle, entreprise, numero }], un numéro dans la suite de
+-- chaque entreprise visée. os_number reste le résumé affichable (« 002 / 001 »).
+ALTER TABLE ordres_de_service ADD COLUMN IF NOT EXISTS numeros_entreprises JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Fiches de travaux modificatifs (FTM), numérotées FTM-01, FTM-02... par affaire.
 CREATE TABLE IF NOT EXISTS ftm (
@@ -19,6 +22,7 @@ CREATE TABLE IF NOT EXISTS ftm (
   motif TEXT,
   description TEXT,
   marche_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  numeros_entreprises JSONB NOT NULL DEFAULT '[]'::jsonb,
   incidence_delai_jours INTEGER,
   incidences_delais_details TEXT,
   montant_estime_ht NUMERIC,
@@ -30,7 +34,9 @@ CREATE TABLE IF NOT EXISTS ftm (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ftm_tenant_project ON ftm(tenant_id, project_id);
-CREATE UNIQUE INDEX IF NOT EXISTS ftm_numero_unique ON ftm(tenant_id, project_id, numero);
+-- Chaque entreprise a sa suite (FTM-01 chez Durand et chez Petit) : pas d'unicité du numéro par affaire.
+DROP INDEX IF EXISTS ftm_numero_unique;
+ALTER TABLE ftm ADD COLUMN IF NOT EXISTS numeros_entreprises JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Devis reçus des entreprises pour des travaux supplémentaires.
 CREATE TABLE IF NOT EXISTS devis_travaux_modificatifs (

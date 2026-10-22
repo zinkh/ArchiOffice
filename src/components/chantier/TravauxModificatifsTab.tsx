@@ -4,12 +4,14 @@
 // Serveur : server/routes/travauxModificatifs.ts (tables ftm et devis_travaux_modificatifs).
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconChevronRight, IconPaperclip, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconChevronRight, IconFileDownload, IconPaperclip, IconPlus, IconSend, IconTrash } from '@tabler/icons-react';
 import { apiFetch } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import { uploadResourceFiles, ResourceAttachments } from '../ResourceAttachments';
 import { DialogShell, Champ } from '../projectDetail/situations/DialogShell';
 import { useConfirmDialog } from '../ui/ConfirmDialog';
+import { exportFtmToPDF } from '../../lib/ftmPdf';
+import { telechargerPdf } from '../../lib/observationsExport';
 import type { OrdreDeService } from '../../types';
 
 interface Marche { id: string; type_marche?: string; entreprise_nom?: string; lot_numero?: string; lot_titre?: string; numero_subsequent?: number }
@@ -50,10 +52,13 @@ const nombre = (v: string): number | null => { const n = Number(v.replace(',', '
 const dateFr = (d?: string | null) => (d ? new Date(d).toLocaleDateString('fr-FR') : '—');
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
-export default function TravauxModificatifsTab({ projectId, marches, ordresDeService }: {
+export default function TravauxModificatifsTab({ projectId, project, marches, ordresDeService, onOrdreEmis }: {
   projectId: string;
+  project?: { name: string; project_code?: string; address?: string; client?: string };
   marches: Marche[];
   ordresDeService: OrdreDeService[];
+  /** Appelé après l'émission d'un OS depuis une fiche : la liste des OS de l'affaire se relit. */
+  onOrdreEmis?: () => void;
 }) {
   const { t } = useTranslation();
   const { confirm, dialog } = useConfirmDialog();
@@ -99,6 +104,33 @@ export default function TravauxModificatifsTab({ projectId, marches, ordresDeSer
   const rattacherDevis = async (d: Devis, ftmId: string) => {
     setDevis(prev => prev.map(x => x.id === d.id ? { ...x, ftm_id: ftmId || null } : x));
     if (!(await ecrire(`/api/devis-travaux-modificatifs/${d.id}`, 'PUT', { ftm_id: ftmId || null }))) void charger();
+  };
+
+  const ordreDe = (f: Ftm) => ordresDeService.find(o => o.id === f.ordre_service_id);
+
+  const exporterPdf = async (f: Ftm) => {
+    try {
+      const ordre = ordreDe(f);
+      const pdf = await exportFtmToPDF(f, {
+        project: project ?? { name: '' },
+        entreprises: (f.marche_ids || []).map(id => marcheParId.get(id)?.entreprise_nom).filter((x): x is string => !!x),
+        devis: devis.filter(d => d.ftm_id === f.id),
+        ordre: ordre ? { numero: ordre.os_number, titre: ordre.title } : null,
+      });
+      telechargerPdf(pdf);
+    } catch (e: any) { setError(e?.message || t('travaux_modif_pdf_failed')); }
+  };
+
+  // Émet l'ordre de service d'une fiche validée : brouillon prérempli, numéroté dans la suite de chaque entreprise.
+  const emettreOs = async (f: Ftm) => {
+    const ok = await confirm({
+      title: t('travaux_modif_os_confirm_title', { number: f.numero }),
+      message: t('travaux_modif_os_confirm_message'),
+      confirmLabel: t('travaux_modif_os_emit'), cancelLabel: t('projectdetail_dialog_cancel'), tone: 'primary',
+    });
+    if (!ok) return;
+    const r = await ecrire(`/api/ftm/${f.id}/ordre-service`, 'POST');
+    if (r) { await charger(); onOrdreEmis?.(); }
   };
 
   const supprimer = async (kind: 'devis' | 'ftm', id: string, nom: string) => {
@@ -287,6 +319,15 @@ export default function TravauxModificatifsTab({ projectId, marches, ordresDeSer
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {f.status === 'validee' && !f.ordre_service_id && (f.marche_ids || []).length > 0 && (
+                            <button type="button" onClick={() => void emettreOs(f)} title={t('travaux_modif_os_emit_title')}
+                              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-blue-100 hover:bg-blue-200 text-blue-700 text-[0.6875rem] font-bold transition">
+                              <IconSend size={11} /> {t('travaux_modif_os_emit')}
+                            </button>
+                          )}
+                          {ordreDe(f) && <span className="text-[0.6875rem] font-mono font-bold text-[var(--tblr-muted)] whitespace-nowrap" title={ordreDe(f)!.title}>{t('projectdetail_os_label', { number: ordreDe(f)!.os_number })}</span>}
+                          <button type="button" onClick={() => void exporterPdf(f)} aria-label={t('travaux_modif_pdf_named', { name: f.numero })} title={t('travaux_modif_pdf')}
+                            className="p-1 text-[var(--tblr-muted)] hover:text-blue-500"><IconFileDownload size={14} /></button>
                           <button type="button" aria-expanded={piecesOpen === f.id} aria-label={t('travaux_modif_files_named', { name: f.numero })} title={t('projectdetail_os_files')}
                             onClick={() => setPiecesOpen(p => p === f.id ? null : f.id)} className={`p-1 ${piecesOpen === f.id ? 'text-blue-500' : 'text-[var(--tblr-muted)] hover:text-blue-500'}`}><IconPaperclip size={14} /></button>
                           <button type="button" aria-label={t('travaux_modif_delete_named', { name: f.numero })} onClick={() => void supprimer('ftm', f.id, f.numero)}

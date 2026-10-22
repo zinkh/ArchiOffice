@@ -5,10 +5,17 @@
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { creerOrdreDeService } from './ordresDeService';
+import {
+  attribuerNumeros, CLE_SANS_ENTREPRISE, cleEntreprise, entreprisesDistinctes, formatNumeroFtm, numeroHeriteFtm, resumeNumeros,
+  type NumeroEntreprise,
+} from '../../src/lib/numerotationEntreprise';
 
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
+  getUserName?: (tenantId: string, userId: string, email?: string) => Promise<string>;
+  logActivity?: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
 }
 
 const FTM = 'ftm';
@@ -50,21 +57,37 @@ async function withLock<T>(key: string, task: () => Promise<T>): Promise<T> {
   try { return await run; } finally { if (locks.get(key) === tail) locks.delete(key); }
 }
 
-/** Prochain numéro de FTM de l'affaire : « FTM-01 », « FTM-02 »... */
-export function prochainNumeroFtm(numeros: Array<string | null | undefined>): string {
-  const nums = numeros.map(n => parseInt(String(n ?? '').replace(/^\D+/, ''), 10)).filter(n => Number.isFinite(n));
-  return `FTM-${String((nums.length ? Math.max(...nums) : 0) + 1).padStart(2, '0')}`;
-}
+/** Colonne numeros_entreprises absente (migration non jouée) : la fiche est créée avec son seul numéro texte. */
+const colonneManquante = (e: any): boolean => !!e && (e.code === '42703' || e.code === 'PGRST204' || /numeros_entreprises/.test(String(e.message || '')));
 
-export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
+const ORIGINE_OS: Record<string, string> = { maitrise_ouvrage: 'maitrise_ouvrage', maitrise_oeuvre: 'maitrise_oeuvre', aleas: 'aleas' };
+
+export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
   /** Marchés d'une liste, vérifiés dans le cabinet et l'affaire ; null si l'un d'eux est étranger. */
   async function marchesDe(tenantId: string, projectId: string, ids: string[]): Promise<any[] | null> {
     if (ids.length === 0) return [];
     const { data } = await supabaseAdmin.from('marches_entreprises')
-      .select('id, project_id, type_marche, entreprise_nom').in('id', ids).eq('tenant_id', tenantId);
+      .select('id, project_id, type_marche, contact_id, entreprise_nom').in('id', ids).eq('tenant_id', tenantId);
     const rows = (data || []) as any[];
     if (rows.length !== ids.length || rows.some(m => m.project_id !== projectId)) return null;
     return rows;
+  }
+  /** Numéros d'une nouvelle FTM : un par entreprise visée, dans la suite de chacune (« FTM-03 », « FTM-03 / FTM-01 »). */
+  async function numerosFtm(tenantId: string, projectId: string, marches: any[]): Promise<NumeroEntreprise[]> {
+    const [{ data: ftmRows }, { data: marchesProjet }] = await Promise.all([
+      tenantScopedFrom(supabaseAdmin, tenantId, FTM).select('*').eq('project_id', projectId),
+      supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom').eq('tenant_id', tenantId).eq('project_id', projectId),
+    ]);
+    const cles = new Map<string, string>(((marchesProjet || []) as any[]).map(m => [m.id, cleEntreprise(m)]));
+    for (const m of marches) cles.set(m.id, cleEntreprise(m));
+    // Une fiche sans entreprise a sa propre suite.
+    const entreprises = marches.length
+      ? entreprisesDistinctes(marches)
+      : [{ marche_id: '', cle: CLE_SANS_ENTREPRISE, entreprise: '' }];
+    const lignes = ((ftmRows || []) as any[]).map(f => (Array.isArray(f.marche_ids) && f.marche_ids.length === 0 && !f.numeros_entreprises?.length
+      ? { ...f, numeros_entreprises: [{ marche_id: '', cle: CLE_SANS_ENTREPRISE, entreprise: '', numero: numeroHeriteFtm(f) }] }
+      : f));
+    return attribuerNumeros(lignes, entreprises, id => cles.get(id), numeroHeriteFtm);
   }
   const idsMarches = (v: unknown): string[] =>
     [...new Set((Array.isArray(v) ? v : []).filter((x): x is string => typeof x === 'string' && !!x))].slice(0, 20);
@@ -91,26 +114,32 @@ export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin,
       const title = texte(req.body?.title, 200);
       if (!title) return res.status(400).json({ error: "L'intitulé de la fiche est obligatoire." });
       const marcheIds = idsMarches(req.body?.marche_ids);
-      if ((await marchesDe(tenantId, projectId, marcheIds)) === null) return res.status(400).json({ error: 'Marché de travaux introuvable pour cette affaire.' });
+      const marches = await marchesDe(tenantId, projectId, marcheIds);
+      if (marches === null) return res.status(400).json({ error: 'Marché de travaux introuvable pour cette affaire.' });
       const osId = texte(req.body?.ordre_service_id, 64);
       if (osId && !(await assertTenantEntity(supabaseAdmin, 'ordres_de_service', osId, tenantId))) return res.status(400).json({ error: 'Ordre de service introuvable pour ce cabinet.' });
       const origine = ORIGINES.includes(req.body?.origine) ? req.body.origine : null;
       const status = (FTM_STATUTS as readonly string[]).includes(req.body?.status) ? req.body.status : 'brouillon';
-      const lu = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).select('numero').eq('project_id', projectId);
+      const lu = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).select('id').eq('project_id', projectId);
       if (lu.error) return manquante(lu.error) ? res.status(503).json({ error: MSG_503 }) : res.status(500).json({ error: 'Enregistrement impossible.' });
-      // Numéro attribué par le serveur, sous verrou : jamais saisi, jamais en double.
+      // Numéro attribué par le serveur dans la suite de CHAQUE entreprise visée, sous verrou : jamais saisi, jamais en double.
       const resultat = await withLock(`ftm:${tenantId}:${projectId}`, async () => {
-        const { data: existants } = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).select('numero').eq('project_id', projectId);
-        return tenantScopedFrom(supabaseAdmin, tenantId, FTM).insert({
-          id: crypto.randomUUID(), project_id: projectId, numero: prochainNumeroFtm((existants || []).map((r: any) => r.numero)),
+        const numeros = await numerosFtm(tenantId, projectId, marches);
+        const ligne = {
+          id: crypto.randomUUID(), project_id: projectId, numero: resumeNumeros(numeros, formatNumeroFtm),
           title, objet: texte(req.body?.objet, 300), origine, motif: texte(req.body?.motif, 2000), description: texte(req.body?.description, 5000),
           marche_ids: marcheIds, incidence_delai_jours: entier(req.body?.incidence_delai_jours) ?? null,
           incidences_delais_details: texte(req.body?.incidences_delais_details, 1000),
           montant_estime_ht: montant(req.body?.montant_estime_ht) ?? null, montant_accepte_ht: montant(req.body?.montant_accepte_ht) ?? null,
           status, date_emission: dateIso(req.body?.date_emission) ?? null, date_decision: dateIso(req.body?.date_decision) ?? null,
           ordre_service_id: osId,
-        }).select().single();
+        };
+        let r = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).insert({ ...ligne, numeros_entreprises: numeros }).select().single();
+        if (r.error && colonneManquante(r.error)) r = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).insert(ligne).select().single();
+        return r;
       });
+      // Ancien index unique (affaire, numero) encore en place : deux entreprises ne peuvent pas avoir chacune FTM-01.
+      if (resultat.error?.code === '23505') return res.status(409).json({ error: "Ce numéro de fiche existe déjà dans l'affaire : supprimez l'index ftm_numero_unique (supabase/migrate_os_multi_entreprises_ftm.sql)." });
       if (resultat.error) return manquante(resultat.error) ? res.status(503).json({ error: MSG_503 }) : res.status(500).json({ error: 'Enregistrement impossible.' });
       res.status(201).json(resultat.data);
     } catch (e: any) {
@@ -163,6 +192,47 @@ export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin,
     } catch (e: any) {
       console.error('[PUT /api/ftm/:id]', e);
       res.status(500).json({ error: 'Enregistrement impossible.' });
+    }
+  });
+
+  // Émet l'ordre de service d'une FTM VALIDÉE : brouillon prérempli (objet, description, entreprises,
+  // montant, incidences), numéroté dans la suite de chaque entreprise ; la fiche garde le lien.
+  app.post('/api/ftm/:id/ordre-service', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: f } = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).select('*').eq('id', req.params.id).maybeSingle();
+      if (!f) return res.status(404).json({ error: 'Fiche introuvable.' });
+      const fiche = f as any;
+      if (fiche.status !== 'validee') return res.status(409).json({ error: "Seule une fiche validée par le maître d'ouvrage donne lieu à un ordre de service." });
+      if (fiche.ordre_service_id) return res.status(409).json({ error: 'Un ordre de service est déjà rattaché à cette fiche.' });
+      const marcheIds = idsMarches(fiche.marche_ids);
+      if (marcheIds.length === 0) return res.status(400).json({ error: "Rattachez d'abord la fiche à au moins une entreprise." });
+      const { data: devisRows } = await tenantScopedFrom(supabaseAdmin, tenantId, DEVIS).select('montant_ht, statut').eq('ftm_id', fiche.id);
+      const acceptes = ((devisRows || []) as any[]).filter(d => d.statut === 'accepte').reduce((s, d) => s + (Number(d.montant_ht) || 0), 0);
+      // Montant : celui décidé sur la fiche, à défaut la somme des devis acceptés, à défaut l'estimation.
+      const montantOs = fiche.montant_accepte_ht != null ? Number(fiche.montant_accepte_ht) : acceptes > 0 ? acceptes : fiche.montant_estime_ht != null ? Number(fiche.montant_estime_ht) : null;
+      const jours = Number(fiche.incidence_delai_jours) || 0;
+      const aujourdhui = new Date().toISOString().slice(0, 10);
+      const r = await creerOrdreDeService(supabaseAdmin, tenantId, {
+        project_id: fiche.project_id, marche_ids: marcheIds, type: 'travaux', status: 'draft',
+        title: fiche.title, objet: fiche.objet || fiche.title,
+        description: [fiche.motif, fiche.description].filter(Boolean).join('\n\n') || null,
+        origine_demande: ORIGINE_OS[fiche.origine] || (fiche.origine ? 'autres' : undefined),
+        incidences_delais_type: jours > 0 ? 'oui' : 'non', incidences_delais_details: jours > 0 ? [`${jours} jour(s)`, fiche.incidences_delais_details].filter(Boolean).join(' : ') : undefined,
+        incidences_couts_type: montantOs ? 'oui' : 'non', montant_devis_presente: montantOs, montant_devis_accepte: montantOs,
+        date: aujourdhui, date_emission: aujourdhui,
+      });
+      if (!r.ok) return res.status(r.status).json({ error: r.error });
+      const { data: ftmMaj, error } = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).update({ ordre_service_id: r.data.id }).eq('id', fiche.id).select().maybeSingle();
+      if (error) console.error('[POST /api/ftm/:id/ordre-service] lien non posé', error);
+      if (getUserName && logActivity) {
+        const userName = await getUserName(tenantId, req.user.id, req.user.email);
+        logActivity(tenantId, req.user.id, userName, `Ordre de service "${r.data.title}" émis depuis la fiche ${fiche.numero}`, r.data.title || '', r.data.id, 'ordre_de_service', 'Ordres de service');
+      }
+      res.status(201).json({ ordre: r.data, ftm: ftmMaj ?? { ...fiche, ordre_service_id: r.data.id } });
+    } catch (e: any) {
+      console.error('[POST /api/ftm/:id/ordre-service]', e);
+      res.status(500).json({ error: "L'ordre de service n'a pas pu être créé." });
     }
   });
 
