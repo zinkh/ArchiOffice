@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useToastWithUndo } from '../hooks/useToastWithUndo';
 import { Toast } from './ui/Toast';
@@ -12,7 +13,7 @@ import { applyTenantHeader } from '../lib/activeTenant';
 import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
-  IconBuilding, IconTools, IconPhoto, IconClipboardList, IconAlertTriangle,
+  IconBuilding, IconTools, IconFileDiff, IconPhoto, IconClipboardList, IconAlertTriangle,
   IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX,
 } from '@tabler/icons-react';
 import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
@@ -49,6 +50,8 @@ interface ChantierModuleProps {
   lots_list: ProjectLot[];
   ordresDeService: OrdreDeService[];
   osSituationsContent: React.ReactNode;
+  /** Contenu de l'onglet « Travaux modificatifs » (devis reçus et FTM). */
+  travauxModificatifsContent?: React.ReactNode;
   contacts: Contact[];
   settings?: AgencySettings | null;
   /** Rafraîchit les réserves de l'AOR après une reprise d'observations. */
@@ -57,7 +60,7 @@ interface ChantierModuleProps {
 
 const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
 
-type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'photos';
+type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'travaux-modificatifs' | 'photos';
 
 const STATUT_CR_LABELS: Record<string, string> = {
   brouillon: 'BROUILLON',
@@ -81,7 +84,8 @@ function isBadWeather(meteo?: string) {
   return WEATHER_ALERT_KEYWORDS.some(k => lower.includes(k));
 }
 
-export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, contacts, settings, onReservesChanged }: ChantierModuleProps) {
+export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, travauxModificatifsContent, contacts, settings, onReservesChanged }: ChantierModuleProps) {
+  const { t } = useTranslation();
   // Lots et entreprises classés par numéro de lot (« 2 » avant « 10 »), partout dans le module.
   const lots_list = useMemo(
     () => [...lotsBruts].sort((a, b) => String(a.lot_number ?? '').localeCompare(String(b.lot_number ?? ''), 'fr', { numeric: true })),
@@ -841,6 +845,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     { id: 'reserves', label: 'Observations', icon: IconAlertTriangle },
     { id: 'entreprises', label: 'Entreprises', icon: IconBuilding },
     { id: 'os', label: 'OS & situations', icon: IconTools },
+    ...(travauxModificatifsContent ? [{ id: 'travaux-modificatifs' as ChantierTab, label: t('travaux_modif_tab'), icon: IconFileDiff }] : []),
     { id: 'photos', label: 'Photos', icon: IconPhoto },
   ];
 
@@ -1579,6 +1584,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           {activeTab === 'entreprises' && <EntreprisesTab lots_list={lots_list} observations={allObservations} />}
 
           {activeTab === 'os' && osSituationsContent}
+
+          {activeTab === 'travaux-modificatifs' && travauxModificatifsContent}
 
           {activeTab === 'photos' && <PhotosTab observations={allObservations} reports={reports} />}
         </div>

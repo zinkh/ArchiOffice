@@ -10,8 +10,9 @@ import {
   VisibilityState,
   ColumnSizingState,
 } from '@tanstack/react-table';
-import { IconPlus, IconTrash, IconColumns, IconChevronDown, IconChevronRight, IconLayoutRows, IconArrowRight, IconFileTypePdf, IconPrinter } from '@tabler/icons-react';
+import { IconPlus, IconTrash, IconColumns, IconArrowsExchange, IconCopyPlus, IconChevronDown, IconChevronRight, IconLayoutRows, IconArrowRight, IconFileTypePdf, IconPrinter } from '@tabler/icons-react';
 import { useConfirmDialog } from './ui/ConfirmDialog';
+import { DialogShell } from './projectDetail/situations/DialogShell';
 import { Observation, ProjectLot } from '../types';
 import { openSignedUrl } from '../lib/signedStorageUrl';
 import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../lib/offlineQueue';
@@ -234,33 +235,81 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
   }, []);
 
-  const addRow = async () => {
-    // Id généré côté client : une création rejouée après coupure réseau
-    // (file de synchro hors-ligne) ne crée jamais deux observations.
-    const id = crypto.randomUUID();
-    const body = { id, texte: '', statut: 'À faire' as const, type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
-      // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
-      batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
-      phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
-    };
-    // La ligne apparaît tout de suite (en attente) : sans cela, on re-clique et on en crée deux.
-    const provisoire: Observation = { ...body, project_id: projectId, pendingSync: true };
+  // Crée une observation : elle apparaît tout de suite (en attente), puis le serveur confirme.
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
+  const createObservation = useCallback(async (body: Record<string, unknown> & { id: string }): Promise<boolean> => {
+    const id = body.id;
+    const lot = lots.find(l => l.id === body.lot_id);
+    const provisoire = { ...body, project_id: projectId, pendingSync: true, lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined } as unknown as Observation;
     creeesRef.current.add(id);
     setObservations(prev => upsertById(prev, provisoire));
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${projectId}/observations`, body });
       if (!queued && data) {
-        setObservations(prev => upsertById(prev, data));
+        setObservations(prev => upsertById(prev, { ...data, lot: provisoire.lot }));
         db.observationsCache.put(data).catch(() => {});
         creeesRef.current.delete(id);
       }
-      onChanged?.();
+      return true;
     } catch (err) {
       console.error(err);
       creeesRef.current.delete(id);
       setObservations(prev => prev.filter(o => o.id !== id));
       setSaveError(true);
+      return false;
     }
+  }, [lots, projectId]);
+
+  const addRow = async () => {
+    // Id généré côté client : une création rejouée après coupure réseau
+    // (file de synchro hors-ligne) ne crée jamais deux observations.
+    const ok = await createObservation({ id: crypto.randomUUID(), texte: '', statut: 'À faire', type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
+      // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
+      batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
+      phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
+    });
+    if (ok) onChanged?.();
+  };
+
+  // Nouvelle remarque pour la même entreprise (même lot, mêmes bâtiment et phase) : on saisit à la suite.
+  const addRowSameCompany = useCallback(async (source: Observation) => {
+    const ok = await createObservation({
+      id: crypto.randomUUID(), texte: '', statut: 'À faire', type: source.type || typeFilter || defaultType || 'observation',
+      lot_id: source.lot_id || null, contact_id: source.contact_id || null, created_report_id: currentReportId || undefined,
+      batiment_id: source.batiment_id || null, phase_id: source.phase_id || null,
+    });
+    if (ok) onChangedRef.current?.();
+  }, [createObservation, currentReportId, typeFilter, defaultType]);
+
+  // Changer d'entreprise (la remarque passe au lot choisi) ou l'attribuer aussi à d'autres entreprises (une copie par lot).
+  const [reattribution, setReattribution] = useState<{ id: string; mode: 'changer' | 'ajouter'; lotIds: string[]; busy: boolean } | null>(null);
+  const appliquerReattribution = async () => {
+    if (!reattribution || reattribution.lotIds.length === 0) return;
+    const source = observationsRef.current.find(o => o.id === reattribution.id);
+    if (!source) { setReattribution(null); return; }
+    setReattribution({ ...reattribution, busy: true });
+    if (reattribution.mode === 'changer') {
+      const lot = lots.find(l => l.id === reattribution.lotIds[0]);
+      if (lot) {
+        updateLocal(source.id, { lot_id: lot.id, lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title }, contact_id: lot.contact_id || source.contact_id });
+        try {
+          await queuedJsonRequest({ entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${source.id}`, body: { lot_id: lot.id, ...(lot.contact_id ? { contact_id: lot.contact_id } : {}) } });
+          setSaveError(false);
+        } catch (err) { console.error(err); setSaveError(true); }
+      }
+    } else {
+      for (const lotId of reattribution.lotIds) {
+        const lot = lots.find(l => l.id === lotId);
+        await createObservation({
+          id: crypto.randomUUID(), texte: source.texte, statut: 'À faire', type: source.type || 'observation', urgence: source.urgence || 'normal',
+          due_date: source.due_date || undefined, lot_id: lotId, contact_id: lot?.contact_id || undefined,
+          created_report_id: currentReportId || undefined, batiment_id: source.batiment_id || null, phase_id: source.phase_id || null,
+        });
+      }
+    }
+    setReattribution(null);
+    onChanged?.();
   };
 
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
@@ -568,18 +617,33 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     }),
     columnHelper.display({
       id: 'actions',
-      size: 40,
-      cell: info => (
-        <button
-          type="button"
-          onClick={() => void deleteRow(info.row.original.id)}
-          className="text-zinc-300 dark:text-zinc-600 hover:text-red-500 dark:hover:text-red-400 p-1 rounded opacity-0 group-hover/row:opacity-100 transition"
-        >
-          <IconTrash size={15} />
-        </button>
-      ),
+      size: 96,
+      cell: info => {
+        const row = info.row.original;
+        const discret = 'text-zinc-300 dark:text-zinc-600 p-1 rounded opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition';
+        return (
+          <div className="flex items-center justify-end gap-0.5">
+            {!row.pendingSync && (
+              <>
+                <button type="button" onClick={() => void addRowSameCompany(row)} className={`${discret} hover:text-[var(--tblr-primary)]`}
+                  title={t('observations_same_company')} aria-label={t('observations_same_company')}>
+                  <IconCopyPlus size={15} />
+                </button>
+                <button type="button" onClick={() => setReattribution({ id: row.id, mode: 'changer', lotIds: [], busy: false })} className={`${discret} hover:text-[var(--tblr-primary)]`}
+                  title={t('observations_reassign')} aria-label={t('observations_reassign')}>
+                  <IconArrowsExchange size={15} />
+                </button>
+              </>
+            )}
+            <button type="button" onClick={() => void deleteRow(row.id)} className={`${discret} hover:text-red-500 dark:hover:text-red-400`}
+              title={t('projectdetail_dialog_delete')} aria-label={t('projectdetail_dialog_delete')}>
+              <IconTrash size={15} />
+            </button>
+          </div>
+        );
+      },
     }),
-  ], [lots, decoupage, aDecoupage, saveField, updateLocal, deleteRow, reprendreEnReserve, expanded, toggleExpanded]);
+  ], [lots, decoupage, aDecoupage, saveField, updateLocal, deleteRow, reprendreEnReserve, expanded, toggleExpanded, t, addRowSameCompany]);
 
   const table = useReactTable({
     data: filtered,
@@ -857,6 +921,53 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
           Nouvelle observation
         </button>
       </div>
+      <DialogShell
+        open={!!reattribution}
+        onClose={() => setReattribution(null)}
+        busy={reattribution?.busy}
+        title={t('observations_reassign')}
+        subtitle={(() => { const o = reattribution ? observations.find(x => x.id === reattribution.id) : null; return o ? `#${String(o.number || '').padStart(2, '0')} · ${(o.texte || '').slice(0, 80)}` : undefined; })()}
+        footer={reattribution && (
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => setReattribution(null)} disabled={reattribution.busy}>{t('projectdetail_dialog_cancel')}</button>
+            <button type="button" className="btn btn-primary" onClick={() => void appliquerReattribution()} disabled={reattribution.busy || reattribution.lotIds.length === 0}>
+              {reattribution.mode === 'changer' ? t('observations_reassign_move') : t('observations_reassign_copy', { count: reattribution.lotIds.length })}
+            </button>
+          </>
+        )}
+      >
+        {reattribution && (() => {
+          const source = observations.find(o => o.id === reattribution.id);
+          const choix = lots.filter(l => reattribution.mode === 'ajouter' ? l.id !== source?.lot_id : true);
+          return (
+            <div className="space-y-4">
+              <div role="radiogroup" aria-label={t('observations_reassign')} className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(['changer', 'ajouter'] as const).map(mode => (
+                  <label key={mode} className={`flex items-start gap-2 rounded-lg border p-3 text-sm cursor-pointer ${reattribution.mode === mode ? 'border-[var(--tblr-primary)] bg-[var(--tblr-primary-lt)]' : 'border-[var(--tblr-border)]'}`}>
+                    <input type="radio" name="reattribution-mode" checked={reattribution.mode === mode} onChange={() => setReattribution({ ...reattribution, mode, lotIds: [] })} className="mt-1" />
+                    <span><span className="block font-semibold">{t(`observations_reassign_mode_${mode}`)}</span><span className="block text-xs text-[var(--tblr-muted)]">{t(`observations_reassign_mode_${mode}_hint`)}</span></span>
+                  </label>
+                ))}
+              </div>
+              <fieldset className="space-y-1">
+                <legend className="text-[0.6875rem] font-bold uppercase text-[var(--tblr-muted)]">{t('observations_reassign_companies')}</legend>
+                <div className="max-h-64 overflow-y-auto rounded-lg border border-[var(--tblr-border)] divide-y divide-[var(--tblr-border)]">
+                  {choix.map(l => {
+                    const coche = reattribution.lotIds.includes(l.id);
+                    return (
+                      <label key={l.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-[var(--tblr-surface-2)]">
+                        <input type={reattribution.mode === 'changer' ? 'radio' : 'checkbox'} name="reattribution-lot" checked={coche}
+                          onChange={() => setReattribution({ ...reattribution, lotIds: reattribution.mode === 'changer' ? [l.id] : coche ? reattribution.lotIds.filter(x => x !== l.id) : [...reattribution.lotIds, l.id] })} />
+                        <span className="min-w-0 truncate">{l.lot_number} · {l.lot_title}<span className="text-[var(--tblr-muted)]"> — {l.contact_name || t('observations_reassign_no_company')}</span>{l.id === source?.lot_id ? <span className="text-[var(--tblr-muted)]"> ({t('observations_reassign_current')})</span> : null}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </div>
+          );
+        })()}
+      </DialogShell>
       {confirmDialog}
     </div>
   );

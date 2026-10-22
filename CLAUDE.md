@@ -658,6 +658,15 @@ Vérifiée en 390, 820 et 1366 px. Règles à garder :
 - **Échelle de texte des cartes** : titre de carte 16 px (`text-base`), contrôles et texte courant 14 px (`text-sm`, comme `.btn` et les champs), informations secondaires 12 px (`text-xs`), pastilles et étiquettes en capitales 11 px (`text-[0.6875rem]`, jamais en dessous). Un contrôle n'est pas une information secondaire : bouton, champ, sélecteur et filtre restent à 14 px, cibles de 44 px au doigt (`pointer-coarse:min-h-11`).
 - **Les fenêtres (`ModalShell`) sont montées à la racine de la page** (portail) : un parent transformé ou filtré devient le repère d'un élément `fixed` et la fenêtre prenait sa taille au lieu de celle de l'écran.
 
+### OS multi-entreprises, travaux modificatifs et FTM (onglet DET)
+
+- **Numéro d'OS attribué par le serveur** (`POST /api/ordres_de_service`, `prochainNumeroOs`) : plus grand numéro de l'affaire + 1 (« 001 »), sous verrou par affaire ; le `os_number` envoyé par un client est ignoré pour un OS de travaux (l'avenant MOE garde le sien). L'écran n'affiche qu'un aperçu en lecture seule.
+- **Un OS, plusieurs entreprises** : `ordres_de_service.marche_ids` (jsonb), `marche_id` restant le marché principal. Chaque marché est vérifié (cabinet, affaire, pas d'accord-cadre) ; `entreprise`, `lot` et `destinataire_os` résument tous les marchés. Colonne absente (instance non migrée) : repli sur le seul marché principal.
+- **Pièces jointes d'un OS** : `ResourceAttachments` (`ordres_de_service`), choisies dans le formulaire puis déposées après création (`uploadResourceFiles`), ou depuis le trombone de la ligne.
+- **Onglet « Travaux modificatifs »** (`TravauxModificatifsTab.tsx`, `server/routes/travauxModificatifs.ts`, `supabase/migrate_os_multi_entreprises_ftm.sql`) : devis reçus des entreprises (`devis_travaux_modificatifs`, statuts reçu / en analyse / accepté / refusé) et fiches de travaux modificatifs (`ftm`, numéro `FTM-NN` par affaire attribué par le serveur, statuts brouillon / émise / validée / refusée, entreprises concernées, incidences, lien vers l'OS émis). Un devis se rattache à une FTM ; supprimer la FTM détache ses devis. Pièces jointes sur les deux (`ftm`, `devis_travaux_modificatifs` dans `ATTACHABLE_RESOURCE_TYPES`). Instance non migrée : lecture vide, 503 à l'écriture.
+- **Observations** : deux commandes par ligne (`ObservationsTable.tsx`) : « Nouvelle remarque pour la même entreprise » (même lot, bâtiment et phase) et « Changer d'entreprise ou attribuer à d'autres » (déplace la remarque vers un autre lot, ou en crée une copie par lot coché).
+- **Pas encore fait** : export PDF d'une FTM, émission d'un OS prérempli depuis une FTM validée.
+
 ### Situations de travaux et certificats de paiement (onglet RDT)
 
 L'onglet RDT listait les factures de l'AGENCE et en déduisait un « reste à

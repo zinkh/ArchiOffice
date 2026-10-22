@@ -27,7 +27,7 @@ export type AttachableResourceType =
   | 'projects' | 'contacts' | 'proposals' | 'tenders' | 'permits' | 'meetings'
   | 'receptions' | 'reserves' | 'contrats_moe' | 'ordres_de_service' | 'visas'
   | 'notes_honoraires' | 'marches_entreprises' | 'tasks' | 'milestones' | 'agents'
-  | 'agency_library';
+  | 'agency_library' | 'ftm' | 'devis_travaux_modificatifs';
 
 function formatSize(bytes: number | null): string {
   if (!bytes) return '';
@@ -46,6 +46,19 @@ async function postForm<T>(url: string, form: FormData): Promise<T> {
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error || `Échec du dépôt (${res.status}).`);
   return data;
+}
+
+/** Dépose des fichiers sur une fiche (même appel que le bouton « Ajouter » de ResourceAttachments). */
+export async function uploadResourceFiles(resourceType: AttachableResourceType, resourceId: string, files: File[], category?: string): Promise<void> {
+  for (const file of files) {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('resource_type', resourceType);
+    form.append('resource_id', resourceId);
+    form.append('name', file.name);
+    if (category) form.append('category', category);
+    await postForm('/api/documents', form);
+  }
 }
 
 export function ResourceAttachments({ resourceType, resourceId, category }: {

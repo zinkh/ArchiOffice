@@ -419,6 +419,8 @@ export interface OrdreDeService {
   project_id: string;
   /** Requis à la création (server/routes/ordresDeService.ts) ; nullable en base pour ne pas casser une lecture. */
   marche_id?: string | null;
+  /** Marchés visés quand l'OS s'adresse à plusieurs entreprises (marche_id est le premier). */
+  marche_ids?: string[];
   os_number: string;
   march_number?: string;
   title: string;

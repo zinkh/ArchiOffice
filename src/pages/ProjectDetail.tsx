@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, ChangeEvent, useRef, useId, type Dispatch, type SetStateAction } from 'react';
+import React, { Fragment, useState, useEffect, useMemo, ChangeEvent, useRef, useId, type Dispatch, type SetStateAction } from 'react';
 import { MISSION_PHASES, MISSION_ID_TO_PHASE } from '../lib/profitability';
 import ProjectProfitability from '../components/projectDetail/ProjectProfitability';
 import CreatableSelect from 'react-select/creatable';
@@ -42,6 +42,7 @@ import {
   IconTools,
   IconClipboardCheck,
   IconSignRight,
+  IconPaperclip,
   } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
@@ -114,7 +115,8 @@ import ProjectTasksTab from '../components/projectDetail/ProjectTasksTab';
 import { InspirationBoards } from '../components/projectDetail/InspirationBoards';
 import { StudyRequestTab } from '../components/projectDetail/StudyRequestTab';
 import { ProjectNoticesTab } from '../components/projectDetail/ProjectNoticesTab';
-import { ResourceAttachments } from '../components/ResourceAttachments';
+import TravauxModificatifsTab from '../components/chantier/TravauxModificatifsTab';
+import { ResourceAttachments, uploadResourceFiles } from '../components/ResourceAttachments';
 import { PanneauPermisDialog } from '../components/PanneauPermisDialog';
 import { generatePermitDraftPanel } from '../lib/panneaux';
 
@@ -342,6 +344,7 @@ export default function ProjectDetail() {
     title: '',
     os_number: '',
     marche_id: '',
+    marche_ids: [] as string[],
     lot: '',
     entreprise: '',
     maitrise_oeuvre: '',
@@ -353,6 +356,9 @@ export default function ProjectDetail() {
     delai_unit: 'jours',
     objet: '',
   });
+  // Pièces jointes choisies avant la création de l'OS (déposées une fois l'OS enregistré) et OS dont les pièces sont dépliées.
+  const [osFiles, setOsFiles] = useState<File[]>([]);
+  const [osPiecesOpenId, setOsPiecesOpenId] = useState<string | null>(null);
   // Formulaire de création rapide d'un marché travaux, ouvert depuis le
   // formulaire OS quand le projet n'en a encore aucun — un OS doit toujours
   // être rattaché à un marché (server/routes/ordresDeService.ts).
@@ -1118,26 +1124,34 @@ export default function ProjectDetail() {
     }
   }, [project]);
 
-  // Numérotation par marché, plutôt que par nom d'entreprise en texte libre :
-  // un OS s'adresse toujours à un marché de travaux (marche_id).
-  const getNextOsNumberForMarche = (marcheId: string) => {
-    if (!marcheId) return '';
-    const count = ordresDeService.filter(os => os.marche_id === marcheId).length;
-    return (count + 1).toString().padStart(2, '0');
+  // Numérotation automatique : le numéro est attribué par le serveur (plus grand numéro de
+  // l'affaire + 1) ; cet aperçu n'est qu'indicatif, il n'est jamais envoyé.
+  const prochainNumeroOs = () => {
+    const nums = ordresDeService
+      .filter(o => !o.type || o.type === 'travaux')
+      .map(o => parseInt(String(o.os_number), 10))
+      .filter(n => Number.isFinite(n));
+    return String((nums.length ? Math.max(...nums) : 0) + 1).padStart(3, '0');
   };
 
-  const handleMarcheChange = (marcheId: string) => {
-    const marche = marchesTravaux.find((m: any) => m.id === marcheId);
-    const entreprise = marche?.entreprise_nom || '';
-    const lot = marche ? [marche.lot_numero, marche.lot_titre].filter(Boolean).join(' — ') : '';
+  // Un OS peut s'adresser à plusieurs entreprises : une case par marché de travaux.
+  const appliquerMarchesOs = (ids: string[]) => {
+    const marches = ids.map(mid => marchesTravaux.find((m: any) => m.id === mid)).filter(Boolean) as any[];
+    const entreprise = marches.map(m => m.entreprise_nom).filter(Boolean).join(' ; ');
+    const lot = marches.map(m => [m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')).filter(Boolean).join(' ; ');
     setNewOs(prev => ({
       ...prev,
-      marche_id: marcheId,
+      marche_ids: ids,
+      marche_id: ids[0] || '',
       lot,
       entreprise,
       destinataire_os: entreprise,
-      os_number: getNextOsNumberForMarche(marcheId),
     }));
+  };
+
+  const toggleMarcheOs = (marcheId: string) => {
+    const ids = newOs.marche_ids.includes(marcheId) ? newOs.marche_ids.filter(x => x !== marcheId) : [...newOs.marche_ids, marcheId];
+    appliquerMarchesOs(ids);
   };
 
   const handleCreateMarche = async () => {
@@ -1154,7 +1168,7 @@ export default function ProjectDetail() {
     if (res.ok) {
       const created = await res.json();
       await fetchMarchesTravaux();
-      handleMarcheChange(created.id);
+      setNewOs(prev => ({ ...prev, marche_ids: [...prev.marche_ids, created.id], marche_id: prev.marche_id || created.id }));
       setNewMarche({ entreprise_nom: '', lot_numero: '', lot_titre: '', montant_ht: '' });
       setIsAddingMarche(false);
     } else {
@@ -1260,7 +1274,7 @@ export default function ProjectDetail() {
   };
 
   const handleCreateOs = async () => {
-    if (!id || !newOs.title || !newOs.os_number || !newOs.marche_id || isCreatingOs) return;
+    if (!id || !newOs.title || newOs.marche_ids.length === 0 || isCreatingOs) return;
     setIsCreatingOs(true);
     try {
       const res = await fetch('/api/ordres_de_service', {
@@ -1269,7 +1283,7 @@ export default function ProjectDetail() {
         body: JSON.stringify({
           project_id: id,
           marche_id: newOs.marche_id,
-          os_number: newOs.os_number,
+          marche_ids: newOs.marche_ids,
           title: newOs.title,
           lot: newOs.lot,
           entreprise: newOs.entreprise || newOs.destinataire_os,
@@ -1287,8 +1301,15 @@ export default function ProjectDetail() {
         })
       });
       if (res.ok) {
+        const creee = await res.json().catch(() => null);
+        // Pièces jointes choisies dans le formulaire : déposées sur l'OS une fois créé. Un échec ne défait pas l'OS.
+        if (creee?.id && osFiles.length > 0) {
+          try { await uploadResourceFiles('ordres_de_service', creee.id, osFiles); }
+          catch (e: any) { showToast(e?.message || t('projectdetail_os_files_failed'), 'error', { duration: 6000 }); }
+        }
+        setOsFiles([]);
         await fetchOrdresDeService();
-        setNewOs({ title: '', os_number: '', marche_id: '', lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
+        setNewOs({ title: '', os_number: '', marche_id: '', marche_ids: [], lot: '', entreprise: '', maitrise_oeuvre: project?.project_manager || '', montant_devis_presente: '', date_emission: new Date().toISOString().slice(0, 10), emetteur_os: '', destinataire_os: '', delai_execution: '', delai_unit: 'jours', objet: '' });
         setIsAddingOs(false);
       } else {
         const err = await res.json().catch(() => null);
@@ -4343,6 +4364,7 @@ export default function ProjectDetail() {
                 ordresDeService={ordresDeService}
                 contacts={contacts}
                 settings={settings}
+                travauxModificatifsContent={id ? <TravauxModificatifsTab projectId={id} marches={marchesTravaux} ordresDeService={ordresDeService} /> : undefined}
                 osSituationsContent={
               <div className="space-y-8">
                 {/* Ordres de Service Travaux */}
@@ -4378,9 +4400,10 @@ export default function ProjectDetail() {
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
                           <label htmlFor="os-numero" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_number')}</label>
-                          <input id="os-numero" type="text"
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.os_number} onChange={e => setNewOs({...newOs, os_number: e.target.value})} />
+                          <input id="os-numero" type="text" readOnly aria-describedby="os-numero-aide"
+                            className="w-full bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none text-[var(--tblr-muted)]"
+                            value={prochainNumeroOs()} />
+                          <p id="os-numero-aide" className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_os_number_auto')}</p>
                         </div>
                         <div className="space-y-1">
                           <label htmlFor="os-date" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_issue_date')}</label>
@@ -4388,20 +4411,22 @@ export default function ProjectDetail() {
                             className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
                             value={newOs.date_emission} onChange={e => setNewOs({...newOs, date_emission: e.target.value})} />
                         </div>
-                        <div className="space-y-1">
-                          <label htmlFor="os-marche" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_contract')} <span aria-hidden className="text-red-500">*</span></label>
-                          <select
-                            id="os-marche"
-                            required
-                            className="w-full bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg h-10 px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500"
-                            value={newOs.marche_id} onChange={e => handleMarcheChange(e.target.value)}>
-                            <option value="">{t('projectdetail_os_contract_choose')}</option>
-                            {/* Un accord-cadre ne s'exécute pas lui-même : l'OS vise un de ses marchés subséquents. */}
+                        <fieldset className="space-y-1 min-w-0">
+                          <legend className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_companies')} <span aria-hidden className="text-red-500">*</span></legend>
+                          {/* Un accord-cadre ne s'exécute pas lui-même : l'OS vise un de ses marchés subséquents. */}
+                          <div className="max-h-40 overflow-y-auto rounded-lg border border-[var(--tblr-border)] bg-white dark:bg-zinc-900 divide-y divide-[var(--tblr-border)]">
                             {marchesTravaux.filter((m: any) => m.type_marche !== 'accord_cadre').map((m: any) => (
-                              <option key={m.id} value={m.id}>{m.type_marche === 'subsequent' ? `MS n°${m.numero_subsequent ?? '?'} · ` : ''}{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</option>
+                              <label key={m.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-[var(--tblr-surface-2)]">
+                                <input type="checkbox" checked={newOs.marche_ids.includes(m.id)} onChange={() => toggleMarcheOs(m.id)} />
+                                <span className="truncate">{m.type_marche === 'subsequent' ? `MS n°${m.numero_subsequent ?? '?'} · ` : ''}{[m.lot_numero, m.lot_titre].filter(Boolean).join(' — ')} · {m.entreprise_nom}</span>
+                              </label>
                             ))}
-                          </select>
-                        </div>
+                            {marchesTravaux.filter((m: any) => m.type_marche !== 'accord_cadre').length === 0 && (
+                              <p className="px-3 py-2 text-xs italic text-[var(--tblr-muted)]">{t('projectdetail_os_contract_choose')}</p>
+                            )}
+                          </div>
+                          <p className="text-[0.6875rem] text-[var(--tblr-muted)]">{t('projectdetail_os_companies_hint')}</p>
+                        </fieldset>
                       </div>
                       {marchesTravaux.length === 0 && !isAddingMarche && (
                         <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 text-xs text-amber-700 dark:text-amber-400">
@@ -4446,6 +4471,22 @@ export default function ProjectDetail() {
                           value={newOs.objet} onChange={e => setNewOs({...newOs, objet: e.target.value})}
                           placeholder={t('projectdetail_os_subject_placeholder')} />
                       </div>
+                      <div className="space-y-1">
+                        <label htmlFor="os-pieces" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_files')}</label>
+                        <input id="os-pieces" type="file" multiple
+                          className="block w-full text-xs file:mr-3 file:rounded-lg file:border-0 file:bg-zinc-100 dark:file:bg-zinc-800 file:px-3 file:py-2 file:text-xs file:font-bold"
+                          onChange={e => setOsFiles(prev => [...prev, ...Array.from(e.target.files || [])])} />
+                        {osFiles.length > 0 && (
+                          <ul className="flex flex-wrap gap-1.5 pt-1">
+                            {osFiles.map((f, i) => (
+                              <li key={`${f.name}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-[var(--tblr-surface)] border border-[var(--tblr-border)] pl-2.5 pr-1 py-0.5 text-xs">
+                                <span className="truncate max-w-[14rem]">{f.name}</span>
+                                <button type="button" aria-label={t('projectdetail_os_file_remove', { name: f.name })} onClick={() => setOsFiles(prev => prev.filter((_, k) => k !== i))} className="p-0.5 text-[var(--tblr-muted)] hover:text-red-500"><IconX size={12} /></button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                         <div className="space-y-1">
                           <label htmlFor="os-emetteur" className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase">{t('projectdetail_os_issuer')}</label>
@@ -4485,8 +4526,8 @@ export default function ProjectDetail() {
                           </div>
                         </div>
                         <div className="md:col-span-2 flex items-end">
-                          <button type="button" onClick={handleCreateOs} disabled={!newOs.marche_id || !newOs.title || isCreatingOs}
-                            title={!newOs.marche_id || !newOs.title ? t('projectdetail_os_create_disabled') : undefined}
+                          <button type="button" onClick={handleCreateOs} disabled={newOs.marche_ids.length === 0 || !newOs.title || isCreatingOs}
+                            title={newOs.marche_ids.length === 0 || !newOs.title ? t('projectdetail_os_create_disabled') : undefined}
                             className="w-full h-10 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm font-bold transition">
                             {isCreatingOs ? 'Création…' : t('projectdetail_os_create')}
                           </button>
@@ -4511,7 +4552,8 @@ export default function ProjectDetail() {
                       </thead>
                       <tbody className="divide-y divide-[var(--tblr-border)]">
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).map((os) => (
-                          <tr key={os.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors">
+                          <Fragment key={os.id}>
+                          <tr className="hover:bg-[var(--tblr-surface-2)] transition-colors">
                             <td className="px-4 py-3 font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap font-mono text-xs">
                               {t('projectdetail_os_label', { number: os.os_number })}
                             </td>
@@ -4558,6 +4600,11 @@ export default function ProjectDetail() {
                                     <IconX size={13} />
                                   </button>
                                 )}
+                                <button type="button" onClick={() => setOsPiecesOpenId(prev => prev === os.id ? null : os.id)} aria-expanded={osPiecesOpenId === os.id}
+                                  title={t('projectdetail_os_files')} aria-label={t('projectdetail_os_files_named', { number: os.os_number })}
+                                  className={`p-1 transition-colors ${osPiecesOpenId === os.id ? 'text-blue-500' : 'text-[var(--tblr-muted)] hover:text-blue-500'}`}>
+                                  <IconPaperclip size={13} />
+                                </button>
                                 <button type="button" onClick={() => generateOsPdf(os)} title={t('projectdetail_os_export_pdf')} aria-label={t('projectdetail_os_export_pdf')}
                                   className="p-1 text-[var(--tblr-muted)] hover:text-blue-500 transition-colors">
                                   <IconFileDownload size={13} />
@@ -4572,6 +4619,12 @@ export default function ProjectDetail() {
                               )}
                             </td>
                           </tr>
+                          {osPiecesOpenId === os.id && (
+                            <tr className="bg-[var(--tblr-surface-2)]">
+                              <td colSpan={9} className="px-6 py-3"><ResourceAttachments resourceType="ordres_de_service" resourceId={os.id} /></td>
+                            </tr>
+                          )}
+                          </Fragment>
                         ))}
                         {ordresDeService.filter(o => o.type === 'travaux' || !o.type).length === 0 && (
                           <tr>
