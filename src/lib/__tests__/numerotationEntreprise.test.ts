@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  attribuerNumeros, cleEntreprise, entreprisesDistinctes, formatNumeroFtm, formatNumeroOs, numeroHeriteFtm, numeroHeriteOs, resumeNumeros,
+  attribuerNumeros, cleEntreprise, cleEntrepriseLot, lotPourNumero, entreprisesDistinctes, formatNumeroFtm, formatNumeroOs, numeroHeriteFtm, numeroHeriteOs, resumeNumeros,
 } from '../numerotationEntreprise';
 
 const marches = [
@@ -37,9 +37,26 @@ describe('numérotation par entreprise', () => {
   });
 
   it('formate et relit les numéros', () => {
-    expect(formatNumeroFtm(3)).toBe('FTM-03');
-    expect(numeroHeriteFtm({ numero: 'FTM-07' } as any)).toBe(7);
+    expect(formatNumeroFtm(3, { lot: '01' })).toBe('FTM-01-03');
+    expect(formatNumeroFtm(1)).toBe('FTM-00-01');
+    expect(numeroHeriteFtm({ numero: 'FTM-02-07' } as any)).toBe(7);
+    expect(numeroHeriteFtm({ numero: 'FTM-02-07 / FTM-01-03' } as any)).toBe(7);
     expect(numeroHeriteOs({ os_number: '002 / 001' } as any)).toBe(2);
     expect(numeroHeriteOs({} as any)).toBe(0);
+  });
+
+  it('FTM : une suite par entreprise ET par lot (FTM-01-01, FTM-02-01)', () => {
+    const lots = [
+      { id: 'a', entreprise_nom: 'Durand', lot_numero: '1' },
+      { id: 'b', entreprise_nom: 'Durand', lot_numero: '02' },
+    ];
+    expect(lotPourNumero('1')).toBe('01');
+    expect(lotPourNumero('01a')).toBe('01A');
+    expect(lotPourNumero(null)).toBe('00');
+    expect(cleEntrepriseLot(lots[0])).not.toBe(cleEntrepriseLot(lots[1]));
+    const cles = new Map(lots.map(l => [l.id, cleEntrepriseLot(l)]));
+    const existantes = [{ marche_ids: ['a'], numeros_entreprises: [{ marche_id: 'a', cle: cleEntrepriseLot(lots[0]), entreprise: 'Durand', numero: 1 }] }];
+    const numeros = attribuerNumeros(existantes, entreprisesDistinctes(lots, cleEntrepriseLot), id => cles.get(id), numeroHeriteFtm);
+    expect(resumeNumeros(numeros, formatNumeroFtm)).toBe('FTM-01-02 / FTM-02-01');
   });
 });

@@ -34,8 +34,8 @@ CREATE TABLE IF NOT EXISTS ftm (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_ftm_tenant_project ON ftm(tenant_id, project_id);
--- Chaque entreprise a sa suite (FTM-01 chez Durand et chez Petit) : pas d'unicité du numéro par affaire.
-DROP INDEX IF EXISTS ftm_numero_unique;
+-- Le numéro d'une FTM porte le lot (FTM-01-01, FTM-02-01) : il reste unique par affaire.
+CREATE UNIQUE INDEX IF NOT EXISTS ftm_numero_unique ON ftm(tenant_id, project_id, numero);
 ALTER TABLE ftm ADD COLUMN IF NOT EXISTS numeros_entreprises JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- Devis reçus des entreprises pour des travaux supplémentaires.

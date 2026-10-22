@@ -72,7 +72,7 @@ describe('Ordres de service multi-entreprises', () => {
 });
 
 describe('FTM et devis de travaux modificatifs', () => {
-  it('numérote les FTM par entreprise et rattache les devis', async () => {
+  it('numérote les FTM par entreprise et par lot et rattache les devis', async () => {
     const { token } = setup('tm-p4');
     const creer = (corps: any) => request(app).post('/api/projects/tm-p4/ftm').set(authHeader(token)).send(corps);
     const f1 = await creer({ title: 'Reprise en sous-oeuvre', marche_ids: ['tm-p4-m1'], origine: 'aleas' });
@@ -82,7 +82,7 @@ describe('FTM et devis de travaux modificatifs', () => {
     const f5 = await creer({ title: 'Sans entreprise' });
     expect(f1.status).toBe(201);
     expect(f1.body.status).toBe('brouillon');
-    expect([f1, f2, f3, f4, f5].map(f => f.body.numero)).toEqual(['FTM-01', 'FTM-01', 'FTM-02', 'FTM-03 / FTM-02', 'FTM-01']);
+    expect([f1, f2, f3, f4, f5].map(f => f.body.numero)).toEqual(['FTM-04-01', 'FTM-05-01', 'FTM-04-02', 'FTM-04-03 / FTM-05-02', 'FTM-00-01']);
 
     const devis = await request(app).post('/api/projects/tm-p4/devis-travaux-modificatifs').set(authHeader(token)).send({
       objet: 'Micropieux supplémentaires', marche_id: 'tm-p4-m1', montant_ht: 12500, date_reception: '2026-10-15', ftm_id: f1.body.id,

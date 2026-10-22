@@ -7,6 +7,8 @@
 
 export interface NumeroEntreprise {
   marche_id: string;
+  /** Numéro du lot du marché visé (« 01 »), repris dans le numéro des FTM. */
+  lot?: string;
   /** Clé stable de l'entreprise : fiche contact, à défaut son nom normalisé. */
   cle: string;
   entreprise: string;
@@ -15,6 +17,7 @@ export interface NumeroEntreprise {
 
 export interface MarcheEntreprise {
   id: string;
+  lot_numero?: string | null;
   contact_id?: string | null;
   entreprise_nom?: string | null;
 }
@@ -33,17 +36,32 @@ export function cleEntreprise(m: Pick<MarcheEntreprise, 'contact_id' | 'entrepri
   return `n:${nom}`;
 }
 
+/** Numéro de lot normalisé pour un numéro de FTM : « 1 » devient « 01 », « 01A » reste « 01A », absent « 00 ». */
+export function lotPourNumero(lot?: string | null): string {
+  const l = String(lot ?? '').trim().replace(/[^A-Za-z0-9.]/g, '');
+  if (!l) return '00';
+  return /^\d+$/.test(l) ? l.padStart(2, '0') : l.toUpperCase();
+}
+
+/** Clé d'une suite par entreprise ET par lot (FTM) : FTM-01-01 pour le lot 01, FTM-02-01 pour le lot 02. */
+export function cleEntrepriseLot(m: Pick<MarcheEntreprise, 'contact_id' | 'entreprise_nom' | 'lot_numero'>): string {
+  return `${cleEntreprise(m)}|${lotPourNumero(m.lot_numero)}`;
+}
+
 export const CLE_SANS_ENTREPRISE = 'aucune';
 
 /** Les entreprises distinctes d'une liste de marchés, dans l'ordre : deux lots d'une même entreprise n'en font qu'une. */
-export function entreprisesDistinctes(marches: MarcheEntreprise[]): Array<{ marche_id: string; cle: string; entreprise: string }> {
+export function entreprisesDistinctes(
+  marches: MarcheEntreprise[],
+  cleDe: (m: MarcheEntreprise) => string = cleEntreprise,
+): Array<{ marche_id: string; lot: string; cle: string; entreprise: string }> {
   const vues = new Set<string>();
-  const out: Array<{ marche_id: string; cle: string; entreprise: string }> = [];
+  const out: Array<{ marche_id: string; lot: string; cle: string; entreprise: string }> = [];
   for (const m of marches) {
-    const cle = cleEntreprise(m);
+    const cle = cleDe(m);
     if (vues.has(cle)) continue;
     vues.add(cle);
-    out.push({ marche_id: m.id, cle, entreprise: String(m.entreprise_nom ?? '') });
+    out.push({ marche_id: m.id, lot: lotPourNumero(m.lot_numero), cle, entreprise: String(m.entreprise_nom ?? '') });
   }
   return out;
 }
@@ -78,7 +96,7 @@ export function numeroMaxEntreprise(
 /** Le numéro suivant de chaque entreprise visée (une seule entrée par entreprise). */
 export function attribuerNumeros(
   lignes: LigneNumerotee[],
-  entreprises: Array<{ marche_id: string; cle: string; entreprise: string }>,
+  entreprises: Array<{ marche_id: string; lot?: string; cle: string; entreprise: string }>,
   cleDuMarche: (marcheId: string) => string | undefined,
   numeroHerite: (ligne: LigneNumerotee) => number,
 ): NumeroEntreprise[] {
@@ -86,14 +104,20 @@ export function attribuerNumeros(
 }
 
 /** Résumé affichable : « 002 » pour une entreprise, « 002 / 001 » pour plusieurs (même ordre que les noms). */
-export function resumeNumeros(numeros: NumeroEntreprise[], formater: (n: number) => string): string {
-  return numeros.map(n => formater(n.numero)).join(' / ');
+export function resumeNumeros(numeros: NumeroEntreprise[], formater: (n: number, entree: NumeroEntreprise) => string): string {
+  return numeros.map(n => formater(n.numero, n)).join(' / ');
 }
 
 export const formatNumeroOs = (n: number): string => String(n).padStart(3, '0');
-export const formatNumeroFtm = (n: number): string => `FTM-${String(n).padStart(2, '0')}`;
+/** « FTM-01-02 » : lot 01, deuxième fiche de ce lot (sans lot : « FTM-00-02 »). */
+export const formatNumeroFtm = (n: number, entree?: Pick<NumeroEntreprise, 'lot'>): string =>
+  `FTM-${lotPourNumero(entree?.lot)}-${String(n).padStart(2, '0')}`;
 
 /** Numéro lu dans la colonne texte d'un OS (« 004 », « 002 / 001 » : le premier). */
 export const numeroHeriteOs = (l: LigneNumerotee & { os_number?: unknown }): number => parseInt(String(l.os_number ?? ''), 10) || 0;
-/** Numéro lu dans la colonne texte d'une FTM (« FTM-03 »). */
-export const numeroHeriteFtm = (l: LigneNumerotee & { numero?: unknown }): number => parseInt(String(l.numero ?? '').replace(/^\D+/, ''), 10) || 0;
+/** Numéro lu dans la colonne texte d'une FTM : le dernier groupe de chiffres du premier numéro (« FTM-01-02 » : 2). */
+export const numeroHeriteFtm = (l: LigneNumerotee & { numero?: unknown }): number => {
+  const premier = String(l.numero ?? '').split('/')[0];
+  const m = premier.match(/(\d+)\s*$/);
+  return m ? parseInt(m[1], 10) : 0;
+};

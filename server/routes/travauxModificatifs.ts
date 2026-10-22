@@ -7,7 +7,7 @@ import { assertTenantEntity } from '../assertTenantEntity';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { creerOrdreDeService } from './ordresDeService';
 import {
-  attribuerNumeros, CLE_SANS_ENTREPRISE, cleEntreprise, entreprisesDistinctes, formatNumeroFtm, numeroHeriteFtm, resumeNumeros,
+  attribuerNumeros, CLE_SANS_ENTREPRISE, cleEntrepriseLot, entreprisesDistinctes, formatNumeroFtm, numeroHeriteFtm, resumeNumeros,
   type NumeroEntreprise,
 } from '../../src/lib/numerotationEntreprise';
 
@@ -67,23 +67,24 @@ export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin,
   async function marchesDe(tenantId: string, projectId: string, ids: string[]): Promise<any[] | null> {
     if (ids.length === 0) return [];
     const { data } = await supabaseAdmin.from('marches_entreprises')
-      .select('id, project_id, type_marche, contact_id, entreprise_nom').in('id', ids).eq('tenant_id', tenantId);
+      .select('id, project_id, type_marche, contact_id, entreprise_nom, lot_numero').in('id', ids).eq('tenant_id', tenantId);
     const rows = (data || []) as any[];
     if (rows.length !== ids.length || rows.some(m => m.project_id !== projectId)) return null;
     return rows;
   }
-  /** Numéros d'une nouvelle FTM : un par entreprise visée, dans la suite de chacune (« FTM-03 », « FTM-03 / FTM-01 »). */
+  /** Numéros d'une nouvelle FTM : un par entreprise et lot visés, dans la suite de chacun (« FTM-01-03 », « FTM-01-03 / FTM-02-01 »). */
   async function numerosFtm(tenantId: string, projectId: string, marches: any[]): Promise<NumeroEntreprise[]> {
     const [{ data: ftmRows }, { data: marchesProjet }] = await Promise.all([
       tenantScopedFrom(supabaseAdmin, tenantId, FTM).select('*').eq('project_id', projectId),
-      supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom').eq('tenant_id', tenantId).eq('project_id', projectId),
+      supabaseAdmin.from('marches_entreprises').select('id, contact_id, entreprise_nom, lot_numero').eq('tenant_id', tenantId).eq('project_id', projectId),
     ]);
-    const cles = new Map<string, string>(((marchesProjet || []) as any[]).map(m => [m.id, cleEntreprise(m)]));
-    for (const m of marches) cles.set(m.id, cleEntreprise(m));
+    // Une suite par entreprise ET par lot : FTM-01-01 pour le lot 01, FTM-02-01 pour le lot 02.
+    const cles = new Map<string, string>(((marchesProjet || []) as any[]).map(m => [m.id, cleEntrepriseLot(m)]));
+    for (const m of marches) cles.set(m.id, cleEntrepriseLot(m));
     // Une fiche sans entreprise a sa propre suite.
     const entreprises = marches.length
-      ? entreprisesDistinctes(marches)
-      : [{ marche_id: '', cle: CLE_SANS_ENTREPRISE, entreprise: '' }];
+      ? entreprisesDistinctes(marches, cleEntrepriseLot)
+      : [{ marche_id: '', lot: '', cle: CLE_SANS_ENTREPRISE, entreprise: '' }];
     const lignes = ((ftmRows || []) as any[]).map(f => (Array.isArray(f.marche_ids) && f.marche_ids.length === 0 && !f.numeros_entreprises?.length
       ? { ...f, numeros_entreprises: [{ marche_id: '', cle: CLE_SANS_ENTREPRISE, entreprise: '', numero: numeroHeriteFtm(f) }] }
       : f));
@@ -126,7 +127,7 @@ export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin,
       const resultat = await withLock(`ftm:${tenantId}:${projectId}`, async () => {
         const numeros = await numerosFtm(tenantId, projectId, marches);
         const ligne = {
-          id: crypto.randomUUID(), project_id: projectId, numero: resumeNumeros(numeros, formatNumeroFtm),
+          id: crypto.randomUUID(), project_id: projectId, numero: resumeNumeros(numeros, (n, e) => formatNumeroFtm(n, e)),
           title, objet: texte(req.body?.objet, 300), origine, motif: texte(req.body?.motif, 2000), description: texte(req.body?.description, 5000),
           marche_ids: marcheIds, incidence_delai_jours: entier(req.body?.incidence_delai_jours) ?? null,
           incidences_delais_details: texte(req.body?.incidences_delais_details, 1000),
@@ -138,8 +139,8 @@ export function registerTravauxModificatifsRoutes(app: Express, { supabaseAdmin,
         if (r.error && colonneManquante(r.error)) r = await tenantScopedFrom(supabaseAdmin, tenantId, FTM).insert(ligne).select().single();
         return r;
       });
-      // Ancien index unique (affaire, numero) encore en place : deux entreprises ne peuvent pas avoir chacune FTM-01.
-      if (resultat.error?.code === '23505') return res.status(409).json({ error: "Ce numéro de fiche existe déjà dans l'affaire : supprimez l'index ftm_numero_unique (supabase/migrate_os_multi_entreprises_ftm.sql)." });
+      // Index unique (affaire, numero) : le numéro porte le lot, seuls deux marchés sous un même numéro de lot s'y heurtent.
+      if (resultat.error?.code === '23505') return res.status(409).json({ error: "Ce numéro de fiche existe déjà dans l'affaire : deux marchés portent le même numéro de lot. Corrigez la numérotation des lots." });
       if (resultat.error) return manquante(resultat.error) ? res.status(503).json({ error: MSG_503 }) : res.status(500).json({ error: 'Enregistrement impossible.' });
       res.status(201).json(resultat.data);
     } catch (e: any) {
