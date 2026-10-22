@@ -6,6 +6,7 @@ import { Jimp } from 'jimp';
 import { cleanText } from '../referencesDossier/format';
 import { loadAgency, resolveReferences } from '../referencesDossier/data';
 import { prepareLogo } from './logos';
+import { associerMarches } from '../planningSources';
 import type { ChantierPanelData, PanelFact, PanelLogo, PanelLot, PanelParty, PanelSousTraitant } from './types';
 
 type Db = any;
@@ -144,14 +145,16 @@ export async function loadChantierPanel(
   }
 
   // Lots : la liste des lots de l'affaire fait foi ; l'entreprise vient du marché, à défaut de la fiche du lot.
-  const marcheByLot = new Map<string, any>();
-  for (const m of usableMarches) {
-    const k = normalizeLotNumber(m.lot_numero);
-    if (k && !marcheByLot.has(k)) marcheByLot.set(k, m);
-  }
+  // Rapprochement par intitulé (le numéro d'un marché ne suit pas toujours celui du lot).
+  const { parLot } = associerMarches(
+    lotRows.map(l => ({ id: l.id, lot_number: String(l.lot_number ?? ''), lot_title: String(l.lot_title ?? '') })),
+    usableMarches,
+  );
+  const lotByMarcheId = new Map<string, any>();
+  for (const l of lotRows) for (const m of (parLot.get(l.id)?.lignes ?? []) as any[]) lotByMarcheId.set(m.id, l);
   const lots: PanelLot[] = [];
   for (const l of [...lotRows].sort((a, b) => compareLotNumbers(String(a.lot_number), String(b.lot_number)))) {
-    const marche = marcheByLot.get(normalizeLotNumber(l.lot_number));
+    const marche = ((parLot.get(l.id)?.lignes ?? []) as any[]).find(m => m.contact_id || m.entreprise_nom);
     const contactId: string | null = marche?.contact_id ?? l.contact_id ?? null;
     const contact = contactId ? contacts.get(contactId) : undefined;
     const company = cleanText(marche?.entreprise_nom) ?? contactName(contact);
@@ -172,9 +175,10 @@ export async function loadChantierPanel(
     const nom = cleanText(st.nom);
     if (!marche || !nom) continue;
     const address = cleanText(st.adresse);
+    const lotDuMarche = lotByMarcheId.get(marche.id);
     sousTraitants.push({
-      lot: String(marche.lot_numero ?? ''),
-      lotTitle: lotTitleByNumber.get(normalizeLotNumber(marche.lot_numero)) ?? cleanText(marche.lot_titre) ?? '',
+      lot: String(lotDuMarche?.lot_number ?? marche.lot_numero ?? ''),
+      lotTitle: lotDuMarche ? String(lotDuMarche.lot_title ?? '') : (lotTitleByNumber.get(normalizeLotNumber(marche.lot_numero)) ?? cleanText(marche.lot_titre) ?? ''),
       entreprise: cleanText(marche.entreprise_nom) ?? '',
       nom, adresse: address ? [address] : [], objet: cleanText(st.objet),
     });

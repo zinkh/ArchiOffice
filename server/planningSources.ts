@@ -48,7 +48,7 @@ export interface MarcheLigne {
   statut?: string | null;
 }
 
-export interface MarcheDuLot { entreprises: string[]; montantHt: number | null; dureeMois: number | null }
+export interface MarcheDuLot { entreprises: string[]; montantHt: number | null; dureeMois: number | null; lignes: MarcheLigne[] }
 
 const MOTS_VIDES = new Set(['des', 'les', 'aux', 'pour', 'sur', 'avec', 'dans', 'une', 'travaux', 'lot', 'ouvrages']);
 const mots = (t: unknown): Set<string> => new Set(
@@ -89,6 +89,7 @@ export function associerMarches(lots: LotPlanifiable[], marches: MarcheLigne[]):
       entreprises: [...new Set(liste.map(m => propre(m.entreprise_nom)).filter(Boolean))],
       montantHt: montant > 0 ? Math.round(montant) : null,
       dureeMois: duree > 0 ? duree : null,
+      lignes: liste,
     });
   }
   return { parLot, sansLot };

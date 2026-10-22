@@ -162,6 +162,25 @@ describe('résolution depuis l’affaire', () => {
     expect(panel!.lots[1].logo).toBeNull();
     expect(JSON.stringify(panel)).not.toContain('AUTRE CABINET');
   });
+  it('rapproche les marchés des lots par intitulé quand les numéros divergent (cas réel SELIA)', async () => {
+    const tenant = makeTenant();
+    fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenant, agency_name: 'AAZS' }]);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'pS', tenant_id: tenant, name: 'SELIA', client: 'SELIA' }]);
+    fakeSupabaseAdmin.seed('project_lots', [
+      { id: 'a', tenant_id: tenant, project_id: 'pS', lot_number: '07', lot_title: 'PEINTURE' },
+      { id: 'b', tenant_id: tenant, project_id: 'pS', lot_number: '09', lot_title: 'CHAUFFAGE VENTILATION PLOMBERIE' },
+      { id: 'c', tenant_id: tenant, project_id: 'pS', lot_number: '10', lot_title: 'ELECTRICITE' },
+    ]);
+    fakeSupabaseAdmin.seed('marches_entreprises', [
+      { id: 'm1', tenant_id: tenant, project_id: 'pS', entreprise_nom: 'PEINTRE SA', lot_numero: '09', lot_titre: 'PEINTURE' },
+      { id: 'm2', tenant_id: tenant, project_id: 'pS', entreprise_nom: 'CVC SARL', lot_numero: '10', lot_titre: 'CHAUFFAGE VENTILATION' },
+      { id: 'm3', tenant_id: tenant, project_id: 'pS', entreprise_nom: 'ELEC SAS', lot_numero: '12', lot_titre: 'ELECTRICITE' },
+      { id: 'm0', tenant_id: tenant, project_id: 'pS', entreprise_nom: 'INSTALLATEUR', lot_numero: '00', lot_titre: 'INSTALLATION DE CHANTIER' },
+    ]);
+    const panel = await loadChantierPanel(fakeSupabaseAdmin, tenant, 'pS', { withImage: false });
+    const par = Object.fromEntries(panel!.lots.map(l => [l.number, l.company]));
+    expect(par).toEqual({ '07': 'PEINTRE SA', '09': 'CVC SARL', '10': 'ELEC SAS' });
+  });
   it('une affaire d’un autre cabinet est introuvable', async () => {
     const tenant = makeTenant();
     const other = makeTenant();
