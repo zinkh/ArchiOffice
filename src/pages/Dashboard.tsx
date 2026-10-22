@@ -18,7 +18,7 @@ import {
 } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { fetchJson } from '../lib/api';
-import { computeCopilotSuggestions, formatCopilotSuggestion } from '../lib/copilotSuggestions';
+import { formatCopilotSuggestion, type CopilotSuggestionRaw } from '../lib/copilotSuggestions';
 import type { Project, Milestone } from '../types';
 import { useTranslation } from 'react-i18next';
 import ActivityFeed from '../components/ActivityFeed';
@@ -90,6 +90,7 @@ function AdminDashboardView() {
   const [tenders,    setTenders]    = useState<any[]>([]);
   const [invoices,   setInvoices]   = useState<any[]>([]);
   const [proposals,  setProposals]  = useState<any[]>([]);
+  const [rawSuggestions, setRawSuggestions] = useState<CopilotSuggestionRaw[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -97,18 +98,21 @@ function AdminDashboardView() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [projectsData, milestonesData, tendersData, invoicesData, proposalsData] = await Promise.all([
+      const [projectsData, milestonesData, tendersData, invoicesData, proposalsData, suggestionsData] = await Promise.all([
         fetchJson('/api/projects'),
         fetchJson('/api/milestones'),
         fetchJson('/api/tenders'),
         fetchJson('/api/invoices'),
         fetchJson('/api/proposals'),
+        // Mêmes règles que la pastille du chat, calculées côté serveur (tâches, réunions, réserves, permis...) : leur échec ne doit pas vider le tableau de bord.
+        fetchJson('/api/copilot/suggestions').catch(() => []),
       ]);
       setProjects(Array.isArray(projectsData) ? projectsData : []);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
       setTenders(Array.isArray(tendersData) ? tendersData : []);
       setInvoices(Array.isArray(invoicesData) ? invoicesData : []);
       setProposals(Array.isArray(proposalsData) ? proposalsData : []);
+      setRawSuggestions(Array.isArray(suggestionsData) ? suggestionsData : []);
     } catch (err) {
       console.error('Failed to load dashboard data:', err);
       setLoadError(err instanceof Error ? err.message : String(err));
@@ -164,10 +168,7 @@ function AdminDashboardView() {
   // agent chat with a prefilled draft the user reviews before sending, so
   // the AI never acts without the user's go-ahead. Rules live in
   // src/lib/copilotSuggestions.ts, shared with the global chat badge. ──
-  const suggestions = React.useMemo(
-    () => computeCopilotSuggestions({ projects, milestones, invoices }).map(raw => formatCopilotSuggestion(raw, t)),
-    [milestones, projects, invoices, t]
-  );
+  const suggestions = React.useMemo(() => rawSuggestions.map(raw => formatCopilotSuggestion(raw, t)), [rawSuggestions, t]);
 
   const dashboardHeader = (
     <>

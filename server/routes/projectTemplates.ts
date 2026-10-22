@@ -33,7 +33,7 @@ const days = (v: unknown) => {
 export function sanitizeLots(raw: unknown) {
   if (!Array.isArray(raw)) return [];
   return raw.slice(0, MAX_ITEMS)
-    .map((l: any) => ({ lot_number: text(l?.lot_number, 20), lot_title: text(l?.lot_title) }))
+    .map((l: any) => ({ lot_number: text(l?.lot_number, 20), lot_title: text(l?.lot_title), ...(typeof l?.rge_required === 'boolean' ? { rge_required: l.rge_required } : {}) }))
     .filter(l => l.lot_title);
 }
 

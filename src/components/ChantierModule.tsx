@@ -14,8 +14,9 @@ import {
   IconPlus, IconFileDownload, IconCopy, IconSend, IconCloud, IconTemperature,
   IconUsers, IconChevronLeft, IconChevronRight, IconCamera,
   IconBuilding, IconTools, IconFileDiff, IconPhoto, IconClipboardList, IconAlertTriangle,
-  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX,
+  IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar,
 } from '@tabler/icons-react';
+import PlanningChantierTab from './chantier/PlanningChantierTab';
 import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
@@ -60,7 +61,7 @@ interface ChantierModuleProps {
 
 const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
 
-type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'travaux-modificatifs' | 'photos';
+type ChantierTab = 'comptes-rendus' | 'reserves' | 'entreprises' | 'os' | 'travaux-modificatifs' | 'planning' | 'photos';
 
 const STATUT_CR_LABELS: Record<string, string> = {
   brouillon: 'BROUILLON',
@@ -846,6 +847,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     { id: 'entreprises', label: 'Entreprises', icon: IconBuilding },
     { id: 'os', label: 'OS & situations', icon: IconTools },
     ...(travauxModificatifsContent ? [{ id: 'travaux-modificatifs' as ChantierTab, label: t('travaux_modif_tab'), icon: IconFileDiff }] : []),
+    { id: 'planning', label: 'Planning', icon: IconChartBar },
     { id: 'photos', label: 'Photos', icon: IconPhoto },
   ];
 
@@ -1586,6 +1588,8 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
           {activeTab === 'os' && osSituationsContent}
 
           {activeTab === 'travaux-modificatifs' && travauxModificatifsContent}
+
+          {activeTab === 'planning' && <PlanningChantierTab project={project} lots={lots_list} settings={settings} showToast={showToast} />}
 
           {activeTab === 'photos' && <PhotosTab observations={allObservations} reports={reports} />}
         </div>

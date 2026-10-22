@@ -12,6 +12,7 @@ interface Lot {
   project_id: string;
   lot_number: string;
   lot_title: string;
+  rge_required?: boolean;
 }
 
 interface LotsManagerProps {
@@ -36,6 +37,17 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
       await apiFetch(`/api/lots/${id}`, { method: 'PUT', body: JSON.stringify({ lot_title: title }) });
       notifier(await fetchLots());
     } catch (e) { setError(e instanceof Error ? e.message : 'Échec du renommage'); }
+  };
+  const setRgeRequired = async (id: string, required: boolean) => {
+    setError('');
+    // Affichage immédiat, relu du serveur ensuite (comme le reste des champs du lot).
+    setLots(prev => prev.map(l => (l.id === id ? { ...l, rge_required: required } : l)));
+    try {
+      await apiFetch(`/api/lots/${id}`, { method: 'PUT', body: JSON.stringify({ rge_required: required }) });
+    } catch (e) {
+      setLots(prev => prev.map(l => (l.id === id ? { ...l, rge_required: !required } : l)));
+      setError(e instanceof Error ? e.message : "Échec de l'enregistrement de l'exigence RGE");
+    }
   };
   const renumber = async (id: string, brut: string): Promise<boolean> => {
     setError('');
@@ -204,6 +216,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
               <th className="p-4 w-10" aria-label="Déplacer" />
               <th className="p-4 font-bold text-sm">N°</th>
               <th className="p-4 font-bold text-sm">Intitulé</th>
+              <th className="p-4 font-bold text-sm text-center">RGE exigé</th>
               <th className="p-4 font-bold text-sm text-right">Actions</th>
             </tr>
           </thead>
@@ -229,6 +242,16 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
                 </td>
                 <td className="p-4 text-sm font-medium w-28"><LotNumberInput value={lot.lot_number} onCommit={numero => renumber(lot.id, numero)} /></td>
                 <td className="p-4 text-sm"><LotTitleInput value={lot.lot_title} onCommit={title => void rename(lot.id, title)} /></td>
+                <td className="p-4 text-center">
+                  <input
+                    type="checkbox"
+                    checked={!!lot.rge_required}
+                    onChange={e => void setRgeRequired(lot.id, e.target.checked)}
+                    aria-label={`RGE exigé pour le lot ${lot.lot_number} ${lot.lot_title}`}
+                    title="Une alerte signale l'entreprise titulaire si sa qualification RGE manque ou expire"
+                    className="h-4 w-4 pointer-coarse:h-6 pointer-coarse:w-6"
+                  />
+                </td>
                 <td className="p-4 text-right">
                   <button
                     onClick={() => void handleDeleteLot(lot.id)}
@@ -241,7 +264,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
             ))}
             {lots.length === 0 && !loading && (
               <tr>
-                <td colSpan={4} className="p-8 text-center italic" style={{ color: 'var(--tblr-muted)' }}>
+                <td colSpan={5} className="p-8 text-center italic" style={{ color: 'var(--tblr-muted)' }}>
                   Aucun lot défini pour ce projet.
                 </td>
               </tr>
@@ -271,6 +294,7 @@ export const LotsManager: React.FC<LotsManagerProps> = ({ projectId, onChange, o
                   style={{ borderColor: 'var(--tblr-border)' }}
                 />
               </td>
+              <td />
               <td className="p-4 text-right">
                 <button
                   onClick={() => void handleAddLot()}

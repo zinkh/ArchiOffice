@@ -19,10 +19,62 @@ export interface McpOAuthClient {
   redirect_uris: string[];
 }
 
+/** Une agence (cabinet) à laquelle la personne appartient réellement. */
+export interface McpAgency {
+  id: string;
+  name: string | null;
+  slug: string | null;
+  /** Rôle système tenu DANS cette agence (admin, manager, pm, user). */
+  role: string | null;
+  /** Intitulé métier libre tenu dans cette agence. */
+  roleLabel: string | null;
+}
+
+/**
+ * Accès aux adhésions, injecté par server.ts : ce paquet n'importe rien de
+ * server/ (même raison que setExternalFileReader), alors que
+ * server/tenantMemberships.ts est la seule source de vérité de l'appartenance.
+ */
+export interface McpAgencyDirectory {
+  /** Toutes les agences de la personne, celle par défaut en tête. */
+  list(userId: string): Promise<McpAgency[]>;
+  /** L'agence si — et seulement si — la personne en est membre MAINTENANT. */
+  find(userId: string, tenantId: string): Promise<McpAgency | null>;
+  /** Le cabinet existe-t-il (distingue « inconnue » de « accès refusé ») ? */
+  exists(tenantId: string): Promise<boolean>;
+}
+
+let agencyDirectory: McpAgencyDirectory | null = null;
+
+export function setMcpAgencyDirectory(dir: McpAgencyDirectory | null): void {
+  agencyDirectory = dir;
+}
+
+export function getMcpAgencyDirectory(): McpAgencyDirectory | null {
+  return agencyDirectory;
+}
+
+/**
+ * - selected     : une agence est active et la personne en est membre.
+ * - not_selected : aucune agence n'est désignée pour cette connexion.
+ * - access_lost  : une agence est désignée mais la personne n'en est plus
+ *                  membre (appartenance révoquée), ou l'annuaire est absent.
+ */
+export type McpAgencyState = 'selected' | 'not_selected' | 'access_lost';
+
 export interface McpResolvedToken {
   userId: string;
-  tenantId: string;
   connectionId: string;
+  /** L'agence effective de CET appel, ou null hors état `selected`. */
+  tenantId: string | null;
+  agency: McpAgency | null;
+  agencyState: McpAgencyState;
+  /** Agence désignée (stockée), même quand l'accès a été perdu. */
+  selectedTenantId: string | null;
+  /** `consent` tant que switch_agency n'a jamais été appelé sur cette connexion. */
+  selectionSource: 'consent' | 'switch';
+  /** Vrai dès qu'un changement d'agence a eu lieu sur cette connexion. */
+  hasSwitched: boolean;
 }
 
 /** RFC 7591 minimal : Gemini se présente sans identifiant préalable, on lui
@@ -125,12 +177,22 @@ export async function refreshConnection(
   return { accessToken, expiresIn: Math.floor(ACCESS_TOKEN_TTL_MS / 1000), scope: conn.scope || '' };
 }
 
-/** Résout un jeton d'accès présenté par Gemini (en-tête Authorization, aussi
- *  bien sur /mcp que — repris tel quel — sur les appels internes vers
- *  /api/* que font les outils, voir tools.ts) vers l'utilisateur et le
- *  cabinet qu'il désigne. Rend null sur tout jeton absent, expiré ou révoqué,
- *  jamais une exception : c'est un cas attendu, pas une panne. */
-export async function resolveAccessToken(supabaseAdmin: any, token: string): Promise<McpResolvedToken | null> {
+/** Résout un jeton d'accès présenté par le client MCP (en-tête Authorization,
+ *  aussi bien sur /mcp que — repris tel quel — sur les appels internes vers
+ *  /api/* que font les outils, voir tools.ts) vers la personne, la connexion et
+ *  l'agence qu'il désigne. Rend null sur tout jeton absent, expiré ou révoqué,
+ *  jamais une exception : c'est un cas attendu, pas une panne.
+ *
+ *  L'agence n'est jamais lue « telle qu'enregistrée » : l'appartenance est
+ *  revérifiée à CHAQUE résolution. `pinnedTenantId` fige l'agence d'une opération
+ *  déjà démarrée (en-tête X-Tenant-Id des appels internes d'un outil) : un
+ *  changement d'agence survenu entre-temps ne la redirige pas, mais
+ *  l'appartenance à l'agence figée est elle aussi revérifiée. */
+export async function resolveAccessToken(
+  supabaseAdmin: any,
+  token: string,
+  options: { pinnedTenantId?: string | null } = {},
+): Promise<McpResolvedToken | null> {
   if (!token || !token.startsWith('mcp_at_')) return null;
   const { data: conn } = await supabaseAdmin.from('mcp_connections').select('*').eq('access_token_hash', hashToken(token)).maybeSingle();
   if (!conn || conn.revoked_at) return null;
@@ -138,7 +200,41 @@ export async function resolveAccessToken(supabaseAdmin: any, token: string): Pro
   // Meilleur effort : un échec d'écriture de `last_used_at` ne doit jamais
   // faire échouer l'appel qu'on est justement en train d'authentifier.
   supabaseAdmin.from('mcp_connections').update({ last_used_at: new Date().toISOString() }).eq('id', conn.id).then(() => {}, () => {});
-  return { userId: conn.user_id, tenantId: conn.tenant_id, connectionId: conn.id };
+
+  // Sélection : le choix fait depuis le connecteur, à défaut le cabinet de
+  // consentement. Jamais le cabinet affiché dans le navigateur.
+  const hasSwitched = !!conn.active_tenant_id;
+  const stored: string | null = conn.active_tenant_id || conn.tenant_id || null;
+  const target = options.pinnedTenantId || stored;
+  const base = {
+    userId: conn.user_id, connectionId: conn.id, selectedTenantId: stored,
+    selectionSource: (hasSwitched ? 'switch' : 'consent') as 'consent' | 'switch', hasSwitched,
+  };
+  if (!target) return { ...base, tenantId: null, agency: null, agencyState: 'not_selected' };
+  // Sans annuaire des adhésions, on ne peut rien garantir : on ferme plutôt que
+  // de servir un cabinet dont l'appartenance n'est pas vérifiée.
+  const agency = agencyDirectory ? await agencyDirectory.find(conn.user_id, target) : null;
+  if (!agency) return { ...base, tenantId: null, agency: null, agencyState: 'access_lost' };
+  return { ...base, tenantId: agency.id, agency, agencyState: 'selected' };
+}
+
+/**
+ * Enregistre l'agence active d'UNE connexion et relit la ligne pour confirmer
+ * que la sélection est bien celle qui est enregistrée (deux changements
+ * simultanés : le dernier écrit gagne, et chacun le voit à la relecture).
+ */
+export async function persistActiveAgency(
+  supabaseAdmin: any,
+  params: { connectionId: string; userId: string; tenantId: string },
+): Promise<{ confirmed: boolean; unavailable?: boolean }> {
+  const { error } = await supabaseAdmin.from('mcp_connections')
+    .update({ active_tenant_id: params.tenantId, active_tenant_set_at: new Date().toISOString() })
+    .eq('id', params.connectionId).eq('user_id', params.userId).is('revoked_at', null);
+  // Colonne absente : instance où migrate_mcp_active_agency.sql n'a pas été jouée.
+  if (error) return { confirmed: false, unavailable: true };
+  const { data: row } = await supabaseAdmin.from('mcp_connections')
+    .select('active_tenant_id, revoked_at').eq('id', params.connectionId).eq('user_id', params.userId).maybeSingle();
+  return { confirmed: !!row && !row.revoked_at && row.active_tenant_id === params.tenantId };
 }
 
 export async function listConnections(supabaseAdmin: any, tenantId: string, userId: string) {
