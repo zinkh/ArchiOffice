@@ -300,6 +300,8 @@ export interface ProjectLot {
   lot_title: string;
   contact_id?: string;
   contact_name?: string;
+  /** Le lot exige une entreprise RGE (alerte si sa qualification manque ou expire). */
+  rge_required?: boolean;
   market_number?: string;
   base_amount?: number;
   options_amount?: number;

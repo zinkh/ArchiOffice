@@ -9,7 +9,7 @@
 // than final text, so the i18n formatting stays entirely on the client via
 // formatCopilotSuggestion() — the server never needs a translation layer.
 import type { Project, Milestone } from '../types';
-import { resumeQualifications, parContact, joursAvant, normaliserSiret, type Qualification } from './qualifications';
+import { resumeQualifications, resumeAssurance, resumeRge, parContact, joursAvant, normaliserSiret, type Qualification } from './qualifications';
 
 const MAX_SUGGESTIONS = 10;
 // Plafond par type de suggestion : sans lui, un type très bavard (une carte par
@@ -93,7 +93,7 @@ export interface CopilotReserveInput { id: string; project_id?: string | null; s
 export interface CopilotContractInput { id: string; project_id?: string | null; status?: string | null; intitule_projet?: string | null; numero?: string | null; date_debut?: string | null; created_at?: string | null }
 export interface CopilotFeeNoteInput { project_id?: string | null; contrat_id?: string | null }
 export interface CopilotPermitInput { id: string; project_id?: string | null; type?: string | null; reference?: string | null; submission_date?: string | null; status?: string | null }
-export interface CopilotLotInput { project_id?: string | null; contact_id?: string | null }
+export interface CopilotLotInput { id?: string; project_id?: string | null; contact_id?: string | null; lot_number?: string | null; lot_title?: string | null; rge_required?: boolean | null }
 
 export interface CopilotContactInput {
   id: string; first_name?: string | null; last_name?: string | null; company_name?: string | null;
@@ -104,7 +104,7 @@ export interface CopilotOrderInput { id: string; project_id?: string | null; sta
 export interface CopilotSituationInput { id: string; project_id?: string | null; etat?: string | null; date_situation?: string | null }
 export interface CopilotObservationInput { id: string; project_id?: string | null; statut?: string | null; due_date?: string | null }
 export interface CopilotMarketInput {
-  id: string; project_id?: string | null; entreprise_nom?: string | null; contact_id?: string | null; act_entreprise_id?: string | null;
+  id: string; project_id?: string | null; entreprise_nom?: string | null; contact_id?: string | null; act_entreprise_id?: string | null; lot_numero?: string | null;
   type_marche?: string | null; statut?: string | null; statut_signature?: string | null; date_notification?: string | null;
 }
 export interface CopilotConsultationInput { project_id?: string | null; consultation?: { pieces_admin?: { id: string; nom?: string }[]; pieces_recues?: Record<string, string[]> } | null }
@@ -134,6 +134,8 @@ export type CopilotSuggestionRaw =
   | { id: string; tone: 'danger'; type: 'observations_overdue'; params: { project: string; count: number } }
   | { id: string; tone: 'danger' | 'warning'; type: 'qualification_expiring'; params: { company: string; days: number } }
   | { id: string; tone: 'warning'; type: 'insurance_missing'; params: { project: string; count: number; names: string } }
+  | { id: string; tone: 'danger' | 'warning'; type: 'insurance_expiring'; params: { project: string; company: string; days: number } }
+  | { id: string; tone: 'danger' | 'warning'; type: 'rge_required'; params: { project: string; lot: string; company: string; state: 'missing' | 'expired' | 'soon'; days: number } }
   | { id: string; tone: 'warning'; type: 'workload'; params: { name: string; count: number } }
   | { id: string; tone: 'warning'; type: 'project_incomplete'; params: { project: string; fields: string[] } }
   | { id: string; tone: 'warning'; type: 'invoice_draft_stale'; params: { count: number; amount: number; numbers: string } };
@@ -401,14 +403,20 @@ const INSURANCE_PATTERN = /assurance|decennale/;
 // Une entreprise notifiée (marché notifié ou signé, ni résilié ni subséquent) doit
 // justifier de son assurance avant d'exécuter : pièce cochée dans l'ACT, ou
 // document de l'affaire rattaché à l'entreprise (fiche ou nom cité).
+const isNotifiedMarket = (m: CopilotMarketInput) =>
+  (!!m.date_notification || m.statut_signature === 'signe') && strip(m.statut) !== 'resilie' && m.type_marche !== 'subsequent' && !!m.project_id;
+
 function missingInsurance(
   projects: Project[], markets: CopilotMarketInput[], consultations: CopilotConsultationInput[], documents: CopilotDocumentInput[],
+  qualifications: Qualification[],
 ): CopilotSuggestionRaw[] {
+  const byContact = parContact(qualifications);
   const insuranceDocs = documents.filter(d => INSURANCE_PATTERN.test(strip(`${d.name ?? ''} ${d.description ?? ''} ${d.doc_type ?? ''}`)));
   const byProject = new Map<string, string[]>();
   markets.forEach(m => {
-    const notified = !!m.date_notification || m.statut_signature === 'signe';
-    if (!notified || strip(m.statut) === 'resilie' || m.type_marche === 'subsequent' || !m.project_id) return;
+    if (!isNotifiedMarket(m) || !m.project_id) return;
+    // Une attestation saisie sur la fiche de l'entreprise (avec sa validité) vaut présence.
+    if (m.contact_id && (byContact[m.contact_id] ?? []).some(q => q.organisme === 'assurance')) return;
     const consultation = consultations.find(c => c.project_id === m.project_id)?.consultation;
     const insurancePieceIds = (consultation?.pieces_admin ?? [])
       .filter(p => p.id === 'assurance' || INSURANCE_PATTERN.test(strip(p.nom)))
@@ -432,6 +440,72 @@ function missingInsurance(
     });
   }
   return list.sort((a, b) => (b.params as { count: number }).count - (a.params as { count: number }).count);
+}
+
+function expiringInsurance(
+  projects: Project[], markets: CopilotMarketInput[], qualifications: Qualification[], now: Date,
+): CopilotSuggestionRaw[] {
+  const today = now.toISOString().slice(0, 10);
+  const byContact = parContact(qualifications);
+  const seen = new Set<string>();
+  const list: CopilotSuggestionRaw[] = [];
+  markets.forEach(m => {
+    if (!isNotifiedMarket(m) || !m.contact_id) return;
+    const key = `${m.project_id}:${m.contact_id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    // Sans date de fin saisie, on ne sait rien de la validité : rien n'est signalé.
+    const resume = resumeAssurance(byContact[m.contact_id] ?? [], today);
+    const fin = resume.principale?.date_fin;
+    if (!fin || (resume.statut !== 'expiree' && resume.statut !== 'bientot')) return;
+    const days = joursAvant(fin, today);
+    const project = projectName(projects, m.project_id);
+    if (!project || days > QUALIFICATION_ALERT_DAYS) return;
+    list.push({
+      id: `insurance-expiring-${key}`, tone: days < 0 ? 'danger' : 'warning', type: 'insurance_expiring',
+      params: { project, company: m.entreprise_nom || '—', days },
+    });
+  });
+  return list.sort((a, b) => (a.params as { days: number }).days - (b.params as { days: number }).days);
+}
+
+const lotKey = (n: string | null | undefined) => (n ?? '').trim().toLowerCase().replace(/^0+(?=\d)/, '');
+
+// Un lot qui exige le RGE : l'entreprise titulaire (fiche du lot, à défaut le
+// marché du même numéro) doit porter une qualification RGE en cours de validité.
+// Ici l'absence de toute qualification EST signalée : c'est le lot qui l'exige.
+function rgeRequiredLots(
+  projects: Project[], lots: CopilotLotInput[], markets: CopilotMarketInput[], contacts: CopilotContactInput[],
+  qualifications: Qualification[], now: Date,
+): CopilotSuggestionRaw[] {
+  const today = now.toISOString().slice(0, 10);
+  const byContact = parContact(qualifications);
+  const list: CopilotSuggestionRaw[] = [];
+  lots.forEach(l => {
+    if (!l.rge_required || !l.project_id) return;
+    const project = projects.find(p => p.id === l.project_id);
+    if (!project || ['completed', 'termine', 'livre', 'clos', 'archive'].some(k => strip(project.status).startsWith(k))) return;
+    const contactId = l.contact_id
+      || markets.find(m => m.project_id === l.project_id && m.type_marche !== 'subsequent' && strip(m.statut) !== 'resilie' && lotKey(m.lot_numero) === lotKey(l.lot_number))?.contact_id;
+    const contact = contacts.find(c => c.id === contactId);
+    if (!contactId || !contact) return;
+    const resume = resumeRge(byContact[contactId] ?? [], today);
+    const fin = resume.principale?.date_fin;
+    const days = fin ? joursAvant(fin, today) : 0;
+    let state: 'missing' | 'expired' | 'soon' | null = null;
+    if (resume.statut === 'aucune') state = 'missing';
+    else if (resume.statut === 'expiree') state = 'expired';
+    else if (resume.statut === 'bientot' && days <= QUALIFICATION_ALERT_DAYS) state = 'soon';
+    if (!state) return;
+    list.push({
+      id: `rge-required-${l.id ?? `${l.project_id}-${l.lot_number}`}`,
+      tone: state === 'soon' ? 'warning' : 'danger',
+      type: 'rge_required',
+      params: { project: project.name, lot: [l.lot_number, l.lot_title].filter(Boolean).join(' '), company: contactName(contact), state, days },
+    });
+  });
+  const rank = { missing: 0, expired: 1, soon: 2 } as const;
+  return list.sort((a, b) => rank[(a.params as { state: 'missing' | 'expired' | 'soon' }).state] - rank[(b.params as { state: 'missing' | 'expired' | 'soon' }).state]);
 }
 
 function overloadedPeople(tasks: CopilotTaskInput[], people: CopilotPersonInput[]): CopilotSuggestionRaw[] {
@@ -643,7 +717,9 @@ export function computeCopilotSuggestions(input: {
     observations ? overdueObservations(projects, observations, now) : [],
     permits ? permitsDue(permits, now) : [],
     lots && contacts && qualifications ? expiringQualifications(lots, contacts, qualifications, now) : [],
-    markets && consultations && documents ? missingInsurance(projects, markets, consultations, documents) : [],
+    markets && consultations && documents ? missingInsurance(projects, markets, consultations, documents, qualifications ?? []) : [],
+    markets && qualifications ? expiringInsurance(projects, markets, qualifications, now) : [],
+    lots && contacts && qualifications ? rgeRequiredLots(projects, lots, markets ?? [], contacts, qualifications, now) : [],
     orders ? unacknowledgedOrders(projects, orders, now) : [],
     situations ? situationsToVerify(projects, situations, now) : [],
     tendersClosingSoon(tenders, now),
@@ -807,6 +883,15 @@ export function formatCopilotSuggestion(
         text: t('ai_suggestion_insurance_missing', { project: raw.params.project, count: raw.params.count, names: raw.params.names }),
         draft: t('ai_draft_insurance_missing', { project: raw.params.project, count: raw.params.count, names: raw.params.names }),
       };
+    case 'insurance_expiring': {
+      const key = raw.params.days < 0 ? 'expired' : 'soon';
+      const vars = { project: raw.params.project, company: raw.params.company, days: Math.abs(raw.params.days) };
+      return { id: raw.id, tone: raw.tone, text: t(`ai_suggestion_insurance_${key}`, vars), draft: t(`ai_draft_insurance_${key}`, vars) };
+    }
+    case 'rge_required': {
+      const vars = { project: raw.params.project, lot: raw.params.lot, company: raw.params.company, days: Math.abs(raw.params.days) };
+      return { id: raw.id, tone: raw.tone, text: t(`ai_suggestion_rge_${raw.params.state}`, vars), draft: t(`ai_draft_rge_${raw.params.state}`, vars) };
+    }
     case 'workload':
       return {
         id: raw.id, tone: raw.tone,

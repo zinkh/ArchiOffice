@@ -308,6 +308,73 @@ describe('computeCopilotSuggestions', () => {
     expect(list).toEqual([]);
   });
 
+  it('compte une attestation saisie sur la fiche comme présente, et alerte sur sa validité', () => {
+    const base2 = { ...base, projects: [project('p1')], consultations: [], documents: [] };
+    const market = (id: string, contact: string) => ({ id, project_id: 'p1', entreprise_nom: `E${id}`, contact_id: contact, statut_signature: 'signe' });
+    const markets = [market('1', 'c1'), market('2', 'c2'), market('3', 'c3'), market('4', 'c4')];
+    const qualifications = [
+      { id: 'q1', contact_id: 'c1', organisme: 'assurance', date_fin: '2026-10-01' },
+      { id: 'q2', contact_id: 'c2', organisme: 'assurance', date_fin: '2026-11-05' },
+      { id: 'q3', contact_id: 'c3', organisme: 'assurance', date_fin: '2027-12-31' },
+      { id: 'q4', contact_id: 'c4', organisme: 'assurance' },
+    ] as any;
+    const list = computeCopilotSuggestions({ ...base2, markets, qualifications });
+    expect(list.map(s => [s.type, s.id.endsWith('p1:c1') || s.id.endsWith('p1:c2')])).toEqual([['insurance_expiring', true], ['insurance_expiring', true]]);
+    expect(list.map(s => s.tone)).toEqual(['danger', 'warning']);
+  });
+
+  it('une assurance expirée ne rend pas valide une qualification professionnelle expirée', () => {
+    const lots = [{ id: 'l1', project_id: 'p1', contact_id: 'c1', lot_number: '05', lot_title: 'Isolation' }];
+    const contacts = [{ id: 'c1', company_name: 'A', email: 'a@b.fr', siret: '12345678901234' }];
+    const qualifications = [
+      { id: 'q1', contact_id: 'c1', organisme: 'qualibat', date_fin: '2026-01-01' },
+      { id: 'q2', contact_id: 'c1', organisme: 'assurance', date_fin: '2030-01-01' },
+    ] as any;
+    const list = computeCopilotSuggestions({ ...base, lots, contacts, qualifications }).filter(s => s.type === 'qualification_expiring');
+    expect(list).toHaveLength(1);
+  });
+
+  it('alerte sur le RGE seulement quand le lot l\'exige', () => {
+    const projects = [project('p1', { status: 'In Progress' })];
+    const contacts = [
+      { id: 'c1', company_name: 'Sans RGE', email: 'a@b.fr', siret: '12345678901234' },
+      { id: 'c2', company_name: 'RGE expiré', email: 'a@b.fr', siret: '12345678901234' },
+      { id: 'c3', company_name: 'RGE bientôt', email: 'a@b.fr', siret: '12345678901234' },
+      { id: 'c4', company_name: 'RGE valide', email: 'a@b.fr', siret: '12345678901234' },
+      { id: 'c5', company_name: 'Pas exigé', email: 'a@b.fr', siret: '12345678901234' },
+    ];
+    const lots = [
+      { id: 'l1', project_id: 'p1', contact_id: 'c1', lot_number: '01', lot_title: 'Isolation', rge_required: true },
+      { id: 'l2', project_id: 'p1', contact_id: 'c2', lot_number: '02', lot_title: 'Chauffage', rge_required: true },
+      { id: 'l3', project_id: 'p1', contact_id: 'c3', lot_number: '03', lot_title: 'Menuiseries', rge_required: true },
+      { id: 'l4', project_id: 'p1', contact_id: 'c4', lot_number: '04', lot_title: 'Ventilation', rge_required: true },
+      { id: 'l5', project_id: 'p1', contact_id: 'c5', lot_number: '05', lot_title: 'Peinture', rge_required: false },
+    ];
+    const qualifications = [
+      { id: 'q2', contact_id: 'c2', organisme: 'rge', date_fin: '2026-09-01' },
+      { id: 'q3', contact_id: 'c3', organisme: 'qualit_enr', date_fin: '2026-11-05' },
+      { id: 'q4', contact_id: 'c4', organisme: 'rge', date_fin: '2028-01-01' },
+    ] as any;
+    const list = computeCopilotSuggestions({ ...base, projects, lots, contacts, qualifications }).filter(s => s.type === 'rge_required');
+    expect(list.map(s => [s.id, (s.params as any).state, s.tone])).toEqual([
+      ['rge-required-l1', 'missing', 'danger'],
+      ['rge-required-l2', 'expired', 'danger'],
+      ['rge-required-l3', 'soon', 'warning'],
+    ]);
+  });
+
+  it('retrouve l\'entreprise d\'un lot RGE par son marché quand la fiche du lot n\'en a pas', () => {
+    const list = computeCopilotSuggestions({
+      ...base,
+      projects: [project('p1', { status: 'In Progress' })],
+      lots: [{ id: 'l1', project_id: 'p1', contact_id: null, lot_number: '02', lot_title: 'Chauffage', rge_required: true }],
+      markets: [{ id: 'm1', project_id: 'p1', entreprise_nom: 'Dupont', contact_id: 'c1', lot_numero: '2', statut_signature: 'signe' }],
+      contacts: [{ id: 'c1', company_name: 'Dupont', email: 'a@b.fr', siret: '12345678901234' }],
+      qualifications: [],
+    }).filter(s => s.type === 'rge_required');
+    expect(list).toHaveLength(1);
+  });
+
   it('signale une charge excessive au-delà de 15 tâches ouvertes', () => {
     const many = Array.from({ length: 16 }, (_, i) => ({ id: `t${i}`, title: 'T', assignee_id: 'u1' }));
     const list = computeCopilotSuggestions({ ...base, tasks: many, people: [{ id: 'u1', name: 'Sophie' }] });

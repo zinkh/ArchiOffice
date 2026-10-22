@@ -436,7 +436,8 @@ CREATE TABLE IF NOT EXISTS project_lots (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-  lot_number TEXT NOT NULL, lot_title TEXT NOT NULL, contact_id TEXT
+  lot_number TEXT NOT NULL, lot_title TEXT NOT NULL, contact_id TEXT,
+  rge_required BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS tasks (

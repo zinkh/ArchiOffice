@@ -48,7 +48,7 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
   app.put("/api/lots/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const patch: Record<string, string> = {};
+      const patch: Record<string, string | boolean> = {};
       if (req.body?.lot_number !== undefined) {
         const numero = validerNumeroDeLot(req.body.lot_number);
         if (!numero.ok) return res.status(400).json({ error: numero.error });
@@ -61,6 +61,7 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
         patch.lot_number = numero.numero;
       }
       if (typeof req.body?.lot_title === 'string') patch.lot_title = req.body.lot_title.trim();
+      if (typeof req.body?.rge_required === 'boolean') patch.rge_required = req.body.rge_required;
       if (patch.lot_title !== undefined && !patch.lot_title) return res.status(400).json({ error: "Le titre du lot ne peut pas être vide" });
       if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
       const { error } = await supabaseAdmin.from('project_lots').update(patch).eq('id', req.params.id).eq('tenant_id', tenantId);

@@ -43,17 +43,22 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
         if (error) return undefined;
         return data || [];
       };
+      // `rge_required` n'existe qu'après la migration : repli sur les colonnes d'origine.
+      const readLots = async () =>
+        (await optional('project_lots', 'id, project_id, contact_id, lot_number, lot_title, rge_required'))
+        ?? optional('project_lots', 'id, project_id, contact_id, lot_number, lot_title');
+      const markets = await optional('marches_entreprises', 'id, project_id, entreprise_nom, contact_id, act_entreprise_id, lot_numero, type_marche, statut, statut_signature, date_notification');
       const [meetings, reserves, contracts, feeNotes, permits, lots] = await Promise.all([
         optional('meetings', 'id, title, date, notes'),
         optional('reserves', 'id, project_id, status, due_date'),
         optional('contrats_moe', 'id, project_id, status, numero, intitule_projet, date_debut, created_at'),
         optional('notes_honoraires', 'project_id, contrat_id'),
         optional('permits', 'id, project_id, type, reference, submission_date, status'),
-        optional('project_lots', 'project_id, contact_id'),
+        readLots(),
       ]);
 
-      // Entreprises titulaires d'un lot : leurs fiches et qualifications seulement.
-      const lotContactIds = [...new Set((lots || []).map((l: any) => l.contact_id).filter(Boolean))] as string[];
+      // Entreprises titulaires d'un lot ou d'un marché : leurs fiches et qualifications seulement.
+      const lotContactIds = [...new Set([...(lots || []), ...(markets || [])].map((l: any) => l.contact_id).filter(Boolean))] as string[];
       const byIds = async (table: string, columns: string) => {
         if (lotContactIds.length === 0) return [];
         const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, table).select(columns).in(table === 'contacts' ? 'id' : 'contact_id', lotContactIds);
@@ -65,10 +70,9 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
         optional('observations', 'id, project_id, statut, due_date'),
       ]);
       const contacts = lots ? await byIds('contacts', 'id, first_name, last_name, company_name, email, email_work, phone, phone_mobile, phone_work, siret') : undefined;
-      const qualifications = lots ? await byIds('contact_qualifications', 'id, contact_id, organisme, reference, date_fin, source, verified_at') : undefined;
+      const qualifications = lots ? await byIds('contact_qualifications', 'id, contact_id, organisme, reference, libelle, domaines, date_fin, source, verified_at') : undefined;
 
       // Assurances : marchés notifiés, pièces reçues de l'ACT et documents d'assurance de ces affaires.
-      const markets = await optional('marches_entreprises', 'id, project_id, entreprise_nom, contact_id, act_entreprise_id, type_marche, statut, statut_signature, date_notification');
       const consultations = markets ? await optional('act_data', 'project_id, consultation') : undefined;
       const marketProjectIds = [...new Set((markets || []).map((m: any) => m.project_id).filter(Boolean))] as string[];
       let documents: any[] | undefined = [];
