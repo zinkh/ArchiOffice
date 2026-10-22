@@ -24,7 +24,12 @@ export interface SendViaAccountParams {
   subject: string;
   text?: string;
   html?: string;
+  /** Pièces jointes déjà réduites à des octets (server/emailAttachments.ts) ou fournies par le serveur. */
+  attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
+
+/** Outlook (Graph sendMail) n'accepte que des pièces jointes en ligne de moins de ~3 Mo. */
+const OUTLOOK_MAX_INLINE_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
 export interface SendViaAccountResult {
   id: string | null;
@@ -36,12 +41,12 @@ export interface SendViaAccountResult {
  * du cabinet dans ce cas, comme /api/send-email le fait déjà.
  */
 export async function sendViaAccount(supabaseAdmin: any, account: MailAccountRow, params: SendViaAccountParams): Promise<SendViaAccountResult> {
-  const { to, cc, subject, text, html } = params;
+  const { to, cc, subject, text, html, attachments } = params;
 
   if (account.provider === 'google') {
     const composer = new MailComposer({
       from: account.external_account_email || undefined,
-      to, cc: cc || undefined, subject, text, html,
+      to, cc: cc || undefined, subject, text, html, attachments,
     });
     const message: Buffer = await new Promise((resolve, reject) => {
       composer.compile().build((err: any, msg: Buffer) => (err ? reject(err) : resolve(msg)));
@@ -61,11 +66,20 @@ export async function sendViaAccount(supabaseAdmin: any, account: MailAccountRow
     const accessToken = await getOutlookAccessToken(supabaseAdmin, account);
     const toRecipients = String(to).split(',').map(a => ({ emailAddress: { address: a.trim() } })).filter(r => r.emailAddress.address);
     const ccRecipients = cc ? String(cc).split(',').map(a => ({ emailAddress: { address: a.trim() } })).filter(r => r.emailAddress.address) : undefined;
+    if (attachments?.some(a => a.content.length > OUTLOOK_MAX_INLINE_ATTACHMENT_BYTES)) {
+      throw new Error('Pièce jointe trop volumineuse pour un envoi via Outlook (3 Mo au plus).');
+    }
+    const fileAttachments = attachments?.map(a => ({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: a.filename,
+      contentType: a.contentType || 'application/octet-stream',
+      contentBytes: a.content.toString('base64'),
+    }));
     const resp = await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
       method: 'POST',
       headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        message: { subject, body: { contentType: html ? 'HTML' : 'Text', content: html || text || '' }, toRecipients, ccRecipients },
+        message: { subject, body: { contentType: html ? 'HTML' : 'Text', content: html || text || '' }, toRecipients, ccRecipients, attachments: fileAttachments },
         saveToSentItems: true,
       }),
     });
@@ -90,7 +104,7 @@ export async function sendViaAccount(supabaseAdmin: any, account: MailAccountRow
   });
   const info = await transporter.sendMail({
     from: account.external_account_email || account.smtp_username,
-    to, cc, subject, text, html,
+    to, cc, subject, text, html, attachments,
   });
   return { id: info.messageId || null };
 }
