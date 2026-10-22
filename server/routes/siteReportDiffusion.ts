@@ -34,6 +34,9 @@ const SMTP_CONNECT_TIMEOUT_MS = 15_000;
 /** Le téléversement d'un PDF de plusieurs Mo peut être lent, mais reste sous le délai des passerelles (~60 s). */
 const SMTP_SOCKET_TIMEOUT_MS = 40_000;
 
+/** Réponse « en cours » donnée avant le délai des passerelles (~60 s), pour ne jamais finir en 504 muet. */
+export const DIFFUSION_RESPONSE_DEADLINE_MS = 45_000;
+
 /** Un compte-rendu avec ses photos reste sous ce poids ; au-delà, la plupart des boîtes refuseraient le message. */
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
@@ -163,18 +166,33 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
           failed.push({ contact_id: r.contactId, name: r.name, email: r.email, error: err?.message || 'Envoi impossible' });
         }
       };
-      await Promise.all(addressable.map(send));
-
-      let statut = (report as any).statut;
-      if (sent.length > 0) {
-        const { error: updateError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').update({ statut: 'diffuse' }).eq('id', reportId);
-        if (updateError) console.error('[POST /api/reports/:reportId/diffuse] statut non enregistré', updateError);
-        else statut = 'diffuse';
-        const userName = await getUserName(tenantId, req.user.id, req.user.email);
-        logActivity(tenantId, req.user.id, userName, `Diffusion du compte rendu n° ${(report as any).report_number} à ${sent.map(s => s.name).join(', ')}`, project.name, projectId, 'project', 'Chantier');
-      }
+      // Statut et journal : exécutés une seule fois, que la réponse soit déjà partie ou non.
+      const finalize = async (): Promise<string> => {
+        let statut = (report as any).statut;
+        if (sent.length > 0) {
+          const { error: updateError } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').update({ statut: 'diffuse' }).eq('id', reportId);
+          if (updateError) console.error('[POST /api/reports/:reportId/diffuse] statut non enregistré', updateError);
+          else statut = 'diffuse';
+          const userName = await getUserName(tenantId, req.user.id, req.user.email);
+          logActivity(tenantId, req.user.id, userName, `Diffusion du compte rendu n° ${(report as any).report_number} à ${sent.map(s => s.name).join(', ')}`, project.name, projectId, 'project', 'Chantier');
+        }
+        return statut;
+      };
 
       const skipped = withoutEmail.map(r => ({ contact_id: r.contactId, name: r.name }));
+      const allDone = Promise.all(addressable.map(send)).then(finalize);
+      // Au-delà de DIFFUSION_RESPONSE_DEADLINE_MS, on répond « en cours » avant que la passerelle
+      // ne coupe (504 sans corps) : les envois se poursuivent et le statut passe à « diffusé » à
+      // leur terme. Le client relit alors le compte-rendu (voir sendDiffusion).
+      let timer: NodeJS.Timeout | undefined;
+      const deadline = new Promise<'deadline'>(resolve => { timer = setTimeout(() => resolve('deadline'), DIFFUSION_RESPONSE_DEADLINE_MS); });
+      const outcome = await Promise.race([allDone, deadline]);
+      clearTimeout(timer);
+      if (outcome === 'deadline') {
+        allDone.catch(err => console.error('[POST /api/reports/:reportId/diffuse] finalisation', err));
+        return res.status(202).json({ pending: true, sent: [], failed: [], skipped, statut: (report as any).statut });
+      }
+      const statut = outcome;
       if (sent.length === 0) {
         return res.status(502).json({ error: `Aucun message n'a pu être envoyé : ${failed[0]?.error || 'envoi impossible'}`, sent, failed, skipped, statut });
       }

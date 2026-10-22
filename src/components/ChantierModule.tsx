@@ -447,7 +447,25 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       const token = await getAccessToken();
       if (token) headers.set('Authorization', `Bearer ${token}`);
       applyTenantHeader(headers);
-      const res = await baseFetchJson<DiffusionResult & { statut?: string }>(`/api/reports/${selectedReport.id}/diffuse`, { method: 'POST', body, headers });
+      const res = await baseFetchJson<DiffusionResult & { statut?: string; pending?: boolean }>(`/api/reports/${selectedReport.id}/diffuse`, { method: 'POST', body, headers });
+      if (res.pending) {
+        // Le serveur poursuit les envois en arrière-plan (réponse 202) : on attend que le compte-rendu
+        // passe en « diffusé » plutôt que d'inviter à renvoyer, ce qui doublerait les messages.
+        for (let essai = 0; essai < 12; essai++) {
+          await new Promise(r => setTimeout(r, 5000));
+          const relu = await apiFetch<SiteReport[]>(`/api/projects/${project.id}/reports`).catch(() => null);
+          const serveur = Array.isArray(relu) ? relu.find(r => r.id === selectedReport.id) : undefined;
+          if (serveur?.statut === 'diffuse') {
+            setReports(prev => prev.map(r => (r.id === serveur.id ? { ...r, statut: 'diffuse' } : r)));
+            db.siteReportsCache.put({ ...selectedReport, statut: 'diffuse' }).catch(() => {});
+            setDiffusionOpen(false);
+            showToast('Compte-rendu diffusé.', 'success', { duration: 6000 });
+            return;
+          }
+        }
+        setDiffusionError('L’envoi prend plus de temps que prévu et se poursuit sur le serveur. Ne cliquez pas de nouveau sur Envoyer : vérifiez le dossier des éléments envoyés, puis l’état du compte-rendu dans quelques minutes.');
+        return;
+      }
       setDiffusionResult(res);
       const diffused = { ...selectedReport, statut: 'diffuse' as SiteReport['statut'] };
       setReports(prev => prev.map(r => (r.id === diffused.id ? { ...r, statut: diffused.statut } : r)));
