@@ -244,3 +244,12 @@ Don't see something you expected here, or know of a gap this page is missing? Op
 - Supplier quotes and invoices attachable to a project and a phase, so they count in the cost side of the profitability by phase.
 - Export of approved expenses for payroll/accounting (Excel in the cabinet charter, then FEC lines).
 
+
+### Co-contracting: several companies on the same lot (OS and FTM numbering)
+
+⏳ Planned. Service orders (OS) and change order sheets (FTM) are numbered per company **and per lot** (`src/lib/numerotationEntreprise.ts`: `OS 04-001`, `FTM-04-01`). That assumes one company per lot number. Co-contracting (*cotraitance*, joint or several contractors on a single lot) breaks the assumption: two `marches_entreprises` rows share the same `lot_numero`.
+
+- **What happens today**: each company keeps its own sequence, so both start at `04-001` / `FTM-04-01`. For OS nothing blocks it (no unique index), but two documents then carry the same visible number. For FTM, the unique index `(tenant_id, project_id, numero)` answers `409` ("two markets carry the same lot number") on the second company's first sheet.
+- **To decide**: either one shared sequence per lot (the lot's `cle` instead of company + lot, simple but the number no longer says whose it is), or a company marker in the number (`FTM-04A-01` / `FTM-04B-01`, or the company's initials), the lot prefix staying the same.
+- **To build**: model the co-contracting group on the lot (mandatary and co-contractors, joint or several liability), so an OS or FTM can address the whole group with a single number, as `marche_ids` already does for several companies; adapt the `key` (`cleEntrepriseLot`), the number formats (`formatNumeroOs`, `formatNumeroFtm`) and the unique index together, with a test on two companies sharing a lot.
+- **Related**: the DOE workshop and the construction site panel also read one company per lot; they will need the same group notion.
