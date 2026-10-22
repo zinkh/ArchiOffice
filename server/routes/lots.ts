@@ -1,6 +1,7 @@
 // Phase 7 extraction — moved out of server.ts's Lots section (project_lots
 // table — market trade packages like Gros œuvre, Charpente, Électricité).
 import type { Express } from 'express';
+import { rgeExigeParDefaut } from '../../src/lib/rgeLots';
 import { validerNumeroDeLot, numeroDeLotPris, numerosPourOrdre } from '../../src/lib/lotsOrder';
 
 export interface RouteDeps {
@@ -35,7 +36,12 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
       if (lecture) throw lecture;
       if (numeroDeLotPris(lot_number, autres ?? [])) return res.status(409).json({ error: `Le numéro « ${lot_number} » est déjà utilisé par un autre lot du projet.` });
       const lotId = bodyId || crypto.randomUUID();
-      const { error } = await supabaseAdmin.from('project_lots').insert({ id: lotId, tenant_id: tenantId, project_id: projectId, lot_number, lot_title });
+      const base = { id: lotId, tenant_id: tenantId, project_id: projectId, lot_number, lot_title };
+      // « RGE exigé » : valeur envoyée, à défaut déduite du titre (isolation, chauffage).
+      const rge = typeof req.body?.rge_required === 'boolean' ? req.body.rge_required : rgeExigeParDefaut(lot_title);
+      let { error } = await supabaseAdmin.from('project_lots').insert({ ...base, rge_required: rge });
+      // Instance non migrée : sans la colonne, le lot se crée quand même.
+      if (error) ({ error } = await supabaseAdmin.from('project_lots').insert(base));
       if (error) throw error;
       res.status(201).json({ id: lotId });
     } catch (error) {
