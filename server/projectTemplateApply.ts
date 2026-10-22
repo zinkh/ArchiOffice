@@ -7,6 +7,7 @@
 //
 // Meilleur effort : l'affaire est déjà créée, un échec sur un jalon ne doit pas
 // la faire perdre. Les erreurs sont rapportées (`failed`) plutôt qu'avalées.
+import { rgeExigeParDefaut } from '../src/lib/rgeLots';
 import { addDaysIso } from '../src/lib/projectTemplates';
 import type { ProjectTemplate } from '../src/types';
 
@@ -29,10 +30,15 @@ export async function applyTemplateToProject(
 
   const lots = Array.isArray(template.default_lots) ? template.default_lots : [];
   if (lots.length) {
-    const { error } = await supabaseAdmin.from('project_lots').insert(lots.map(l => ({
+    const rows = lots.map(l => ({
       id: crypto.randomUUID(), tenant_id: tenantId, project_id: projectId,
       lot_number: l.lot_number, lot_title: l.lot_title,
-    })));
+    }));
+    // « RGE exigé » : valeur du modèle, à défaut déduite du titre (isolation, chauffage).
+    let { error } = await supabaseAdmin.from('project_lots').insert(
+      rows.map((r, i) => ({ ...r, rge_required: lots[i].rge_required ?? rgeExigeParDefaut(lots[i].lot_title) })));
+    // Instance non migrée : sans la colonne, les lots se créent quand même.
+    if (error) ({ error } = await supabaseAdmin.from('project_lots').insert(rows));
     if (error) result.failed.push(`lots : ${error.message}`); else result.lots = lots.length;
   }
 

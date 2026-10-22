@@ -117,6 +117,11 @@ describe('application d\'un modèle à la création d\'une affaire', () => {
     const lots = fakeSupabaseAdmin.getTable('project_lots').filter(l => l.project_id === projectId);
     expect(lots).toHaveLength(template.default_lots.length);
     expect(lots.every(l => l.tenant_id === tenantId)).toBe(true);
+    // « RGE exigé » est prérempli pour l'isolation et le chauffage, jamais pour les autres lots.
+    for (const l of lots) {
+      const attendu = /isolation|chauffage/i.test(l.lot_title) && !/phonique|acoustique/i.test(l.lot_title);
+      expect(l.rge_required, l.lot_title).toBe(attendu);
+    }
 
     const ms = fakeSupabaseAdmin.getTable('milestones').filter(m => m.project_id === projectId);
     expect(ms).toHaveLength(template.default_milestones.length);

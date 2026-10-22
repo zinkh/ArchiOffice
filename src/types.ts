@@ -58,7 +58,7 @@ export interface DocumentDiffusion {
 export type TemplateOperationType = 'neuf' | 'rehabilitation' | 'extension' | 'maison_individuelle' | 'permis_seul' | 'autre';
 export type TemplateMarcheType = 'prive' | 'public';
 
-export interface TemplateLot { lot_number: string; lot_title: string }
+export interface TemplateLot { lot_number: string; lot_title: string; /** Absent : déduit du titre (isolation, chauffage). */ rge_required?: boolean }
 /** Délais relatifs à la date de démarrage de l'affaire (jours calendaires). */
 export interface TemplateMilestone { title: string; due_date_offset_days: number }
 export interface TemplateTask {
@@ -300,6 +300,8 @@ export interface ProjectLot {
   lot_title: string;
   contact_id?: string;
   contact_name?: string;
+  /** Le lot exige une entreprise RGE (alerte si sa qualification manque ou expire). */
+  rge_required?: boolean;
   market_number?: string;
   base_amount?: number;
   options_amount?: number;

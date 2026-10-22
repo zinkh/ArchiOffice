@@ -6,7 +6,7 @@
 import { todayIso } from './actEntreprises';
 
 export type OrganismeQualification =
-  | 'qualibat' | 'qualifelec' | 'qualit_enr' | 'certibat' | 'rge' | 'autre';
+  | 'qualibat' | 'qualifelec' | 'qualit_enr' | 'certibat' | 'rge' | 'assurance' | 'autre';
 
 export const ORGANISMES: { value: OrganismeQualification; label: string }[] = [
   { value: 'qualibat', label: 'Qualibat' },
@@ -14,6 +14,7 @@ export const ORGANISMES: { value: OrganismeQualification; label: string }[] = [
   { value: 'qualit_enr', label: "Qualit'EnR" },
   { value: 'certibat', label: 'Certibat' },
   { value: 'rge', label: 'RGE (autre organisme)' },
+  { value: 'assurance', label: "Attestation d'assurance" },
   { value: 'autre', label: 'Autre' },
 ];
 
@@ -131,7 +132,7 @@ export interface ResumeQualifications {
  * validité, pas de toutes. À statut égal, Qualibat passe avant les autres puis
  * l'échéance la plus lointaine.
  */
-export function resumeQualifications(
+function resumer(
   liste: Qualification[],
   today: string = todayIso(),
 ): ResumeQualifications {
@@ -148,6 +149,31 @@ export function resumeQualifications(
     total: liste.length,
     verifiee: liste.some(q => !!q.verified_at),
   };
+}
+
+/**
+ * Qualifications professionnelles (Qualibat, RGE...) : l'attestation
+ * d'assurance, qui vit dans la même table pour sa date de validité, n'en est
+ * pas une et ne doit pas rendre « valide » une entreprise dont le Qualibat a
+ * expiré.
+ */
+export function resumeQualifications(liste: Qualification[], today: string = todayIso()): ResumeQualifications {
+  return resumer(liste.filter(q => q.organisme !== 'assurance'), today);
+}
+
+/** Attestation(s) d'assurance d'une entreprise : la mieux validée l'emporte. */
+export function resumeAssurance(liste: Qualification[], today: string = todayIso()): ResumeQualifications {
+  return resumer(liste.filter(q => q.organisme === 'assurance'), today);
+}
+
+/** Une qualification RGE : organisme RGE, Qualit'EnR, Certibat, ou RGE citée dans son libellé. */
+export function estQualificationRge(q: Pick<Qualification, 'organisme' | 'libelle' | 'domaines' | 'reference'>): boolean {
+  if (q.organisme === 'rge' || q.organisme === 'qualit_enr' || q.organisme === 'certibat') return true;
+  return /\brge\b/i.test(`${q.libelle ?? ''} ${q.domaines ?? ''} ${q.reference ?? ''}`);
+}
+
+export function resumeRge(liste: Qualification[], today: string = todayIso()): ResumeQualifications {
+  return resumer(liste.filter(estQualificationRge), today);
 }
 
 /** Regroupe une liste plate par contact. */
