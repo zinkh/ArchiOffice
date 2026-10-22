@@ -68,9 +68,20 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
       }
       if (typeof req.body?.lot_title === 'string') patch.lot_title = req.body.lot_title.trim();
       if (typeof req.body?.rge_required === 'boolean') patch.rge_required = req.body.rge_required;
+      // Un lot renommé vers « isolation » ou « chauffage » (import depuis le CCTP, liste) reçoit la valeur de
+      // départ ; une case décochée à la main n'est jamais recochée tant que le titre reste dans la même famille.
+      if (typeof patch.lot_title === 'string' && patch.lot_title && patch.rge_required === undefined && rgeExigeParDefaut(patch.lot_title)) {
+        const { data: avant } = await supabaseAdmin.from('project_lots').select('lot_title').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+        if (avant && !rgeExigeParDefaut(avant.lot_title)) patch.rge_required = true;
+      }
       if (patch.lot_title !== undefined && !patch.lot_title) return res.status(400).json({ error: "Le titre du lot ne peut pas être vide" });
       if (!Object.keys(patch).length) return res.status(400).json({ error: "Rien à modifier" });
-      const { error } = await supabaseAdmin.from('project_lots').update(patch).eq('id', req.params.id).eq('tenant_id', tenantId);
+      let { error } = await supabaseAdmin.from('project_lots').update(patch).eq('id', req.params.id).eq('tenant_id', tenantId);
+      // Instance non migrée : sans la colonne, le renommage passe quand même (sauf demande explicite de la case).
+      if (error && patch.rge_required !== undefined && req.body?.rge_required === undefined) {
+        const { rge_required: _ignore, ...sansRge } = patch;
+        ({ error } = await supabaseAdmin.from('project_lots').update(sansRge).eq('id', req.params.id).eq('tenant_id', tenantId));
+      }
       if (error) throw error;
       res.json({ success: true });
     } catch (error) {

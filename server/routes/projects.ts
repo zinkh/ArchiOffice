@@ -5,6 +5,7 @@
 // section moved to dpgf.ts/situations.ts instead (their natural home —
 // those modules already own the POST/PUT/DELETE side of the same tables;
 // only the read lookups had never been extracted).
+import { rgeExigeParDefaut } from '../../src/lib/rgeLots';
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
@@ -221,7 +222,11 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
         await supabaseAdmin.from('project_cotraitants').insert(cotraitants_list.map((c: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, specialty: c.specialty, contact_id: c.contact_id || null })));
       }
       if (lots_list?.length) {
-        await supabaseAdmin.from('project_lots').insert(lots_list.map((l: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null })));
+        const lotRows = lots_list.map((l: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null }));
+        // « RGE exigé » : valeur de départ (isolation, chauffage) ; sans la colonne, les lots se créent quand même.
+        const { error: lotsError } = await supabaseAdmin.from('project_lots').insert(
+          lotRows.map((r: any, i: number) => ({ ...r, rge_required: typeof lots_list[i].rge_required === 'boolean' ? lots_list[i].rge_required : rgeExigeParDefaut(r.lot_title) })));
+        if (lotsError) await supabaseAdmin.from('project_lots').insert(lotRows);
       }
       if (stakeholders_list?.length) {
         await supabaseAdmin.from('project_stakeholders').insert(stakeholders_list.map((s: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, project_id: id, name: s.name, role: s.role, contact_id: s.contact_id || null })));
@@ -326,19 +331,27 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
       // identifiant et ses autres colonnes : les lots étaient réinsérés avec un
       // nouvel id et sans leurs montants (base_amount...), ce qui détachait les
       // visas, les marchés et le DPGF (projectLotId) qui les référencent.
-      const replaceList = async (table: string, items: any[] | undefined, pick: (item: any) => Record<string, unknown>) => {
+      // `forNew` : colonnes posées seulement sur une ligne NOUVELLE (jamais sur une ligne reprise),
+      // retirées au besoin si la base n'a pas encore la colonne (la liste est déjà supprimée).
+      const replaceList = async (table: string, items: any[] | undefined, pick: (item: any) => Record<string, unknown>, forNew?: (item: any) => Record<string, unknown>) => {
         if (items === undefined) return;
         const { data: existingRows } = await supabaseAdmin.from(table).select('*').eq('project_id', id).eq('tenant_id', tenantId);
         const existingById = new Map<string, any>((existingRows || []).map((r: any) => [r.id, r]));
         await supabaseAdmin.from(table).delete().eq('project_id', id).eq('tenant_id', tenantId);
         if (!items?.length) return;
-        await supabaseAdmin.from(table).insert(items.map((item: any) => {
+        const rows = items.map((item: any) => {
           const previous = item?.id ? existingById.get(item.id) : undefined;
-          return { ...(previous || {}), ...pick(item), id: previous ? previous.id : crypto.randomUUID(), tenant_id: tenantId, project_id: id };
-        }));
+          return { ...(previous || {}), ...pick(item), id: previous ? previous.id : crypto.randomUUID(), tenant_id: tenantId, project_id: id, __neuf: !previous };
+        });
+        const withNew = rows.map(({ __neuf, ...row }: any, i: number) => (forNew && __neuf ? { ...row, ...forNew(items[i]) } : row));
+        const plain = rows.map(({ __neuf, ...row }: any) => row);
+        const { error: insertError } = await supabaseAdmin.from(table).insert(withNew);
+        if (insertError && forNew) await supabaseAdmin.from(table).insert(plain);
       };
       await replaceList('project_cotraitants', cotraitants_list, (c: any) => ({ specialty: c.specialty, contact_id: c.contact_id || null }));
-      await replaceList('project_lots', lots_list, (l: any) => ({ lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null }));
+      await replaceList('project_lots', lots_list, (l: any) => ({ lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id || null }),
+        // « RGE exigé » : valeur de départ d'un lot nouveau (isolation, chauffage), jamais d'un lot repris.
+        (l: any) => ({ rge_required: typeof l.rge_required === 'boolean' ? l.rge_required : rgeExigeParDefaut(l.lot_title) }));
       await replaceList('project_stakeholders', stakeholders_list, (s: any) => ({ name: s.name, role: s.role, contact_id: s.contact_id || null }));
       if (categories_list !== undefined) {
         await supabaseAdmin.from('project_categories_junction').delete().eq('project_id', id).eq('tenant_id', tenantId);
