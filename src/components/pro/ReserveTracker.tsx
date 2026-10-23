@@ -17,6 +17,7 @@ import {
   IconFileTypePdf,
   IconSearch,
   IconLoader2,
+  IconMessage,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { CardHeader } from '../ui/Card';
@@ -104,7 +105,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       if (filter === 'retard' && reserveOverdueDays(r) === 0) return false;
       if (filter === 'levees' && !isReserveClosed(r)) return false;
       if (!q) return true;
-      const hay = [r.title, r.batiment, r.local, r.description, ...parseJsonList(r.lots), ...parseJsonList(r.entreprises), String(r.number ?? '')]
+      const hay = [r.title, r.batiment, r.local, r.description, r.reponse, ...parseJsonList(r.lots), ...parseJsonList(r.entreprises), String(r.number ?? '')]
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
@@ -335,6 +336,12 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                   <div className="text-xs text-[var(--tblr-muted)] truncate">
                     {[entreprises.join(', ') || lots.join(', '), [res.batiment, res.local].filter(Boolean).join(' / ')].filter(Boolean).join(' · ') || '—'}
                   </div>
+                  {res.reponse && (
+                    <div className="flex items-start gap-1 text-xs text-[var(--tblr-text)]">
+                      <IconMessage size={12} className="mt-0.5 shrink-0 text-[var(--tblr-primary)]" aria-label="Suivi" />
+                      <span className="line-clamp-2">{res.reponse}</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <span className={cn('text-xs font-medium', retard > 0 ? 'text-red-600' : 'text-[var(--tblr-muted)]')}>
                       {res.due_date ? new Date(res.due_date).toLocaleDateString('fr-FR') : 'Sans échéance'}
@@ -405,6 +412,12 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                               )}
                             </div>
                             {res.description && <div className="text-[0.6875rem] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
+                            {res.reponse && (
+                              <div className="flex items-start gap-1 text-[0.6875rem] text-[var(--tblr-text)] line-clamp-2" title={res.reponse}>
+                                <IconMessage size={12} className="mt-0.5 shrink-0 text-[var(--tblr-primary)]" aria-label="Suivi" />
+                                <span className="line-clamp-2">{res.reponse}</span>
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
                           <td className="px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} /></td>

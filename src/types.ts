@@ -538,6 +538,8 @@ export interface Reserve {
   number?: number;
   /** Commentaire libre : l'état constaté, ce qui reste à faire. */
   description?: string | null;
+  /** Suivi : réponse de l'entreprise ou remarque de la maîtrise d'œuvre (levée jugée insatisfaisante, reprise attendue...). */
+  reponse?: string | null;
   /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
   photos?: ReservePhoto[];
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
@@ -598,6 +600,8 @@ export interface GpaReserve {
   number?: number;
   /** Commentaire libre : l'état constaté, ce qui reste à faire. */
   description?: string | null;
+  /** Suivi : réponse de l'entreprise ou remarque de la maîtrise d'œuvre (levée jugée insatisfaisante, reprise attendue...). */
+  reponse?: string | null;
   /** Photos prises sur le chantier — servies par GET /api/reserves(-gpa) avec la liste. */
   photos?: ReservePhoto[];
   /** Posé côté client tant que la création n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */
