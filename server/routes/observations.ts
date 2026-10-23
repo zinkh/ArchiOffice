@@ -16,6 +16,7 @@ import { assertTenantEntity } from '../assertTenantEntity';
 import { convertObservationsToReserves, CLOSED_OBSERVATION_STATUSES } from '../observationToReserve';
 import { sanitizeFilename } from '../sanitizeFilename';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
+import { MAX_OBSERVATION_LOTS } from '../../src/lib/observationLots';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -27,6 +28,32 @@ export interface RouteDeps {
 
 /** Identifiant de bâtiment/phase du registre du chantier : texte court, sinon ignoré. */
 const cleanRef = (v: unknown): string => (typeof v === 'string' && v.length <= 64 ? v : '');
+
+/**
+ * Lots visés par une observation (voir src/lib/observationLots.ts) : un lot (`lot_id`), plusieurs
+ * (`lot_ids`, `lot_id` = le premier) ou tous (`tce`, `lot_id` nul). Rend les colonnes à écrire, ou
+ * `{}` quand le corps n'en parle pas (la modification ne touche alors pas aux lots).
+ */
+async function readLotTargets(supabaseAdmin: any, tenantId: string, body: any): Promise<{ fields?: Record<string, unknown>; error?: string }> {
+  if (body.tce === undefined && body.lot_ids === undefined) return {};
+  if (body.tce === true) return { fields: { tce: true, lot_ids: [], lot_id: null } };
+  const rawIds: unknown[] = Array.isArray(body.lot_ids) ? body.lot_ids : [];
+  const ids = [...new Set(rawIds.filter((v): v is string => typeof v === 'string' && v.length > 0 && v.length <= 64))].slice(0, MAX_OBSERVATION_LOTS);
+  if (ids.length > 0) {
+    const { data } = await supabaseAdmin.from('project_lots').select('id').eq('tenant_id', tenantId).in('id', ids);
+    if (((data || []) as any[]).length !== ids.length) return { error: 'Lot introuvable pour ce cabinet.' };
+  }
+  if (ids.length > 1) return { fields: { tce: false, lot_ids: ids, lot_id: ids[0] } };
+  // Un seul lot (ou aucun) : retour au cas historique, lot_id porté par la liste ou par le corps.
+  return { fields: { tce: false, lot_ids: [], ...(ids.length === 1 ? { lot_id: ids[0] } : {}) } };
+}
+
+/** Instance dont la migration des lots multiples n'est pas jouée : l'écriture se rejoue sans ces colonnes. */
+const MULTI_LOT_COLUMNS = /\b(lot_ids|tce)\b/i;
+const withoutMultiLotColumns = <T extends Record<string, unknown>>(row: T): Omit<T, 'lot_ids' | 'tce'> => {
+  const { lot_ids: _ids, tce: _tce, ...rest } = row;
+  return rest;
+};
 
 // Verrou par opération (un seul processus) : sérialise l'attribution du numéro d'observation.
 const numberLocks = new Map<string, Promise<unknown>>();
@@ -96,19 +123,26 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
         const { data: report } = await tenantScopedFrom(supabaseAdmin, tenantId, 'site_reports').select('project_id').eq('id', created_report_id).maybeSingle();
         if (!report || (report as any).project_id !== projectId) return res.status(400).json({ error: "Compte rendu introuvable pour cette opération." });
       }
+      const targets = await readLotTargets(supabaseAdmin, tenantId, req.body);
+      if (targets.error) return res.status(400).json({ error: targets.error });
       const id = bodyId || `obs_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       // Le numéro (max + 1) est attribué sous verrou par opération : deux créations
       // simultanées ne lisent plus le même maximum et ne prennent plus le même numéro.
       const created = await withProjectNumberLock(projectId, async () => {
         const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('number').eq('project_id', projectId).order('number', { ascending: false }).limit(1);
         const number = existing && existing.length > 0 ? ((existing[0] as any).number || 0) + 1 : 1;
-        const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert({
+        const row = {
           id, project_id: projectId, lot_id: lot_id || null, contact_id: contact_id || null,
           texte: texte || '', statut: statut || 'À faire', due_date: due_date || null,
           created_report_id: created_report_id || null, number,
           type: type || 'observation', urgence: urgence || 'normal',
           batiment_id: batimentId || null, phase_id: phaseId || null,
-        }).select().single();
+          ...targets.fields,
+        };
+        let { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert(row).select().single();
+        if (error && MULTI_LOT_COLUMNS.test(String(error.message))) {
+          ({ data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').insert(withoutMultiLotColumns(row)).select().single());
+        }
         if (error) throw error;
         return { data, number };
       });
@@ -152,7 +186,17 @@ export function registerObservationRoutes(app: Express, { supabaseAdmin, getTena
       if (req.body.batiment_id !== undefined) update.batiment_id = cleanRef(req.body.batiment_id) || null;
       if (req.body.phase_id !== undefined) update.phase_id = cleanRef(req.body.phase_id) || null;
       if (statut === 'Levée' && resolved_report_id) update.resolved_report_id = resolved_report_id;
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update(update).eq('id', id);
+      const targets = await readLotTargets(supabaseAdmin, tenantId, req.body);
+      if (targets.error) return res.status(400).json({ error: targets.error });
+      Object.assign(update, targets.fields);
+      let { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update(update).eq('id', id);
+      if (error && MULTI_LOT_COLUMNS.test(String(error.message))) {
+        // Migration des lots multiples non jouée : on n'écrit que le reste, sans mentir sur l'attribution TCE / multi-lots.
+        if (targets.fields && (targets.fields.tce === true || (targets.fields.lot_ids as unknown[])?.length > 1)) {
+          return res.status(503).json({ error: "L'attribution à plusieurs lots n'est pas encore disponible sur cette instance (migration en attente)." });
+        }
+        ({ error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'observations').update(withoutMultiLotColumns(update)).eq('id', id));
+      }
       if (error) throw error;
       res.json({ success: true });
     } catch (error) {

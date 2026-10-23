@@ -189,3 +189,49 @@ describe('POST /api/reports/:reportId/diffuse', () => {
     expect(sendMail).not.toHaveBeenCalled();
   });
 });
+
+describe('POST /api/reports/:reportId/diffuse : anciennes observations, TCE et multi-lots', () => {
+  const seedOlder = (tenantId: string, projectId: string) => {
+    fakeSupabaseAdmin.seed('observations', [
+      { id: `old1-${tenantId}`, tenant_id: tenantId, project_id: projectId, lot_id: `l1-${tenantId}`, texte: 'Ancien point maçonnerie', statut: 'À faire', number: 10, type: 'observation' },
+      { id: `old2-${tenantId}`, tenant_id: tenantId, project_id: projectId, lot_id: `l1-${tenantId}`, texte: 'Point déjà levé', statut: 'Levée', number: 11, type: 'observation' },
+      { id: `old3-${tenantId}`, tenant_id: tenantId, project_id: projectId, lot_id: `l2-${tenantId}`, texte: 'Ancien point plomberie', statut: 'En cours', number: 12, type: 'observation' },
+    ]);
+  };
+
+  it("n'ajoute les anciennes observations non levées que sur demande, et seulement celles du destinataire", async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const { projectId, reportId } = seedOperation(tenantId);
+    seedOlder(tenantId, projectId);
+
+    await diffuse(token, reportId, [`c1-${tenantId}`]).expect(200);
+    expect(sendMail.mock.calls[0][0].text).not.toContain('Ancien point');
+
+    sendMail.mockClear();
+    const res = await diffuse(token, reportId, [`c1-${tenantId}`]).field('include_previous', '1');
+    expect(res.status).toBe(200);
+    const text: string = sendMail.mock.calls[0][0].text;
+    expect(text).toContain('Observations antérieures non levées vous concernant (1) :');
+    expect(text).toContain('Ancien point maçonnerie');
+    expect(text).not.toContain('Point déjà levé');
+    expect(text).not.toContain('Ancien point plomberie');
+    expect(res.body.sent[0].observations).toBe(2);
+  });
+
+  it('adresse une observation TCE à toutes les entreprises de lot, pas aux intervenants sans lot', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId);
+    const { projectId, reportId } = seedOperation(tenantId);
+    fakeSupabaseAdmin.seed('observations', [
+      { id: `tce-${tenantId}`, tenant_id: tenantId, project_id: projectId, tce: true, lot_ids: [], texte: 'Évacuer les gravats', statut: 'À faire', number: 20, type: 'observation' },
+    ]);
+    fakeSupabaseAdmin.seed('observation_reports', [{ observation_id: `tce-${tenantId}`, report_id: reportId }]);
+
+    await diffuse(token, reportId, [`c1-${tenantId}`, `c2-${tenantId}`]).expect(200);
+    const mails = Object.fromEntries(sendMail.mock.calls.map(([m]) => [m.to, m.text as string]));
+    expect(mails['durand@ent.test']).toContain('[TCE]');
+    expect(mails['durand@ent.test']).toContain('Évacuer les gravats');
+    expect(mails['bet@ent.test']).not.toContain('Évacuer les gravats');
+  });
+});

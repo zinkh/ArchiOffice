@@ -18,6 +18,11 @@ interface Props {
   result: DiffusionResult | null;
   /** Message d'une erreur qui a empêché tout envoi. */
   error: string | null;
+  /** Joindre les anciennes observations non levées (PDF et message de chaque destinataire). */
+  includePrevious: boolean;
+  /** Nombre d'anciennes observations non levées de l'opération. */
+  previousCount: number;
+  onIncludePreviousChange: (value: boolean) => void;
   onSend: (contactIds: string[]) => void;
   onClose: () => void;
 }
@@ -28,7 +33,7 @@ interface Props {
  * le nombre d'observations qui lui sont adressées. Ceux sans adresse sont
  * signalés et ne peuvent pas être cochés.
  */
-export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipients, busy, result, error, onSend, onClose }: Props) {
+export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipients, busy, result, error, includePrevious, previousCount, onIncludePreviousChange, onSend, onClose }: Props) {
   const titleId = useId();
   const descId = useId();
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -134,6 +139,15 @@ export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipient
             </p>
           ) : (
             <>
+              <label className="mb-2 flex items-start gap-2 min-h-11 text-sm text-[var(--tblr-text)] cursor-pointer">
+                <input type="checkbox" checked={includePrevious} disabled={busy} onChange={e => onIncludePreviousChange(e.target.checked)} className="rounded size-4 mt-0.5" />
+                <span>
+                  <span className="font-semibold">Joindre les anciennes observations non levées{previousCount > 0 ? ` (${previousCount})` : ''}</span>
+                  <span className="block text-xs text-[var(--tblr-muted)]">
+                    Imprimées à la suite du PDF, et ajoutées au message de chaque entreprise concernée (TCE : toutes les entreprises).
+                  </span>
+                </span>
+              </label>
               <label className="flex items-center gap-2 min-h-11 text-sm font-semibold text-[var(--tblr-text)] cursor-pointer">
                 <input
                   type="checkbox"
@@ -164,6 +178,7 @@ export function DiffusionDialog({ open, reportNumber, alreadyDiffused, recipient
                       </span>
                       <span className="shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                         {r.observations.length} observation{r.observations.length > 1 ? 's' : ''}
+                        {r.previousObservations.length > 0 ? ` + ${r.previousObservations.length} ancienne${r.previousObservations.length > 1 ? 's' : ''}` : ''}
                       </span>
                     </label>
                   </li>

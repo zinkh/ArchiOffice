@@ -19,6 +19,7 @@ import {
   reperBatiment, resumeBatiments, resumePenalites, retardCumule,
 } from './siteReportLotSuivi';
 import type { Contact, Observation, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote } from '../types';
+import { TCE_LABEL } from './observationLots';
 
 export interface SiteReportExportProject {
   id: string;
@@ -48,6 +49,11 @@ export interface SiteReportExportOptions {
   attachments?: File[];
   /** Tous les comptes-rendus de l'affaire : le retard cumulé d'un lot en est la somme jusqu'à celui-ci. */
   allReports?: SiteReport[];
+  /**
+   * Anciennes observations restées non levées (option d'export), par lot : imprimées à la suite de celles
+   * du compte-rendu, sous leur propre titre, sans photos (le PDF reste léger).
+   */
+  previousOpenByLot?: ObservationsByLot[];
 }
 
 export interface SiteReportPdf {
@@ -408,15 +414,29 @@ export async function exportSiteReportToPDF(
   }
 
   // ── Une section par lot (historique daté + photos) ──────────────────────
-  if (observationsByLot.length > 0) {
+  const previousOpenByLot = opts.previousOpenByLot ?? [];
+  if (observationsByLot.length > 0 || previousOpenByLot.length > 0) {
     doc.addPage('a4', orientation);
     y = drawAgencyHeader(doc, settings, letterhead);
   }
   // Colonne bâtiment / phase : seulement si le chantier en a un registre ET qu'une observation y est affectée.
-  const showDecoupage = observationsByLot.some(g => g.items.some(o => etiquetteDecoupage(o, opts.decoupage)));
+  const showDecoupage = [...observationsByLot, ...previousOpenByLot].some(g => g.items.some(o => etiquetteDecoupage(o, opts.decoupage)));
 
-  for (const group of observationsByLot) {
+  const sections = [
+    ...observationsByLot.map(group => ({ group, previous: false })),
+    ...previousOpenByLot.map(group => ({ group, previous: true })),
+  ];
+  for (const [index, { group, previous }] of sections.entries()) {
     progress(`Lot ${group.title}…`);
+    if (previous && (index === 0 || !sections[index - 1].previous)) {
+      // Titre de la partie « anciennes observations » : posé une seule fois, avant le premier lot concerné.
+      ensureRoom(24);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...GRIS_TEXTE);
+      doc.text('OBSERVATIONS ANTÉRIEURES NON LEVÉES', MARGIN, y + 4);
+      doc.setDrawColor(...GRIS_TEXTE); doc.setLineWidth(0.5);
+      doc.line(MARGIN, y + 6.5, pageW() - MARGIN, y + 6.5);
+      y += 12;
+    }
     ensureRoom(14);
     doc.setFillColor(...GRIS_FOND);
     doc.rect(MARGIN, y - 1, contentW(), 7, 'F');
@@ -429,7 +449,7 @@ export async function exportSiteReportToPDF(
       {
         head: 'Description', style: {},
         cell: (o: Observation) => [
-          [OBSERVATION_TYPE_LABELS[o.type || ''] ? `[${OBSERVATION_TYPE_LABELS[o.type || '']}] ` : '', o.texte].join(''),
+          [o.tce ? `[${TCE_LABEL}] ` : '', OBSERVATION_TYPE_LABELS[o.type || ''] ? `[${OBSERVATION_TYPE_LABELS[o.type || '']}] ` : '', o.texte].join(''),
           o.reponse ? `Réponse : ${o.reponse}` : '',
         ].filter(Boolean).join('\n'),
       },
@@ -453,7 +473,7 @@ export async function exportSiteReportToPDF(
     });
     y = (doc as any).lastAutoTable.finalY + 4;
 
-    await drawThumbnails(group.items.flatMap(o => o.photos || []));
+    if (!previous) await drawThumbnails(group.items.flatMap(o => o.photos || []));
 
     doc.setDrawColor(...GRIS_FILET); doc.setLineWidth(0.25);
     doc.line(MARGIN, y, pageW() - MARGIN, y);

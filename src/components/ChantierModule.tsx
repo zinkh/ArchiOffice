@@ -18,7 +18,7 @@ import {
   IconRefresh, IconListDetails, IconDots, IconPaperclip, IconX, IconChartBar,
 } from '@tabler/icons-react';
 import PlanningChantierTab from './chantier/PlanningChantierTab';
-import { Project, ProjectLot, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
+import { Project, ProjectLot, ProjectStakeholder, SiteReport, SiteReportNote, SiteReportAttendee, SiteReportLotTracking, PresenceStatus, Observation, OrdreDeService, Contact } from '../types';
 import ObservationsTable from './ObservationsTable';
 import { SignedImage } from './SignedImage';
 import { openSignedUrl } from '../lib/signedStorageUrl';
@@ -41,6 +41,10 @@ import { DecisionRow, ObservationRow, RubriqueRow } from './chantier/ReportRows'
 import { DEFAULT_LIEU, LotTrackingCards } from './chantier/LotTrackingCards';
 import { QuickCaptureBar } from './chantier/QuickCaptureBar';
 import { countOpenObservations } from '../lib/observationsOpen';
+import { groupObservationsByLot } from '../lib/observationLots';
+import { contactLabel } from '../lib/crDiffusion';
+import { NewIntervenantDialog, type IntervenantOption, type NewIntervenantInput } from './chantier/IntervenantCombobox';
+import type { LotChoice } from './chantier/ObservationLotPicker';
 import { LotEventsDialog } from './chantier/LotEventsDialog';
 import { IntemperiesDialog } from './chantier/IntemperiesDialog';
 import {
@@ -58,6 +62,10 @@ interface ChantierModuleProps {
   settings?: AgencySettings | null;
   /** Rafraîchit les réserves de l'AOR après une reprise d'observations. */
   onReservesChanged?: () => void;
+  /** Liste des intervenants de l'opération après l'ajout d'un nouvel intervenant depuis une rubrique. */
+  onStakeholdersChange?: (stakeholders: ProjectStakeholder[]) => void;
+  /** Fiche contact créée depuis une rubrique : à ajouter à la liste des contacts de l'affaire. */
+  onContactCreated?: (contact: Contact) => void;
 }
 
 const PRESENCE_LABELS: Record<PresenceStatus, string> = { P: 'Présent', R: 'Retard', AE: 'Absent excusé', ANE: 'Absent non excusé', NC: 'Non convoqué' };
@@ -86,7 +94,7 @@ function isBadWeather(meteo?: string) {
   return WEATHER_ALERT_KEYWORDS.some(k => lower.includes(k));
 }
 
-export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, travauxModificatifsContent, contacts, settings, onReservesChanged }: ChantierModuleProps) {
+export default function ChantierModule({ project, lots_list: lotsBruts, ordresDeService, osSituationsContent, travauxModificatifsContent, contacts, settings, onReservesChanged, onStakeholdersChange, onContactCreated }: ChantierModuleProps) {
   const { t } = useTranslation();
   // Lots et entreprises classés par numéro de lot (« 2 » avant « 10 »), partout dans le module.
   const lots_list = useMemo(
@@ -103,6 +111,16 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   const [reviewOpenOnly, setReviewOpenOnly] = useState(false);
   // Lot des observations saisies depuis le compte-rendu (vide = sans lot).
   const [newObsLotId, setNewObsLotId] = useState('');
+  // Option d'export et de diffusion, propre au poste : joindre les anciennes observations restées non levées.
+  const [includePrevious, setIncludePrevious] = useState(() => {
+    try { return localStorage.getItem('chantier:pdf:previousOpen') === '1'; } catch { return false; }
+  });
+  const changeIncludePrevious = (value: boolean) => {
+    setIncludePrevious(value);
+    try { localStorage.setItem('chantier:pdf:previousOpen', value ? '1' : '0'); } catch { /* préférence non mémorisée */ }
+  };
+  // Création d'un intervenant depuis le champ « Société » d'une rubrique.
+  const [newIntervenant, setNewIntervenant] = useState<{ query: string; noteId: string } | null>(null);
 
   const [reports, setReports] = useState<SiteReport[]>([]);
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
@@ -409,14 +427,22 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
   // ── Diffusion par e-mail ────────────────────────────────────────────────────
   // Le PDF part avec les identifiants des contacts cochés ; le serveur retrouve
   // lui-même adresses et observations (server/routes/siteReportDiffusion.ts).
+  // Anciennes observations : celles de l'opération restées non levées (ni levées, ni refusées) et absentes de ce compte-rendu.
+  const previousOpenObservations = useMemo(() => {
+    const inReport = new Set(reportObservations.map(o => o.id));
+    return allObservations.filter(o => !inReport.has(o.id) && o.statut !== 'Levée' && o.statut !== 'Refusée');
+  }, [allObservations, reportObservations]);
+  const previousOpenByLot = useMemo(() => groupObservationsByLot(previousOpenObservations, lots_list), [previousOpenObservations, lots_list]);
+
   const diffusionRecipients = useMemo(
     () => buildDiffusionRecipients({
       lots: lots_list,
       stakeholders: project.stakeholders_list || [],
       contacts,
       observations: reportObservations,
+      previousObservations: includePrevious ? previousOpenObservations : [],
     }),
-    [lots_list, project.stakeholders_list, contacts, reportObservations],
+    [lots_list, project.stakeholders_list, contacts, reportObservations, includePrevious, previousOpenObservations],
   );
 
   const openDiffusion = () => {
@@ -448,7 +474,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, download: false, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
       );
       if (blob.size > MAX_DIFFUSION_PDF_BYTES) {
         setDiffusionError(`Le PDF fait ${(blob.size / 1024 / 1024).toFixed(1)} Mo, la limite d'envoi est de 20 Mo : retirez un document joint ou décochez les photos des rubriques.`);
@@ -457,6 +483,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       const body = new FormData();
       body.append('file', blob, filename);
       body.append('contact_ids', JSON.stringify(contactIds));
+      if (includePrevious) body.append('include_previous', '1');
       // Pas d'apiFetch ici : il imposerait un Content-Type JSON, or un envoi multipart doit
       // laisser le navigateur poser sa propre limite.
       const headers = new Headers();
@@ -828,17 +855,75 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     } catch (err) { console.error(err); }
   };
 
-  const observationsByLot = useMemo(() => {
-    const groups = new Map<string, { title: string; entreprise: string; items: Observation[] }>();
-    reportObservations.forEach(o => {
-      const key = o.lot?.id || 'sans-lot';
-      const title = o.lot ? `${o.lot.lot_number} — ${o.lot.lot_title}` : 'Sans lot identifié';
-      const lotFull = lots_list.find(l => l.id === o.lot_id);
-      if (!groups.has(key)) groups.set(key, { title, entreprise: lotFull?.contact_name || '', items: [] });
-      groups.get(key)!.items.push(o);
-    });
-    return Array.from(groups.values());
-  }, [reportObservations, lots_list]);
+  // TCE d'abord, puis chaque lot (ou ensemble de lots), puis « Sans lot identifié ».
+  const observationsByLot = useMemo(() => groupObservationsByLot(reportObservations, lots_list), [reportObservations, lots_list]);
+
+  // Nouvelle attribution d'une observation : un autre lot (correction de l'entreprise), plusieurs lots, ou TCE.
+  // L'observation change de groupe tout de suite ; la jointure `lot` du serveur est recalculée localement.
+  const assignObservationLots = async (obsId: string, choice: LotChoice) => {
+    const lot = lots_list.find(l => l.id === choice.lot_id);
+    setReportObservations(prev => prev.map(o => (o.id === obsId ? {
+      ...o, lot_id: choice.lot_id ?? undefined, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id ?? undefined,
+      lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined,
+    } : o)));
+    try {
+      await queuedJsonRequest({
+        entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${obsId}`,
+        body: { lot_id: choice.lot_id, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id },
+      });
+      setSaveError(false);
+    } catch (err) {
+      console.error(err);
+      setSaveError(true);
+      showToast((err as Error).message || "L'attribution n'a pas pu être enregistrée.", 'error', { duration: 6000 });
+      fetchReportObservations();
+    }
+    fetchAllObservations().catch(() => {});
+  };
+
+  // Intervenants proposés pour la société d'une rubrique : entreprises des lots, puis autres intervenants de l'opération.
+  const intervenantOptions = useMemo<IntervenantOption[]>(() => {
+    const seen = new Set<string>();
+    const out: IntervenantOption[] = [];
+    const add = (value: string, detail: string) => {
+      const name = value.trim();
+      const key = name.toLowerCase();
+      if (!name || seen.has(key)) return;
+      seen.add(key);
+      out.push({ value: name, label: name, detail });
+    };
+    for (const lot of lots_list) add((lot.contact_name || '').split(' - ')[0], `Lot ${lot.lot_number} ${lot.lot_title}`.trim());
+    const contactById = new Map(contacts.map(c => [c.id, c]));
+    for (const s of project.stakeholders_list || []) {
+      const contact = s.contact_id ? contactById.get(s.contact_id) : undefined;
+      add(contact ? contactLabel(contact) : s.name, s.role);
+    }
+    return out;
+  }, [lots_list, contacts, project.stakeholders_list]);
+
+  // Crée (ou retrouve) la fiche contact, l'ajoute aux intervenants de l'opération, puis la choisit comme société de la rubrique.
+  const createIntervenant = async ({ name, role }: NewIntervenantInput) => {
+    const noteId = newIntervenant?.noteId;
+    const wanted = name.toLowerCase();
+    let contact = contacts.find(c => contactLabel(c).toLowerCase() === wanted);
+    if (!contact) {
+      const id = crypto.randomUUID();
+      await apiFetch(`/api/contacts`, { method: 'POST', body: JSON.stringify({ id, company_name: name, category: 'Entreprise' }) });
+      contact = { id, company_name: name, first_name: '', last_name: '', category: 'Entreprise', name: '' } as unknown as Contact;
+      onContactCreated?.(contact);
+    }
+    const current = project.stakeholders_list || [];
+    if (!current.some(s => s.contact_id === contact!.id && s.role.toLowerCase() === role.toLowerCase())) {
+      const res = await apiFetch<{ stakeholders: Omit<ProjectStakeholder, 'project_id'>[] }>(`/api/projects/${project.id}/stakeholders`, {
+        method: 'PUT',
+        body: JSON.stringify({ stakeholders: [...current.map(s => ({ id: s.id, name: s.name, role: s.role, contact_id: s.contact_id || null })), { name, role, contact_id: contact.id }] }),
+      });
+      onStakeholdersChange?.(res.stakeholders.map(s => ({ ...s, project_id: project.id })));
+    }
+    if (noteId) await saveNoteField(noteId, 'responsible_company', name);
+    setNewIntervenant(null);
+    showToast(`${name} ajouté aux intervenants du chantier.`, 'success', { duration: 5000 });
+  };
 
   const generatePdf = async () => {
     if (!selectedReport) return;
@@ -855,7 +940,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         project.stakeholders_list || [],
         contacts,
         settings,
-        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports },
+        { decoupageLabel: etiquetteDecoupage(selectedReport, decoupage), decoupage: decoupageEffectif, includeRubriquePhotos: pdfRubriquePhotos, attachments: pdfAttachments, allReports: reports, previousOpenByLot: includePrevious ? previousOpenByLot : undefined },
       );
     } catch (error) {
       console.error('Error generating PDF:', error);
@@ -1188,6 +1273,10 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                         <input type="checkbox" checked={pdfRubriquePhotos} onChange={e => changePdfRubriquePhotos(e.target.checked)} />
                         Photos des rubriques dans le PDF
                       </label>
+                      <label className="flex items-center gap-1 text-xs" title="Imprime à la suite du compte-rendu, et ajoute au message de diffusion de chaque destinataire, les observations des comptes-rendus précédents qui ne sont pas encore levées">
+                        <input type="checkbox" checked={includePrevious} onChange={e => changeIncludePrevious(e.target.checked)} />
+                        Joindre les anciennes observations non levées{previousOpenObservations.length > 0 ? ` (${previousOpenObservations.length})` : ''}
+                      </label>
                       <span className="flex flex-wrap items-center gap-1.5 text-xs">
                         <input ref={attachmentInputRef} type="file" multiple hidden
                           accept="application/pdf,image/jpeg,image/png,.pdf,.jpg,.jpeg,.png"
@@ -1494,7 +1583,7 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                           </div>
                           <div className="space-y-1.5">
                             {[...items].sort((a, b) => (a.issue_date || '').localeCompare(b.issue_date || '')).map(n => (
-                              <RubriqueRow key={n.id} note={n} onSave={saveNoteField} onDelete={deleteNote} onUploadPhoto={uploadNotePhoto} onRemovePhoto={removeNotePhoto} />
+                              <RubriqueRow key={n.id} note={n} intervenants={intervenantOptions} onCreateIntervenant={(query, noteId) => setNewIntervenant({ query, noteId })} onSave={saveNoteField} onDelete={deleteNote} onUploadPhoto={uploadNotePhoto} onRemovePhoto={removeNotePhoto} />
                             ))}
                           </div>
                         </div>
@@ -1544,13 +1633,13 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
                     )}
                     <div className="space-y-4">
                       {observationsByLot.map(group => (
-                        <div key={group.title}>
+                        <div key={group.key}>
                           <div className="flex items-center gap-2 text-sm font-bold text-[var(--tblr-text)] mb-2">
                             {group.title} {group.entreprise && <span className="text-xs font-normal text-[var(--tblr-muted)]">{group.entreprise}</span>}
                           </div>
                           <div className="space-y-1.5">
                             {group.items.map(o => (
-                              <ObservationRow key={o.id} obs={o} onSave={saveObservationField} onUploadPhoto={uploadObservationPhoto} />
+                              <ObservationRow key={o.id} obs={o} lots={lots_list} onAssignLots={assignObservationLots} onSave={saveObservationField} onUploadPhoto={uploadObservationPhoto} />
                             ))}
                           </div>
                         </div>
@@ -1639,8 +1728,19 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         busy={diffusionBusy}
         result={diffusionResult}
         error={diffusionError}
+        includePrevious={includePrevious}
+        previousCount={previousOpenObservations.length}
+        onIncludePreviousChange={changeIncludePrevious}
         onSend={ids => void sendDiffusion(ids)}
         onClose={() => setDiffusionOpen(false)}
+      />
+
+      <NewIntervenantDialog
+        open={!!newIntervenant}
+        initialName={newIntervenant?.query ?? ''}
+        knownNames={contacts.map(c => contactLabel(c)).filter(Boolean)}
+        onSubmit={createIntervenant}
+        onClose={() => setNewIntervenant(null)}
       />
 
       {isDecoupageOpen && (

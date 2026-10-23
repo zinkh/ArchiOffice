@@ -93,17 +93,24 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
 
       const contactIds = [...new Set([...lots, ...stakeholders].map(x => x.contact_id).filter(Boolean))];
       const observationIds = ((linksRes.data || []) as any[]).map(l => l.observation_id);
-      const [contactsRes, observationsRes] = await Promise.all([
+      // Option « anciennes observations » : celles de l'opération restées non levées et absentes de ce compte-rendu.
+      const includePrevious = ['1', 'true'].includes(String(req.body?.include_previous));
+      const [contactsRes, observationsRes, previousRes] = await Promise.all([
         contactIds.length
           ? tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('id, first_name, last_name, company_name, email, email_work, email_other, email_home').in('id', contactIds)
           : Promise.resolve({ data: [] }),
         observationIds.length
-          ? tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('id, project_id, lot_id, contact_id, texte, statut, due_date, number, type, urgence').in('id', observationIds)
+          ? tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('*').in('id', observationIds)
+          : Promise.resolve({ data: [] }),
+        includePrevious
+          ? tenantScopedFrom(supabaseAdmin, tenantId, 'observations').select('*').eq('project_id', projectId).neq('statut', 'Levée').neq('statut', 'Refusée')
           : Promise.resolve({ data: [] }),
       ]);
+      const previousObservations = ((previousRes.data || []) as any[]).filter(o => !observationIds.includes(o.id));
 
       const allowed = buildDiffusionRecipients({
         lots, stakeholders, contacts: (contactsRes.data || []) as any[], observations: (observationsRes.data || []) as any[],
+        previousObservations,
       });
       const chosen = allowed.filter(r => requestedIds.includes(r.contactId));
       const addressable = chosen.filter(r => r.email);
@@ -180,7 +187,7 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
               attachments,
             });
           }
-          sent.push({ contact_id: r.contactId, name: r.name, email: r.email, observations: r.observations.length });
+          sent.push({ contact_id: r.contactId, name: r.name, email: r.email, observations: r.observations.length + r.previousObservations.length });
         } catch (err: any) {
           console.error('[POST /api/reports/:reportId/diffuse] envoi impossible', r.contactId, err?.message);
           failed.push({ contact_id: r.contactId, name: r.name, email: r.email, error: err?.message || 'Envoi impossible' });

@@ -4363,6 +4363,8 @@ export default function ProjectDetail() {
             {activeTab === 'DET' && (
               <ChantierModule
                 onReservesChanged={fetchReserves}
+                onStakeholdersChange={list => setProject(prev => (prev ? { ...prev, stakeholders_list: list } : prev))}
+                onContactCreated={contact => setContacts(prev => [...prev, contact])}
                 project={project}
                 lots_list={project.lots_list || []}
                 ordresDeService={ordresDeService}

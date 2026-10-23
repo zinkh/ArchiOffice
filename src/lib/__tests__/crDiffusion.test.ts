@@ -89,6 +89,7 @@ describe('buildDiffusionMail', () => {
     const mail = buildDiffusionMail({
       contactId: 'c1', name: 'Durand', roles: ['Lot 02 Gros œuvre'], email: 'd@e.fr',
       observations: [obs('o1', { number: 3, type: 'reserve', texte: 'Reprendre l\'enduit', statut: 'Urgent', urgence: 'bloquant', due_date: '2026-03-20' })],
+      previousObservations: [],
     }, ctx);
     expect(mail.subject).toBe('Compte rendu de chantier n° 12 du 12/03/2026, 26014 Villa Martin');
     expect(mail.text).toContain('Observations vous concernant (1) :');
@@ -99,7 +100,7 @@ describe('buildDiffusionMail', () => {
   });
 
   it("dit explicitement quand aucune observation ne concerne le destinataire", () => {
-    const mail = buildDiffusionMail({ contactId: 'c2', name: 'BET', roles: [], email: 'b@e.fr', observations: [] }, ctx);
+    const mail = buildDiffusionMail({ contactId: 'c2', name: 'BET', roles: [], email: 'b@e.fr', observations: [], previousObservations: [] }, ctx);
     expect(mail.text).toContain('Aucune observation ne vous concerne dans ce compte rendu.');
     expect(mail.html).not.toContain('<ul>');
   });
@@ -108,9 +109,60 @@ describe('buildDiffusionMail', () => {
     const mail = buildDiffusionMail({
       contactId: 'c1', name: 'Durand', roles: [], email: 'd@e.fr',
       observations: [obs('o1', { texte: '<script>alert(1)</script> & "guillemets"' })],
+      previousObservations: [],
     }, { ...ctx, projectName: 'Villa\r\nBcc: x@y.fr' });
     expect(mail.html).not.toContain('<script>');
     expect(mail.html).toContain('&lt;script&gt;');
     expect(mail.subject).not.toMatch(/[\r\n]/);
+  });
+
+  it('ajoute une seconde liste pour les anciennes observations non levées, et marque les TCE', () => {
+    const mail = buildDiffusionMail({
+      contactId: 'c1', name: 'Durand', roles: [], email: 'd@e.fr',
+      observations: [obs('o1', { number: 5, tce: true, texte: 'Nettoyer le chantier' })],
+      previousObservations: [obs('o0', { number: 2, texte: 'Reprise du joint', statut: 'En cours' })],
+    }, ctx);
+    expect(mail.text).toContain('- 5. [TCE] [Remarque] Nettoyer le chantier');
+    expect(mail.text).toContain('Observations antérieures non levées vous concernant (1) :');
+    expect(mail.text).toContain('- 2. [Remarque] Reprise du joint (Statut : En cours)');
+    expect(mail.html).toContain('Observations antérieures non levées');
+  });
+});
+
+describe('observations multi-lots, TCE et anciennes observations', () => {
+  const contacts = [contact('c1', { company_name: 'Maçonnerie' }), contact('c2', { company_name: 'Peinture' }), contact('c3', { company_name: 'BET' })];
+  const lots = [lot('l1', '02', 'Gros œuvre', 'c1'), lot('l2', '03', 'Peinture', 'c2')];
+  const ids = (list: Observation[]) => list.map(o => o.id);
+
+  it('adresse une observation à chacune des entreprises des lots visés', () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [], contacts,
+      observations: [obs('multi', { lot_id: 'l1', lot_ids: ['l1', 'l2'] }), obs('seul', { lot_id: 'l2' })],
+    });
+    const byId = Object.fromEntries(recipients.map(r => [r.contactId, ids(r.observations)]));
+    expect(byId).toEqual({ c1: ['multi'], c2: ['multi', 'seul'] });
+  });
+
+  it('adresse une observation TCE à toutes les entreprises titulaires d\'un lot, pas aux autres intervenants', () => {
+    const recipients = buildDiffusionRecipients({
+      lots, stakeholders: [stakeholder('s1', 'Bureau d\'études', 'c3')], contacts,
+      observations: [obs('tce', { tce: true, lot_id: undefined })],
+    });
+    const byId = Object.fromEntries(recipients.map(r => [r.contactId, ids(r.observations)]));
+    expect(byId).toEqual({ c1: ['tce'], c2: ['tce'], c3: [] });
+  });
+
+  it('ne reprend en « anciennes » que celles absentes du compte-rendu', () => {
+    const [r] = buildDiffusionRecipients({
+      lots: [lots[0]], stakeholders: [], contacts,
+      observations: [obs('o1', { lot_id: 'l1' })],
+      previousObservations: [obs('o1', { lot_id: 'l1' }), obs('vieille', { lot_id: 'l1' }), obs('ailleurs', { lot_id: 'l2' })],
+    });
+    expect(ids(r.previousObservations)).toEqual(['vieille']);
+  });
+
+  it('sans option, aucune ancienne observation', () => {
+    const [r] = buildDiffusionRecipients({ lots: [lots[0]], stakeholders: [], contacts, observations: [] });
+    expect(r.previousObservations).toEqual([]);
   });
 });
