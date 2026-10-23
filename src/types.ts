@@ -958,6 +958,15 @@ export interface TenderRssMatch {
   // de l'annonce (server/tenderFieldExtractor.ts) — repris comme
   // tenders.type à la conversion.
   type_marche?: string | null;
+  // Pré-tri IA (server/routes/tenderRssAi.ts) : note de pertinence 0-100,
+  // verdict déduit de la note, motif, points d'attention et identifiant
+  // AO-IA-AAAA-NNN (attribué seulement aux annonces proposées).
+  ai_score?: number | null;
+  ai_verdict?: 'pertinent' | 'a_etudier' | 'hors_cible' | null;
+  ai_reason?: string | null;
+  ai_flags?: string[] | null;
+  ai_ref?: string | null;
+  ai_scored_at?: string | null;
 }
 
 export interface Specification {

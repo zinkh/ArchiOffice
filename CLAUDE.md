@@ -1737,6 +1737,30 @@ cause commune :
    insécable classique, U+00A0, par précaution) par une espace normale,
    un caractère WinAnsi ordinaire correctement mesuré et rendu.
 
+### Pré-tri IA de la veille : propositions avec identifiant AO-IA
+
+Onglet « Propositions IA » de `/appels-offres` (`TenderRssAiProposals.tsx`), à côté de la veille RSS, qui reste
+la seule source des annonces (flux RSS, BOAMP, TED : `tender_rss_matches`). L'IA les **note et les propose**, elle ne
+change jamais leur statut : écarter, surveiller (puis convertir en appel d'offres) restent des gestes de l'architecte,
+avec annulation. Migration `supabase/migrate_tender_rss_ai_triage.sql` (colonnes `ai_*` sur `tender_rss_matches`,
+`settings.tender_ai_criteria`) ; une instance non migrée répond 503 au scan et lit des critères vides.
+
+- **Réservé au plan Enterprise**, réserve → exécute → règle comme `tenderAi.ts` (`endpoint_type = 'tender_ai'`), **un
+  appel par lot de 12 annonces**, 48 au plus par passage (`more` dit qu'il en reste). Crédit épuisé : le passage s'arrête
+  proprement, ce qui est déjà noté reste noté. Route : `POST /api/tender-rss-matches/ai-scan`
+  (`server/routes/tenderRssAi.ts`, logique pure dans `server/tenderAiTriage.ts`, `tests/tenderRssAi.test.ts`).
+- **Pré-tri sans modèle** : une annonce dont la date limite est dépassée est écartée (note 0) sans appel au modèle ;
+  une date absente ou illisible n'écarte jamais.
+- **Note 0-100, verdict déduit** (`verdictForScore`) : 70 et plus « pertinent », 40 à 69 « à étudier », en dessous
+  « hors cible ». Le modèle rend note, motif et points d'attention, jamais le verdict. Les critères du cabinet (texte
+  libre, `settings.tender_ai_criteria`, 2000 caractères, bouton « Mes critères ») sont dans le prompt ; le contenu des
+  annonces y est cité comme donnée non fiable.
+- **Identifiant `AO-IA-AAAA-NNN`**, attribué seulement à partir de « à étudier », par le serveur (jamais par le
+  modèle), à la suite du plus grand numéro de l'année ; unique par cabinet (index partiel, nouvel essai au conflit),
+  **stable** : « Tout renoter » (`rescore: true`) change notes et verdicts mais garde les identifiants déjà donnés.
+- **Pas encore fait** : scan automatique à chaque relève du poller (coût en jetons non borné par une action humaine),
+  notification des annonces « pertinentes ».
+
 ### Rédaction assistée de la note méthodologique d'un appel d'offres
 
 Onglet Note méthodologique de `/appels-offres/:id` (`src/pages/TenderDetail.tsx`,

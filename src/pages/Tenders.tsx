@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark, IconSearch } from '@tabler/icons-react';
+import { IconPlus, IconFileText, IconCircleCheck, IconClock, IconAlertTriangle, IconDownload, IconX, IconTrash, IconEdit, IconArchive, IconFilter, IconSortAscending, IconSortDescending, IconEye, IconList, IconRss, IconBookmark, IconSearch, IconSparkles } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { formatCurrency, cn } from '../lib/utils';
@@ -12,6 +12,7 @@ import { ContactModal } from '../components/ContactModal';
 import { CONTACT_CATEGORY_CLIENT, CONTACT_CATEGORY_COTRAITANT, isClientContact } from '../lib/contactCategories';
 import { TenderRssWatch } from '../components/TenderRssWatch';
 import { TenderRssSelected } from '../components/TenderRssSelected';
+import { TenderRssAiProposals } from '../components/TenderRssAiProposals';
 import type { Tender, Contact, Milestone, MiqcpAssessment } from '../types';
 import { useTranslation } from 'react-i18next';
 import MilestoneGantt from '../components/MilestoneGantt';
@@ -55,7 +56,7 @@ export default function Tenders() {
   const [filterType, setFilterType] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortByDeadline, setSortByDeadline] = useState<'asc' | 'desc' | null>(null);
-  const [activeTab, setActiveTab] = useState<'list' | 'selected' | 'watch'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'proposals' | 'selected' | 'watch'>('list');
   const [isMiqcpWizardOpen, setIsMiqcpWizardOpen] = useState(false);
 
   const tenderMiqcpAssessment: MiqcpAssessment | null = React.useMemo(() => {
@@ -334,6 +335,17 @@ export default function Tenders() {
           {t('tenders')}
         </button>
         <button
+          onClick={() => setActiveTab('proposals')}
+          className="flex items-center gap-2 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
+          style={{
+            borderColor: activeTab === 'proposals' ? 'var(--tblr-primary)' : 'transparent',
+            color: activeTab === 'proposals' ? 'var(--tblr-primary)' : 'var(--tblr-muted)'
+          }}
+        >
+          <IconSparkles size={16} />
+          {t('tender_ai_tab_label')}
+        </button>
+        <button
           onClick={() => setActiveTab('selected')}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium -mb-px border-b-2 transition-colors"
           style={{
@@ -356,6 +368,8 @@ export default function Tenders() {
           {t('tender_rss_tab_label')}
         </button>
       </div>
+
+      {activeTab === 'proposals' && <TenderRssAiProposals />}
 
       {activeTab === 'selected' && <TenderRssSelected />}
 
