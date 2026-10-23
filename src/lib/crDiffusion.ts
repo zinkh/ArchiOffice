@@ -4,6 +4,7 @@
 // une adresse envoyée par le client) : qui reçoit le compte-rendu, quelles
 // observations le concernent, et le texte du message qui lui est adressé.
 import type { Contact, Observation, ProjectLot, ProjectStakeholder } from '../types';
+import { observationTargetsLot, TCE_LABEL } from './observationLots';
 
 export interface DiffusionRecipient {
   /** Identifiant du contact : la clé d'un destinataire (une entreprise sur plusieurs lots n'en forme qu'un). */
@@ -16,6 +17,8 @@ export interface DiffusionRecipient {
   email: string;
   /** Observations du compte-rendu qui la concernent, par numéro. */
   observations: Observation[];
+  /** Observations antérieures encore non levées qui la concernent (option « anciennes observations »), par numéro. */
+  previousObservations: Observation[];
 }
 
 export interface DiffusionMailContext {
@@ -81,6 +84,8 @@ export function buildDiffusionRecipients(input: {
   stakeholders: ProjectStakeholder[];
   contacts: Contact[];
   observations: Observation[];
+  /** Observations des comptes-rendus précédents, non levées : jointes au message seulement si fournies. */
+  previousObservations?: Observation[];
 }): DiffusionRecipient[] {
   const contactById = new Map(input.contacts.map(c => [c.id, c]));
   const entries = new Map<string, { roles: string[]; lotIds: Set<string> }>();
@@ -109,13 +114,19 @@ export function buildDiffusionRecipients(input: {
 
   return [...entries.entries()].map(([contactId, entry]) => {
     const contact = contactById.get(contactId)!;
+    // Une observation revient à l'entreprise d'un des lots visés (un seul, plusieurs, ou tous : TCE,
+    // auquel cas toutes les entreprises titulaires d'un lot la reçoivent), ou à la personne désignée.
+    const concerns = (o: Observation) =>
+      [...entry.lotIds].some(lotId => observationTargetsLot(o, lotId)) || o.contact_id === contactId;
+    const alreadyListed = new Set(input.observations.map(o => o.id));
     return {
       contactId,
       name: contactLabel(contact),
       roles: entry.roles,
       email: contactEmail(contact),
-      observations: input.observations
-        .filter(o => (o.lot_id && entry.lotIds.has(o.lot_id)) || o.contact_id === contactId)
+      observations: input.observations.filter(concerns).sort(byNumber),
+      previousObservations: (input.previousObservations ?? [])
+        .filter(o => !alreadyListed.has(o.id) && concerns(o))
         .sort(byNumber),
     };
   });
@@ -132,7 +143,8 @@ const escapeHtml = (s: string): string =>
 
 /** Une observation sur une ligne : « 3. [À lever] Texte. Statut : À faire. Délai : 12/03/2026. ». */
 function observationLine(o: Observation): string {
-  const parts = [`${o.number != null ? `${o.number}. ` : ''}[${TYPE_LABELS[o.type || 'observation']}] ${o.texte}`.trim()];
+  const scope = o.tce ? `[${TCE_LABEL}] ` : '';
+  const parts = [`${o.number != null ? `${o.number}. ` : ''}${scope}[${TYPE_LABELS[o.type || 'observation']}] ${o.texte}`.trim()];
   const details = [
     `Statut : ${o.statut}`,
     o.urgence && o.urgence !== 'normal' ? `Urgence : ${o.urgence}` : '',
@@ -156,6 +168,10 @@ export function buildDiffusionMail(recipient: DiffusionRecipient, ctx: Diffusion
     ? `Observations vous concernant (${count}) :`
     : 'Aucune observation ne vous concerne dans ce compte rendu.';
   const lines = recipient.observations.map(observationLine);
+  // Anciennes observations non levées (option de la diffusion) : une seconde liste, sous la première.
+  const previousCount = recipient.previousObservations.length;
+  const previousHeading = previousCount > 0 ? `Observations antérieures non levées vous concernant (${previousCount}) :` : '';
+  const previousLines = recipient.previousObservations.map(observationLine);
   const next = ctx.nextMeeting ? `Prochaine réunion : ${ctx.nextMeeting}` : '';
   const signature = (ctx.signature || '').trim() || (ctx.agencyName || '').trim();
 
@@ -166,6 +182,7 @@ export function buildDiffusionMail(recipient: DiffusionRecipient, ctx: Diffusion
     '',
     heading,
     ...lines.map(l => `- ${l}`),
+    ...(previousCount > 0 ? ['', previousHeading, ...previousLines.map(l => `- ${l}`)] : []),
     ...(next ? ['', next] : []),
     '',
     'Cordialement,',
@@ -177,6 +194,7 @@ export function buildDiffusionMail(recipient: DiffusionRecipient, ctx: Diffusion
     `<p>${escapeHtml(intro)}</p>`,
     `<p><strong>${escapeHtml(heading)}</strong></p>`,
     ...(count > 0 ? [`<ul>${lines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`] : []),
+    ...(previousCount > 0 ? [`<p><strong>${escapeHtml(previousHeading)}</strong></p>`, `<ul>${previousLines.map(l => `<li>${escapeHtml(l)}</li>`).join('')}</ul>`] : []),
     ...(next ? [`<p>${escapeHtml(next)}</p>`] : []),
     `<p>Cordialement,${signature ? `<br>${escapeHtml(signature).replace(/\r?\n/g, '<br>')}` : ''}</p>`,
   ].join('\n');

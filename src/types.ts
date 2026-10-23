@@ -1447,6 +1447,10 @@ export interface Observation {
   lot_id?: string;
   lot?: Pick<ProjectLot, 'id' | 'lot_number' | 'lot_title'>;
   contact_id?: string;
+  /** Observation adressée à plusieurs lots : tous les lots visés (`lot_id` = le premier). Vide = un seul lot. */
+  lot_ids?: string[] | null;
+  /** Tout corps d'état : l'observation vise tous les lots (`lot_id` nul). */
+  tce?: boolean | null;
   texte: string;
   statut: 'À faire' | 'En cours' | 'Levée' | 'Urgent' | 'Refusée';
   due_date?: string;

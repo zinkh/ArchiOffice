@@ -3,7 +3,9 @@ import { IconCamera, IconTrash, IconX } from '@tabler/icons-react';
 import { SignedImage } from '../SignedImage';
 import { PhotoSourcePicker } from '../PhotoSourcePicker';
 import { cn } from '../../lib/utils';
-import type { Observation, SiteReportNote, SiteReport } from '../../types';
+import type { Observation, ProjectLot, SiteReportNote, SiteReport } from '../../types';
+import { IntervenantCombobox, type IntervenantOption } from './IntervenantCombobox';
+import { ObservationLotPicker, type LotChoice } from './ObservationLotPicker';
 import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { CommitTextarea, ROW_FIELD, TOUCH_TARGET } from './fields';
 
@@ -13,8 +15,12 @@ import { CommitTextarea, ROW_FIELD, TOUCH_TARGET } from './fields';
 
 const DELETE_BUTTON = cn('p-1 text-zinc-400 hover:text-red-500 flex items-center justify-center', TOUCH_TARGET);
 
-export function RubriqueRow({ note, onSave, onDelete, onUploadPhoto, onRemovePhoto }: {
+export function RubriqueRow({ note, intervenants, onCreateIntervenant, onSave, onDelete, onUploadPhoto, onRemovePhoto }: {
   note: SiteReportNote;
+  /** Intervenants proposés pour la société (lots, intervenants de l'opération). */
+  intervenants: readonly IntervenantOption[];
+  /** Création d'un intervenant absent de la liste ; `noteId` : la rubrique qui recevra le nouvel intervenant. */
+  onCreateIntervenant: (query: string, noteId: string) => void;
   onSave: (id: string, field: keyof SiteReportNote, value: string) => void;
   onDelete: (id: string) => void;
   onUploadPhoto: (id: string, file: File) => void;
@@ -37,12 +43,13 @@ export function RubriqueRow({ note, onSave, onDelete, onUploadPhoto, onRemovePho
         value={note.text || ''}
         onCommit={v => onSave(note.id, 'text', v)}
       />
-      <input
-        aria-label="Société"
-        placeholder="Société"
-        className={cn(ROW_FIELD, 'order-5 md:order-3 basis-full md:basis-auto md:w-32 md:text-xs pointer-coarse:min-h-11 md:pointer-coarse:min-h-0')}
-        defaultValue={note.responsible_company || ''}
-        onBlur={e => onSave(note.id, 'responsible_company', e.target.value)}
+      <IntervenantCombobox
+        label="Société"
+        className="order-5 md:order-3 basis-full md:basis-auto md:w-32"
+        value={note.responsible_company || ''}
+        options={intervenants}
+        onCommit={v => onSave(note.id, 'responsible_company', v)}
+        onCreate={query => onCreateIntervenant(query, note.id)}
       />
       <select
         aria-label="État de la rubrique"
@@ -115,8 +122,11 @@ export function DecisionRow({ decision, onChange, onRemove }: {
  * le statut, la nature, le lot, la réponse...). Sur le chantier on ne saisit ici que l'intitulé, le délai
  * et les photos du jour.
  */
-export function ObservationRow({ obs, onSave, onUploadPhoto }: {
+export function ObservationRow({ obs, lots, onAssignLots, onSave, onUploadPhoto }: {
   obs: Observation;
+  lots: readonly ProjectLot[];
+  /** Nouvelle attribution (un lot, plusieurs, ou TCE) : corrige aussi l'entreprise d'une observation saisie dans le mauvais lot. */
+  onAssignLots: (id: string, choice: LotChoice) => void;
   onSave: (id: string, field: string, value: any) => void;
   onUploadPhoto: (id: string, file: File) => void;
 }) {
@@ -133,6 +143,7 @@ export function ObservationRow({ obs, onSave, onUploadPhoto }: {
       {obs.pendingSync && (
         <span className="order-1 shrink-0 text-[0.6875rem] font-bold uppercase px-1.5 py-1 rounded bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">en attente</span>
       )}
+      <ObservationLotPicker obs={obs} lots={lots} onApply={choice => onAssignLots(obs.id, choice)} className="order-2 md:order-2 shrink-0 max-w-[16rem]" />
       <label className="order-2 md:order-2 shrink-0 flex items-center gap-2 text-xs text-[var(--tblr-muted)]">
         <span>Pour le</span>
         <input

@@ -21,6 +21,8 @@ import { fetchAgencySettings } from '../lib/pdfLetterhead';
 import { cachedListFirst } from '../lib/offlineReadCache';
 import { SANS_AFFECTATION, DECOUPAGE_VIDE, batimentsActifs, phasesActives, correspondDecoupage, type DecoupageChantier, type FiltreDecoupage } from '../lib/chantierDecoupage';
 import { DecoupageFilters, DecoupageSelects } from './chantier/DecoupageFields';
+import { ObservationLotPicker, type LotChoice } from './chantier/ObservationLotPicker';
+import { observationSelectedLotIds, observationTargetsLot, TCE_FULL_LABEL, TCE_LABEL } from '../lib/observationLots';
 import { db } from '../db';
 import { apiFetch } from '../lib/api';
 import { isReprenable } from '../lib/observationsReserves';
@@ -223,6 +225,19 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     setObservations(prev => prev.map(o => o.id === id ? { ...o, ...patch } : o));
   }, []);
 
+  // Nouvelle attribution (un autre lot, plusieurs lots, ou TCE) : la ligne change de groupe tout de suite.
+  const assignLots = useCallback((id: string, choice: LotChoice) => {
+    const lot = lots.find(l => l.id === choice.lot_id);
+    updateLocal(id, {
+      lot_id: choice.lot_id ?? undefined, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id ?? undefined,
+      lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined,
+    });
+    queuedJsonRequest({
+      entity: 'observation', id: crypto.randomUUID(), method: 'PUT', url: `/api/observations/${id}`,
+      body: { lot_id: choice.lot_id, lot_ids: choice.lot_ids, tce: choice.tce, contact_id: choice.contact_id },
+    }).then(() => { setSaveError(false); onChangedRef.current?.(); }).catch(err => { console.error(err); setSaveError(true); });
+  }, [lots, updateLocal]);
+
   // Lève le badge « en attente » d'une observation dès que sa création a
   // effectivement atteint le serveur (voir src/lib/offlineQueue.ts).
   useEffect(() => {
@@ -374,7 +389,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     if (typeSelect && (o.type || 'observation') !== typeSelect) return false;
     if (openOnly && o.statut === 'Levée') return false;
     if (statusFilter && o.statut !== statusFilter) return false;
-    if (lotFilter && o.lot_id !== lotFilter) return false;
+    if (lotFilter && !observationTargetsLot(o, lotFilter)) return false;
     if (!correspondDecoupage(o, filtreDecoupage)) return false;
     if (globalFilter) {
       const q = globalFilter.toLowerCase();
@@ -419,22 +434,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
       size: 140,
       cell: info => {
         const row = info.row.original;
-        return (
-          <select
-            className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs dark:text-white"
-            value={row.lot_id || ''}
-            onChange={e => {
-              const lot = lots.find(l => l.id === e.target.value);
-              updateLocal(row.id, { lot_id: e.target.value, lot: lot ? { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } : undefined });
-              saveField(row.id, 'lot_id', e.target.value);
-            }}
-          >
-            <option value="">—</option>
-            {lots.map(l => (
-              <option key={l.id} value={l.id}>{l.lot_number} · {l.lot_title}</option>
-            ))}
-          </select>
-        );
+        return <ObservationLotPicker obs={row} lots={lots} onApply={choice => assignLots(row.id, choice)} className="w-full" />;
       },
     }),
     ...(aDecoupage ? [columnHelper.display({
@@ -643,7 +643,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
         );
       },
     }),
-  ], [lots, decoupage, aDecoupage, saveField, updateLocal, deleteRow, reprendreEnReserve, expanded, toggleExpanded, t, addRowSameCompany]);
+  ], [lots, decoupage, aDecoupage, saveField, updateLocal, assignLots, deleteRow, reprendreEnReserve, expanded, toggleExpanded, t, addRowSameCompany]);
 
   const table = useReactTable({
     data: filtered,
@@ -662,11 +662,14 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   const lotGroups = useMemo(() => {
     const rows = table.getRowModel().rows;
     const groups: { key: string; label: string; rows: typeof rows }[] = [];
+    // TCE d'abord ; une observation adressée à plusieurs lots figure sous chacun d'eux.
+    const tceRows = rows.filter(x => x.original.tce);
+    if (tceRows.length) groups.push({ key: 'tce', label: `${TCE_LABEL} · ${TCE_FULL_LABEL}`, rows: tceRows });
     lots.forEach(l => {
-      const r = rows.filter(x => x.original.lot_id === l.id);
+      const r = rows.filter(x => !x.original.tce && observationTargetsLot(x.original, l.id));
       if (r.length) groups.push({ key: l.id, label: `${l.lot_number} · ${l.lot_title}`, rows: r });
     });
-    const orphans = rows.filter(x => !x.original.lot_id || !lots.some(l => l.id === x.original.lot_id));
+    const orphans = rows.filter(x => !x.original.tce && !observationSelectedLotIds(x.original).some(id => lots.some(l => l.id === id)));
     if (orphans.length) groups.push({ key: 'none', label: 'Sans lot', rows: orphans });
     return groups;
     // eslint-disable-next-line react-hooks/exhaustive-deps
