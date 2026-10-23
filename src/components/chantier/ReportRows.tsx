@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconCamera, IconTrash, IconX } from '@tabler/icons-react';
 import { SignedImage } from '../SignedImage';
+import { PhotoSourcePicker } from '../PhotoSourcePicker';
 import { cn } from '../../lib/utils';
 import type { Observation, SiteReportNote, SiteReport } from '../../types';
 import { openSignedUrl } from '../../lib/signedStorageUrl';
@@ -19,7 +20,6 @@ export function RubriqueRow({ note, onSave, onDelete, onUploadPhoto, onRemovePho
   onUploadPhoto: (id: string, file: File) => void;
   onRemovePhoto: (id: string, url: string) => void;
 }) {
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const photos = note.photos || [];
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-2 p-2.5 md:p-2 rounded-lg bg-[var(--tblr-surface-2)]">
@@ -53,12 +53,14 @@ export function RubriqueRow({ note, onSave, onDelete, onUploadPhoto, onRemovePho
         <option value="open">Ouvert</option>
         <option value="done">Soldé</option>
       </select>
-      <button type="button" aria-label="Ajouter une photo à la rubrique" title="Ajouter une photo" onClick={() => fileInputRef.current?.click()}
-        className={cn('order-3 md:order-5 p-1 text-zinc-400 hover:text-[var(--tblr-primary)] flex items-center justify-center', TOUCH_TARGET)}>
-        <IconCamera size={16} />
-      </button>
-      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(note.id, f); e.target.value = ''; }} />
+      <PhotoSourcePicker accept="image/png,image/jpeg,image/webp" onFiles={files => onUploadPhoto(note.id, files[0])}>
+        {open => (
+          <button type="button" aria-label="Ajouter une photo à la rubrique" title="Ajouter une photo" onClick={open}
+            className={cn('order-3 md:order-5 p-1 text-zinc-400 hover:text-[var(--tblr-primary)] flex items-center justify-center', TOUCH_TARGET)}>
+            <IconCamera size={16} />
+          </button>
+        )}
+      </PhotoSourcePicker>
       <button type="button" aria-label="Supprimer l'entrée" onClick={() => onDelete(note.id)} className={cn('order-3 md:order-6', DELETE_BUTTON)}>
         <IconTrash size={16} />
       </button>
@@ -118,7 +120,6 @@ export function ObservationRow({ obs, onSave, onUploadPhoto }: {
   onSave: (id: string, field: string, value: any) => void;
   onUploadPhoto: (id: string, file: File) => void;
 }) {
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
   const photos = obs.photos || [];
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-2 p-2.5 md:p-2 rounded-lg bg-[var(--tblr-surface-2)]">
@@ -142,17 +143,19 @@ export function ObservationRow({ obs, onSave, onUploadPhoto }: {
           onBlur={e => onSave(obs.id, 'due_date', e.target.value)}
         />
       </label>
-      <button
-        type="button"
-        onClick={() => fileInputRef.current?.click()}
-        className={cn('order-2 md:order-3 ml-auto md:ml-0 shrink-0 p-1 text-zinc-400 hover:text-[var(--tblr-primary)] flex items-center justify-center', TOUCH_TARGET)}
-        title="Ajouter une photo"
-        aria-label="Ajouter une photo"
-      >
-        <IconCamera size={18} />
-      </button>
-      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onUploadPhoto(obs.id, f); e.target.value = ''; }} />
+      <PhotoSourcePicker accept="image/png,image/jpeg,image/webp" onFiles={files => onUploadPhoto(obs.id, files[0])}>
+        {open => (
+          <button
+            type="button"
+            onClick={open}
+            className={cn('order-2 md:order-3 ml-auto md:ml-0 shrink-0 p-1 text-zinc-400 hover:text-[var(--tblr-primary)] flex items-center justify-center', TOUCH_TARGET)}
+            title="Ajouter une photo"
+            aria-label="Ajouter une photo"
+          >
+            <IconCamera size={18} />
+          </button>
+        )}
+      </PhotoSourcePicker>
       {photos.length > 0 && (
         <div className="order-4 md:order-4 basis-full flex flex-wrap gap-2">
           {photos.map((url, i) => (

@@ -36,6 +36,8 @@ import { cachedListFirst } from '../lib/offlineReadCache';
 import { attendeesUrl, toAttendeeContact, loadContactsForAttendees, loadMeetingAttendees } from '../lib/meetingAttendeesOffline';
 import { db } from '../db';
 import { SignedImage } from '../components/SignedImage';
+import { PhotoSourcePicker } from '../components/PhotoSourcePicker';
+import { useImageDrop } from '../hooks/useImageDrop';
 import type { Contact, Project, Meeting, MeetingPhoto, MeetingAttendee, Proposal, Tender } from '../types';
 import { isContactIncomplete } from './Contacts';
 import { exportMeetingToPDF, exportMeetingToDocx, type AgencySettings } from '../lib/meetingExport';
@@ -397,7 +399,6 @@ function AttendeesPanel({ meetingId }: AttendeesPanelProps) {
 
 export default function Reunions() {
   const { t } = useTranslation();
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [mobileView, setMobileView] = useState<MobileView>('projects');
 
@@ -860,10 +861,10 @@ export default function Reunions() {
     } finally { setExportingDocx(false); }
   };
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!selectedMeeting || !e.target.files?.length) return;
+  // Reçoit des fichiers déjà choisis : appareil photo, pellicule ou glisser-déposer.
+  const uploadPhotoFiles = async (files: File[]) => {
+    if (!selectedMeeting || !files.length) return;
     const meetingId = selectedMeeting.id;
-    const files = Array.from(e.target.files);
     setUploadingPhoto(true);
     try {
       for (const file of files) {
@@ -882,9 +883,13 @@ export default function Reunions() {
       }
     } finally {
       setUploadingPhoto(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
+
+  const { isOver: photoDropOver, dropProps: photoDropProps } = useImageDrop(
+    files => { void uploadPhotoFiles(files); },
+    !!selectedMeeting && !uploadingPhoto,
+  );
 
   // Lève le badge « en attente » d'une photo dès que son envoi a
   // effectivement atteint le serveur, et remplace l'aperçu local par le
@@ -1486,44 +1491,41 @@ export default function Reunions() {
 
             <hr className="mb-8" style={{ borderColor: 'var(--tblr-border)' }} />
 
-            {/* Photos */}
-            <div>
+            {/* Photos : appareil photo, pellicule ou glisser-déposer */}
+            <PhotoSourcePicker multiple disabled={uploadingPhoto} onFiles={files => { void uploadPhotoFiles(files); }}>
+            {openPhotoPicker => (
+            <div
+              {...photoDropProps}
+              className="rounded-xl transition-shadow"
+              style={photoDropOver ? { boxShadow: '0 0 0 2px var(--tblr-primary)', background: 'var(--tblr-surface-2)' } : undefined}
+            >
               <div className="flex flex-wrap items-center justify-between mb-3 gap-2 min-w-0">
                 <h2 className="text-sm font-semibold flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
                   <IconPhoto size={16} />
                   Photos ({(selectedMeeting.photos || []).length})
                 </h2>
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={openPhotoPicker}
                   disabled={uploadingPhoto}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 whitespace-nowrap pointer-coarse:min-h-11"
                   style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
                 >
                   <IconCamera size={14} />
                   {uploadingPhoto ? 'Upload...' : 'Ajouter'}
                 </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  capture="environment"
-                  onChange={handlePhotoUpload}
-                  className="hidden"
-                />
               </div>
 
               {(selectedMeeting.photos || []).length === 0 ? (
                 <button
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={openPhotoPicker}
                   className="w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-3 transition-colors"
                   style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
                   onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--tblr-primary)'; e.currentTarget.style.color = 'var(--tblr-primary)'; }}
                   onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--tblr-border)'; e.currentTarget.style.color = 'var(--tblr-muted)'; }}
                 >
                   <IconCamera size={32} className="opacity-50" />
-                  <span className="text-sm">Appuyez pour ajouter des photos</span>
-                  <span className="text-xs opacity-70">Depuis l'appareil photo ou la galerie</span>
+                  <span className="text-sm">{photoDropOver ? 'Déposez les photos ici' : 'Appuyez pour ajouter des photos'}</span>
+                  <span className="text-xs opacity-70">Appareil photo, pellicule ou glisser-déposer</span>
                 </button>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
@@ -1570,7 +1572,7 @@ export default function Reunions() {
                     </div>
                   ))}
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={openPhotoPicker}
                     className="aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 transition-colors"
                     style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}
                     onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--tblr-primary)'; e.currentTarget.style.color = 'var(--tblr-primary)'; }}
@@ -1582,6 +1584,8 @@ export default function Reunions() {
                 </div>
               )}
             </div>
+            )}
+            </PhotoSourcePicker>
           </div>
         )
       ) : hasActiveEntity ? (
