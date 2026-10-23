@@ -36,6 +36,7 @@ interface ReserveDetailProps {
 interface FormState {
   title: string;
   description: string;
+  reponse: string;
   status: ReserveStatus;
   batiment: string;
   local: string;
@@ -55,6 +56,7 @@ function formFromReserve(r: ReserveLike | null): FormState {
   return {
     title: r?.title || '',
     description: r?.description || '',
+    reponse: r?.reponse || '',
     status: r?.status || 'A faire',
     batiment: r?.batiment || '',
     local: r?.local || '',
@@ -194,6 +196,8 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
         project_id: projectId,
         title: form.title.trim(),
         description: form.description.trim() || null,
+        // Envoyée seulement si elle existe ou change : une instance non migrée refuse la colonne.
+        ...(form.reponse.trim() || reserve?.reponse ? { reponse: form.reponse.trim() || null } : {}),
         status: form.status,
         batiment: form.batiment,
         local: form.local,
@@ -397,6 +401,26 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
             <label className={labelClass}>Commentaire</label>
             <textarea className={cn(inputClass, 'min-h-[72px]')} value={form.description} onChange={e => set('description', e.target.value)} placeholder="État constaté, ce qui reste à faire…" />
           </div>
+
+          {/* Suivi : réponse de l'entreprise ou remarque de la maîtrise d'œuvre, comme la réponse d'une observation du DET */}
+          {!isNew && (
+            <div className="space-y-1">
+              <label className={labelClass} htmlFor="reserve-reponse">Suivi / réponse</label>
+              <textarea
+                id="reserve-reponse"
+                className={cn(inputClass, 'min-h-[72px]', form.status === 'Levée refusée par le MOE' && 'border-pink-400')}
+                value={form.reponse}
+                onChange={e => set('reponse', e.target.value)}
+                maxLength={5000}
+                placeholder={form.status === 'Levée refusée par le MOE'
+                  ? "Ce qui n'est pas satisfaisant, reprise attendue…"
+                  : "Réponse de l'entreprise ou remarque de la maîtrise d'œuvre…"}
+              />
+              {form.status === 'Levée refusée par le MOE' && !form.reponse.trim() && (
+                <div className="text-xs text-pink-700 dark:text-pink-400">Levée refusée : précisez ce qui reste à reprendre.</div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

@@ -467,6 +467,15 @@ directement l'appareil photo sur un téléphone ; en création, les photos
 prises avant l'enregistrement sont mises en file et envoyées une à une une
 fois la réserve créée (il faut son id pour les rattacher).
 
+**Suivi / réponse.** Une réserve peut être faite sans être satisfaisante : `reserves.reponse` et
+`gpa_reserves.reponse` (`supabase/migrate_reserves_reponse.sql`, TEXT, 5000 caractères) portent la
+réponse de l'entreprise ou la remarque de la maîtrise d'œuvre, comme la réponse d'une observation du
+DET. Saisie dans la fiche (`ReserveDetail`, champ « Suivi / réponse », mis en avant quand le statut est
+« Levée refusée par le MOE »), vue dans la liste (icône + extrait), cherchée par la recherche et imprimée
+dans l'export PDF. `PUT` ne l'écrit que si le corps la porte (`normalizeReponse`,
+`server/reservePhotos.ts`) : un changement de statut depuis la liste ne l'efface pas ; une instance non
+migrée répond 503. Test : `tests/reserveReponse.test.ts`.
+
 **Extrait de plan.** Les repères sont stockés en pourcentage de la première
 page du plan (`x`/`y`, PlanAnnotator). `src/lib/planRender.ts` rend cette
 page (pdf.js, ou `<img>` pour un plan image) sur un canvas mis en cache par

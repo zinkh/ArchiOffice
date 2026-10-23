@@ -14,6 +14,22 @@ export const RESERVE_PHOTO_BUCKET = 'reserve-photos';
 
 export type ReserveKind = 'opr' | 'gpa';
 
+/** Longueur maximale de la réponse de suivi d'une réserve (comme celle d'une observation). */
+export const RESERVE_REPONSE_MAX = 5000;
+
+/** Réponse de suivi à écrire : texte tronqué, vide ou non textuel = effacé. */
+export function normalizeReponse(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, RESERVE_REPONSE_MAX) : null;
+}
+
+/** Vrai quand l'écriture échoue faute de la colonne `reponse` (instance non migrée). */
+export function isMissingReponseColumn(error: any): boolean {
+  if (!error) return false;
+  return error.code === '42703' || error.code === 'PGRST204' || /reponse/i.test(String(error.message || ''));
+}
+
 export interface ReserveKindConfig {
   kind: ReserveKind;
   table: 'reserves' | 'gpa_reserves';

@@ -248,8 +248,10 @@ export async function exportReservesToPDF(
     const titleLines = doc.splitTextToSize(r.title || '(sans titre)', contentW() - 16) as string[];
     doc.setFontSize(9);
     const descLines = r.description ? (doc.splitTextToSize(r.description, contentW() - 4) as string[]) : [];
+    const reponseLines = r.reponse ? (doc.splitTextToSize(r.reponse, contentW() - 4) as string[]) : [];
     const thumbRows = Math.ceil(thumbs.length / 4);
     const blockH = 6 + titleLines.length * 5 + fields.length * 4.6 + (descLines.length ? descLines.length * 4 + 3 : 0)
+      + (reponseLines.length ? reponseLines.length * 4 + 7 : 0)
       + thumbRows * (THUMB_H + 9) + 6;
     ensureRoom(Math.min(blockH, pageH() - FOOTER_RESERVE - 40));
 
@@ -281,6 +283,18 @@ export async function exportReservesToPDF(
       doc.setFont('helvetica', 'italic'); doc.setTextColor(...GRIS_TEXTE);
       doc.text(descLines, MARGIN + 2, y);
       y += descLines.length * 4 + 2;
+    }
+
+    // Suivi / réponse (levée jugée insatisfaisante, réponse de l'entreprise...)
+    if (reponseLines.length) {
+      ensureRoom(reponseLines.length * 4 + 7);
+      y += 1;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(...GRIS_DOUX);
+      doc.text('Suivi / réponse :', MARGIN + 2, y);
+      y += 4;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(...GRIS_TEXTE);
+      doc.text(reponseLines, MARGIN + 2, y);
+      y += reponseLines.length * 4 + 2;
     }
 
     // Vignettes : extrait de plan puis photos, quatre par ligne

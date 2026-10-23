@@ -4,7 +4,7 @@
 // separate table since OPR and GPA reserves are distinct tracking sets.
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
-import { attachReservePhotos, deleteReservePhotos } from '../reservePhotos';
+import { attachReservePhotos, deleteReservePhotos, normalizeReponse, isMissingReponseColumn } from '../reservePhotos';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -84,13 +84,18 @@ export function registerGpaReserveRoutes(app: Express, { supabaseAdmin, getTenan
   app.put("/api/gpa-reserves/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description } = req.body;
+      const { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description, reponse } = req.body;
       if (plan_id && !(await assertTenantEntity(supabaseAdmin, 'plans', plan_id, tenantId))) {
         return res.status(400).json({ error: "Plan introuvable pour ce cabinet." });
       }
-      const { error } = await supabaseAdmin.from('gpa_reserves').update({ title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      const update: Record<string, unknown> = { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null };
+      // La réponse de suivi n'est écrite que si le corps la porte : un client qui ne la connaît
+      // pas (agent, ancien écran) ne doit pas l'effacer.
+      if (reponse !== undefined) update.reponse = normalizeReponse(reponse);
+      const { error } = await supabaseAdmin.from('gpa_reserves').update(update).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (isMissingReponseColumn(error)) return res.status(503).json({ error: "Le suivi des réserves n'est pas disponible : migration à appliquer." });
       if (error) throw error;
-      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null });
+      res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null, ...(reponse !== undefined ? { reponse: normalizeReponse(reponse) } : {}) });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update GPA reserve" }); }
   });
 }
