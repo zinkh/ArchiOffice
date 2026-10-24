@@ -3434,6 +3434,30 @@ l'architecte, malgré les quelques lignes qu'elle portait encore : à la
 différence de `cctps` ci-dessus, la perte a été assumée plutôt que
 préservée par précaution.
 
+### Archivage des affaires
+
+« Terminée » dit où en est l'affaire, « archivée » dit qu'elle est rangée et en lecture seule. Colonnes
+`projects.archived_at`, `archived_by`, `archive_reason`, `retention_until`, `settings.archive_retention_years`
+(NULL = 10 ans) et journal `project_archive_log` (`supabase/migrate_project_archive.sql`, additive : `archived_at`
+NULL = affaire active). Une instance non migrée garde le comportement d'avant : le garde de lecture seule se tait
+(`isProjectArchived` vaut faux sur erreur), l'archivage répond 503, le journal se lit vide.
+
+- **Clôture indicative** (`src/lib/projectArchive.ts`, testé) : statut terminé, factures soldées, réserves levées,
+  tâches terminées, DOE visé. Un contrôle en alerte n'interdit rien : `POST /api/projects/:id/archive` répond 409
+  `CHECKLIST_OVERRIDE_REQUIRED` (avec la liste) tant qu'aucun `override_reason` n'est fourni, puis archive et journalise
+  les contrôles passés outre. Un DOE illisible (atelier absent) est « inconnu », jamais « non visé ».
+- **Droits** : archiver, administrateurs et managers ; rouvrir (`POST .../unarchive`, motif obligatoire), administrateurs.
+- **Lecture seule** : `PUT /api/projects/:id` répond 409 `PROJECT_ARCHIVED`. Les autres routes d'écriture rattachées à
+  l'affaire (documents, tâches, factures...) ne sont PAS encore gardées.
+- **Conservation** : `retention_until` = date d'archivage + durée du cabinet (10 ans par défaut, 1 à 50). Aucune purge
+  automatique.
+- **Écran** : `/projects` masque les archivées par défaut (bascule « Archivées ») ; les autres écrans qui lisent
+  `GET /api/projects` comme annuaire les reçoivent toujours. `ProjectArchiveControl` (en-tête de la fiche) porte
+  l'archivage et la réouverture.
+- **Pas encore fait** : réglage de la durée dans `/settings`, dépôt automatique du dossier de clôture sur l'espace
+  externe du cabinet, exclusion des affaires archivées des alertes, suggestions, planning et pointage, archivage en
+  masse, alerte d'échéance de conservation.
+
 ### Pagination et fan-out sur les listes
 
 `GET /api/projects` et `GET /api/invoices` faisaient tous deux la même
