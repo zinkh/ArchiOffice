@@ -30,6 +30,9 @@ Relevés dans `server/routes/documents.ts`, `server/documentUpload.ts`, `server/
 | Affaire archivée : écritures refusées en 409 `PROJECT_ARCHIVED` (`archivedProjectGuard`). | Les nœuds d'une affaire archivée sont en lecture seule (`readOnlyReason: "archived"`). |
 | Jetons non-JWT déjà connus du middleware `/api` : `mcp_at_`, `tg_at_`, `mail_at_`. | Un quatrième préfixe `ds_at_` pour les appareils (section 3). |
 | Le quota de documents s'applique à la création (`checkQuota`). | Réponse 503 neutre, comme pour les dépôts publics. |
+| **Où partent les octets** (`storeBusinessFile.ts`) : avec un espace externe actif, uniquement sur cet espace (échec en 502, jamais de repli sur Supabase) ; **sans espace externe actif, dans Supabase Storage**. Aucune règle ne traite le CAO à part. | **Rien ne garantit aujourd'hui que le CAO reste hors de Supabase.** Le contrat l'impose pour les clients desktop (section 8.4). |
+| Les métadonnées (nom, taille, version, chemin) restent dans la base Supabase, quel que soit l'endroit où sont les octets. | La règle CAO porte sur les **octets**, pas sur les lignes de la base. |
+| Adaptateur WebDAV (Nextcloud et kDrive) : dépôt par PUT unique avec le fichier entier en mémoire, identifiant = **chemin relatif**, pas de lien temporaire, suffixe ` (2)` si le nom existe. | Voir « Stockage externe : WebDAV, Nextcloud et kDrive » (section 12). |
 
 ## 3. Conventions
 
@@ -184,7 +187,7 @@ ou, pour un nouveau document :
 
 Réponse `201` : `{ "uploadId": "up_...", "chunkSize": 8388608, "expiresAt": "..." }`.
 
-Contrôles à l'ouverture (avant tout octet) : affaire non archivée (409 `PROJECT_ARCHIVED`), droit d'écriture, verrou (423 `LOCKED` en mode `enforced`), **extension et type refusés** (400 `FILE_TYPE_REFUSED`, mêmes listes que `documentUpload.ts`), quota (503 neutre), `baseVersion` égal à la version courante (409 `VERSION_CONFLICT`, voir 9). Un document approuvé répond 409 `DOCUMENT_APPROVED`.
+Contrôles à l'ouverture (avant tout octet) : affaire non archivée (409 `PROJECT_ARCHIVED`), **stockage externe actif pour un fichier CAO (409 `EXTERNAL_STORAGE_REQUIRED`, section 8.4)**, droit d'écriture, verrou (423 `LOCKED` en mode `enforced`), **extension et type refusés** (400 `FILE_TYPE_REFUSED`, mêmes listes que `documentUpload.ts`), quota (503 neutre), `baseVersion` égal à la version courante (409 `VERSION_CONFLICT`, voir 9). Un document approuvé répond 409 `DOCUMENT_APPROVED`.
 
 ### 8.2 Envoyer
 
@@ -202,7 +205,21 @@ Contrôles à l'ouverture (avant tout octet) : affaire non archivée (409 `PROJE
 
 Idempotent : un second `complete` de la même session rend le même résultat. Journal d'activité alimenté comme aujourd'hui (`logActivity`).
 
-### 8.4 Création depuis l'Explorateur
+### 8.4 Fichiers CAO : stockage externe obligatoire
+
+Les octets d'un fichier CAO, BIM ou 3D **ne sont jamais écrits dans Supabase Storage** par un client desktop.
+
+- **Liste fermée d'extensions** (insensible à la casse), réglée côté serveur et non par le client : `dwg`, `dxf`, `dwt`, `dwf`, `rvt`, `rfa`, `rte`, `ifc`, `ifczip`, `skp`, `pln`, `pla`, `mod`, `dgn`, `vwx`, `3dm`, `rhl`. La liste est une constante unique, partagée avec la règle équivalente de l'interface web (voir plus bas).
+- **Contrôle à l'ouverture** (`POST /uploads`, avant tout octet) : si l'extension est dans la liste et que le cabinet n'a **aucun espace externe actif** (`getActiveConnection` vide), le serveur répond **409 `EXTERNAL_STORAGE_REQUIRED`** avec un message qui nomme la cause (« Les fichiers CAO se déposent sur l'espace de stockage de votre cabinet. Branchez-le dans Réglages. »). Rien n'est reçu, rien n'est créé.
+- **Pas de repli** : si l'espace externe est actif mais ne répond pas, le dépôt échoue en 502, comme pour les autres fichiers. Il ne bascule jamais sur Supabase.
+- **Morceaux en cours** : conservés sur le **disque temporaire du serveur**, purgés à la fin de la session ou à son expiration (24 h). Ils ne passent jamais par Supabase Storage.
+- **Mode hors ligne du poste** (`OFFLINE_MODE`) : les octets vont dans le dossier de stockage local ou le NAS du poste, jamais vers un Supabase distant. Le contrôle ne refuse donc pas un dépôt dans ce mode ; la valeur `storage_backend = 'supabase'` y désigne le dossier local, pas le cloud.
+- **Nœud côté client** : un fichier CAO dont le dépôt est refusé reste en erreur visible (« espace de stockage requis ») ; il n'est ni supprimé ni envoyé ailleurs.
+- **Lecture** : inchangée. Un CAO déjà présent dans Supabase (déposé avant cette règle) reste lisible ; il n'est pas migré automatiquement (voir questions ouvertes).
+
+**Même règle côté interface web** (hors périmètre du contrat, mais même faille) : `POST /api/documents` et `PUT /api/documents/:id` envoient aujourd'hui un CAO dans Supabase quand le cabinet n'a rien branché. La constante d'extensions doit y être appliquée avec le même code d'erreur, sans quoi la garantie « le CAO n'est pas dans Supabase » reste fausse dès qu'un utilisateur passe par l'écran Documents.
+
+### 8.5 Création depuis l'Explorateur
 
 Un fichier déposé dans un dossier d'affaire est créé avec `category` et `phase` **déduits du dossier** et `doc_type` déduit de l'extension. Un fichier déposé à un endroit qui ne permet pas de déduire l'affaire (racine du cabinet) va dans la **zone « À classer »** : dossier virtuel `inbox:<tenantId>`, documents sans affaire, visibles dans l'application pour classement. Aucun formulaire n'est imposé à l'utilisateur.
 
@@ -320,6 +337,27 @@ Points à décider avant la migration :
 - Les tables doivent rester **hors `SYNC_TABLES`** (poste local) : un poste Electron ne synchronise pas les jetons d'appareil.
 - Une instance non migrée répond `503 DESKTOP_SYNC_UNAVAILABLE` sur `/api/desktop/v1/*` sans toucher au reste de l'API, comme les autres modules facultatifs.
 
+### Stockage externe : WebDAV, Nextcloud et kDrive
+
+Le contrat passe par l'interface `ExternalStorageProvider` : aucun appel n'est propre à un fournisseur. Nextcloud et kDrive partagent l'adaptateur WebDAV (`server/externalStorage/providers/webdav.ts`), Google Drive et Dropbox ont le leur. Ce que cet adaptateur impose au contrat :
+
+| Comportement vérifié dans le code | Conséquence |
+|---|---|
+| `openReadStream` retransmet l'en-tête `Range` et rejoue le 206. | L'hydratation par plages (section 5) est compatible. |
+| `getTemporaryLink` rend `null` : aucun lien temporaire. | **Tous les octets lus transitent par le serveur ArchiOffice.** La bande passante et la durée des requêtes sont à dimensionner. Pas de redirection 302 pour WebDAV, contrairement à Dropbox. |
+| `uploadFile` fait **un seul PUT avec le fichier entier** (`Buffer`), puis relit la taille par PROPFIND. Pas de dépôt par morceaux côté Nextcloud. | Les morceaux reçus du client sont **réassemblés sur le disque du serveur**, puis envoyés en un PUT. Un gros fichier dépend des limites du serveur du cabinet (PHP, serveur mandataire, délais). Voir risques. |
+| `externalId` est le **chemin relatif** du fichier, alors que Dropbox utilise un identifiant stable. | Renommer ou déplacer un fichier directement dans Nextcloud ou kDrive **casse la référence** ArchiOffice. |
+| `freeName` suffixe le nom (` (2)`, ` (3)`) si le fichier existe déjà. | Chaque version est un **fichier distinct** dans le drive, avec un nom qui peut différer de `name` dans le nœud. Le nœud reste la référence. |
+| HTTPS obligatoire, garde SSRF, connexion épinglée, redirections de même origine. | Un serveur WebDAV sur le réseau interne (NAS) reste refusé. |
+| Authentification par mot de passe d'application. | Le contrat n'a rien à ajouter ; le compte devrait être limité au dossier racine d'ArchiOffice. |
+
+**Règles propres au contrat :**
+
+1. **Un renommage ou un changement de phase fait depuis l'Explorateur ou le Finder ne déplace pas le fichier dans le drive.** `PATCH /nodes/{id}` ne modifie que la base ; l'arborescence du drive et celle du poste peuvent donc diverger. Le chemin du drive n'est jamais exposé comme un chemin de travail.
+2. **Le dossier racine d'ArchiOffice ne doit pas être synchronisé en écriture par un autre client** (client de bureau Nextcloud ou kDrive, par exemple). Une modification faite ainsi change les octets sans passer par les versions ni les verrous, et fait diverger `size` et `sha256`. Le serveur détecte l'écart à la lecture (`X-Content-SHA256` ne correspond plus) et le signale ; il ne le corrige pas. Si un cabinet souhaite ce client en lecture, le dossier doit y être en lecture seule.
+3. **Les suppressions** : la suppression logique de l'appareil n'appelle pas `deleteFile`. Le fichier du drive n'est supprimé qu'à la purge de la corbeille (30 jours), et le comportement de la corbeille du fournisseur à ce moment n'est pas garanti par le contrat.
+4. **Capacité à tester** avant de promettre une taille maximale : dépôt de 100 Mo, 500 Mo et 1 Go sur un Nextcloud et sur un kDrive réels, avec délais et limites du serveur mandataire. Le comportement de kDrive sur de gros fichiers n'a pas été vérifié.
+
 ### Risques d'implémentation
 
 1. **Mémoire** : `storeBusinessFile` exige un `Buffer`. Un fichier de plusieurs centaines de Mo en mémoire n'est pas acceptable. Il faut faire évoluer les fournisseurs pour accepter un flux, ou limiter la v1 à 200 Mo.
@@ -334,6 +372,7 @@ Points à décider avant la migration :
 - Même isolation que l'API : `tenant_id` sur chaque lecture, `assertTenantEntity` sur chaque identifiant reçu.
 - Un fichier n'est **jamais exécuté ni ouvert** par le serveur ; la liste d'extensions sûres d'`electron/fileAccess.cjs` reste la règle du client Electron pour « Ouvrir ». Le client natif ouvre par l'application associée de l'utilisateur, comme l'Explorateur.
 - Les liens profonds `archioffice://document/<id>` ne donnent aucun accès par eux-mêmes : ils exigent une session valide et le droit de lecture.
+- **Aucun octet CAO dans Supabase** : garanti par le contrôle d'ouverture (section 8.4) et par le fait que les morceaux restent sur le disque temporaire. Un refus 409 est journalisé (`logActivity`) pour qu'un administrateur sache qu'un poste tente de déposer du CAO sans espace branché.
 - Journal d'activité (`logActivity`) pour chaque dépôt, suppression, restauration, rupture de verrou et révocation d'appareil.
 - Nettoyage RGPD : la fermeture d'un cabinet purge appareils, verrous, sessions et journal (`tenantPurge.ts` doit les connaître).
 
@@ -354,6 +393,13 @@ Un jeu de scénarios exécuté contre un serveur de test, par le client Windows 
 11. Dépôt d'un `.exe` ou d'un `.html` : refusé, aucune trace côté serveur.
 12. Chemin de plus de 260 caractères : le nom serveur est déjà borné, le fichier reste ouvrable.
 13. Documents CAO avec références externes : les chemins relatifs vers les fichiers voisins résolvent (test sur un jeu réel d'Archicad ou d'AutoCAD).
+14. **CAO sans espace externe** : dépôt d'un `.dwg` par un cabinet sans espace actif, refusé en 409 `EXTERNAL_STORAGE_REQUIRED` avant le premier octet ; vérifier qu'aucun objet n'existe dans le bucket `documents` de Supabase et qu'aucune ligne `documents` n'a été créée.
+15. **CAO avec espace externe** : le fichier est sur le drive, `storage_backend = 'external'`, et le bucket Supabase reste vide. Espace coupé en cours de dépôt : 502, toujours aucun octet dans Supabase.
+16. **Morceaux temporaires** : session abandonnée à mi-chemin, les morceaux sont purgés du disque temporaire à l'expiration, rien n'est resté dans Supabase.
+17. **Même règle côté web** : le dépôt d'un `.rvt` par l'écran Documents est refusé de la même façon.
+18. **WebDAV (Nextcloud et kDrive)** : hydratation par plages, dépôt de 100 Mo, 500 Mo et 1 Go, délais et limites du serveur mandataire relevés ; deux versions d'un même fichier produisent deux fichiers distincts dans le drive, le nœud restant le même.
+19. **Renommage dans le drive** : un fichier renommé directement dans Nextcloud ou kDrive devient illisible côté ArchiOffice avec une erreur claire, sans corrompre les autres.
+20. **Écriture externe** : un fichier modifié dans le drive par un autre client est détecté à la lecture (empreinte différente) et signalé, jamais écrasé en silence.
 
 ## 15. Ce qui n'est pas dans ce contrat
 
@@ -369,3 +415,7 @@ Un jeu de scénarios exécuté contre un serveur de test, par le client Windows 
 3. La corbeille de 30 jours existe-t-elle déjà dans l'application web, ou ce contrat en crée-t-il une pour les appareils seulement ?
 4. Les documents d'autres fiches (permis, devis...) doivent-ils apparaître plus tard sous un dossier « Autres pièces » ?
 5. Droits par affaire : le contrat expose `permissions` mais le serveur ne vérifie que le rôle du cabinet ; faut-il restreindre aux `project_members` ?
+6. **CAO déjà dans Supabase** : faut-il les migrer vers l'espace externe du cabinet (outil de migration, comme celui de l'arborescence locale), ou les laisser en place ? Le contrat ne change pas leur lecture.
+7. **Cabinet sans espace externe** : le refus est le comportement retenu pour le CAO. Souhaite-t-on un message qui renvoie vers les Réglages, ou un déblocage ponctuel par un administrateur ?
+8. **Liste d'extensions CAO** (section 8.4) : à confirmer avec les logiciels réellement utilisés par les cabinets (Archicad, Allplan, Vectorworks, Rhino, Revit...) avant de la figer.
+9. **Taille maximale** sur WebDAV : à fixer après les essais de la section 12 sur un Nextcloud et un kDrive réels, pas avant.
