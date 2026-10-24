@@ -51,6 +51,9 @@ export function McpConnectionsCard() {
     }
   };
 
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const mcpUrl = `${origin}/mcp`;
+
   const formatDate = (iso: string | null) => iso ? new Date(iso).toLocaleString() : t('mcp_connections_never_used');
 
   return (
@@ -58,8 +61,38 @@ export function McpConnectionsCard() {
       <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('mcp_connections_title')}</h2>
       <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('mcp_connections_explanation')}</p>
       <code className="block text-xs rounded-lg px-2.5 py-1.5 select-all" style={{ background: 'var(--tblr-bg-surface-secondary)', color: 'var(--tblr-text)' }}>
-        {typeof window !== 'undefined' ? `${window.location.origin}/mcp` : '/mcp'}
+        {mcpUrl}
       </code>
+
+      <details className="rounded-lg px-3 py-2" style={{ border: '1px solid var(--tblr-border)' }}>
+        <summary className="text-sm font-medium cursor-pointer" style={{ color: 'var(--tblr-text)' }}>{t('mcp_guide_title')}</summary>
+        <div className="mt-3 space-y-3 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+          <p>{t('mcp_guide_intro')}</p>
+          <div>
+            <div className="font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('mcp_guide_url_label')}</div>
+            <code className="block rounded-lg px-2.5 py-1.5 select-all" style={{ background: 'var(--tblr-bg-surface-secondary)', color: 'var(--tblr-text)' }}>{mcpUrl}</code>
+          </div>
+          <ol className="list-decimal pl-5 space-y-1">
+            <li>{t('mcp_guide_step1')}</li>
+            <li>{t('mcp_guide_step2')}</li>
+            <li>{t('mcp_guide_step3')}</li>
+            <li>{t('mcp_guide_step4')}</li>
+          </ol>
+          <ul className="list-disc pl-5 space-y-1">
+            <li>{t('mcp_guide_claude')}</li>
+            <li>{t('mcp_guide_claude_code')}</li>
+            <li>{t('mcp_guide_gemini')}</li>
+          </ul>
+          <code className="block rounded-lg px-2.5 py-1.5 select-all break-all" style={{ background: 'var(--tblr-bg-surface-secondary)', color: 'var(--tblr-text)' }}>
+            {`claude mcp add --transport http archioffice ${mcpUrl}`}
+          </code>
+          <p>{t('mcp_guide_agencies')}</p>
+          <p>
+            {t('mcp_guide_discovery')}
+            <code className="block mt-1 select-all break-all" style={{ color: 'var(--tblr-text)' }}>{origin}/.well-known/oauth-authorization-server</code>
+          </p>
+        </div>
+      </details>
 
       {error && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{error}</p>}
 
