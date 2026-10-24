@@ -1,7 +1,9 @@
 import { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconAlertTriangle, IconArchive, IconArchiveOff, IconCircleCheck, IconHelpCircle } from '@tabler/icons-react';
+import { IconAlertTriangle, IconArchive, IconArchiveOff, IconCircleCheck, IconDownload, IconHelpCircle } from '@tabler/icons-react';
 import { fetchJson } from '../../lib/api';
+import { getAccessToken } from '../../lib/authToken';
+import { downloadBlob } from '../../lib/panneaux';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { ARCHIVE_REASON_MAX_CHARS, type ArchiveCheckItem } from '../../lib/projectArchive';
 
@@ -39,7 +41,36 @@ export function ProjectArchiveControl({ projectId, archivedAt, retentionUntil, c
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [downloading, setDownloading] = useState(false);
   const archived = !!archivedAt;
+
+  // Message court après un archivage ou un téléchargement, effacé seul.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(''), 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const downloadDossier = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const token = await getAccessToken();
+      const res = await fetch(`/api/projects/${projectId}/closure-dossier`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || t('project_archive_dossier_failed'));
+      }
+      downloadBlob(await res.blob(), t('project_archive_dossier_filename'));
+    } catch (e: any) {
+      setNotice(e?.message || t('project_archive_dossier_failed'));
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   const close = () => { if (!busy) setMode(null); };
   useEscapeKey(mode !== null, close);
@@ -64,10 +95,17 @@ export function ProjectArchiveControl({ projectId, archivedAt, retentionUntil, c
     setBusy(true);
     setError('');
     try {
-      await fetchJson(`/api/projects/${projectId}/${mode === 'archive' ? 'archive' : 'unarchive'}`, {
-        method: 'POST',
-        body: JSON.stringify(mode === 'archive' ? { override_reason: reason.trim() } : { reason: reason.trim() }),
-      });
+      const result = await fetchJson<{ dossier?: { deposited: boolean; reason?: string } }>(
+        `/api/projects/${projectId}/${mode === 'archive' ? 'archive' : 'unarchive'}`,
+        {
+          method: 'POST',
+          body: JSON.stringify(mode === 'archive' ? { override_reason: reason.trim() } : { reason: reason.trim() }),
+        },
+      );
+      if (mode === 'archive') {
+        if (result?.dossier?.deposited) setNotice(t('project_archive_deposited'));
+        else if (result?.dossier?.reason === 'deposit_failed') setNotice(t('project_archive_not_deposited'));
+      }
       setMode(null);
       await onChanged();
     } catch (e: any) {
@@ -81,6 +119,16 @@ export function ProjectArchiveControl({ projectId, archivedAt, retentionUntil, c
 
   return (
     <>
+      {notice && (
+        <span role="status" className="max-w-[16rem] text-xs leading-tight" style={{ color: 'var(--tblr-muted)' }}>{notice}</span>
+      )}
+      {archived && canArchive && (
+        <button type="button" onClick={() => { void downloadDossier(); }} disabled={downloading}
+          className="p-2 text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] rounded-lg transition disabled:opacity-50"
+          title={t('project_archive_dossier_download')} aria-label={t('project_archive_dossier_download')}>
+          <IconDownload size={18} aria-hidden />
+        </button>
+      )}
       {archived ? (
         canReopen ? (
           <button type="button" onClick={() => open('reopen')} className={buttonClass}

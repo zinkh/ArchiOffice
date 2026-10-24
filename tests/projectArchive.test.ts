@@ -2,7 +2,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
+import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader, connectExternalStorage } from './testServer';
+import { memoryDrive } from '../server/externalStorage/memoryProvider';
 
 let app: Express;
 
@@ -102,6 +103,54 @@ describe('Archivage des affaires', () => {
 
     const log = await request(app).get('/api/projects/ar5/archive-log').set(authHeader(admin.token));
     expect(log.body.map((l: any) => l.action).sort()).toEqual(['archive', 'unarchive']);
+  });
+
+  it('dépose le dossier de clôture sur l’espace externe quand il est actif', async () => {
+    memoryDrive.reset();
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+    connectExternalStorage(tenantId);
+    fakeSupabaseAdmin.seed('projects', [{ id: 'ar7', tenant_id: tenantId, project_code: '26014', name: 'Villa Martin', client: 'M. Martin', status: 'Completed' }]);
+    fakeSupabaseAdmin.seed('documents', [{ id: 'ar7-visa', tenant_id: tenantId, project_id: 'ar7', doc_type: 'DOE_VISA', name: 'Visa DOE-2026-001.pdf' }]);
+
+    const res = await request(app).post('/api/projects/ar7/archive').set(authHeader(token)).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.dossier).toMatchObject({ deposited: true });
+
+    const doc = fakeSupabaseAdmin.getTable('documents').find((d: any) => d.doc_type === 'DOSSIER_CLOTURE');
+    expect(doc).toMatchObject({ project_id: 'ar7', category: 'Clôture', storage_backend: 'external', mime_type: 'application/pdf' });
+    expect(memoryDrive.livePaths().some(p => p.includes('26014 - Villa Martin/Clôture/Dossier de clôture') && p.endsWith('.pdf'))).toBe(true);
+  });
+
+  it('ne dépose rien sans espace externe, mais le dossier reste téléchargeable', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('projects', [{ id: 'ar8', tenant_id: tenantId, project_code: '26015', name: 'Maison Durand', client: 'M. Durand', status: 'Completed' }]);
+    fakeSupabaseAdmin.seed('documents', [{ id: 'ar8-visa', tenant_id: tenantId, project_id: 'ar8', doc_type: 'DOE_VISA', name: 'Visa.pdf' }]);
+
+    const before = await request(app).get('/api/projects/ar8/closure-dossier').set(authHeader(token));
+    expect(before.status).toBe(409);
+
+    const res = await request(app).post('/api/projects/ar8/archive').set(authHeader(token)).send({});
+    expect(res.body.dossier).toEqual({ deposited: false, reason: 'no_external_storage' });
+    expect(fakeSupabaseAdmin.getTable('documents').some((d: any) => d.doc_type === 'DOSSIER_CLOTURE' && d.project_id === 'ar8')).toBe(false);
+
+    const pdf = await request(app).get('/api/projects/ar8/closure-dossier').set(authHeader(token)).buffer(true).parse((r, cb) => {
+      const chunks: Buffer[] = [];
+      r.on('data', (c: Buffer) => chunks.push(c));
+      r.on('end', () => cb(null, Buffer.concat(chunks)));
+    });
+    expect(pdf.status).toBe(200);
+    expect(pdf.headers['content-type']).toContain('application/pdf');
+    expect((pdf.body as Buffer).subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  it('réserve le dossier de clôture aux administrateurs et managers', async () => {
+    const tenantId = makeTenant();
+    const member = makeUser(tenantId, 'user');
+    seedCleanProject(tenantId, 'ar9');
+    const res = await request(app).get('/api/projects/ar9/closure-dossier').set(authHeader(member.token));
+    expect(res.status).toBe(403);
   });
 
   it('n’archive pas l’affaire d’un autre cabinet', async () => {

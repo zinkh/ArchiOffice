@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_RETENTION_YEARS, buildArchiveChecklist, checklistWarnings, normalizeRetentionYears, retentionUntil,
 } from '../projectArchive';
+import { libelleStatutFacture, totauxFactures } from '../closureDossierPdf';
 
 describe('normalizeRetentionYears', () => {
   it('rend 10 ans quand la valeur est absente ou illisible', () => {
@@ -27,6 +28,29 @@ describe('retentionUntil', () => {
   it('ramène le 29 février au 28 février d’une année non bissextile', () => {
     expect(retentionUntil('2024-02-29T08:00:00.000Z', 1)).toBe('2025-02-28');
     expect(retentionUntil('2024-02-29T08:00:00.000Z', 4)).toBe('2028-02-29');
+  });
+});
+
+describe('totauxFactures', () => {
+  it('compte comme reste à encaisser tout ce qui n’est pas payé', () => {
+    const totaux = totauxFactures([
+      { numero: 'F1', totalTtc: 1200, statut: 'Paid' },
+      { numero: 'F2', totalTtc: 300.5, statut: 'Sent' },
+      { numero: 'F3', totalTtc: 99.5, statut: 'Overdue' },
+    ]);
+    expect(totaux).toEqual({ total: 1600, paye: 1200, reste: 400 });
+  });
+
+  it('ignore un montant illisible au lieu de propager NaN', () => {
+    expect(totauxFactures([{ numero: 'F1', totalTtc: Number.NaN, statut: 'Paid' }]).total).toBe(0);
+    expect(totauxFactures([])).toEqual({ total: 0, paye: 0, reste: 0 });
+  });
+});
+
+describe('libelleStatutFacture', () => {
+  it('traduit les statuts connus et garde les autres tels quels', () => {
+    expect(libelleStatutFacture('Paid')).toBe('Payée');
+    expect(libelleStatutFacture('Autre')).toBe('Autre');
   });
 });
 

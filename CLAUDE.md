@@ -3454,9 +3454,19 @@ NULL = affaire active). Une instance non migrée garde le comportement d'avant :
 - **Écran** : `/projects` masque les archivées par défaut (bascule « Archivées ») ; les autres écrans qui lisent
   `GET /api/projects` comme annuaire les reçoivent toujours. `ProjectArchiveControl` (en-tête de la fiche) porte
   l'archivage et la réouverture.
-- **Pas encore fait** : réglage de la durée dans `/settings`, dépôt automatique du dossier de clôture sur l'espace
-  externe du cabinet, exclusion des affaires archivées des alertes, suggestions, planning et pointage, archivage en
-  masse, alerte d'échéance de conservation.
+- **Dossier de clôture** (`server/projectClosure.ts`, rendu partagé `src/lib/closureDossierPdf.ts`, charte du cabinet,
+  « P1|2 ») : un PDF qui reprend la fiche, l'archivage (date, conservation, motif), les contrôles de clôture, les
+  factures avec leur reste à encaisser, les réserves et l'index des pièces conservées (300 au plus, la troncature est
+  dite). `GET /api/projects/:id/closure-dossier` (administrateurs et managers : il porte des montants) le produit à la
+  demande, 409 tant que l'affaire n'est pas archivée. **À l'archivage il est déposé tout seul, mais seulement si le
+  cabinet a un espace externe actif** (`getActiveConnection`) : document `doc_type = 'DOSSIER_CLOTURE'`, catégorie
+  « Clôture », rangé sous `<racine>/<code> - <affaire>/Clôture/`. Sans espace externe rien n'est écrit dans Supabase
+  (le quota est justement ce que l'espace externe épargne) et la réponse porte `dossier.reason = 'no_external_storage'` ;
+  un espace qui ne répond pas donne `deposit_failed` sans défaire l'archivage. Le dossier ne contient pas les fichiers
+  eux-mêmes, seulement leur index.
+- **Pas encore fait** : réglage de la durée dans `/settings`, exclusion des affaires archivées des alertes,
+  suggestions, planning et pointage, archivage en masse, alerte d'échéance de conservation, garde de lecture seule
+  sur les routes rattachées à l'affaire.
 
 ### Pagination et fan-out sur les listes
 

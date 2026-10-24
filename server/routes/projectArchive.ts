@@ -3,6 +3,9 @@
 // archive_reason / retention_until, table project_archive_log,
 // supabase/migrate_project_archive.sql. Voir CLAUDE.md, « Archivage des affaires ».
 import type { Express } from 'express';
+import { getActiveConnection } from '../externalStorage/externalConnection';
+import type { StoreBusinessFile } from '../externalStorage/storeBusinessFile';
+import { construireDossierCloturePdf, deposerDossierCloture, nomDossierCloture } from '../projectClosure';
 import {
   ARCHIVE_REASON_MAX_CHARS, buildArchiveChecklist, checklistWarnings, normalizeRetentionYears, retentionUntil,
   type ArchiveCheckItem,
@@ -13,6 +16,15 @@ export interface RouteDeps {
   getTenantId: (userId: string) => Promise<string>;
   getUserName: (tenantId: string, userId: string, email?: string) => Promise<string>;
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
+  storeBusinessFile: StoreBusinessFile;
+  checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
+}
+
+export interface DossierDepose {
+  deposited: boolean;
+  document_id?: string;
+  /** `no_external_storage` : rien à déposer automatiquement ; `deposit_failed` : l'espace n'a pas répondu. */
+  reason?: 'no_external_storage' | 'deposit_failed';
 }
 
 const MIGRATION_MISSING = 'L’archivage des affaires n’est pas encore disponible sur cette instance (migration project_archive à appliquer).';
@@ -64,7 +76,7 @@ function cleanReason(value: unknown): string {
   return typeof value === 'string' ? value.trim().slice(0, ARCHIVE_REASON_MAX_CHARS) : '';
 }
 
-export function registerProjectArchiveRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, requireRole }: RouteDeps) {
+export function registerProjectArchiveRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota }: RouteDeps) {
   const loadProject = async (tenantId: string, id: string) => {
     const { data, error } = await supabaseAdmin.from('projects').select('*')
       .eq('id', id).eq('tenant_id', tenantId).maybeSingle();
@@ -134,10 +146,57 @@ export function registerProjectArchiveRoutes(app: Express, { supabaseAdmin, getT
         throw error;
       }
       await writeLog(tenantId, project.id, 'archive', reason, warnings, req);
-      res.json({ archived: true, archived_at: archivedAt, retention_until: until, overridden: warnings.length });
+
+      // Dépôt automatique du dossier de clôture, seulement quand le cabinet a un
+      // espace externe actif. Meilleur effort : l'affaire est déjà archivée, un
+      // espace qui ne répond pas ne défait rien (le PDF reste téléchargeable).
+      let dossier: DossierDepose = { deposited: false, reason: 'no_external_storage' };
+      try {
+        if (await getActiveConnection(supabaseAdmin, tenantId)) {
+          const archivePar = await getUserName(tenantId, req.user.id, req.user.email);
+          const pdf = await construireDossierCloturePdf(supabaseAdmin, tenantId, project.id, {
+            archivedAt, retentionUntil: until, motif: reason || null, archivePar, controles: checklist,
+          });
+          const documentId = await deposerDossierCloture({ supabaseAdmin, storeBusinessFile, checkQuota }, {
+            tenantId, project, pdf, userName: archivePar, archivedAt,
+          });
+          dossier = { deposited: true, document_id: documentId };
+        }
+      } catch (e) {
+        console.error('[POST /api/projects/:id/archive] dépôt du dossier de clôture', e);
+        dossier = { deposited: false, reason: 'deposit_failed' };
+      }
+
+      res.json({ archived: true, archived_at: archivedAt, retention_until: until, overridden: warnings.length, dossier });
     } catch (e: any) {
       console.error('[POST /api/projects/:id/archive]', e);
       res.status(500).json({ error: 'Impossible d’archiver l’affaire.' });
+    }
+  });
+
+  // Le dossier de clôture à la demande (PDF). Il porte des montants de facturation :
+  // même cercle que l'archivage.
+  app.get('/api/projects/:id/closure-dossier', requireRole('admin', 'manager'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const project = await loadProject(tenantId, req.params.id);
+      if (!project) return res.status(404).json({ error: 'Affaire introuvable.' });
+      if (!project.archived_at) return res.status(409).json({ error: 'Le dossier de clôture n’existe que pour une affaire archivée.' });
+
+      const [controles, archivePar] = await Promise.all([
+        loadChecklist(supabaseAdmin, tenantId, project),
+        project.archived_by ? getUserName(tenantId, project.archived_by) : Promise.resolve(null),
+      ]);
+      const pdf = await construireDossierCloturePdf(supabaseAdmin, tenantId, project.id, {
+        archivedAt: project.archived_at, retentionUntil: project.retention_until ?? null,
+        motif: project.archive_reason ?? null, archivePar, controles,
+      });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(nomDossierCloture(project))}`);
+      res.send(pdf);
+    } catch (e: any) {
+      console.error('[GET /api/projects/:id/closure-dossier]', e);
+      res.status(500).json({ error: 'Impossible de produire le dossier de clôture.' });
     }
   });
 
