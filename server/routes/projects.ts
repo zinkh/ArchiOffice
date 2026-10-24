@@ -13,6 +13,7 @@ import { attachReservePhotos } from '../reservePhotos';
 import { attachLastOpenedAt, recordProjectOpened } from '../projectRecentViews';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 import { applyTemplateToProject } from '../projectTemplateApply';
+import { isProjectArchived } from './projectArchive';
 import { OPERATION_LABELS } from '../../src/lib/projectTemplates';
 import type { TemplateOperationType } from '../../src/types';
 
@@ -256,6 +257,11 @@ export function registerProjectRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
+      // Une affaire archivée est en lecture seule : on la rouvre d'abord
+      // (POST /api/projects/:id/unarchive, administrateurs).
+      if (await isProjectArchived(supabaseAdmin, tenantId, id)) {
+        return res.status(409).json({ error: 'Affaire archivée : rouvrez-la pour la modifier.', code: 'PROJECT_ARCHIVED' });
+      }
       const {
         name, client, client_id, status, budget, category, start_date, end_date, description, image_url, address,
         is_complete_mission, is_chantier, offline_enabled, etudes_notes, chantier_notes, is_public_client, client_siret, client_vat_number,
