@@ -83,6 +83,7 @@ import { PhaseControlDialog } from '../components/projectDetail/PhaseControlDial
 import { useUndoableDelete } from '../hooks/useUndoableDelete';
 import { useProjectAutosave } from '../hooks/useProjectAutosave';
 import { AutosaveIndicator } from '../components/projectDetail/AutosaveIndicator';
+import { ProjectArchiveControl } from '../components/projectDetail/ProjectArchiveControl';
 import { GeoportailMap, RNBInfo } from '../components/LocationMaps';
 import type { CadastreParcel } from '../components/MapLibreCadastre';
 import { summarizeParcels } from '../lib/cadastreSelection';
@@ -1978,6 +1979,14 @@ export default function ProjectDetail() {
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 shrink-0 lg:ml-0 lg:order-none">
+          <ProjectArchiveControl
+            projectId={project.id}
+            archivedAt={project.archived_at}
+            retentionUntil={project.retention_until}
+            canArchive={currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager'}
+            canReopen={currentUser?.system_role === 'admin'}
+            onChanged={fetchFullProject}
+          />
           {currentUser?.system_role === 'admin' && (
             <button
               type="button"

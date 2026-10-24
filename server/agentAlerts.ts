@@ -23,6 +23,7 @@ import { conditionsDe, consommation, type MarcheAccordCadreChamps } from '../src
 import { normalizeEvidence } from '../src/lib/phaseControls';
 import phaseControlDefaults from './config/phaseControls.json';
 import { selectAllPages } from './selectAllPages';
+import { archivedProjectIds, archivedProjectsWithRetention, sansAffairesArchivees } from './archivedProjects';
 
 // Une fois par semaine par défaut ; AGENT_ALERTS_INTERVAL_HOURS le règle. Une alerte dont la
 // cause disparaît se referme donc au cycle suivant, pas immédiatement.
@@ -62,6 +63,8 @@ export interface TenantSnapshot {
   marches: Row[];
   /** Documents rattachés à une affaire (nom et statut seulement) : preuves cherchées par les alertes. */
   documents: Row[];
+  /** Affaires archivées (id, nom, code, fin de conservation) : seule la règle de conservation les lit. */
+  archivedProjects?: Row[];
 }
 
 export interface AlertRuleDef {
@@ -575,9 +578,37 @@ export const ALERT_RULES: AlertRuleDef[] = [
   },
 ];
 
+// Fin de conservation d'une affaire archivée. Aucune purge automatique : l'alerte
+// prévient pour qu'on exporte le dossier puis qu'on décide.
+ALERT_RULES.push({
+  code: 'conservation_echeance',
+  label: "Fin de conservation d'une affaire archivée",
+  description: "La durée de conservation d'une affaire archivée arrive à échéance : exportez son dossier de clôture puis décidez de la suite. Rien n'est supprimé automatiquement.",
+  defaultSeverity: 'info',
+  defaultThresholdDays: 90,
+  evaluate(snapshot, thresholdDays) {
+    const alerts: DetectedAlert[] = [];
+    for (const project of snapshot.archivedProjects ?? []) {
+      const remaining = daysUntil(project.retention_until, snapshot.now);
+      if (remaining === null || remaining > thresholdDays) continue;
+      alerts.push({
+        dedupKey: `conservation_echeance:${project.id}`,
+        title: `Fin de conservation : ${projectLabel(project)}`,
+        message: remaining < 0
+          ? `La durée de conservation de « ${projectLabel(project)} » est échue depuis ${-remaining} jours.`
+          : `La durée de conservation de « ${projectLabel(project)} » s'achève dans ${remaining} jour(s).`,
+        targetType: 'project',
+        targetId: String(project.id),
+      });
+    }
+    return alerts;
+  },
+});
+
 export const ALERT_RULES_BY_CODE = new Map(ALERT_RULES.map(r => [r.code, r]));
 
 // ── Chargement de l'état d'un cabinet ───────────────────────────────────────
+// (les affaires archivées en sont retirées : voir loadTenantSnapshot)
 async function selectAll(supabaseAdmin: SupabaseClient, table: string, tenantId: string, columns: string): Promise<Row[]> {
   const { data, error } = await supabaseAdmin.from(table).select(columns).eq('tenant_id', tenantId);
   if (error) {
@@ -614,7 +645,19 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
           return data as Row[];
         }),
     ]);
-  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches, documents };
+  // Une affaire archivée est rangée : plus d'alerte sur elle. Les alertes déjà
+  // ouvertes se referment seules, leur cause n'étant plus lue.
+  const archivees = await archivedProjectIds(supabaseAdmin, tenantId);
+  const sans = (rows: Row[]): Row[] => sansAffairesArchivees(rows, archivees) as Row[];
+  return {
+    tenantId, now,
+    projects: sansAffairesArchivees(projects, archivees, 'id') as Row[],
+    phaseHistory: sans(phaseHistory), contrats: sans(contrats), invoices: sans(invoices), proposals, tenders,
+    tasks: sans(tasks), meetings, ordresDeService: sans(ordresDeService), reserves: sans(reserves),
+    notesHonoraires: sans(notesHonoraires), qualifications, consultations: sans(consultations),
+    marches: sans(marches), documents: sans(documents),
+    archivedProjects: await archivedProjectsWithRetention(supabaseAdmin, tenantId),
+  };
 }
 
 export interface RuleSetting {

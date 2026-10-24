@@ -6,6 +6,7 @@
 // background job, matching how the Dashboard already recomputes on load.
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { archivedProjectIds, sansAffairesArchivees } from '../archivedProjects';
 import { computeCopilotSuggestions } from '../../src/lib/copilotSuggestions';
 
 export interface RouteDeps {
@@ -96,13 +97,20 @@ export function registerCopilotSuggestionRoutes(app: Express, { supabaseAdmin, g
         people = data || [];
       }
 
+      // Une affaire archivée est rangée : aucune suggestion sur elle.
+      const archivees = await archivedProjectIds(supabaseAdmin, tenantId);
+      const sans = <T extends Record<string, any>>(rows: T[] | undefined) => sansAffairesArchivees(rows, archivees);
+
       const suggestions = computeCopilotSuggestions({
-        contacts, qualifications, orders, situations, observations, people, markets, consultations, documents,
-        meetings, reserves, contracts, feeNotes, permits, lots,
-        projects: projectsRes.data || [],
-        milestones: milestonesRes.data || [],
-        invoices,
-        tasks: tasksRes.error ? [] : tasksRes.data || [],
+        contacts, qualifications, people,
+        orders: sans(orders), situations: sans(situations), observations: sans(observations),
+        markets: sans(markets), consultations: sans(consultations), documents: sans(documents),
+        meetings, reserves: sans(reserves), contracts: sans(contracts), feeNotes: sans(feeNotes),
+        permits: sans(permits), lots: sans(lots),
+        projects: sansAffairesArchivees(projectsRes.data || [], archivees, 'id') || [],
+        milestones: sans(milestonesRes.data || []) || [],
+        invoices: sans(invoices) || [],
+        tasks: tasksRes.error ? [] : sans(tasksRes.data || []) || [],
         proposals: proposalsRes.error ? [] : proposalsRes.data || [],
         tenders: tendersRes.error ? [] : tendersRes.data || [],
       });

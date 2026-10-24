@@ -313,6 +313,10 @@ export interface Project {
   name: string;
   client: string;
   client_id?: string;
+  /** Archivage (supabase/migrate_project_archive.sql) : absent ou nul = affaire active. */
+  archived_at?: string | null;
+  retention_until?: string | null;
+  archive_reason?: string | null;
   status: 'Planning' | 'In Progress' | 'Completed' | 'On Hold';
   budget: number;
   category?: string;

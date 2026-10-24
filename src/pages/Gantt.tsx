@@ -63,7 +63,8 @@ export default function Gantt() {
         apiFetch('/api/tasks'),
         apiFetch('/api/team'),
       ]);
-      if (Array.isArray(projectsData)) setProjects(projectsData);
+      // Une affaire archivée est rangée : elle n'a plus de ligne au planning.
+      if (Array.isArray(projectsData)) setProjects(projectsData.filter((p: Project) => !p.archived_at));
       if (Array.isArray(milestonesData)) setMilestones(milestonesData);
       if (Array.isArray(tasksData)) setTasks(tasksData);
       if (Array.isArray(teamData)) setTeam(teamData);

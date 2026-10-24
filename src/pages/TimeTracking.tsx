@@ -167,7 +167,7 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
         <div className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto">
           <select className="min-w-48 flex-1 p-2 border rounded text-sm dark:bg-zinc-800 dark:border-zinc-700 sm:max-w-64 sm:flex-none" value={clockProjectId} onChange={e => setClockProjectId(e.target.value)} disabled={!!current}>
             <option value="">{t('time_tracking_no_project')}</option>
-            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {projects.filter(p => !p.archived_at).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
           {!current && (
             <>
@@ -358,7 +358,7 @@ export default function TimeTracking({ embedded = false }: { embedded?: boolean 
               </div>
               <select className="w-full p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700" value={manualForm.project_id} onChange={e => setManualForm({ ...manualForm, project_id: e.target.value })}>
                 <option value="">{t('time_tracking_no_project')}</option>
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {projects.filter(p => !p.archived_at).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <select aria-label={t('time_tracking_phase_label')} className="w-full p-2 border rounded dark:bg-zinc-800 dark:border-zinc-700" value={manualForm.phase} onChange={e => setManualForm({ ...manualForm, phase: e.target.value })}>
                 <option value="">{t('time_tracking_phase_none')}</option>

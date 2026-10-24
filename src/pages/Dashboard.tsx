@@ -107,7 +107,8 @@ function AdminDashboardView() {
         // Mêmes règles que la pastille du chat, calculées côté serveur (tâches, réunions, réserves, permis...) : leur échec ne doit pas vider le tableau de bord.
         fetchJson('/api/copilot/suggestions').catch(() => []),
       ]);
-      setProjects(Array.isArray(projectsData) ? projectsData : []);
+      // Les indicateurs ne comptent pas les affaires archivées (rangées, en lecture seule).
+      setProjects(Array.isArray(projectsData) ? projectsData.filter((p: Project) => !p.archived_at) : []);
       setMilestones(Array.isArray(milestonesData) ? milestonesData : []);
       setTenders(Array.isArray(tendersData) ? tendersData : []);
       setInvoices(Array.isArray(invoicesData) ? invoicesData : []);

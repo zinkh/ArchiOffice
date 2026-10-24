@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent, ChangeEvent } from 'react';
-import { IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
+import { IconArchive, IconPlus, IconFilter, IconSearch, IconArrowUpRight, IconDeviceFloppy, IconSettings, IconTrash, IconTag, IconUpload, IconCircleCheck, IconCircle, IconCalendar, IconExternalLink, IconLayoutGrid, IconList, IconChevronUp, IconChevronDown, IconUser, IconDownload, IconArrowsSort, IconSortAscending, IconSortDescending } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency, cn } from '../lib/utils';
 import { fetchJson, apiFetch } from '../lib/api';
@@ -7,6 +7,7 @@ import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../ty
 import { useTranslation } from 'react-i18next';
 import { OPERATION_LABELS, summarizeTemplate } from '../lib/projectTemplates';
 import { useUser } from '../UserContext';
+import { BulkArchiveDialog } from '../components/BulkArchiveDialog';
 import { db } from '../db';
 import { queuedJsonRequest } from '../lib/offlineQueue';
 import { refreshOfflineProjects } from '../lib/offlinePrefetch';
@@ -146,6 +147,9 @@ export default function Projects() {
   const { toast, showToast } = useToastWithUndo();
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('All');
+  // Les affaires archivées sont rangées : masquées par défaut, consultables ici.
+  const [showArchived, setShowArchived] = useState(false);
+  const [showBulkArchive, setShowBulkArchive] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string>('All');
   const [filterProjectManager, setFilterProjectManager] = useState<string>('All');
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -272,10 +276,11 @@ export default function Projects() {
   const filteredProjects = projects.filter(project => {
     const matchesSearch = project.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           project.client.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesArchive = showArchived ? !!project.archived_at : !project.archived_at;
     const matchesStatus = filterStatus === 'All' || project.status === filterStatus;
     const matchesCategory = filterCategory === 'All' || project.category === filterCategory;
     const matchesProjectManager = filterProjectManager === 'All' || project.project_manager === filterProjectManager;
-    return matchesSearch && matchesStatus && matchesCategory && matchesProjectManager;
+    return matchesSearch && matchesArchive && matchesStatus && matchesCategory && matchesProjectManager;
   }).sort((a, b) => (sortConfig ? compareProjects(a, b, sortConfig.key, sortConfig.direction) : compareRecentlyOpened(a, b)));
 
   const projectsPagination = usePagination(filteredProjects);
@@ -768,6 +773,30 @@ export default function Projects() {
           />
         </div>
         <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={() => { setShowArchived(v => !v); projectsPagination.setPage(1); }}
+            aria-pressed={showArchived}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+            style={showArchived
+              ? { border: '1px solid var(--tblr-primary)', color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }
+              : { border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
+          >
+            <IconArchive size={16} />
+            {showArchived ? t('projects_filter_archived') : t('projects_filter_active')}
+          </button>
+          {(currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager') && (
+            <button
+              onClick={() => setShowBulkArchive(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
+            >
+              <IconArchive size={16} />
+              {t('projects_bulk_archive_button')}
+            </button>
+          )}
+          {showBulkArchive && (
+            <BulkArchiveDialog onClose={() => setShowBulkArchive(false)} onDone={fetchProjects} />
+          )}
           <button
             onClick={cycleFilter}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
