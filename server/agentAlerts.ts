@@ -23,6 +23,7 @@ import { conditionsDe, consommation, type MarcheAccordCadreChamps } from '../src
 import { normalizeEvidence } from '../src/lib/phaseControls';
 import phaseControlDefaults from './config/phaseControls.json';
 import { selectAllPages } from './selectAllPages';
+import { archivedProjectIds, sansAffairesArchivees } from './archivedProjects';
 
 // Une fois par semaine par défaut ; AGENT_ALERTS_INTERVAL_HOURS le règle. Une alerte dont la
 // cause disparaît se referme donc au cycle suivant, pas immédiatement.
@@ -578,6 +579,7 @@ export const ALERT_RULES: AlertRuleDef[] = [
 export const ALERT_RULES_BY_CODE = new Map(ALERT_RULES.map(r => [r.code, r]));
 
 // ── Chargement de l'état d'un cabinet ───────────────────────────────────────
+// (les affaires archivées en sont retirées : voir loadTenantSnapshot)
 async function selectAll(supabaseAdmin: SupabaseClient, table: string, tenantId: string, columns: string): Promise<Row[]> {
   const { data, error } = await supabaseAdmin.from(table).select(columns).eq('tenant_id', tenantId);
   if (error) {
@@ -614,7 +616,18 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
           return data as Row[];
         }),
     ]);
-  return { tenantId, now, projects, phaseHistory, contrats, invoices, proposals, tenders, tasks, meetings, ordresDeService, reserves, notesHonoraires, qualifications, consultations, marches, documents };
+  // Une affaire archivée est rangée : plus d'alerte sur elle. Les alertes déjà
+  // ouvertes se referment seules, leur cause n'étant plus lue.
+  const archivees = await archivedProjectIds(supabaseAdmin, tenantId);
+  const sans = (rows: Row[]): Row[] => sansAffairesArchivees(rows, archivees) as Row[];
+  return {
+    tenantId, now,
+    projects: sansAffairesArchivees(projects, archivees, 'id') as Row[],
+    phaseHistory: sans(phaseHistory), contrats: sans(contrats), invoices: sans(invoices), proposals, tenders,
+    tasks: sans(tasks), meetings, ordresDeService: sans(ordresDeService), reserves: sans(reserves),
+    notesHonoraires: sans(notesHonoraires), qualifications, consultations: sans(consultations),
+    marches: sans(marches), documents: sans(documents),
+  };
 }
 
 export interface RuleSetting {

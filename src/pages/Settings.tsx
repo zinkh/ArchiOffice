@@ -337,6 +337,7 @@ export default function Settings() {
     numAffaireSepSeq: true,
     numAffaireDigits: 3,
     invoicePaymentTermsDays: 30,
+    archiveRetentionYears: 10,
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -2637,6 +2638,30 @@ export default function Settings() {
             </div>
             {renderSaveButton('invoicePaymentTerms', () => saveSection('invoicePaymentTerms', {
               invoicePaymentTermsDays: settings.invoicePaymentTermsDays,
+            }))}
+          </div>
+
+          {/* ── Archivage des affaires : durée de conservation ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_archive_retention_title')}</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_archive_retention_help')}</p>
+            </div>
+            <div className="max-w-xs">
+              <label htmlFor="archive-retention-years" className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_archive_retention_label')}</label>
+              <input
+                id="archive-retention-years"
+                type="number"
+                min={1}
+                max={50}
+                className="w-full p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={settings.archiveRetentionYears ?? 10}
+                onChange={e => setSettings({ ...settings, archiveRetentionYears: Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 10)) })}
+              />
+            </div>
+            {renderSaveButton('archiveRetention', () => saveSection('archiveRetention', {
+              archiveRetentionYears: settings.archiveRetentionYears ?? 10,
             }))}
           </div>
 

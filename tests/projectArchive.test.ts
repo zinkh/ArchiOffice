@@ -4,6 +4,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader, connectExternalStorage } from './testServer';
 import { memoryDrive } from '../server/externalStorage/memoryProvider';
+import { loadTenantSnapshot } from '../server/agentAlerts';
 
 let app: Express;
 
@@ -177,6 +178,53 @@ describe('Archivage des affaires', () => {
     expect((await request(app).post('/api/projects/ar10/unarchive').set(authHeader(token)).send({ reason: 'Avenant' })).status).toBe(200);
     const apres = await request(app).put('/api/reserves/ar10-res').set(authHeader(token)).send({ title: 'Joint repris', project_id: 'ar10' });
     expect(apres.status).not.toBe(409);
+  });
+
+  it('retire les affaires archivées des alertes et des suggestions', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+    const retard = { status: 'Overdue', due_date: '2020-01-01', total_amount: 1000 };
+    fakeSupabaseAdmin.seed('projects', [
+      { id: 'sv-actif', tenant_id: tenantId, name: 'Chantier Actif', client: 'A', status: 'In Progress' },
+      { id: 'sv-archive', tenant_id: tenantId, name: 'Chantier Rangé', client: 'B', status: 'In Progress', archived_at: '2025-01-01T00:00:00.000Z' },
+    ]);
+    fakeSupabaseAdmin.seed('invoices', [
+      { id: 'sv-i1', tenant_id: tenantId, project_id: 'sv-actif', invoice_number: 'F-ACTIF', ...retard },
+      { id: 'sv-i2', tenant_id: tenantId, project_id: 'sv-archive', invoice_number: 'F-RANGE', ...retard },
+    ]);
+    fakeSupabaseAdmin.seed('tasks', [
+      { id: 'sv-t1', tenant_id: tenantId, project_id: 'sv-archive', title: 'Tâche rangée', status: 'todo', due_date: '2020-01-01' },
+    ]);
+
+    const snapshot = await loadTenantSnapshot(fakeSupabaseAdmin as any, tenantId);
+    expect(snapshot.projects.map(p => p.id)).toEqual(['sv-actif']);
+    expect(snapshot.invoices.map(i => i.id)).toEqual(['sv-i1']);
+    expect(snapshot.tasks).toHaveLength(0);
+
+    const res = await request(app).get('/api/copilot/suggestions').set(authHeader(token));
+    expect(res.status).toBe(200);
+    const texte = JSON.stringify(res.body);
+    expect(texte).toContain('F-ACTIF');
+    expect(texte).not.toContain('F-RANGE');
+    expect(texte).not.toContain('Chantier Rangé');
+  });
+
+  it('applique la durée de conservation réglée par le cabinet', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+    seedCleanProject(tenantId, 'ar11');
+
+    for (const invalide of [0, 51, 2.5]) {
+      const refus = await request(app).put('/api/settings').set(authHeader(token)).send({ archiveRetentionYears: invalide });
+      expect(refus.status).toBe(400);
+    }
+    const ok = await request(app).put('/api/settings').set(authHeader(token)).send({ archiveRetentionYears: 15 });
+    expect(ok.status).toBe(200);
+    expect((await request(app).get('/api/settings').set(authHeader(token))).body.archiveRetentionYears).toBe(15);
+
+    const res = await request(app).post('/api/projects/ar11/archive').set(authHeader(token)).send({});
+    expect(res.status).toBe(200);
+    expect(res.body.retention_until).toMatch(new RegExp(`^${new Date().getUTCFullYear() + 15}-`));
   });
 
   it('n’archive pas l’affaire d’un autre cabinet', async () => {

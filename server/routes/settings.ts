@@ -48,6 +48,7 @@ const toSnake: Record<string, string> = {
   numAffaireSepSeq: 'num_affaire_sep_seq',
   numAffaireDigits: 'num_affaire_digits',
   invoicePaymentTermsDays: 'invoice_payment_terms_days',
+  archiveRetentionYears: 'archive_retention_years',
   onboardingCompletedAt: 'onboarding_completed_at',
   defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
   defaultLeaveDaysRtt: 'default_leave_days_rtt',
@@ -111,7 +112,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'zoho_books_org_id',
         'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
         'num_affaire_sep_prefix', 'num_affaire_sep_seq', 'num_affaire_digits',
-        'invoice_payment_terms_days',
+        'invoice_payment_terms_days', 'archive_retention_years',
         'onboarding_completed_at',
         'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
         'ragic_api_key', 'ragic_account',
@@ -127,7 +128,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'google_contacts_sync_categories',
         'mail_triage_agent_id', 'mail_inbox_domain',
       ]);
-      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits', 'invoice_payment_terms_days']);
+      const numericCols = new Set(['maf_taux_contrat_permil', 'maf_declaration_year', 'default_leave_days_conges_payes', 'default_leave_days_rtt', 'num_affaire_digits', 'invoice_payment_terms_days', 'archive_retention_years']);
       const filteredData: any = Object.fromEntries(
         Object.entries(snakeData)
           .filter(([k]) => validCols.has(k))
@@ -147,6 +148,16 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         const domain = normalizeMailInboxDomain(filteredData.mail_inbox_domain);
         if (domain === null) return res.status(400).json({ error: "Domaine de réception invalide (exemple : agents.moncabinet.fr)." });
         filteredData.mail_inbox_domain = domain || null;
+      }
+
+      // Durée de conservation des affaires archivées : de 1 à 50 ans, vide = 10 ans.
+      // Refusée ici plutôt que par la contrainte de la base, dont l'erreur ne dit rien.
+      if ('archive_retention_years' in filteredData && filteredData.archive_retention_years !== null) {
+        const years = Number(filteredData.archive_retention_years);
+        if (!Number.isInteger(years) || years < 1 || years > 50) {
+          return res.status(400).json({ error: "La durée de conservation doit être un nombre entier d'années entre 1 et 50." });
+        }
+        filteredData.archive_retention_years = years;
       }
 
       // L'agent de triage référencé doit appartenir à CE cabinet — même
