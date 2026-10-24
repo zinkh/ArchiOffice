@@ -153,6 +153,32 @@ describe('Archivage des affaires', () => {
     expect(res.status).toBe(403);
   });
 
+  it('refuse toute écriture rattachée à une affaire archivée, et laisse lire', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'admin');
+    seedCleanProject(tenantId, 'ar10');
+    fakeSupabaseAdmin.seed('reserves', [{ id: 'ar10-res', tenant_id: tenantId, project_id: 'ar10', title: 'Joint', status: 'Levée' }]);
+    fakeSupabaseAdmin.seed('documents', [{ id: 'ar10-doc', tenant_id: tenantId, project_id: 'ar10', name: 'Plan.pdf', doc_type: 'DOC' }]);
+    await request(app).post('/api/projects/ar10/archive').set(authHeader(token)).send({});
+
+    const attendu = (res: request.Response) => {
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('PROJECT_ARCHIVED');
+    };
+    attendu(await request(app).put('/api/reserves/ar10-res').set(authHeader(token)).send({ title: 'Autre' }));
+    attendu(await request(app).delete('/api/documents/ar10-doc').set(authHeader(token)));
+    attendu(await request(app).post('/api/tasks').set(authHeader(token)).send({ title: 'Reprise', project_id: 'ar10' }));
+    attendu(await request(app).post('/api/projects/ar10/phase-notes').set(authHeader(token)).send({ phase: 'DET', body: 'Note' }));
+    attendu(await request(app).post('/api/documents').set(authHeader(token))
+      .field('project_id', 'ar10').field('name', 'Nouveau').attach('file', Buffer.from('%PDF-1.4'), 'nouveau.pdf'));
+
+    // La lecture et la réouverture restent possibles.
+    expect((await request(app).get('/api/projects/ar10/phase-notes').set(authHeader(token))).status).toBe(200);
+    expect((await request(app).post('/api/projects/ar10/unarchive').set(authHeader(token)).send({ reason: 'Avenant' })).status).toBe(200);
+    const apres = await request(app).put('/api/reserves/ar10-res').set(authHeader(token)).send({ title: 'Joint repris', project_id: 'ar10' });
+    expect(apres.status).not.toBe(409);
+  });
+
   it('n’archive pas l’affaire d’un autre cabinet', async () => {
     const mine = makeTenant();
     const other = makeTenant();

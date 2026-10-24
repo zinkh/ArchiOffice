@@ -27,6 +27,7 @@ import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
 import { registerProjectArchiveRoutes } from "./server/routes/projectArchive";
+import { archivedProjectGuard } from "./server/archivedProjectGuard";
 import { registerChantierDecoupageRoutes } from "./server/routes/chantierDecoupage";
 import { registerProjectNoticeRoutes } from "./server/routes/projectNotices";
 import { registerMailAiRoutes } from "./server/routes/mailAi";
@@ -920,6 +921,10 @@ export async function createApp() {
     // route ait à le transporter.
     return proceed(user.id, activeTenantId, user);
   });
+
+  // Affaire archivée : lecture seule pour tout ce qui s'y rattache. Monté ici,
+  // après l'authentification et avant toute route (server/archivedProjectGuard.ts).
+  app.use("/api", archivedProjectGuard({ supabaseAdmin, getTenantId }));
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });

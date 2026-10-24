@@ -18,6 +18,7 @@ import { safeSegment } from '../storageKey';
 import { handleDocumentUpload } from '../documentUpload';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
+import { isProjectArchived } from './projectArchive';
 import { buildDocumentFolderPath } from '../externalStorage/businessFolderPath';
 import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
@@ -121,6 +122,11 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       await checkQuota(tenantId, 'documents');
       const { project_id, name, category, phase, description } = req.body;
+      // Envoi multipart : le corps n'est lu qu'ici, le garde d'affaire archivée
+      // (server/archivedProjectGuard.ts) n'a pas pu le voir.
+      if (project_id && await isProjectArchived(supabaseAdmin, tenantId, String(project_id))) {
+        return res.status(409).json({ error: 'Affaire archivée : rouvrez-la pour la modifier.', code: 'PROJECT_ARCHIVED' });
+      }
       // Derived from the authenticated caller, never trusted from the request
       // body — the client used to be able to submit any uploaded_by value and
       // falsify a document's apparent author (security audit finding).
