@@ -4171,8 +4171,22 @@ l'URL de base saisie par le cabinet. Trois pièges traités : le chemin s'encode
 **segment par segment** (un `encodeURIComponent` global détruirait les barres
 obliques), `MKCOL` répondant 405 vaut succès (la collection existe déjà), et un
 `PUT` écrase sans prévenir — d'où la recherche d'un nom libre avant dépôt.
-`assertPublicHttpUrl()` (`server/ssrfGuard.ts`) est appliqué à
-l'enregistrement **et** à chaque appel : c'est une URL fournie par le cabinet.
+C'est une URL fournie par le cabinet, donc l'adaptateur ne
+passe plus par `fetch` mais par `pinnedRequest` (`server/externalStorage/pinnedHttp.ts`, `https.request`
+sans dépendance), qui applique le garde SSRF (`resolvePublicUrl`, `server/ssrfGuard.ts`) à l'enregistrement
+**et** à chaque appel, avec trois protections : **HTTPS obligatoire** (le mot de passe d'application part en
+Basic Auth ; `http://` est refusé en 400 à la saisie comme à l'usage), **connexion épinglée** sur l'adresse
+publique validée (une seconde résolution DNS hostile ne peut plus viser une adresse interne ; le certificat
+reste vérifié contre le nom d'hôte) et **redirections suivies à la main**, de même origine uniquement (ni autre
+hôte, ni retour en http, donc l'en-tête Authorization ne part jamais ailleurs), trois sauts au plus. Le garde
+reconnaît aussi les adresses IPv4 encapsulées en IPv6 sous leur forme hexadécimale (`::ffff:7f00:1`).
+Après chaque dépôt, `verifyUploadedSize` relit la taille annoncée par le serveur (PROPFIND, `getcontentlength`) :
+une divergence supprime le fichier et fait échouer le dépôt ; une taille absente ou une vérification en échec ne
+bloquent rien. `WEBDAV_VERIFY_UPLOAD=off` coupe ce contrôle pour un serveur dont la taille annoncée diffère de
+celle déposée (chiffrement côté serveur). Conseil de mise en service : créer le mot de passe d'application
+pour un compte dédié, limité au dossier racine d'ArchiOffice. Un serveur WebDAV sur le réseau interne (NAS) reste
+refusé par ce garde : pour un NAS, voir le projet de fournisseur « dossier local » du client Electron.
+Tests : `tests/webdavHardening.test.ts`, `tests/externalStorageConnections.test.ts`.
 
 ### Mouvement, gestes et préférences d'accessibilité
 

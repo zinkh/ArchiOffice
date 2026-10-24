@@ -7,17 +7,20 @@
 //   Nextcloud : https://<hôte>/remote.php/dav/files/<utilisateur>/
 //   kDrive    : https://<identifiant kDrive>.connect.kdrive.infomaniak.com/
 //
-// Aucune dépendance npm ajoutée : `fetch` accepte les verbes PROPFIND et MKCOL,
-// ce qui suffit pour les cinq opérations dont l'interface a besoin. Une
+// Aucune dépendance npm ajoutée : `https.request` accepte les verbes PROPFIND et
+// MKCOL, ce qui suffit pour les opérations dont l'interface a besoin. Une
 // bibliothèque WebDAV apporterait surtout du parsing XML dont on n'a pas
-// l'usage — on ne lit jamais qu'un code de statut.
+// l'usage — on ne lit jamais qu'un code de statut, et la taille d'un fichier.
+//
+// Toutes les requêtes passent par `pinnedRequest` (../pinnedHttp.ts) : HTTPS
+// obligatoire, connexion épinglée sur l'adresse publique validée par le garde SSRF,
+// redirections limitées à la même origine.
 //
 // L'authentification se fait par MOT DE PASSE D'APPLICATION, jamais par le mot
 // de passe du compte : chez Nextcloud comme chez Infomaniak, il est révocable
 // individuellement et ne donne pas accès au reste du compte. Il est chiffré au
-// repos par server/secretsCrypto.ts, comme les mots de passe IMAP.
-import { Readable } from 'stream';
-import { assertPublicHttpUrl } from '../../ssrfGuard';
+// repos par server/secretsCrypto.ts, comme les mots de passe IMAP. Il vaut mieux
+// le créer pour un compte dédié, limité au dossier racine d'ArchiOffice.
 import { decryptSecretMaybe } from '../../secretsCrypto';
 import {
   ExternalFolderMissingError,
@@ -28,12 +31,15 @@ import {
 } from '../provider';
 import { registerProviderFactory } from '../providerFactory';
 import type { ExternalStorageConnection } from '../externalConnection';
+import { pinnedRequest, readTextCapped, type PinnedResponse } from '../pinnedHttp';
 
 // Un PUT de 50 Mo (le plafond de server/documentUpload.ts) sur une liaison
-// ordinaire dépasse largement les 10 s par défaut de fetchWithTimeout, et
-// Infomaniak limite le débit de façon agressive.
+// ordinaire dépasse largement les 10 s par défaut, et Infomaniak limite le débit
+// de façon agressive.
 const UPLOAD_TIMEOUT_MS = 120_000;
 const CALL_TIMEOUT_MS = 20_000;
+// Une réponse de PROPFIND sur UN fichier tient en quelques centaines d'octets.
+const PROPFIND_MAX_BYTES = 64 * 1024;
 
 /** Normalise l'URL de base : toujours exactement une barre oblique finale. */
 export function normalizeBaseUrl(baseUrl: string): string {
@@ -53,6 +59,13 @@ export function buildWebdavUrl(baseUrl: string, relativePath: string, isCollecti
   // Plusieurs implémentations Nextcloud exigent la barre finale sur une
   // collection pour PROPFIND et MKCOL, et la refusent sur un fichier.
   return normalizeBaseUrl(baseUrl) + segments.join('/') + (isCollection && segments.length ? '/' : '');
+}
+
+/** `getcontentlength` d'une réponse PROPFIND (le préfixe d'espace de noms varie :
+ *  `d:`, `D:`, aucun), ou null si le serveur ne la renseigne pas. */
+export function parseContentLength(propfindXml: string): number | null {
+  const m = propfindXml.match(/<(?:[\w.-]+:)?getcontentlength[^>]*>\s*(\d+)\s*</i);
+  return m ? Number(m[1]) : null;
 }
 
 function authHeader(connection: ExternalStorageConnection): string {
@@ -88,36 +101,47 @@ class WebdavProvider implements ExternalStorageProvider {
   private async call(
     method: string,
     url: string,
-    init: RequestInit = {},
+    init: { headers?: Record<string, string>; body?: Buffer } = {},
     timeoutMs = CALL_TIMEOUT_MS,
-  ): Promise<Response> {
-    // Le garde SSRF est réappliqué à CHAQUE appel et pas seulement à
-    // l'enregistrement : c'est une URL fournie par le cabinet, et rien ne
-    // garantit qu'elle n'a pas changé en base entre-temps.
-    await assertPublicHttpUrl(url);
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+  ): Promise<PinnedResponse> {
     try {
-      return await fetch(url, {
-        ...init,
+      // Le garde SSRF (HTTPS, adresse publique, adresse épinglée) est réappliqué à
+      // CHAQUE appel et pas seulement à l'enregistrement : c'est une URL fournie
+      // par le cabinet, et rien ne garantit qu'elle n'a pas changé en base ou en
+      // DNS entre-temps.
+      return await pinnedRequest(url, {
         method,
         headers: { Authorization: authHeader(this.connection), ...(init.headers || {}) },
-        signal: controller.signal,
-        redirect: 'follow',
+        body: init.body,
+        timeoutMs,
       });
     } catch (err: any) {
-      if (err?.status) throw err; // erreur du garde SSRF, déjà typée
-      // undici ne dit que « fetch failed » : la vraie raison (ENOTFOUND,
-      // ECONNREFUSED, certificat...) est dans `cause`.
-      const cause = err?.cause?.code || err?.cause?.message;
+      if (err?.status) throw err; // garde SSRF ou redirection refusée, déjà typée
+      if (err?.name === 'AbortError') {
+        throw new ExternalStorageError('Serveur de stockage injoignable : délai dépassé', 'unreachable', 502);
+      }
+      // La vraie raison (ENOTFOUND, ECONNREFUSED, certificat...) est dans `code`
+      // ou `cause`, le message seul est parfois générique.
+      const cause = err?.code || err?.cause?.code || err?.cause?.message;
       throw new ExternalStorageError(
         `Serveur de stockage injoignable : ${err?.message || err}${cause ? ` (${cause})` : ''}`,
         'unreachable',
         502,
       );
-    } finally {
-      clearTimeout(timer);
     }
+  }
+
+  /** Pour les appels dont seul le statut compte : le corps est abandonné pour
+   *  rendre la connexion au pool. */
+  private async callStatus(
+    method: string,
+    url: string,
+    init: { headers?: Record<string, string>; body?: Buffer } = {},
+    timeoutMs = CALL_TIMEOUT_MS,
+  ): Promise<number> {
+    const res = await this.call(method, url, init, timeoutMs);
+    res.stream.resume();
+    return res.status;
   }
 
   private get base(): string {
@@ -134,12 +158,12 @@ class WebdavProvider implements ExternalStorageProvider {
   }
 
   private async exists(relativePath: string, isCollection: boolean): Promise<boolean> {
-    const res = await this.call('PROPFIND', this.url(relativePath, isCollection), {
+    const status = await this.callStatus('PROPFIND', this.url(relativePath, isCollection), {
       headers: { Depth: '0' },
     });
-    if (res.status === 207 || res.status === 200) return true;
-    if (res.status === 404) return false;
-    throw statusError(res.status, 'vérification');
+    if (status === 207 || status === 200) return true;
+    if (status === 404) return false;
+    throw statusError(status, 'vérification');
   }
 
   async resolveRoot(): Promise<string> {
@@ -149,11 +173,11 @@ class WebdavProvider implements ExternalStorageProvider {
   }
 
   private async mkcol(relativePath: string): Promise<void> {
-    const res = await this.call('MKCOL', this.url(relativePath, true));
+    const status = await this.callStatus('MKCOL', this.url(relativePath, true));
     // 405 = la collection existe déjà. C'est un succès, pas une erreur : on ne
     // crée un dossier que pour être sûr qu'il soit là.
-    if (res.status === 201 || res.status === 405) return;
-    throw statusError(res.status, 'création de dossier');
+    if (status === 201 || status === 405) return;
+    throw statusError(status, 'création de dossier');
   }
 
   async findChildFolder(parentExternalId: string, name: string): Promise<string | null> {
@@ -177,16 +201,49 @@ class WebdavProvider implements ExternalStorageProvider {
     // dépose deux pièces homonymes dans la même phase (deux indices d'un même
     // plan, par exemple) perdrait la première sans le savoir : on suffixe plutôt.
     const target = await this.freeName(parentExternalId, fileName);
-    const res = await this.call(
+    const status = await this.callStatus(
       'PUT',
       this.url(target),
-      { body: buffer as any, headers: { 'Content-Type': mimeType || 'application/octet-stream' } },
+      { body: buffer, headers: { 'Content-Type': mimeType || 'application/octet-stream' } },
       UPLOAD_TIMEOUT_MS,
     );
-    if (res.status !== 201 && res.status !== 204 && res.status !== 200) {
-      throw statusError(res.status, 'dépôt du fichier');
+    if (status !== 201 && status !== 204 && status !== 200) {
+      throw statusError(status, 'dépôt du fichier');
     }
+    await this.verifyUploadedSize(target, buffer.length);
     return { externalId: target, sizeBytes: buffer.length, webUrl: null };
+  }
+
+  /**
+   * Un PUT coupé en route peut répondre 201 et laisser un fichier tronqué : on
+   * relit la taille déclarée par le serveur. Une divergence supprime le fichier et
+   * fait échouer le dépôt (l'appelant n'écrit alors aucune ligne en base).
+   *
+   * Meilleur effort sur tout le reste : si le serveur ne renseigne pas la taille,
+   * ou si la vérification elle-même échoue, le dépôt n'est pas bloqué.
+   * `WEBDAV_VERIFY_UPLOAD=off` coupe le contrôle pour un serveur dont la taille
+   * annoncée diffère de la taille déposée (chiffrement côté serveur, par exemple).
+   */
+  private async verifyUploadedSize(path: string, expected: number): Promise<void> {
+    if (process.env.WEBDAV_VERIFY_UPLOAD === 'off') return;
+    let size: number | null = null;
+    try {
+      const res = await this.call('PROPFIND', this.url(path), { headers: { Depth: '0' } });
+      if (res.status !== 207) {
+        res.stream.resume();
+        return;
+      }
+      size = parseContentLength(await readTextCapped(res.stream, PROPFIND_MAX_BYTES));
+    } catch {
+      return;
+    }
+    if (size === null || size === expected) return;
+    await this.deleteFile(path).catch(() => undefined);
+    throw new ExternalStorageError(
+      `Le fichier déposé est incomplet (${size} octets reçus sur ${expected}). Réessayez.`,
+      'unknown',
+      502,
+    );
   }
 
   /** `cctp.pdf`, puis `cctp (2).pdf`, `cctp (3).pdf`… — déterministe, et jamais
@@ -205,10 +262,10 @@ class WebdavProvider implements ExternalStorageProvider {
   }
 
   async deleteFile(externalId: string): Promise<void> {
-    const res = await this.call('DELETE', this.url(externalId));
+    const status = await this.callStatus('DELETE', this.url(externalId));
     // 404 : déjà supprimé côté drive. Rien à signaler.
-    if (res.status === 204 || res.status === 200 || res.status === 404) return;
-    throw statusError(res.status, 'suppression');
+    if (status === 204 || status === 200 || status === 404) return;
+    throw statusError(status, 'suppression');
   }
 
   /** WebDAV n'a aucune notion de lien temporaire. Les partages publics de
@@ -222,22 +279,26 @@ class WebdavProvider implements ExternalStorageProvider {
     const res = await this.call('GET', this.url(externalId), {
       headers: rangeHeader ? { Range: rangeHeader } : {},
     });
-    if (res.status !== 200 && res.status !== 206) throw statusError(res.status, 'lecture');
-    if (!res.body) throw new ExternalStorageError('Réponse vide du serveur de stockage.', 'unknown', 502);
+    if (res.status !== 200 && res.status !== 206) {
+      res.stream.resume();
+      throw statusError(res.status, 'lecture');
+    }
 
-    const length = res.headers.get('content-length');
+    const length = res.headers['content-length'];
     return {
-      body: Readable.fromWeb(res.body as any),
-      contentType: res.headers.get('content-type') || 'application/octet-stream',
+      body: res.stream,
+      contentType: res.headers['content-type'] || 'application/octet-stream',
       contentLength: length ? Number(length) : null,
       status: res.status === 206 ? 206 : 200,
-      contentRange: res.headers.get('content-range'),
+      contentRange: res.headers['content-range'] ?? null,
     };
   }
 
   async probe(): Promise<void> {
-    const res = await this.call('PROPFIND', normalizeBaseUrl(this.base), { headers: { Depth: '0' } });
-    if (res.status !== 207 && res.status !== 200) throw statusError(res.status, 'test de connexion');
+    const status = await this.callStatus('PROPFIND', normalizeBaseUrl(this.base), {
+      headers: { Depth: '0' },
+    });
+    if (status !== 207 && status !== 200) throw statusError(status, 'test de connexion');
   }
 }
 

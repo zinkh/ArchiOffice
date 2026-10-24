@@ -8,9 +8,9 @@
 // rejects non-http(s) schemes outright. Residual caveat: this validates at
 // check time, so a hostile DNS server could still rebind to a private IP
 // between this lookup and the actual fetch (classic DNS-rebinding TOCTOU).
-// Pinning the connection to the validated IP would close that gap; it's
-// deliberately out of scope here — this still removes the trivial
-// "just pass an internal URL" attack, which is the exploitable case today.
+// `assertPublicHttpUrl` leaves that gap open (callers that only need a yes/no).
+// `resolvePublicUrl` returns the validated addresses so the caller can pin the
+// connection to them (see externalStorage/pinnedHttp.ts, used by WebDAV).
 import dns from 'dns/promises';
 import net from 'net';
 
@@ -44,6 +44,14 @@ function isBlockedV6(ip: string): boolean {
   // IPv4-mapped (::ffff:169.254.169.254) — validate the embedded v4 address.
   const mapped = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (mapped) return isBlockedV4(mapped[1]);
+  // Same address in hex form (::ffff:7f00:1 is 127.0.0.1): the URL parser
+  // normalizes dotted IPv4-mapped literals to this shape.
+  const mappedHex = a.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    return isBlockedV4(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+  }
   if (a === '::1' || a === '::') return true;         // loopback / unspecified
   if (/^f[cd]/.test(a)) return true;                  // fc00::/7 unique-local
   if (/^fe[89ab]/.test(a)) return true;               // fe80::/10 link-local
@@ -62,13 +70,23 @@ function reject(status: number, message: string): never {
   throw err;
 }
 
+export interface ResolvedPublicUrl {
+  url: URL;
+  /** Every address the host resolved to, all verified public. Pin the connection to one of them. */
+  addresses: string[];
+}
+
 /**
  * Validates that `rawUrl` is an http(s) URL whose host resolves only to public
- * addresses. Throws an Error with `.status` (400 for a malformed URL/scheme or
- * unresolvable host, 403 for a private/reserved target) otherwise. Returns the
- * parsed URL on success.
+ * addresses, and returns those addresses. With `requireHttps`, plain http is
+ * refused (credentials would travel in clear). Throws an Error with `.status`
+ * (400 for a malformed URL/scheme or unresolvable host, 403 for a
+ * private/reserved target) otherwise.
  */
-export async function assertPublicHttpUrl(rawUrl: unknown): Promise<URL> {
+export async function resolvePublicUrl(
+  rawUrl: unknown,
+  opts: { requireHttps?: boolean } = {},
+): Promise<ResolvedPublicUrl> {
   if (typeof rawUrl !== 'string' || !rawUrl.trim()) reject(400, 'URL requise');
   let u: URL;
   try {
@@ -78,6 +96,9 @@ export async function assertPublicHttpUrl(rawUrl: unknown): Promise<URL> {
   }
   if (u!.protocol !== 'http:' && u!.protocol !== 'https:') {
     reject(400, 'Seuls les schémas http et https sont autorisés');
+  }
+  if (opts.requireHttps && u!.protocol !== 'https:') {
+    reject(400, 'Une adresse HTTPS est requise : un mot de passe ne doit jamais circuler en clair');
   }
 
   // WHATWG URL keeps the brackets on an IPv6 literal host (e.g. "[::1]") —
@@ -99,5 +120,13 @@ export async function assertPublicHttpUrl(rawUrl: unknown): Promise<URL> {
   if (addresses!.some(isBlockedAddress)) {
     reject(403, 'Cette adresse (réseau interne/privé) n\'est pas autorisée');
   }
-  return u!;
+  return { url: u!, addresses: addresses! };
+}
+
+/**
+ * Same validation, for callers that only need to know the URL is acceptable.
+ * Returns the parsed URL on success.
+ */
+export async function assertPublicHttpUrl(rawUrl: unknown): Promise<URL> {
+  return (await resolvePublicUrl(rawUrl)).url;
 }
