@@ -75,6 +75,12 @@ async function purgeTenant(supabaseAdmin: SupabaseClient, tenantId: string): Pro
     console.error(`[tenantPurge] Failed to delete tenant ${tenantId}:`, error.message);
     return;
   }
+  // Le journal de synchronisation desktop n'a PAS de clé étrangère vers tenants (voir
+  // supabase/migrate_desktop_sync.sql) : ses déclencheurs écrivent une ligne pour chaque
+  // document supprimé par la cascade ci-dessus, donc le nettoyage se fait APRÈS la
+  // suppression du cabinet. Meilleur effort : une instance non migrée n'a pas la table,
+  // et la purge périodique (desktop_changes_prune) rattrape de toute façon ces lignes.
+  await supabaseAdmin.from('desktop_changes').delete().eq('tenant_id', tenantId).then(() => undefined, () => undefined);
   console.log(`[tenantPurge] Purged tenant ${tenantId} (deletion grace period elapsed)`);
 }
 

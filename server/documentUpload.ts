@@ -17,7 +17,9 @@
 // regardless of what the client claimed.
 import multer from 'multer';
 
-const DANGEROUS_EXTENSIONS = new Set([
+// Exportée pour que le dépôt par morceaux du client desktop (server/desktop/uploads.ts)
+// applique EXACTEMENT la même liste que l'envoi multipart.
+export const DANGEROUS_EXTENSIONS = new Set([
   'svg', 'svgz', 'html', 'htm', 'xhtml', 'shtml',
   'js', 'mjs', 'cjs', 'jse', 'vbs', 'vbe', 'wsf', 'wsh',
   'exe', 'dll', 'com', 'scr', 'msi', 'msp', 'bat', 'cmd', 'ps1',

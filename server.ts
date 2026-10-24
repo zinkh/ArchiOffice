@@ -12,6 +12,7 @@ import { signMcpUploadTicket, MCP_UPLOAD_TICKET_TTL_SECONDS } from "./server/mcp
 import { createMcpAgencyDirectory } from "./server/mcpAgencyDirectory";
 import { resolveAccessToken as resolveTelegramAccessToken } from "./server/telegramBot";
 import { resolveMailRelayToken } from "./server/agentMailRelayTokens";
+import { resolveDeviceToken } from "./server/desktop/deviceTokens";
 import { resolveAutomationApiKey } from "./server/automationApiKeys";
 import { registerProjectTemplateRoutes } from "./server/routes/projectTemplates";
 import { registerActDataRoutes } from "./server/routes/actData";
@@ -118,6 +119,7 @@ import { registerRfiRoutes } from "./server/routes/rfis";
 import { registerProjectRoutes } from "./server/routes/projects";
 import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
+import { registerDesktopSyncRoutes } from "./server/routes/desktopSync";
 import { registerKnowledgeSharingRoutes } from "./server/routes/knowledgeSharing";
 import { registerInspirationRoutes } from "./server/routes/inspirations";
 import { registerTaskRoutes } from "./server/routes/tasks";
@@ -889,6 +891,44 @@ export async function createApp() {
           return proceed(resolved.userId, resolved.tenantId);
         }
       }
+      // Appareil de synchronisation desktop (Explorateur Windows, Finder macOS) — voir
+      // server/desktop/deviceTokens.ts et docs/desktop-sync-contract.md. Contrairement à un
+      // jeton MCP, il ne donne accès QU'À /api/desktop/v1 : un fichier de configuration
+      // d'un poste ne doit pas ouvrir l'API entière. Le cabinet se désigne par X-Tenant-Id,
+      // revérifié contre les adhésions comme pour une session.
+      if (token.startsWith('ds_at_')) {
+        const inDesktopScope = pathOnly === "/api/desktop/v1" || pathOnly.startsWith("/api/desktop/v1/");
+        if (!inDesktopScope) {
+          return res.status(403).json({ error: "Ce jeton d'appareil ne donne accès qu'à la synchronisation desktop.", code: 'DEVICE_SCOPE' });
+        }
+        const resolved = await resolveDeviceToken(supabaseAdmin, token);
+        if (resolved?.status === 'revoked') {
+          return res.status(401).json({ error: "Cet appareil a été révoqué.", code: 'DEVICE_REVOKED' });
+        }
+        if (resolved?.status === 'expired') {
+          return res.status(401).json({ error: "Le jeton de cet appareil a expiré.", code: 'DEVICE_EXPIRED' });
+        }
+        if (resolved?.status === 'ok') {
+          const requested = (req.headers[TENANT_HEADER] as string | undefined)?.trim() || null;
+          // Seuls l'enregistrement des appareils et la liste des cabinets se passent de cabinet.
+          const needsNoTenant = pathOnly === "/api/desktop/v1/roots" || pathOnly.startsWith("/api/desktop/v1/devices");
+          if (!requested && !needsNoTenant) {
+            return res.status(400).json({ error: "L'en-tête X-Tenant-Id est requis.", code: 'TENANT_REQUIRED' });
+          }
+          let deviceTenantId: string | null = null;
+          if (requested) {
+            try {
+              deviceTenantId = await resolveActiveTenantId(supabaseAdmin, resolved.userId, requested);
+            } catch (e: any) {
+              return res.status(e.status || 403).json({ error: e.message, code: e.code });
+            }
+          }
+          req.user = { id: resolved.userId };
+          req.deviceId = resolved.deviceId;
+          req.activeTenantId = deviceTenantId;
+          return proceed(resolved.userId, deviceTenantId);
+        }
+      }
       // Clé d'automatisation (n8n, ou tout appelant HTTP externe) — voir
       // server/automationApiKeys.ts. Liaison persistante et révocable comme
       // tg_at_, pas à usage unique comme mail_at_ : un scénario n8n rappelle
@@ -1155,6 +1195,8 @@ export async function createApp() {
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
+  // Synchronisation desktop (Explorateur Windows, Finder macOS) : /api/desktop/v1.
+  registerDesktopSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, getSystemRole });
   // Client de bureau seulement (répond 404 ailleurs) : ouverture d'un fichier dans
   // l'Explorateur et migration vers l'arborescence lisible.
   registerDesktopStorageRoutes(app, {

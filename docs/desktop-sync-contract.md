@@ -1,6 +1,6 @@
 # Contrat d'API de synchronisation desktop (Windows et macOS)
 
-Statut : **proposition, rien n'est implémenté.** Ce document fixe l'interface entre le serveur ArchiOffice et les deux composants natifs qui exposent les documents dans l'Explorateur Windows (Cloud Files API) et dans le Finder (File Provider). Le même contrat sert aux deux systèmes : seul le client natif diffère.
+Statut : **le socle serveur est implémenté** (section 17) ; les clients natifs Windows et macOS ne le sont pas. Ce document fixe l'interface entre le serveur ArchiOffice et les deux composants natifs qui exposent les documents dans l'Explorateur Windows (Cloud Files API) et dans le Finder (File Provider). Le même contrat sert aux deux systèmes : seul le client natif diffère.
 
 Il remplace les hypothèses des échanges préliminaires par ce que le code actuel fait réellement (section 2).
 
@@ -117,7 +117,7 @@ Le client natif garde un **curseur** et ne relit jamais l'arbre.
 {
   "events": [
     { "seq": 10231, "type": "upsert", "node": { "id": "doc:3f2a...", "...": "..." } },
-    { "seq": 10232, "type": "delete", "id": "doc:77c1...", "parentId": "phase:p_123:APD" },
+    { "seq": 10232, "type": "delete", "id": "doc:77c1...", "projectId": "p_123" },
     { "seq": 10233, "type": "lock", "id": "doc:3f2a...", "lock": { "...": "..." } },
     { "seq": 10234, "type": "unlock", "id": "doc:3f2a..." }
   ],
@@ -130,7 +130,7 @@ Le client natif garde un **curseur** et ne relit jamais l'arbre.
 - **Sans curseur** (premier appel) : renvoie `{ "cursor": "<courant>", "resync": true }` ; le client parcourt alors l'arborescence par `children` pour initialiser, puis lit les changements à partir de ce curseur.
 - **Curseur trop ancien** (30 jours de conservation) : `410 CURSOR_EXPIRED` ; le client refait une synchronisation complète.
 - Les événements sont **idempotents et ordonnés** par `seq`. Un `upsert` porte l'état complet du nœud.
-- **Indication de temps réel** (optionnelle) : `GET /events` en flux SSE n'envoie que `{ "hint": "changes" }`. Le client rappelle `/changes`. Si le flux est coupé, un sondage toutes les 60 s suffit (même principe que la file `notification_outbox` des notifications desktop).
+- **Indication de temps réel** (optionnelle, **pas encore implémentée**) : `GET /events` en flux SSE n'enverrait que `{ "hint": "changes" }`. Le client rappellerait `/changes`. Sans ce flux, un sondage toutes les 60 s suffit (même principe que la file `notification_outbox` des notifications desktop).
 - L'écriture dans le journal se fait par **déclencheurs en base** (sur `documents`, `document_versions`, `document_locks`, `project_*`), pas dans le code des routes : plusieurs chemins du serveur modifient `documents` (dépôts, DOE, agents, MCP, migration de stockage).
 
 ## 7. Verrous
@@ -150,7 +150,7 @@ Routes :
 | `POST /nodes/{id}/lock` | Pose le verrou. `409 ALREADY_LOCKED` (avec le détenteur) s'il est pris. Corps `{ deviceId }`. |
 | `POST /nodes/{id}/lock/renew` | Prolonge. Le client le fait toutes les 10 minutes tant que le fichier est ouvert. |
 | `DELETE /nodes/{id}/lock` | Libère. Un dépôt réussi par le détenteur ne libère pas seul : la libération est un geste (ou la fermeture du fichier détectée par le client). |
-| `DELETE /nodes/{id}/lock?force=true` | Rupture par un administrateur ou un manager. Journalisée, la personne est notifiée (`notifyUsers`). |
+| `DELETE /nodes/{id}/lock?force=true` | Rupture par un administrateur ou un manager. Journalisée dans le journal d'activité ; la notification de la personne (`notifyUsers`) n'est pas encore faite. |
 
 Durée de vie : 8 h sans renouvellement, puis expiration. Un appareil révoqué perd ses verrous. Sous Windows et macOS, un fichier verrouillé par une autre personne est livré **en lecture seule** (attribut de fichier).
 
@@ -191,7 +191,7 @@ Contrôles à l'ouverture (avant tout octet) : affaire non archivée (409 `PROJE
 
 ### 8.2 Envoyer
 
-`PUT /uploads/{uploadId}` avec `Content-Range: bytes 0-8388607/4821937` et corps binaire. `204` si le morceau est accepté. Les morceaux peuvent arriver dans le désordre mais pas se chevaucher différemment. `GET /uploads/{uploadId}` rend `{ received: [[0, 8388607], ...] }` pour reprendre après une coupure. Une session non terminée expire au bout de 24 h et ses morceaux sont purgés.
+`PUT /uploads/{uploadId}` avec `Content-Range: bytes 0-8388607/4821937` et corps binaire. `204` si le morceau est accepté. Les morceaux peuvent arriver dans le désordre ; un morceau renvoyé ou qui en recoupe un autre écrase simplement les mêmes octets (les intervalles reçus sont fusionnés). `GET /uploads/{uploadId}` rend `{ received: [[0, 8388607], ...] }` pour reprendre après une coupure. Une session non terminée expire au bout de 24 h et ses morceaux sont purgés.
 
 ### 8.3 Terminer
 
@@ -242,7 +242,7 @@ Un fichier déposé dans un dossier d'affaire est créé avec `category` et `pha
 | `POST /nodes/{id}/restore` | Restaure depuis la corbeille. |
 | `DELETE /nodes/{id}` | **Suppression logique** (`deleted_at`). Corbeille 30 jours, puis purge par le serveur. Jamais de suppression définitive depuis un appareil. Rôle `admin`, `manager` ou `pm` comme aujourd'hui, sinon 403. |
 | `POST /nodes/{id}/bump-indice` | Fait avancer l'indice de diffusion (geste explicite, dans l'application ou le menu contextuel). Refuse au-delà de `Z`. |
-| `POST /nodes/{id}/link` | Rend un lien profond `archioffice://document/<id>` et son équivalent web. |
+| `POST /nodes/{id}/link` | Rend le lien profond `archioffice://document/<id>` et l'identifiant du nœud (pas d'adresse web en v1). |
 
 La création de dossier (hors dossiers de phase existants) n'est pas supportée en v1 : les dossiers sont l'affaire et la phase. Un utilisateur qui crée un dossier dans l'Explorateur reçoit une erreur claire (`409 FOLDER_NOT_SUPPORTED`) ; le client natif la présente comme un refus du système de fichiers.
 
@@ -266,73 +266,19 @@ Le contrat ne définit rien de plus que ces points d'appui : toute différence d
 
 ## 12. Changements à prévoir côté serveur
 
-À appliquer par migration **via le MCP Supabase** lors de l'implémentation (rien n'a été appliqué). Brouillon, à relire avant toute application :
+La migration est **`supabase/migrate_desktop_sync.sql`** (additive, rejouable, testée contre un vrai Postgres par
+`tests/desktopSyncMigration.pg.test.ts`). Elle est appliquée par le MCP Supabase au déploiement ; elle n'a pas été
+appliquée à une base distante lors de l'implémentation. Écarts avec le brouillon initial de ce contrat :
 
-```sql
--- Journal de changements : séquence globale, filtrée par cabinet à la lecture.
-CREATE TABLE IF NOT EXISTS desktop_changes (
-  seq BIGSERIAL PRIMARY KEY,
-  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  type TEXT NOT NULL CHECK (type IN ('upsert','delete','lock','unlock','scope')),
-  node_id TEXT NOT NULL,
-  project_id TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_desktop_changes_tenant_seq ON desktop_changes(tenant_id, seq);
-
-CREATE TABLE IF NOT EXISTS document_locks (
-  document_id TEXT PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
-  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL,
-  device_id TEXT,
-  locked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  expires_at TIMESTAMPTZ NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS desktop_devices (
-  id TEXT PRIMARY KEY,
-  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL,
-  name TEXT NOT NULL,
-  platform TEXT NOT NULL CHECK (platform IN ('windows','macos')),
-  app_version TEXT,
-  token_hash TEXT NOT NULL UNIQUE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  last_seen_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ NOT NULL,
-  revoked_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS desktop_uploads (
-  id TEXT PRIMARY KEY,
-  tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-  user_id UUID NOT NULL,
-  target JSONB NOT NULL,
-  base_version INTEGER,
-  bump_indice BOOLEAN NOT NULL DEFAULT false,
-  name TEXT NOT NULL,
-  size_bytes BIGINT NOT NULL,
-  sha256 TEXT NOT NULL,
-  received JSONB NOT NULL DEFAULT '[]',
-  temp_path TEXT,
-  expires_at TIMESTAMPTZ NOT NULL,
-  completed_at TIMESTAMPTZ
-);
-
-ALTER TABLE documents
-  ADD COLUMN IF NOT EXISTS content_sha256 TEXT,
-  ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ,
-  ADD COLUMN IF NOT EXISTS conflict_of TEXT,
-  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
-
-ALTER TABLE settings
-  ADD COLUMN IF NOT EXISTS desktop_lock_mode TEXT NOT NULL DEFAULT 'advisory'
-  CHECK (desktop_lock_mode IN ('off','advisory','enforced'));
-```
+- `desktop_devices` est rattaché à la **personne** (`user_id`), sans `tenant_id` : un architecte qui exerce dans deux cabinets a un seul appareil.
+- `desktop_changes.tenant_id` n'a **pas de clé étrangère** vers `tenants` : les déclencheurs écrivent à chaque suppression de document, et la suppression en cascade d'un cabinet échouerait sinon. `server/tenantPurge.ts` nettoie ces lignes après la suppression du cabinet.
+- Un plancher de curseur (`desktop_sync_state.floor_seq`, relevé par `desktop_changes_prune`) permet de répondre `410 CURSOR_EXPIRED`.
+- Les déclencheurs couvrent `documents` (mise à jour de `updated_at`, journal), `document_locks` et `projects` (nom, code, archivage : événement `scope`).
+- `desktop_uploads` porte aussi `device_id`, `mime_type`, `description` et `result` (pour rendre `complete` idempotent).
 
 Points à décider avant la migration :
 
-- Les **déclencheurs** qui alimentent `desktop_changes` ne sont pas écrits ici ; ils doivent couvrir `INSERT`, `UPDATE` et `DELETE` de `documents` et `document_versions`, ainsi que `project_lots` et `projects` (changement d'archivage ou de nom, qui renomme tout un dossier).
+- Les déclencheurs sont écrits et testés (`documents`, `document_locks`, `projects`). Restent à décider : un événement `scope` quand un lot ou une phase est renommé (aujourd'hui seule l'affaire déclenche), et l'ajout de `document_versions` si l'on veut tracer une restauration de version.
 - `documents.id` est un `TEXT` (UUID généré par l'application) et non un `UUID` : les clés étrangères ci-dessus le respectent.
 - Les tables doivent rester **hors `SYNC_TABLES`** (poste local) : un poste Electron ne synchronise pas les jetons d'appareil.
 - Une instance non migrée répond `503 DESKTOP_SYNC_UNAVAILABLE` sur `/api/desktop/v1/*` sans toucher au reste de l'API, comme les autres modules facultatifs.
@@ -419,3 +365,32 @@ Un jeu de scénarios exécuté contre un serveur de test, par le client Windows 
 7. **Cabinet sans espace externe** : le refus est le comportement retenu pour le CAO. Souhaite-t-on un message qui renvoie vers les Réglages, ou un déblocage ponctuel par un administrateur ?
 8. **Liste d'extensions CAO** (section 8.4) : à confirmer avec les logiciels réellement utilisés par les cabinets (Archicad, Allplan, Vectorworks, Rhino, Revit...) avant de la figer.
 9. **Taille maximale** sur WebDAV : à fixer après les essais de la section 12 sur un Nextcloud et un kDrive réels, pas avant.
+
+## 17. État d'avancement
+
+**Implémenté (socle serveur)**, sous `/api/desktop/v1` :
+
+| Domaine | Routes | Fichiers |
+|---|---|---|
+| Appareils | `POST/GET /devices`, `DELETE /devices/:id` (jeton `ds_at_`, limité à ce préfixe) | `server/desktop/deviceTokens.ts`, `server.ts` |
+| Arborescence | `GET /roots`, `GET /nodes/:id`, `/children`, `/versions`, `/content` | `server/desktop/nodes.ts`, `src/lib/desktopNodes.ts` |
+| Journal | `GET /changes` (curseur, plancher, 410) | `server/desktop/changes.ts`, déclencheurs SQL |
+| Verrous | `POST/DELETE /nodes/:id/lock`, `/lock/renew` (modes `off`, `advisory`, `enforced`) | `server/desktop/locks.ts` |
+| Dépôt | `POST /uploads`, `PUT/GET /uploads/:id`, `POST /uploads/:id/complete` | `server/desktop/uploads.ts` |
+| Gestes | `PATCH`, `DELETE` (logique), `restore`, `bump-indice`, `link` | `server/routes/desktopSync.ts` |
+| Règle CAO | `409 EXTERNAL_STORAGE_REQUIRED` à l'ouverture et à la fin d'un dépôt, et au renommage | `src/lib/cadFiles.ts`, `server/desktop/uploads.ts` |
+
+**Tests** : `tests/desktopSyncDevices.test.ts`, `desktopSyncRoutes.test.ts`, `desktopSyncUploads.test.ts`, `src/lib/__tests__/cadFiles.test.ts`, `desktopNodes.test.ts`, et `tests/desktopSyncMigration.pg.test.ts` (vrai Postgres, ignoré sans `PGHOST`). Vérifié par mutation : retirer la règle CAO fait échouer 11 tests.
+
+**Pas encore fait** :
+
+- Clients natifs Windows (Cloud Files API) et macOS (File Provider).
+- Flux SSE `/events`.
+- Notification de la personne dont on rompt un verrou.
+- Réglage `settings.desktop_lock_mode` dans l'écran Réglages (la colonne existe, la valeur par défaut est `advisory`) : un cabinet ne peut pas encore le changer sans SQL.
+- Règle CAO sur la route web `POST/PUT /api/documents` (même faille que celle décrite en 8.4) et migration des CAO déjà dans Supabase.
+- Dépôt en flux : tout fichier est relu en mémoire à la fin, d'où un plafond de 200 Mo (`DESKTOP_MAX_UPLOAD_MB`).
+- Réponse `ETag` conditionnelle (`If-None-Match`) et gestion de `If-Match` sur `content`.
+- Purge automatique des documents de la corbeille après 30 jours.
+- Essais de gros fichiers sur un Nextcloud et un kDrive réels.
+- Application de la migration à une base Supabase distante.
