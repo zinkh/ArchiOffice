@@ -12,7 +12,20 @@ export interface DesktopBridge {
   getDataLocation: () => Promise<{ dbDataDir: string; storageDataDir: string }>;
   /** Ouvre l'un des deux dossiers dans l'explorateur de fichiers du système. */
   openDataFolder: (kind: 'db' | 'storage') => Promise<boolean>;
+  /** Sélectionne un fichier du cabinet dans l'explorateur. La clé vient de
+   *  GET /api/storage/local-file ; aucun chemin de disque ne passe par le renderer. */
+  revealFile: (ref: LocalFileRef) => Promise<boolean>;
+  /** Ouvre un fichier dans son application associée, sauf type pouvant lancer un programme. */
+  openFile: (ref: LocalFileRef) => Promise<OpenFileResult>;
 }
+
+/** Clé de stockage d'un fichier du cabinet (jamais un chemin de disque). */
+export interface LocalFileRef {
+  bucket: string;
+  path: string;
+}
+
+export type OpenFileResult = 'ok' | 'introuvable' | 'type_non_ouvrable' | 'echec';
 
 export function desktopBridge(): DesktopBridge | null {
   const bridge = (window as any).archiofficeDesktop;

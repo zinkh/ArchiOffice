@@ -26,6 +26,7 @@ import {
 import { ensureFolderPath, folderKeyFor, invalidateFolderSubtree } from './externalFolders';
 import { createProvider } from './providerFactory';
 import { ExternalFolderMissingError, ExternalStorageError } from './provider';
+import { LAST_NUMBERED_ATTEMPT, isDuplicateUploadError, readableObjectPath } from './localTreePath';
 
 export type BusinessBucket = 'documents' | 'plans';
 
@@ -150,9 +151,42 @@ export function createBusinessFileStore(deps: BusinessFileStoreDeps): {
     // elles l'appelaient avant de savoir où le fichier irait, et auraient donc
     // refusé pour cause de quota un dépôt qui ne consomme rien chez nous.
     await checkStorageQuota(target.tenantId, buffer.length);
+    if (offlineMode()) return storeInReadableTree(target, buffer, mimetype);
     const fileUrl = await uploadToStorage(target.bucket, target.supabasePath, buffer, mimetype);
     return { fileUrl, sizeBytes: buffer.length, storageBackend: 'supabase' };
   };
+
+  /**
+   * Poste Electron : le fichier est rangé dans une arborescence lisible
+   * (`<cabinet>/<affaire>/<phase>/<fichier>`, voir localTreePath.ts) au lieu du
+   * chemin Supabase à identifiants. Il reste dans le même dossier de stockage
+   * (éventuellement un partage réseau) et garde la forme `/object/public/...`,
+   * donc rien d'autre ne change pour les lecteurs de `file_url`.
+   *
+   * Deux fichiers de même nom dans la même phase sont normaux (deux indices d'un
+   * plan) : la passerelle refuse d'écraser (création exclusive) et on réessaie
+   * sous « nom (2) », « nom (3) »... Jamais d'écrasement silencieux.
+   */
+  async function storeInReadableTree(
+    target: BusinessFileTarget,
+    buffer: Buffer,
+    mimetype: string,
+  ): Promise<StoredFileRef> {
+    for (let attempt = 1; attempt <= LAST_NUMBERED_ATTEMPT + 1; attempt += 1) {
+      const objectPath = readableObjectPath(
+        { tenantId: target.tenantId, folderPath: target.folderPath, fileName: target.fileName },
+        attempt,
+      );
+      try {
+        const fileUrl = await uploadToStorage(target.bucket, objectPath, buffer, mimetype);
+        return { fileUrl, sizeBytes: buffer.length, storageBackend: 'supabase' };
+      } catch (err) {
+        if (!isDuplicateUploadError(err) || attempt > LAST_NUMBERED_ATTEMPT) throw err;
+      }
+    }
+    // Inatteignable : la dernière tentative lève ou retourne.
+    throw new Error("Impossible de trouver un nom libre pour ce fichier.");
+  }
 
   const removeBusinessFile: RemoveBusinessFile = async (tenantId, bucket, fileUrl) => {
     if (!isExternalRef(fileUrl)) {

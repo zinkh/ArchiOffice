@@ -32,6 +32,7 @@ import { AgentMissionsCard } from '../components/AgentMissionsCard';
 import { RagSettingsCard } from '../components/RagSettingsCard';
 import { AgencyMethodologyLibraryCard } from '../components/AgencyMethodologyLibraryCard';
 import { AutomationIntegrationsCard } from '../components/AutomationIntegrationsCard';
+import StorageTreeMigrationCard from '../components/StorageTreeMigrationCard';
 import { SwapText } from '../components/ui/SwapText';
 
 // ─── Plugin registry ──────────────────────────────────────────────────────────
@@ -3058,6 +3059,9 @@ export default function Settings() {
               </div>
             </div>
           )}
+
+          {/* ── Client Electron — arborescence lisible des documents (administrateurs) ── */}
+          {dataLocation && isAdmin && <StorageTreeMigrationCard />}
 
           {/* ── Poste lié au cloud mais dont l'import initial n'a jamais abouti ──
               server.ts ne démarre /api/sync que si importCompleted est vrai :

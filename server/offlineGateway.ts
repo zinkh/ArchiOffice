@@ -246,7 +246,20 @@ function mountStorageShim(router: Router, serviceRoleKey: string) {
       const filePath = safeObjectPath(req.params.bucket, relPath);
       if (!filePath) return res.status(400).json({ message: 'Invalid object path' });
       fs.mkdirSync(path.dirname(filePath), { recursive: true });
-      fs.writeFileSync(filePath, req.body);
+      // Comme le vrai Supabase Storage : `x-upsert: false` (supabase-js l'envoie
+      // pour upload(..., { upsert: false })) refuse d'écraser un objet existant.
+      // Création exclusive (`wx`) plutôt que « tester puis écrire » : deux postes
+      // qui partagent le même dossier réseau ne peuvent pas s'écraser entre le
+      // test et l'écriture. Un en-tête absent garde l'ancien comportement.
+      const exclusive = String(req.headers['x-upsert'] ?? '').toLowerCase() === 'false';
+      try {
+        fs.writeFileSync(filePath, req.body, { flag: exclusive ? 'wx' : 'w' });
+      } catch (err: any) {
+        if (err?.code === 'EEXIST') {
+          return res.status(409).json({ statusCode: '409', error: 'Duplicate', message: 'The resource already exists' });
+        }
+        throw err;
+      }
       res.json({ Id: relPath, Key: `${req.params.bucket}/${relPath}` });
     },
   );

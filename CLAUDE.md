@@ -3988,6 +3988,40 @@ seulement en tests headless. `flex: 0 0 84px` (une base explicite, plutôt que
 `flex-basis:auto` dérivé de `height`) lève l'ambiguïté dès cette première
 passe.
 
+### Arborescence lisible des fichiers (client Electron) et accès à l'Explorateur
+
+En mode hors ligne (`OFFLINE_MODE=true`, toujours le cas dans Electron), les fichiers de la GED et des
+plans ne sont plus rangés sous un nom aléatoire mais dans une arborescence que l'on ouvre à la main dans
+l'Explorateur, sur le dossier de stockage choisi au premier lancement (typiquement un partage NAS commun à
+plusieurs postes) : `<bucket>/<cabinet>/<code - affaire>/<phase>/<fichier>`.
+
+- **Chemins** : `server/externalStorage/localTreePath.ts` (`readableObjectPath`, pur, testé). Accents repliés
+  en ASCII (« Réhabilitation » devient « Rehabilitation ») : l'export vers le cloud (`initialExport`) ignore
+  sans bruit les clés non ASCII. Longueurs bornées (dossier 50, fichier 80, chemin 190) pour la limite de 260
+  caractères de Windows. Le premier segment reste le `tenantId` : c'est la frontière d'autorisation.
+- **Pas d'écrasement silencieux** : le gateway (`server/offlineGateway.ts`) honore `x-upsert: false` par une
+  écriture exclusive (`wx`) et répond 409. `storeBusinessFile` (`storeInReadableTree`) réessaie avec un suffixe
+  numéroté (50 tentatives) sur ce seul conflit.
+- **Références** : `objectPathFromRef` (`server/storagePaths.ts`) décode l'URL stockée ; `deleteFromStorage`
+  l'utilise (un chemin encodé ne se supprimait plus).
+- **Migration des fichiers existants** (`server/storageTreeMigration.ts`, routes
+  `server/routes/desktopStorage.ts`, carte `StorageTreeMigrationCard.tsx` dans Réglages, administrateurs) :
+  simuler, copier (jamais déplacer, empreinte sha256 vérifiée, reprise possible, journal
+  `.archioffice-migration.json` à côté du dossier de stockage), puis repointer `file_url`. Les anciens
+  fichiers ne sont supprimés que par un geste séparé (simulation puis confirmation), à faire quand tous les
+  postes sont à jour : un poste resté sur l'ancienne version a encore besoin des anciens chemins. Les routes
+  répondent 404 hors client de bureau.
+- **Explorateur et ouverture** : boutons « Afficher dans l'Explorateur » et « Ouvrir » (`Documents.tsx`,
+  `src/lib/localFiles.ts`). Le renderer ne fournit jamais de chemin de disque : le serveur
+  (`GET /api/storage/local-file`) vérifie l'appartenance au cabinet et rend une clé `{bucket, path}` ; le
+  processus principal (`electron/fileAccess.cjs`, IPC `desktop:reveal-file` / `desktop:open-file`) reconstruit
+  le chemin (realpath, rejet des liens symboliques et de `..`) et n'ouvre qu'une liste blanche d'extensions.
+- **Limites connues** : seuls `documents` et `plans` sont rangés ; `meeting-photos` et autres buckets, ainsi que
+  `receptions.document_url`, ne sont pas migrés ; boutons seulement dans `Documents.tsx`. Comportement sous
+  Windows/NAS réel et acceptation par Supabase Storage des noms avec espaces non vérifiés ici.
+- Tests : `localTreePath`, `readableTreeStorage`, `storageTreeMigration`, `desktopStorageRoutes`,
+  `electronFileAccess`, `src/lib/__tests__/localFiles.test.ts`.
+
 ### Emplacement des données (client Electron)
 
 Historiquement, la base Postgres embarquée (`pgdata/`) et les fichiers

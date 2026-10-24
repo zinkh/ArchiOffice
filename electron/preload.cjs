@@ -37,4 +37,13 @@ contextBridge.exposeInMainWorld('archiofficeDesktop', {
    *  l'explorateur de fichiers du système. Le chemin réel n'est jamais
    *  transmis au renderer : celui-ci ne fait que désigner LEQUEL ouvrir. */
   openDataFolder: (kind) => ipcRenderer.invoke('desktop:open-data-folder', kind),
+
+  /** Sélectionne un fichier du cabinet dans l'Explorateur. `ref` est sa clé de
+   *  stockage { bucket, path }, jamais un chemin de disque : le processus principal
+   *  reconstruit le sien (electron/fileAccess.cjs). Renvoie false si introuvable. */
+  revealFile: (ref) => ipcRenderer.invoke('desktop:reveal-file', ref),
+
+  /** Ouvre un fichier du cabinet dans son application associée. Renvoie 'ok',
+   *  'introuvable', 'type_non_ouvrable' (jamais un programme) ou 'echec'. */
+  openFile: (ref) => ipcRenderer.invoke('desktop:open-file', ref),
 });
