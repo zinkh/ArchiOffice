@@ -116,33 +116,38 @@ export function registerProjectArchiveRoutes(app: Express, { supabaseAdmin, getT
     }
   });
 
-  app.post('/api/projects/:id/archive', requireRole('admin', 'manager'), async (req: any, res: any) => {
-    try {
-      const tenantId = await getTenantId(req.user.id);
-      const project = await loadProject(tenantId, req.params.id);
-      if (!project) return res.status(404).json({ error: 'Affaire introuvable.' });
-      if (project.archived_at) return res.status(409).json({ error: 'Affaire déjà archivée.', code: 'PROJECT_ARCHIVED' });
+  interface Issue { status: number; body: Record<string, unknown> }
+
+  /**
+   * Archive UNE affaire : contrôles de clôture, motif de passage outre, journal,
+   * dépôt du dossier de clôture. Partagée par l'archivage à l'unité et en masse.
+   */
+  const archiverAffaire = async (req: any, tenantId: string, project: any, overrideBrut: unknown, reasonBrut: unknown): Promise<Issue> => {
+      if (project.archived_at) return { status: 409, body: { error: 'Affaire déjà archivée.', code: 'PROJECT_ARCHIVED' } };
 
       const checklist = await loadChecklist(supabaseAdmin, tenantId, project);
       const warnings = checklistWarnings(checklist);
-      const overrideReason = cleanReason(req.body?.override_reason);
+      const overrideReason = cleanReason(overrideBrut);
       // Clôture indicative : des contrôles en alerte n'interdisent rien, ils
       // demandent un motif de passage outre, conservé dans le journal.
       if (warnings.length && !overrideReason) {
-        return res.status(409).json({
-          error: 'Des contrôles de clôture sont en alerte : un motif est nécessaire pour archiver quand même.',
-          code: 'CHECKLIST_OVERRIDE_REQUIRED', checklist,
-        });
+        return {
+          status: 409,
+          body: {
+            error: 'Des contrôles de clôture sont en alerte : un motif est nécessaire pour archiver quand même.',
+            code: 'CHECKLIST_OVERRIDE_REQUIRED', checklist,
+          },
+        };
       }
 
       const archivedAt = new Date().toISOString();
       const until = retentionUntil(archivedAt, await retentionYears(supabaseAdmin, tenantId));
-      const reason = overrideReason || cleanReason(req.body?.reason);
+      const reason = overrideReason || cleanReason(reasonBrut);
       const { error } = await supabaseAdmin.from('projects').update({
         archived_at: archivedAt, archived_by: req.user.id, archive_reason: reason || null, retention_until: until,
       }).eq('id', project.id).eq('tenant_id', tenantId);
       if (error) {
-        if (isMissingSchema(error)) return res.status(503).json({ error: MIGRATION_MISSING });
+        if (isMissingSchema(error)) return { status: 503, body: { error: MIGRATION_MISSING } };
         throw error;
       }
       await writeLog(tenantId, project.id, 'archive', reason, warnings, req);
@@ -167,10 +172,104 @@ export function registerProjectArchiveRoutes(app: Express, { supabaseAdmin, getT
         dossier = { deposited: false, reason: 'deposit_failed' };
       }
 
-      res.json({ archived: true, archived_at: archivedAt, retention_until: until, overridden: warnings.length, dossier });
+      return {
+        status: 200,
+        body: { archived: true, archived_at: archivedAt, retention_until: until, overridden: warnings.length, dossier },
+      };
+  };
+
+  app.post('/api/projects/:id/archive', requireRole('admin', 'manager'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const project = await loadProject(tenantId, req.params.id);
+      if (!project) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const issue = await archiverAffaire(req, tenantId, project, req.body?.override_reason, req.body?.reason);
+      res.status(issue.status).json(issue.body);
     } catch (e: any) {
       console.error('[POST /api/projects/:id/archive]', e);
       res.status(500).json({ error: 'Impossible d’archiver l’affaire.' });
+    }
+  });
+
+  // ── Archivage en masse ─────────────────────────────────────────────────────
+  // Les affaires terminées depuis N mois, avec leurs contrôles de clôture, puis
+  // l'archivage groupé de celles qu'on choisit. Chaque affaire passe par le même
+  // chemin qu'à l'unité (contrôles, motif, journal, dossier de clôture).
+  const MAX_CANDIDATS = 50;
+  const MAX_ARCHIVAGE_GROUPE = 25;
+
+  app.get('/api/archive/candidates', requireRole('admin', 'manager'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const months = Math.min(Math.max(parseInt(String(req.query.months), 10) || 12, 1), 120);
+      const limite = new Date();
+      limite.setUTCMonth(limite.getUTCMonth() - months);
+      const limiteIso = limite.toISOString().slice(0, 10);
+
+      const { data, error } = await supabaseAdmin.from('projects').select('*')
+        .eq('tenant_id', tenantId).eq('status', 'Completed');
+      if (error) throw error;
+      const terminees = (data || []).filter((p: any) => !p.archived_at);
+      const datees = terminees.filter((p: any) => p.end_date && String(p.end_date).slice(0, 10) <= limiteIso)
+        .sort((a: any, b: any) => String(a.end_date).localeCompare(String(b.end_date)));
+      const retenues = datees.slice(0, MAX_CANDIDATS);
+
+      const candidates: Array<Record<string, unknown>> = [];
+      for (const p of retenues) {
+        const warnings = checklistWarnings(await loadChecklist(supabaseAdmin, tenantId, p));
+        candidates.push({
+          id: p.id, name: p.name, project_code: p.project_code ?? null, end_date: p.end_date,
+          warnings: warnings.map(({ id, label, detail }) => ({ id, label, detail })),
+        });
+      }
+      res.json({
+        months, candidates,
+        truncated: datees.length > retenues.length,
+        // Une affaire terminée sans date de fin ne peut pas être datée : elle n'est jamais proposée.
+        skipped_no_date: terminees.filter((p: any) => !p.end_date).length,
+      });
+    } catch (e: any) {
+      console.error('[GET /api/archive/candidates]', e);
+      res.status(500).json({ error: 'Impossible de lister les affaires à archiver.' });
+    }
+  });
+
+  app.post('/api/archive/bulk', requireRole('admin', 'manager'), async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const ids: string[] = Array.isArray(req.body?.project_ids)
+        ? [...new Set<string>(req.body.project_ids.filter((x: unknown): x is string => typeof x === 'string' && x.length > 0))]
+        : [];
+      if (ids.length === 0) return res.status(400).json({ error: 'Aucune affaire sélectionnée.' });
+      if (ids.length > MAX_ARCHIVAGE_GROUPE) {
+        return res.status(400).json({ error: `Pas plus de ${MAX_ARCHIVAGE_GROUPE} affaires à la fois.` });
+      }
+
+      const results: Array<{ id: string; name: string | null; outcome: string; dossier_deposited?: boolean }> = [];
+      for (const id of ids) {
+        const project = await loadProject(tenantId, id);
+        if (!project) { results.push({ id, name: null, outcome: 'introuvable' }); continue; }
+        try {
+          const issue = await archiverAffaire(req, tenantId, project, req.body?.override_reason, req.body?.reason);
+          const code = issue.body.code;
+          results.push({
+            id, name: project.name,
+            outcome: issue.status === 200 ? 'archivee'
+              : code === 'CHECKLIST_OVERRIDE_REQUIRED' ? 'motif_requis'
+              : code === 'PROJECT_ARCHIVED' ? 'deja_archivee'
+              : 'echec',
+            dossier_deposited: (issue.body.dossier as DossierDepose | undefined)?.deposited ?? false,
+          });
+        } catch (e) {
+          // Une affaire en échec n'arrête pas les autres.
+          console.error('[POST /api/archive/bulk]', id, e);
+          results.push({ id, name: project.name, outcome: 'echec' });
+        }
+      }
+      res.json({ results, archived: results.filter(r => r.outcome === 'archivee').length });
+    } catch (e: any) {
+      console.error('[POST /api/archive/bulk]', e);
+      res.status(500).json({ error: 'Impossible d’archiver les affaires.' });
     }
   });
 

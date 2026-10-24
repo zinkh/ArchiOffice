@@ -19,6 +19,22 @@ export async function archivedProjectIds(supabaseAdmin: any, tenantId: string): 
 }
 
 /**
+ * Les affaires archivées du cabinet avec leur date de fin de conservation,
+ * pour l'alerte d'échéance. Vide quand la colonne n'existe pas encore.
+ */
+export async function archivedProjectsWithRetention(
+  supabaseAdmin: any, tenantId: string,
+): Promise<Array<{ id: string; name: string | null; project_code: string | null; retention_until: string | null }>> {
+  try {
+    const { data, error } = await supabaseAdmin.from('projects').select('id, name, project_code, retention_until')
+      .eq('tenant_id', tenantId).not('archived_at', 'is', null);
+    return error ? [] : (data || []);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Retire les lignes d'une affaire archivée. `cle` vaut `project_id` pour les
  * lignes rattachées à une affaire, `id` pour la liste des affaires elle-même ;
  * une ligne sans affaire (réunion libre, appel d'offres) est conservée.

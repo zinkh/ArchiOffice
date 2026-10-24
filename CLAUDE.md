@@ -3464,9 +3464,31 @@ NULL = affaire active). Une instance non migrée garde le comportement d'avant :
   (le quota est justement ce que l'espace externe épargne) et la réponse porte `dossier.reason = 'no_external_storage'` ;
   un espace qui ne répond pas donne `deposit_failed` sans défaire l'archivage. Le dossier ne contient pas les fichiers
   eux-mêmes, seulement leur index.
-- **Pas encore fait** : réglage de la durée dans `/settings`, exclusion des affaires archivées des alertes,
-  suggestions, planning et pointage, archivage en masse, alerte d'échéance de conservation, garde de lecture seule
-  sur les routes rattachées à l'affaire.
+- **Lecture seule complète** (`server/archivedProjectGuard.ts`, monté dans `server.ts` APRÈS l'authentification et AVANT
+  toute route) : une écriture (`POST/PUT/PATCH/DELETE`) qui vise une affaire archivée répond 409 `PROJECT_ARCHIVED`. Le garde
+  lit le projet dans le chemin (`/projects/:id/...`), dans le corps (`project_id` d'une création) ou dans la ligne visée
+  (`TABLES_RATTACHEES` : tâches, documents, factures, réserves, OS, situations, marchés, notes d'honoraires, RFI, réunions,
+  permis, plans, avenants, pointage). Exemptés : lecture, `archive` / `unarchive`, création et suppression de l'affaire,
+  génération d'un PDF (`.../pdf`). Un envoi multipart (`POST /api/documents`) n'est lisible qu'après `multer` : sa route
+  vérifie elle-même. **Toute NOUVELLE table rattachée à une affaire s'ajoute à `TABLES_RATTACHEES`**, sinon ses lignes
+  restent modifiables. Un garde qui échoue laisse passer (journalisé) plutôt que de fermer l'application.
+- **Affaires archivées hors du suivi** (`server/archivedProjects.ts`) : les alertes métier (`loadTenantSnapshot`) et les
+  suggestions IA ne lisent plus leurs lignes (une alerte déjà ouverte se referme au cycle suivant), le planning, le
+  tableau de bord et les sélecteurs de pointage non plus. `GET /api/projects` les rend toujours, avec `archived_at` : les
+  pages qui s'en servent comme annuaire résolvent encore leur nom.
+- **Durée de conservation** : `settings.archive_retention_years` (1 à 50, vide = 10), carte « Archivage » de `/settings`
+  (onglet Cabinet). Elle s'applique aux archivages FUTURS : changer la durée ne recalcule pas `retention_until` des
+  affaires déjà archivées. Règle d'alerte `conservation_echeance` (`defaultThresholdDays` 90, gravité info, affaires
+  archivées dont la fin de conservation est dans le seuil ou dépassée) : elle prévient, **rien n'est jamais purgé seul**.
+- **Archivage en masse** (`GET /api/archive/candidates?months=`, `POST /api/archive/bulk`, administrateurs et managers,
+  `BulkArchiveDialog.tsx`, bouton « Archiver les terminées » de `/projects`) : les affaires `Completed` dont la date de
+  fin remonte à N mois (une affaire terminée SANS date de fin n'est jamais proposée, le nombre en est donné), 50 au plus
+  proposées, 25 au plus archivées par appel. Chaque affaire passe par `archiverAffaire` (le même code que l'archivage à
+  l'unité : contrôles, motif, journal, dossier de clôture) ; un motif commun couvre celles en alerte, une affaire en
+  échec n'arrête pas les autres, et le résultat dit pour chacune `archivee`, `deja_archivee`, `motif_requis`,
+  `introuvable` ou `echec`.
+- **Pas encore fait** : exclusion des affaires archivées des écrans qui les listent pour une autre raison (calendrier,
+  courrier, documents), recalcul de `retention_until` quand la durée change, purge assistée en fin de conservation.
 
 ### Pagination et fan-out sur les listes
 

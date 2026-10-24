@@ -7,6 +7,7 @@ import type { Project, ProjectCategory, Milestone, ProjectTemplate } from '../ty
 import { useTranslation } from 'react-i18next';
 import { OPERATION_LABELS, summarizeTemplate } from '../lib/projectTemplates';
 import { useUser } from '../UserContext';
+import { BulkArchiveDialog } from '../components/BulkArchiveDialog';
 import { db } from '../db';
 import { queuedJsonRequest } from '../lib/offlineQueue';
 import { refreshOfflineProjects } from '../lib/offlinePrefetch';
@@ -148,6 +149,7 @@ export default function Projects() {
   const [filterStatus, setFilterStatus] = useState<string>('All');
   // Les affaires archivées sont rangées : masquées par défaut, consultables ici.
   const [showArchived, setShowArchived] = useState(false);
+  const [showBulkArchive, setShowBulkArchive] = useState(false);
   const [filterCategory, setFilterCategory] = useState<string>('All');
   const [filterProjectManager, setFilterProjectManager] = useState<string>('All');
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -782,6 +784,19 @@ export default function Projects() {
             <IconArchive size={16} />
             {showArchived ? t('projects_filter_archived') : t('projects_filter_active')}
           </button>
+          {(currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager') && (
+            <button
+              onClick={() => setShowBulkArchive(true)}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"
+              style={{ border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}
+            >
+              <IconArchive size={16} />
+              {t('projects_bulk_archive_button')}
+            </button>
+          )}
+          {showBulkArchive && (
+            <BulkArchiveDialog onClose={() => setShowBulkArchive(false)} onDone={fetchProjects} />
+          )}
           <button
             onClick={cycleFilter}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors"

@@ -4,7 +4,7 @@ import request from 'supertest';
 import type { Express } from 'express';
 import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader, connectExternalStorage } from './testServer';
 import { memoryDrive } from '../server/externalStorage/memoryProvider';
-import { loadTenantSnapshot } from '../server/agentAlerts';
+import { ALERT_RULES_BY_CODE, loadTenantSnapshot } from '../server/agentAlerts';
 
 let app: Express;
 
@@ -225,6 +225,81 @@ describe('Archivage des affaires', () => {
     const res = await request(app).post('/api/projects/ar11/archive').set(authHeader(token)).send({});
     expect(res.status).toBe(200);
     expect(res.body.retention_until).toMatch(new RegExp(`^${new Date().getUTCFullYear() + 15}-`));
+  });
+
+  it('prévient avant la fin de conservation, sans rien supprimer', () => {
+    const regle = ALERT_RULES_BY_CODE.get('conservation_echeance')!;
+    const now = new Date('2036-06-01T08:00:00.000Z');
+    const snapshot = {
+      tenantId: 't', now, projects: [], phaseHistory: [], contrats: [], invoices: [], proposals: [], tenders: [], tasks: [],
+      meetings: [], ordresDeService: [], reserves: [], notesHonoraires: [], qualifications: [], consultations: [], marches: [], documents: [],
+      archivedProjects: [
+        { id: 'proche', name: 'Villa proche', retention_until: '2036-07-15' },
+        { id: 'echue', name: 'Villa échue', retention_until: '2036-05-01' },
+        { id: 'loin', name: 'Villa lointaine', retention_until: '2040-01-01' },
+        { id: 'sans-date', name: 'Villa sans date', retention_until: null },
+      ],
+    };
+    const alertes = regle.evaluate(snapshot as any, regle.defaultThresholdDays ?? 90);
+    expect(alertes.map(a => a.targetId).sort()).toEqual(['echue', 'proche']);
+    expect(alertes.find(a => a.targetId === 'echue')!.message).toContain('échue');
+    expect(regle.evaluate({ ...snapshot, archivedProjects: undefined } as any, 90)).toEqual([]);
+  });
+
+  it('propose les affaires terminées depuis longtemps, avec leurs contrôles', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const { token } = makeUser(tenantId, 'manager');
+    fakeSupabaseAdmin.seed('projects', [
+      { id: 'cd-vieille-propre', tenant_id: tenantId, name: 'Vieille propre', client: 'A', status: 'Completed', end_date: '2018-03-01' },
+      { id: 'cd-vieille-facture', tenant_id: tenantId, name: 'Vieille à solder', client: 'B', status: 'Completed', end_date: '2019-03-01' },
+      { id: 'cd-recente', tenant_id: tenantId, name: 'Récente', client: 'C', status: 'Completed', end_date: new Date().toISOString().slice(0, 10) },
+      { id: 'cd-sans-date', tenant_id: tenantId, name: 'Sans date', client: 'D', status: 'Completed' },
+      { id: 'cd-en-cours', tenant_id: tenantId, name: 'En cours', client: 'E', status: 'In Progress', end_date: '2018-01-01' },
+      { id: 'cd-deja', tenant_id: tenantId, name: 'Déjà rangée', client: 'F', status: 'Completed', end_date: '2018-01-01', archived_at: '2024-01-01T00:00:00.000Z' },
+    ]);
+    fakeSupabaseAdmin.seed('documents', [
+      { id: 'cd-v1', tenant_id: tenantId, project_id: 'cd-vieille-propre', doc_type: 'DOE_VISA', name: 'Visa.pdf' },
+      { id: 'cd-v2', tenant_id: tenantId, project_id: 'cd-vieille-facture', doc_type: 'DOE_VISA', name: 'Visa.pdf' },
+    ]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'cd-i', tenant_id: tenantId, project_id: 'cd-vieille-facture', status: 'Sent' }]);
+
+    const res = await request(app).get('/api/archive/candidates?months=12').set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body.candidates.map((c: any) => c.id)).toEqual(['cd-vieille-propre', 'cd-vieille-facture']);
+    expect(res.body.candidates[0].warnings).toEqual([]);
+    expect(res.body.candidates[1].warnings.map((w: any) => w.id)).toEqual(['invoices']);
+    expect(res.body.skipped_no_date).toBe(1);
+
+    const member = makeUser(tenantId, 'user');
+    expect((await request(app).get('/api/archive/candidates').set(authHeader(member.token))).status).toBe(403);
+  });
+
+  it('archive en masse : les alertes demandent un motif, une affaire en échec n’arrête pas les autres', async () => {
+    const tenantId = makeTenant({ plan: 'pro' });
+    const autre = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    seedCleanProject(tenantId, 'bk-propre');
+    seedProject(tenantId, 'bk-facture');
+    fakeSupabaseAdmin.seed('documents', [{ id: 'bk-visa', tenant_id: tenantId, project_id: 'bk-facture', doc_type: 'DOE_VISA', name: 'Visa.pdf' }]);
+    fakeSupabaseAdmin.seed('invoices', [{ id: 'bk-i', tenant_id: tenantId, project_id: 'bk-facture', status: 'Sent' }]);
+    seedCleanProject(autre, 'bk-etranger');
+
+    const sansMotif = await request(app).post('/api/archive/bulk').set(authHeader(token))
+      .send({ project_ids: ['bk-propre', 'bk-facture', 'bk-etranger', 'inconnue'] });
+    expect(sansMotif.status).toBe(200);
+    const parId = Object.fromEntries(sansMotif.body.results.map((r: any) => [r.id, r.outcome]));
+    expect(parId).toEqual({ 'bk-propre': 'archivee', 'bk-facture': 'motif_requis', 'bk-etranger': 'introuvable', inconnue: 'introuvable' });
+    expect(sansMotif.body.archived).toBe(1);
+
+    const avecMotif = await request(app).post('/api/archive/bulk').set(authHeader(token))
+      .send({ project_ids: ['bk-propre', 'bk-facture'], override_reason: 'Facture réglée hors plateforme' });
+    const parId2 = Object.fromEntries(avecMotif.body.results.map((r: any) => [r.id, r.outcome]));
+    expect(parId2).toEqual({ 'bk-propre': 'deja_archivee', 'bk-facture': 'archivee' });
+    expect(fakeSupabaseAdmin.getTable('project_archive_log').filter((l: any) => l.project_id === 'bk-facture')).toHaveLength(1);
+
+    expect((await request(app).post('/api/archive/bulk').set(authHeader(token)).send({ project_ids: [] })).status).toBe(400);
+    const trop = Array.from({ length: 26 }, (_, i) => `x${i}`);
+    expect((await request(app).post('/api/archive/bulk').set(authHeader(token)).send({ project_ids: trop })).status).toBe(400);
   });
 
   it('n’archive pas l’affaire d’un autre cabinet', async () => {
