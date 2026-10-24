@@ -5,7 +5,7 @@ import {
   IconUpload, IconCloudOff, IconCloud, IconChevronDown, IconChevronRight, IconFolder,
   IconFolderOpen, IconLayoutSidebar, IconCircleCheck, IconClock,
   IconAlertTriangle, IconSend, IconCheck, IconUsers, IconEye,
-  IconPencil,
+  IconPencil, IconExternalLink,
 } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
@@ -15,6 +15,7 @@ import { useUser } from '../UserContext';
 import { apiFetch } from '../lib/api';
 import { getAccessToken } from '../lib/authToken';
 import { openSignedUrl } from '../lib/signedStorageUrl';
+import { canUseLocalFiles, openLocalFile, revealLocalFile } from '../lib/localFiles';
 
 const PHASES: DocumentPhase[] = ['ESQ', 'APS', 'APD', 'PC', 'PRO', 'DCE', 'ACT', 'VISA', 'DET', 'AOR', 'Général'];
 
@@ -602,6 +603,16 @@ export default function Documents() {
                           <button className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => openUpdateModal(doc)} title="Modifier">
                             <IconPencil size={15} />
                           </button>
+                          {canUseLocalFiles() && (
+                            <>
+                              <button className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => revealLocalFile(doc.file_url)} title={t('local_file_reveal')} aria-label={t('local_file_reveal')}>
+                                <IconFolderOpen size={15} />
+                              </button>
+                              <button className="p-1.5 rounded-lg transition-colors" style={{ color: 'var(--tblr-muted)' }} onClick={() => openLocalFile(doc.file_url)} title={t('local_file_open')} aria-label={t('local_file_open')}>
+                                <IconExternalLink size={15} />
+                              </button>
+                            </>
+                          )}
                           <button className="p-1.5 rounded-lg transition-colors" style={{ color: isPerime ? '#d63939' : 'var(--tblr-muted)' }} onClick={() => handleDownload(doc)} title="Télécharger">
                             <IconDownload size={15} />
                           </button>

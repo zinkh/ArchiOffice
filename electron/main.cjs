@@ -7,6 +7,7 @@ const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 const { resolveDataLocation } = require('./dataLocation.cjs');
+const { resolveStorageFile, isSafeToOpen } = require('./fileAccess.cjs');
 const { createAppMenu } = require('./menu.cjs');
 
 // package.json's "name" is the npm workspace root ("react-example", a
@@ -324,6 +325,37 @@ function registerDataLocationIpc() {
     if (!dir) return false;
     shell.openPath(dir).catch((err) => log('[dataLocation] Échec ouverture dossier :', err));
     return true;
+  });
+
+  // Fichiers du cabinet : le renderer désigne un fichier par sa clé de stockage
+  // ({ bucket, path }, vérifiée côté serveur) et jamais par un chemin de disque. Le
+  // chemin réel est reconstruit ici, sous le dossier de stockage que seul ce
+  // processus connaît (voir electron/fileAccess.cjs).
+  ipcMain.handle('desktop:reveal-file', (_event, ref) => {
+    const file = dataLocation && resolveStorageFile(dataLocation.storageDataDir, ref && ref.bucket, ref && ref.path);
+    if (!file) return false;
+    shell.showItemInFolder(file); // sélectionne le fichier, ne lance rien
+    return true;
+  });
+
+  // 'ok' | 'introuvable' | 'type_non_ouvrable' | 'echec'. Un type qui pourrait lancer
+  // un programme n'est jamais ouvert : il reste consultable par « Afficher dans
+  // l'Explorateur ».
+  ipcMain.handle('desktop:open-file', async (_event, ref) => {
+    const file = dataLocation && resolveStorageFile(dataLocation.storageDataDir, ref && ref.bucket, ref && ref.path);
+    if (!file) return 'introuvable';
+    if (!isSafeToOpen(file)) return 'type_non_ouvrable';
+    try {
+      const error = await shell.openPath(file);
+      if (error) {
+        log('[fileAccess] Échec ouverture fichier :', error);
+        return 'echec';
+      }
+      return 'ok';
+    } catch (err) {
+      log('[fileAccess] Échec ouverture fichier :', err);
+      return 'echec';
+    }
   });
 }
 

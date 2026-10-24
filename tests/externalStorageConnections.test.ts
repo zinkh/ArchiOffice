@@ -78,11 +78,28 @@ describe('POST /api/external-storage/webdav', () => {
   it('refuse une URL qui pointe sur le réseau interne', async () => {
     const tenantId = makeTenant();
     const { token } = makeUser(tenantId, 'admin');
-    for (const baseUrl of ['http://127.0.0.1/dav/', 'http://169.254.169.254/latest/meta-data/']) {
+    for (const baseUrl of [
+      'https://127.0.0.1/dav/',
+      'https://169.254.169.254/latest/meta-data/',
+      // Forme hexadécimale d'une adresse IPv4 encapsulée : 127.0.0.1.
+      'https://[::ffff:7f00:1]/dav/',
+    ]) {
       const res = await request(app).post('/api/external-storage/webdav')
         .set(authHeader(token)).send({ ...NEXTCLOUD, baseUrl });
       expect(res.status).toBe(403);
     }
+    expect(fakeSupabaseAdmin.getTable('external_storage_connections').filter((c) => c.tenant_id === tenantId)).toHaveLength(0);
+  });
+
+  // Le mot de passe d'application part en Basic Auth : jamais en clair.
+  it('refuse une adresse http, même publique', async () => {
+    const tenantId = makeTenant();
+    const { token } = makeUser(tenantId, 'admin');
+    const res = await request(app).post('/api/external-storage/webdav')
+      .set(authHeader(token))
+      .send({ ...NEXTCLOUD, baseUrl: 'http://203.0.113.10/remote.php/dav/files/khaldoun/' });
+    expect(res.status).toBe(400);
+    expect(String(res.body.error)).toMatch(/HTTPS/);
     expect(fakeSupabaseAdmin.getTable('external_storage_connections').filter((c) => c.tenant_id === tenantId)).toHaveLength(0);
   });
 

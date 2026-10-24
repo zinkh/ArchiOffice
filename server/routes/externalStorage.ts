@@ -12,7 +12,7 @@
 // server/routes/settings.ts.
 import type { Express } from 'express';
 import crypto from 'crypto';
-import { assertPublicHttpUrl } from '../ssrfGuard';
+import { resolvePublicUrl } from '../ssrfGuard';
 import { encryptSecret } from '../secretsCrypto';
 import { createOAuthState, consumeOAuthState, oauthErrorParam } from '../oauthState';
 import { createProvider, hasProviderFactory } from '../externalStorage/providerFactory';
@@ -267,8 +267,9 @@ export function registerExternalStorageRoutes(
         return res.status(503).json({ error: "Le connecteur WebDAV n'est pas disponible sur cette instance." });
       }
       // L'URL vient du cabinet : elle ne doit jamais pouvoir viser un service
-      // interne. Lève une erreur portant son propre statut (400 ou 403).
-      await assertPublicHttpUrl(baseUrl);
+      // interne, et le mot de passe d'application part en Basic Auth, donc HTTPS
+      // obligatoire. Lève une erreur portant son propre statut (400 ou 403).
+      await resolvePublicUrl(baseUrl, { requireHttps: true });
 
       const candidate: ExternalStorageConnection = {
         id: crypto.randomUUID(),

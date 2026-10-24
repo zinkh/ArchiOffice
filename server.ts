@@ -129,6 +129,9 @@ import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
 import { registerExternalStorageRoutes } from "./server/routes/externalStorage";
+import { objectPathFromRef } from "./server/storagePaths";
+import { registerDesktopStorageRoutes } from "./server/routes/desktopStorage";
+import { storageDir } from "./server/offlineAccount";
 import { registerAutomationApiKeyRoutes } from "./server/routes/automationApiKeys";
 import { registerWebhookRoutes } from "./server/routes/webhooks";
 import { createBusinessFileStore } from "./server/externalStorage/storeBusinessFile";
@@ -733,8 +736,10 @@ export async function createApp() {
   }
 
   async function deleteFromStorage(bucket: string, fileUrl: string) {
-    const marker = `/object/public/${bucket}/`;
-    const path = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl;
+    // Nom d'objet décodé : l'URL est encodée (« Villa%20Martin ») alors que
+    // `remove()` attend le nom réel, et un fichier à nom lisible n'était sinon
+    // jamais trouvé, donc jamais supprimé, sans qu'aucune erreur le dise.
+    const path = objectPathFromRef(bucket, fileUrl);
     await supabaseAdmin.storage.from(bucket).remove([path]).catch(() => {});
   }
 
@@ -1143,6 +1148,14 @@ export async function createApp() {
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
+  // Client de bureau seulement (répond 404 ailleurs) : ouverture d'un fichier dans
+  // l'Explorateur et migration vers l'arborescence lisible.
+  registerDesktopStorageRoutes(app, {
+    supabaseAdmin, getTenantId, requireRole,
+    storageRoot: (bucket) => storageDir(bucket),
+    publicUrl: (bucket, objectPath) => supabaseAdmin.storage.from(bucket).getPublicUrl(objectPath).data.publicUrl,
+    journalPath: () => path.join(path.dirname(storageDir('documents')), '.archioffice-migration.json'),
+  });
   registerKnowledgeSharingRoutes(app, { supabaseAdmin, requireTenantAdmin });
   registerInspirationRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerTaskRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });

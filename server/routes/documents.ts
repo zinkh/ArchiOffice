@@ -19,6 +19,7 @@ import { handleDocumentUpload } from '../documentUpload';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { buildDocumentFolderPath } from '../externalStorage/businessFolderPath';
+import { createDocumentFolderResolver } from '../externalStorage/documentFolders';
 import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
 // Ressources auxquelles une pièce jointe peut se rattacher au-delà d'un
@@ -61,40 +62,10 @@ export interface RouteDeps {
 }
 
 export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole }: RouteDeps) {
-  // Le numéro et le nom de l'affaire nomment son dossier sur l'espace du
-  // cabinet (« 26014 - Villa Martin »). Lecture sautée pour un document sans
-  // affaire, et sans incidence quand le cabinet n'a branché aucun espace :
-  // storeBusinessFile ignore alors le chemin logique.
-  async function loadFolderProject(projectId: string | null, tenantId: string) {
-    if (!projectId) return null;
-    const { data } = await supabaseAdmin.from('projects')
-      .select('project_code, name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
-    return (data as any) || null;
-  }
-
-  // Le sous-dossier d'une pièce jointe rattachée à autre chose qu'un projet
-  // (permis, réunion, réserve...) : la plupart de ces ressources portent
-  // elles-mêmes un project_id, donc le fichier va nicher dans le dossier de
-  // l'affaire — sinon (contacts, devis, appels d'offres, qui n'ont pas
-  // encore d'affaire) il tombe dans un sous-dossier nommé d'après la
-  // ressource, à la racine « Général », comme un document sans affaire.
-  const RESOURCE_FOLDER_LABELS: Record<string, string> = {
-    contacts: 'Contacts', proposals: 'Devis', tenders: "Appels d'offres",
-    permits: 'Permis', meetings: 'Réunions', receptions: 'Réceptions', reserves: 'Réserves',
-    contrats_moe: 'Contrats MOE', ordres_de_service: 'Ordres de service', visas: 'VISA',
-    notes_honoraires: "Notes d'honoraires", marches_entreprises: 'Marchés entreprises',
-    tasks: 'Tâches', milestones: 'Jalons', agents: 'Bibliothèque de connaissances',
-    agency_library: 'Bibliothèque notes méthodologiques',
-  };
-
-  async function folderPathForResource(resourceType: string, resourceId: string | null, tenantId: string): Promise<string[]> {
-    if (resourceType === 'projects') return buildDocumentFolderPath(await loadFolderProject(resourceId, tenantId), null);
-    if (!resourceId || resourceType === 'agency_library') return buildDocumentFolderPath(null, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
-    const { data } = await supabaseAdmin.from(resourceType).select('project_id').eq('id', resourceId).eq('tenant_id', tenantId).maybeSingle();
-    const linkedProjectId = (data as any)?.project_id || null;
-    const project = linkedProjectId ? await loadFolderProject(linkedProjectId, tenantId) : null;
-    return buildDocumentFolderPath(project, RESOURCE_FOLDER_LABELS[resourceType] || resourceType);
-  }
+  // Dossier d'un document selon son rattachement (affaire, phase, ressource) :
+  // règle partagée avec la migration des fichiers existants, voir
+  // server/externalStorage/documentFolders.ts.
+  const { loadFolderProject, folderPathForResource } = createDocumentFolderResolver(supabaseAdmin);
 
   app.get("/api/documents", async (req: any, res: any) => {
     try {

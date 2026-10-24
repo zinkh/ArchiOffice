@@ -32,6 +32,21 @@ export interface ParsedStorageRef {
   path: string;
 }
 
+/** Le nom d'objet RÉEL (décodé) d'une référence `…/object/public/<bucket>/<path>`,
+ *  ou le texte tel quel quand ce n'est pas une URL de ce bucket (chemin déjà nu).
+ *  L'URL est encodée (« Villa%20Martin ») alors que `remove()` et `download()`
+ *  attendent le nom d'objet : sans décodage, un fichier à nom lisible n'est jamais
+ *  retrouvé. */
+export function objectPathFromRef(bucket: string, fileUrl: string): string {
+  const marker = `${PUBLIC_URL_MARKER}${bucket}/`;
+  const raw = fileUrl.includes(marker) ? fileUrl.split(marker)[1] : fileUrl;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw; // « % » littéral dans un chemin déjà brut
+  }
+}
+
 /** Parses the bucket + object path back out of a stored `getPublicUrl()`-shaped
  *  string (…/storage/v1/object/public/<bucket>/<path>). Returns null for
  *  anything that isn't a URL of that shape (already-bare paths, foreign URLs). */
