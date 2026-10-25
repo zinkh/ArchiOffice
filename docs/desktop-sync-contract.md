@@ -387,8 +387,9 @@ Un jeu de scénarios exécuté contre un serveur de test, par le client Windows 
 - Clients natifs Windows (Cloud Files API) et macOS (File Provider).
 - Flux SSE `/events`.
 - Notification de la personne dont on rompt un verrou.
-- Réglage `settings.desktop_lock_mode` dans l'écran Réglages (la colonne existe, la valeur par défaut est `advisory`) : un cabinet ne peut pas encore le changer sans SQL.
-- Règle CAO sur la route web `POST/PUT /api/documents` (même faille que celle décrite en 8.4) et migration des CAO déjà dans Supabase.
+- Fait : réglage `settings.desktop_lock_mode` dans Réglages > Cabinet (carte « Synchronisation desktop : verrouillage des documents », administrateurs, valeurs `off`, `advisory`, `enforced` validées par `PUT /api/settings`).
+- Fait : la règle CAO s'applique aussi au web, au cœur de `storeBusinessFile` (documents, plans, visas, DOE) : 409 `EXTERNAL_STORAGE_REQUIRED` sans espace externe actif, exemption du mode hors ligne.
+- Reste : migration des CAO déjà présents dans Supabase.
 - Dépôt en flux : tout fichier est relu en mémoire à la fin, d'où un plafond de 200 Mo (`DESKTOP_MAX_UPLOAD_MB`).
 - Réponse `ETag` conditionnelle (`If-None-Match`) et gestion de `If-Match` sur `content`.
 - Purge automatique des documents de la corbeille après 30 jours.

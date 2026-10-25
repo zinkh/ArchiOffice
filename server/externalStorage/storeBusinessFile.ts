@@ -14,6 +14,7 @@
 // fichier ? » insoluble, deux fichiers de la même affaire pouvant vivre à deux
 // endroits sans que rien ne l'explique. Mieux vaut un message clair et un dépôt
 // à refaire.
+import { isCadFileName } from '../../src/lib/cadFiles';
 import { sanitizeExternalFileName } from './folderNaming';
 import { buildExternalRef, isExternalRef, parseExternalRef } from './externalRef';
 import {
@@ -150,6 +151,17 @@ export function createBusinessFileStore(deps: BusinessFileStoreDeps): {
     // Branche Supabase. Le contrôle de quota vit ICI et non dans les routes :
     // elles l'appelaient avant de savoir où le fichier irait, et auraient donc
     // refusé pour cause de quota un dépôt qui ne consomme rien chez nous.
+    // Règle CAO : les octets d'un fichier CAO, BIM ou 3D ne vont jamais dans
+    // Supabase Storage. Sans espace externe actif, le dépôt est refusé (409),
+    // sans repli. Le poste Electron (mode hors ligne) garde ses octets sur place.
+    if (!offlineMode() && isCadFileName(target.fileName)) {
+      const refused: any = new Error(
+        "Les fichiers CAO, BIM et 3D ne sont pas stockés sur ArchiOffice : connectez l'espace de stockage du cabinet (Réglages) pour les déposer.",
+      );
+      refused.status = 409;
+      refused.code = 'EXTERNAL_STORAGE_REQUIRED';
+      throw refused;
+    }
     await checkStorageQuota(target.tenantId, buffer.length);
     if (offlineMode()) return storeInReadableTree(target, buffer, mimetype);
     const fileUrl = await uploadToStorage(target.bucket, target.supabasePath, buffer, mimetype);
