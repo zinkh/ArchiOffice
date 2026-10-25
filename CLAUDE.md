@@ -4295,8 +4295,10 @@ une instance non migrée répond 503 `DESKTOP_SYNC_UNAVAILABLE` sur ce préfixe 
   `src/lib/cadFiles.ts` (`CAD_EXTENSIONS`, liste unique) ; `server/desktop/uploads.ts` répond 409
   `EXTERNAL_STORAGE_REQUIRED` à l'ouverture d'un dépôt, le revérifie à la fin (le dépôt peut durer des heures) et
   `PATCH` refuse de renommer un fichier Supabase en `.dwg`. Pas de repli : un espace externe en panne fait échouer
-  le dépôt. Mode hors ligne (`OFFLINE_MODE`) exempté, les octets restant sur le poste. **Pas encore appliquée à
-  `POST/PUT /api/documents`** (l'écran Documents envoie encore un CAO dans Supabase sans espace branché).
+  le dépôt. Mode hors ligne (`OFFLINE_MODE`) exempté, les octets restant sur le poste. **Appliquée aussi au web** : la
+  branche Supabase de `storeBusinessFile` (documents, plans, visas, DOE) refuse un CAO en 409
+  `EXTERNAL_STORAGE_REQUIRED` avant le quota (`tests/cadRuleDocuments.test.ts`). Le mode de verrouillage se règle
+  dans Réglages > Cabinet (`settings.desktop_lock_mode`, `PUT /api/settings` valide `off`, `advisory`, `enforced`).
   `tests/desktopSyncUploads.test.ts` compte les écritures vers Supabase Storage ; retirer la règle fait échouer 11 tests.
 - **Version technique et indice de diffusion sont deux choses.** Un dépôt crée `version + 1` et laisse l'indice
   (`A`, `B`...) intact ; il n'avance que sur demande (`bumpIndice`, `POST /nodes/:id/bump-indice`). L'ancien
