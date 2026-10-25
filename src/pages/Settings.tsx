@@ -339,6 +339,7 @@ export default function Settings() {
     numAffaireDigits: 3,
     invoicePaymentTermsDays: 30,
     archiveRetentionYears: 10,
+    desktopLockMode: 'advisory',
     defaultLeaveDaysCongesPayes: 25,
     defaultLeaveDaysRtt: 0,
     maf_enabled: false,
@@ -2663,6 +2664,31 @@ export default function Settings() {
             </div>
             {renderSaveButton('archiveRetention', () => saveSection('archiveRetention', {
               archiveRetentionYears: settings.archiveRetentionYears ?? 10,
+            }))}
+          </div>
+
+          {/* ── Synchronisation desktop : verrouillage des documents ── */}
+          <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+            <div>
+              <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('settings_desktop_lock_title')}</h2>
+              <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_desktop_lock_help')}</p>
+            </div>
+            <div className="max-w-md">
+              <label htmlFor="desktop-lock-mode" className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('settings_desktop_lock_label')}</label>
+              <select
+                id="desktop-lock-mode"
+                className="w-full p-2 rounded-lg text-sm"
+                style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                value={settings.desktopLockMode ?? 'advisory'}
+                onChange={e => setSettings({ ...settings, desktopLockMode: e.target.value })}
+              >
+                <option value="off">{t('settings_desktop_lock_off')}</option>
+                <option value="advisory">{t('settings_desktop_lock_advisory')}</option>
+                <option value="enforced">{t('settings_desktop_lock_enforced')}</option>
+              </select>
+            </div>
+            {renderSaveButton('desktopLock', () => saveSection('desktopLock', {
+              desktopLockMode: settings.desktopLockMode ?? 'advisory',
             }))}
           </div>
 

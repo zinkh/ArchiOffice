@@ -49,6 +49,7 @@ const toSnake: Record<string, string> = {
   numAffaireDigits: 'num_affaire_digits',
   invoicePaymentTermsDays: 'invoice_payment_terms_days',
   archiveRetentionYears: 'archive_retention_years',
+  desktopLockMode: 'desktop_lock_mode',
   onboardingCompletedAt: 'onboarding_completed_at',
   defaultLeaveDaysCongesPayes: 'default_leave_days_conges_payes',
   defaultLeaveDaysRtt: 'default_leave_days_rtt',
@@ -112,7 +113,7 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
         'zoho_books_org_id',
         'num_prefix_devis', 'num_prefix_facture', 'num_prefix_honoraires', 'num_prefix_affaire',
         'num_affaire_sep_prefix', 'num_affaire_sep_seq', 'num_affaire_digits',
-        'invoice_payment_terms_days', 'archive_retention_years',
+        'invoice_payment_terms_days', 'archive_retention_years', 'desktop_lock_mode',
         'onboarding_completed_at',
         'maf_enabled', 'maf_numero_adherent', 'maf_taux_contrat_permil', 'maf_declaration_year',
         'ragic_api_key', 'ragic_account',
@@ -158,6 +159,11 @@ export function registerSettingsRoutes(app: Express, { supabaseAdmin, getTenantI
           return res.status(400).json({ error: "La durée de conservation doit être un nombre entier d'années entre 1 et 50." });
         }
         filteredData.archive_retention_years = years;
+      }
+
+      // Mode de verrouillage de la synchronisation desktop : vocabulaire fermé.
+      if ('desktop_lock_mode' in filteredData && !['off', 'advisory', 'enforced'].includes(filteredData.desktop_lock_mode)) {
+        return res.status(400).json({ error: "Mode de verrouillage inconnu (off, advisory ou enforced attendu)." });
       }
 
       // L'agent de triage référencé doit appartenir à CE cabinet — même

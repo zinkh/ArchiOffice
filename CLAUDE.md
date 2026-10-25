@@ -117,6 +117,7 @@ There is **no ESLint, no Prettier, no commit hooks**. Keep code consistent with 
 | `AGENT_MAIL_INBOX_ALIAS_DOMAIN` | Optional | Fallback domain for the `agents+<slug>@…` alias, used only by a tenant that has not set its own (`settings.mail_inbox_domain`, `/settings` > Agents IA) |
 | `AGENT_MAIL_INBOX_FOLDER` / `AGENT_MAIL_INBOX_POLL_MINUTES` | Optional | IMAP folder polled (default `INBOX`) and poll cadence in minutes (default 3) |
 | `DOE_REMINDERS_INTERVAL_HOURS` | Optional | Cadence du cycle des relances automatiques de l'atelier DOE (défaut 6 h) |
+| `DESKTOP_MAX_UPLOAD_MB` / `DESKTOP_UPLOAD_DIR` | Optional | Synchronisation desktop : taille maximale d'un fichier déposé par morceaux (défaut 200 Mo, le fichier est relu en mémoire à la fin) et dossier temporaire des morceaux (défaut : dossier temporaire du système) |
 | `PORT` | Optional | Server port (default 8080 in Docker) |
 | `DISABLE_HMR` | Optional | Set `true` to disable Vite HMR |
 
@@ -4277,6 +4278,59 @@ celle déposée (chiffrement côté serveur). Conseil de mise en service : crée
 pour un compte dédié, limité au dossier racine d'ArchiOffice. Un serveur WebDAV sur le réseau interne (NAS) reste
 refusé par ce garde : pour un NAS, voir le projet de fournisseur « dossier local » du client Electron.
 Tests : `tests/webdavHardening.test.ts`, `tests/externalStorageConnections.test.ts`.
+
+### Synchronisation desktop (Explorateur Windows, Finder macOS) : socle serveur
+
+Les documents d'affaire sont exposés à deux clients natifs à venir (Cloud Files API sous Windows,
+File Provider sous macOS) par `/api/desktop/v1` (`server/routes/desktopSync.ts`, `server/desktop/*`).
+Le contrat complet, ses écarts avec le code d'origine et ce qui reste à faire sont dans
+`docs/desktop-sync-contract.md`. Migration `supabase/migrate_desktop_sync.sql` (hors `SYNC_TABLES`) ;
+une instance non migrée répond 503 `DESKTOP_SYNC_UNAVAILABLE` sur ce préfixe seulement.
+
+- **Jeton d'appareil `ds_at_…`**, rattaché à la PERSONNE (`desktop_devices`, SHA-256 seul stocké, rendu une fois,
+  90 jours glissants, révocable). Le middleware `/api` de `server.ts` ne le laisse atteindre QUE `/api/desktop/v1`
+  (403 `DEVICE_SCOPE` ailleurs : à ne pas aligner sur `mcp_at_`, qui ouvre toute l'API) et exige `X-Tenant-Id`,
+  revérifié contre les adhésions (sauf `/roots` et `/devices`). Un appareil n'en enregistre pas un autre.
+- **Règle CAO : les octets d'un fichier CAO, BIM ou 3D ne vont jamais dans Supabase Storage.**
+  `src/lib/cadFiles.ts` (`CAD_EXTENSIONS`, liste unique) ; `server/desktop/uploads.ts` répond 409
+  `EXTERNAL_STORAGE_REQUIRED` à l'ouverture d'un dépôt, le revérifie à la fin (le dépôt peut durer des heures) et
+  `PATCH` refuse de renommer un fichier Supabase en `.dwg`. Pas de repli : un espace externe en panne fait échouer
+  le dépôt. Mode hors ligne (`OFFLINE_MODE`) exempté, les octets restant sur le poste. **Appliquée aussi au web** : la
+  branche Supabase de `storeBusinessFile` (documents, plans, visas, DOE) refuse un CAO en 409
+  `EXTERNAL_STORAGE_REQUIRED` avant le quota (`tests/cadRuleDocuments.test.ts`). Le mode de verrouillage se règle
+  dans Réglages > Cabinet (`settings.desktop_lock_mode`, `PUT /api/settings` valide `off`, `advisory`, `enforced`).
+  `tests/desktopSyncUploads.test.ts` compte les écritures vers Supabase Storage ; retirer la règle fait échouer 11 tests.
+- **Version technique et indice de diffusion sont deux choses.** Un dépôt crée `version + 1` et laisse l'indice
+  (`A`, `B`...) intact ; il n'avance que sur demande (`bumpIndice`, `POST /nodes/:id/bump-indice`). L'ancien
+  `PUT /api/documents/:id` fait avancer l'indice à CHAQUE fichier envoyé : un enregistrement automatique de Word
+  y brûlerait une lettre.
+- **Concurrence** : `baseVersion` obligatoire pour modifier un document existant ; `409 VERSION_CONFLICT` rend la
+  version courante et le nœud. À la fin d'un dépôt la mise à jour est CONDITIONNELLE sur la version lue, et le fichier
+  déjà stocké est retiré si elle échoue. Le client dépose son fichier en copie `conflit` (`conflict_of`), le serveur
+  ne fusionne jamais.
+- **Journal de changements écrit par des déclencheurs SQL**, pas par les routes : plusieurs chemins écrivent dans
+  `documents` (dépôts, DOE, agents, MCP, migration de stockage). `desktop_changes.tenant_id` n'a volontairement PAS de
+  clé étrangère (la suppression en cascade d'un cabinet déclenche ces écritures et échouerait) ; `tenantPurge.ts`
+  nettoie APRÈS la suppression du cabinet. Le curseur est un `seq` ; `desktop_changes_prune` relève un plancher
+  (`desktop_sync_state`) et un curseur plus ancien reçoit 410 `CURSOR_EXPIRED`. L'événement porte l'ÉTAT courant : un
+  `upsert` dont le document a disparu est rendu comme `delete`. Verrou et contenu sont des natures distinctes à la
+  compaction, sinon un `lock` masquerait un `upsert` récent.
+- **Verrous** (`settings.desktop_lock_mode` : `off`, `advisory` par défaut, `enforced`) : le verrou d'un autre bloque
+  (423) seulement en `enforced`. Huit heures sans renouvellement, reprise d'un verrou expiré par mise à jour
+  conditionnelle, rupture réservée aux administrateurs et managers. Chaque requête de `locks.ts` porte `tenant_id`.
+- **Suppression logique** (`documents.deleted_at`) pour les appareils : jamais de `DELETE` définitif, rôles `admin`,
+  `manager`, `pm` comme sur l'écran. Les dossiers (affaire, phase) se déduisent des documents, on n'en crée pas.
+- **Arborescence calculée par le serveur** (`server/desktop/nodes.ts`, mêmes chemins que le stockage externe) : le
+  client ne calcule aucun chemin. Les noms sont valides pour Windows et macOS (`safeNodeName`) et uniques par dossier
+  sans tenir compte de la casse (`uniqueSiblingNames`, suffixe ` (2)`). Un renommage ou un changement de phase ne
+  déplace PAS le fichier chez le fournisseur (WebDAV : l'identifiant est le chemin relatif).
+- **Dépôt par morceaux** sur le disque temporaire du serveur (`DESKTOP_UPLOAD_DIR`, 24 h, purge opportuniste),
+  `complete` idempotent ; limite actuelle de 200 Mo (`DESKTOP_MAX_UPLOAD_MB`) parce que `storeBusinessFile` exige un
+  `Buffer`.
+- **Tests** : `tests/desktopSync{Devices,Routes,Uploads}.test.ts`, `src/lib/__tests__/{cadFiles,desktopNodes}.test.ts`
+  et `tests/desktopSyncMigration.pg.test.ts` (déclencheurs, purge, cascade, rejeu ; ignoré sans `PGHOST`). Le faux
+  Supabase est partagé par fichier et les identifiants se répètent d'un test à l'autre : relire une ligne par
+  `(tenant_id, id)`, jamais par `id` seul.
 
 ### Mouvement, gestes et préférences d'accessibilité
 

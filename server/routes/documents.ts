@@ -185,7 +185,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       }
       logActivity(tenantId, req.user.id, uploaded_by, `Ajout du document "${name}"`, name, id, 'document', 'Documents');
       res.status(201).json({ id, file_url, size_bytes: stored.sizeBytes, uploaded_at });
-    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document" }); }
+    } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to upload document", ...(e.code === 'EXTERNAL_STORAGE_REQUIRED' ? { code: e.code } : {}) }); }
   });
 
   // admin/manager/pm only — any authenticated tenant member (including the
@@ -274,7 +274,7 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         if (error) throw error;
       }
       res.json({ success: true });
-    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update document: " + e.message }); }
+    } catch (e: any) { console.error(e); res.status(e.code === 'EXTERNAL_STORAGE_REQUIRED' ? 409 : 500).json({ error: e.code === 'EXTERNAL_STORAGE_REQUIRED' ? e.message : "Failed to update document: " + e.message, ...(e.code === 'EXTERNAL_STORAGE_REQUIRED' ? { code: e.code } : {}) }); }
   });
 
   app.get("/api/documents/:id/versions", async (req: any, res: any) => {
