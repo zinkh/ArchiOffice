@@ -47,6 +47,27 @@ export function normalizeBaseUrl(baseUrl: string): string {
 }
 
 /**
+ * Nextcloud : le cabinet colle souvent l'adresse qu'il ouvre dans son navigateur
+ * (`https://cloud.exemple.fr/`, `.../index.php/apps/files/`), qui répond 405 à
+ * PROPFIND. Le point d'accès WebDAV est `<racine>/remote.php/dav/files/<utilisateur>/` :
+ * on le reconstruit quand l'URL saisie n'y mène pas déjà. Une URL qui contient
+ * déjà `remote.php/dav` est laissée telle quelle, de même que celle d'un autre fournisseur.
+ */
+export function completeNextcloudUrl(flavor: string, baseUrl: string, username: string): string {
+  const trimmed = String(baseUrl).trim();
+  if (flavor !== 'nextcloud' || !username || /\/remote\.php\/(?:web)?dav/i.test(trimmed)) return trimmed;
+  try {
+    const url = new URL(trimmed);
+    // Installation dans un sous-dossier (`/nextcloud/`) : on garde le préfixe, on
+    // retire seulement l'interface web (`/index.php/...`, `/apps/...`).
+    const root = url.pathname.replace(/\/(?:index\.php|apps)(?:\/.*)?$/i, '').replace(/\/+$/, '');
+    return `${url.origin}${root}/remote.php/dav/files/${encodeURIComponent(username.trim())}/`;
+  } catch {
+    return trimmed;
+  }
+}
+
+/**
  * Assemble l'URL d'une ressource.
  *
  * L'encodage se fait SEGMENT PAR SEGMENT : encodeURIComponent sur le chemin
@@ -298,6 +319,14 @@ class WebdavProvider implements ExternalStorageProvider {
     const status = await this.callStatus('PROPFIND', normalizeBaseUrl(this.base), {
       headers: { Depth: '0' },
     });
+    if (status === 405) {
+      throw new ExternalStorageError(
+        "Le serveur de stockage a répondu 405 (test de connexion). L'adresse saisie n'est pas un point d'accès WebDAV. " +
+          'Nextcloud : https://<hôte>/remote.php/dav/files/<identifiant>/ ; kDrive : https://<identifiant>.connect.kdrive.infomaniak.com/.',
+        'unknown',
+        502,
+      );
+    }
     if (status !== 207 && status !== 200) throw statusError(status, 'test de connexion');
   }
 }

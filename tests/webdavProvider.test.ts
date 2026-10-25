@@ -6,7 +6,7 @@
 // les erreurs sont silencieuses et coûteuses (un chemin mal encodé casse au
 // premier nom d'affaire accentué, c'est-à-dire tout de suite).
 import { describe, expect, it } from 'vitest';
-import { buildWebdavUrl, normalizeBaseUrl } from '../server/externalStorage/providers/webdav';
+import { buildWebdavUrl, completeNextcloudUrl, normalizeBaseUrl } from '../server/externalStorage/providers/webdav';
 
 const NEXTCLOUD = 'https://cloud.aazs.test/remote.php/dav/files/khaldoun/';
 const KDRIVE = 'https://123456.connect.kdrive.infomaniak.com/';
@@ -49,5 +49,24 @@ describe('buildWebdavUrl', () => {
   it('traite kDrive exactement comme Nextcloud', () => {
     expect(buildWebdavUrl(KDRIVE, 'ArchiOffice/26014 - Villa Martin', true))
       .toBe(`${KDRIVE}ArchiOffice/26014%20-%20Villa%20Martin/`);
+  });
+});
+
+describe('completeNextcloudUrl', () => {
+  const dav = 'https://cloud.aazs.test/remote.php/dav/files/khaldoun/';
+  it("reconstruit le point d'accès WebDAV depuis l'adresse du navigateur", () => {
+    expect(completeNextcloudUrl('nextcloud', 'https://cloud.aazs.test/', 'khaldoun')).toBe(dav);
+    expect(completeNextcloudUrl('nextcloud', 'https://cloud.aazs.test/index.php/apps/files/', 'khaldoun')).toBe(dav);
+  });
+  it("garde le sous-dossier d'installation", () => {
+    expect(completeNextcloudUrl('nextcloud', 'https://x.test/nextcloud/apps/files', 'a b')).toBe(
+      'https://x.test/nextcloud/remote.php/dav/files/a%20b/',
+    );
+  });
+  it('laisse intactes une URL WebDAV et celle de kDrive', () => {
+    expect(completeNextcloudUrl('nextcloud', dav, 'khaldoun')).toBe(dav);
+    expect(completeNextcloudUrl('kdrive', 'https://id.connect.kdrive.infomaniak.com/', 'u')).toBe(
+      'https://id.connect.kdrive.infomaniak.com/',
+    );
   });
 });

@@ -22,6 +22,7 @@ import {
   type ExternalStorageConnection,
 } from '../externalStorage/externalConnection';
 import { sanitizeFolderSegment } from '../externalStorage/folderNaming';
+import { completeNextcloudUrl } from '../externalStorage/providers/webdav';
 import { clearStorageTokenCache } from '../externalStorage/oauthTokens';
 import { GOOGLE_DRIVE_SCOPE, GOOGLE_TOKEN_URL } from '../externalStorage/providers/googleDrive';
 import { DROPBOX_AUTH_URL, DROPBOX_SCOPE, DROPBOX_TOKEN_URL } from '../externalStorage/providers/dropbox';
@@ -270,6 +271,7 @@ export function registerExternalStorageRoutes(
       // interne, et le mot de passe d'application part en Basic Auth, donc HTTPS
       // obligatoire. Lève une erreur portant son propre statut (400 ou 403).
       await resolvePublicUrl(baseUrl, { requireHttps: true });
+      const resolvedBaseUrl = completeNextcloudUrl(flavor, baseUrl, String(username));
 
       const candidate: ExternalStorageConnection = {
         id: crypto.randomUUID(),
@@ -278,7 +280,7 @@ export function registerExternalStorageRoutes(
         webdav_flavor: flavor,
         display_name: displayName || (flavor === 'kdrive' ? 'kDrive' : 'Nextcloud'),
         external_account_email: username,
-        base_url: String(baseUrl).trim(),
+        base_url: resolvedBaseUrl,
         username: String(username).trim(),
         password_encrypted: encryptSecret(String(password)),
         root_folder_path: sanitizeFolderSegment(rootFolderPath || 'ArchiOffice'),
