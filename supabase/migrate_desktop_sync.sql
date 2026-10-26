@@ -110,7 +110,7 @@ INSERT INTO desktop_sync_state (key, value) VALUES ('floor_seq', 0) ON CONFLICT 
 -- Purge les événements plus anciens que `p_retain` et relève le plancher. Appelée par
 -- le serveur (rôle service), jamais par un compte connecté.
 CREATE OR REPLACE FUNCTION desktop_changes_prune(p_retain INTERVAL DEFAULT INTERVAL '30 days')
-RETURNS BIGINT LANGUAGE plpgsql AS $$
+RETURNS BIGINT LANGUAGE plpgsql SET search_path = public AS $$
 DECLARE
   v_max BIGINT;
   v_deleted BIGINT;
@@ -131,7 +131,7 @@ $$;
 -- migration de stockage) : le journal se tient donc en base et non dans les routes.
 -- Seuls les documents d'affaire (`resource_type = 'projects'`) intéressent le client.
 
-CREATE OR REPLACE FUNCTION desktop_documents_touch() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION desktop_documents_touch() RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   NEW.updated_at := now();
   RETURN NEW;
@@ -143,7 +143,7 @@ CREATE TRIGGER trg_desktop_documents_touch
   BEFORE UPDATE ON documents
   FOR EACH ROW EXECUTE FUNCTION desktop_documents_touch();
 
-CREATE OR REPLACE FUNCTION desktop_documents_journal() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION desktop_documents_journal() RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 DECLARE
   v_row documents;
   v_type TEXT;
@@ -169,7 +169,7 @@ CREATE TRIGGER trg_desktop_documents_journal
   AFTER INSERT OR UPDATE OR DELETE ON documents
   FOR EACH ROW EXECUTE FUNCTION desktop_documents_journal();
 
-CREATE OR REPLACE FUNCTION desktop_locks_journal() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION desktop_locks_journal() RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
     INSERT INTO desktop_changes (tenant_id, type, node_id)
@@ -190,7 +190,7 @@ CREATE TRIGGER trg_desktop_locks_journal
 -- Une affaire qui change de nom, de code ou d'archivage change le chemin de tous ses
 -- fichiers : un événement `scope` force le client à relire le dossier. Les colonnes
 -- sont lues par to_jsonb pour ne pas dépendre d'une instance déjà migrée pour l'archivage.
-CREATE OR REPLACE FUNCTION desktop_projects_journal() RETURNS TRIGGER LANGUAGE plpgsql AS $$
+CREATE OR REPLACE FUNCTION desktop_projects_journal() RETURNS TRIGGER LANGUAGE plpgsql SET search_path = public AS $$
 BEGIN
   IF NEW.name IS DISTINCT FROM OLD.name
      OR NEW.project_code IS DISTINCT FROM OLD.project_code
@@ -218,3 +218,13 @@ ALTER TABLE desktop_changes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE desktop_sync_state ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM PUBLIC;
+-- anon et authenticated n'existent que sur Supabase : un Postgres ordinaire (CI, poste Electron) n'a pas ces rôles.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM authenticated;
+  END IF;
+END $$;
