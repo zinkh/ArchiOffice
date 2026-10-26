@@ -217,4 +217,14 @@ ALTER TABLE desktop_uploads ENABLE ROW LEVEL SECURITY;
 ALTER TABLE desktop_changes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE desktop_sync_state ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM PUBLIC;
+-- anon et authenticated n'existent que sur Supabase : un Postgres ordinaire (CI, poste Electron) n'a pas ces rôles.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    REVOKE ALL ON FUNCTION desktop_changes_prune(INTERVAL) FROM authenticated;
+  END IF;
+END $$;
