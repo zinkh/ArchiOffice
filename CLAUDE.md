@@ -3651,6 +3651,27 @@ sigle, ex. « AACZ »). Plusieurs correspondances : `needs_clarification` avec l
   contenu pour une liste (le premier bloc garde sa forme). Instructions MCP : `MCP_INSTRUCTIONS` (`httpServer.ts`).
 - Tests : `tests/mcpAgencySwitching.test.ts` (vrai endpoint `/mcp`, données fictives).
 
+### Fusion de contacts et vue détaillée de `/contacts`
+
+**Fusion** (`POST /api/contacts/merge`, `server/routes/contactMerge.ts`, administrateurs et managers). Tout le travail est la fonction SQL
+`merge_contacts(tenant, conservé, doublons[], patch, acteur)` (`supabase/migrate_merge_contacts.sql`), **en une seule transaction** : elle rattache
+les colonnes qui référencent un contact (liste `v_refs`), les liens polymorphes (`email_links`, `email_folder_links`, `documents` en
+`resource_type = 'contacts'`) et les références jsonb, retire d'abord les lignes qui violeraient une contrainte d'unicité
+(`contact_merge_dedupe`), hérite des identifiants de synchro (Ragic, Odoo, Google), cumule `ca_amount`, applique le patch, supprime les doublons et
+journalise dans `contact_merge_log`. Réservée au rôle serveur (`REVOKE` pour `PUBLIC`, `anon`, `authenticated`).
+
+- **Le client n'envoie que des CHOIX** (`picks` : champ vers fiche) et le mot `FUSIONNER` ; les valeurs écrites sont recalculées côté serveur depuis
+  les fiches lues en base (`resolveMergePatch`, `src/lib/contactMerge.ts`, partagé écran et serveur). Onze fiches au plus par fusion ; un contact
+  personnel d'un autre utilisateur ou mélangé à un contact partagé est refusé (403, 409).
+- **Garde-fou** : `tests/contactMergeReferences.test.ts` lit les migrations et exige que toute colonne `…contact_id` / `…client_id` / `REFERENCES contacts(id)`
+  figure dans `v_refs`. **Une nouvelle colonne qui référence un contact s'ajoute à la fonction**, sinon ses lignes resteraient accrochées à une fiche supprimée.
+  Test réel : `tests/contactMerge.pg.test.ts` (Postgres, ignoré sans `PGHOST`).
+- **Écran** : `ContactMergeDialog.tsx` (choix de la fiche conservée et des valeurs en conflit, vérification, confirmation par saisie de FUSIONNER).
+  Cases à cocher dans le tableau, bouton « Fusionner (N) » et bandeau des doublons possibles (`findDuplicateGroups` : même SIRET, même e-mail, même nom).
+- **Vue détaillée** (`ContactsDetailView.tsx`) : liste compacte et fiche à onglets (vue d'ensemble, affaires, facturation, échanges). **Le tableau reste la vue
+  par défaut** ; le choix est mémorisé (`localStorage` `contacts:view`) et `?vue=detail|table` l'emporte.
+- Pas encore fait : plusieurs interlocuteurs par société, statut et rappel de relation commerciale.
+
 ### Visibilité des contacts personnels
 
 `contacts.is_personal` (`migrate_contacts_is_personal.sql`) existait déjà

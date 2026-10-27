@@ -69,6 +69,7 @@ import { registerPlanningChantierRoutes } from "./server/routes/planningChantier
 import { registerTenderPartnerSolicitationRoutes } from "./server/routes/tenderPartnerSolicitations";
 import { registerMilestoneRoutes } from "./server/routes/milestones";
 import { registerContactRoutes } from "./server/routes/contacts";
+import { registerContactMergeRoutes } from "./server/routes/contactMerge";
 import { registerQualificationRoutes } from "./server/routes/qualifications";
 import { registerEntrepriseSearchRoutes } from "./server/routes/entreprisesSearch";
 import { registerSuperAdminRoutes } from "./server/routes/superAdmin";
@@ -1150,6 +1151,7 @@ export async function createApp() {
   registerTenderPartnerSolicitationRoutes(app, { supabaseAdmin, getTenantId });
   registerMilestoneRoutes(app, { supabaseAdmin, getTenantId });
   registerContactRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerContactMergeRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireRole });
   registerQualificationRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerEntrepriseSearchRoutes(app, { supabaseAdmin, getTenantId });
   registerSuperAdminRoutes(app, { supabaseAdmin });
