@@ -4,7 +4,7 @@ import ProjectProfitability from '../components/projectDetail/ProjectProfitabili
 import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
-  IconArrowLeft, 
+  IconArrowLeft, IconArrowRight,
   IconTrash, 
   IconPlus, 
   IconCircleCheck, 
@@ -369,9 +369,6 @@ export default function ProjectDetail() {
 
   // AR modal state
   const [arOsTarget, setArOsTarget] = useState<OrdreDeService | null>(null);
-  const [showDeleteProjectConfirm, setShowDeleteProjectConfirm] = useState(false);
-  const [deleteProjectConfirmInput, setDeleteProjectConfirmInput] = useState('');
-  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [arForm, setArForm] = useState({ date_ar: new Date().toISOString().slice(0, 10), date_execution: '', notes_ar: '' });
   const [arSaving, setArSaving] = useState(false);
 
@@ -710,7 +707,6 @@ export default function ProjectDetail() {
   // ou une suppression en cours.
   useEscapeKey(isVisaModalOpen, () => setIsVisaModalOpen(false));
   useEscapeKey(!!arOsTarget, () => { if (!arSaving) setArOsTarget(null); });
-  useEscapeKey(showDeleteProjectConfirm, () => { if (!isDeletingProject) setShowDeleteProjectConfirm(false); });
 
   // Onglets de phase chantier gouvernés par une mission du contrat MOE : le
   // contrat fait foi (même principe que HONOS ci-dessus), donc un onglet
@@ -1222,21 +1218,6 @@ export default function ProjectDetail() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [saveNow]);
-
-  const handleDelete = async () => {
-    if (!project) return;
-    setIsDeletingProject(true);
-    try {
-      const res = await fetch(`/api/projects/${project.id}`, { method: 'DELETE' });
-      if (res.ok) {
-        navigate('/projects');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsDeletingProject(false);
-    }
-  };
 
   const handleAddMilestone = async () => {
     if (!id || !newMilestoneTitle || !newMilestoneDate) return;
@@ -1948,7 +1929,7 @@ export default function ProjectDetail() {
           </span>
         </div>
 
-        <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-center min-w-0">
+        <div className="order-3 w-full lg:order-none lg:w-auto lg:flex-1 flex justify-start lg:justify-end min-w-0">
           <div className="flex items-center gap-2 min-w-0 w-full lg:w-auto">
             <PhaseStepper
               className="min-w-0 flex-1 lg:flex-none"
@@ -1968,36 +1949,19 @@ export default function ProjectDetail() {
                 type="button"
                 onClick={() => { void advancePhase(); }}
                 title={t('project_phase_advance_title', { phase: upcomingPhase })}
-                className="shrink-0 h-8 px-2.5 inline-flex items-center gap-1 rounded-lg border text-[0.8125rem] font-semibold whitespace-nowrap transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
-                style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+                className="shrink-0 group h-8 pl-3 pr-1 inline-flex items-center gap-2 rounded-full text-[0.8125rem] font-semibold whitespace-nowrap transition-colors hover:brightness-95 outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}
               >
                 {t('project_phase_advance', { phase: upcomingPhase })}
-                <IconChevronRight size={14} aria-hidden />
+                <span className="w-6 h-6 rounded-full inline-flex items-center justify-center text-white transition-transform group-hover:translate-x-0.5" style={{ background: 'var(--tblr-primary)' }}>
+                  <IconArrowRight size={14} aria-hidden />
+                </span>
               </button>
             )}
           </div>
         </div>
 
         <div className="flex items-center gap-1 sm:gap-2 shrink-0 lg:ml-0 lg:order-none">
-          <ProjectArchiveControl
-            projectId={project.id}
-            archivedAt={project.archived_at}
-            retentionUntil={project.retention_until}
-            canArchive={currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager'}
-            canReopen={currentUser?.system_role === 'admin'}
-            onChanged={fetchFullProject}
-          />
-          {currentUser?.system_role === 'admin' && (
-            <button
-              type="button"
-              onClick={() => { setDeleteProjectConfirmInput(''); setShowDeleteProjectConfirm(true); }}
-              className="p-2 text-[var(--tblr-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition"
-              title={t('projectdetail_delete_project')}
-              aria-label={t('projectdetail_delete_project')}
-            >
-              <IconTrash size={18} />
-            </button>
-          )}
           <AutosaveIndicator status={autosaveStatus} onRetry={() => { void saveNow(); }} />
         </div>
       </div>
@@ -2017,6 +1981,17 @@ export default function ProjectDetail() {
       <div id={projectPanelId} role="tabpanel" aria-label={t(`project_tab_title_${activeTab.toLowerCase()}`)} tabIndex={0} className={`flex-1 outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] ${activeTab === 'INFOS' && !showFullEditor ? 'xl:min-h-0 xl:overflow-hidden' : 'lg:min-h-0 lg:overflow-hidden'}`}>
         {activeTab === 'INFOS' && !showFullEditor ? (
           <ProjectOverview
+            archiveControl={
+              <ProjectArchiveControl
+                variant="tile"
+                projectId={project.id}
+                archivedAt={project.archived_at}
+                retentionUntil={project.retention_until}
+                canArchive={currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager'}
+                canReopen={currentUser?.system_role === 'admin'}
+                onChanged={fetchFullProject}
+              />
+            }
             project={project}
             setProject={setProject}
             notePhase={viewedPhase || actualCurrentPhase}
@@ -5801,56 +5776,6 @@ export default function ProjectDetail() {
                 <button type="button" onClick={handleArSubmit} disabled={arSaving || !arForm.date_ar} aria-busy={arSaving}
                   className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 transition">
                   {arSaving ? t('projectdetail_autosave_saving') : t('projectdetail_ar_confirm')}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
-      <AnimatePresence>
-        {showDeleteProjectConfirm && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <motion.div
-              ref={launchOriginRef}
-              role="dialog" aria-modal="true" aria-labelledby="delete-project-modal-title"
-              initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-              className="w-full max-w-md rounded-lg shadow-2xl p-6"
-              style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}
-            >
-              <h3 id="delete-project-modal-title" className="text-sm font-bold text-[var(--tblr-text)] mb-2">{t('projects_delete_confirm_title')}</h3>
-              <p className="text-sm text-[var(--tblr-muted)] mb-2">
-                {t('projects_delete_confirm_body', { name: project?.name })}
-              </p>
-              <p className="text-sm text-[var(--tblr-muted)] mb-3">
-                {t('projects_delete_confirm_instruction', { word: t('projects_delete_confirm_word') })}
-              </p>
-              <input
-                autoFocus
-                aria-label={t('projects_delete_confirm_instruction', { word: t('projects_delete_confirm_word') })}
-                className="w-full px-3 py-2 bg-white dark:bg-zinc-900 border border-[var(--tblr-border)] rounded-lg outline-none focus:ring-2 focus:ring-red-500 text-[var(--tblr-text)]"
-                value={deleteProjectConfirmInput}
-                onChange={e => setDeleteProjectConfirmInput(e.target.value)}
-                placeholder={t('projects_delete_confirm_word')}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && deleteProjectConfirmInput.trim().toLowerCase() === t('projects_delete_confirm_word').toLowerCase() && !isDeletingProject) {
-                    handleDelete();
-                  }
-                }}
-              />
-              <div className="flex gap-2 mt-5 justify-end">
-                <button type="button" onClick={() => setShowDeleteProjectConfirm(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
-                  {t('btn_cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={deleteProjectConfirmInput.trim().toLowerCase() !== t('projects_delete_confirm_word').toLowerCase() || isDeletingProject}
-                  onClick={handleDelete}
-                  className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                >
-                  {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
                 </button>
               </div>
             </motion.div>

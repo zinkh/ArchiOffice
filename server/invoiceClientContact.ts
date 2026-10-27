@@ -57,6 +57,13 @@ export async function resolveInvoiceClientId(
   return (proj as any)?.client_id || null;
 }
 
+/** Fiche normalisée d'un contact du cabinet (contact d'envoi d'une facture). */
+export async function loadContactInfo(supabaseAdmin: any, tenantId: string, contactId: string): Promise<ClientContactInfo | null> {
+  const { data: contact } = await supabaseAdmin.from('contacts').select('*')
+    .eq('id', contactId).eq('tenant_id', tenantId).maybeSingle();
+  return contact ? toClientInfo(contact) : null;
+}
+
 /** Full contact row + normalized display fields, for GET /api/invoices/:id. */
 export async function loadInvoiceClientContact(
   supabaseAdmin: any,

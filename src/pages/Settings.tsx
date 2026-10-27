@@ -1,3 +1,4 @@
+import { DeleteProjectCard } from '../components/settings/DeleteProjectCard';
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../db';
@@ -2666,6 +2667,8 @@ export default function Settings() {
               archiveRetentionYears: settings.archiveRetentionYears ?? 10,
             }))}
           </div>
+
+          {currentUser?.system_role === 'admin' && <DeleteProjectCard />}
 
           {/* ── Synchronisation desktop : verrouillage des documents ── */}
           <div className="rounded-xl p-5 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>

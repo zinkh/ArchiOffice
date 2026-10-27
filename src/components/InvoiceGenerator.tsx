@@ -44,7 +44,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
     seller_bic: '',
     currency: 'EUR',
     items: [
-      { id: '1', description: initialData?.description || 'Prestations architecturales', quantity: 1, unit_price: initialData?.amount || 0, vat_rate: 20 }
+      { id: crypto.randomUUID(), description: initialData?.description || 'Prestations architecturales', quantity: 1, unit_price: initialData?.amount || 0, vat_rate: 20 }
     ],
     ...initialData
   });
@@ -201,18 +201,27 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
       const { default: jsPDF } = await import('jspdf');
       const pdf = new jsPDF('p', 'mm', 'a4');
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+
       const page = previewRef.current.querySelector('.pdf-page') as HTMLElement;
-      
-      await pdf.html(page, {
-        x: 0,
-        y: 0,
-        width: pdfWidth,
-        windowWidth: page.scrollWidth,
-        margin: [10, 10, 10, 10],
-        autoPaging: true
-      });
-      
+
+      // html2canvas-pro (et non html2canvas) : Tailwind 4 écrit ses couleurs en
+      // oklch(), que html2canvas 1.4 ne sait pas lire et fait échouer la capture.
+      const { default: html2canvas } = await import('html2canvas-pro');
+      const canvas = await html2canvas(page, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: page.scrollWidth });
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      let remaining = imgHeight;
+      let offset = 0;
+      pdf.addImage(imgData, 'JPEG', 0, offset, pdfWidth, imgHeight);
+      remaining -= pdfHeight;
+      while (remaining > 1) {
+        offset -= pdfHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, offset, pdfWidth, imgHeight);
+        remaining -= pdfHeight;
+      }
+
       // Note: Full Factur-X PDF/A-3 embedding is complex in browser.
       // We provide the XML as a separate download for now to ensure compliance with structured data requirement.
       const invoiceLabel = data.invoice_type === 'acompte' ? 'Acompte' : 'Facture';
@@ -253,7 +262,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
 
   const addItem = () => {
     const newItem: InvoiceItem = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: crypto.randomUUID(),
       description: '',
       quantity: 1,
       unit_price: 0,
@@ -388,6 +397,7 @@ export function InvoiceGenerator({ onClose, onSave, initialData, project }: Invo
                     <h3 className="text-[8pt] font-bold uppercase text-zinc-400 mb-2">Destinataire</h3>
                     <div className="text-[9pt]">
                       <p className="font-bold">{buyer.name}</p>
+                      {data.billing_contact && data.billing_contact.name !== buyer.name && <p>À l'attention de : {data.billing_contact.name}</p>}
                       <p>{buyer.address || 'Adresse non renseignée'}</p>
                       {buyer.siret && <p>SIRET : {buyer.siret}</p>}
                       {buyer.vatNumber && <p>TVA : {buyer.vatNumber}</p>}

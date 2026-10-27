@@ -10,7 +10,7 @@ import { validateBody } from '../../src/lib/validateRequest';
 import { invoiceSchema } from '../../src/schemas/invoice.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { getActiveAccountingProvider, syncInvoiceToAccounting } from '../invoiceAccountingSync';
-import { loadInvoiceClientContact, resolveInvoiceClientId } from '../invoiceClientContact';
+import { loadContactInfo, loadInvoiceClientContact, resolveInvoiceClientId } from '../invoiceClientContact';
 import { computeInvoiceDueDate, resolveInvoicePaymentTermsDays } from '../invoiceDueDate';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 import { ensureCanWriteInvoices, getCallerRole, visibleProjectIds } from '../invoiceAccess';
@@ -26,6 +26,12 @@ export interface RouteDeps {
 }
 
 export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, getNextDocNumber, getNextAffaireInvoiceNumber }: RouteDeps) {
+  // Écrit à part de l'UPDATE principal : une instance non migrée (colonne
+  // billing_contact_id absente) garde ainsi le reste de l'enregistrement.
+  const setBillingContact = async (invoiceId: string, contactId: string | null) => {
+    const { error } = await supabaseAdmin.from('invoices').update({ billing_contact_id: contactId }).eq('id', invoiceId);
+    if (error) console.warn('billing_contact_id non enregistré (migration absente ?):', error.message);
+  };
   // Liste allégée : ni `invoice_items` (une facture peut en porter des
   // dizaines, et rien dans la liste ne les affiche — seul le générateur de
   // facture, ouvert sur UNE facture à la fois, en a besoin ; voir GET
@@ -94,7 +100,9 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       // Fan-out kept to this single-item route only (never the list above) —
       // see CLAUDE.md's "Pagination et fan-out sur les listes" for why.
       const client = await loadInvoiceClientContact(supabaseAdmin, tenantId, rest);
-      res.json({ ...rest, project_name: p?.name || null, items: invoice_items || [], client });
+      const billing_contact = rest.billing_contact_id
+        ? await loadContactInfo(supabaseAdmin, tenantId, rest.billing_contact_id) : null;
+      res.json({ ...rest, project_name: p?.name || null, items: invoice_items || [], client, billing_contact });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch invoice" });
@@ -106,7 +114,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       const tenantId = await getTenantId(req.user.id);
       if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const {
-        project_id, client_id, amount, description, status, due_date,
+        project_id, client_id, billing_contact_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
@@ -127,6 +135,9 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       // the project's own client, so a facture created from a project still
       // carries a buyer identity without the caller having to look it up.
       const finalClientId = await resolveInvoiceClientId(supabaseAdmin, tenantId, { client_id, project_id });
+      if (billing_contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', billing_contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact d'envoi introuvable pour ce cabinet." });
+      }
 
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
@@ -192,6 +203,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         affaire_invoice_number: finalAffaireInvoiceNumber, phases: phases || []
       });
       if (insErr) throw insErr;
+      if (billing_contact_id) await setBillingContact(id, billing_contact_id);
 
       if (items && Array.isArray(items) && items.length > 0) {
         const itemRows = items.map((item: any) => ({ id: crypto.randomUUID(), invoice_id: id, tenant_id: tenantId, description: item.description, quantity: item.quantity, unit_price: item.unit_price, vat_rate: item.vat_rate }));
@@ -257,7 +269,7 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       if (!(await ensureCanWriteInvoices(supabaseAdmin, tenantId, req.user.id, res))) return;
       const { id } = req.params;
       const {
-        project_id, client_id, amount, description, status, due_date,
+        project_id, client_id, billing_contact_id, amount, description, status, due_date,
         invoice_number, tax_amount, total_amount, issue_date,
         seller_name, seller_address, seller_siret, seller_vat_number, seller_iban, seller_bic, vat_rate,
         invoice_type, mission_id, mission_name, advancement_pct, affaire_invoice_number, phases,
@@ -278,6 +290,10 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
       }
       if (client_id && client_id !== existing.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', client_id, tenantId))) {
         return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+      }
+
+      if (billing_contact_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', billing_contact_id, tenantId))) {
+        return res.status(400).json({ error: "Contact d'envoi introuvable pour ce cabinet." });
       }
 
       // A connector-confirmed invoice number is the connector's own legal
@@ -374,11 +390,14 @@ export function registerInvoiceRoutes(app: Express, { supabaseAdmin, getTenantId
         phases: merge(phases, existing.phases) ?? []
       }).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
+      // Comme client_id : qui reçoit la facture n'est pas son contenu légal,
+      // donc modifiable même une fois la facture envoyée.
+      if (billing_contact_id !== undefined) await setBillingContact(id, billing_contact_id || null);
 
       if (items && Array.isArray(items)) {
         await supabaseAdmin.from('invoice_items').delete().eq('invoice_id', id).eq('tenant_id', tenantId);
         if (items.length > 0) {
-          const itemRows = items.map((item: any) => ({ id: item.id || crypto.randomUUID(), invoice_id: id, tenant_id: tenantId, description: item.description, quantity: item.quantity, unit_price: item.unit_price, vat_rate: item.vat_rate }));
+          const itemRows = items.map((item: any) => ({ id: crypto.randomUUID(), invoice_id: id, tenant_id: tenantId, description: item.description, quantity: item.quantity, unit_price: item.unit_price, vat_rate: item.vat_rate }));
           const { error: itemErr } = await supabaseAdmin.from('invoice_items').insert(itemRows);
           if (itemErr) throw itemErr;
         }

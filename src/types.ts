@@ -1264,6 +1264,10 @@ export interface Invoice {
   // projet). Rempli depuis projects.client_id à la création quand les deux
   // existent, toujours modifiable ensuite (voir invoices.client_id).
   client_id?: string | null;
+  // Contact à qui la facture est envoyée (comptabilité, finances...), distinct
+  // du Maître d'Ouvrage ; null = le Maître d'Ouvrage lui-même.
+  billing_contact_id?: string | null;
+  billing_contact?: { name: string; email?: string | null; phone?: string | null } | null;
   // Lecture seule, jointe par GET /api/invoices/:id à des fins d'affichage —
   // jamais envoyée sur un POST/PUT (voir server/routes/invoices.ts).
   client?: {

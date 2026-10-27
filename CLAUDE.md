@@ -281,6 +281,10 @@ connexions parallèles, exécuté par la CI). Les index uniques `(tenant_id, num
 notes d'honoraires ne sont PAS posés : des doublons existent déjà en production et feraient échouer
 la migration.
 
+### Contact d'envoi d'une facture, mentions légales, lignes
+
+Le Maître d'Ouvrage d'une facture rattachée à une affaire est celui de l'affaire (l'éditeur ne le laisse choisir que sans affaire) ; `src/lib/invoiceLegalMentions.ts` (testé) signale les mentions de l'acheteur absentes de sa fiche (nom, adresse complète, SIRET à 14 chiffres). `invoices.billing_contact_id` (`supabase/migrate_invoice_billing_contact.sql`) désigne un autre destinataire (comptabilité, finances) : modifiable même sur une facture envoyée, écrit à part de l'UPDATE principal (instance non migrée tolérée), proposé en premier dans la fenêtre d'envoi. **Les lignes (`invoice_items`) reçoivent toujours un nouvel UUID côté serveur** : l'éditeur envoyait l'id « 1 » en dur et la clé primaire est globale (`invoice_items_pkey`). L'export PDF de l'éditeur utilise `html2canvas-pro`, car Tailwind 4 écrit ses couleurs en oklch() que `html2canvas` ne lit pas. Suppression d'une affaire : réservée aux administrateurs, dans Réglages (`DeleteProjectCard`) ; la fiche et la liste n'offrent que « Archiver » (plan d'actions de l'onglet Infos).
+
 ### Délai de paiement et date d'échéance
 
 Une facture sans date d'échéance explicite (typiquement la facture brouillon
