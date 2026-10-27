@@ -17,6 +17,8 @@ interface Props {
   canReopen: boolean;
   /** Relit la fiche après un archivage ou une réouverture. */
   onChanged: () => void | Promise<void>;
+  /** `tile` : bouton libellé pleine largeur (onglet Infos) ; `icon` : icône seule. */
+  variant?: 'icon' | 'tile';
 }
 
 type Mode = 'archive' | 'reopen';
@@ -32,7 +34,7 @@ const STATE_ICON = {
  * n'empêchent pas d'archiver, ils demandent un motif, conservé au journal.
  * Voir server/routes/projectArchive.ts.
  */
-export function ProjectArchiveControl({ projectId, archivedAt, retentionUntil, canArchive, canReopen, onChanged }: Props) {
+export function ProjectArchiveControl({ projectId, archivedAt, retentionUntil, canArchive, canReopen, onChanged, variant = 'icon' }: Props) {
   const { t } = useTranslation();
   const titleId = useId();
   const reasonId = useId();
@@ -143,13 +145,21 @@ export function ProjectArchiveControl({ projectId, archivedAt, retentionUntil, c
             {t('projects_archived_badge')}
           </span>
         )
-      ) : canArchive && (
+      ) : canArchive && (variant === 'tile' ? (
+        <button type="button" onClick={() => open('archive')}
+          className="w-full flex items-center justify-center gap-2 py-2.5 px-1.5 rounded-lg border transition-colors hover:bg-[var(--tblr-surface-2)]"
+          style={{ borderColor: 'var(--tblr-border)' }}
+          title={t('project_archive_intro')}>
+          <IconArchive size={17} aria-hidden style={{ color: 'var(--tblr-muted)' }} />
+          <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_archive_button')}</span>
+        </button>
+      ) : (
         <button type="button" onClick={() => open('archive')}
           className="p-2 text-[var(--tblr-muted)] hover:bg-[var(--tblr-surface-2)] rounded-lg transition"
           title={t('project_archive_button')} aria-label={t('project_archive_button')}>
           <IconArchive size={18} aria-hidden />
         </button>
-      )}
+      ))}
 
       {mode && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={e => { if (e.target === e.currentTarget) close(); }}>

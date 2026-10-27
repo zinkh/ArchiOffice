@@ -143,13 +143,15 @@ export interface ProjectOverviewProps {
   /** Journal de l'opération (usePhaseNotes) et phases de la mission, dans l'ordre du stepper. */
   phaseNotes: PhaseNotesApi;
   journalPhases: string[];
+  /** Archivage de l'affaire (placé dans le plan d'actions : seul endroit de la fiche). */
+  archiveControl?: React.ReactNode;
 }
 
 export function ProjectOverview({
   project, setProject, phaseHistory, projectActivity, projectMembers, contacts, onSaveStakeholders, permits, milestones,
   onOpenFullEditor, onAddMilestone, onToggleMilestone,
   newMilestoneTitle, setNewMilestoneTitle, newMilestoneDate, setNewMilestoneDate,
-  isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase, phaseNotes, journalPhases,
+  isAddingMilestone, setIsAddingMilestone, onGoToInvoices, notePhase, phaseNotes, journalPhases, archiveControl,
 }: ProjectOverviewProps) {
   const navigate = useNavigate();
   const [panneauOpen, setPanneauOpen] = useState(false);
@@ -532,6 +534,7 @@ export function ProjectOverview({
             <IconSignRight size={17} style={{ color: 'var(--tblr-muted)' }} />
             <span className="text-[0.6875rem] font-medium leading-tight" style={{ color: 'var(--tblr-text)' }}>{t('project_overview_action_panel')}</span>
           </button>
+          {archiveControl && <div className="col-span-2 flex flex-col items-stretch gap-2">{archiveControl}</div>}
         </div>
 
         <AnimatePresence>

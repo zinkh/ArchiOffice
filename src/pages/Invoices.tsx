@@ -17,6 +17,7 @@ import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
+import { contactEmail, missingBuyerMentions } from '../lib/invoiceLegalMentions';
 import { isClientContact } from '../lib/contactCategories';
 import { canWriteInvoices } from '../lib/invoicePermissions';
 import { useUser } from '../UserContext';
@@ -445,7 +446,10 @@ export default function Invoices() {
 
   const openSendModal = (invoice: Invoice) => {
     const project = projects.find(p => p.id === invoice.project_id);
-    const clientEmail = project?.client_email || project?.email_client || '';
+    const billingContact = invoice.billing_contact_id ? contacts.find(c => c.id === invoice.billing_contact_id) : undefined;
+    const clientContact = invoice.client_id ? contacts.find(c => c.id === invoice.client_id) : undefined;
+    // Contact d'envoi (comptabilité...) d'abord, puis le Maître d'Ouvrage.
+    const clientEmail = contactEmail(billingContact) || project?.client_email || project?.email_client || contactEmail(clientContact) || '';
     const affaireRef = invoice.affaire_invoice_number ? ` (réf. affaire ${invoice.affaire_invoice_number})` : '';
     const isAcompte = invoice.invoice_type === 'acompte';
     const phases = isAcompte ? getEffectivePhases(invoice) : [];
@@ -1373,7 +1377,7 @@ export default function Invoices() {
                       setEditForm({
                         ...editForm,
                         project_id: newProjectId,
-                        client_id: newProject?.client_id || editForm.client_id,
+                        client_id: newProjectId ? (newProject?.client_id || null) : editForm.client_id,
                       });
                     }}
                   >
@@ -1384,39 +1388,68 @@ export default function Invoices() {
                   </select>
                 </div>
 
-                {/* Maître d'Ouvrage — always editable, same rationale as the
-                    project select just above: correcting who a document is
-                    attached to isn't part of the legal content already sent,
-                    and it's exactly what lets a Zoho/Odoo-created placeholder
-                    contact (name only, no SIRET/address/phone) be fixed
-                    after the fact. Independent of project_id: a general
-                    invoice or one imported from a connector has no project
-                    at all, but still needs a Maître d'Ouvrage to be a valid
-                    French invoice. */}
-                <div>
-                  <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_client_label')}</label>
-                  <ContactAutocomplete
-                    contacts={contacts.filter(isClientContact)}
-                    value={editForm.client_id || ''}
-                    onChange={id => setEditForm({ ...editForm, client_id: id || null })}
-                    placeholder={t('invoices_select_client')}
-                  />
-                  {(() => {
-                    const client = contacts.find(c => c.id === editForm.client_id);
-                    if (client) {
-                      return (
-                        <div className="mt-2 text-xs space-y-0.5 p-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
-                          {contactLegalLines(client).map((line, i) => <p key={i}>{line}</p>)}
-                        </div>
-                      );
-                    }
-                    return (
-                      <p className="mt-1 text-xs flex items-center gap-1" style={{ color: '#e67700' }}>
-                        <IconInfoCircle size={12} className="shrink-0" />{t('invoices_no_client_warning')}
-                      </p>
-                    );
-                  })()}
-                </div>
+                {/* Maître d'Ouvrage : celui de l'opération. Sans affaire, il reste
+                    à choisir (facture générale ou importée d'un connecteur). */}
+                {(() => {
+                  const linkedProject = projects.find(p => p.id === editForm.project_id);
+                  const fromProject = !!linkedProject;
+                  const client = contacts.find(c => c.id === editForm.client_id);
+                  const missing = missingBuyerMentions(client);
+                  const billing = contacts.find(c => c.id === editForm.billing_contact_id);
+                  return (
+                    <>
+                      <div>
+                        <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_client_label')}</label>
+                        {fromProject ? (
+                          <p className="text-xs mb-1" style={{ color: 'var(--tblr-muted)' }}>{t('invoices_client_from_project')}</p>
+                        ) : (
+                          <ContactAutocomplete
+                            contacts={contacts.filter(isClientContact)}
+                            value={editForm.client_id || ''}
+                            onChange={id => setEditForm({ ...editForm, client_id: id || null })}
+                            placeholder={t('invoices_select_client')}
+                          />
+                        )}
+                        {client ? (
+                          <div className="mt-2 text-xs space-y-0.5 p-2 rounded-lg" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
+                            {contactLegalLines(client).map((line, i) => <p key={i}>{line}</p>)}
+                          </div>
+                        ) : (
+                          <p className="mt-1 text-xs flex items-center gap-1" style={{ color: '#e67700' }}>
+                            <IconInfoCircle size={12} className="shrink-0" />{t(fromProject ? 'invoices_project_no_client_warning' : 'invoices_no_client_warning')}
+                          </p>
+                        )}
+                        {client && (missing.length === 0 ? (
+                          <p role="status" className="mt-2 text-xs flex items-center gap-1" style={{ color: '#2f9e44' }}>
+                            <IconCircleCheck size={14} className="shrink-0" />{t('invoices_legal_mentions_ok')}
+                          </p>
+                        ) : (
+                          <p role="alert" className="mt-2 text-xs flex items-start gap-1" style={{ color: '#e67700' }}>
+                            <IconInfoCircle size={14} className="shrink-0 mt-px" />
+                            <span>{t('invoices_legal_mentions_missing', { list: missing.map(m => t(`invoices_legal_mention_${m}`)).join(', ') })}</span>
+                          </p>
+                        ))}
+                      </div>
+
+                      {/* Contact d'envoi : comptabilité, finances... Toujours modifiable,
+                          comme le projet : qui reçoit la facture n'en change pas le contenu légal. */}
+                      <div>
+                        <label className="block text-sm font-medium mb-1" style={{ color: 'var(--tblr-text)' }}>{t('invoices_billing_contact_label')}</label>
+                        <ContactAutocomplete
+                          contacts={contacts}
+                          value={editForm.billing_contact_id || ''}
+                          onChange={id => setEditForm({ ...editForm, billing_contact_id: id || null })}
+                          placeholder={t('invoices_billing_contact_placeholder')}
+                        />
+                        <p className="mt-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                          {billing
+                            ? (contactEmail(billing) || t('invoices_billing_contact_no_email'))
+                            : t('invoices_billing_contact_hint')}
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
 
                 {/* Invoice type toggle — always editable: recategorizing an
                     already-sent invoice (e.g. flagging a Zoho import as a

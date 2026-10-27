@@ -136,9 +136,6 @@ export default function Projects() {
   // sans elle le nouveau contact sortait aussitôt des listes filtrées.
   const [contactModalCategory, setContactModalCategory] = useState<string>(CONTACT_CATEGORY_CLIENT);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
-  const [deleteConfirmInput, setDeleteConfirmInput] = useState('');
-  const [isDeletingProject, setIsDeletingProject] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [sortConfig, setSortConfig] = useState<{ key: keyof Project; direction: 'asc' | 'desc' } | null>(null);
   const [isEditing, setIsEditing] = useState(false);
@@ -650,32 +647,6 @@ export default function Projects() {
     }
   };
 
-  const deleteConfirmWord = t('projects_delete_confirm_word');
-
-  const handleDeleteProject = async (id: string) => {
-    setIsDeletingProject(true);
-    try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-
-      if (res.ok) {
-        setProjects(prev => prev.filter(p => p.id !== id));
-        setIsModalOpen(false);
-        setSelectedProject(null);
-        setDeleteTarget(null);
-        setDeleteConfirmInput('');
-      } else {
-        const errorData = await res.json();
-        console.error('Delete failed:', errorData.error);
-        showToast(t('projects_delete_failed', { error: errorData.error || '' }), 'error');
-      }
-    } catch (err) {
-      console.error('Failed to delete project:', err);
-      showToast(t('projects_delete_failed_retry'), 'error');
-    } finally {
-      setIsDeletingProject(false);
-    }
-  };
-
   const handleExportXLSX = async () => {
     const { exporterListe, FORMAT_EURO } = await import('../lib/xlsxLetterhead');
     let settings: any = {};
@@ -1064,16 +1035,6 @@ export default function Projects() {
               </>
             ) : (
               <>
-                {currentUser?.system_role === 'admin' && (
-                  <button
-                    type="button"
-                    onClick={() => { setDeleteTarget(selectedProject); setDeleteConfirmInput(''); }}
-                    className="btn btn-ghost mr-auto hover:!text-[var(--tblr-danger)]"
-                  >
-                    <IconTrash size={18} aria-hidden="true" />
-                    {t('btn_delete')}
-                  </button>
-                )}
                 <Link to={`/projects/${selectedProject.id}`} className="btn btn-secondary">
                   <IconExternalLink size={18} aria-hidden="true" />
                   {t('projects_open_full_page')}
@@ -1844,60 +1805,6 @@ export default function Projects() {
                 </li>
               ))}
             </ul>
-          </ModalShell>
-        )}
-      </AnimatePresence>
-
-      {/* Delete Project Confirmation Modal — type-to-confirm to prevent accidental deletion */}
-      <AnimatePresence>
-        {deleteTarget && (
-          <ModalShell
-            key="project-delete-modal"
-            size="md"
-            title={t('projects_delete_confirm_title')}
-            busy={isDeletingProject}
-            onClose={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
-            bodyClassName="p-4 sm:p-6"
-            footer={
-              <>
-                <button
-                  type="button"
-                  onClick={() => { setDeleteTarget(null); setDeleteConfirmInput(''); }}
-                  disabled={isDeletingProject}
-                  className="btn btn-secondary"
-                >
-                  {t('btn_cancel')}
-                </button>
-                <button
-                  type="button"
-                  disabled={deleteConfirmInput.trim().toLowerCase() !== deleteConfirmWord.toLowerCase() || isDeletingProject}
-                  onClick={() => handleDeleteProject(deleteTarget.id)}
-                  className="btn btn-danger disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  {isDeletingProject ? t('projects_deleting') : t('projects_delete_confirm_button')}
-                </button>
-              </>
-            }
-          >
-            <p className="text-sm text-[var(--tblr-muted)]">
-              {t('projects_delete_confirm_body', { name: deleteTarget.name })}
-            </p>
-            <label htmlFor="project-delete-confirm" className="block text-sm text-[var(--tblr-muted)] mt-3">
-              {t('projects_delete_confirm_instruction', { word: deleteConfirmWord })}
-            </label>
-            <input
-              id="project-delete-confirm"
-              autoFocus
-              className={FIELD_CLS + ' mt-2'}
-              value={deleteConfirmInput}
-              onChange={e => setDeleteConfirmInput(e.target.value)}
-              placeholder={deleteConfirmWord}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && deleteConfirmInput.trim().toLowerCase() === deleteConfirmWord.toLowerCase() && !isDeletingProject) {
-                  handleDeleteProject(deleteTarget.id);
-                }
-              }}
-            />
           </ModalShell>
         )}
       </AnimatePresence>
