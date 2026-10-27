@@ -68,7 +68,7 @@ describe('fusion de contacts : toutes les références sont rattachées', () => 
   });
 
   it('la liste de la fonction ne contient que des colonnes qui existent dans les migrations', () => {
-    const known = new Set([...referencingColumns().keys(), 'marches_entreprises.act_entreprise_id', 'marches_entreprises.contact_id']);
+    const known = new Set([...referencingColumns().keys(), 'marches_entreprises.act_entreprise_id', 'marches_entreprises.contact_id', 'contacts.company_contact_id']);
     const unknown = [...declaredInFunction()].filter(c => !known.has(c));
     expect(unknown).toEqual([]);
   });

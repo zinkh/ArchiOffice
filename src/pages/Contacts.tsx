@@ -840,6 +840,7 @@ export default function Contacts() {
           selectedIds={selectedIds}
           onToggleSelected={toggleSelected}
           onEdit={handleEdit}
+          onChanged={fetchContacts}
         />
       )}
 

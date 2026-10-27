@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconBuilding, IconEdit, IconUser, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import type { Contact, Invoice, Project } from '../../types';
-import { fetchJson } from '../../lib/api';
+import { fetchJson, apiFetch } from '../../lib/api';
 import { contactName } from '../../lib/contactMerge';
 import { missingBuyerMentions } from '../../lib/invoiceLegalMentions';
 import CorrespondenceTab from '../CorrespondenceTab';
@@ -20,7 +20,11 @@ interface Props {
   selectedIds: string[];
   onToggleSelected: (id: string) => void;
   onEdit: (contact: Contact) => void;
+  /** Appelé après une modification de suivi : la page relit les contacts. */
+  onChanged: () => void;
 }
+
+const STATUSES = ['prospect', 'en_discussion', 'client', 'partenaire', 'inactif'] as const;
 
 const euro = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n);
 
@@ -34,12 +38,13 @@ function Row({ label, value }: { label: string; value?: string | null }) {
   );
 }
 
-export function ContactsDetailView({ contacts, projects, canSelect, selectedIds, onToggleSelected, onEdit }: Props) {
+export function ContactsDetailView({ contacts, projects, canSelect, selectedIds, onToggleSelected, onEdit, onChanged }: Props) {
   const { t } = useTranslation();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [mobileFiche, setMobileFiche] = useState(false);
   const [tab, setTab] = useState<Tab>('overview');
   const [invoices, setInvoices] = useState<Invoice[] | null>(null);
+  const [saveError, setSaveError] = useState('');
 
   // Une fiche reste ouverte tant qu'elle figure dans la liste filtrée ; sinon la première.
   const active = useMemo(
@@ -52,6 +57,18 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
     fetchJson('/api/invoices').then(setInvoices).catch(() => setInvoices([]));
   }, [tab, invoices]);
 
+  // Écrit seulement les champs de suivi passés ; le serveur les valide.
+  const saveRelation = async (id: string, patch: Partial<Pick<Contact, 'company_contact_id' | 'relation_status' | 'relation_reminder_on' | 'relation_reminder_note'>>) => {
+    setSaveError('');
+    try {
+      const res = await apiFetch(`/api/contacts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || String(res.status));
+      onChanged();
+    } catch (e: any) {
+      setSaveError(e?.message || t('contacts_relation_save_failed'));
+    }
+  };
+
   if (!active) {
     return (
       <div className="rounded-lg p-10 text-center" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
@@ -61,6 +78,10 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
     );
   }
 
+  const company = active.company_contact_id ? contacts.find(c => c.id === active.company_contact_id) : undefined;
+  const people = contacts.filter(c => c.company_contact_id === active.id);
+  const companyChoices = contacts.filter(c => c.id !== active.id && !c.company_contact_id && c.company_name && !c.first_name && !c.last_name);
+  const reminderDue = !!active.relation_reminder_on && active.relation_reminder_on <= new Date().toISOString().slice(0, 10);
   const linkedProjects = projects.filter(p => p.client_id === active.id);
   const linkedInvoices = (invoices || []).filter(i => i.client_id === active.id);
   const missing = missingBuyerMentions(active);
@@ -117,6 +138,58 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
 
         <div className="p-4" role="tabpanel">
           {tab === 'overview' && (
+            <div className="space-y-5">
+            <section aria-label={t('contacts_relation_title')} className="rounded-md p-3 space-y-3" style={{ border: '1px solid var(--tblr-border)' }}>
+              <h4 className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_relation_title')}</h4>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
+                  {t('contacts_relation_status')}
+                  <select className="w-full px-2 py-1.5 rounded-md text-sm pointer-coarse:min-h-11" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    value={active.relation_status || ''} onChange={e => saveRelation(active.id, { relation_status: (e.target.value || null) as Contact['relation_status'] })}>
+                    <option value="">{t('contacts_relation_none')}</option>
+                    {STATUSES.map(s => <option key={s} value={s}>{t(`contacts_relation_status_${s}`)}</option>)}
+                  </select>
+                </label>
+                <label className="text-xs space-y-1 block" style={{ color: reminderDue ? 'var(--tblr-danger)' : 'var(--tblr-muted)' }}>
+                  {t('contacts_relation_reminder')}{reminderDue ? ` (${t('contacts_relation_due')})` : ''}
+                  <input type="date" className="w-full px-2 py-1.5 rounded-md text-sm pointer-coarse:min-h-11" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    value={active.relation_reminder_on || ''} onChange={e => saveRelation(active.id, { relation_reminder_on: e.target.value || null })} />
+                </label>
+              </div>
+              <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
+                {t('contacts_relation_note')}
+                <input type="text" maxLength={500} key={active.id + (active.relation_reminder_note || '')} defaultValue={active.relation_reminder_note || ''}
+                  className="w-full px-2 py-1.5 rounded-md text-sm pointer-coarse:min-h-11" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                  onBlur={e => { if (e.target.value !== (active.relation_reminder_note || '')) saveRelation(active.id, { relation_reminder_note: e.target.value }); }} />
+              </label>
+              {saveError && <p role="alert" className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{saveError}</p>}
+            </section>
+
+            <section aria-label={t('contacts_company_section')} className="space-y-2">
+              {people.length > 0 ? (
+                <>
+                  <h4 className="text-sm font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts_people_title', { count: people.length })}</h4>
+                  <ul className="space-y-1">
+                    {people.map(c => (
+                      <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
+                        <button type="button" className="hover:underline text-left" style={{ color: 'var(--tblr-primary)' }} onClick={() => { setActiveId(c.id); setTab('overview'); }}>{contactName(c)}{c.job_title ? ` · ${c.job_title}` : ''}</button>
+                        <button type="button" className="text-xs" style={{ color: 'var(--tblr-muted)' }} onClick={() => saveRelation(c.id, { company_contact_id: null })}>{t('contacts_company_detach')}</button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : null}
+              {(active.first_name || active.last_name) && (
+                <label className="text-xs space-y-1 block" style={{ color: 'var(--tblr-muted)' }}>
+                  {t('contacts_company_link')}{company ? ` : ${contactName(company)}` : ''}
+                  <select className="w-full px-2 py-1.5 rounded-md text-sm pointer-coarse:min-h-11" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' }}
+                    value={active.company_contact_id || ''} onChange={e => saveRelation(active.id, { company_contact_id: e.target.value || null })}>
+                    <option value="">{t('contacts_company_none')}</option>
+                    {companyChoices.map(c => <option key={c.id} value={c.id}>{contactName(c)}</option>)}
+                  </select>
+                </label>
+              )}
+            </section>
             <dl>
               <Row label={t('contacts_col_company')} value={active.company_name} />
               <Row label={t('email')} value={email} />
@@ -127,6 +200,7 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
               <Row label={t('ca_amount')} value={active.ca_amount ? euro(Number(active.ca_amount)) : ''} />
               <Row label="Notes" value={active.notes} />
             </dl>
+            </div>
           )}
           {tab === 'projects' && (
             linkedProjects.length === 0

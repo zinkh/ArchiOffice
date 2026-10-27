@@ -100,6 +100,7 @@ DECLARE
   v_refs TEXT[][] := ARRAY[
     ['consultation_depot_invites','contact_id'],
     ['contact_qualifications','contact_id'],
+    ['contacts','company_contact_id'],
     ['contrats_moe','client_id'],
     ['documents','contact_id'],
     ['doe_requests','contact_id'],
@@ -186,6 +187,11 @@ BEGIN
     GET DIAGNOSTICS n = ROW_COUNT;
     IF n > 0 THEN v_moved := v_moved || jsonb_build_object(v_tbl || '.' || v_col, n); END IF;
   END LOOP;
+
+  -- Une fiche ne peut pas être sa propre société (le doublon fusionné était sa société).
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'contacts' AND column_name = 'company_contact_id') THEN
+    UPDATE contacts SET company_contact_id = NULL WHERE tenant_id = p_tenant AND id = p_primary AND company_contact_id = p_primary;
+  END IF;
 
   -- 3. Liens polymorphes : e-mails et documents rattachés à la fiche.
   IF to_regclass('email_links') IS NOT NULL THEN

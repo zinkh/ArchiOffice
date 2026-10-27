@@ -3670,7 +3670,11 @@ journalise dans `contact_merge_log`. Réservée au rôle serveur (`REVOKE` pour 
   Cases à cocher dans le tableau, bouton « Fusionner (N) » et bandeau des doublons possibles (`findDuplicateGroups` : même SIRET, même e-mail, même nom).
 - **Vue détaillée** (`ContactsDetailView.tsx`) : liste compacte et fiche à onglets (vue d'ensemble, affaires, facturation, échanges). **Le tableau reste la vue
   par défaut** ; le choix est mémorisé (`localStorage` `contacts:view`) et `?vue=detail|table` l'emporte.
-- Pas encore fait : plusieurs interlocuteurs par société, statut et rappel de relation commerciale.
+- **Société et interlocuteurs, suivi de relation** (`supabase/migrate_contact_relations.sql`) : `contacts.company_contact_id` (société de rattachement, `ON DELETE SET NULL`,
+  une seule profondeur : la société choisie ne doit pas être elle-même rattachée), `relation_status` (prospect, en_discussion, client, partenaire, inactif),
+  `relation_reminder_on` / `relation_reminder_note`. Validés par `normalizeRelation` (`server/routes/contacts.ts`, `tests/contactRelations.test.ts`) ; une instance non migrée
+  retombe sur l'enregistrement sans ces colonnes. Se modifient dans l'onglet « Vue d'ensemble » de la vue détaillée. `merge_contacts` rattache `contacts.company_contact_id`.
+- Pas encore fait : alerte ou notification sur les rappels échus, filtre par statut dans le tableau.
 
 ### Visibilité des contacts personnels
 
