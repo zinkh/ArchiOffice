@@ -56,6 +56,7 @@ export default function Contacts() {
   const [filterCompany, setFilterCompany] = useState('');
   const [filterCorpsEtat, setFilterCorpsEtat] = useState('');
   const [filterSpecialite, setFilterSpecialite] = useState('');
+  const [filterRelation, setFilterRelation] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'last_name', order: 'asc' });
 
   // Fusion de contacts : sélection (tableau) et fiches du doublon en cours de traitement.
@@ -547,6 +548,11 @@ export default function Contacts() {
     if (filterCorpsEtat) {
       result = result.filter(c => (c.corps_etat || []).includes(filterCorpsEtat));
     }
+    if (filterRelation) {
+      result = result.filter(c => filterRelation === 'due'
+        ? !!c.relation_reminder_on && c.relation_reminder_on <= new Date().toISOString().slice(0, 10)
+        : c.relation_status === filterRelation);
+    }
     if (filterSpecialite) {
       result = result.filter(c => (c.specialite || []).includes(filterSpecialite));
     }
@@ -569,7 +575,7 @@ export default function Contacts() {
     });
 
     return result;
-  }, [contacts, searchQuery, filterCategory, filterCompany, filterCorpsEtat, filterSpecialite, sortConfig]);
+  }, [contacts, searchQuery, filterCategory, filterCompany, filterCorpsEtat, filterSpecialite, filterRelation, sortConfig]);
 
   // Les organismes ne sont pas une table : ils sont saisis librement sur chaque
   // contact, la liste déroulante se déduit donc des contacts eux-mêmes.
@@ -784,6 +790,22 @@ export default function Contacts() {
               </select>
             </div>
           )}
+          <div className="relative">
+            <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+            <select
+              aria-label={t('contacts_relation_status')}
+              className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
+              style={inputStyle}
+              value={filterRelation}
+              onChange={e => setFilterRelation(e.target.value)}
+            >
+              <option value="">{t('contacts_relation_status')}</option>
+              {['prospect', 'en_discussion', 'client', 'partenaire', 'inactif'].map(v => (
+                <option key={v} value={v}>{t(`contacts_relation_status_${v}`)}</option>
+              ))}
+              <option value="due">{t('contacts_relation_filter_due')}</option>
+            </select>
+          </div>
           {specialiteOptions.length > 0 && (
             <div className="relative">
               <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />

@@ -49,3 +49,22 @@ describe('suivi de relation des contacts', () => {
     expect((await put(user.token, p, { company_contact_id: soc })).status).toBe(200);
   });
 });
+
+describe('alerte de relance échue', () => {
+  it('signale un rappel dépassé, ignore le futur et les contacts personnels', async () => {
+    const { ALERT_RULES_BY_CODE } = await import('../server/agentAlerts');
+    const regle = ALERT_RULES_BY_CODE.get('contact_relance_echue')!;
+    const snapshot = {
+      tenantId: 't', now: new Date('2026-11-20T08:00:00.000Z'),
+      contactReminders: [
+        { id: 'a', company_name: 'Selia', relation_reminder_on: '2026-11-15', relation_reminder_note: 'Devis' },
+        { id: 'b', first_name: 'Claire', last_name: 'Aubry', relation_reminder_on: '2026-12-01' },
+        { id: 'c', company_name: 'Privé', relation_reminder_on: '2026-01-01', is_personal: true },
+        { id: 'd', company_name: 'Sans date', relation_reminder_on: null },
+      ],
+    };
+    const alertes = regle.evaluate(snapshot as any, 0);
+    expect(alertes.map(a => a.dedupKey)).toEqual(['contact_relance_echue:a']);
+    expect(alertes[0].message).toContain('Devis');
+  });
+});

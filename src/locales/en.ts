@@ -2016,6 +2016,7 @@ export default {
       "contacts_col_prefix": "Prefix",
       "contacts_col_company": "Organisation",
       "contacts_all_companies": "All organisations",
+      "contacts_relation_filter_due": "Follow-ups due",
       "contacts_relation_title": "Relationship follow-up",
       "contacts_relation_status": "Status",
       "contacts_relation_none": "Not set",

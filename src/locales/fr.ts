@@ -2065,6 +2065,7 @@ export default {
       "contacts_col_prefix": "Civilité",
       "contacts_col_company": "Organisme",
       "contacts_all_companies": "Tous les organismes",
+      "contacts_relation_filter_due": "Relances à faire",
       "contacts_relation_title": "Suivi de la relation",
       "contacts_relation_status": "Statut",
       "contacts_relation_none": "Non défini",

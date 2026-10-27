@@ -3674,7 +3674,7 @@ journalise dans `contact_merge_log`. Réservée au rôle serveur (`REVOKE` pour 
   une seule profondeur : la société choisie ne doit pas être elle-même rattachée), `relation_status` (prospect, en_discussion, client, partenaire, inactif),
   `relation_reminder_on` / `relation_reminder_note`. Validés par `normalizeRelation` (`server/routes/contacts.ts`, `tests/contactRelations.test.ts`) ; une instance non migrée
   retombe sur l'enregistrement sans ces colonnes. Se modifient dans l'onglet « Vue d'ensemble » de la vue détaillée. `merge_contacts` rattache `contacts.company_contact_id`.
-- Pas encore fait : alerte ou notification sur les rappels échus, filtre par statut dans le tableau.
+- **Relances** : filtre par statut ou « Relances à faire » dans le tableau ; règle d'alerte `contact_relance_echue` (`server/agentAlerts.ts`, seuil en jours de retard, 0 par défaut, contacts personnels exclus, colonne absente = aucune alerte).
 
 ### Visibilité des contacts personnels
 
