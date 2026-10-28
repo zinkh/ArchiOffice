@@ -775,8 +775,12 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     updateReportField('decisions', (selectedReport?.decisions || []).filter((_, i) => i !== index));
   };
 
+  // Une création à la fois : sans ce verrou, un second appui avant la réponse du serveur
+  // (rien ne s'affichait jusque-là) créait une seconde observation, avec un autre identifiant.
+  const creatingObservationRef = useRef(false);
   const addObservation = async (type: Observation['type'] = 'observation'): Promise<string | undefined> => {
-    if (!selectedReportId) return undefined;
+    if (!selectedReportId || creatingObservationRef.current) return undefined;
+    creatingObservationRef.current = true;
     // Id généré côté client : une création rejouée après coupure réseau
     // (file de synchro hors-ligne, src/lib/offlineQueue.ts) ne crée jamais
     // deux observations.
@@ -788,17 +792,23 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       // Une observation relevée dans un compte-rendu hérite de son bâtiment et de sa phase.
       batiment_id: selectedReport?.batiment_id || null, phase_id: selectedReport?.phase_id || null,
     };
+    // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
+    const lotJoin = lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {};
+    // Ligne affichée tout de suite (en attente), remplacée par la réponse du serveur.
+    setReportObservations(prev => upsertById(prev, { ...body, project_id: project.id, pendingSync: true, ...lotJoin } as unknown as Observation));
     try {
       const { queued, data } = await queuedJsonRequest<Observation>({ entity: 'observation', id, method: 'POST', url: `/api/projects/${project.id}/observations`, body });
-      const newObs: Observation = {
-        ...(queued ? { ...body, project_id: project.id, pendingSync: true } : data!),
-        // La création ne renvoie pas la jointure du lot : sans elle, l'observation tomberait sous « Sans lot ».
-        ...(lot ? { lot: { id: lot.id, lot_number: lot.lot_number, lot_title: lot.lot_title } } : {}),
-      };
-      setReportObservations(prev => upsertById(prev, newObs));
+      if (!queued && data) setReportObservations(prev => upsertById(prev, { ...data, ...lotJoin }));
       fetchAllObservations().catch(() => {});
       return id;
-    } catch (err) { console.error(err); return undefined; }
+    } catch (err) {
+      console.error(err);
+      setReportObservations(prev => prev.filter(o => o.id !== id));
+      setSaveError(true);
+      return undefined;
+    } finally {
+      creatingObservationRef.current = false;
+    }
   };
 
   // Photo prise depuis la barre du bas : elle crée l'observation à laquelle elle se rattache.

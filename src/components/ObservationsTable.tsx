@@ -276,15 +276,23 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     }
   }, [lots, projectId]);
 
+  // Une ligne ajoutée à la fois : un second appui avant la réponse du serveur créait une seconde observation.
+  const addingRef = useRef(false);
   const addRow = async () => {
-    // Id généré côté client : une création rejouée après coupure réseau
-    // (file de synchro hors-ligne) ne crée jamais deux observations.
-    const ok = await createObservation({ id: crypto.randomUUID(), texte: '', statut: 'À faire', type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
-      // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
-      batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
-      phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
-    });
-    if (ok) onChanged?.();
+    if (addingRef.current) return;
+    addingRef.current = true;
+    try {
+      // Id généré côté client : une création rejouée après coupure réseau
+      // (file de synchro hors-ligne) ne crée jamais deux observations.
+      const ok = await createObservation({ id: crypto.randomUUID(), texte: '', statut: 'À faire', type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
+        // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
+        batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
+        phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
+      });
+      if (ok) onChanged?.();
+    } finally {
+      addingRef.current = false;
+    }
   };
 
   // Nouvelle remarque pour la même entreprise (même lot, mêmes bâtiment et phase) : on saisit à la suite.
