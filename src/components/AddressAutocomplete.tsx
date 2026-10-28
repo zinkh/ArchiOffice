@@ -12,6 +12,9 @@ interface AddressAutocompleteProps {
     street?: string;
     banId?: string;
     cityCode?: string;
+    /** Position de l'adresse choisie (WGS84), quand le géocodeur la fournit. */
+    lon?: number;
+    lat?: number;
   }) => void;
   placeholder?: string;
   required?: boolean;
@@ -160,7 +163,10 @@ export function AddressAutocomplete({ label, value, onChange, onSelect, placehol
         zipcode: feature.properties.postcode,
         street: feature.properties.street || feature.properties.name,
         banId: feature.properties.id,
-        cityCode: feature.properties.citycode
+        cityCode: feature.properties.citycode,
+        ...(Array.isArray(feature.geometry?.coordinates) && feature.geometry.coordinates[0] && feature.geometry.coordinates[1]
+          ? { lon: feature.geometry.coordinates[0], lat: feature.geometry.coordinates[1] }
+          : {}),
       });
     }
   };

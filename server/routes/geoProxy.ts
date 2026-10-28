@@ -530,6 +530,44 @@ export function registerGeoProxyRoutes(app: Express) {
     }
   });
 
+  // Adresse la plus proche d'un point (centre d'une parcelle cochée sur la carte).
+  // Même forme de réponse que /api/address-search, plus `distance` (en mètres) :
+  // c'est à l'écran de décider si une adresse trop éloignée vaut d'être proposée.
+  app.get("/api/address-reverse", async (req, res) => {
+    const lon = Number(req.query.lon);
+    const lat = Number(req.query.lat);
+    if (!Number.isFinite(lon) || !Number.isFinite(lat) || Math.abs(lon) > 180 || Math.abs(lat) > 90) {
+      return res.status(400).json({ error: "Parameters 'lon' and 'lat' must be valid coordinates" });
+    }
+    const endpoints = [
+      `https://data.geopf.fr/geocodage/reverse?lon=${lon}&lat=${lat}&index=address&limit=1`,
+      `https://api-adresse.data.gouv.fr/reverse/?lon=${lon}&lat=${lat}&limit=1`,
+    ];
+    for (const url of endpoints) {
+      try {
+        const response = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 5000);
+        if (!response.ok) continue;
+        const data: any = await response.json();
+        const features = (data?.features || []).map((f: any) => ({
+          properties: {
+            label: f.properties?.label || "",
+            id: f.properties?.id || "",
+            name: f.properties?.name || "",
+            postcode: f.properties?.postcode || "",
+            citycode: f.properties?.citycode || "",
+            city: f.properties?.city || "",
+            distance: Number.isFinite(Number(f.properties?.distance)) ? Number(f.properties.distance) : null,
+          },
+          geometry: f.geometry,
+        })).filter((f: any) => f.properties.label);
+        if (features.length > 0) return res.json({ features });
+      } catch (e) {
+        console.warn("Reverse geocoding failed on", url.split('?')[0]);
+      }
+    }
+    res.json({ features: [] });
+  });
+
   app.get("/api/weather", async (req, res) => {
     try {
       const { q, date } = req.query;

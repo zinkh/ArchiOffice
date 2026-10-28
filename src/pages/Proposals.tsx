@@ -1,6 +1,6 @@
 import { contactPatchFromProposal, fillMissingClientFields } from '../lib/proposalClient';
 import * as React from 'react';
-import { useState, useEffect, useId } from 'react';
+import { useState, useEffect, useId, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown } from '@tabler/icons-react';
 import { AnimatePresence } from 'motion/react';
@@ -11,9 +11,14 @@ import { fetchJson } from '../lib/api';
 import type { Proposal, Contact, Milestone, MiqcpAssessment, ProjectTemplate } from '../types';
 import { OPERATION_LABELS, feeDistributionFromTemplate, summarizeTemplate } from '../lib/projectTemplates';
 import { useTranslation } from 'react-i18next';
-import { GeoportailMap, GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
+import { GeorisquesInfo, RNBInfo, BDNBInfo } from '../components/LocationMaps';
 import { summarizeParcels, selectionGeometry } from '../lib/cadastreSelection';
-import type { CadastreParcel } from '../components/MapLibreCadastre';
+import {
+  parseStoredParcels, serializeParcels, pointInParcels,
+  type ParcelAddress, type StoredParcel,
+} from '../lib/terrainParcelles';
+import { isErpOperation } from '../lib/erp';
+import { TerrainParcelles } from '../components/proposal/TerrainParcelles';
 import { AddressAutocomplete } from '../components/AddressAutocomplete';
 import { ContactAutocomplete } from '../components/ContactAutocomplete';
 import { ContactModal } from '../components/ContactModal';
@@ -167,7 +172,6 @@ export default function Proposals() {
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
-  const [selectedParcelGeometry, setSelectedParcelGeometry] = useState<GeoJSON.Geometry | null>(null);
   const [exportProposal, setExportProposal] = useState<Proposal | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
@@ -196,6 +200,8 @@ export default function Proposals() {
     ref_cadastrale: '',
     zone_plu: '',
     surface_parcelle: '',
+    parcelles_selection: '',
+    is_erp: false,
     nom_etablissement: '',
     avant_trav: '',
     apres_trav: '',
@@ -245,6 +251,41 @@ export default function Proposals() {
     const id = setTimeout(() => setRiskAddress(value), 700);
     return () => clearTimeout(id);
   }, [newProposal.adresse_terrain]);
+
+  // Parcelles cochées sur la carte : la proposition les enregistre (JSON), c'est
+  // ce qui garde le cadre autour du terrain quand on referme puis rouvre la fiche.
+  const parcels = useMemo(() => parseStoredParcels(newProposal.parcelles_selection), [newProposal.parcelles_selection]);
+  const selectedParcelGeometry = useMemo(() => selectionGeometry(parcels), [parcels]);
+  const isErp = isErpOperation(newProposal);
+
+  const handleParcelsChange = (next: StoredParcel[]) => {
+    setFormTouched(true);
+    setNewProposal(prev => {
+      const { reference, surface } = summarizeParcels(next);
+      return {
+        ...prev,
+        parcelles_selection: serializeParcels(next),
+        ...(next.length > 0 ? {
+          ref_cadastrale: reference || prev.ref_cadastrale,
+          surface_parcelle: surface != null ? String(surface) : prev.surface_parcelle,
+        } : {}),
+      };
+    });
+  };
+
+  // Remplacement de l'adresse saisie par celle de la parcelle, après accord de la personne.
+  const handleParcelAddressAccepted = (address: ParcelAddress) => {
+    setFormTouched(true);
+    setNewProposal(prev => ({
+      ...prev,
+      adresse_terrain: address.label,
+      cp_ville_terrain: `${address.zipcode} ${address.city}`.trim(),
+      site_postcode: address.zipcode,
+      site_city: address.city,
+      ban_id_terrain: address.banId,
+      city_code_terrain: address.cityCode,
+    }));
+  };
   const { settings } = useSettings();
   const mafCost = useMafCost({
     project: newProposal,
@@ -322,10 +363,18 @@ export default function Proposals() {
       const url = editingProposal ? `/api/proposals/${editingProposal.id}` : '/api/proposals';
       const method = editingProposal ? 'PUT' : 'POST';
 
+      // Hors ERP, les champs ERP masqués ne doivent pas rester enregistrés (ils
+      // alimenteraient encore les exports et la fiche d'affaire).
+      const payload: Partial<Proposal> = isErp
+        ? { ...newProposal, is_erp: true }
+        : {
+            ...newProposal, is_erp: false,
+            type_et_cat: '', surface_erp: '', surface_ert: '', effectif_public: '', effectif_personnel: '',
+          };
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newProposal)
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         const saved = await res.json();
@@ -999,21 +1048,34 @@ export default function Proposals() {
                           });
                         }}
                         onSelect={(details) => {
+                          // Une adresse choisie hors des parcelles cochées désigne un autre
+                          // terrain : l'ancienne sélection n'a plus de sens.
+                          const movedAway = parcels.length > 0 && details.lon != null && details.lat != null
+                            && !pointInParcels([details.lon, details.lat], parcels);
                           setNewProposal(prev => ({
-                            ...prev, 
+                            ...prev,
                             adresse_terrain: details.fullAddress,
                             cp_ville_terrain: `${details.zipcode || ''} ${details.city || ''}`.trim(),
                             site_postcode: details.zipcode || '',
                             site_city: details.city || '',
                             ban_id_terrain: details.banId || '',
-                            city_code_terrain: details.cityCode || ''
+                            city_code_terrain: details.cityCode || '',
+                            ...(movedAway ? { parcelles_selection: '' } : {}),
                           }));
-                        }} 
+                        }}
                       />
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <FormField label="Code Postal Terrain" value={newProposal.site_postcode} onChange={(v: any) => setNewProposal(prev => ({...prev, site_postcode: v}))} />
                         <FormField label="Ville Terrain" value={newProposal.site_city} onChange={(v: any) => setNewProposal(prev => ({...prev, site_city: v}))} />
                       </div>
+                      <TerrainParcelles
+                        currentAddress={newProposal.adresse_terrain || ''}
+                        mapAddress={riskAddress}
+                        banId={newProposal.ban_id_terrain}
+                        parcels={parcels}
+                        onParcelsChange={handleParcelsChange}
+                        onAddressAccepted={handleParcelAddressAccepted}
+                      />
                     </div>
                     <FormField label="Référence Cadastrale" value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal(prev => ({...prev, ref_cadastrale: v}))} />
                     <FormField label="Zone PLU" value={newProposal.zone_plu} onChange={(v: any) => setNewProposal(prev => ({...prev, zone_plu: v}))} />
@@ -1021,7 +1083,10 @@ export default function Proposals() {
                     <FormField label="Nom de l’établissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
                     <FormField label="Avant Travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
                     <FormField label="Après Travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
-                    <FormField label="Type et catégorie ERP" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                    <FormField label="Opération classée ERP (établissement recevant du public)" type="checkbox" value={isErp} onChange={(v: any) => setNewProposal(prev => ({...prev, is_erp: !!v}))} />
+                    {isErp && (
+                      <FormField label="Type et catégorie ERP" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                    )}
                     <FormField label="Type" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
                     <FormField label="Catégorie" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
                     <FormField
@@ -1057,10 +1122,14 @@ export default function Proposals() {
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <FormField label="Surface plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
                     <FormField label="Surface extension" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher_ext: v}))} />
-                    <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
-                    <FormField label="Surf. ERT" value={newProposal.surface_ert} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_ert: v}))} />
-                    <FormField label="Effectif Public" value={newProposal.effectif_public} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_public: v}))} />
-                    <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
+                    {isErp && (
+                      <>
+                        <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
+                        <FormField label="Surf. ERT" value={newProposal.surface_ert} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_ert: v}))} />
+                        <FormField label="Effectif Public" value={newProposal.effectif_public} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_public: v}))} />
+                        <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
+                      </>
+                    )}
                     <FormField label="Date de modification" value={newProposal.date_modification} onChange={(v: any) => setNewProposal(prev => ({...prev, date_modification: v}))} />
                   </div>
                 </div>
@@ -1085,28 +1154,6 @@ export default function Proposals() {
                       <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={riskAddress} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={riskAddress} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
                       <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={riskAddress} /></InfoPanelBoundary>
-                    </div>
-
-                    <div className="space-y-4">
-                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider mb-2 block">{t('proposals_maps_title')}</label>
-                      <div className="rounded-lg overflow-hidden border border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] relative shadow-sm h-[28rem] md:h-[34rem]">
-                        <InfoPanelBoundary label="Cadastre">
-                          <GeoportailMap
-                            address={riskAddress}
-                            banId={newProposal.ban_id_terrain}
-                            onSelectionChange={(parcels: CadastreParcel[]) => {
-                              setSelectedParcelGeometry(selectionGeometry(parcels));
-                              if (parcels.length === 0) return;
-                              const { reference, surface } = summarizeParcels(parcels);
-                              setNewProposal(prev => ({
-                                ...prev,
-                                ref_cadastrale: reference || prev.ref_cadastrale,
-                                surface_parcelle: surface != null ? String(surface) : prev.surface_parcelle,
-                              }));
-                            }}
-                          />
-                        </InfoPanelBoundary>
-                      </div>
                     </div>
                   </div>
                 )}

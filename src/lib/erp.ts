@@ -51,6 +51,28 @@ export function parseTypeEtCat(raw: string | undefined | null): ErpSelection {
   return { code, categorie: cat ? Number(cat[1]) : null, ...(nature ? { nature } : {}) };
 }
 
+export interface ErpFlagFields {
+  is_erp?: boolean | null;
+  type_et_cat?: string | null;
+  surface_erp?: string | null;
+  surface_ert?: string | null;
+  effectif_public?: string | null;
+  effectif_personnel?: string | null;
+}
+
+/**
+ * L'opération est-elle un ERP ? Le choix explicite (`is_erp`) l'emporte ; sans lui
+ * (propositions antérieures au réglage), l'opération en est un dès qu'un champ ERP
+ * a déjà été saisi : on ne cache jamais une donnée existante.
+ */
+export function isErpOperation(p: ErpFlagFields): boolean {
+  if (typeof p.is_erp === 'boolean') return p.is_erp;
+  const filled = (v?: string | null) => !!v && v.trim() !== '' && Number(v) !== 0;
+  return !!(p.type_et_cat?.trim())
+    || filled(p.surface_erp) || filled(p.surface_ert)
+    || filled(p.effectif_public) || filled(p.effectif_personnel);
+}
+
 /** Catégorie certaine d'après l'effectif total ; en dessous de 301 elle dépend du seuil du type (4e ou 5e). */
 export function categorieFromEffectif(effectifTotal: number): number | null {
   if (!Number.isFinite(effectifTotal) || effectifTotal <= 0) return null;
