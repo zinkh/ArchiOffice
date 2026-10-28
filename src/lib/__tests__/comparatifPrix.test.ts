@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   construireLot, comparatifDepuisOffres, ecartPct, niveauEcart, mediane, modeEffectif,
-  prixEntreprise, totalLotPostes, ligneEnEcart, aDesPrix, type EntrepriseComparee,
+  prixEntreprise, totalLotPostes, ligneEnEcart, aDesPrix, repartirSaisie, type EntrepriseComparee,
 } from '../comparatifPrix';
 import type { Lot, OffreDocument } from '../../types/dpgf';
 
@@ -148,6 +148,52 @@ describe('ligneEnEcart', () => {
     expect(ligneEnEcart(a1, es)).toBe(true);
     expect(ligneEnEcart(a2, es)).toBe(true);
     expect(ligneEnEcart(a1, [ent('e1')])).toBe(false);
+  });
+});
+
+describe('repartirSaisie', () => {
+  const ids = ['a1', 'a2', 'a3'];
+
+  it('crée l’offre « Saisie manuelle » pour un prix nouveau', () => {
+    const r = repartirSaisie([], 'e1', 'lot1', ids, { a1: 18 }, []);
+    expect(r).toEqual([{ id: null, prix: { a1: 18 }, postesAjoutes: [] }]);
+  });
+
+  it('corrige un prix dans l’offre qui le porte, sans toucher aux autres lots', () => {
+    const importee = offre('o1', 'e1', { a1: 18, z9: 50 });
+    const r = repartirSaisie([importee], 'e1', 'lot1', ids, { a1: 19 }, []);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toMatchObject({ id: 'o1', prix: { a1: 19, z9: 50 } });
+  });
+
+  it('supprime un prix effacé dans toutes les offres qui le portent', () => {
+    const a = offre('o1', 'e1', { a1: 18 }, { importedAt: '2026-01-01T00:00:00Z' });
+    const b = offre('o2', 'e1', { a1: 17 }, { importedAt: '2026-02-01T00:00:00Z' });
+    const r = repartirSaisie([a, b], 'e1', 'lot1', ids, { a1: undefined }, []);
+    expect(r.map(m => m.prix.a1)).toEqual([undefined, undefined]);
+    expect(prixEntreprise([a, b].map((o, i) => ({ ...o, prix: r[i].prix as never })), 'e1').a1).toBeUndefined();
+  });
+
+  it('ne rend rien quand rien ne change', () => {
+    const importee = offre('o1', 'e1', { a1: 18 });
+    expect(repartirSaisie([importee], 'e1', 'lot1', ids, { a1: 18 }, [])).toEqual([]);
+  });
+
+  it('range les postes ajoutés dans la saisie manuelle, et retire ceux supprimés', () => {
+    const poste = { id: 'p1', numero: 'A.1', designation: 'Cuvelage', unite: 'ft', quantite: 1, prixUnitaire: 3200, lotId: 'lot1' };
+    const importee = offre('o1', 'e1', { a1: 18 }, { postesAjoutes: [poste] });
+    const nouveau = { id: 'p2', numero: 'A.2', designation: 'Drain', unite: 'ml', quantite: 5, prixUnitaire: 40 };
+    const r = repartirSaisie([importee], 'e1', 'lot1', ids, { a1: 18 }, [nouveau as never]);
+    const retire = r.find(m => m.id === 'o1')!;
+    expect(retire.postesAjoutes).toEqual([]);
+    const manuel = r.find(m => m.id === null)!;
+    expect(manuel.postesAjoutes).toEqual([{ ...nouveau, lotId: 'lot1' }]);
+  });
+
+  it('ignore les offres des autres entreprises', () => {
+    const autre = offre('o9', 'e2', { a1: 99 });
+    const r = repartirSaisie([autre], 'e1', 'lot1', ids, { a1: 18 }, []);
+    expect(r).toEqual([{ id: null, prix: { a1: 18 }, postesAjoutes: [] }]);
   });
 });
 

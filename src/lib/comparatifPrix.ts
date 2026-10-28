@@ -20,6 +20,12 @@ export const SEUIL_ECART_PCT = 15;
 /** Seuil du filtre « écarts importants » de l'écran. */
 export const SEUIL_FILTRE_PCT = 10;
 
+// Formats d'affichage communs à la saisie et au comparatif (espaces ordinaires
+// non nécessaires ici : ces textes s'affichent à l'écran, pas dans un PDF).
+export const eur0 = (n: number) => new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(n);
+export const eur2 = (n: number) => new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+export const pctFr = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(1).replace('.', ',')} %`;
+
 /** Un prix : un nombre, `null` pour mémoire, `undefined` non chiffré. */
 export type PrixSaisi = number | null | undefined;
 
@@ -82,7 +88,7 @@ export interface LotCompare {
 // ── Lecture du document ──────────────────────────────────────────────────────
 
 const estChiffrable = (l: Ligne) => l.type !== 'titre' && l.type !== 'commentaire' && l.type !== 'sous-total' && !l.cctpOnly;
-const estHorsBase = (l: Ligne) => !!l.nature && l.nature !== 'base';
+export const estHorsBase = (l: Ligne) => !!l.nature && l.nature !== 'base';
 
 /** Articles feuilles chiffrables d'un lot, dans l'ordre du document, rangés par chapitre. */
 export function chapitresDuLot(lot: Lot): { id: string; numero: string; titre: string; lignes: Ligne[] }[] {
@@ -231,6 +237,79 @@ export function construireLot(lot: Lot, offres: OffreDocument[], entreprises: En
   }
 
   return { chapitres, ajouts, estimationTotale, totaux, pourMemoire, rangs };
+}
+
+// ── Écriture d'une saisie poste par poste ────────────────────────────────────
+
+/** Nom du fichier de l'offre créée par la saisie à la main (non importée). */
+export const FICHIER_SAISIE_MANUELLE = 'Saisie manuelle';
+
+export interface MiseAJourOffre {
+  /** null : l'offre « Saisie manuelle » n'existe pas encore, elle est à créer. */
+  id: string | null;
+  prix: Record<string, number | null>;
+  postesAjoutes: PosteAjoute[];
+}
+
+/**
+ * Répartit l'état voulu d'un lot (prix et postes ajoutés d'UNE entreprise) entre
+ * ses offres : un prix corrigé est réécrit dans l'offre qui le porte (la plus
+ * récente), un prix supprimé l'est partout, un prix nouveau va dans l'offre
+ * « Saisie manuelle ». Les autres lots de ces offres ne sont jamais touchés.
+ * Ne rend que les offres qui changent.
+ */
+export function repartirSaisie(
+  offres: OffreDocument[],
+  entrepriseId: string,
+  lotId: string,
+  idsLot: string[],
+  prixLot: Record<string, PrixSaisi>,
+  ajoutsLot: PosteAjoute[],
+): MiseAJourOffre[] {
+  const miennes = offres.filter(o => retenue(o, entrepriseId))
+    .sort((a, b) => (b.importedAt || '').localeCompare(a.importedAt || ''));
+  const manuelle = miennes.find(o => o.fichierNom === FICHIER_SAISIE_MANUELLE) ?? null;
+
+  const etats = new Map<string | null, MiseAJourOffre>();
+  const etat = (o: OffreDocument | null): MiseAJourOffre => {
+    const cle = o?.id ?? null;
+    let e = etats.get(cle);
+    if (!e) {
+      e = { id: cle, prix: { ...(o?.prix ?? {}) }, postesAjoutes: [...(o?.postesAjoutes ?? [])] };
+      etats.set(cle, e);
+    }
+    return e;
+  };
+
+  for (const id of idsLot) {
+    const voulu = prixLot[id];
+    const porteuses = miennes.filter(o => Object.prototype.hasOwnProperty.call(o.prix ?? {}, id));
+    if (voulu === undefined) {
+      for (const o of porteuses) delete etat(o).prix[id];
+    } else {
+      etat(porteuses[0] ?? manuelle).prix[id] = voulu;
+    }
+  }
+
+  const voulus = new Map(ajoutsLot.map(p => [p.id, p]));
+  const places = new Set<string>();
+  for (const o of miennes) {
+    const courants = o.postesAjoutes ?? [];
+    const gardes = courants
+      .filter(p => p.lotId !== lotId || voulus.has(p.id))
+      .map(p => (p.lotId === lotId ? voulus.get(p.id)! : p));
+    for (const p of gardes) if (p.lotId === lotId) places.add(p.id);
+    if (JSON.stringify(gardes) !== JSON.stringify(courants)) etat(o).postesAjoutes = gardes;
+  }
+  for (const p of ajoutsLot) if (!places.has(p.id)) etat(manuelle).postesAjoutes.push({ ...p, lotId });
+
+  const originaux = new Map(miennes.map(o => [o.id, o]));
+  return [...etats.values()].filter(e => {
+    const o = e.id ? originaux.get(e.id) : null;
+    if (!o) return Object.keys(e.prix).length > 0 || e.postesAjoutes.length > 0;
+    return JSON.stringify(e.prix) !== JSON.stringify(o.prix ?? {})
+      || JSON.stringify(e.postesAjoutes) !== JSON.stringify(o.postesAjoutes ?? []);
+  });
 }
 
 /** Une ligne qui sort du lot : un écart supérieur au seuil, ou un poste laissé pour mémoire. */
