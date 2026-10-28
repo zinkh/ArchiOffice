@@ -66,6 +66,7 @@ import { DoeAtelier } from '../components/aor/DoeAtelier';
 import { RESERVE_STATUSES, reserveStatusKey, isReserveClosed } from '../components/pro/reserveShared';
 import { AorLayout } from '../components/aor/AorLayout';
 import { OprPvSection } from '../components/aor/OprPvSection';
+import { PlansDropZone, PlansImportDialog, PlanName } from '../components/aor/PlansImport';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
@@ -459,6 +460,9 @@ export default function ProjectDetail() {
   const [projectActivity, setProjectActivity] = useState<any[]>([]);
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
   const [planUploading, setPlanUploading] = useState(false);
+  // Fichiers en attente dans la fenêtre d'import en lot des plans AOR (null = fenêtre fermée).
+  const [planImportFiles, setPlanImportFiles] = useState<File[] | null>(null);
+  const planBulkInputRef = useRef<HTMLInputElement>(null);
   const planInputRef = useRef<HTMLInputElement>(null);
   const [doeATraiter, setDoeATraiter] = useState<number | null>(null);
   const plansEnCartes = useMediaQuery('(max-width: 767px)');
@@ -5631,6 +5635,7 @@ export default function ProjectDetail() {
                 {(() => {
                   const aorPlans = plans.filter(p => p.category === 'AOR' || !p.category);
                   return (
+                    <PlansDropZone onFiles={files => setPlanImportFiles(files)} disabled={planUploading || planImportFiles !== null}>
                     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <CardHeader
                         className="p-4 sm:p-6"
@@ -5644,11 +5649,22 @@ export default function ProjectDetail() {
                             ref={planInputRef}
                             onChange={handlePlanUpload}
                           />
+                          <input
+                            type="file"
+                            multiple
+                            className="hidden"
+                            ref={planBulkInputRef}
+                            onChange={e => {
+                              const files = Array.from(e.target.files || []);
+                              e.target.value = '';
+                              if (files.length) setPlanImportFiles(files);
+                            }}
+                          />
                           <button
                             type="button"
                             onClick={() => {
                               setUpdatingPlanId(null);
-                              planInputRef.current?.click();
+                              planBulkInputRef.current?.click();
                             }}
                             disabled={planUploading}
                             aria-busy={planUploading}
@@ -5666,7 +5682,7 @@ export default function ProjectDetail() {
                           {[...aorPlans].sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()).map(plan => (
                             <li key={plan.id} className="flex items-center gap-2 px-4 py-3">
                               <div className="flex-1 min-w-0">
-                                <p className="font-bold text-sm break-words">{plan.name}</p>
+                                <PlanName plan={plan} className="font-bold text-sm break-words" onRenamed={(pid, name) => setPlans(prev => prev.map(p => p.id === pid ? { ...p, name } : p))} onError={m => showToast(m, 'error', { duration: 6000 })} />
                                 <p className="text-xs text-[var(--tblr-muted)]">
                                   {t('projectdetail_ff_index')} {plan.index || 'A'} · {new Date(plan.uploaded_at).toLocaleDateString('fr-FR')}
                                 </p>
@@ -5705,7 +5721,7 @@ export default function ProjectDetail() {
                               .sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
                               .map((plan) => (
                               <tr key={plan.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
-                                <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">{plan.name}</td>
+                                <td className="px-6 py-4 font-bold text-[var(--tblr-text)]"><PlanName plan={plan} onRenamed={(pid, name) => setPlans(prev => prev.map(p => p.id === pid ? { ...p, name } : p))} onError={m => showToast(m, 'error', { duration: 6000 })} /></td>
                                 <td className="px-6 py-4">
                                   <span className="px-2 py-0.5 bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] rounded text-[0.6875rem] font-bold">
                                     {plan.index || 'A'}
@@ -5761,6 +5777,7 @@ export default function ProjectDetail() {
                       </div>
                       )}
                     </div>
+                    </PlansDropZone>
                   );
                 })()}
                 </>) },
@@ -5770,6 +5787,17 @@ export default function ProjectDetail() {
           </div>
         )}
       </div>
+      {planImportFiles && (
+        <PlansImportDialog
+          projectId={id!}
+          category="AOR"
+          initialFiles={planImportFiles}
+          existingNames={plans.filter(p => p.category === 'AOR' || !p.category).map(p => p.name)}
+          onUploaded={plan => setPlans(prev => [...prev, plan as any])}
+          onNotify={m => showToast(m, 'success')}
+          onClose={() => setPlanImportFiles(null)}
+        />
+      )}
       {/* AR Modal */}
       <AnimatePresence>
         {arOsTarget && (

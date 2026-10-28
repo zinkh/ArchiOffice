@@ -66,6 +66,23 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, s
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create plan" }); }
   });
 
+  // Renommer un plan : seul le nom change, jamais le fichier ni son emplacement de stockage.
+  app.put("/api/plans/:id", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const name = typeof req.body?.name === 'string'
+        ? req.body.name.replace(/[\u0000-\u001f]/g, ' ').replace(/\s+/g, ' ').trim()
+        : '';
+      if (!name) return res.status(400).json({ error: "Le nom du plan est obligatoire." });
+      if (name.length > 200) return res.status(400).json({ error: "Le nom du plan est trop long (200 caractères au plus)." });
+      const { data: plan } = await supabaseAdmin.from('plans').select('id').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+      if (!plan) return res.status(404).json({ error: "Plan introuvable." });
+      const { error } = await supabaseAdmin.from('plans').update({ name }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ id: req.params.id, name });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to rename plan" }); }
+  });
+
   app.delete("/api/plans/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);

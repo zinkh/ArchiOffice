@@ -457,6 +457,21 @@ Un procès-verbal des opérations préalables à la réception **par lot**, en d
 - **Points ouverts** : « CCAG applicable » (2009 ou 2021) est porté par le PV et non par le marché (liste blanche de `marches_entreprises` non modifiée) ; les formulaires 2019 citent le CCAG 2009, leur validité avec le CCAG 2021 est à confirmer sur le site de la DAJ. Pas de lecture hors ligne de ces PV.
 - Tests : `src/lib/__tests__/oprPv.test.ts`, `oprPvDocument.test.ts`, `oprPvExe.test.ts`, `tests/oprPvReceptions.test.ts`, `tests/oprPvUi.test.ts`, `tests/reserveNature.test.ts`.
 
+### Import de plans AOR en lot et renommage
+
+Bloc Plans de l'onglet AOR : « Importer un plan » ouvre un sélecteur multiple, et le bloc entier accepte un
+glisser-déposer de fichiers (`PlansDropZone`, `src/components/aor/PlansImport.tsx`, seulement pour un glisser qui
+porte des fichiers). Les fichiers arrivent dans `PlansImportDialog` : un nom modifiable par plan avant l'envoi,
+alerte sur les noms en double (dans le lot ou déjà sur l'affaire), retrait d'une ligne, ajout de fichiers. Les
+envois partent UN PAR UN vers `POST /api/plans` (index A, version 1, catégorie AOR) ; un échec s'affiche sur sa
+ligne et n'arrête pas les suivants, et le bouton relance seulement ceux qui restent. Logique pure et testée dans
+`src/lib/planImport.ts` (`nomPlanRetenu` : caractères interdits retirés, extension d'origine rétablie si effacée ;
+50 plans au plus par import ; vides et déjà présents écartés). « Nouvel indice » d'un plan garde son sélecteur à
+fichier unique (`handlePlanUpload`). Renommer un plan déjà importé : crayon `PlanName` (Entrée enregistre, Échap
+annule) puis `PUT /api/plans/:id`, qui ne change que `plans.name` (200 caractères au plus, 404 hors cabinet),
+jamais le fichier ni son emplacement. Aucune migration. Tests : `src/lib/__tests__/planImport.test.ts`,
+`tests/plansRename.test.ts`. Pas vérifié dans un navigateur réel.
+
 ### Réserves de chantier : fiche, photos, export PDF
 
 `src/components/pro/ReserveTracker.tsx` (les mêmes réserves d'OPR et
