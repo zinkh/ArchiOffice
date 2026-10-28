@@ -1,10 +1,10 @@
 // Onglet AOR, bloc Plans : dépôt de plusieurs plans d'un coup (sélecteur ou glisser-déposer),
 // avec un nom modifiable pour chacun avant l'envoi, et renommage d'un plan déjà importé.
 // Les envois partent un par un vers POST /api/plans (un échec n'arrête pas les suivants).
-import { useCallback, useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type DragEvent, type PointerEvent, type ReactNode } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
-import { IconCheck, IconPencil, IconTrash, IconUpload, IconX } from '@tabler/icons-react';
+import { IconCheck, IconGripVertical, IconPencil, IconTrash, IconUpload, IconX } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
 import {
   ajouterAuLot, nomPlanRetenu, nomsEnDouble, PLAN_NAME_MAX, PLANS_PAR_LOT_MAX, type PlanImportEntry,
@@ -303,5 +303,19 @@ export function PlanName({ plan, onRenamed, onError, className }: {
       <button type="button" onClick={() => setEdition(false)} disabled={occupe} aria-label={t('btn_cancel')}
         className="flex items-center justify-center min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 sm:p-1 text-[var(--tblr-muted)] disabled:opacity-50"><IconX size={16} /></button>
     </span>
+  );
+}
+
+/** Poignée de réordonnancement d'un plan : se saisit à la souris, ou au doigt par un appui long. */
+export function PlanGrip({ name, onPointerDown }: { name: string; onPointerDown: (e: PointerEvent<HTMLElement>) => void }) {
+  const { t } = useTranslation();
+  return (
+    <span
+      role="img"
+      aria-label={t('plans_reorder_handle', { name })}
+      title={t('plans_reorder_hint')}
+      onPointerDown={onPointerDown}
+      className="flex items-center justify-center min-h-11 min-w-8 sm:min-h-0 sm:min-w-0 sm:p-1 shrink-0 cursor-grab active:cursor-grabbing touch-none text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] select-none"
+    ><IconGripVertical size={16} /></span>
   );
 }

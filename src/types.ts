@@ -637,6 +637,8 @@ export interface Plan {
   version: number;
   parent_id?: string;
   category?: 'PRO' | 'AOR';
+  /** Rang choisi par glisser-déposer ; absent tant que le plan n'a jamais été rangé. */
+  sort_order?: number | null;
 }
 
 export type InspirationPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE';

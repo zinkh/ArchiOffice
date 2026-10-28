@@ -40,3 +40,33 @@ describe('PUT /api/plans/:id', () => {
     expect(plan(b.planId)?.name).toBe('ancien.pdf');
   });
 });
+
+describe('PUT /api/plans/order', () => {
+  const rang = (id: string) => fakeSupabaseAdmin.getTable('plans').find(p => p.id === id)?.sort_order;
+
+  function deuxPlans() {
+    const c = cabinet();
+    fakeSupabaseAdmin.seed('plans', [{ id: `${c.planId}-2`, tenant_id: c.tenantId, project_id: `p-${c.tenantId}`, name: 'b.pdf', file_url: 'y', index: 'A' }]);
+    return { ...c, projectId: `p-${c.tenantId}`, ids: [`${c.planId}-2`, c.planId] };
+  }
+
+  it('enregistre le rang de chaque plan dans l\'ordre reçu', async () => {
+    const { token, projectId, ids } = deuxPlans();
+    const res = await request(app).put('/api/plans/order').set(authHeader(token)).send({ project_id: projectId, ids });
+    expect(res.status).toBe(200);
+    expect(rang(ids[0])).toBe(0);
+    expect(rang(ids[1])).toBe(1);
+  });
+
+  it('refuse un plan d\'un autre cabinet, un doublon ou une liste invalide, sans rien écrire', async () => {
+    const a = deuxPlans();
+    const b = deuxPlans();
+    const h = authHeader(a.token);
+    expect((await request(app).put('/api/plans/order').set(h).send({ project_id: a.projectId, ids: [a.ids[0], b.ids[0]] })).status).toBe(400);
+    expect((await request(app).put('/api/plans/order').set(h).send({ project_id: a.projectId, ids: [a.ids[0], a.ids[0]] })).status).toBe(400);
+    expect((await request(app).put('/api/plans/order').set(h).send({ project_id: a.projectId, ids: [] })).status).toBe(400);
+    expect((await request(app).put('/api/plans/order').set(h).send({ ids: a.ids })).status).toBe(400);
+    expect(rang(a.ids[0])).toBeUndefined();
+    expect(rang(b.ids[0])).toBeUndefined();
+  });
+});

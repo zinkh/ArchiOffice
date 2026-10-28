@@ -472,6 +472,16 @@ annule) puis `PUT /api/plans/:id`, qui ne change que `plans.name` (200 caractèr
 jamais le fichier ni son emplacement. Aucune migration. Tests : `src/lib/__tests__/planImport.test.ts`,
 `tests/plansRename.test.ts`. Pas vérifié dans un navigateur réel.
 
+**Ordre des plans.** Chaque plan AOR a une poignée (`PlanGrip`) : glisser à la souris, ou appui long au doigt
+(`usePlanReorder`, sur `startPressDrag` comme `LotsManager`). L'ordre se prévisualise pendant le geste et ne part
+qu'au relâché, par `PUT /api/plans/order` (`{ project_id, ids }`, liste complète, déclarée avant `/:id`) qui écrit
+`plans.sort_order` (`supabase/migrate_plans_sort_order.sql`) ; un plan d'un autre cabinet ou d'une autre affaire,
+un doublon ou une liste vide sont refusés en 400 sans rien écrire, une instance non migrée répond 503
+`PLAN_ORDER_UNAVAILABLE`. Un échec d'enregistrement remet l'ordre précédent à l'écran. Tri
+(`src/lib/planOrder.ts`, testé) : plans jamais rangés d'abord (le plus récent en tête, comme avant), puis les plans
+rangés selon leur rang : un plan déposé après un réordonnancement apparaît donc en haut de la liste. Tests :
+`planOrder.test.ts`, `tests/plansRename.test.ts`. Pas vérifié dans un navigateur réel.
+
 ### Réserves de chantier : fiche, photos, export PDF
 
 `src/components/pro/ReserveTracker.tsx` (les mêmes réserves d'OPR et

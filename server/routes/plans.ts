@@ -66,6 +66,32 @@ export function registerPlanRoutes(app: Express, { supabaseAdmin, getTenantId, s
     } catch (e: any) { console.error(e); res.status(e.status || 500).json({ error: e.message || "Failed to create plan" }); }
   });
 
+  // Ordre manuel des plans d'une affaire (glisser-déposer). Déclaré avant /:id pour ne pas être pris pour un id.
+  // Le corps donne la liste complète des plans dans l'ordre voulu ; seuls ceux du cabinet ET de l'affaire sont rangés.
+  app.put("/api/plans/order", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { project_id, ids } = req.body || {};
+      if (typeof project_id !== 'string' || !project_id) return res.status(400).json({ error: "Affaire manquante." });
+      if (!Array.isArray(ids) || ids.length === 0 || ids.length > 500 || ids.some((i: unknown) => typeof i !== 'string')) {
+        return res.status(400).json({ error: "Liste de plans invalide." });
+      }
+      if (new Set(ids).size !== ids.length) return res.status(400).json({ error: "Liste de plans en double." });
+      const { data: existants, error: errLecture } = await supabaseAdmin.from('plans').select('id').eq('tenant_id', tenantId).eq('project_id', project_id);
+      if (errLecture) throw errLecture;
+      const connus = new Set((existants || []).map((p: any) => p.id));
+      if (ids.some((i: string) => !connus.has(i))) return res.status(400).json({ error: "Plan introuvable pour cette affaire." });
+      for (let rang = 0; rang < ids.length; rang++) {
+        const { error } = await supabaseAdmin.from('plans').update({ sort_order: rang }).eq('id', ids[rang]).eq('tenant_id', tenantId).eq('project_id', project_id);
+        if (error) {
+          if (['42703', 'PGRST204'].includes(error.code)) return res.status(503).json({ error: "L'ordre des plans demande une mise à jour de la base.", code: 'PLAN_ORDER_UNAVAILABLE' });
+          throw error;
+        }
+      }
+      res.json({ success: true });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to reorder plans" }); }
+  });
+
   // Renommer un plan : seul le nom change, jamais le fichier ni son emplacement de stockage.
   app.put("/api/plans/:id", async (req: any, res: any) => {
     try {
