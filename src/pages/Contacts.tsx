@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud, IconGitMerge, IconTable, IconLayoutSidebar } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,10 @@ import { ensureContactCategory } from '../lib/contactCategories';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
+import { useUser } from '../UserContext';
+import { ContactsDetailView } from '../components/contacts/ContactsDetailView';
+import { ContactMergeDialog } from '../components/ContactMergeDialog';
+import { contactName, findDuplicateGroups, MERGE_MAX_CONTACTS } from '../lib/contactMerge';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
 type SortOrder = 'asc' | 'desc';
@@ -26,6 +30,8 @@ export function isContactIncomplete(c: Contact): boolean {
 
 export default function Contacts() {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
+  const canMerge = currentUser?.system_role === 'admin' || currentUser?.system_role === 'manager';
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [categories, setCategories] = useState<ContactCategory[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -50,7 +56,26 @@ export default function Contacts() {
   const [filterCompany, setFilterCompany] = useState('');
   const [filterCorpsEtat, setFilterCorpsEtat] = useState('');
   const [filterSpecialite, setFilterSpecialite] = useState('');
+  const [filterRelation, setFilterRelation] = useState('');
   const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'last_name', order: 'asc' });
+
+  // Fusion de contacts : sélection (tableau) et fiches du doublon en cours de traitement.
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [mergeIds, setMergeIds] = useState<string[] | null>(null);
+  const [showDuplicates, setShowDuplicates] = useState(false);
+
+  // Vue : tableau par défaut, détaillée au choix. Le paramètre ?vue= l'emporte,
+  // sinon le dernier choix de la personne (localStorage, facultatif).
+  const [viewParam] = useSearchParams();
+  const [view, setView] = useState<'table' | 'detail'>(() => {
+    const fromUrl = viewParam.get('vue');
+    if (fromUrl === 'detail' || fromUrl === 'table') return fromUrl;
+    try { return localStorage.getItem('contacts:view') === 'detail' ? 'detail' : 'table'; } catch { return 'table'; }
+  });
+  const chooseView = (v: 'table' | 'detail') => {
+    setView(v);
+    try { localStorage.setItem('contacts:view', v); } catch { /* sans stockage, le choix ne survit pas */ }
+  };
 
   // Edit State
   const [isEditing, setIsEditing] = useState(false);
@@ -523,6 +548,11 @@ export default function Contacts() {
     if (filterCorpsEtat) {
       result = result.filter(c => (c.corps_etat || []).includes(filterCorpsEtat));
     }
+    if (filterRelation) {
+      result = result.filter(c => filterRelation === 'due'
+        ? !!c.relation_reminder_on && c.relation_reminder_on <= new Date().toISOString().slice(0, 10)
+        : c.relation_status === filterRelation);
+    }
     if (filterSpecialite) {
       result = result.filter(c => (c.specialite || []).includes(filterSpecialite));
     }
@@ -545,7 +575,7 @@ export default function Contacts() {
     });
 
     return result;
-  }, [contacts, searchQuery, filterCategory, filterCompany, filterCorpsEtat, filterSpecialite, sortConfig]);
+  }, [contacts, searchQuery, filterCategory, filterCompany, filterCorpsEtat, filterSpecialite, filterRelation, sortConfig]);
 
   // Les organismes ne sont pas une table : ils sont saisis librement sur chaque
   // contact, la liste déroulante se déduit donc des contacts eux-mêmes.
@@ -574,6 +604,21 @@ export default function Contacts() {
   }, [contacts]);
 
   const contactsPagination = usePagination(filteredAndSortedContacts);
+
+  const duplicateGroups = useMemo(
+    () => (canMerge ? findDuplicateGroups(contacts.filter(c => !c.is_personal)) : []),
+    [contacts, canMerge],
+  );
+  const contactsById = useMemo(() => new Map(contacts.map(c => [c.id, c])), [contacts]);
+  const toggleSelected = (id: string) =>
+    setSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+  const pageIds = contactsPagination.pageItems.map(c => c.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every(id => selectedIds.includes(id));
+  const mergeContacts = useMemo(
+    () => (mergeIds || []).map(id => contactsById.get(id)).filter((c): c is Contact => !!c),
+    [mergeIds, contactsById],
+  );
+  const reasonLabel = (r: string) => t(`contacts_merge_reason_${r}`);
 
   // Shared input style
   const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
@@ -649,6 +694,28 @@ export default function Contacts() {
             <IconCloud size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">CardDAV</span>
           </button>
+          <div role="group" aria-label={t('contacts_view_label')} className="inline-flex rounded-md overflow-hidden shadow-sm" style={{ border: '1px solid var(--tblr-border)' }}>
+            {([['table', IconTable, 'contacts_view_table'], ['detail', IconLayoutSidebar, 'contacts_view_detail']] as const).map(([k, Icon, label]) => (
+              <button key={k} type="button" aria-pressed={view === k} onClick={() => chooseView(k)}
+                className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-3 md:py-2 text-xs md:text-sm font-medium pointer-coarse:min-h-11"
+                style={{ background: view === k ? 'var(--tblr-primary-lt)' : 'var(--tblr-surface-2)', color: view === k ? 'var(--tblr-primary)' : 'var(--tblr-text)' }}>
+                <Icon size={14} className="md:size-[18px]" />
+                <span className="hidden md:inline">{t(label)}</span>
+              </button>
+            ))}
+          </div>
+          {canMerge && (
+            <button
+              onClick={() => setMergeIds(selectedIds)}
+              disabled={selectedIds.length < 2 || selectedIds.length > MERGE_MAX_CONTACTS}
+              className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm disabled:opacity-50"
+              style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+              title={t('contacts_merge_button_hint')}
+            >
+              <IconGitMerge size={14} className="md:size-[18px]" />
+              <span className="hidden md:inline">{t('contacts_merge_button', { count: selectedIds.length })}</span>
+            </button>
+          )}
           <button
             onClick={() => {
               setIsEditing(false);
@@ -723,6 +790,22 @@ export default function Contacts() {
               </select>
             </div>
           )}
+          <div className="relative">
+            <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
+            <select
+              aria-label={t('contacts_relation_status')}
+              className="pl-10 pr-4 py-2 rounded-lg outline-none focus:ring-2 focus:ring-blue-500/20 appearance-none w-full sm:min-w-[180px]"
+              style={inputStyle}
+              value={filterRelation}
+              onChange={e => setFilterRelation(e.target.value)}
+            >
+              <option value="">{t('contacts_relation_status')}</option>
+              {['prospect', 'en_discussion', 'client', 'partenaire', 'inactif'].map(v => (
+                <option key={v} value={v}>{t(`contacts_relation_status_${v}`)}</option>
+              ))}
+              <option value="due">{t('contacts_relation_filter_due')}</option>
+            </select>
+          </div>
           {specialiteOptions.length > 0 && (
             <div className="relative">
               <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
@@ -742,7 +825,48 @@ export default function Contacts() {
         </div>
       </div>
 
-      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+      {duplicateGroups.length > 0 && (
+        <div className="rounded-lg px-4 py-3 text-sm" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+          <button type="button" onClick={() => setShowDuplicates(v => !v)} aria-expanded={showDuplicates}
+            className="flex items-center gap-2 w-full text-left font-medium" style={{ color: 'var(--tblr-text)' }}>
+            <IconGitMerge size={16} style={{ color: 'var(--tblr-primary)' }} />
+            {t('contacts_merge_duplicates_banner', { count: duplicateGroups.length })}
+            <span className="ml-auto text-xs" style={{ color: 'var(--tblr-primary)' }}>
+              {showDuplicates ? t('contacts_merge_duplicates_hide') : t('contacts_merge_duplicates_show')}
+            </span>
+          </button>
+          {showDuplicates && (
+            <ul className="mt-3 space-y-2">
+              {duplicateGroups.map(g => (
+                <li key={g.ids.join('|')} className="flex flex-wrap items-center gap-2 justify-between">
+                  <span style={{ color: 'var(--tblr-text)' }}>
+                    {g.ids.map(id => contactsById.get(id)).filter(Boolean).map(c => contactName(c as Contact)).join(' · ')}
+                    <span className="ml-2 text-xs" style={{ color: 'var(--tblr-muted)' }}>({g.reasons.map(reasonLabel).join(', ')})</span>
+                  </span>
+                  <button type="button" disabled={g.ids.length > MERGE_MAX_CONTACTS} onClick={() => setMergeIds(g.ids)}
+                    className="px-3 py-1 rounded-md text-xs font-medium disabled:opacity-50" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>
+                    {t('contacts_merge_review')}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {view === 'detail' && (
+        <ContactsDetailView
+          contacts={filteredAndSortedContacts}
+          projects={projects}
+          canSelect={canMerge}
+          selectedIds={selectedIds}
+          onToggleSelected={toggleSelected}
+          onEdit={handleEdit}
+          onChanged={fetchContacts}
+        />
+      )}
+
+      <div className={view === 'detail' ? 'hidden' : 'rounded-lg overflow-hidden'} style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
         {/* Mobile accordion */}
         <div className="md:hidden">
           <MobileAccordionTable
@@ -789,6 +913,12 @@ export default function Contacts() {
           <table className="min-w-full text-sm text-left">
             <thead style={{ background: 'var(--tblr-surface-2)', borderBottom: '1px solid var(--tblr-border)' }}>
               <tr>
+                {canMerge && (
+                  <th className="pl-4 py-4 w-8">
+                    <input type="checkbox" aria-label={t('contacts_merge_select_all')} checked={allPageSelected}
+                      onChange={() => setSelectedIds(prev => allPageSelected ? prev.filter(id => !pageIds.includes(id)) : [...new Set([...prev, ...pageIds])])} />
+                  </th>
+                )}
                 <th className="px-6 py-4 cursor-pointer transition-colors font-medium" style={{ color: 'var(--tblr-muted)' }} onClick={() => handleSort('prefix')}>
                   <div className="flex items-center gap-1">
                     {t('contacts_col_prefix')}
@@ -829,6 +959,12 @@ export default function Contacts() {
             <tbody>
               {contactsPagination.pageItems.map((contact) => (
                 <tr key={contact.id} className="transition-colors" style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  {canMerge && (
+                    <td className="pl-4 py-4 w-8">
+                      <input type="checkbox" aria-label={t('contacts_merge_select_one', { name: contactName(contact) })}
+                        checked={selectedIds.includes(contact.id)} onChange={() => toggleSelected(contact.id)} />
+                    </td>
+                  )}
                   <td className="px-6 py-4 font-medium" style={{ color: 'var(--tblr-text)' }}>
                     {contact.prefix || '---'}
                   </td>
@@ -913,7 +1049,7 @@ export default function Contacts() {
               ))}
               {filteredAndSortedContacts.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
+                  <td colSpan={11} className="px-6 py-12 text-center" style={{ color: 'var(--tblr-muted)' }}>
                     <div className="flex flex-col items-center gap-2">
                       <IconUser size={32} className="opacity-20" />
                       <p>{searchQuery || filterCategory || filterCompany ? t('contacts_no_contacts_filter') : t('no_contacts')}</p>
@@ -934,6 +1070,23 @@ export default function Contacts() {
           style={{ borderColor: 'var(--tblr-border)' }}
         />
       </div>
+
+      <AnimatePresence>
+        {mergeIds && mergeContacts.length >= 2 && (
+          <ContactMergeDialog
+            key="contact-merge"
+            contacts={mergeContacts}
+            projects={projects}
+            onClose={() => setMergeIds(null)}
+            onMerged={({ primary_id, merged_ids }) => {
+              setMergeIds(null);
+              setSelectedIds([]);
+              fetchContacts();
+              showToast(t('contacts_merge_done', { count: merged_ids.length, id: primary_id }));
+            }}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Add/Edit Contact Modal */}
       <AnimatePresence>

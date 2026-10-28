@@ -990,6 +990,12 @@ export interface SpecSection {
 
 export interface Contact {
   id: string;
+  // Suivi façon CRM (supabase/migrate_contact_relations.sql) : société de
+  // rattachement d'une personne, statut de la relation et prochaine relance.
+  company_contact_id?: string | null;
+  relation_status?: 'prospect' | 'en_discussion' | 'client' | 'partenaire' | 'inactif' | null;
+  relation_reminder_on?: string | null;
+  relation_reminder_note?: string | null;
   // Name fields
   prefix?: string;
   first_name: string;

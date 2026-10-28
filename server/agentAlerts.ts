@@ -65,6 +65,8 @@ export interface TenantSnapshot {
   documents: Row[];
   /** Affaires archivées (id, nom, code, fin de conservation) : seule la règle de conservation les lit. */
   archivedProjects?: Row[];
+  /** Contacts partagés qui portent un rappel de relance (supabase/migrate_contact_relations.sql). */
+  contactReminders?: Row[];
 }
 
 export interface AlertRuleDef {
@@ -605,6 +607,34 @@ ALERT_RULES.push({
   },
 });
 
+// Rappel de relance posé sur une fiche contact (CRM). Les contacts personnels n'en
+// déclenchent pas : l'alerte part aux administrateurs, elle ne doit rien révéler d'un contact privé.
+ALERT_RULES.push({
+  code: 'contact_relance_echue',
+  label: 'Relance de contact échue',
+  description: "Le rappel de relance d'une fiche contact (prospect, client...) est dépassé depuis plus que le délai réglé. L'alerte se referme quand la date du rappel est repoussée ou effacée.",
+  defaultSeverity: 'info',
+  defaultThresholdDays: 0,
+  evaluate(snapshot, thresholdDays) {
+    const alerts: DetectedAlert[] = [];
+    for (const c of snapshot.contactReminders ?? []) {
+      if (c.is_personal) continue;
+      const late = daysUntil(c.relation_reminder_on, snapshot.now);
+      if (late === null || -late < thresholdDays || late > 0) continue;
+      const name = String(c.company_name || '').trim() || `${c.first_name || ''} ${c.last_name || ''}`.trim() || 'Contact sans nom';
+      alerts.push({
+        dedupKey: `contact_relance_echue:${c.id}`,
+        title: `Relance à faire : ${name}`,
+        message: `La relance prévue le ${c.relation_reminder_on} pour « ${name} » n'a pas été faite` +
+          (c.relation_reminder_note ? ` (${String(c.relation_reminder_note).trim()}).` : '.'),
+        targetType: 'contact',
+        targetId: String(c.id),
+      });
+    }
+    return alerts;
+  },
+});
+
 export const ALERT_RULES_BY_CODE = new Map(ALERT_RULES.map(r => [r.code, r]));
 
 // ── Chargement de l'état d'un cabinet ───────────────────────────────────────
@@ -649,8 +679,14 @@ export async function loadTenantSnapshot(supabaseAdmin: SupabaseClient, tenantId
   // ouvertes se referment seules, leur cause n'étant plus lue.
   const archivees = await archivedProjectIds(supabaseAdmin, tenantId);
   const sans = (rows: Row[]): Row[] => sansAffairesArchivees(rows, archivees) as Row[];
+  // Instance non migrée (colonne absente) : aucune relance à signaler, jamais une erreur.
+  const { data: reminderRows, error: reminderError } = await supabaseAdmin
+    .from('contacts')
+    .select('id, first_name, last_name, company_name, is_personal, relation_reminder_on, relation_reminder_note')
+    .eq('tenant_id', tenantId).not('relation_reminder_on', 'is', null);
+  const contactReminders = reminderError ? [] : ((reminderRows || []) as unknown as Row[]).filter(c => !c.is_personal);
   return {
-    tenantId, now,
+    tenantId, now, contactReminders,
     projects: sansAffairesArchivees(projects, archivees, 'id') as Row[],
     phaseHistory: sans(phaseHistory), contrats: sans(contrats), invoices: sans(invoices), proposals, tenders,
     tasks: sans(tasks), meetings, ordresDeService: sans(ordresDeService), reserves: sans(reserves),

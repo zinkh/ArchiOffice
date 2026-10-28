@@ -36,7 +36,49 @@ const CONTACT_COLUMNS = new Set([
   'category', 'notes', 'birthday', 'website', 'created_at', 'created_by',
   'siret', 'vat_number', 'market_number', 'market_amount_base', 'market_amount_options', 'market_amount_avenants',
   'is_personal', 'corps_etat', 'specialite',
+  'company_contact_id', 'relation_status', 'relation_reminder_on', 'relation_reminder_note',
 ]);
+
+export const RELATION_STATUSES = ['prospect', 'en_discussion', 'client', 'partenaire', 'inactif'] as const;
+const RELATION_KEYS = ['company_contact_id', 'relation_status', 'relation_reminder_on', 'relation_reminder_note'] as const;
+
+/** Colonnes de suivi absentes (instance non migrée) : on réessaie sans elles plutôt que d'échouer. */
+function isMissingColumn(e: any): boolean {
+  return ['42703', 'PGRST204'].includes(e?.code) && RELATION_KEYS.some(k => String(e?.message || '').includes(k));
+}
+
+/**
+ * Valide et normalise les champs de suivi présents dans `contact` (modifié en place).
+ * Rend un message d'erreur, ou null. Une société de rattachement doit appartenir au
+ * cabinet, ne pas être la fiche elle-même, et ne pas être elle-même rattachée (pas de chaîne).
+ */
+async function normalizeRelation(
+  supabaseAdmin: any, tenantId: string, contact: Record<string, any>, selfId: string | null,
+): Promise<string | null> {
+  if ('relation_status' in contact) {
+    const v = contact.relation_status;
+    if (v === '' || v == null) contact.relation_status = null;
+    else if (!(RELATION_STATUSES as readonly string[]).includes(v)) return 'Statut de relation inconnu.';
+  }
+  if ('relation_reminder_on' in contact) {
+    const v = contact.relation_reminder_on;
+    if (v === '' || v == null) contact.relation_reminder_on = null;
+    else if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(v))) return 'Date de rappel invalide.';
+  }
+  if ('relation_reminder_note' in contact) {
+    const v = contact.relation_reminder_note;
+    contact.relation_reminder_note = typeof v === 'string' && v.trim() ? v.trim().slice(0, 500) : null;
+  }
+  if ('company_contact_id' in contact) {
+    const v = contact.company_contact_id;
+    if (v === '' || v == null) { contact.company_contact_id = null; return null; }
+    if (typeof v !== 'string' || v === selfId) return 'Société de rattachement invalide.';
+    const { data } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('id, company_contact_id').eq('id', v).maybeSingle();
+    if (!data) return 'Société de rattachement introuvable.';
+    if ((data as any).company_contact_id) return 'La société choisie est elle-même rattachée à une autre fiche.';
+  }
+  return null;
+}
 
 function pickContactColumns(body: Record<string, any>): Record<string, any> {
   const out: Record<string, any> = {};
@@ -85,7 +127,11 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
       // form always sends '' for these when left blank, but a caller that
       // omits the keys entirely (e.g. the AI agent creating a company
       // contact) would otherwise hit a not-null constraint violation.
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({
+      const relationError = await normalizeRelation(supabaseAdmin, tenantId, contact, id);
+      if (relationError) return res.status(400).json({ error: relationError });
+      const insertRow = (row: Record<string, any>) => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert(row);
+      const withoutRelation = (row: Record<string, any>) => Object.fromEntries(Object.entries(row).filter(([k]) => !(RELATION_KEYS as readonly string[]).includes(k)));
+      const row = {
         ...contact,
         id,
         first_name: contact.first_name ?? '',
@@ -94,7 +140,9 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
         // pickContactColumns already dropped it from `contact` above): a
         // personal contact belongs to whoever creates it, a pro one to no one.
         owner_user_id: contact.is_personal ? req.user.id : null,
-      });
+      };
+      let { error } = await insertRow(row);
+      if (error && isMissingColumn(error)) ({ error } = await insertRow(withoutRelation(row)));
       if (error) throw error;
       const contactName = contact.company_name || `${contact.first_name || ''} ${contact.last_name || ''}`.trim();
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
@@ -131,7 +179,13 @@ export function registerContactRoutes(app: Express, { supabaseAdmin, getTenantId
         // it first, rather than staying invisible to everyone forever.
         ? ((existing as any)?.owner_user_id || req.user.id)
         : null;
-      const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(updateData).eq('id', id);
+      const relationError = await normalizeRelation(supabaseAdmin, tenantId, updateData, id);
+      if (relationError) return res.status(400).json({ error: relationError });
+      const update = (row: Record<string, any>) => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(row).eq('id', id);
+      let { error } = await update(updateData);
+      if (error && isMissingColumn(error)) {
+        ({ error } = await update(Object.fromEntries(Object.entries(updateData).filter(([k]) => !(RELATION_KEYS as readonly string[]).includes(k)))));
+      }
       if (error) throw error;
       res.json({ success: true });
     } catch (e: any) {
