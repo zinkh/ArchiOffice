@@ -7,7 +7,7 @@
 
 import {
   AVIS_RECEPTION, EPREUVES, INSTALLATIONS, ISSUES_DECISION, NATURES_RESERVE, OUVRAGES,
-  POSE_EQUIPEMENTS, PRESENCES_ENTREPRISE, PRESENCES_MOA, TERRAINS, TRAVAUX,
+  PORTEES, POSE_EQUIPEMENTS, PRESENCES_ENTREPRISE, PRESENCES_MOA, TERRAINS, TRAVAUX,
   constatsVierges, estDateIso, pvVierge,
   type CcagVersion, type ConditionReserve, type Constats, type Decision, type Delais,
   type NatureReserve, type OprPv, type Proposition, type RegimeMarche,
@@ -17,10 +17,12 @@ import { DELAI_MAX_JOURS, DELAI_MIN_JOURS } from './oprPvDelais';
 /** Colonnes de `receptions` qu'un PV d'OPR écrit, en plus des colonnes historiques. */
 export const OPR_COLONNES = [
   'marche_id', 'lot_id', 'ccag_version', 'date_avis_achevement', 'date_achevement_annoncee', 'date_opr',
-  'presences', 'constats', 'proposition', 'decision', 'levee', 'carence', 'delais',
+  'presences', 'constats', 'proposition', 'decision', 'levee', 'carence', 'delais', 'public_info',
 ] as const;
 
 export const ID_MAX = 64;
+export const PRESTATIONS_MAX = 2000;
+export const NOM_MAX = 200;
 export const ANNEXE_MAX = 20;
 export const CONDITIONS_MAX = 10;
 export const REFACTION_MAX = 1_000_000_000;
@@ -168,6 +170,15 @@ const SECTIONS: Record<string, (v: unknown, erreurs: string[]) => unknown> = {
     return { date_lettre: dateOuNull(o.date_lettre, 'carence.date_lettre', e), date_fixation: dateOuNull(o.date_fixation, 'carence.date_fixation', e) };
   },
   delais,
+  public_info: (v, e) => {
+    const o = estObjet(v) ? v : {};
+    return {
+      portee: enumOuNull(o.portee, PORTEES, 'public_info.portee', e),
+      prestations: texteOuNull(o.prestations, PRESTATIONS_MAX, 'public_info.prestations', e),
+      signataire: texteOuNull(o.signataire, NOM_MAX, 'public_info.signataire', e),
+      reference_marche: texteOuNull(o.reference_marche, ID_MAX, 'public_info.reference_marche', e),
+    };
+  },
 };
 
 export function sanitizeOprPayload(body: unknown): OprPayload {
@@ -212,5 +223,6 @@ export function lirePv(row: Corps | null | undefined): OprPv | null {
     levee: lu('levee', pv.levee),
     carence: lu('carence', pv.carence),
     delais: lu('delais', pv.delais),
+    public_info: lu('public_info', pv.public_info),
   };
 }

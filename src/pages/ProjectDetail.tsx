@@ -5161,7 +5161,7 @@ export default function ProjectDetail() {
                 { id: 'pv', label: t('aor_section_pv'), count: receptions.length, children: (<>
                 <OprPvSection
                   projectId={id || ''}
-                  projet={{ nom: project?.name || '', code: project?.project_code, maitreOuvrage: project?.client, objet: project?.programme }}
+                  projet={{ nom: project?.name || '', code: project?.project_code, maitreOuvrage: project?.client, maitreOuvrageId: project?.client_id, objet: project?.programme }}
                   marchePublic={!!project?.is_public_client}
                   settings={settings ?? {}}
                   onReservesChanged={fetchReserves}

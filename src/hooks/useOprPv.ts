@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../lib/api';
 import type { OprPv } from '../lib/oprPv';
 import { lirePv } from '../lib/oprPvSanitize';
+import type { ContactIdentite } from '../lib/oprPvExport';
 
 export interface MarcheOpr {
   id: string;
@@ -14,6 +15,8 @@ export interface MarcheOpr {
   entreprise_nom: string | null;
   type_marche: string | null;
   objet: string | null;
+  contact_id: string | null;
+  entreprise_siret: string | null;
   date_signature: string | null;
   date_notification: string | null;
 }
@@ -34,6 +37,8 @@ export interface PvOpr {
   reference_pv: string | null;
   signed_at: string | null;
   signed_mode: 'papier' | 'electronique' | null;
+  /** Lieu de signature (« Fait à », EXE5). */
+  lieu: string | null;
   pv: OprPv;
 }
 
@@ -57,6 +62,7 @@ export function useOprPv(projectId: string) {
   const [chargement, setChargement] = useState(true);
   const [erreur, setErreur] = useState<string | null>(null);
   const actif = useRef(true);
+  const contacts = useRef<Map<string, ContactIdentite> | null>(null);
 
   const recharger = useCallback(async () => {
     try {
@@ -68,7 +74,7 @@ export function useOprPv(projectId: string) {
       if (!actif.current) return;
       const lus = (receptions ?? []).flatMap((row): PvOpr[] => {
         const pv = lirePv(row);
-        return pv ? [{ id: row.id, reference_pv: row.reference_pv ?? null, signed_at: row.signed_at ?? null, signed_mode: row.signed_mode ?? null, pv }] : [];
+        return pv ? [{ id: row.id, reference_pv: row.reference_pv ?? null, signed_at: row.signed_at ?? null, signed_mode: row.signed_mode ?? null, lieu: row.lieu ?? null, pv }] : [];
       });
       const ids = new Set(lus.map(p => p.id));
       setPvs(lus.sort((a, b) => (b.pv.date_opr ?? '').localeCompare(a.pv.date_opr ?? '')));
@@ -118,7 +124,17 @@ export function useOprPv(projectId: string) {
     await recharger();
   }, [projectId, recharger]);
 
+  /** Fiche d'un contact (titulaire, maître d'ouvrage), lue une fois pour toutes : l'annuaire du cabinet reste petit. */
+  const obtenirContact = useCallback(async (id?: string | null): Promise<ContactIdentite | null> => {
+    if (!id) return null;
+    if (!contacts.current) {
+      const liste = await lire<Array<ContactIdentite & { id: string }>>('/api/contacts', []);
+      contacts.current = new Map(liste.map(c => [c.id, c]));
+    }
+    return contacts.current.get(id) ?? null;
+  }, []);
+
   const retirerReserve = useCallback((id: string) => envoyer(`/api/reserves/${id}`, 'DELETE'), [envoyer]);
 
-  return { pvs, marches, reserves, chargement, erreur, recharger, creer, modifier, supprimer, signer, rouvrir, ajouterReserve, retirerReserve };
+  return { pvs, marches, reserves, chargement, erreur, recharger, creer, modifier, supprimer, signer, rouvrir, ajouterReserve, retirerReserve, obtenirContact };
 }

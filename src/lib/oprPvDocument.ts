@@ -13,7 +13,7 @@ export type BlocPv =
   | { t: 'titre'; text: string }
   | { t: 'texte'; text: string; gras?: boolean }
   /** Case à cocher. `valeur` : ce qui suit le texte (date, montant) ; '' = à compléter en pointillés. */
-  | { t: 'case'; text: string; cochee: boolean; niveau: 0 | 1; valeur?: string }
+  | { t: 'case'; text: string; cochee: boolean; niveau: 0 | 1 | 2; valeur?: string }
   | { t: 'fiche'; titre?: string; lignes: [string, string][] }
   | { t: 'signatures'; cases: { titre: string; sous?: string; date?: string }[] }
   | { t: 'saut' }
@@ -67,9 +67,12 @@ export function dateFr(valeur?: string | null): string {
 const eur = (n: number): string =>
   `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`.replace(/[  ]/g, ' ');
 
-const cases = (
-  options: Array<[string, string]>, choisi: string | null,
-): BlocPv[] => options.map(([valeur, text]) => ({ t: 'case', text, cochee: choisi === valeur, niveau: 0 }));
+/** Les options d'un choix exclusif, toutes imprimées, celle retenue cochée. */
+export const casesExclusives = (
+  options: Array<[string, string]>, choisi: string | null, niveau: 0 | 1 | 2 = 0,
+): BlocPv[] => options.map(([valeur, text]) => ({ t: 'case', text, cochee: choisi === valeur, niveau }));
+
+const cases = casesExclusives;
 
 /**
  * Les conditions d'une réception sous réserve, dans l'ordre du modèle. Toutes sont
@@ -118,6 +121,22 @@ function lignesReserves(reserves: ReservePv[]): Array<string[] | { groupe: strin
     out.push(reserveEnLigne(r));
   }
   return out;
+}
+
+/** L'annexe des réserves à lever : une page à part, le tableau à compléter à la main au besoin. */
+export function blocsAnnexeReserves(fiche: [string, string][], reserves: ReservePv[]): BlocPv[] {
+  return [
+    { t: 'saut' },
+    { t: 'titre', text: 'Annexe au procès-verbal des opérations préalables à la réception' },
+    { t: 'fiche', lignes: fiche },
+    {
+      t: 'tableau',
+      titre: 'Réserve(s) à lever',
+      entetes: ['N°', 'Localisation', 'Date', 'Points à lever', "Levée par l'entreprise (date)", 'Vérification MOE (date)'],
+      largeurs: [10, 36, 20, 62, 28, 26],
+      lignes: lignesReserves(reserves),
+    },
+  ];
 }
 
 export function construirePvPrive(d: DonneesPvPrive): DocPv {
@@ -207,16 +226,7 @@ export function construirePvPrive(d: DonneesPvPrive): DocPv {
     { t: 'case', niveau: 0, cochee: false, text: "La réception prononcée le ........ avec effet à la date du ........ est rapportée, les épreuves n'ayant pas été concluantes." },
     { t: 'signatures', cases: [{ titre: "Le maître d'ouvrage", date: dateFr(decision.date_decision) }] },
 
-    { t: 'saut' },
-    { t: 'titre', text: 'Annexe au procès-verbal des opérations préalables à la réception' },
-    { t: 'fiche', lignes: identite.filter(([k]) => k === 'Objet du marché' || k === 'Lot' || k === 'Date des OPR') },
-    {
-      t: 'tableau',
-      titre: 'Réserve(s) à lever',
-      entetes: ['N°', 'Localisation', 'Date', 'Points à lever', "Levée par l'entreprise (date)", 'Vérification MOE (date)'],
-      largeurs: [10, 36, 20, 62, 28, 26],
-      lignes: lignesReserves(d.reserves),
-    },
+    ...blocsAnnexeReserves(identite.filter(([k]) => k === 'Objet du marché' || k === 'Lot' || k === 'Date des OPR'), d.reserves),
   ];
 
   return {

@@ -1,7 +1,8 @@
 // Liste des PV d'OPR par lot (bloc « Réception » de l'onglet AOR) : un PV par lot, avec son
-// statut, ses réserves et ses échéances déduits. Ce modèle est celui des marchés privés ; en
-// marché public les PV passent par les formulaires EXE4 à EXE9, qui ne sont pas encore proposés
-// ici. Tableau au bureau, liste de cartes sous 768 px (un seul rendu monté).
+// statut, ses réserves et ses échéances déduits. En marché privé, le modèle simplifié du cabinet ;
+// en marché public, les formulaires EXE4 et EXE5 (la décision EXE6, EXE7 et la levée des réserves
+// EXE8, EXE9 ne sont pas encore proposées). Tableau au bureau, liste de cartes sous 768 px (un
+// seul rendu monté).
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
@@ -20,7 +21,7 @@ import { OprPvDialog, type ProjetOpr } from './OprPvDialog';
 interface Props {
   projectId: string;
   projet: ProjetOpr;
-  /** Maître d'ouvrage public : le modèle simplifié ne s'applique pas. */
+  /** Maître d'ouvrage public : formulaires EXE4 et EXE5 au lieu du modèle simplifié. */
   marchePublic: boolean;
   settings: AgencySettings;
   /** Appelé quand des réserves ont changé, pour que le suivi des réserves se relise. */
@@ -78,7 +79,9 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
   const actions = (pv: PvOpr) => (
     <div className="flex items-center gap-1 justify-end">
       <button type="button" className="btn btn-secondary" onClick={() => setOuvert(pv.id)}>{t('opr_open')}</button>
-      <button type="button" aria-label={`${t('opr_pdf')} ${pv.reference_pv ?? ''}`} className="p-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]" onClick={() => telecharger(pv, 'pdf')}><IconDownload size={16} /></button>
+      {!marchePublic && (
+        <button type="button" aria-label={`${t('opr_pdf')} ${pv.reference_pv ?? ''}`} className="p-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]" onClick={() => telecharger(pv, 'pdf')}><IconDownload size={16} /></button>
+      )}
       <button type="button" aria-label={`${t('opr_delete')} ${pv.reference_pv ?? ''}`} className="p-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 text-[var(--tblr-muted)] hover:text-red-600" onClick={() => supprimer(pv)}><IconTrash size={16} /></button>
     </div>
   );
@@ -91,7 +94,8 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
     </>
   );
 
-  const liste = api.pvs.filter(p => p.pv.regime === 'prive');
+  const regime = marchePublic ? 'public' : 'prive';
+  const liste = api.pvs.filter(p => p.pv.regime === regime);
   const edite = ouvert && ouvert !== 'nouveau' ? liste.find(p => p.id === ouvert) ?? null : null;
 
   return (
@@ -100,7 +104,7 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
         icon={IconClipboardList}
         title={t('opr_title')}
         description={t('opr_subtitle')}
-        action={marchePublic ? undefined : (
+        action={(
           <button type="button" onClick={() => setOuvert('nouveau')} disabled={api.marches.length === 0}
             className="flex items-center gap-2 px-4 py-2 pointer-coarse:min-h-11 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-sm font-bold transition disabled:opacity-60">
             <IconPlus size={14} /> {t('opr_new')}
@@ -109,10 +113,10 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
       />
       <div className="p-4 sm:p-6 space-y-4">
         {marchePublic && <p role="note" className="text-sm rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] p-3">{t('opr_public_notice')}</p>}
-        {!marchePublic && !api.chargement && api.marches.length === 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_no_markets')}</p>}
+        {!api.chargement && api.marches.length === 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_no_markets')}</p>}
         {(erreur || api.erreur) && <p role="alert" className="text-sm text-red-600">{erreur || api.erreur}</p>}
         {api.chargement && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_loading')}</p>}
-        {!api.chargement && !marchePublic && liste.length === 0 && api.marches.length > 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_empty')}</p>}
+        {!api.chargement && liste.length === 0 && api.marches.length > 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_empty')}</p>}
 
         {liste.length > 0 && (bureau ? (
           <div className="overflow-x-auto">
@@ -162,10 +166,10 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
 
       <AnimatePresence>
         {ouvert === 'nouveau' && (
-          <OprPvDialog key="nouveau" pv={null} marches={api.marches} reserves={[]} projet={projet} settings={settings} api={api} onClose={fermer} />
+          <OprPvDialog key="nouveau" pv={null} regime={regime} marches={api.marches} reserves={[]} projet={projet} settings={settings} api={api} onClose={fermer} />
         )}
         {edite && (
-          <OprPvDialog key={edite.id} pv={edite} marches={api.marches} reserves={reservesDe(edite)} projet={projet} settings={settings} api={api} onClose={fermer} />
+          <OprPvDialog key={edite.id} pv={edite} regime={regime} marches={api.marches} reserves={reservesDe(edite)} projet={projet} settings={settings} api={api} onClose={fermer} />
         )}
       </AnimatePresence>
       {dialog}

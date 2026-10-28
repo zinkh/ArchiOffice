@@ -137,6 +137,52 @@ describe("Mise à jour d'un PV d'OPR", () => {
   });
 });
 
+describe('PV public (EXE4, EXE5)', () => {
+  const creer = (token: string, extra: object = {}) => request(app).post('/api/receptions').set(authHeader(token))
+    .send({ project_id: 'p1', date: '2026-11-03', type: 'provisoire', marche_id: 'm1', ...extra });
+
+  it('enregistre le CCAG, les mentions du marché public et le lieu de signature', async () => {
+    const { token } = cabinet(true);
+    const res = await creer(token, {
+      ccag_version: '2021', lieu: 'Nancy',
+      public_info: { portee: 'partielle', prestations: '  Lot 01 : gros œuvre  ', signataire: 'K. Sektaoui', reference_marche: 'M-2026-01' },
+      constats: { epreuves: 'concluantes_sauf_annexe', pose_equipements: 'non_conforme', annexes: { epreuves: '1' } },
+      proposition: { avis: 'avec_reserve', conditions: [{ nature: 'malfacons', avant_le: '2026-12-01', annexe: '3' }, { nature: 'pose', avant_le: '2026-11-25' }], refaction_montant: 1500 },
+    });
+    expect(res.status).toBe(200);
+    expect(ligne(res.body.id)).toMatchObject({
+      regime: 'public', ccag_version: '2021', lieu: 'Nancy',
+      public_info: { portee: 'partielle', prestations: 'Lot 01 : gros œuvre', signataire: 'K. Sektaoui', reference_marche: 'M-2026-01' },
+    });
+    expect(ligne(res.body.id)?.constats).toMatchObject({ pose_equipements: 'non_conforme', annexes: { epreuves: '1' } });
+    expect(ligne(res.body.id)?.proposition.conditions).toHaveLength(2);
+  });
+
+  it('la mise à jour est partielle : modifier les mentions du public ne touche ni les constats ni le CCAG', async () => {
+    const { token } = cabinet(true);
+    const id = (await creer(token, { ccag_version: '2009', constats: { travaux: 'executes' }, public_info: { portee: 'totale' } })).body.id;
+    const maj = await request(app).put(`/api/receptions/${id}`).set(authHeader(token)).send({ public_info: { portee: 'partielle', prestations: 'Bâtiment A' } });
+    expect(maj.status).toBe(200);
+    expect(ligne(id)).toMatchObject({ ccag_version: '2009', public_info: { portee: 'partielle', prestations: 'Bâtiment A', signataire: null } });
+    expect(ligne(id)?.constats).toMatchObject({ travaux: 'executes' });
+  });
+
+  it('refuse un CCAG inconnu et une portée hors vocabulaire', async () => {
+    const { token } = cabinet(true);
+    expect((await creer(token, { ccag_version: '2015' })).status).toBe(400);
+    expect((await creer(token, { public_info: { portee: 'moitié' } })).status).toBe(400);
+  });
+
+  it('un PV signé garde ses mentions du public figées', async () => {
+    const { token } = cabinet(true);
+    const id = (await creer(token, { ccag_version: '2021', date_opr: '2026-11-03', public_info: { portee: 'totale' }, proposition: { avis: 'sans_reserve' } })).body.id;
+    expect((await request(app).post(`/api/receptions/${id}/signature`).set(authHeader(token)).send({ mode: 'papier', date: '2026-11-10' })).status).toBe(200);
+    const refus = await request(app).put(`/api/receptions/${id}`).set(authHeader(token)).send({ public_info: { portee: 'partielle' } });
+    expect(refus.status).toBe(409);
+    expect(ligne(id)?.public_info).toMatchObject({ portee: 'totale' });
+  });
+});
+
 describe('Référence automatique', () => {
   const creer = (token: string, extra: object = {}) => request(app).post('/api/receptions').set(authHeader(token))
     .send({ project_id: 'p1', date: '2026-11-03', type: 'provisoire', marche_id: 'm1', ...extra });

@@ -53,11 +53,14 @@ export function rendreDocPv(r: RenduPdf, doc: DocPv): void {
   const titre = (text: string): void => {
     place(34); // jamais un titre seul en bas de page
     y += 3;
-    pdf.setFillColor(...TABLEAU_GRIS.groupe);
-    pdf.rect(MARGE, y - 4.5, largeur, 7, 'F');
     pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9.5); pdf.setTextColor(...TEXTE);
-    pdf.text(text.toUpperCase(), MARGE + 2, y);
-    y += 7;
+    // Un titre long (rubrique E de l'EXE5) passe sur plusieurs lignes au lieu de déborder.
+    const lignes = pdf.splitTextToSize(text.toUpperCase(), largeur - 4) as string[];
+    const hauteur = 3 + lignes.length * 4;
+    pdf.setFillColor(...TABLEAU_GRIS.groupe);
+    pdf.rect(MARGE, y - 4.5, largeur, hauteur, 'F');
+    pdf.text(lignes, MARGE + 2, y);
+    y += hauteur;
   };
 
   const texte = (text: string, gras = false): void => {

@@ -68,7 +68,10 @@ export async function construireDocxPv(doc: DocPv, settings: AgencySettings): Pr
         saut = false;
         break;
       case 'texte':
-        enfants.push(new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: b.text, bold: b.gras, size: 20, color: '111827' })] }));
+        // Un retour à la ligne du contenu (adresse, identité) devient un paragraphe : Word ne coupe pas sur « \n ».
+        for (const ligne of b.text.split('\n')) {
+          enfants.push(new Paragraph({ spacing: { after: 60 }, children: [new TextRun({ text: ligne, bold: b.gras, size: 20, color: '111827' })] }));
+        }
         break;
       case 'case':
         enfants.push(new Paragraph({

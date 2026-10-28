@@ -12,6 +12,7 @@ const receptions = [
   { id: 'r1', project_id: 'p1', regime: 'prive', marche_id: 'm1', reference_pv: 'OPR-2026-001', date_opr: '2026-11-03', proposition: { avis: 'sans_reserve' }, signed_at: null },
   { id: 'r2', project_id: 'p1', regime: 'prive', marche_id: 'm2', reference_pv: 'OPR-2026-002', date_opr: '2026-10-20', signed_at: '2026-11-10', signed_mode: 'papier' },
   { id: 'r-generique', project_id: 'p1', regime: null, date: '2026-01-01', type: 'OPR' },
+  { id: 'r-public', project_id: 'p1', regime: 'public', marche_id: 'm1', reference_pv: 'OPR-2026-003', date_opr: '2026-11-05', ccag_version: '2021', lieu: 'Nancy', public_info: { portee: 'totale', signataire: 'K. Sektaoui' } },
 ];
 const marches = [
   { id: 'm1', lot_numero: '01', lot_titre: 'Gros œuvre', entreprise_nom: 'BTS', type_marche: 'marche' },
@@ -75,10 +76,52 @@ describe('liste des PV d\'OPR', () => {
     expect(texte.find(t => t.includes('OPR-2026-002'))).toContain('opr_signed_on');
   });
 
-  it('en marché public : avertissement sur les formulaires EXE et aucun bouton de création', async () => {
+  it('en marché public : avertissement sur EXE6 à EXE9, et seuls les PV publics sont listés', async () => {
     await monter(true);
     expect(container.textContent).toContain('opr_public_notice');
-    expect(boutons('opr_new')).toHaveLength(0);
+    const lignes = [...container.querySelectorAll('tbody tr')];
+    expect(lignes).toHaveLength(1);
+    expect(lignes[0].textContent).toContain('OPR-2026-003');
+    // L'export rapide du modèle simplifié n'existe pas en public : les cerfas se téléchargent depuis le formulaire.
+    expect(lignes[0].querySelector('button[aria-label^="opr_pdf"]')).toBeNull();
+  });
+});
+
+describe('PV public (EXE4, EXE5)', () => {
+  it('le formulaire porte les champs du cerfa, propose les quatre avis, et exporte EXE4 et EXE5', async () => {
+    await monter(true);
+    await act(async () => container.querySelector<HTMLButtonElement>('tbody tr button')!.click());
+    const dialogue = document.body.querySelector('[role="dialog"]')!;
+    const texte = dialogue.textContent ?? '';
+    for (const cle of ['opr_ccag', 'opr_market_reference', 'opr_signatory', 'opr_place', 'opr_scope', 'opr_c_pose_equipements', 'opr_avis_sous_reserve_public', 'opr_avis_avec_reserve_public', 'opr_decision_later']) {
+      expect(texte).toContain(cle);
+    }
+    // La décision du maître d'ouvrage (EXE6, EXE7) n'est pas encore proposée en public.
+    expect(texte).not.toContain('opr_section_c');
+    const exports = boutons('EXE').map(b => b.textContent?.trim());
+    expect(exports).toHaveLength(4);
+    expect(exports.join(' ')).toContain('EXE4');
+    expect(exports.join(' ')).toContain('EXE5');
+    // Les champs enregistrés sont repris.
+    expect((dialogue.querySelector('select option[value="2021"]')!.parentElement as HTMLSelectElement).value).toBe('2021');
+  });
+
+  it('enregistre le CCAG, les mentions du public et le lieu, sans jamais envoyer le régime', async () => {
+    await monter(true);
+    await act(async () => boutons('opr_new')[0].click());
+    const dialogue = document.body.querySelector('[role="dialog"]')!;
+    const selects = [...dialogue.querySelectorAll('select')];
+    await remplir(selects[0], 'm1');
+    const ccag = selects.find(sel => [...sel.options].some(o => o.value === '2009'))!;
+    await remplir(ccag, '2009');
+    const champs = [...dialogue.querySelectorAll<HTMLInputElement>('input[maxlength]')];
+    await remplir(champs.find(c => c.maxLength === 64)!, 'M-2026-01');
+    await act(async () => boutons('opr_save')[0].click());
+    await attendre();
+    const envoi = appels.find(a => a.url === '/api/receptions' && a.options?.method === 'POST')!;
+    const corps = JSON.parse(String(envoi.options!.body));
+    expect(corps).toMatchObject({ marche_id: 'm1', ccag_version: '2009', public_info: { reference_marche: 'M-2026-01' } });
+    expect(corps.regime).toBeUndefined();
   });
 });
 

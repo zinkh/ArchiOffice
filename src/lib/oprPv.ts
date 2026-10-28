@@ -109,6 +109,20 @@ export interface Carence {
   date_fixation: string | null;
 }
 
+export const PORTEES = ['totale', 'partielle'] as const;
+
+/** Mentions propres au marché public (EXE4 E et F, rappel de la référence du marché en bas de page). */
+export interface PublicInfo {
+  /** La réception porte sur l'ouvrage entier ou sur une partie (réception partielle). */
+  portee: (typeof PORTEES)[number] | null;
+  /** Prestations concernées (« comportant les prestations suivantes », « désignées ci-dessous »). */
+  prestations: string | null;
+  /** Nom et prénom du maître d'œuvre soussigné. */
+  signataire: string | null;
+  /** Référence (numéro) du marché public, rappelée sur le formulaire. */
+  reference_marche: string | null;
+}
+
 /** Délais propres au marché, en jours : absents = valeurs par défaut (voir oprPvDelais). */
 export interface Delais {
   opr?: number;
@@ -132,6 +146,7 @@ export interface OprPv {
   levee: Levee;
   carence: Carence;
   delais: Delais;
+  public_info: PublicInfo;
 }
 
 export function constatsVierges(): Constats {
@@ -154,6 +169,7 @@ export function pvVierge(regime: RegimeMarche): OprPv {
     levee: { date_pv: null, date_transmission: null },
     carence: { date_lettre: null, date_fixation: null },
     delais: {},
+    public_info: { portee: null, prestations: null, signataire: null, reference_marche: null },
   };
 }
 
@@ -313,6 +329,14 @@ export function controlerPv(pv: OprPv, ctx: ContexteControle = {}): ControlePv {
   }
 
   const { proposition, decision, constats, presences } = pv;
+
+  if (pv.regime === 'public') {
+    if (!pv.public_info.portee) {
+      avertissements.push({ code: 'portee_manquante', message: "Précisez si la réception porte sur l'ouvrage entier ou sur une partie de l'ouvrage." });
+    } else if (pv.public_info.portee === 'partielle' && !pv.public_info.prestations) {
+      avertissements.push({ code: 'prestations_manquantes', message: 'Réception partielle : désignez les prestations concernées.' });
+    }
+  }
 
   if (presences.entreprise === 'absente_convoquee' && !presences.date_convocation) {
     erreurs.push({ code: 'convocation_manquante', message: 'Entreprise absente : la date du courrier de convocation est requise.' });
