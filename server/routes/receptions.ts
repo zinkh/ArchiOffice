@@ -7,8 +7,8 @@
 // et jamais lu dans la requête, et le lot d'un PV ne change plus une fois créé.
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
-import { regimeDepuisAffaire } from '../../src/lib/oprPv';
-import { sanitizeOprPayload } from '../../src/lib/oprPvSanitize';
+import { controlerPv, estDateIso, regimeDepuisAffaire } from '../../src/lib/oprPv';
+import { lirePv, sanitizeOprPayload } from '../../src/lib/oprPvSanitize';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -44,6 +44,29 @@ async function verifierReferences(
   return null;
 }
 
+/** Une réserve est encore à lever tant qu'elle n'est ni levée ni quittancée. */
+const STATUTS_RESERVE_LEVEE = new Set(['Levée', 'Quitus Transmis']);
+
+/**
+ * Prochaine référence `OPR-AAAA-NNN` du cabinet : le plus grand suffixe de l'année + 1.
+ * Deux créations simultanées peuvent proposer la même : l'index unique partiel
+ * (`receptions_opr_reference`) en refuse une, et l'appelant recalcule.
+ */
+async function prochaineReference(supabaseAdmin: any, tenantId: string, annee: string): Promise<string> {
+  const { data } = await supabaseAdmin.from('receptions').select('reference_pv').eq('tenant_id', tenantId);
+  const prefixe = `OPR-${annee}-`;
+  let max = 0;
+  for (const r of data ?? []) {
+    const ref = String(r.reference_pv ?? '');
+    if (!ref.startsWith(prefixe)) continue;
+    const suffixe = /^\d+$/.test(ref.slice(prefixe.length)) ? Number(ref.slice(prefixe.length)) : 0;
+    if (suffixe > max) max = suffixe;
+  }
+  return `${prefixe}${String(max + 1).padStart(3, '0')}`;
+}
+
+const REPONSE_PV_SIGNE = { error: 'PV signé : rouvrez la signature pour le modifier.', code: 'PV_SIGNE' };
+
 export function registerReceptionRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.get("/api/receptions", async (req: any, res: any) => {
     try {
@@ -78,17 +101,24 @@ export function registerReceptionRoutes(app: Express, { supabaseAdmin, getTenant
         regime = regimeDepuisAffaire(affaire?.is_public_client);
       }
 
-      const { data, error } = await supabaseAdmin.from('receptions').insert({
-        id: crypto.randomUUID(), tenant_id: tenantId, project_id, date, type, has_reserves: !!has_reserves, reserves_count: reserves_count || 0, document_url,
-        reference_pv: reference_pv || null, lieu: lieu || null, signataires: signataires || null,
-        observations: observations || null, date_limite_levee: date_limite_levee || null, pv_valide: !!pv_valide,
-        ...opr.colonnes, ...(regime ? { regime } : {}),
-      }).select().single();
-      if (error) {
-        if (estOpr && MISSING_COLUMN_CODES.has(error.code)) return res.status(503).json(NON_MIGRE);
-        throw error;
+      // Un PV d'OPR reçoit sa référence du serveur quand le client n'en fournit pas.
+      const referenceAuto = estOpr && !reference_pv;
+      const annee = estDateIso(date) ? date.slice(0, 4) : String(new Date().getUTCFullYear());
+      for (let tentative = 0; ; tentative++) {
+        const { data, error } = await supabaseAdmin.from('receptions').insert({
+          id: crypto.randomUUID(), tenant_id: tenantId, project_id, date, type, has_reserves: !!has_reserves, reserves_count: reserves_count || 0, document_url,
+          reference_pv: referenceAuto ? await prochaineReference(supabaseAdmin, tenantId, annee) : (reference_pv || null),
+          lieu: lieu || null, signataires: signataires || null,
+          observations: observations || null, date_limite_levee: date_limite_levee || null, pv_valide: !!pv_valide,
+          ...opr.colonnes, ...(regime ? { regime } : {}),
+        }).select().single();
+        if (error) {
+          if (referenceAuto && error.code === '23505' && tentative < 4) continue;
+          if (estOpr && MISSING_COLUMN_CODES.has(error.code)) return res.status(503).json(NON_MIGRE);
+          throw error;
+        }
+        return res.json(data);
       }
-      res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to create reception" }); }
   });
 
@@ -126,6 +156,9 @@ export function registerReceptionRoutes(app: Express, { supabaseAdmin, getTenant
         return res.json(data);
       }
 
+      // PV signé : le contenu est figé jusqu'à la réouverture de la signature.
+      if (existant.signed_at) return res.status(409).json(REPONSE_PV_SIGNE);
+
       // PV d'OPR : mise à jour partielle (un client qui ne connaît pas un champ ne l'efface pas)
       // et lot figé.
       const { marche_id, lot_id, ...modifiables } = opr.colonnes;
@@ -150,5 +183,63 @@ export function registerReceptionRoutes(app: Express, { supabaseAdmin, getTenant
       }
       res.json(data);
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reception" }); }
+  });
+
+  // Signature d'un PV d'OPR (papier : scan déposé ; électronique : document signé déposé).
+  // Refusée tant que le PV est incohérent ; une fois signé, son contenu est figé (PUT en 409).
+  app.post("/api/receptions/:id/signature", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const mode = String(req.body?.mode ?? '');
+      if (mode !== 'papier' && mode !== 'electronique') {
+        return res.status(400).json({ error: "Mode de signature inconnu (papier ou électronique)." });
+      }
+      const date = req.body?.date;
+      if (!estDateIso(date)) return res.status(400).json({ error: "Date de signature invalide (AAAA-MM-JJ)." });
+      const documentId = typeof req.body?.document_id === 'string' ? req.body.document_id.slice(0, 100) : null;
+      if (documentId && !(await assertTenantEntity(supabaseAdmin, 'documents', documentId, tenantId))) {
+        return res.status(400).json({ error: "Document introuvable pour ce cabinet." });
+      }
+
+      const { data: existant } = await supabaseAdmin.from('receptions').select('*').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existant) return res.status(404).json({ error: "PV de réception introuvable." });
+      const pv = lirePv(existant);
+      if (!pv) return res.status(400).json({ error: "Seul un PV d'OPR par lot se signe." });
+      if (existant.signed_at) return res.status(409).json(REPONSE_PV_SIGNE);
+
+      const { data: reserves } = await supabaseAdmin.from('reserves').select('status').eq('tenant_id', tenantId).eq('reception_id', existant.id);
+      const reservesOuvertes = (reserves ?? []).filter((r: any) => !STATUTS_RESERVE_LEVEE.has(r.status)).length;
+      const controle = controlerPv(pv, { reservesOuvertes });
+      if (controle.erreurs.length) {
+        return res.status(409).json({ error: "Le PV est incohérent : corrigez-le avant de le signer.", code: 'PV_INCOHERENT', erreurs: controle.erreurs });
+      }
+
+      const { data, error } = await supabaseAdmin.from('receptions')
+        .update({ signed_at: date, signed_mode: mode, signed_document_id: documentId })
+        .eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) {
+        if (MISSING_COLUMN_CODES.has(error.code)) return res.status(503).json(NON_MIGRE);
+        throw error;
+      }
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to sign reception" }); }
+  });
+
+  // Rouvre un PV signé par erreur : son contenu redevient modifiable.
+  app.post("/api/receptions/:id/signature/rouvrir", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: existant } = await supabaseAdmin.from('receptions').select('id, regime').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existant) return res.status(404).json({ error: "PV de réception introuvable." });
+      if (!existant.regime) return res.status(400).json({ error: "Seul un PV d'OPR par lot se signe." });
+      const { data, error } = await supabaseAdmin.from('receptions')
+        .update({ signed_at: null, signed_mode: null, signed_document_id: null })
+        .eq('id', req.params.id).eq('tenant_id', tenantId).select().single();
+      if (error) {
+        if (MISSING_COLUMN_CODES.has(error.code)) return res.status(503).json(NON_MIGRE);
+        throw error;
+      }
+      res.json(data);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to reopen reception" }); }
   });
 }

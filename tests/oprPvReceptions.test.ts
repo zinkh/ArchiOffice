@@ -137,6 +137,107 @@ describe("Mise à jour d'un PV d'OPR", () => {
   });
 });
 
+describe('Référence automatique', () => {
+  const creer = (token: string, extra: object = {}) => request(app).post('/api/receptions').set(authHeader(token))
+    .send({ project_id: 'p1', date: '2026-11-03', type: 'provisoire', marche_id: 'm1', ...extra });
+
+  it('attribue OPR-AAAA-NNN à la suite, par cabinet et par année', async () => {
+    const a = cabinet();
+    const b = cabinet();
+    const un = await creer(a.token);
+    const deux = await creer(a.token);
+    expect(ligne(un.body.id)?.reference_pv).toBe('OPR-2026-001');
+    expect(ligne(deux.body.id)?.reference_pv).toBe('OPR-2026-002');
+    // Un autre cabinet repart de 001, une autre année aussi.
+    expect(ligne((await creer(b.token)).body.id)?.reference_pv).toBe('OPR-2026-001');
+    expect(ligne((await creer(a.token, { date: '2027-01-05' })).body.id)?.reference_pv).toBe('OPR-2027-001');
+  });
+
+  it('respecte une référence fournie, et ne numérote jamais un PV générique', async () => {
+    const { token } = cabinet();
+    const fournie = await creer(token, { reference_pv: 'PV-A-12' });
+    expect(ligne(fournie.body.id)?.reference_pv).toBe('PV-A-12');
+    const generique = await request(app).post('/api/receptions').set(authHeader(token)).send({ project_id: 'p1', date: '2026-01-01', type: 'OPR' });
+    expect(ligne(generique.body.id)?.reference_pv ?? null).toBeNull();
+    // La référence saisie à la main n'est pas lue comme un suffixe et ne fait pas sauter la suite.
+    expect(ligne((await creer(token)).body.id)?.reference_pv).toBe('OPR-2026-001');
+  });
+});
+
+describe("Signature d'un PV d'OPR", () => {
+  async function pvPret(token: string, extra: object = {}) {
+    const res = await request(app).post('/api/receptions').set(authHeader(token)).send({
+      project_id: 'p1', date: '2026-11-03', type: 'provisoire', marche_id: 'm1', date_opr: '2026-11-03',
+      proposition: { avis: 'sans_reserve', date_proposition: '2026-11-04' }, ...extra,
+    });
+    return res.body.id as string;
+  }
+  const signer = (token: string, id: string, corps: object = { mode: 'papier', date: '2026-11-10' }) =>
+    request(app).post(`/api/receptions/${id}/signature`).set(authHeader(token)).send(corps);
+
+  it('fige le contenu : un PUT répond 409 PV_SIGNE jusqu\'à la réouverture', async () => {
+    const { token } = cabinet();
+    const id = await pvPret(token);
+    const signe = await signer(token, id);
+    expect(signe.status).toBe(200);
+    expect(ligne(id)).toMatchObject({ signed_at: '2026-11-10', signed_mode: 'papier' });
+
+    const refus = await request(app).put(`/api/receptions/${id}`).set(authHeader(token)).send({ lieu: 'Autre' });
+    expect(refus.status).toBe(409);
+    expect(refus.body.code).toBe('PV_SIGNE');
+    expect((await signer(token, id)).status).toBe(409);
+
+    const rouvert = await request(app).post(`/api/receptions/${id}/signature/rouvrir`).set(authHeader(token)).send({});
+    expect(rouvert.status).toBe(200);
+    expect(ligne(id)?.signed_at).toBeNull();
+    expect((await request(app).put(`/api/receptions/${id}`).set(authHeader(token)).send({ lieu: 'Autre' })).status).toBe(200);
+  });
+
+  it('refuse un mode inconnu, une date invalide et un document étranger', async () => {
+    const { token } = cabinet();
+    const id = await pvPret(token);
+    expect((await signer(token, id, { mode: 'oral', date: '2026-11-10' })).status).toBe(400);
+    expect((await signer(token, id, { mode: 'papier', date: 'demain' })).status).toBe(400);
+    expect((await signer(token, id, { mode: 'papier', date: '2026-11-10', document_id: 'inconnu' })).status).toBe(400);
+    expect(ligne(id)?.signed_at ?? null).toBeNull();
+  });
+
+  it('refuse de signer un PV incohérent, en listant ce qui manque', async () => {
+    const { token } = cabinet();
+    const id = await pvPret(token, { proposition: { avis: 'sous_reserve', date_proposition: '2026-11-04' } });
+    const res = await signer(token, id);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe('PV_INCOHERENT');
+    expect(res.body.erreurs.map((e: any) => e.code)).toContain('proposition_conditions_manquantes');
+    expect(ligne(id)?.signed_at ?? null).toBeNull();
+  });
+
+  it('refuse « sans réserve » tant que des réserves du PV restent à lever', async () => {
+    const { tenantId, token } = cabinet();
+    const id = await pvPret(token);
+    fakeSupabaseAdmin.seed('reserves', [
+      { id: 'r-ouverte', tenant_id: tenantId, project_id: 'p1', reception_id: id, title: 'Joint', status: 'A faire' },
+      { id: 'r-levee', tenant_id: tenantId, project_id: 'p1', reception_id: id, title: 'Peinture', status: 'Levée' },
+    ]);
+    const res = await signer(token, id);
+    expect(res.status).toBe(409);
+    expect(res.body.erreurs.map((e: any) => e.code)).toContain('reserves_ouvertes');
+    fakeSupabaseAdmin.getTable('reserves').find(r => r.id === 'r-ouverte')!.status = 'Quitus Transmis';
+    expect((await signer(token, id)).status).toBe(200);
+  });
+
+  it('ne signe ni un PV générique, ni le PV d\'un autre cabinet', async () => {
+    const a = cabinet();
+    const b = cabinet();
+    const generique = await request(app).post('/api/receptions').set(authHeader(a.token)).send({ project_id: 'p1', date: '2026-01-01', type: 'OPR' });
+    expect((await signer(a.token, generique.body.id)).status).toBe(400);
+    expect((await request(app).post(`/api/receptions/${generique.body.id}/signature/rouvrir`).set(authHeader(a.token)).send({})).status).toBe(400);
+    const idB = await pvPret(b.token);
+    expect((await signer(a.token, idB)).status).toBe(404);
+    expect((await request(app).post(`/api/receptions/${idB}/signature/rouvrir`).set(authHeader(a.token)).send({})).status).toBe(404);
+  });
+});
+
 describe('Affaire archivée', () => {
   it('refuse en 409 la création et la modification d\'un PV', async () => {
     const { tenantId, token } = cabinet();

@@ -65,6 +65,7 @@ import { ReprendreObservationsBanner } from '../components/pro/ReprendreObservat
 import { DoeAtelier } from '../components/aor/DoeAtelier';
 import { RESERVE_STATUSES, reserveStatusKey, isReserveClosed } from '../components/pro/reserveShared';
 import { AorLayout } from '../components/aor/AorLayout';
+import { OprPvSection } from '../components/aor/OprPvSection';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
@@ -5158,6 +5159,13 @@ export default function ProjectDetail() {
                   <DoeAtelier projectId={id || ''} onSummary={setDoeATraiter} />
                 ) },
                 { id: 'pv', label: t('aor_section_pv'), count: receptions.length, children: (<>
+                <OprPvSection
+                  projectId={id || ''}
+                  projet={{ nom: project?.name || '', code: project?.project_code, maitreOuvrage: project?.client, objet: project?.programme }}
+                  marchePublic={!!project?.is_public_client}
+                  settings={settings ?? {}}
+                  onReservesChanged={fetchReserves}
+                />
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconClipboardCheck}
