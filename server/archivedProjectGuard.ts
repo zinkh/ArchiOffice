@@ -10,6 +10,7 @@ export const TABLES_RATTACHEES: Record<string, string> = {
   documents: 'documents',
   invoices: 'invoices',
   reserves: 'reserves',
+  receptions: 'receptions',
   'gpa-reserves': 'gpa_reserves',
   milestones: 'milestones',
   observations: 'observations',
