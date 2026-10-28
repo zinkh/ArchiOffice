@@ -1,3 +1,4 @@
+import { contactPatchFromProposal, fillMissingClientFields } from '../lib/proposalClient';
 import * as React from 'react';
 import { useState, useEffect, useId } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -328,6 +329,14 @@ export default function Proposals() {
       });
       if (res.ok) {
         const saved = await res.json();
+        // Ce qui est saisi ici complète les champs vides de la fiche du client, sans rien écraser.
+        const client = contacts.find(c => c.id === newProposal.client_id);
+        const patch = contactPatchFromProposal(newProposal, client);
+        if (client && Object.keys(patch).length) {
+          fetchJson(`/api/contacts/${client.id}`, { method: 'PUT', body: JSON.stringify(patch) })
+            .then(() => setContacts(prev => prev.map(c => c.id === client.id ? { ...c, ...patch } : c)))
+            .catch(err => console.error('Contact completion failed:', err));
+        }
         if (editingProposal) {
           setProposals(proposals.map(p => p.id === saved.id ? saved : p));
         } else {
@@ -357,7 +366,8 @@ export default function Proposals() {
 
   const handleEditClick = (proposal: Proposal) => {
     setEditingProposal(proposal);
-    setNewProposal(proposal);
+    // Le contact est la source des coordonnées : les champs laissés vides se remplissent depuis sa fiche.
+    setNewProposal(fillMissingClientFields(proposal, contacts.find(c => c.id === proposal.client_id)) as Proposal);
     setCostMode((proposal.ratio_rehab || proposal.ratio_extension) ? 'ratio' : 'manual');
     setSubmitError(null);
     setFormTouched(false);
