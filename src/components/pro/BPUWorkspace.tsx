@@ -8,7 +8,7 @@ import {
   IconChevronRight, IconChevronDown,
   IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
-  IconBuildingStore, IconFileImport, IconFileExport,
+  IconBuildingStore,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
   IconPencil, IconFilter, IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
 } from '@tabler/icons-react';
@@ -20,7 +20,7 @@ import type { ProNotify } from './DPGFWorkspace';
 import { formatQuantite } from '../../lib/quantiteFormat';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
-import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, OffreBPU, NatureArticle } from '../../types/bpu';
+import type { BPU, BPULot, BPUChapitre, BPULigne, Tranche, NatureArticle } from '../../types/bpu';
 import { natureEffective, trancheEffective } from '../../types/bpu';
 import {
   evalFormula, MAX_ARTICLE_DEPTH, childNumber,
@@ -41,10 +41,10 @@ import { formatCurrency } from '../../lib/utils';
 /**
  * Le BPU et le DQE sont le MÊME document, vu avec deux jeux de colonnes : le
  * bordereau ne montre que l'unité et le prix unitaire, le DQE y ajoute les
- * quantités estimatives et les montants. Un troisième jeu compare les offres
- * reçues, ce qui réutilise l'arbre et le rendu plutôt qu'une seconde table.
+ * quantités estimatives et les montants. Les offres des entreprises se comparent
+ * dans l'onglet ACT (phase « Collecte des offres »), pas ici.
  */
-export type ColSet = 'bpu' | 'dqe' | 'comparatif';
+export type ColSet = 'bpu' | 'dqe';
 
 interface BPUWorkspaceProps {
   bpu: BPU;
@@ -52,7 +52,6 @@ interface BPUWorkspaceProps {
   mode: 'bpu' | 'dqe';
   notify?: ProNotify;
   projectName?: string;
-  offres?: OffreBPU[];
   /** Lots du projet (project_lots), pour rattacher les lots du bordereau. */
   projectLots?: { id: string; lot_number: string; lot_title: string }[];
   showTree?: boolean;
@@ -65,14 +64,12 @@ interface BPUWorkspaceProps {
   onPushToDpgf?: () => void;
   onOpenLibrary?: () => void;
   onPushToLibrary?: (lignes: BPULigne[]) => void;
-  onImportOffre?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce bordereau (les lignes absentes deviennent des articles). */
   onImportDocument?: () => void;
   /** Fichier (tableur) déposé par glisser-déposer sur le tableau. */
   onDropFichier?: (fichier: File) => void;
   /** Trouvaille de la recherche à ouvrir et montrer. */
   searchTarget?: CibleRecherche | null;
-  onPushToAct?: () => void;
 }
 
 const newId = () => crypto.randomUUID();
@@ -125,10 +122,10 @@ function ventilation(bpu: BPU) {
 // ── Composant ─────────────────────────────────────────────────────────────────
 
 export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
-  bpu, onChange, mode, projectName, offres = [], projectLots = [], notify,
+  bpu, onChange, mode, projectName, projectLots = [], notify,
   showTree: showTreeProp, onToggleTree, onDragStart, onDropExternal,
   onInitFromDpgf, onPushToDpgf, onOpenLibrary, onPushToLibrary,
-  onImportOffre, onImportDocument, onDropFichier, onPushToAct, searchTarget,
+  onImportDocument, onDropFichier, searchTarget,
 }) => {
   const [fichierSurvole, setFichierSurvole] = useState(false);
   const [colSet, setColSet] = useState<ColSet>(mode);
@@ -197,16 +194,15 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     setSelectedRowKeys(new Set([clePourCible(c)]));
   });
 
-  const showQte = colSet === 'dqe' || colSet === 'comparatif';
+  const showQte = colSet === 'dqe';
   const showMontant = colSet === 'dqe';
   const showLettres = colSet === 'bpu' && bpu.prixEnLettres;
-  const showOffres = colSet === 'comparatif';
   // Un bordereau de prix unitaires n'a pas de total : c'est justement ce qui le
   // distingue d'un DPGF, et l'afficher serait l'erreur métier à ne pas commettre.
   const showTotaux = colSet !== 'bpu';
 
   const nbCols = 5 + (showQte ? 1 : 0) + 1 + (showMontant ? 1 : 0)
-    + (showLettres ? 1 : 0) + (showOffres ? offres.length + 1 : 0) + 1;
+    + (showLettres ? 1 : 0) + 1;
   // Colonnes ajoutées en queue de tableau par le découpage (bâtiment, phase —
   // chacune conditionnelle — et localisation, toujours présente), en plus de
   // celles déjà comptées par nbCols. Même raisonnement que DPGFWorkspace.
@@ -695,7 +691,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         { id: 'bpu-tranches', label: t('pro_bpu_tranches'), icon: <IconStackPush size={16} />, checked: showTranches, onClick: () => setShowTranches(v => !v) },
         { id: 'bpu-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, checked: showDecoupage, onClick: () => setShowDecoupage(v => !v) },
         { id: 'bpu-lettres', label: t('pro_bpu_prices_in_words'), icon: <IconAbc size={16} />, checked: !!bpu.prixEnLettres, onClick: () => patchBpu({ prixEnLettres: !bpu.prixEnLettres }) },
-        { id: 'bpu-compare', label: t('pro_bpu_compare_offers'), icon: <IconScale size={16} />, checked: colSet === 'comparatif', onClick: () => setColSet(c => c === 'comparatif' ? mode : 'comparatif'), disabled: offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
         { id: 'bpu-vue-heading', heading: 'Afficher' },
         { id: 'bpu-vue-tout', label: 'Tout le bordereau', icon: <IconFilter size={16} />, checked: vueMarche === 'tout', onClick: () => setVueMarche('tout') },
         { id: 'bpu-vue-ac', label: 'Accord-cadre seul', icon: <IconFilter size={16} />, checked: vueMarche === 'ac', onClick: () => setVueMarche('ac') },
@@ -703,14 +698,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
         { id: 'bpu-market-sep', separator: true },
         { id: 'bpu-from-dpgf', label: t('pro_bpu_init_from_dpgf'), icon: <IconArrowsExchange size={16} />, onClick: () => onInitFromDpgf?.(), disabled: !onInitFromDpgf },
         { id: 'bpu-to-dpgf', label: t('pro_bpu_push_to_dpgf'), icon: <IconArrowsExchange size={16} />, onClick: () => onPushToDpgf?.(), disabled: !onPushToDpgf },
-      ],
-    },
-    {
-      kind: 'menu', id: 'bpu-exchange', label: t('pro_import_export'), icon: <IconFileExport size={16} />,
-      entries: [
-        { id: 'bpu-exchange-in', heading: t('pro_bpu_offers_received') },
-        { id: 'bpu-import', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
-        { id: 'bpu-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
       ],
     },
   ]);
@@ -768,29 +755,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       </div>
     );
   };
-
-  // ── Comparatif ──────────────────────────────────────────────────────────────
-  /** Prix remis par chaque entreprise pour un article, et le moins-disant. */
-  const prixOffres = (ligneId: string) => {
-    const valeurs = offres.map(o => ({ offre: o, prix: o.prix?.[ligneId] ?? null }));
-    const chiffres = valeurs.map(v => v.prix).filter((p): p is number => p != null && p > 0);
-    const mini = chiffres.length ? Math.min(...chiffres) : null;
-    return { valeurs, mini };
-  };
-
-  const totauxOffres = useMemo(() => {
-    const totaux = new Map<string, number>();
-    for (const o of offres) {
-      let total = 0;
-      forEachLigne(bpu.lots, (ligne: BPULigne) => {
-        if (ligne.children?.length) return;
-        const pu = o.prix?.[ligne.id];
-        if (pu != null) total += pu * (ligne.quantite || 0);
-      });
-      totaux.set(o.id, total);
-    }
-    return totaux;
-  }, [offres, bpu.lots]);
 
   const vent = useMemo(() => ventilation(bpu), [bpu]);
   const trancheById = useMemo(
@@ -933,7 +897,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             </div>
           )}
 
-          <table className="w-full border-collapse text-sm" style={{ minWidth: showOffres ? 900 : 720 }}>
+          <table className="w-full border-collapse text-sm" style={{ minWidth: 720 }}>
             <thead className="sticky top-0 z-10">
               <tr className="text-xs" style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)', boxShadow: 'inset 0 -1px 0 var(--tblr-border)' }}>
                 <th className="pl-3 pr-1 py-2 w-8">
@@ -954,12 +918,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 <th className="px-2 py-2 text-right font-semibold w-28">P.U. HT (€)</th>
                 {showLettres && <th className="px-2 py-2 text-left font-semibold w-64">P.U. en lettres</th>}
                 {showMontant && <th className="px-2 py-2 text-right font-semibold w-28">Montant HT (€)</th>}
-                {showOffres && offres.map(o => (
-                  <th key={o.id} className="px-2 py-2 text-right font-semibold w-28 truncate" title={o.entrepriseNom}>
-                    {o.entrepriseNom}
-                  </th>
-                ))}
-                {showOffres && <th className="px-2 py-2 text-right font-semibold w-24">Moins-disant</th>}
                 {bpu.multiBatiments && <th className="px-1 py-2 text-center font-semibold w-14">Bât.</th>}
                 {bpu.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">Phase</th>}
                 <th className="px-2 py-2 text-left font-semibold w-28">Localisation</th>
@@ -1011,8 +969,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                       <td />
                       {showLettres && <td />}
                       {showMontant && <td className="px-2 py-2 text-right font-mono tabular-nums">{formatCurrency(totaux.sousTotaux[row.lotIdx])}</td>}
-                      {showOffres && offres.map(o => <td key={o.id} />)}
-                      {showOffres && <td />}
                       {(bpu.multiBatiments || bpu.multiPhases) && (
                         <td className="px-1 py-2" colSpan={(bpu.multiBatiments ? 1 : 0) + (bpu.multiPhases ? 1 : 0)}>
                           <div className="flex items-center gap-1 justify-center">
@@ -1096,7 +1052,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                 const canAddChild = row.depth < MAX_ARTICLE_DEPTH;
                 const nature = natureEffective(l);
                 const isSelected = selectedRowKeys.has(rKey);
-                const { valeurs, mini } = showOffres ? prixOffres(l.id) : { valeurs: [], mini: null };
                 const lettres = l.prixUnitaireLettres ?? (l.prixUnitaire > 0 ? montantEnLettres(l.prixUnitaire) : '');
 
                 return (
@@ -1150,20 +1105,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                         {hasChildren
                           ? <span className="px-1 text-sm text-zinc-500 italic">{formatCurrency(sumLigne(l))}</span>
                           : <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric />}
-                      </td>
-                    )}
-                    {showOffres && valeurs.map(({ offre, prix }) => (
-                      <td key={offre.id}
-                          className={`px-2 py-0.5 text-right font-mono text-xs
-                            ${prix != null && mini != null && prix === mini ? 'bg-green-50 text-green-700 font-semibold' : ''}
-                            ${prix == null ? 'text-zinc-300' : ''}`}
-                          title={prix == null ? 'Non chiffré' : undefined}>
-                        {prix == null ? '—' : fmt2(prix)}
-                      </td>
-                    ))}
-                    {showOffres && (
-                      <td className="px-2 py-0.5 text-right font-mono text-xs text-green-700">
-                        {mini != null ? fmt2(mini) : ''}
                       </td>
                     )}
                     {(bpu.multiBatiments || bpu.multiPhases) && (
@@ -1222,7 +1163,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                   ))}
                   <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                     <th scope="row" colSpan={nbCols - 2} className="px-4 py-2 text-right text-sm font-semibold">
-                      {colSet === 'comparatif' ? t('pro_total_ht') : t('pro_bpu_estimated_ht')}
+                      {t('pro_bpu_estimated_ht')}
                     </th>
                     <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
                     <td colSpan={1 + nbColsDecoupage} />
@@ -1237,15 +1178,6 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                     <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
                     <td colSpan={1 + nbColsDecoupage} />
                   </tr>
-                  {showOffres && (
-                    <tr className="font-bold text-xs border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
-                      <td colSpan={5 + (showQte ? 1 : 0) + 1} className="px-4 py-2 text-right">TOTAL DE L'OFFRE</td>
-                      {offres.map(o => (
-                        <td key={o.id} className="px-2 py-2 text-right font-mono">{formatCurrency(totauxOffres.get(o.id) ?? 0)}</td>
-                      ))}
-                      <td /><td colSpan={1 + nbColsDecoupage} />
-                    </tr>
-                  )}
                 </>
               )}
 

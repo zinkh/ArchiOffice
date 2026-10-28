@@ -6,11 +6,11 @@ import {
   IconPlus, IconTrash, IconCopy, IconClipboard,
   IconChevronRight, IconChevronDown, IconArrowsMaximize, IconArrowsMinimize,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
-  IconFileImport, IconScale, IconBuildingCommunity, IconArrowUp, IconArrowDown,
+  IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
   IconSubtask, IconTag,
 } from '@tabler/icons-react';
-import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type OffreDocument, type GroupementDpgf } from '../../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -66,14 +66,8 @@ interface DPGFWorkspaceProps {
   searchTarget?: CibleRecherche | null;
   showTree?: boolean;
   onToggleTree?: () => void;
-  /** Ouvre l'import d'une offre reçue sur ce DPGF. Absent tant que ProTab ne le fournit pas. */
-  onImportOffre?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce DPGF (les lignes absentes deviennent des articles). */
   onImportDocument?: () => void;
-  /** Verse le DPGF et ses offres au comparatif détaillé du module ACT. */
-  onPushToAct?: () => void;
-  /** Juste pour désactiver « Verser au comparatif » tant qu'aucune offre n'est reçue. */
-  offres?: OffreDocument[];
   notify?: ProNotify;
 }
 
@@ -83,7 +77,7 @@ const isTextField = (el: EventTarget | null) =>
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   dpgf, onChange, projectName, onDropExternal, onDragStart, searchTarget,
-  showTree: showTreeProp, onToggleTree, onImportOffre, onImportDocument, onPushToAct, offres = [], notify,
+  showTree: showTreeProp, onToggleTree, onImportDocument, notify,
 }) => {
   const { settings } = useSettings();
   const { t } = useTranslation();
@@ -766,13 +760,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     {
       kind: 'button', id: 'dpgf-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />,
       pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v),
-    },
-    {
-      kind: 'menu', id: 'dpgf-market', label: t('pro_market'), icon: <IconScale size={16} />,
-      entries: [
-        { id: 'dpgf-import-offer', label: t('pro_import_offer'), icon: <IconFileImport size={16} />, onClick: () => onImportOffre?.(), disabled: !onImportOffre },
-        { id: 'dpgf-to-act', label: t('pro_push_to_act'), icon: <IconScale size={16} />, onClick: () => onPushToAct?.(), disabled: !onPushToAct || offres.length === 0, hint: offres.length ? undefined : t('pro_push_to_act_no_offer') },
-      ],
     },
   ]);
 

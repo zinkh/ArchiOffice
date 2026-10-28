@@ -972,6 +972,18 @@ migration).
 - `MultiSelectDropdown` (cases à cocher dans un popover) sert aux corps d'état
   et aux lots ; son `triggerContent` en fait aussi le menu de la pastille.
 
+### Saisie des offres au total ou poste par poste, et comparatif des P.U. (ACT)
+
+L'import des offres a quitté l'onglet PRO : le DPGF et le DQE/BPU n'ont plus ni bouton « Importer une offre », ni « Verser au comparatif », ni colonnes d'offres (`ColSet` n'a plus que `bpu` et `dqe`). Tout se fait dans la phase « Collecte des offres » de l'ACT. **Aucune migration** : les offres restent dans `OffreDocument` (`dpgfs.offres`, `bpu_data.offres`, mêmes routes, même remontée des prix vers la bibliothèque), seule l'interface a bougé.
+
+- **Un mode de saisie par couple lot x entreprise** (`consultation.offres[].mode_saisie`, jsonb) : `total` (on tape `montant_base`) ou `postes` (les P.U. sont dans `OffreDocument.prix` et `montant_base` **en est déduit**, jamais saisi). Sans mode enregistré, `modeEffectif` déduit : un montant saisi veut dire « total », des prix reçus (portail de dépôt, ancien import PRO) veulent dire « postes ». Un effet de `ACTModule` recalcule `montant_base` des offres « postes » quand les prix changent ailleurs. Passer en « postes » écrase le montant saisi par le total calculé.
+- **Document de référence** : `consultation.document_reference` (`dpgf` par défaut, ou `bpu`) ; le lot du document se retrouve par `Lot.projectLotId`. `useOffresDocument` (`src/hooks/`) lit le document et ses offres et écrit en série.
+- **Saisie** (`act/OffrePostesDialog.tsx`) : un P.U. par article en regard de l'estimation et de l'écart, « pour mémoire » (`null`, jamais 0), postes ajoutés par l'entreprise, collage d'une colonne de tableur, Entrée passe à la ligne suivante. `repartirSaisie` (`src/lib/comparatifPrix.ts`, testé) range chaque prix **dans l'offre qui le porte** (la plus récente), les prix nouveaux dans l'offre « Saisie manuelle », un prix effacé disparaît de toutes. Plusieurs fichiers d'une même entreprise se superposent (`prixEntreprise`, le plus récent gagne). L'import d'un bordereau (`OffreImportDialog`) passe en « postes » les lots de l'entreprise qu'il chiffre.
+- **Comparatif** (`act/ComparatifPrixUnitaires.tsx`, logique pure `construireLot`) : par lot, colonne **Estimation** (P.U. du document) puis un P.U. par entreprise, médiane, meilleur prix (au moins deux entreprises), écart à l'estimation (rouge au-delà de +15 %, ambre en dessous de -15 %), total du lot calculé (base seulement, options et PSE comparées mais non comptées), classement. Une entreprise au total seul reste dans les totaux et le classement, colonne hachurée sans détail. Filtre « écarts de plus de 10 % ou pour mémoire ». Sous 768 px, une carte par article.
+- **`consultation.comparatif` se dérive des offres** pour les lots rattachés au document (`comparatifDepuisOffres`, via `versComparatif`) : l'analyse, la négociation, le RAO et l'export Excel le lisent par `consultationCourante`. Les lots sans lot de document gardent le tableau manuel (« Comparatif manuel »).
+- **Pas encore fait** : la négociation travaille toujours sur les totaux et les lignes d'option, pas sur les P.U. ; l'export Excel du comparatif n'a pas de colonnes de P.U. par entreprise (il exporte les montants par article) ; interface non vérifiée dans un navigateur réel.
+- Tests : `src/lib/__tests__/comparatifPrix.test.ts`.
+
 ### Négociation des offres (ACT) : fiches, options, synthèse économique
 
 Phase « Négociation » du module ACT, entre la collecte et l'analyse. Tout vit

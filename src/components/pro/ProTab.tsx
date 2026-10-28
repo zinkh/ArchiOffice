@@ -10,15 +10,14 @@ import { BPUWorkspace } from './BPUWorkspace';
 import { LotsManager } from './LotsManager';
 import { appliquerOrdreLots, comparerNumerosDeLot, lotsDivergent, planImportLots, type LotProjet } from '../../lib/lotsOrder';
 import { PrintPageDecorations } from '../PrintPageDecorations';
-import { DPGF, Lot, Chapitre, Ligne, type OffreDocument } from '../../types/dpgf';
-import type { BPU, BPURow, OffreBPU } from '../../types/bpu';
+import { DPGF, Lot, Chapitre, Ligne } from '../../types/dpgf';
+import type { BPU, BPURow } from '../../types/bpu';
 import { EMPTY_BPU } from '../../types/bpu';
 import { dpgfToBpu, bpuToDpgf, assignerReferences } from '../../lib/bpuConvert';
 import { exportBPUtoExcel, exportBPUtoPDF } from '../../lib/bpuExport';
 import { OffreImportDialog } from './OffreImportDialog';
 import { ajouterLignesAuDocument } from '../../lib/postesAjoutes';
 import type { LigneImportee } from '../../lib/bpuImport';
-import { bpuVersComparatif, dpgfVersComparatif } from '../../lib/bpuToAct';
 import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
@@ -174,18 +173,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
     setVersions(await apiFetch<DpgfVersion[]>(`/api/projects/${projectId}/dpgf/versions`));
   }, [projectId]);
 
-  // Offres reçues sur le DPGF. Chargées à part du document lui-même (route
-  // dédiée, cf. server/routes/dpgf.ts) : GET /api/projects/:id/dpgf ne rend
-  // que le document, exactement comme avant cette fonctionnalité — useDPGF.ts
-  // en dépend et n'a aucune raison de changer de forme pour ça.
-  const [dpgfOffres, setDpgfOffres] = useState<OffreDocument[]>([]);
-  useEffect(() => {
-    let annule = false;
-    apiFetch<OffreDocument[]>(`/api/projects/${projectId}/dpgf/offres`)
-      .then(rows => { if (!annule) setDpgfOffres(rows); })
-      .catch(() => { /* pas encore de DPGF, ou hors ligne : liste vide */ });
-    return () => { annule = true; };
-  }, [projectId]);
+  // Les offres des entreprises ne se saisissent plus ici : elles sont importées,
+  // saisies et comparées dans l'onglet ACT (phase « Collecte des offres »).
 
   // Vue divisée (DPGF / ESTIMATION)
   const [splitView, setSplitView] = useState(false);
@@ -210,15 +199,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
   // actif ensuite : sans ce verrou, tout projet forfaitaire paierait un appel
   // réseau inutile à chaque ouverture de l'espace PRO.
   const [bpuTouched, setBpuTouched] = useState(false);
-  const [offres, setOffres] = useState<OffreBPU[]>([]);
 
   const bpuDoc = useAutosavedDoc<BPU>({
     key: projectId,
     load: useCallback(async (id: string) => {
       const row = await loadBpuRow(id);
       // Les offres voyagent avec la ligne mais ne font pas partie du document
-      // que l'éditeur réécrit : on les met de côté ici.
-      setOffres(row?.offres ?? []);
+      // que l'éditeur réécrit : elles se lisent dans l'onglet ACT.
       return row?.document && Object.keys(row.document).length ? row.document : null;
     }, []),
     save: saveBpu, empty: EMPTY_BPU, lsKey: bpuLsKey,
@@ -467,10 +454,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
     }
   }, [projectId, t, showToast]);
 
-  // ── Offres reçues des entreprises ───────────────────────────────────────────
-  // Un seul dialogue sert les deux documents (OffreImportDialog) ; ce
-  // discriminant dit dans lequel des deux on est en train d'importer.
-  const [importCible, setImportCible] = useState<'dpgf' | 'bpu' | null>(null);
+  // ── Import d'un fichier dans un document vierge ─────────────────────────────
   // Import d'un fichier dans un document encore vierge : le CCTP et le DPGF
   // partagent le même arbre, le DQE et le BPU aussi.
   const [importDocCible, setImportDocCible] = useState<'dpgf' | 'bpu' | null>(null);
@@ -484,8 +468,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
       return;
     }
     setFichierDepose(fichier);
-    // Bordereau vierge : les lignes deviennent des articles ; sinon c'est une offre à rapprocher.
-    if (!bpu || bpu.lots.length === 0) setImportDocCible('bpu'); else setImportCible('bpu');
+    // Bordereau vierge : les lignes deviennent des articles. Sinon c'est une offre,
+    // qui se rapproche et se saisit dans l'onglet ACT.
+    if (!bpu || bpu.lots.length === 0) setImportDocCible('bpu');
+    else notify("L'offre d'une entreprise s'importe dans l'onglet ACT, phase « Collecte des offres ».", { type: 'success' });
   };
 
   /**
@@ -505,92 +491,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
       showToast(`${ajoutes} article(s) ajouté(s) au document.`, 'success');
     }
   }, [importDocCible, bpu, dpgf, setBpu, setDpgf, showToast]);
-
-  /**
-   * Les offres vivent dans une colonne séparée du document et passent par leur
-   * propre endpoint : logées dans le document, elles seraient effacées par la
-   * première autosauvegarde suivant l'import.
-   */
-  const enregistrerOffre = useCallback(async (offre: any) => {
-    const saved = await apiFetch<OffreBPU & { prixRemontes?: number }>(
-      `/api/projects/${projectId}/bpu/offres`,
-      { method: 'POST', body: JSON.stringify({ offre }) },
-    );
-    setOffres(prev => [...prev, saved]);
-    // Le serveur verse au passage les prix de l'offre dans la bibliothèque,
-    // pour les articles qui en viennent. On le dit, sinon l'enrichissement se
-    // fait dans le dos de l'architecte et il ne pensera pas à aller le lire.
-    if (saved.prixRemontes) {
-      showToast(t('pro_tab_offer_prices_added', { count: saved.prixRemontes }), 'success');
-    }
-  }, [projectId, t, showToast]);
-
-  /** Même chose côté DPGF, sur sa propre route et son propre état d'offres. */
-  const enregistrerOffreDpgf = useCallback(async (offre: any) => {
-    const saved = await apiFetch<OffreDocument & { prixRemontes?: number }>(
-      `/api/projects/${projectId}/dpgf/offres`,
-      { method: 'POST', body: JSON.stringify({ offre }) },
-    );
-    setDpgfOffres(prev => [...prev, saved]);
-    if (saved.prixRemontes) {
-      showToast(t('pro_tab_offer_prices_added', { count: saved.prixRemontes }), 'success');
-    }
-  }, [projectId, t, showToast]);
-
-  /**
-   * Verse un résultat de versComparatif (DPGF ou BPU) dans le comparatif
-   * détaillé du module ACT, qui sait déjà comparer, noter et en tirer un RAO.
-   * À la demande seulement : ce comparatif est éditable, une synchronisation
-   * automatique se battrait contre l'architecte.
-   */
-  const verserComparatif = useCallback(async (
-    resultat: { comparatif: any[]; lotsNonRattaches: { numero: string; titre: string }[] },
-    docLabel: string,
-  ) => {
-    const { comparatif, lotsNonRattaches } = resultat;
-    if (lotsNonRattaches.length) {
-      const confirmed = await confirmAction({
-        title: `Lots non rattachés dans le ${docLabel}`,
-        message: (
-          <>
-            <p>{t('pro_tab_lots_not_linked_confirm', { docLabel, liste: '' })}</p>
-            <ul className="mt-2 space-y-0.5 text-xs font-mono">
-              {lotsNonRattaches.map(l => <li key={l.numero}>{l.numero} {l.titre}</li>)}
-            </ul>
-          </>
-        ),
-        confirmLabel: 'Continuer quand même',
-        cancelLabel: 'Annuler',
-        tone: 'primary',
-      });
-      if (!confirmed) return;
-    }
-    if (!comparatif.length) {
-      showToast(t('pro_tab_no_lots_linked', { docLabel }), 'error');
-      return;
-    }
-    try {
-      const act = await apiFetch<any>(`/api/projects/${projectId}/act`);
-      const consultation = { ...(act?.consultation ?? {}), comparatif };
-      await apiFetch(`/api/projects/${projectId}/act`, {
-        method: 'PUT',
-        body: JSON.stringify({ ...(act ?? {}), consultation }),
-      });
-      showToast(t('pro_tab_comparatif_updated', { count: comparatif.length }), 'success');
-    } catch (e: any) {
-      showToast(t('pro_tab_comparatif_send_failed', { error: e?.message ?? t('pro_tab_unknown_error') }), 'error');
-    }
-  }, [projectId, t, confirmAction, showToast]);
-
-  const verserAuComparatifAct = useCallback(async () => {
-    if (!bpu) return;
-    await verserComparatif(bpuVersComparatif(bpu, offres), 'bordereau');
-  }, [bpu, offres, verserComparatif]);
-
-  const verserAuComparatifActDpgf = useCallback(async () => {
-    if (!dpgf) return;
-    await verserComparatif(dpgfVersComparatif(dpgf, dpgfOffres), 'DPGF');
-  }, [dpgf, dpgfOffres, verserComparatif]);
 
   // Cross-panel DnD : la ligne draguée depuis le panneau droit est déposée dans
   // le panneau gauche (DPGFWorkspace) via onDropExternal.
@@ -930,10 +830,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                   projectName={projectName}
                   showTree={showTree}
                   onToggleTree={toggleTree}
-                  onImportOffre={() => setImportCible('dpgf')}
                   onImportDocument={() => setImportDocCible('dpgf')}
-                  onPushToAct={dpgf.lots.length > 0 ? verserAuComparatifActDpgf : undefined}
-                  offres={dpgfOffres}
                   onDragStart={ligne => setDraggedLigne(ligne)}
                   onDropExternal={draggedLigne ? handleDropExternal : undefined}
                 />
@@ -1015,16 +912,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 notify={notify}
                 mode={activeSubTab === 'BPU' ? 'bpu' : 'dqe'}
                 projectName={projectName}
-                offres={offres}
                 showTree={showTree}
                 onToggleTree={toggleTree}
                 onDragStart={ligne => setDraggedLigne(ligne)}
                 onInitFromDpgf={dpgf && dpgf.lots.length > 0 ? initBpuFromDpgf : undefined}
                 onPushToDpgf={dpgf && bpu.lots.length > 0 ? pushBpuToDpgf : undefined}
-                onImportOffre={() => setImportCible('bpu')}
                 onImportDocument={() => setImportDocCible('bpu')}
                 onDropFichier={deposerFichierBpu}
-                onPushToAct={verserAuComparatifAct}
                 onPushToLibrary={lignes => { void envoyerVersBibliotheque(lignes); }}
                 onOpenLibrary={() => { /* le panneau vit dans l'atelier */ }}
                 projectLots={projectLots}
@@ -1034,15 +928,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
         )}
       </div>
 
-      {importCible === 'bpu' && bpu && (
-        <OffreImportDialog
-          doc={bpu}
-          docLabel="bordereau"
-          fichierInitial={fichierDepose ?? undefined}
-          onClose={() => { setImportCible(null); setFichierDepose(null); }}
-          onConfirm={enregistrerOffre}
-        />
-      )}
       {importDocCible && (importDocCible === 'bpu' ? bpu : dpgf) && (
         <OffreImportDialog
           mode="document"
@@ -1051,14 +936,6 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
           fichierInitial={importDocCible === 'bpu' ? fichierDepose ?? undefined : undefined}
           onClose={() => { setImportDocCible(null); setFichierDepose(null); }}
           onCreerPostes={creerArticlesDepuisFichier}
-        />
-      )}
-      {importCible === 'dpgf' && dpgf && (
-        <OffreImportDialog
-          doc={dpgf}
-          docLabel="DPGF"
-          onClose={() => setImportCible(null)}
-          onConfirm={enregistrerOffreDpgf}
         />
       )}
     </div>

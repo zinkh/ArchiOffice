@@ -39,6 +39,15 @@ import { useConsultationDepot } from '../hooks/useConsultationDepot';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
 import DepotSettingsDialog from './act/DepotSettingsDialog';
 import InviterDepotDialog from './act/InviterDepotDialog';
+import OffrePostesDialog from './act/OffrePostesDialog';
+import ComparatifPrixUnitaires from './act/ComparatifPrixUnitaires';
+import { OffreImportDialog } from './pro/OffreImportDialog';
+import { useOffresDocument, type CibleDocument } from '../hooks/useOffresDocument';
+import {
+  aDesPrix, ajoutsEntreprise, chapitresDuLot, comparatifDepuisOffres, modeEffectif, prixEntreprise, totalLotPostes,
+  type EntrepriseComparee, type ModeSaisie,
+} from '../lib/comparatifPrix';
+import type { Lot as LotDocument, OffreDocument } from '../types/dpgf';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -95,6 +104,12 @@ interface Offre {
   note_technique: number;
   conforme: boolean;
   motif_nc?: string;
+  /**
+   * Comment l'offre de ce lot a été saisie. « total » : montant_base est tapé.
+   * « postes » : les prix unitaires sont dans les offres du document de
+   * référence et montant_base en est déduit. Absent : voir modeEffectif.
+   */
+  mode_saisie?: ModeSaisie;
 }
 
 interface Attribution {
@@ -133,6 +148,8 @@ interface Consultation extends DonneesNegociation {
   comparatif: ComparatifLot[];
   /** Réglages des documents du marché (RC, CCAP, acte d'engagement). */
   marche?: ParametresMarche;
+  /** Document dont les articles et l'estimation servent à comparer les offres (DPGF par défaut). */
+  document_reference?: CibleDocument;
 }
 
 type Phase = 'preparation' | 'criteres' | 'portail' | 'collecte' | 'negociation' | 'analyse' | 'marches';
@@ -453,6 +470,131 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
     [consultation.dce_documents],
   );
 
+  // ── Offres poste par poste (document de référence : DPGF ou bordereau) ─────
+  // Les offres des entreprises restent dans leur colonne séparée du document ;
+  // l'ACT les saisit, les importe et les compare. Une offre « poste par poste »
+  // ne porte pas de montant saisi : montant_base en est déduit à chaque écriture.
+  const cibleDocument: CibleDocument = consultation.document_reference ?? 'dpgf';
+  const docs = useOffresDocument(projectId, cibleDocument);
+  const lotsDocument = useMemo<LotDocument[]>(() => docs.document?.lots ?? [], [docs.document]);
+  const libelleDocument = cibleDocument === 'dpgf' ? 'DPGF' : 'bordereau';
+  const [saisieOuverte, setSaisieOuverte] = useState<{ lotId: string; entreprise: EntrepriseConsultee } | null>(null);
+  const [importOuvert, setImportOuvert] = useState<{ entreprise?: EntrepriseConsultee } | null>(null);
+
+  const lotDocumentDe = useCallback(
+    (lotId: string) => lotsDocument.find(l => l.projectLotId === lotId),
+    [lotsDocument],
+  );
+
+  /** Mode de saisie d'un couple lot x entreprise : celui enregistré, sinon déduit des données reçues. */
+  const modeDe = useCallback((lotId: string, entrepriseId: string): ModeSaisie => {
+    const offre = consultation.offres.find(o => o.lot_id === lotId && o.entreprise_id === entrepriseId);
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    const aPrix = lotDoc ? aDesPrix(lotDoc, prixEntreprise(docs.offres, entrepriseId)) : false;
+    return modeEffectif(offre?.mode_saisie, offre?.montant_base ?? 0, aPrix);
+  }, [consultation.offres, docs.offres, lotsDocument]);
+
+  const entreprisesDuLot = useCallback((lotId: string): EntrepriseComparee[] =>
+    consultation.entreprises
+      .filter(e => e.lots_ids.includes(lotId) && !e.ne_repond_pas)
+      .map(e => ({
+        id: e.id, nom: e.nom, mode: modeDe(lotId, e.id),
+        totalSaisi: consultation.offres.find(o => o.lot_id === lotId && o.entreprise_id === e.id)?.montant_base ?? 0,
+      })),
+  [consultation.entreprises, consultation.offres, modeDe]);
+
+  // Le comparatif lu par l'analyse, la négociation et l'export Excel se déduit
+  // des offres pour les lots rattachés au document ; les autres gardent leur saisie manuelle.
+  const comparatifEffectif = useMemo(
+    () => comparatifDepuisOffres(lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif),
+    [lotsDocument, docs.offres, entreprisesDuLot, consultation.comparatif],
+  );
+  const lotsSansDocument = useMemo(
+    () => lots.filter(l => !lotsDocument.some(d => d.projectLotId === l.id)),
+    [lots, lotsDocument],
+  );
+
+  const totalPostesLot = (lotId: string, entrepriseId: string, offres: OffreDocument[]): number => {
+    const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+    if (!lotDoc) return 0;
+    return totalLotPostes(lotDoc, prixEntreprise(offres, entrepriseId), ajoutsEntreprise(offres, entrepriseId, lotDoc.id)) ?? 0;
+  };
+
+  /** Modifie (ou crée) l'offre d'un lot x entreprise sur la consultation la plus récente. */
+  const patchOffre = (lotId: string, entrepriseId: string, patch: Partial<Offre>) => {
+    const c = latest.current.consultation;
+    const existe = c.offres.some(o => o.lot_id === lotId && o.entreprise_id === entrepriseId);
+    const offres = existe
+      ? c.offres.map(o => (o.lot_id === lotId && o.entreprise_id === entrepriseId ? { ...o, ...patch } : o))
+      : [...c.offres, { id: crypto.randomUUID(), lot_id: lotId, entreprise_id: entrepriseId, montant_base: 0, note_technique: 0, conforme: true, ...patch }];
+    update({ ...c, offres });
+  };
+
+  const changerMode = (lotId: string, entrepriseId: string, mode: ModeSaisie) => {
+    if (mode === 'postes') {
+      patchOffre(lotId, entrepriseId, { mode_saisie: 'postes', montant_base: totalPostesLot(lotId, entrepriseId, docs.offres) });
+    } else {
+      // Le dernier total calculé reste dans montant_base : il sert de point de départ à la saisie du total.
+      patchOffre(lotId, entrepriseId, { mode_saisie: 'total' });
+    }
+  };
+
+  const enregistrerSaisie = async (
+    lotId: string, entreprise: EntrepriseConsultee, lotDoc: LotDocument,
+    prix: Parameters<typeof docs.ecrireSaisie>[0]['prix'], ajouts: Parameters<typeof docs.ecrireSaisie>[0]['postesAjoutes'],
+  ) => {
+    const idsLot = chapitresDuLot(lotDoc).flatMap(c => c.lignes.map(l => l.id));
+    const suivantes = await docs.ecrireSaisie({
+      entreprise: { id: entreprise.id, nom: entreprise.nom }, lotId: lotDoc.id, idsLot, prix, postesAjoutes: ajouts,
+    });
+    patchOffre(lotId, entreprise.id, { mode_saisie: 'postes', montant_base: totalPostesLot(lotId, entreprise.id, suivantes) });
+  };
+
+  /** Un bordereau importé passe en « poste par poste » les lots de l'entreprise qu'il chiffre. */
+  const confirmerImport = async (offre: Omit<OffreDocument, 'id' | 'importedAt'>) => {
+    const { offres: suivantes, saved } = await docs.enregistrer(offre);
+    const c = latest.current.consultation;
+    const entreprise = c.entreprises.find(e => e.id === saved.entrepriseId);
+    if (!entreprise) return;
+    let offresConsultation = c.offres;
+    for (const lotId of entreprise.lots_ids) {
+      const lotDoc = lotsDocument.find(l => l.projectLotId === lotId);
+      if (!lotDoc || !aDesPrix(lotDoc, saved.prix)) continue;
+      const patch = { mode_saisie: 'postes' as const, montant_base: totalPostesLot(lotId, entreprise.id, suivantes) };
+      offresConsultation = offresConsultation.some(o => o.lot_id === lotId && o.entreprise_id === entreprise.id)
+        ? offresConsultation.map(o => (o.lot_id === lotId && o.entreprise_id === entreprise.id ? { ...o, ...patch } : o))
+        : [...offresConsultation, { id: crypto.randomUUID(), lot_id: lotId, entreprise_id: entreprise.id, note_technique: 0, conforme: true, ...patch }];
+    }
+    update({ ...c, offres: offresConsultation });
+  };
+
+  // Un bordereau reçu par le portail de dépôt (ou modifié ailleurs) change les
+  // prix sans passer par la saisie ci-dessus : le montant des offres « poste par
+  // poste » est recalculé à la lecture pour que l'analyse lise le bon total.
+  useEffect(() => {
+    if (!loaded || docs.chargement || !docs.document) return;
+    const c = latest.current.consultation;
+    let offres = c.offres;
+    let change = false;
+    for (const e of c.entreprises) {
+      for (const lotId of e.lots_ids) {
+        if (!lotsDocument.some(l => l.projectLotId === lotId)) continue;
+        const offre = offres.find(o => o.lot_id === lotId && o.entreprise_id === e.id);
+        const mode = modeEffectif(offre?.mode_saisie, offre?.montant_base ?? 0, aDesPrix(lotsDocument.find(l => l.projectLotId === lotId)!, prixEntreprise(docs.offres, e.id)));
+        if (mode !== 'postes') continue;
+        const total = totalPostesLot(lotId, e.id, docs.offres);
+        if (offre && offre.mode_saisie === 'postes' && offre.montant_base === total) continue;
+        change = true;
+        const patch = { mode_saisie: 'postes' as const, montant_base: total };
+        offres = offre
+          ? offres.map(o => (o === offre ? { ...o, ...patch } : o))
+          : [...offres, { id: crypto.randomUUID(), lot_id: lotId, entreprise_id: e.id, note_technique: 0, conforme: true, ...patch }];
+      }
+    }
+    if (change) update({ ...c, offres });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, docs.chargement, docs.document, docs.offres]);
+
   // ── Phase helpers ─────────────────────────────────────────────────────────
 
   const goPhase = (p: Phase) => {
@@ -469,8 +611,8 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
     [consultation.offres, consultation.negociations],
   );
   const consultationCourante = useMemo(
-    () => ({ ...consultation, offres: offresCourantes }),
-    [consultation, offresCourantes],
+    () => ({ ...consultation, offres: offresCourantes, comparatif: comparatifEffectif }),
+    [consultation, offresCourantes, comparatifEffectif],
   );
 
   // ── RENDER ────────────────────────────────────────────────────────────────
@@ -1006,8 +1148,41 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
             onImporterActe={res => update({ ...consultation, entreprises: res.entreprises as EntrepriseConsultee[], offres: res.offres as Offre[] })}
             onOpenSettings={() => setReglagesDepotOuverts(true)}
           />
+          {/* Document de référence : ses articles et son estimation servent à saisir et comparer les offres poste par poste. */}
+          <div className="rounded-lg p-4 flex flex-wrap items-center justify-between gap-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-[var(--tblr-text)]">Saisie poste par poste</p>
+              <p className="text-[0.6875rem] text-[var(--tblr-muted)]">
+                {docs.chargement
+                  ? 'Lecture du document de référence…'
+                  : docs.document
+                    ? `Les prix unitaires se saisissent ou s’importent sur les articles du ${libelleDocument}, et se comparent à son estimation.`
+                    : `Aucun ${libelleDocument} n’est renseigné dans l’onglet PRO : seul le total du lot peut être saisi.`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex rounded-lg overflow-hidden border border-[var(--tblr-border)]" role="group" aria-label="Document de référence">
+                {(['dpgf', 'bpu'] as const).map(c => (
+                  <button
+                    key={c} type="button" aria-pressed={cibleDocument === c}
+                    onClick={() => cibleDocument !== c && update({ ...consultation, document_reference: c })}
+                    className={cn('px-3 py-1.5 text-xs font-bold', c === 'bpu' && 'border-l border-[var(--tblr-border)]', cibleDocument === c ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'bg-[var(--tblr-surface)]')}
+                  >
+                    {c === 'dpgf' ? 'DPGF' : 'Bordereau'}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button" disabled={!docs.document} onClick={() => setImportOuvert({})}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 transition"
+              >
+                <IconDownload size={13} className="rotate-180" /> Importer un bordereau chiffré
+              </button>
+            </div>
+          </div>
           {lots.map(lot => {
             const entreprisesLot = consultation.entreprises.filter(e => e.lots_ids.includes(lot.id));
+            const lotDoc = lotDocumentDe(lot.id);
             return (
               <div key={lot.id} className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                 <div className="p-5 border-b border-[var(--tblr-border)]">
@@ -1030,6 +1205,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                     <thead className="bg-[var(--tblr-surface-2)]">
                       <tr>
                         <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Entreprise</th>
+                        <th className="px-4 py-2.5 text-left text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Mode de saisie</th>
                         <th className="px-4 py-2.5 text-right text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant HT (€)</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Note technique /100</th>
                         <th className="px-4 py-2.5 text-center text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Conforme</th>
@@ -1051,6 +1227,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                           }
                           update({ ...consultation, offres: newOffres });
                         };
+                        const modeLigne = modeDe(lot.id, entreprise.id);
                         const cleLignes = `${lot.id}:${entreprise.id}`;
                         const negOffre = trouverNegociation(consultation.negociations, lot.id, entreprise.id);
                         const nbLignes = negOffre?.lignes.length ?? 0;
@@ -1059,11 +1236,38 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                           <tr className={cn('hover:bg-zinc-50 dark:hover:bg-zinc-800/30', !offre.conforme && 'bg-red-50/50 dark:bg-red-900/10')}>
                             <td className="px-4 py-3 font-medium text-zinc-800 dark:text-zinc-200">{entreprise.nom}</td>
                             <td className="px-4 py-3">
-                              <input type="number" min={0} step={100}
-                                className="w-full text-right px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
-                                value={offre.montant_base || ''}
-                                onChange={e => updateOffre({ montant_base: parseFloat(e.target.value) || 0 })}
-                                placeholder="0.00" />
+                              <div className="inline-flex rounded-lg overflow-hidden border border-[var(--tblr-border)]" role="group" aria-label={`Mode de saisie de ${entreprise.nom}`}>
+                                <button
+                                  type="button" aria-pressed={modeLigne === 'total'} onClick={() => modeLigne !== 'total' && changerMode(lot.id, entreprise.id, 'total')}
+                                  className={cn('px-2.5 py-1 text-xs font-bold', modeLigne === 'total' ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'bg-[var(--tblr-surface)]')}
+                                >Total du lot</button>
+                                <button
+                                  type="button" aria-pressed={modeLigne === 'postes'} disabled={!lotDoc}
+                                  title={lotDoc ? undefined : `Aucun lot du ${libelleDocument} n’est rattaché à ce lot (onglet PRO)`}
+                                  onClick={() => modeLigne !== 'postes' && changerMode(lot.id, entreprise.id, 'postes')}
+                                  className={cn('px-2.5 py-1 text-xs font-bold border-l border-[var(--tblr-border)] disabled:opacity-40', modeLigne === 'postes' ? 'bg-[var(--tblr-primary-lt)] text-[var(--tblr-primary)]' : 'bg-[var(--tblr-surface)]')}
+                                >Poste par poste</button>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {modeLigne === 'postes' ? (
+                                <div className="text-right">
+                                  <div className="font-bold tabular-nums text-sm">{offre.montant_base ? fmt(offre.montant_base) : <span className="text-[var(--tblr-muted)]">·</span>}</div>
+                                  <div className="text-[0.6875rem] text-[var(--tblr-muted)]">calculé d’après les postes</div>
+                                  <div className="flex justify-end gap-1.5 mt-1.5">
+                                    <button type="button" onClick={() => setSaisieOuverte({ lotId: lot.id, entreprise })}
+                                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[var(--tblr-primary)] text-white hover:opacity-90">Saisir les postes</button>
+                                    <button type="button" onClick={() => setImportOuvert({ entreprise })}
+                                      className="px-2.5 py-1 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700">Importer</button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <input type="number" min={0} step={100}
+                                  className="w-full text-right px-2 py-1.5 text-sm border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-900 outline-none focus:ring-2 focus:ring-blue-500"
+                                  value={offre.montant_base || ''}
+                                  onChange={e => updateOffre({ montant_base: parseFloat(e.target.value) || 0, mode_saisie: 'total' })}
+                                  placeholder="0.00" />
+                              )}
                             </td>
                             <td className="px-4 py-3">
                               <input type="number" min={0} max={100}
@@ -1096,7 +1300,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                           </tr>
                           {lignesOuvertes.has(cleLignes) && (
                             <tr className="bg-[var(--tblr-surface-2)]/40">
-                              <td colSpan={6} className="px-4 py-3">
+                              <td colSpan={7} className="px-4 py-3">
                                 <LignesOffreEditor
                                   lotId={lot.id} entrepriseId={entreprise.id} negociations={consultation.negociations}
                                   onChange={negociations => update({ ...consultation, negociations })}
@@ -1108,7 +1312,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                         );
                       })}
                       {entreprisesLot.length === 0 && (
-                        <tr><td colSpan={6} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
+                        <tr><td colSpan={7} className="px-4 py-6 text-center text-[var(--tblr-muted)] italic text-sm">Aucune entreprise affectée à ce lot (phase 1).</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -1118,20 +1322,31 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
           })}
           {lots.length === 0 && <div className="rounded-lg p-8 text-center text-[var(--tblr-muted)] italic" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>Aucun lot défini. Créez les lots en phase 1.</div>}
 
-          {/* ── Comparatif détaillé ──────────────────────────────────────── */}
+          {/* ── Comparatif des prix unitaires, lu dans les offres du document de référence ── */}
+          <ComparatifPrixUnitaires
+            lots={lots}
+            documentLots={lotsDocument}
+            offres={docs.offres}
+            entreprisesDuLot={entreprisesDuLot}
+            documentLabel={libelleDocument}
+            onExport={() => generateComparatifExcel(lots, consultationCourante, projectName, settings ?? {})}
+          />
+
+          {/* ── Comparatif manuel : seulement pour les lots sans article de référence ── */}
+          {lotsSansDocument.length > 0 && (
           <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
             <div className="p-5 border-b border-[var(--tblr-border)] flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-bold text-[var(--tblr-text)] uppercase tracking-wider flex items-center gap-2">
-                  <IconScale size={15} /> Comparatif détaillé des offres
+                  <IconScale size={15} /> Comparatif manuel
                 </h3>
-                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Tableau article par article — saisie manuelle ou auto-rempli depuis les offres</p>
+                <p className="text-[0.6875rem] text-[var(--tblr-muted)] mt-0.5">Lots sans article dans le {libelleDocument} : tableau article par article saisi à la main</p>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => {
                     // Auto-fill lot totals from offres into comparatif
-                    const comp: ComparatifLot[] = lots.map(lot => {
+                    const comp: ComparatifLot[] = lotsSansDocument.map(lot => {
                       const existing = (consultation.comparatif || []).find(cl => cl.lot_id === lot.id);
                       const articles: ComparatifArticle[] = existing?.articles || [];
                       // Ensure a sous-total-lot row exists
@@ -1148,7 +1363,10 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                       const filtered = articles.filter(a => !(a.is_subtotal && a.code === '__lot_total__'));
                       return { lot_id: lot.id, articles: [...filtered, newTotalRow] };
                     });
-                    update({ ...consultation, comparatif: comp });
+                    update({
+                      ...consultation,
+                      comparatif: [...(consultation.comparatif || []).filter(c => !lotsSansDocument.some(l => l.id === c.lot_id)), ...comp],
+                    });
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition"
                 >
@@ -1172,8 +1390,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
 
             {showComparatif && (
               <div className="p-5 space-y-6">
-                {lots.length === 0 && <p className="text-sm text-[var(--tblr-muted)] italic text-center py-4">Aucun lot défini.</p>}
-                {lots.map(lot => {
+                {lotsSansDocument.map(lot => {
                   const cl: ComparatifLot = (consultation.comparatif || []).find(c => c.lot_id === lot.id) || { lot_id: lot.id, articles: [] };
                   const entreprisesLot = consultation.entreprises.filter(e => e.lots_ids.includes(lot.id));
                   const isExpanded = expandedComparatifLots.has(lot.id);
@@ -1355,6 +1572,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
               </div>
             )}
           </div>
+          )}
         </div>
       )}
 
@@ -1362,7 +1580,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
       {phase === 'negociation' && (
         <NegociationPhase
           lots={lots}
-          consultation={{ ...consultation, entreprises: consultation.entreprises }}
+          consultation={{ ...consultation, comparatif: comparatifEffectif }}
           projectName={projectName}
           settings={settings ?? {}}
           onPatch={patchNegociation}
@@ -1553,6 +1771,32 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
 
       {reglagesDepotOuverts && (
         <DepotSettingsDialog projectId={projectId} onClose={() => setReglagesDepotOuverts(false)} onSaved={() => void depot.reload()} />
+      )}
+
+      {saisieOuverte && (() => {
+        const lotDoc = lotDocumentDe(saisieOuverte.lotId);
+        const { lotId, entreprise } = saisieOuverte;
+        return lotDoc ? (
+          <OffrePostesDialog
+            lot={lotDoc}
+            entreprise={{ id: entreprise.id, nom: entreprise.nom }}
+            prixInitial={prixEntreprise(docs.offres, entreprise.id)}
+            ajoutsInitiaux={ajoutsEntreprise(docs.offres, entreprise.id, lotDoc.id)}
+            onSave={(prix, ajouts) => enregistrerSaisie(lotId, entreprise, lotDoc, prix, ajouts)}
+            onClose={() => setSaisieOuverte(null)}
+          />
+        ) : null;
+      })()}
+
+      {importOuvert && docs.document && (
+        <OffreImportDialog
+          doc={docs.document}
+          docLabel={libelleDocument}
+          entreprises={consultation.entreprises.map(e => ({ id: e.id, nom: e.nom }))}
+          entrepriseInitiale={importOuvert.entreprise ? { id: importOuvert.entreprise.id, nom: importOuvert.entreprise.nom } : undefined}
+          onClose={() => setImportOuvert(null)}
+          onConfirm={confirmerImport}
+        />
       )}
 
       {contactModalFor && (
