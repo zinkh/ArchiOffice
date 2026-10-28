@@ -6,6 +6,17 @@ import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { attachReservePhotos, deleteReservePhotos, normalizeReponse, isMissingReponseColumn } from '../reservePhotos';
 import { dispatchWebhookEvent } from '../webhookDispatch';
+import { NATURES_RESERVE, type NatureReserve } from '../../src/lib/oprPv';
+
+const MISSING_COLUMN_CODES = new Set(['42703', 'PGRST204']);
+const NATURE_NON_MIGREE = { error: "La nature des réserves n'est pas disponible : migration à appliquer.", code: 'RESERVE_NATURE_UNAVAILABLE' };
+
+/** Nature d'une réserve d'OPR : absente (undefined), vidée (null) ou de vocabulaire fermé ; autre chose est refusé. */
+function lireNature(v: unknown): { ok: true; valeur: NatureReserve | null | undefined } | { ok: false } {
+  if (v === undefined) return { ok: true, valeur: undefined };
+  if (v === null || v === '') return { ok: true, valeur: null };
+  return typeof v === 'string' && (NATURES_RESERVE as readonly string[]).includes(v) ? { ok: true, valeur: v as NatureReserve } : { ok: false };
+}
 export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
@@ -32,6 +43,8 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: bodyId, project_id, reception_id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description } = req.body;
+      const nature = lireNature(req.body.nature);
+      if (!nature.ok) return res.status(400).json({ error: "Nature de réserve inconnue." });
       // Rejouer la même création après une coupure réseau (file de synchro
       // hors-ligne) ne doit ni créer une seconde réserve, ni consommer un
       // second numéro dans la séquence du projet.
@@ -56,7 +69,9 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
         id, tenant_id: tenantId, project_id, reception_id, title, batiment, local,
         status: status || 'A faire', lots, entreprises, created_at, due_date, plan_id, x, y, number: nextNumber,
         description: description || null,
+        ...(nature.valeur ? { nature: nature.valeur } : {}),
       }).select().single();
+      if (error && nature.valeur && MISSING_COLUMN_CODES.has(error.code)) return res.status(503).json(NATURE_NON_MIGREE);
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création de la réserve N° ${nextNumber} "${title}"`, title || '', id, 'reserve', 'Réserves/Observations');
@@ -81,6 +96,8 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
     try {
       const tenantId = await getTenantId(req.user.id);
       const { title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description, reponse } = req.body;
+      const nature = lireNature(req.body.nature);
+      if (!nature.ok) return res.status(400).json({ error: "Nature de réserve inconnue." });
       if (plan_id && !(await assertTenantEntity(supabaseAdmin, 'plans', plan_id, tenantId))) {
         return res.status(400).json({ error: "Plan introuvable pour ce cabinet." });
       }
@@ -90,7 +107,10 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
       // La réponse de suivi n'est écrite que si le corps la porte : un client qui ne la connaît
       // pas (agent, ancien écran) ne doit pas l'effacer.
       if (reponse !== undefined) update.reponse = normalizeReponse(reponse);
+      // La nature non plus : un écran qui ne la connaît pas ne l'efface pas.
+      if (nature.valeur !== undefined) update.nature = nature.valeur;
       const { error } = await supabaseAdmin.from('reserves').update(update).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error && nature.valeur !== undefined && MISSING_COLUMN_CODES.has(error.code) && /nature/i.test(String(error.message || ''))) return res.status(503).json(NATURE_NON_MIGREE);
       if (isMissingReponseColumn(error)) return res.status(503).json({ error: "Le suivi des réserves n'est pas disponible : migration à appliquer." });
       if (error) throw error;
       const wasClosed = existingReserve && ['Levée', 'Quitus Transmis'].includes((existingReserve as any).status);
@@ -101,5 +121,20 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
       }
       res.json({ id: req.params.id, title, batiment, local, status, lots, entreprises, created_at, due_date, plan_id, x, y, description: description ?? null, ...(reponse !== undefined ? { reponse: normalizeReponse(reponse) } : {}) });
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve" }); }
+  });
+
+  // Ne change que la nature d'une réserve (le PUT d'une réserve réécrit tous ses champs).
+  app.put("/api/reserves/:id/nature", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const nature = lireNature(req.body?.nature);
+      if (!nature.ok || nature.valeur === undefined) return res.status(400).json({ error: "Nature de réserve inconnue." });
+      const { data: existante } = await supabaseAdmin.from('reserves').select('id').eq('id', req.params.id).eq('tenant_id', tenantId).maybeSingle();
+      if (!existante) return res.status(404).json({ error: "Réserve introuvable." });
+      const { error } = await supabaseAdmin.from('reserves').update({ nature: nature.valeur }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error && MISSING_COLUMN_CODES.has(error.code)) return res.status(503).json(NATURE_NON_MIGREE);
+      if (error) throw error;
+      res.json({ id: req.params.id, nature: nature.valeur });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve nature" }); }
   });
 }

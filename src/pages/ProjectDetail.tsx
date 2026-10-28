@@ -43,7 +43,9 @@ import {
   IconClipboardCheck,
   IconSignRight,
   IconPaperclip,
-  } from '@tabler/icons-react';
+    IconSortAscendingLetters,
+  IconSortDescendingLetters,
+} from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { setProjectTabInfo } from '../lib/openProjectTabs';
@@ -65,6 +67,10 @@ import { ReprendreObservationsBanner } from '../components/pro/ReprendreObservat
 import { DoeAtelier } from '../components/aor/DoeAtelier';
 import { RESERVE_STATUSES, reserveStatusKey, isReserveClosed } from '../components/pro/reserveShared';
 import { AorLayout } from '../components/aor/AorLayout';
+import { OprPvSection } from '../components/aor/OprPvSection';
+import { PlansDropZone, PlansImportDialog, PlanName, PlanGrip } from '../components/aor/PlansImport';
+import { usePlanReorder } from '../hooks/usePlanReorder';
+import { appliquerOrdre, idsTriesParNom, sensProchainTri, trierPlans } from '../lib/planOrder';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
@@ -455,9 +461,36 @@ export default function ProjectDetail() {
   const [projectActivity, setProjectActivity] = useState<any[]>([]);
   const [updatingPlanId, setUpdatingPlanId] = useState<string | null>(null);
   const [planUploading, setPlanUploading] = useState(false);
+  // Fichiers en attente dans la fenêtre d'import en lot des plans AOR (null = fenêtre fermée).
+  const [planImportFiles, setPlanImportFiles] = useState<File[] | null>(null);
+  const planBulkInputRef = useRef<HTMLInputElement>(null);
   const planInputRef = useRef<HTMLInputElement>(null);
   const [doeATraiter, setDoeATraiter] = useState<number | null>(null);
   const plansEnCartes = useMediaQuery('(max-width: 767px)');
+  // Ordre manuel des plans AOR : aperçu pendant le geste, enregistrement au relâché (échec : retour à l'ordre précédent).
+  const aorPlansTries = trierPlans(plans.filter(p => p.category === 'AOR' || !p.category));
+  const commitPlansOrder = async (ids: string[]) => {
+    const avant = plans;
+    setPlans(prev => appliquerOrdre(prev, ids));
+    try {
+      const res = await fetch('/api/plans/order', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: id, ids }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => null);
+        throw new Error(err?.error || res.statusText);
+      }
+    } catch (err: any) {
+      setPlans(avant);
+      showToast(t('plans_reorder_failed', { error: err?.message || '' }), 'error', { duration: 6000 });
+    }
+  };
+  const planReorder = usePlanReorder(aorPlansTries.map(p => p.id), commitPlansOrder);
+  const aorPlansAffiches = planReorder.ordre
+    ? planReorder.ordre.map(pid => aorPlansTries.find(p => p.id === pid)).filter((p): p is Plan => !!p)
+    : aorPlansTries;
   const reservesOuvertes = reserves.filter(r => !isReserveClosed(r)).length + gpaReserves.filter(r => !isReserveClosed(r)).length;
 
   // Reception PV form state
@@ -5133,6 +5166,13 @@ export default function ProjectDetail() {
                   <DoeAtelier projectId={id || ''} onSummary={setDoeATraiter} />
                 ) },
                 { id: 'pv', label: t('aor_section_pv'), count: receptions.length, children: (<>
+                <OprPvSection
+                  projectId={id || ''}
+                  projet={{ nom: project?.name || '', code: project?.project_code, maitreOuvrage: project?.client, maitreOuvrageId: project?.client_id, objet: project?.programme }}
+                  marchePublic={!!project?.is_public_client}
+                  settings={settings ?? {}}
+                  onReservesChanged={fetchReserves}
+                />
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                   <CardHeader
                     icon={IconClipboardCheck}
@@ -5596,8 +5636,9 @@ export default function ProjectDetail() {
                 </>) },
                 { id: 'plans', label: t('aor_section_plans'), count: plans.filter(p => p.category === 'AOR' || !p.category).length, children: (<>
                 {(() => {
-                  const aorPlans = plans.filter(p => p.category === 'AOR' || !p.category);
+                  const aorPlans = aorPlansAffiches;
                   return (
+                    <PlansDropZone onFiles={files => setPlanImportFiles(files)} disabled={planUploading || planImportFiles !== null}>
                     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
                       <CardHeader
                         className="p-4 sm:p-6"
@@ -5611,11 +5652,36 @@ export default function ProjectDetail() {
                             ref={planInputRef}
                             onChange={handlePlanUpload}
                           />
+                          <input
+                            type="file"
+                            multiple
+                            className="hidden"
+                            ref={planBulkInputRef}
+                            onChange={e => {
+                              const files = Array.from(e.target.files || []);
+                              e.target.value = '';
+                              if (files.length) setPlanImportFiles(files);
+                            }}
+                          />
+                          {aorPlans.length > 1 && (() => {
+                            const sens = sensProchainTri(aorPlans);
+                            const Icone = sens === 'asc' ? IconSortAscendingLetters : IconSortDescendingLetters;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => void commitPlansOrder(idsTriesParNom(aorPlans, sens))}
+                                disabled={planUploading || planReorder.tenu !== null}
+                                title={t(sens === 'asc' ? 'plans_sort_name_asc' : 'plans_sort_name_desc')}
+                                aria-label={t(sens === 'asc' ? 'plans_sort_name_asc' : 'plans_sort_name_desc')}
+                                className="flex items-center justify-center min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 sm:p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg transition disabled:opacity-50"
+                              ><Icone size={16} /></button>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={() => {
                               setUpdatingPlanId(null);
-                              planInputRef.current?.click();
+                              planBulkInputRef.current?.click();
                             }}
                             disabled={planUploading}
                             aria-busy={planUploading}
@@ -5630,10 +5696,11 @@ export default function ProjectDetail() {
                       />
                       {plansEnCartes ? (
                         <ul className="divide-y divide-[var(--tblr-border)]">
-                          {[...aorPlans].sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()).map(plan => (
-                            <li key={plan.id} className="flex items-center gap-2 px-4 py-3">
+                          {aorPlans.map(plan => (
+                            <li key={plan.id} ref={planReorder.registerRow(plan.id)} className={`flex items-center gap-2 px-4 py-3 ${planReorder.tenu === plan.id ? 'bg-[var(--tblr-surface-2)] shadow-md relative z-10' : ''}`}>
+                              <PlanGrip name={plan.name} onPointerDown={e => planReorder.startReorder(e, plan.id)} />
                               <div className="flex-1 min-w-0">
-                                <p className="font-bold text-sm break-words">{plan.name}</p>
+                                <PlanName plan={plan} className="font-bold text-sm break-words" onRenamed={(pid, name) => setPlans(prev => prev.map(p => p.id === pid ? { ...p, name } : p))} onError={m => showToast(m, 'error', { duration: 6000 })} />
                                 <p className="text-xs text-[var(--tblr-muted)]">
                                   {t('projectdetail_ff_index')} {plan.index || 'A'} · {new Date(plan.uploaded_at).toLocaleDateString('fr-FR')}
                                 </p>
@@ -5669,10 +5736,9 @@ export default function ProjectDetail() {
                           </thead>
                           <tbody className="divide-y divide-[var(--tblr-border)]">
                             {aorPlans
-                              .sort((a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime())
                               .map((plan) => (
-                              <tr key={plan.id} className="hover:bg-[var(--tblr-surface-2)] transition-colors group">
-                                <td className="px-6 py-4 font-bold text-[var(--tblr-text)]">{plan.name}</td>
+                              <tr key={plan.id} ref={planReorder.registerRow(plan.id)} className={`hover:bg-[var(--tblr-surface-2)] transition-colors group ${planReorder.tenu === plan.id ? 'bg-[var(--tblr-surface-2)] shadow-md' : ''}`}>
+                                <td className="px-6 py-4 font-bold text-[var(--tblr-text)]"><div className="flex items-center gap-2"><PlanGrip name={plan.name} onPointerDown={e => planReorder.startReorder(e, plan.id)} /><PlanName plan={plan} onRenamed={(pid, name) => setPlans(prev => prev.map(p => p.id === pid ? { ...p, name } : p))} onError={m => showToast(m, 'error', { duration: 6000 })} /></div></td>
                                 <td className="px-6 py-4">
                                   <span className="px-2 py-0.5 bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] rounded text-[0.6875rem] font-bold">
                                     {plan.index || 'A'}
@@ -5728,6 +5794,7 @@ export default function ProjectDetail() {
                       </div>
                       )}
                     </div>
+                    </PlansDropZone>
                   );
                 })()}
                 </>) },
@@ -5737,6 +5804,17 @@ export default function ProjectDetail() {
           </div>
         )}
       </div>
+      {planImportFiles && (
+        <PlansImportDialog
+          projectId={id!}
+          category="AOR"
+          initialFiles={planImportFiles}
+          existingNames={plans.filter(p => p.category === 'AOR' || !p.category).map(p => p.name)}
+          onUploaded={plan => setPlans(prev => [...prev, plan as any])}
+          onNotify={m => showToast(m, 'success')}
+          onClose={() => setPlanImportFiles(null)}
+        />
+      )}
       {/* AR Modal */}
       <AnimatePresence>
         {arOsTarget && (

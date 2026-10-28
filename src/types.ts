@@ -509,6 +509,21 @@ export interface Reception {
   observations?: string;
   date_limite_levee?: string;
   pv_valide?: boolean;
+  /** PV d'OPR par lot (src/lib/oprPv.ts) : absent pour un PV générique de l'affaire. */
+  regime?: 'prive' | 'public' | null;
+  marche_id?: string | null;
+  lot_id?: string | null;
+  ccag_version?: '2009' | '2021' | null;
+  date_avis_achevement?: string | null;
+  date_achevement_annoncee?: string | null;
+  date_opr?: string | null;
+  presences?: unknown;
+  constats?: unknown;
+  proposition?: unknown;
+  decision?: unknown;
+  levee?: unknown;
+  carence?: unknown;
+  delais?: unknown;
 }
 
 export interface ReservePhoto {
@@ -622,6 +637,8 @@ export interface Plan {
   version: number;
   parent_id?: string;
   category?: 'PRO' | 'AOR';
+  /** Rang choisi par glisser-déposer ; absent tant que le plan n'a jamais été rangé. */
+  sort_order?: number | null;
 }
 
 export type InspirationPhase = 'ESQ' | 'APS' | 'APD' | 'PC' | 'PRO' | 'DCE';
