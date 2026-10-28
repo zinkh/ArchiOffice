@@ -6,6 +6,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const telechargements: Array<{ blob: Blob; nom: string }> = [];
+vi.mock('file-saver', () => ({ saveAs: (blob: Blob, nom: string) => { telechargements.push({ blob, nom }); } }));
 
 const appels: Array<{ url: string; options?: RequestInit }> = [];
 const receptions = [
@@ -13,13 +15,22 @@ const receptions = [
   { id: 'r2', project_id: 'p1', regime: 'prive', marche_id: 'm2', reference_pv: 'OPR-2026-002', date_opr: '2026-10-20', signed_at: '2026-11-10', signed_mode: 'papier' },
   { id: 'r-generique', project_id: 'p1', regime: null, date: '2026-01-01', type: 'OPR' },
   { id: 'r-public', project_id: 'p1', regime: 'public', marche_id: 'm1', reference_pv: 'OPR-2026-003', date_opr: '2026-11-05', ccag_version: '2021', lieu: 'Nancy', public_info: { portee: 'totale', signataire: 'K. Sektaoui' } },
+  {
+    id: 'r-public-recu', project_id: 'p1', regime: 'public', marche_id: 'm2', reference_pv: 'OPR-2026-004', date_opr: '2026-10-01', ccag_version: '2021',
+    proposition: { avis: 'avec_reserve', conditions: [{ nature: 'malfacons', avant_le: '2026-12-01', annexe: '1' }] },
+    decision: { issue: 'avec_reserve', date_decision: '2026-10-20', conditions: [{ nature: 'malfacons', avant_le: '2026-12-01', annexe: '1' }] },
+  },
+  { id: 'r-public-refus', project_id: 'p1', regime: 'public', marche_id: 'm1', reference_pv: 'OPR-2026-005', date_opr: '2026-09-01', proposition: { avis: 'non_reception' }, decision: { issue: 'non_receptionnee' } },
 ];
 const marches = [
   { id: 'm1', lot_numero: '01', lot_titre: 'Gros œuvre', entreprise_nom: 'BTS', type_marche: 'marche' },
   { id: 'm2', lot_numero: '02', lot_titre: 'Couverture', entreprise_nom: 'Toitures SA', type_marche: 'marche' },
   { id: 'm-cadre', lot_numero: '03', lot_titre: 'Accord-cadre', entreprise_nom: 'Cadre', type_marche: 'accord_cadre' },
 ];
-const reserves = [{ id: 'x1', reception_id: 'r1', number: 1, batiment: null, local: 'Hall', title: 'Peinture', status: 'A faire', created_at: '2026-11-03' }];
+const reserves = [
+  { id: 'x1', reception_id: 'r1', number: 1, batiment: null, local: 'Hall', title: 'Peinture', status: 'A faire', created_at: '2026-11-03', nature: null },
+  { id: 'x2', reception_id: 'r-public-recu', number: 2, batiment: null, local: 'Façade', title: 'Enduit', status: 'A faire', created_at: '2026-10-01', nature: 'malfacons' },
+];
 
 vi.mock('../src/lib/api', () => ({
   apiFetch: vi.fn(async (url: string, options?: RequestInit) => {
@@ -38,7 +49,7 @@ import { OprPvSection } from '../src/components/aor/OprPvSection';
 let root: Root;
 let container: HTMLDivElement;
 
-beforeEach(() => { appels.length = 0; });
+beforeEach(() => { appels.length = 0; telechargements.length = 0; });
 afterEach(async () => { if (root) await act(async () => root.unmount()); container?.remove(); vi.unstubAllGlobals(); });
 
 async function monter(marchePublic = false) {
@@ -80,30 +91,61 @@ describe('liste des PV d\'OPR', () => {
     await monter(true);
     expect(container.textContent).toContain('opr_public_notice');
     const lignes = [...container.querySelectorAll('tbody tr')];
-    expect(lignes).toHaveLength(1);
-    expect(lignes[0].textContent).toContain('OPR-2026-003');
+    expect(lignes).toHaveLength(3);
+    expect(lignes.map(l => l.textContent).join(' ')).toContain('OPR-2026-003');
     // L'export rapide du modèle simplifié n'existe pas en public : les cerfas se téléchargent depuis le formulaire.
     expect(lignes[0].querySelector('button[aria-label^="opr_pdf"]')).toBeNull();
   });
 });
 
 describe('PV public (EXE4, EXE5)', () => {
-  it('le formulaire porte les champs du cerfa, propose les quatre avis, et exporte EXE4 et EXE5', async () => {
+  const ouvrir = async (reference: string) => {
+    const ligne = [...container.querySelectorAll('tbody tr')].find(l => l.textContent?.includes(reference))!;
+    await act(async () => ligne.querySelector<HTMLButtonElement>('button')!.click());
+    return document.body.querySelector('[role="dialog"]')!;
+  };
+  const formulaires = (dialogue: Element) =>
+    [...dialogue.querySelectorAll('li')].map(l => l.textContent ?? '').filter(t => t.includes('opr_form_')).map(t => t.slice(0, 4));
+
+  it('le formulaire porte les champs du cerfa, les décisions et la nature des réserves', async () => {
     await monter(true);
-    await act(async () => container.querySelector<HTMLButtonElement>('tbody tr button')!.click());
-    const dialogue = document.body.querySelector('[role="dialog"]')!;
+    const dialogue = await ouvrir('OPR-2026-003');
     const texte = dialogue.textContent ?? '';
-    for (const cle of ['opr_ccag', 'opr_market_reference', 'opr_signatory', 'opr_place', 'opr_scope', 'opr_c_pose_equipements', 'opr_avis_sous_reserve_public', 'opr_avis_avec_reserve_public', 'opr_decision_later']) {
+    for (const cle of ['opr_ccag', 'opr_market_reference', 'opr_signatory', 'opr_place', 'opr_scope', 'opr_c_pose_equipements', 'opr_avis_sous_reserve_public', 'opr_avis_avec_reserve_public', 'opr_section_c', 'opr_date_effet', 'opr_reserve_nature']) {
       expect(texte).toContain(cle);
     }
-    // La décision du maître d'ouvrage (EXE6, EXE7) n'est pas encore proposée en public.
-    expect(texte).not.toContain('opr_section_c');
-    const exports = boutons('EXE').map(b => b.textContent?.trim());
-    expect(exports).toHaveLength(4);
-    expect(exports.join(' ')).toContain('EXE4');
-    expect(exports.join(' ')).toContain('EXE5');
+    // Sans proposition ni décision : seuls EXE4 et EXE5 sont à produire.
+    expect(formulaires(dialogue)).toEqual(['EXE4', 'EXE5']);
+    // Pas de levée des réserves tant que la réception n'est pas prononcée avec des réserves.
+    expect(texte).not.toContain('opr_section_levee');
     // Les champs enregistrés sont repris.
     expect((dialogue.querySelector('select option[value="2021"]')!.parentElement as HTMLSelectElement).value).toBe('2021');
+  });
+
+  it('une réception avec réserves ouvre la levée des réserves et la chaîne EXE4, EXE5, EXE6, EXE8, EXE9', async () => {
+    await monter(true);
+    const dialogue = await ouvrir('OPR-2026-004');
+    const texte = dialogue.textContent ?? '';
+    expect(texte).toContain('opr_section_levee');
+    expect(texte).toContain('opr_levee_opt_lever_partie');
+    expect(texte).toContain('opr_refaction_letter');
+    expect(formulaires(dialogue)).toEqual(['EXE4', 'EXE5', 'EXE6', 'EXE8', 'EXE9']);
+    // La nature d'une réserve déjà enregistrée se lit et se corrige sans rouvrir le PV.
+    const natures = [...dialogue.querySelectorAll<HTMLSelectElement>('select[aria-label="opr_reserve_nature"]')];
+    expect(natures).toHaveLength(1);
+    expect(natures[0].value).toBe('malfacons');
+    await remplir(natures[0], 'travaux');
+    await attendre();
+    const appel = appels.find(a => a.url === '/api/reserves/x2/nature')!;
+    expect(appel.options?.method).toBe('PUT');
+    expect(JSON.parse(String(appel.options!.body))).toEqual({ nature: 'travaux' });
+  });
+
+  it('une non-réception produit EXE7 et aucune levée', async () => {
+    await monter(true);
+    const dialogue = await ouvrir('OPR-2026-005');
+    expect(formulaires(dialogue)).toEqual(['EXE4', 'EXE5', 'EXE7']);
+    expect(dialogue.textContent).not.toContain('opr_section_levee');
   });
 
   it('enregistre le CCAG, les mentions du public et le lieu, sans jamais envoyer le régime', async () => {
@@ -168,5 +210,36 @@ describe('PV signé', () => {
     await act(async () => boutons('opr_reopen')[0].click());
     await attendre();
     expect(appels.some(a => a.url === '/api/receptions/r2/signature/rouvrir' && a.options?.method === 'POST')).toBe(true);
+  });
+});
+
+describe('export groupé', () => {
+  it('en public : un PDF par formulaire et par lot, remis dans un ZIP', async () => {
+    await monter(true);
+    await act(async () => boutons('opr_export_all')[0].click());
+    await act(async () => { await new Promise(r => setTimeout(r, 1500)); });
+    expect(telechargements).toHaveLength(1);
+    const { blob, nom } = telechargements[0];
+    expect(nom).toMatch(/\.zip$/);
+    const { default: JSZip } = await import('jszip');
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const fichiers = Object.keys(zip.files).sort();
+    // OPR-2026-003 : EXE4, EXE5 ; OPR-2026-004 : EXE4, EXE5, EXE6, EXE8, EXE9 ; OPR-2026-005 : EXE4, EXE5, EXE7.
+    expect(fichiers).toHaveLength(10);
+    expect(fichiers.filter(f => f.startsWith('EXE4'))).toHaveLength(3);
+    expect(fichiers.filter(f => f.startsWith('EXE6') || f.startsWith('EXE8') || f.startsWith('EXE9') || f.startsWith('EXE7'))).toHaveLength(4);
+    expect(fichiers.every(f => f.endsWith('.pdf'))).toBe(true);
+    const premier = new Uint8Array(await zip.files[fichiers[0]].async('uint8array'));
+    expect(String.fromCharCode(...premier.slice(0, 5))).toBe('%PDF-');
+  });
+
+  it('en privé : le PV simplifié de chaque lot', async () => {
+    await monter(false);
+    await act(async () => boutons('opr_export_all')[0].click());
+    await act(async () => { await new Promise(r => setTimeout(r, 1000)); });
+    const { default: JSZip } = await import('jszip');
+    const zip = await JSZip.loadAsync(await telechargements[0].blob.arrayBuffer());
+    expect(Object.keys(zip.files)).toHaveLength(2);
+    expect(Object.keys(zip.files).every(f => f.startsWith('PV_OPR'))).toBe(true);
   });
 });

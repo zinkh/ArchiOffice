@@ -8,8 +8,8 @@ import { IconDownload, IconLock, IconTrash } from '@tabler/icons-react';
 import { ModalShell } from '../ui/ModalShell';
 import type { AgencySettings } from '../../lib/proposalExport';
 import {
-  NATURES_AVEC_ANNEXE, controlerPv, pvVierge, statutPv,
-  type AvisReception, type ConditionReserve, type IssueDecision, type NatureReserve, type OprPv, type RegimeMarche,
+  NATURES_AVEC_ANNEXE, NATURES_RESERVE, controlerPv, formulairesDuPv, pvVierge, statutPv,
+  type AvisReception, type ConditionReserve, type Constats, type Decision, type IssueDecision, type Levee, type NatureReserve, type OprPv, type OptionLevee, type Presences, type RegimeMarche,
 } from '../../lib/oprPv';
 import { DELAIS_PAR_DEFAUT, echeances } from '../../lib/oprPvDelais';
 import { libelleLot, dateFr, type DonneesPvPrive } from '../../lib/oprPvDocument';
@@ -102,9 +102,11 @@ function Choix<T extends string>({ legende, valeur, options, onChange }: {
   );
 }
 
-function Conditions({ conditions, refaction, natures, avecAnnexe, onChange, onRefaction }: {
+function Conditions({ conditions, refaction, natures, avecAnnexe, datees = AVEC_DATE, onChange, onRefaction }: {
   conditions: ConditionReserve[]; refaction: number | null; natures: NatureReserve[]; avecAnnexe: boolean;
-  onChange: (c: ConditionReserve[]) => void; onRefaction: (v: number | null) => void;
+  /** Natures qui demandent une date limite. */
+  datees?: readonly NatureReserve[];
+  onChange: (c: ConditionReserve[]) => void; onRefaction?: (v: number | null) => void;
 }) {
   const { t } = useTranslation();
   const basculer = (nature: NatureReserve) =>
@@ -123,7 +125,7 @@ function Conditions({ conditions, refaction, natures, avecAnnexe, onChange, onRe
               <input type="checkbox" checked={!!c} onChange={() => basculer(nature)} />
               {t(`opr_cond_${nature}`)}
             </label>
-            {c && AVEC_DATE.includes(nature) && (
+            {c && datees.includes(nature) && (
               <label className="flex items-center gap-2 text-xs text-[var(--tblr-muted)]">
                 {t('opr_cond_before')}
                 <input type="date" className={`${CHAMP} w-auto`} value={c.avant_le ?? ''} onChange={e => maj(nature, { avant_le: e.target.value || null })} />
@@ -138,13 +140,144 @@ function Conditions({ conditions, refaction, natures, avecAnnexe, onChange, onRe
           </div>
         );
       })}
-      {natures.includes('malfacons') && (
+      {onRefaction && natures.includes('malfacons') && (
         <label className="flex items-center gap-2 text-sm">
           <span className="text-[var(--tblr-muted)] text-xs font-semibold">{t('opr_refaction')}</span>
           <input type="number" min={0} step="0.01" className={`${CHAMP} w-40`} value={refaction ?? ''}
             onChange={e => onRefaction(e.target.value === '' ? null : Number(e.target.value))} />
         </label>
       )}
+    </div>
+  );
+}
+
+function PresencesChoix({ valeur, onChange, publique }: { valeur: Presences; onChange: (p: Presences) => void; publique: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <Choix legende={publique ? t('opr_presence_moa_public') : t('opr_presence_moa')} valeur={valeur.moa}
+        options={[['present', t('opr_opt_present')], ['absent_avise', t('opr_opt_absent_avise')], ['absent', t('opr_opt_absent')]]}
+        onChange={v => onChange({ ...valeur, moa: v })} />
+      <Choix legende={publique ? t('opr_presence_company_public') : t('opr_presence_company')} valeur={valeur.entreprise}
+        options={[['presente', t('opr_opt_presente')], ['absente_convoquee', t('opr_opt_absente_convoquee')]]}
+        onChange={v => onChange({ ...valeur, entreprise: v })} />
+      {valeur.entreprise === 'absente_convoquee' && (
+        <Champ label={t('opr_convocation_date')}>
+          {id => <input id={id} type="date" className={`${CHAMP} sm:w-60`} value={valeur.date_convocation ?? ''} onChange={e => onChange({ ...valeur, date_convocation: e.target.value || null })} />}
+        </Champ>
+      )}
+    </>
+  );
+}
+
+function ConstatsGrid({ valeur, onChange, publique }: { valeur: Constats; onChange: (c: Constats) => void; publique: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {CONSTATS.filter(c => publique || !c.publicSeul).map(({ cle, valeurs }) => {
+        const annexe = ANNEXE_DU_CONSTAT[cle];
+        const choisi = valeur[cle] as string | null;
+        return (
+          <div key={cle} className="space-y-2">
+            <Champ label={t(`opr_c_${cle}`)}>
+              {id => (
+                <select id={id} className={CHAMP} value={choisi ?? ''} onChange={e => onChange({ ...valeur, [cle]: e.target.value || null })}>
+                  <option value="">{t('opr_unset')}</option>
+                  {valeurs.map(v => <option key={v} value={v}>{t(`opr_opt_${v}`)}</option>)}
+                </select>
+              )}
+            </Champ>
+            {publique && annexe && choisi && annexe.valeurs.includes(choisi) && (
+              <Champ label={`${t('opr_annex_number')} (${t(`opr_c_${cle}`)})`}>
+                {id => <input id={id} maxLength={20} className={`${CHAMP} w-28`} value={valeur.annexes[annexe.nature] ?? ''}
+                  onChange={e => onChange({ ...valeur, annexes: { ...valeur.annexes, [annexe.nature]: e.target.value || undefined } })} />}
+              </Champ>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Décision du maître d'ouvrage en marché public (EXE6 : réception, EXE7 : non-réception). */
+function DecisionPublique({ decision, onChange }: { decision: Decision; onChange: (d: Decision) => void }) {
+  const { t } = useTranslation();
+  const natures = decision.issue === 'sous_reserve' || decision.issue === 'avec_reserve' ? CONDITIONS_PUBLIC[decision.issue] : [];
+  const issues: Array<[IssueDecision, string]> = [
+    ['sans_reserve', t('opr_issue_sans_reserve')], ['sous_reserve', t('opr_avis_sous_reserve_public')],
+    ['avec_reserve', t('opr_avis_avec_reserve_public')], ['non_receptionnee', t('opr_issue_non_receptionnee')],
+  ];
+  const changer = (issue: IssueDecision | null) => {
+    const permises: NatureReserve[] = issue === 'sous_reserve' || issue === 'avec_reserve' ? CONDITIONS_PUBLIC[issue] : [];
+    onChange({
+      ...decision, issue, conditions: decision.conditions.filter(c => permises.includes(c.nature)),
+      refaction_montant: permises.includes('malfacons') ? decision.refaction_montant : null,
+      refaction_acceptee_le: permises.includes('malfacons') ? decision.refaction_acceptee_le : null,
+    });
+  };
+  return (
+    <>
+      <Choix legende={t('opr_section_c')} valeur={decision.issue} options={issues} onChange={changer} />
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Champ label={t('opr_date_decision')}>{id => <input id={id} type="date" className={CHAMP} value={decision.date_decision ?? ''} onChange={e => onChange({ ...decision, date_decision: e.target.value || null })} />}</Champ>
+        <Champ label={t('opr_date_effet')}>{id => <input id={id} type="date" className={CHAMP} value={decision.date_effet ?? ''} onChange={e => onChange({ ...decision, date_effet: e.target.value || null })} />}</Champ>
+        {natures.includes('malfacons') && (
+          <Champ label={t('opr_refaction_letter')}>{id => <input id={id} type="date" className={CHAMP} value={decision.refaction_acceptee_le ?? ''} onChange={e => onChange({ ...decision, refaction_acceptee_le: e.target.value || null })} />}</Champ>
+        )}
+      </div>
+      {natures.length > 0 && (
+        <Conditions conditions={decision.conditions} refaction={decision.refaction_montant} natures={natures} avecAnnexe
+          onChange={c => onChange({ ...decision, conditions: c })} onRefaction={v => onChange({ ...decision, refaction_montant: v })} />
+      )}
+    </>
+  );
+}
+
+const OPTIONS_LEVEE: OptionLevee[] = ['rapporter', 'lever_toutes', 'maintenir_toutes', 'lever_partie'];
+const NATURES_LEVEE_DATEES: NatureReserve[] = ['installations', 'pose'];
+
+/** Une option de levée (proposition du maître d'œuvre ou décision du maître d'ouvrage) avec ses réserves maintenues. */
+function ChoixLevee<V extends { option: string | null; date: string | null; annexe_levees: string | null; maintenues: ConditionReserve[] }>({ legende, valeur, accepter, onChange }: {
+  legende: string; valeur: V; accepter?: boolean; onChange: (v: V) => void;
+}) {
+  const { t } = useTranslation();
+  const options: Array<[string, string]> = [
+    ...(accepter ? [['accepter', t('opr_levee_opt_accepter')] as [string, string]] : []),
+    ...OPTIONS_LEVEE.map(o => [o, t(`opr_levee_opt_${o}`)] as [string, string]),
+  ];
+  const partie = valeur.option === 'lever_partie';
+  return (
+    <div className="space-y-3">
+      <Choix legende={legende} valeur={valeur.option} options={options}
+        onChange={o => onChange({ ...valeur, option: o, ...(o === 'lever_partie' ? {} : { maintenues: [], annexe_levees: null }) })} />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Champ label={t('opr_date_levee_step')}>{id => <input id={id} type="date" className={CHAMP} value={valeur.date ?? ''} onChange={e => onChange({ ...valeur, date: e.target.value || null })} />}</Champ>
+        {partie && <Champ label={t('opr_levee_annex')}>{id => <input id={id} maxLength={20} className={`${CHAMP} w-28`} value={valeur.annexe_levees ?? ''} onChange={e => onChange({ ...valeur, annexe_levees: e.target.value || null })} />}</Champ>}
+      </div>
+      {partie && (
+        <>
+          <p className="text-xs font-semibold text-[var(--tblr-muted)]">{t('opr_levee_kept')}</p>
+          <Conditions conditions={valeur.maintenues} refaction={null} natures={[...NATURES_RESERVE]} avecAnnexe datees={NATURES_LEVEE_DATEES}
+            onChange={c => onChange({ ...valeur, maintenues: c })} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Levée des réserves en marché public : PV de levée (EXE8), puis propositions et décision (EXE9). */
+function LeveePublique({ levee, onChange }: { levee: Levee; onChange: (l: Levee) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-5">
+      <Champ label={t('opr_levee_pv_date')}>{id => <input id={id} type="date" className={`${CHAMP} sm:w-60`} value={levee.date_pv ?? ''} onChange={e => onChange({ ...levee, date_pv: e.target.value || null })} />}</Champ>
+      <PresencesChoix valeur={levee.presences} onChange={p => onChange({ ...levee, presences: p })} publique />
+      <ConstatsGrid valeur={levee.constats} onChange={c => onChange({ ...levee, constats: c })} publique />
+      <h4 className="text-sm font-semibold">{t('opr_levee_proposal')}</h4>
+      <ChoixLevee legende={t('opr_levee_proposal')} valeur={levee.proposition} onChange={p => onChange({ ...levee, proposition: p })} />
+      <h4 className="text-sm font-semibold">{t('opr_levee_decision')}</h4>
+      <ChoixLevee legende={t('opr_levee_decision')} valeur={levee.decision} accepter onChange={d => onChange({ ...levee, decision: d })} />
     </div>
   );
 }
@@ -208,7 +341,7 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
         pv: form, reference: pv?.reference_pv, projet, maitreOuvrageContact, marche, titulaireContact, agence: settings, lieu: lieu || null,
         reserves: [
           ...reserves,
-          ...nouvelles.map(r => ({ number: null, batiment: r.batiment, local: r.localisation, created_at: null, title: r.points })),
+          ...nouvelles.map(r => ({ number: null, batiment: r.batiment, local: r.localisation, created_at: null, title: r.points, nature: r.nature || null, status: 'A faire' })),
         ],
       });
       await telechargerExe(code, donnees, format, settings);
@@ -251,10 +384,16 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
     try { await api.retirerReserve(id); } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); }
   };
 
+  /** Change la nature d'une réserve déjà enregistrée sans fermer la fenêtre. */
+  const changerNature = async (id: string, nature: NatureReserve | '') => {
+    setErreur(null);
+    try { await api.changerNatureReserve(id, nature); } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); }
+  };
+
   const ajouterBrouillon = () => {
     if (!brouillon.points.trim()) return;
     setNouvelles(n => [...n, brouillon]);
-    setBrouillon({ batiment: brouillon.batiment, localisation: '', points: '' });
+    setBrouillon({ batiment: brouillon.batiment, localisation: '', points: '', nature: brouillon.nature });
   };
 
   const avis: Array<[AvisReception, string]> = publique
@@ -273,7 +412,6 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
     refaction_montant: naturesPour(v).includes('malfacons') ? form.proposition.refaction_montant : null,
   });
   const section = (titre: string) => <h3 className="text-sm font-bold uppercase tracking-wide border-b border-[var(--tblr-border)] pb-1 pt-2">{titre}</h3>;
-  const constats = CONSTATS.filter(c => publique || !c.publicSeul);
 
   return (
     <ModalShell
@@ -288,11 +426,6 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
               <button type="button" className="btn btn-secondary" onClick={() => exporter('docx')}><IconDownload size={14} /> {t('opr_word')}</button>
             </>
           )}
-          {pv && publique && (['EXE4', 'EXE5'] as const).flatMap(code => (['pdf', 'docx'] as const).map(format => (
-            <button key={`${code}-${format}`} type="button" className="btn btn-secondary" onClick={() => exporterExe(code, format)}>
-              <IconDownload size={14} /> {code} {format === 'pdf' ? t('opr_pdf') : t('opr_word')}
-            </button>
-          )))}
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={enCours}>{t('btn_cancel')}</button>
           {!signe && <button type="button" className="btn btn-primary disabled:opacity-60" onClick={enregistrer} disabled={enCours}>{t('opr_save')}</button>}
         </>
@@ -351,42 +484,8 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
         )}
 
         {section(t('opr_section_a'))}
-        <Choix legende={publique ? t('opr_presence_moa_public') : t('opr_presence_moa')} valeur={form.presences.moa}
-          options={[['present', t('opr_opt_present')], ['absent_avise', t('opr_opt_absent_avise')], ['absent', t('opr_opt_absent')]]}
-          onChange={v => set('presences', { ...form.presences, moa: v })} />
-        <Choix legende={publique ? t('opr_presence_company_public') : t('opr_presence_company')} valeur={form.presences.entreprise}
-          options={[['presente', t('opr_opt_presente')], ['absente_convoquee', t('opr_opt_absente_convoquee')]]}
-          onChange={v => set('presences', { ...form.presences, entreprise: v })} />
-        {form.presences.entreprise === 'absente_convoquee' && (
-          <Champ label={t('opr_convocation_date')}>
-            {id => <input id={id} type="date" className={`${CHAMP} sm:w-60`} value={form.presences.date_convocation ?? ''} onChange={e => set('presences', { ...form.presences, date_convocation: e.target.value || null })} />}
-          </Champ>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          {constats.map(({ cle, valeurs }) => {
-            const annexe = ANNEXE_DU_CONSTAT[cle];
-            const choisi = form.constats[cle] as string | null;
-            return (
-              <div key={cle} className="space-y-2">
-                <Champ label={t(`opr_c_${cle}`)}>
-                  {id => (
-                    <select id={id} className={CHAMP} value={choisi ?? ''}
-                      onChange={e => set('constats', { ...form.constats, [cle]: e.target.value || null })}>
-                      <option value="">{t('opr_unset')}</option>
-                      {valeurs.map(v => <option key={v} value={v}>{t(`opr_opt_${v}`)}</option>)}
-                    </select>
-                  )}
-                </Champ>
-                {publique && annexe && choisi && annexe.valeurs.includes(choisi) && (
-                  <Champ label={`${t('opr_annex_number')} (${t(`opr_c_${cle}`)})`}>
-                    {id => <input id={id} maxLength={20} className={`${CHAMP} w-28`} value={form.constats.annexes[annexe.nature] ?? ''}
-                      onChange={e => set('constats', { ...form.constats, annexes: { ...form.constats.annexes, [annexe.nature]: e.target.value || undefined } })} />}
-                  </Champ>
-                )}
-              </div>
-            );
-          })}
-        </div>
+        <PresencesChoix valeur={form.presences} onChange={p => set('presences', p)} publique={publique} />
+        <ConstatsGrid valeur={form.constats} onChange={c => set('constats', c)} publique={publique} />
 
         {section(t('opr_section_b'))}
         <Choix legende={t('opr_section_b')} valeur={form.proposition.avis} options={avis} onChange={changerAvis} />
@@ -401,11 +500,11 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
             onRefaction={v => set('proposition', { ...form.proposition, refaction_montant: v })} />
         )}
 
+        {section(t('opr_section_c'))}
         {publique ? (
-          <p role="note" className="text-sm rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface-2)] p-3">{t('opr_decision_later')}</p>
+          <DecisionPublique decision={form.decision} onChange={d => set('decision', d)} />
         ) : (
           <>
-            {section(t('opr_section_c'))}
             <Choix legende={t('opr_section_c')} valeur={form.decision.issue} options={issues}
               onChange={v => set('decision', { ...form.decision, issue: v, conditions: sousReserve(v) ? form.decision.conditions : [] })} />
             <div className="grid gap-3 sm:grid-cols-2">
@@ -421,6 +520,13 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
           </>
         )}
 
+        {publique && (form.decision.issue === 'sous_reserve' || form.decision.issue === 'avec_reserve') && (
+          <>
+            {section(t('opr_section_levee'))}
+            <LeveePublique levee={form.levee} onChange={l => set('levee', l)} />
+          </>
+        )}
+
         {section(t('opr_reserves_title'))}
         {reserves.length === 0 && nouvelles.length === 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_reserves_empty')}</p>}
         <ul className="space-y-1">
@@ -428,17 +534,33 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
             <li key={r.id} className="flex items-start gap-2 text-sm">
               <span className="w-8 shrink-0 tabular-nums text-[var(--tblr-muted)]">{r.number ?? ''}</span>
               <span className="flex-1 min-w-0">{[r.batiment, r.local].filter(Boolean).join(' · ')}{r.batiment || r.local ? ' : ' : ''}{r.title}</span>
+              {publique && (
+                <select aria-label={t('opr_reserve_nature')} className={`${CHAMP} w-auto text-xs`} value={r.nature ?? ''} onChange={e => changerNature(r.id, e.target.value as NatureReserve | '')}>
+                  <option value="">{t('opr_unset')}</option>
+                  {NATURES_RESERVE.map(n => <option key={n} value={n}>{t(`opr_nature_${n}`)}</option>)}
+                </select>
+              )}
               <button type="button" aria-label={t('opr_reserve_remove')} className="p-2 pointer-coarse:min-h-11 text-[var(--tblr-muted)] hover:text-red-600" onClick={() => retirer(r.id)}><IconTrash size={14} /></button>
             </li>
           ))}
           {nouvelles.map((r, i) => (
             <li key={`n${i}`} className="flex items-start gap-2 text-sm">
               <span className="w-8 shrink-0 text-[var(--tblr-muted)]">+</span>
-              <span className="flex-1 min-w-0">{[r.batiment, r.localisation].filter(Boolean).join(' · ')}{r.batiment || r.localisation ? ' : ' : ''}{r.points}</span>
+              <span className="flex-1 min-w-0">{[r.batiment, r.localisation].filter(Boolean).join(' · ')}{r.batiment || r.localisation ? ' : ' : ''}{r.points}{r.nature ? ` (${t(`opr_nature_${r.nature}`)})` : ''}</span>
               <button type="button" aria-label={t('opr_reserve_remove')} className="p-2 pointer-coarse:min-h-11 text-[var(--tblr-muted)] hover:text-red-600" onClick={() => setNouvelles(n => n.filter((_, j) => j !== i))}><IconTrash size={14} /></button>
             </li>
           ))}
         </ul>
+        {publique && (
+          <Champ label={t('opr_reserve_nature')}>
+            {id => (
+              <select id={id} className={`${CHAMP} sm:w-80`} value={brouillon.nature ?? ''} onChange={e => setBrouillon(b => ({ ...b, nature: e.target.value as NatureReserve | '' }))}>
+                <option value="">{t('opr_unset')}</option>
+                {NATURES_RESERVE.map(n => <option key={n} value={n}>{t(`opr_nature_${n}`)}</option>)}
+              </select>
+            )}
+          </Champ>
+        )}
         <div className="grid gap-2 sm:grid-cols-[8rem_10rem_1fr_auto] items-end">
           <Champ label={t('opr_reserve_building')}>{id => <input id={id} className={CHAMP} value={brouillon.batiment} onChange={e => setBrouillon(b => ({ ...b, batiment: e.target.value }))} />}</Champ>
           <Champ label={t('opr_reserve_location')}>{id => <input id={id} className={CHAMP} value={brouillon.localisation} onChange={e => setBrouillon(b => ({ ...b, localisation: e.target.value }))} />}</Champ>
@@ -462,7 +584,7 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
           ))}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <Champ label={t('opr_levee_pv_date')}>{id => <input id={id} type="date" className={CHAMP} value={form.levee.date_pv ?? ''} onChange={e => set('levee', { ...form.levee, date_pv: e.target.value || null })} />}</Champ>
+          {!publique && <Champ label={t('opr_levee_pv_date')}>{id => <input id={id} type="date" className={CHAMP} value={form.levee.date_pv ?? ''} onChange={e => set('levee', { ...form.levee, date_pv: e.target.value || null })} />}</Champ>}
           <Champ label={t('opr_levee_sent_date')}>{id => <input id={id} type="date" className={CHAMP} value={form.levee.date_transmission ?? ''} onChange={e => set('levee', { ...form.levee, date_transmission: e.target.value || null })} />}</Champ>
         </div>
       </fieldset>
@@ -485,6 +607,21 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
           {controle.erreurs.map(a => <p key={a.code + a.message} className="text-red-600">{a.message}</p>)}
           {controle.avertissements.length > 0 && <p className="font-semibold pt-1">{t('opr_warnings')}</p>}
           {controle.avertissements.map(a => <p key={a.code} className="text-amber-700">{a.message}</p>)}
+        </div>
+      )}
+
+      {pv && publique && (
+        <div className="rounded-lg border border-[var(--tblr-border)] p-3 space-y-2">
+          <p className="text-sm font-semibold">{t('opr_documents')}</p>
+          <ul className="space-y-1">
+            {formulairesDuPv(form).map(code => (
+              <li key={code} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="flex-1 min-w-48"><span className="font-semibold">{code}</span> · {t(`opr_form_${code}`)}</span>
+                <button type="button" className="btn btn-secondary" onClick={() => exporterExe(code, 'pdf')}><IconDownload size={14} /> {t('opr_pdf')}</button>
+                <button type="button" className="btn btn-secondary" onClick={() => exporterExe(code, 'docx')}><IconDownload size={14} /> {t('opr_word')}</button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

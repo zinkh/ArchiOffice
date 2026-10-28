@@ -183,6 +183,70 @@ describe('PV public (EXE4, EXE5)', () => {
   });
 });
 
+describe('Levée des réserves (EXE8, EXE9)', () => {
+  const creer = (token: string, extra: object = {}) => request(app).post('/api/receptions').set(authHeader(token))
+    .send({ project_id: 'p1', date: '2026-11-03', type: 'provisoire', marche_id: 'm1', ccag_version: '2021', date_opr: '2026-10-01', ...extra });
+  const reception = {
+    proposition: { avis: 'avec_reserve', date_proposition: '2026-10-05', conditions: [{ nature: 'malfacons', avant_le: '2026-12-01', annexe: '1' }] },
+    decision: { issue: 'avec_reserve', date_decision: '2026-10-20', conditions: [{ nature: 'malfacons', avant_le: '2026-12-01', annexe: '1' }] },
+    public_info: { portee: 'totale' },
+  };
+
+  it('enregistre le PV de levée, les propositions et la décision, et les relit à l\'identique', async () => {
+    const { token } = cabinet(true);
+    const levee = {
+      date_pv: '2026-11-20', date_transmission: '2026-11-24',
+      presences: { moa: 'absent_avise', entreprise: 'presente' },
+      constats: { epreuves: 'concluantes', ouvrages: 'conformes_sauf_annexe', annexes: { malfacons: '3' } },
+      proposition: { option: 'lever_partie', date: '2026-11-21', annexe_levees: '2', maintenues: [{ nature: 'installations', avant_le: '2026-12-10' }] },
+      decision: { option: 'accepter', date: '2026-11-25' },
+    };
+    const res = await creer(token, { ...reception, levee });
+    expect(res.status).toBe(200);
+    const enregistre = ligne(res.body.id)?.levee;
+    expect(enregistre).toMatchObject({
+      date_pv: '2026-11-20', date_transmission: '2026-11-24',
+      presences: { moa: 'absent_avise', entreprise: 'presente', date_convocation: null },
+      constats: { epreuves: 'concluantes', annexes: { malfacons: '3' } },
+      proposition: { option: 'lever_partie', annexe_levees: '2', maintenues: [{ nature: 'installations', avant_le: '2026-12-10', annexe: null }] },
+      decision: { option: 'accepter', date: '2026-11-25', maintenues: [] },
+    });
+  });
+
+  it('refuse une option de levée hors vocabulaire et une date invalide, avant toute écriture', async () => {
+    const { token } = cabinet(true);
+    const avant = fakeSupabaseAdmin.getTable('receptions').length;
+    expect((await creer(token, { levee: { proposition: { option: 'accepter' } } })).status).toBe(400);
+    expect((await creer(token, { levee: { decision: { option: 'tout_lever' } } })).status).toBe(400);
+    expect((await creer(token, { levee: { date_pv: 'hier' } })).status).toBe(400);
+    expect(fakeSupabaseAdmin.getTable('receptions').length).toBe(avant);
+  });
+
+  it('un PV qui porte déjà ses dates de levée à l\'ancienne (deux dates) se met à jour sans perte', async () => {
+    const { tenantId, token } = cabinet(true);
+    fakeSupabaseAdmin.seed('receptions', [{ id: 'r-ancien', tenant_id: tenantId, project_id: 'p1', regime: 'public', marche_id: 'm1', date: '2026-10-01', type: 'provisoire', levee: { date_pv: '2026-11-20', date_transmission: '2026-11-24' } }]);
+    const maj = await request(app).put('/api/receptions/r-ancien').set(authHeader(token)).send({ levee: { date_pv: '2026-11-20', date_transmission: '2026-11-24', proposition: { option: 'lever_toutes', date: '2026-11-21' } } });
+    expect(maj.status).toBe(200);
+    expect(ligne('r-ancien')?.levee).toMatchObject({ date_pv: '2026-11-20', date_transmission: '2026-11-24', proposition: { option: 'lever_toutes' } });
+  });
+
+  it('la signature refuse une levée partielle sans annexe ni réserves maintenues', async () => {
+    const { token } = cabinet(true);
+    const id = (await creer(token, {
+      ...reception,
+      levee: { date_pv: '2026-11-20', proposition: { option: 'lever_partie', date: '2026-11-21' } },
+    })).body.id;
+    const refus = await request(app).post(`/api/receptions/${id}/signature`).set(authHeader(token)).send({ mode: 'papier', date: '2026-11-30' });
+    expect(refus.status).toBe(409);
+    expect(refus.body.erreurs.map((e: any) => e.code)).toEqual(expect.arrayContaining(['levee_proposition_annexe_manquante', 'levee_proposition_maintenues_manquantes']));
+    // Complétée, elle se signe.
+    await request(app).put(`/api/receptions/${id}`).set(authHeader(token)).send({
+      levee: { date_pv: '2026-11-20', proposition: { option: 'lever_partie', date: '2026-11-21', annexe_levees: '2', maintenues: [{ nature: 'malfacons', annexe: '3' }] } },
+    });
+    expect((await request(app).post(`/api/receptions/${id}/signature`).set(authHeader(token)).send({ mode: 'papier', date: '2026-11-30' })).status).toBe(200);
+  });
+});
+
 describe('Référence automatique', () => {
   const creer = (token: string, extra: object = {}) => request(app).post('/api/receptions').set(authHeader(token))
     .send({ project_id: 'p1', date: '2026-11-03', type: 'provisoire', marche_id: 'm1', ...extra });

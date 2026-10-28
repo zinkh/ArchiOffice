@@ -38,7 +38,14 @@ export interface ReservePv {
   /** Date de constat (AAAA-MM-JJ ou date-heure ISO). */
   date?: string | null;
   points: string;
+  /** Nature de la réserve (annexes numérotées des cerfas) ; absente = non précisée. */
+  nature?: NatureReserve | null;
+  /** Statut de la réserve (« Levée », « A faire »...) : distingue les réserves levées de celles à lever. */
+  statut?: string | null;
 }
+
+/** Une réserve est levée quand elle est levée ou quittancée. */
+export const reserveLevee = (r: Pick<ReservePv, 'statut'>): boolean => r.statut === 'Levée' || r.statut === 'Quitus Transmis';
 
 export interface DonneesPvPrive {
   pv: OprPv;
@@ -104,7 +111,7 @@ function reserveEnLigne(r: ReservePv): string[] {
   return [r.numero != null ? String(r.numero) : '', r.localisation ?? '', dateFr(r.date), r.points, '', ''];
 }
 
-function lignesReserves(reserves: ReservePv[]): Array<string[] | { groupe: string }> {
+export function lignesReserves(reserves: ReservePv[]): Array<string[] | { groupe: string }> {
   if (!reserves.length) return Array.from({ length: 4 }, () => ['', '', '', '', '', '']);
   const batiments = new Set(reserves.map(r => (r.batiment ?? '').trim()));
   const groupees = batiments.size > 1 || !batiments.has('');
@@ -122,6 +129,9 @@ function lignesReserves(reserves: ReservePv[]): Array<string[] | { groupe: strin
   }
   return out;
 }
+
+export const ENTETES_RESERVES = ['N°', 'Localisation', 'Date', 'Points à lever', "Levée par l'entreprise (date)", 'Vérification MOE (date)'];
+export const LARGEURS_RESERVES = [10, 36, 20, 62, 28, 26];
 
 /** L'annexe des réserves à lever : une page à part, le tableau à compléter à la main au besoin. */
 export function blocsAnnexeReserves(fiche: [string, string][], reserves: ReservePv[]): BlocPv[] {

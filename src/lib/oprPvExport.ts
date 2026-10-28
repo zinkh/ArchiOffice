@@ -4,8 +4,9 @@ import { saveAs } from 'file-saver';
 import type { AgencySettings } from './proposalExport';
 import { nomFichier, preparer } from './certificatPaiementExport';
 import { fetchAgencySettings } from './pdfLetterhead';
-import type { OprPv } from './oprPv';
-import { construirePvPrive, libelleLot, type DonneesPvPrive } from './oprPvDocument';
+import type { NatureReserve, OprPv } from './oprPv';
+import { construirePvPrive, libelleLot, type DocPv, type DonneesPvPrive } from './oprPvDocument';
+import { livrer, nomSur, type FichierExporte } from './exportSortie';
 import { construireExe, identiteEnLignes, type DonneesExe, type FormulaireExeAvecRendu, type IdentiteSource } from './oprPvExe';
 import { rendreDocPv } from './oprPvPdf';
 
@@ -15,7 +16,7 @@ export interface SourcePvPrive {
   maitreOuvrage?: string | null;
   objet?: string | null;
   marche: { lot_numero?: string | null; lot_titre?: string | null; entreprise_nom?: string | null; date_signature?: string | null; date_notification?: string | null } | null;
-  reserves: Array<{ number: number | null; batiment: string | null; local: string | null; created_at: string | null; title: string }>;
+  reserves: Array<{ number: number | null; batiment: string | null; local: string | null; created_at: string | null; title: string; nature?: NatureReserve | null; status?: string | null }>;
   /** Nom de l'agence, imprimé sous la signature du maître d'œuvre. */
   agence?: string | null;
 }
@@ -110,7 +111,7 @@ export function donneesExe(s: SourceExe): DonneesExe {
     objet: [s.marche?.objet || s.projet.objet || s.projet.nom, lot].filter(Boolean) as string[],
     lot, entreprise: s.marche?.entreprise_nom ?? null,
     lieu: s.lieu ?? null,
-    reserves: s.reserves.map(r => ({ numero: r.number, batiment: r.batiment, localisation: r.local, date: r.created_at, points: r.title })),
+    reserves: s.reserves.map(r => ({ numero: r.number, batiment: r.batiment, localisation: r.local, date: r.created_at, points: r.title, nature: r.nature ?? null, statut: r.status ?? null })),
   };
 }
 
@@ -127,4 +128,25 @@ export async function telechargerExe(code: FormulaireExeAvecRendu, donnees: Donn
   const reglages = settings && Object.keys(settings).length ? settings : await fetchAgencySettings();
   const { construireDocxPv } = await import('./oprPvDocx');
   saveAs(await construireDocxPv(doc, reglages), nomFichier(...nomDuExe(code, donnees)).replace(/\.pdf$/, '.docx'));
+}
+
+// ---------------------------------------------------------------------------
+// Export groupé : tous les PV d'une affaire, un fichier PDF par formulaire et par lot
+
+export interface DocumentAExporter {
+  /** Nom du fichier, sans extension. */
+  nom: string;
+  doc: DocPv;
+}
+
+/** Un PDF par document, remis tel quel s'il est seul, en ZIP sinon. Rend le nombre de fichiers produits. */
+export async function telechargerArchivePv(documents: DocumentAExporter[], nomArchive: string, settings?: AgencySettings): Promise<number> {
+  const fichiers: FichierExporte[] = [];
+  for (const { nom, doc } of documents) {
+    const r = await preparer(settings);
+    rendreDocPv(r, doc);
+    fichiers.push({ nom: nomSur(`${nom}.pdf`), blob: r.pdf.output('blob') });
+  }
+  await livrer(fichiers, nomSur(`${nomArchive}.zip`));
+  return fichiers.length;
 }

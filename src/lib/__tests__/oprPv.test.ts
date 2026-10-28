@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ajouterJours, conditionsSuggerees, controlerPv, estDateIso, formulaireDecision, formulairesDuPv,
-  joursEntre, naturesImpliquees, pvVierge, regimeDepuisAffaire, statutPv, type OprPv,
+  joursEntre, naturesImpliquees, optionLeveeRetenue, pvVierge, regimeDepuisAffaire, statutPv, type OprPv,
 } from '../oprPv';
 import { DELAIS_PAR_DEFAUT, aEcheanceEnRetard, delaiEffectif, echeances } from '../oprPvDelais';
 import { lirePv, sanitizeOprPayload } from '../oprPvSanitize';
@@ -299,6 +299,111 @@ describe('lirePv', () => {
     expect(pv.date_opr).toBeNull();
     expect(pv.constats).toEqual(pvVierge('public').constats);
     expect(pv.proposition.avis).toBe('sans_reserve');
-    expect(pv.levee).toEqual({ date_pv: null, date_transmission: null });
+    expect(pv.levee).toEqual(pvVierge('public').levee);
+  });
+});
+
+describe('levée des réserves', () => {
+  const recu = (surcharge: Partial<OprPv> = {}): OprPv => {
+    const pv = { ...pvPublic({ ccag_version: '2021', date_opr: '2026-10-01' }), ...surcharge };
+    pv.public_info = { portee: 'totale', prestations: null, signataire: null, reference_marche: null };
+    pv.decision = { ...pv.decision, issue: 'avec_reserve', date_decision: '2026-10-20', conditions: [{ nature: 'malfacons', avant_le: '2026-12-01', annexe: '1' }] };
+    return pv;
+  };
+
+  it("l'issue retenue est la décision du maître d'ouvrage, ou la proposition quand il l'accepte", () => {
+    const pv = recu();
+    expect(optionLeveeRetenue(pv.levee)).toBeNull();
+    pv.levee.proposition.option = 'lever_toutes';
+    expect(optionLeveeRetenue(pv.levee)).toBeNull();
+    pv.levee.decision.option = 'accepter';
+    expect(optionLeveeRetenue(pv.levee)).toBe('lever_toutes');
+    pv.levee.decision.option = 'maintenir_toutes';
+    expect(optionLeveeRetenue(pv.levee)).toBe('maintenir_toutes');
+  });
+
+  it('le statut suit la levée : réserves levées, réception rapportée, sinon toujours avec réserves', () => {
+    const pv = recu();
+    expect(statutPv(pv)).toBe('receptionnee_avec_reserves');
+    pv.levee.proposition.option = 'lever_toutes';
+    pv.levee.decision.option = 'accepter';
+    expect(statutPv(pv)).toBe('reserves_levees');
+    pv.levee.decision.option = 'rapporter';
+    expect(statutPv(pv)).toBe('reception_rapportee');
+    pv.levee.decision.option = 'maintenir_toutes';
+    expect(statutPv(pv)).toBe('receptionnee_avec_reserves');
+    // Une levée sur une réception sans réserve n'a pas de sens : le statut reste « réceptionné ».
+    const sans = recu();
+    sans.decision.issue = 'sans_reserve';
+    sans.levee.decision.option = 'lever_toutes';
+    expect(statutPv(sans)).toBe('receptionnee');
+  });
+
+  it('une levée sans réception avec réserves est signalée', () => {
+    const pv = recu();
+    pv.decision = { ...pv.decision, issue: 'sans_reserve', conditions: [] };
+    pv.levee.date_pv = '2026-11-20';
+    expect(codes(controlerPv(pv).avertissements)).toContain('levee_sans_reserve');
+    expect(codes(controlerPv(recu()).avertissements)).not.toContain('levee_sans_reserve');
+  });
+
+  it('une levée partielle exige l\'annexe des réserves levées, celles qui sont maintenues et leur date', () => {
+    const pv = recu();
+    pv.levee.date_pv = '2026-11-20';
+    pv.levee.proposition = { option: 'lever_partie', date: '2026-11-21', annexe_levees: null, maintenues: [] };
+    let erreurs = codes(controlerPv(pv).erreurs);
+    expect(erreurs).toContain('levee_proposition_annexe_manquante');
+    expect(erreurs).toContain('levee_proposition_maintenues_manquantes');
+    pv.levee.proposition = { option: 'lever_partie', date: '2026-11-21', annexe_levees: '2', maintenues: [{ nature: 'installations', avant_le: null, annexe: null }] };
+    expect(codes(controlerPv(pv).erreurs)).toContain('levee_proposition_date_manquante');
+    pv.levee.proposition.maintenues = [{ nature: 'installations', avant_le: '2026-12-10', annexe: null }, { nature: 'malfacons', avant_le: null, annexe: '3' }];
+    expect(controlerPv(pv).erreurs).toEqual([]);
+    // Les réserves maintenues ne se précisent que pour une levée partielle.
+    pv.levee.proposition.option = 'maintenir_toutes';
+    erreurs = codes(controlerPv(pv).erreurs);
+    expect(erreurs).toContain('levee_proposition_maintenues_inattendues');
+  });
+
+  it('la décision du maître d\'ouvrage qui accepte les propositions n\'a pas de réserve à préciser', () => {
+    const pv = recu();
+    pv.levee.date_pv = '2026-11-20';
+    pv.levee.proposition = { option: 'lever_toutes', date: '2026-11-21', annexe_levees: null, maintenues: [] };
+    pv.levee.decision = { option: 'accepter', date: '2026-11-25', annexe_levees: null, maintenues: [] };
+    expect(controlerPv(pv).erreurs).toEqual([]);
+  });
+
+  it('la proposition ou la décision sur la levée ne précèdent pas le PV de levée', () => {
+    const pv = recu();
+    pv.levee.date_pv = '2026-11-20';
+    pv.levee.proposition = { option: 'lever_toutes', date: '2026-11-10', annexe_levees: null, maintenues: [] };
+    pv.levee.decision = { option: 'lever_toutes', date: '2026-11-11', annexe_levees: null, maintenues: [] };
+    const erreurs = codes(controlerPv(pv).erreurs);
+    expect(erreurs).toContain('levee_proposition_avant_pv');
+    expect(erreurs).toContain('levee_decision_avant_pv');
+  });
+
+  it('assainie côté serveur : options de vocabulaire fermé, réserves maintenues bornées', () => {
+    const ok = sanitizeOprPayload({ levee: {
+      date_pv: '2026-11-20',
+      presences: { moa: 'present', entreprise: 'absente_convoquee', date_convocation: '2026-11-10' },
+      constats: { epreuves: 'concluantes', ouvrages: 'conformes_sauf_annexe', annexes: { malfacons: '3' } },
+      proposition: { option: 'lever_partie', date: '2026-11-21', annexe_levees: '2', maintenues: [{ nature: 'pose', avant_le: '2026-12-01' }, { nature: 'pose' }] },
+      decision: { option: 'accepter' },
+    } });
+    expect(ok.erreurs).toEqual([]);
+    const levee = ok.colonnes.levee as any;
+    expect(levee.presences).toEqual({ moa: 'present', entreprise: 'absente_convoquee', date_convocation: '2026-11-10' });
+    expect(levee.constats.annexes).toEqual({ malfacons: '3' });
+    expect(levee.proposition.maintenues).toEqual([{ nature: 'pose', avant_le: '2026-12-01', annexe: null }]);
+    expect(levee.decision.option).toBe('accepter');
+    expect(sanitizeOprPayload({ levee: { proposition: { option: 'accepter' } } }).erreurs.length).toBe(1); // « accepter » n'est pas une proposition
+    expect(sanitizeOprPayload({ levee: { decision: { option: 'tout_lever' } } }).erreurs.length).toBe(1);
+  });
+
+  it("lit une levée enregistrée à l'ancienne (deux dates seulement) sans rien perdre", () => {
+    const pv = lirePv({ regime: 'public', levee: { date_pv: '2026-11-20', date_transmission: '2026-11-24' } })!;
+    expect(pv.levee).toMatchObject({ date_pv: '2026-11-20', date_transmission: '2026-11-24' });
+    expect(pv.levee.proposition.option).toBeNull();
+    expect(pv.levee.presences.moa).toBeNull();
   });
 });

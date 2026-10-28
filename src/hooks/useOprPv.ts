@@ -4,7 +4,7 @@
 // et les échéances se déduisent de la ligne enregistrée, l'écran ne les recalcule pas à part.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../lib/api';
-import type { OprPv } from '../lib/oprPv';
+import type { NatureReserve, OprPv } from '../lib/oprPv';
 import { lirePv } from '../lib/oprPvSanitize';
 import type { ContactIdentite } from '../lib/oprPvExport';
 
@@ -30,6 +30,7 @@ export interface ReserveOpr {
   title: string;
   status: string | null;
   created_at: string | null;
+  nature: NatureReserve | null;
 }
 
 export interface PvOpr {
@@ -49,6 +50,8 @@ export interface NouvelleReserve {
   batiment: string;
   localisation: string;
   points: string;
+  /** Nature (annexes numérotées des cerfas) ; vide = non précisée. */
+  nature?: NatureReserve | '';
 }
 
 const lire = async <T,>(url: string, repli: T): Promise<T> => {
@@ -119,6 +122,7 @@ export function useOprPv(projectId: string) {
         project_id: projectId, reception_id: pvId, title: r.points.trim(), batiment: r.batiment.trim() || null, local: r.localisation.trim() || null,
         status: 'A faire', lots: JSON.stringify(lot ? [lot] : []), entreprises: JSON.stringify(entreprise ? [entreprise] : []),
         created_at: jour, due_date: jour,
+        ...(r.nature ? { nature: r.nature } : {}),
       }),
     });
     await recharger();
@@ -134,7 +138,11 @@ export function useOprPv(projectId: string) {
     return contacts.current.get(id) ?? null;
   }, []);
 
+  /** Ne change que la nature d'une réserve (le PUT d'une réserve réécrit tous ses champs). */
+  const changerNatureReserve = useCallback((id: string, nature: NatureReserve | '') =>
+    envoyer(`/api/reserves/${id}/nature`, 'PUT', { nature: nature || null }), [envoyer]);
+
   const retirerReserve = useCallback((id: string) => envoyer(`/api/reserves/${id}`, 'DELETE'), [envoyer]);
 
-  return { pvs, marches, reserves, chargement, erreur, recharger, creer, modifier, supprimer, signer, rouvrir, ajouterReserve, retirerReserve, obtenirContact };
+  return { pvs, marches, reserves, chargement, erreur, recharger, creer, modifier, supprimer, signer, rouvrir, ajouterReserve, retirerReserve, changerNatureReserve, obtenirContact };
 }

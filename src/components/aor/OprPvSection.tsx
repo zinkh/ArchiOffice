@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
-import { IconClipboardList, IconDownload, IconPlus, IconTrash } from '@tabler/icons-react';
+import { IconClipboardList, IconDownload, IconFileZip, IconPlus, IconTrash } from '@tabler/icons-react';
 import { Card, CardHeader } from '../ui/Card';
 import { useConfirmDialog } from '../ui/ConfirmDialog';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -15,7 +15,10 @@ import type { AgencySettings } from '../../lib/proposalExport';
 import { statutPv } from '../../lib/oprPv';
 import { aEcheanceEnRetard, echeances } from '../../lib/oprPvDelais';
 import { dateFr, libelleLot } from '../../lib/oprPvDocument';
-import { donneesPvPrive, telechargerPvDocx, telechargerPvPdf } from '../../lib/oprPvExport';
+import { formulairesDuPv } from '../../lib/oprPv';
+import { construirePvPrive } from '../../lib/oprPvDocument';
+import { construireExe } from '../../lib/oprPvExe';
+import { donneesExe, donneesPvPrive, telechargerArchivePv, telechargerPvDocx, telechargerPvPdf, type DocumentAExporter } from '../../lib/oprPvExport';
 import { OprPvDialog, type ProjetOpr } from './OprPvDialog';
 
 interface Props {
@@ -52,6 +55,29 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
       if (format === 'pdf') await telechargerPvPdf(donnees(pv), settings);
       else await telechargerPvDocx(donnees(pv), settings);
     } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); }
+  };
+
+  /** Les documents d'un PV : le PV simplifié en privé, la chaîne des cerfas qu'il porte en public. */
+  const documentsDuPv = async (pv: PvOpr): Promise<DocumentAExporter[]> => {
+    const lotPv = libelleLot(marcheDe(pv)?.lot_numero, marcheDe(pv)?.lot_titre);
+    const suffixe = [pv.reference_pv, lotPv].filter(Boolean).join(' ');
+    if (!marchePublic) return [{ nom: `PV_OPR ${suffixe}`, doc: construirePvPrive(donnees(pv)) }];
+    const marche = marcheDe(pv);
+    const [titulaireContact, maitreOuvrageContact] = await Promise.all([api.obtenirContact(marche?.contact_id), api.obtenirContact(projet.maitreOuvrageId)]);
+    const d = donneesExe({
+      pv: pv.pv, reference: pv.reference_pv, projet, maitreOuvrageContact, marche, titulaireContact, agence: settings, lieu: pv.lieu, reserves: reservesDe(pv),
+    });
+    return formulairesDuPv(pv.pv).map(code => ({ nom: `${code} ${suffixe}`, doc: construireExe(code, d) }));
+  };
+
+  const [export_, setExport] = useState(false);
+  const toutExporter = async () => {
+    setErreur(null);
+    setExport(true);
+    try {
+      const documents = (await Promise.all(liste.map(documentsDuPv))).flat();
+      await telechargerArchivePv(documents, `PV_OPR ${projet.code ?? projet.nom}`, settings);
+    } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); } finally { setExport(false); }
   };
 
   const supprimer = async (pv: PvOpr) => {
@@ -105,10 +131,18 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
         title={t('opr_title')}
         description={t('opr_subtitle')}
         action={(
+          <div className="flex flex-wrap items-center gap-2">
+            {liste.length > 0 && (
+              <button type="button" onClick={toutExporter} disabled={export_}
+                className="flex items-center gap-2 px-4 py-2 pointer-coarse:min-h-11 border border-[var(--tblr-border)] text-[var(--tblr-text)] rounded-lg text-sm font-bold transition hover:bg-[var(--tblr-surface-2)] disabled:opacity-60">
+                <IconFileZip size={14} /> {t('opr_export_all')}
+              </button>
+            )}
           <button type="button" onClick={() => setOuvert('nouveau')} disabled={api.marches.length === 0}
             className="flex items-center gap-2 px-4 py-2 pointer-coarse:min-h-11 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-sm font-bold transition disabled:opacity-60">
             <IconPlus size={14} /> {t('opr_new')}
           </button>
+          </div>
         )}
       />
       <div className="p-4 sm:p-6 space-y-4">

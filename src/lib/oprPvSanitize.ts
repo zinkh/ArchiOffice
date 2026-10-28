@@ -8,9 +8,9 @@
 import {
   AVIS_RECEPTION, EPREUVES, INSTALLATIONS, ISSUES_DECISION, NATURES_RESERVE, OUVRAGES,
   PORTEES, POSE_EQUIPEMENTS, PRESENCES_ENTREPRISE, PRESENCES_MOA, TERRAINS, TRAVAUX,
-  constatsVierges, estDateIso, pvVierge,
-  type CcagVersion, type ConditionReserve, type Constats, type Decision, type Delais,
-  type NatureReserve, type OprPv, type Proposition, type RegimeMarche,
+  OPTIONS_LEVEE_DECISION, OPTIONS_LEVEE_PROPOSITION, constatsVierges, estDateIso, leveeVierge, pvVierge,
+  type CcagVersion, type ConditionReserve, type Constats, type Decision, type DecisionLevee, type Delais, type Levee,
+  type NatureReserve, type OprPv, type Presences, type Proposition, type PropositionLevee, type RegimeMarche,
 } from './oprPv';
 import { DELAI_MAX_JOURS, DELAI_MIN_JOURS } from './oprPvDelais';
 
@@ -148,23 +148,56 @@ function delais(v: unknown, erreurs: string[]): Delais {
   return out;
 }
 
+function presencesDe(v: unknown, e: string[]): Presences {
+  const o = estObjet(v) ? v : {};
+  return {
+    moa: enumOuNull(o.moa, PRESENCES_MOA, 'presences.moa', e),
+    entreprise: enumOuNull(o.entreprise, PRESENCES_ENTREPRISE, 'presences.entreprise', e),
+    date_convocation: dateOuNull(o.date_convocation, 'presences.date_convocation', e),
+  };
+}
+
+function propositionLevee(v: unknown, e: string[]): PropositionLevee {
+  const o = estObjet(v) ? v : {};
+  return {
+    option: enumOuNull(o.option, OPTIONS_LEVEE_PROPOSITION, 'levee.proposition.option', e),
+    date: dateOuNull(o.date, 'levee.proposition.date', e),
+    annexe_levees: texteOuNull(o.annexe_levees, ANNEXE_MAX, 'levee.proposition.annexe_levees', e),
+    maintenues: conditions(o.maintenues, 'levee.proposition.maintenues', e),
+  };
+}
+
+function decisionLevee(v: unknown, e: string[]): DecisionLevee {
+  const o = estObjet(v) ? v : {};
+  return {
+    option: enumOuNull(o.option, OPTIONS_LEVEE_DECISION, 'levee.decision.option', e),
+    date: dateOuNull(o.date, 'levee.decision.date', e),
+    annexe_levees: texteOuNull(o.annexe_levees, ANNEXE_MAX, 'levee.decision.annexe_levees', e),
+    maintenues: conditions(o.maintenues, 'levee.decision.maintenues', e),
+  };
+}
+
+/** La levée des réserves : dates, PV de levée (présences, constats), propositions puis décision. */
+function leveeDe(v: unknown, e: string[]): Levee {
+  const vide = leveeVierge();
+  if (!estObjet(v)) return vide;
+  return {
+    date_pv: dateOuNull(v.date_pv, 'levee.date_pv', e),
+    date_transmission: dateOuNull(v.date_transmission, 'levee.date_transmission', e),
+    presences: presencesDe(v.presences, e),
+    constats: constats(v.constats, e),
+    proposition: propositionLevee(v.proposition, e),
+    decision: decisionLevee(v.decision, e),
+  };
+}
+
 /** Les sections JSON, chacune avec son assainisseur : une section présente dans le corps remplace l'enregistrée. */
 const SECTIONS: Record<string, (v: unknown, erreurs: string[]) => unknown> = {
-  presences: (v, e) => {
-    const o = estObjet(v) ? v : {};
-    return {
-      moa: enumOuNull(o.moa, PRESENCES_MOA, 'presences.moa', e),
-      entreprise: enumOuNull(o.entreprise, PRESENCES_ENTREPRISE, 'presences.entreprise', e),
-      date_convocation: dateOuNull(o.date_convocation, 'presences.date_convocation', e),
-    };
-  },
+  presences: presencesDe,
   constats,
   proposition,
   decision,
-  levee: (v, e) => {
-    const o = estObjet(v) ? v : {};
-    return { date_pv: dateOuNull(o.date_pv, 'levee.date_pv', e), date_transmission: dateOuNull(o.date_transmission, 'levee.date_transmission', e) };
-  },
+  levee: leveeDe,
   carence: (v, e) => {
     const o = estObjet(v) ? v : {};
     return { date_lettre: dateOuNull(o.date_lettre, 'carence.date_lettre', e), date_fixation: dateOuNull(o.date_fixation, 'carence.date_fixation', e) };

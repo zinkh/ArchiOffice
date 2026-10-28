@@ -96,10 +96,40 @@ export interface Decision {
   refaction_acceptee_le: string | null;
 }
 
-/** Levée des réserves (EXE8, EXE9) : seules les dates qui portent les délais pour l'instant. */
+/** Proposition du maître d'œuvre sur la levée des réserves (EXE9, volet F). */
+export const OPTIONS_LEVEE_PROPOSITION = ['rapporter', 'lever_toutes', 'maintenir_toutes', 'lever_partie'] as const;
+/** Décision du maître d'ouvrage (EXE9, volet H) : accepte les propositions ou en décide autrement. */
+export const OPTIONS_LEVEE_DECISION = ['accepter', ...OPTIONS_LEVEE_PROPOSITION] as const;
+export type OptionLevee = (typeof OPTIONS_LEVEE_PROPOSITION)[number];
+
+export interface PropositionLevee {
+  option: OptionLevee | null;
+  date: string | null;
+  /** Numéro de l'annexe qui liste les réserves levées (option « lever_partie »). */
+  annexe_levees: string | null;
+  /** Réserves maintenues (option « lever_partie »), avec leur échéance et leur annexe. */
+  maintenues: ConditionReserve[];
+}
+
+export interface DecisionLevee {
+  option: (typeof OPTIONS_LEVEE_DECISION)[number] | null;
+  date: string | null;
+  annexe_levees: string | null;
+  maintenues: ConditionReserve[];
+}
+
+/**
+ * Levée des réserves : le PV de levée (EXE8, avec ses propres présences et constats), les
+ * propositions du maître d'œuvre puis la décision du maître d'ouvrage (EXE9), et les dates qui
+ * portent le délai de transmission.
+ */
 export interface Levee {
   date_pv: string | null;
   date_transmission: string | null;
+  presences: Presences;
+  constats: Constats;
+  proposition: PropositionLevee;
+  decision: DecisionLevee;
 }
 
 /** Carence du maître d'œuvre : le titulaire saisit le maître d'ouvrage par lettre recommandée. */
@@ -153,6 +183,16 @@ export function constatsVierges(): Constats {
   return { epreuves: null, travaux: null, ouvrages: null, pose_equipements: null, installations: null, terrains: null, annexes: {} };
 }
 
+export function leveeVierge(): Levee {
+  return {
+    date_pv: null, date_transmission: null,
+    presences: { moa: null, entreprise: null, date_convocation: null },
+    constats: constatsVierges(),
+    proposition: { option: null, date: null, annexe_levees: null, maintenues: [] },
+    decision: { option: null, date: null, annexe_levees: null, maintenues: [] },
+  };
+}
+
 export function pvVierge(regime: RegimeMarche): OprPv {
   return {
     regime,
@@ -166,7 +206,7 @@ export function pvVierge(regime: RegimeMarche): OprPv {
     constats: constatsVierges(),
     proposition: { avis: null, date_proposition: null, date_achevement_retenue: null, conditions: [], refaction_montant: null },
     decision: { issue: null, date_decision: null, date_effet: null, conditions: [], refaction_montant: null, refaction_acceptee_le: null },
-    levee: { date_pv: null, date_transmission: null },
+    levee: leveeVierge(),
     carence: { date_lettre: null, date_fixation: null },
     delais: {},
     public_info: { portee: null, prestations: null, signataire: null, reference_marche: null },
@@ -207,9 +247,26 @@ export type StatutPv =
   | 'proposition_emise'
   | 'receptionnee'
   | 'receptionnee_avec_reserves'
+  | 'reserves_levees'
+  | 'reception_rapportee'
   | 'non_receptionnee';
 
-export function statutPv(pv: Pick<OprPv, 'date_opr' | 'proposition' | 'decision'>): StatutPv {
+/**
+ * Issue de la levée des réserves : la décision du maître d'ouvrage, ou la proposition du maître
+ * d'œuvre quand il l'accepte. Null tant que ni l'une ni l'autre ne tranche.
+ */
+export function optionLeveeRetenue(levee: Pick<Levee, 'proposition' | 'decision'>): OptionLevee | null {
+  const d = levee.decision.option;
+  return d === 'accepter' ? levee.proposition.option : d;
+}
+
+export function statutPv(pv: Pick<OprPv, 'date_opr' | 'proposition' | 'decision'> & { levee?: Pick<Levee, 'proposition' | 'decision'> }): StatutPv {
+  const sousReserve = pv.decision.issue === 'sous_reserve' || pv.decision.issue === 'avec_reserve';
+  if (sousReserve && pv.levee) {
+    const option = optionLeveeRetenue(pv.levee);
+    if (option === 'lever_toutes') return 'reserves_levees';
+    if (option === 'rapporter') return 'reception_rapportee';
+  }
   switch (pv.decision.issue) {
     case 'non_receptionnee': return 'non_receptionnee';
     case 'sans_reserve': return 'receptionnee';
@@ -369,6 +426,8 @@ export function controlerPv(pv: OprPv, ctx: ContexteControle = {}): ControlePv {
     erreurs.push({ code: 'reserves_ouvertes', message: 'La réception ne peut pas être prononcée sans réserve alors que des réserves restent à lever.' });
   }
 
+  controlerLevee(pv, erreurs, avertissements);
+
   const apres = (code: string, libelle: string, date: string | null, ref: string | null) => {
     if (date && ref && estDateIso(date) && estDateIso(ref) && date < ref) {
       erreurs.push({ code, message: `${libelle} ne peut pas précéder le ${ref.split('-').reverse().join('/')}.` });
@@ -381,4 +440,38 @@ export function controlerPv(pv: OprPv, ctx: ContexteControle = {}): ControlePv {
   }
 
   return { erreurs, avertissements };
+}
+
+/** Natures dont le maintien d'une réserve exige une date limite (EXE9 4.4, 4.5, 2.4.4, 2.4.5). */
+const NATURES_LEVEE_AVEC_DATE: readonly NatureReserve[] = ['installations', 'pose'];
+
+function controlerLevee(pv: OprPv, erreurs: Anomalie[], avertissements: Anomalie[]): void {
+  const { levee, decision } = pv;
+  const traitee = !!(levee.proposition.option || levee.decision.option || levee.date_pv);
+  if (!traitee) return;
+  if (decision.issue !== 'sous_reserve' && decision.issue !== 'avec_reserve') {
+    avertissements.push({ code: 'levee_sans_reserve', message: "La levée des réserves suppose une réception prononcée avec des réserves : renseignez d'abord la décision du maître d'ouvrage." });
+  }
+  const verifier = (portee: string, option: string | null, annexe: string | null, maintenues: ConditionReserve[]) => {
+    if (option === 'lever_partie') {
+      if (!annexe) erreurs.push({ code: `${portee}_annexe_manquante`, message: "Levée partielle : le numéro de l'annexe qui liste les réserves levées est requis." });
+      if (maintenues.length === 0) erreurs.push({ code: `${portee}_maintenues_manquantes`, message: 'Levée partielle : indiquez les réserves qui sont maintenues.' });
+      for (const c of maintenues) {
+        if (NATURES_LEVEE_AVEC_DATE.includes(c.nature) && !c.avant_le) {
+          erreurs.push({ code: `${portee}_date_manquante`, message: `Une date limite est requise pour maintenir « ${c.nature} ».` });
+        }
+      }
+    } else if (maintenues.length > 0 && option) {
+      erreurs.push({ code: `${portee}_maintenues_inattendues`, message: "Les réserves maintenues ne se précisent que pour une levée partielle." });
+    }
+  };
+  verifier('levee_proposition', levee.proposition.option, levee.proposition.annexe_levees, levee.proposition.maintenues);
+  verifier('levee_decision', levee.decision.option === 'accepter' ? null : levee.decision.option, levee.decision.annexe_levees, levee.decision.maintenues);
+  const avantPv = (code: string, libelle: string, date: string | null) => {
+    if (date && levee.date_pv && estDateIso(date) && estDateIso(levee.date_pv) && date < levee.date_pv) {
+      erreurs.push({ code, message: `${libelle} ne peut pas précéder le PV de levée des réserves.` });
+    }
+  };
+  avantPv('levee_proposition_avant_pv', 'La proposition sur la levée', levee.proposition.date);
+  avantPv('levee_decision_avant_pv', 'La décision sur la levée', levee.decision.date);
 }
