@@ -27,7 +27,7 @@ export function MafCostBadge({ result, showDetails = false }: MafCostBadgeProps)
         <div className="mt-2 text-xs space-y-0.5" style={{ color: 'var(--tblr-muted)' }}>
           <div className="flex items-center gap-1">
             <IconInfoCircle size={12} />
-            Assiette : M × T × P = {fmt(result.montantM)} × {result.tauxPermil !== undefined ? '' : ''}{fmt(result.assiette)} € HT
+            Assiette de calcul : {fmt(result.assiette)} € HT
           </div>
           <div>Taux de cotisation : {result.tauxPermil} ‰ ({result.label})</div>
         </div>

@@ -1978,6 +1978,14 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
 - **Tableau** : parcelle, commune, surface, retrait, total (« partielle » si une contenance est inconnue). Retirer une ligne la retire aussi de la carte. `ref_cadastrale` et `surface_parcelle` restent remplis depuis la sélection (modifiables).
 - **ERP conditionnel** : `proposals.is_erp` (BOOLEAN, NULL = non renseigné). `isErpOperation` (`src/lib/erp.ts`) : le choix explicite l'emporte, sinon l'opération est ERP dès qu'un champ ERP est déjà saisi (une donnée existante n'est jamais cachée). Type et catégorie, surfaces ERP/ERT et effectifs ne s'affichent que pour un ERP ; à l'enregistrement d'une opération non ERP ces champs sont vidés.
 
+### Proposition : nature de l'opération, surfaces, ERP, indice, envoi au client
+
+- **Nature de l'opération** (`proposals.operation_nature` `neuf` | `rehabilitation`, `surface_existante`, `surface_rehabilitee`, `supabase/migrate_proposal_surfaces_nature.sql`) : logique pure dans `src/lib/proposalSurfaces.ts` (testée). Neuf : une surface de plancher, montant des travaux = surface x ratio de construction neuve (`ratio_extension`). Réhabilitation : surface existante, surface réhabilitée (à défaut toute l'existante), surface d'extension ; la surface de plancher (`surface_plancher`, lue par la MAF et les exports) est recalculée = existante + extension, et le montant = réhabilitée x ratio réhab + extension x ratio extension. Une proposition antérieure sans nature la déduit (`operationNature`) et relit `surface_plancher` comme surface existante tant que rien n'est saisi à son nom.
+- **Champs ERP** (nom de l'établissement, avant/après travaux, type et catégorie ERP, surfaces ERP/ERT, effectifs) : visibles et exportés seulement pour une opération ERP, vidés à l'enregistrement sinon. « Type de projet » et « Catégorie de projet » restent visibles (ils alimentent la MAF, les exports et la déduction neuf/réhabilitation).
+- **Indice** : démarre à `A` et se change à la main ; « Date de modification » n'est plus saisie.
+- **MAF** : le calcul est affiché sous le calcul des honoraires (TVA/TTC), selon le type de mission choisi en section 04.
+- **Envoyer au client** (action de la liste) : `ProposalExportModal` (`intent: 'send'`) génère le PDF sans le télécharger (`exportProposalPdf(..., { download: false })`) et ouvre `SendProposalMail` (`MailComposeModal` avec `initialFiles`) ; une proposition en brouillon passe à « Envoyée » une fois le message parti.
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres

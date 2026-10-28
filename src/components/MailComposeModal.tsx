@@ -58,6 +58,8 @@ interface MailComposeModalProps {
   replyTo?: MailReplyContext | null;
   initial?: MailComposeInitial;
   forwardAttachments?: MailForwardAttachment[];
+  /** Fichiers déjà prêts, joints d'office (ex. le PDF d'une proposition) ; la personne peut les retirer. */
+  initialFiles?: File[];
   title?: string;
   onClose: () => void;
   onSent?: () => void;
@@ -144,7 +146,7 @@ function RecipientField({ label, value, onChange, disabled, required, contacts }
   );
 }
 
-export default function MailComposeModal({ accounts, replyTo, initial, forwardAttachments, title, onClose, onSent }: MailComposeModalProps) {
+export default function MailComposeModal({ accounts, replyTo, initial, forwardAttachments, initialFiles, title, onClose, onSent }: MailComposeModalProps) {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const sendable = accounts.filter(canSendNatively);
@@ -163,7 +165,7 @@ export default function MailComposeModal({ accounts, replyTo, initial, forwardAt
   // le corps, modifiable ou supprimable avant l'envoi ; le texte cité ou
   // transféré vient après elle.
   const [body, setBody] = useState(`${initial?.body || ''}${currentUser?.mailSignature ? `\n\n${currentUser.mailSignature}` : ''}${initial?.quote || ''}`);
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<File[]>(() => initialFiles ?? []);
   const [forwardIds, setForwardIds] = useState<Set<string>>(new Set());
   const [contacts, setContacts] = useState<ContactOption[]>([]);
   const [sending, setSending] = useState(false);

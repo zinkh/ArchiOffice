@@ -2,7 +2,7 @@ import { contactPatchFromProposal, fillMissingClientFields } from '../lib/propos
 import * as React from 'react';
 import { useState, useEffect, useId, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown } from '@tabler/icons-react';
+import { IconPlus, IconFileSpreadsheet, IconCircleCheck, IconClock, IconX, IconTrash, IconDeviceFloppy, IconSearch, IconFilter, IconEdit, IconFileText, IconFileTypePdf, IconContract, IconChevronDown, IconSend } from '@tabler/icons-react';
 import { AnimatePresence } from 'motion/react';
 import { ModalShell } from '../components/ui/ModalShell';
 import { formatCurrency, cn } from '../lib/utils';
@@ -40,6 +40,7 @@ import { MAF_INTERCALAIRE_OPTIONS, TAUX_MISSION_OPTIONS } from '../lib/mafUtils'
 import { useMafCost } from '../hooks/useMafCost';
 import { useSettings } from '../hooks/useSettings';
 import { MafCostBadge } from '../components/MafCostBadge';
+import { operationNature, surfaceExistante, surfaceRehabilitee, coutTravauxParRatios, surfacesApresSaisieRehabilitation } from '../lib/proposalSurfaces';
 import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardModal';
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
@@ -173,6 +174,13 @@ export default function Proposals() {
   const [contactModalContext, setContactModalContext] = useState<{ type: 'client' } | { type: 'specialty'; idx: number } | null>(null);
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
   const [exportProposal, setExportProposal] = useState<Proposal | null>(null);
+  // `send` : la fenêtre s'ouvre depuis « Envoyer au client » (l'envoi y est l'action principale).
+  const [exportIntent, setExportIntent] = useState<'export' | 'send'>('export');
+  const openExport = (p: Proposal, intent: 'export' | 'send') => { setExportIntent(intent); setExportProposal(p); };
+  const clientEmailOf = (p: Proposal): string => {
+    const contact = contacts.find(c => c.id === p.client_id);
+    return p.email_client || contact?.email || contact?.email_work || '';
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
     title: '',
@@ -215,7 +223,9 @@ export default function Proposals() {
     effectif_public: '',
     effectif_personnel: '',
     ind: 'A',
-    date_modification: new Date().toLocaleDateString('fr-FR'),
+    operation_nature: 'neuf',
+    surface_existante: '',
+    surface_rehabilitee: '',
     maf_intercalaire: undefined,
     taux_mission: undefined,
     specialties_list: [],
@@ -257,6 +267,7 @@ export default function Proposals() {
   const parcels = useMemo(() => parseStoredParcels(newProposal.parcelles_selection), [newProposal.parcelles_selection]);
   const selectedParcelGeometry = useMemo(() => selectionGeometry(parcels), [parcels]);
   const isErp = isErpOperation(newProposal);
+  const nature = operationNature(newProposal);
 
   const handleParcelsChange = (next: StoredParcel[]) => {
     setFormTouched(true);
@@ -369,7 +380,7 @@ export default function Proposals() {
         ? { ...newProposal, is_erp: true }
         : {
             ...newProposal, is_erp: false,
-            type_et_cat: '', surface_erp: '', surface_ert: '', effectif_public: '', effectif_personnel: '',
+            type_et_cat: '', nom_etablissement: '', avant_trav: '', apres_trav: '', surface_erp: '', surface_ert: '', effectif_public: '', effectif_personnel: '',
           };
       const res = await fetch(url, {
         method,
@@ -416,7 +427,15 @@ export default function Proposals() {
   const handleEditClick = (proposal: Proposal) => {
     setEditingProposal(proposal);
     // Le contact est la source des coordonnées : les champs laissés vides se remplissent depuis sa fiche.
-    setNewProposal(fillMissingClientFields(proposal, contacts.find(c => c.id === proposal.client_id)) as Proposal);
+    const filled = fillMissingClientFields(proposal, contacts.find(c => c.id === proposal.client_id)) as Proposal;
+    // Les propositions antérieures n'ont pas de nature : on la déduit, et l'indice repart de A s'il manque.
+    const nat = operationNature(filled);
+    const normalized: Proposal = { ...filled, ind: filled.ind || 'A', operation_nature: nat };
+    if (nat === 'rehabilitation') {
+      normalized.surface_existante = surfaceExistante(filled);
+      Object.assign(normalized, surfacesApresSaisieRehabilitation(normalized));
+    }
+    setNewProposal(normalized);
     setCostMode((proposal.ratio_rehab || proposal.ratio_extension) ? 'ratio' : 'manual');
     setSubmitError(null);
     setFormTouched(false);
@@ -583,15 +602,11 @@ export default function Proposals() {
   // Auto-calculate construction_cost from ratio fields when in ratio mode
   useEffect(() => {
     if (costMode !== 'ratio') return;
-    const surfExist = parseFloat(newProposal.surface_plancher as string) || 0;
-    const surfExt = parseFloat(newProposal.surface_plancher_ext as string) || 0;
-    const ratioRehab = newProposal.ratio_rehab || 0;
-    const ratioExt = newProposal.ratio_extension || 0;
-    const computed = surfExist * ratioRehab + surfExt * ratioExt;
+    const computed = coutTravauxParRatios(newProposal);
     if (Math.abs(computed - (newProposal.construction_cost || 0)) > 0.01) {
       setNewProposal(prev => ({ ...prev, construction_cost: Number(computed.toFixed(2)) }));
     }
-  }, [costMode, newProposal.surface_plancher, newProposal.surface_plancher_ext, newProposal.ratio_rehab, newProposal.ratio_extension]);
+  }, [costMode, newProposal.operation_nature, newProposal.type_projet, newProposal.surface_plancher, newProposal.surface_plancher_ext, newProposal.surface_existante, newProposal.surface_rehabilitee, newProposal.ratio_rehab, newProposal.ratio_extension]);
 
   // Auto-calculate amount if factors change
   useEffect(() => {
@@ -710,7 +725,8 @@ export default function Proposals() {
             actions={p => (
               <div className="flex gap-2">
                 <button onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
-                <button onClick={() => setExportProposal(p)} title="Export PDF" className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
+                <button onClick={() => openExport(p, 'send')} title={t('proposals_send_to_client')} aria-label={t('proposals_send_to_client')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconSend size={15} /></button>
+                <button onClick={() => openExport(p, 'export')} title="Export PDF" className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
                 {p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
@@ -787,7 +803,15 @@ export default function Proposals() {
                         <IconFileText size={20} />
                       </button>
                       <button
-                        onClick={() => setExportProposal(proposal)}
+                        onClick={() => openExport(proposal, 'send')}
+                        className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                        title={t('proposals_send_to_client')}
+                        aria-label={t('proposals_send_to_client')}
+                      >
+                        <IconSend size={20} />
+                      </button>
+                      <button
+                        onClick={() => openExport(proposal, 'export')}
                         className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                         title={t('pdf_generator')}
                       >
@@ -1080,15 +1104,17 @@ export default function Proposals() {
                     <FormField label="Référence Cadastrale" value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal(prev => ({...prev, ref_cadastrale: v}))} />
                     <FormField label="Zone PLU" value={newProposal.zone_plu} onChange={(v: any) => setNewProposal(prev => ({...prev, zone_plu: v}))} />
                     <FormField label="Surface Parcelle" value={newProposal.surface_parcelle} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_parcelle: v}))} />
-                    <FormField label="Nom de l’établissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
-                    <FormField label="Avant Travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
-                    <FormField label="Après Travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
                     <FormField label="Opération classée ERP (établissement recevant du public)" type="checkbox" value={isErp} onChange={(v: any) => setNewProposal(prev => ({...prev, is_erp: !!v}))} />
                     {isErp && (
-                      <FormField label="Type et catégorie ERP" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                      <>
+                        <FormField label="Nom de l’établissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
+                        <FormField label="Avant travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
+                        <FormField label="Après travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
+                        <FormField label="Type et catégorie ERP" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                      </>
                     )}
-                    <FormField label="Type" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
-                    <FormField label="Catégorie" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
+                    <FormField label="Type de projet" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
+                    <FormField label="Catégorie de projet" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
                     <FormField
                       label="Type de mission (circulaire MAF)"
                       type="select"
@@ -1106,11 +1132,6 @@ export default function Proposals() {
                       />
                     )}
                   </div>
-                  {mafCost && (
-                    <div className="mt-2">
-                      <MafCostBadge result={mafCost} showDetails />
-                    </div>
-                  )}
                 </div>
 
                 {/* Section 5: Surfaces & Capacity */}
@@ -1120,8 +1141,29 @@ export default function Proposals() {
                     {t('proposals_section_surfaces')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                    <FormField label="Surface plancher" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
-                    <FormField label="Surface extension" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher_ext: v}))} />
+                    <FormField
+                      label="Nature de l’opération"
+                      type="select"
+                      options={[{ id: 'neuf', name: 'Construction neuve' }, { id: 'rehabilitation', name: 'Réhabilitation (avec ou sans extension)' }]}
+                      value={nature}
+                      onChange={(v: any) => setNewProposal(prev => {
+                        const next = { ...prev, operation_nature: v === 'rehabilitation' ? 'rehabilitation' : 'neuf' } as Partial<Proposal>;
+                        if (next.operation_nature === 'rehabilitation') {
+                          return { ...next, surface_existante: surfaceExistante(next), ...surfacesApresSaisieRehabilitation({ ...next, surface_existante: surfaceExistante(next) }) };
+                        }
+                        return next;
+                      })}
+                    />
+                    {nature === 'neuf' ? (
+                      <FormField label="Surface de plancher (m²)" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
+                    ) : (
+                      <>
+                        <FormField label="Surface existante (m²)" value={newProposal.surface_existante} onChange={(v: any) => setNewProposal(prev => { const n = { ...prev, surface_existante: v }; return { ...n, ...surfacesApresSaisieRehabilitation(n) }; })} />
+                        <FormField label="Surface réhabilitée (m²)" value={newProposal.surface_rehabilitee} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_rehabilitee: v}))} />
+                        <FormField label="Surface d’extension (m²)" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => { const n = { ...prev, surface_plancher_ext: v }; return { ...n, ...surfacesApresSaisieRehabilitation(n) }; })} />
+                        <div className="text-xs text-[var(--tblr-secondary)] self-end pb-2">Surface de plancher après travaux : {newProposal.surface_plancher || '0'} m²</div>
+                      </>
+                    )}
                     {isErp && (
                       <>
                         <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
@@ -1130,7 +1172,6 @@ export default function Proposals() {
                         <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
                       </>
                     )}
-                    <FormField label="Date de modification" value={newProposal.date_modification} onChange={(v: any) => setNewProposal(prev => ({...prev, date_modification: v}))} />
                   </div>
                 </div>
 
@@ -1208,13 +1249,16 @@ export default function Proposals() {
                   ) : (
                     <div className="space-y-3 p-3 bg-[var(--tblr-primary-lt)] rounded-lg border border-[var(--tblr-border)]">
                       <p className="text-[0.6875rem] text-[var(--tblr-primary)] font-medium">
-                        Montant des travaux = Surface existante × Ratio réhabilitation + Surface extension/neuf × Ratio extension
+                        {nature === 'neuf'
+                          ? 'Montant des travaux = Surface de plancher × Ratio construction neuve'
+                          : 'Montant des travaux = Surface réhabilitée × Ratio réhabilitation + Surface d’extension × Ratio extension'}
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        {nature === 'rehabilitation' && (<>
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface existante (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface réhabilitée (m²)</label>
                           <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
-                            {newProposal.surface_plancher || '0'} m²
+                            {surfaceRehabilitee(newProposal)} m²
                             <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
                           </div>
                         </div>
@@ -1225,14 +1269,24 @@ export default function Proposals() {
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_rehab: Number(v)}))}
                         />
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface extension/neuf (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface d’extension (m²)</label>
                           <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
                             {newProposal.surface_plancher_ext || '0'} m²
                             <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
                           </div>
                         </div>
+                        </>)}
+                        {nature === 'neuf' && (
+                        <div className="space-y-1">
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface de plancher (m²)</label>
+                          <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
+                            {newProposal.surface_plancher || '0'} m²
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
+                          </div>
+                        </div>
+                        )}
                         <FormField
-                          label="Ratio extension (€/m²)"
+                          label={nature === 'neuf' ? 'Ratio construction neuve (€/m²)' : 'Ratio extension (€/m²)'}
                           type="number"
                           value={newProposal.ratio_extension}
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_extension: Number(v)}))}
@@ -1279,6 +1333,17 @@ export default function Proposals() {
                         {formatCurrency(totalTTC)}
                       </div>
                     </div>
+                  </div>
+                  <div className="pt-1">
+                    {mafCost ? (
+                      <MafCostBadge result={mafCost} showDetails />
+                    ) : (
+                      <p className="text-xs text-[var(--tblr-muted)]">
+                        {settings?.maf_enabled
+                          ? 'Choisissez le type de mission (circulaire MAF) en section 04 pour afficher le calcul de l’assurance MAF.'
+                          : 'Le calcul de l’assurance MAF est désactivé dans les réglages du cabinet.'}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1569,6 +1634,10 @@ export default function Proposals() {
       {exportProposal && (
         <ProposalExportModal
           proposal={exportProposal}
+          intent={exportIntent}
+          clientEmail={clientEmailOf(exportProposal)}
+          // Un brouillon envoyé au client n'est plus un brouillon : il passe « Envoyée ».
+          onSent={() => { if (exportProposal.status === 'Draft') handleUpdateStatus(exportProposal, 'Sent'); }}
           onClose={() => setExportProposal(null)}
         />
       )}

@@ -392,7 +392,7 @@ export interface Project {
   effectif_public?: string;
   effectif_personnel?: string;
   ind?: string;
-  date_modification?: string;
+  date_modification?: string; // obsolète : plus saisi
   site_postcode?: string;
   site_city?: string;
   // MAF fields
@@ -1159,6 +1159,10 @@ export interface Proposal {
   parcelles_selection?: string | null;
   /** L'opération est un ERP. Absent : déduit des champs ERP déjà saisis (`isErpOperation`). */
   is_erp?: boolean | null;
+  /** `neuf` ou `rehabilitation` ; absent : déduit (voir lib/proposalSurfaces). */
+  operation_nature?: string | null;
+  surface_existante?: string | null;
+  surface_rehabilitee?: string | null;
   nom_etablissement?: string;
   avant_trav?: string;
   apres_trav?: string;
@@ -1172,7 +1176,7 @@ export interface Proposal {
   effectif_public?: string;
   effectif_personnel?: string;
   ind?: string;
-  date_modification?: string;
+  date_modification?: string; // obsolète : plus saisi
   // MAF — type de mission (circulaire d'activités)
   maf_intercalaire?: MafIntercalaire;
   taux_mission?: number;
