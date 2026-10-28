@@ -85,6 +85,10 @@ function AutoTextarea({ value, onCommit, className, placeholder, id }: { value: 
   }, []);
   // Recalcule aussi quand la colonne est redimensionnée (largeur du parent).
   useEffect(() => {
+    // Champ non contrôlé : une valeur qui change hors saisie (relecture du serveur, liste décalée)
+    // doit être reprise, sinon le champ garde le texte d'une autre observation.
+    const current = ref.current;
+    if (current && document.activeElement !== current && current.value !== value) current.value = value;
     fit();
     const el = ref.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -101,7 +105,9 @@ function AutoTextarea({ value, onCommit, className, placeholder, id }: { value: 
       defaultValue={value}
       placeholder={placeholder}
       onInput={fit}
-      onBlur={e => onCommit(e.target.value)}
+      // Rien n'est enregistré si le texte n'a pas changé : passer dans un champ sans le modifier
+      // ne doit jamais écrire son contenu affiché sur une observation.
+      onBlur={e => { if (e.target.value !== value) onCommit(e.target.value); }}
     />
   );
 }
@@ -276,15 +282,23 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
     }
   }, [lots, projectId]);
 
+  // Une ligne ajoutée à la fois : un second appui avant la réponse du serveur créait une seconde observation.
+  const addingRef = useRef(false);
   const addRow = async () => {
-    // Id généré côté client : une création rejouée après coupure réseau
-    // (file de synchro hors-ligne) ne crée jamais deux observations.
-    const ok = await createObservation({ id: crypto.randomUUID(), texte: '', statut: 'À faire', type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
-      // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
-      batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
-      phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
-    });
-    if (ok) onChanged?.();
+    if (addingRef.current) return;
+    addingRef.current = true;
+    try {
+      // Id généré côté client : une création rejouée après coupure réseau
+      // (file de synchro hors-ligne) ne crée jamais deux observations.
+      const ok = await createObservation({ id: crypto.randomUUID(), texte: '', statut: 'À faire', type: typeFilter || defaultType || 'observation', created_report_id: currentReportId || undefined,
+        // Une ligne ajoutée sous un filtre de bâtiment ou de phase y est affectée d'office.
+        batiment_id: filtreDecoupage.batimentId && filtreDecoupage.batimentId !== SANS_AFFECTATION ? filtreDecoupage.batimentId : null,
+        phase_id: filtreDecoupage.phaseId && filtreDecoupage.phaseId !== SANS_AFFECTATION ? filtreDecoupage.phaseId : null,
+      });
+      if (ok) onChanged?.();
+    } finally {
+      addingRef.current = false;
+    }
   };
 
   // Nouvelle remarque pour la même entreprise (même lot, mêmes bâtiment et phase) : on saisit à la suite.
@@ -553,6 +567,7 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
             className="w-full p-1.5 bg-transparent border-none focus:ring-1 focus:ring-[var(--tblr-primary)] rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-xs dark:text-white"
             defaultValue={info.getValue() || ''}
             onBlur={e => {
+              if (e.target.value === (row.due_date || '')) return;
               updateLocal(row.id, { due_date: e.target.value });
               saveField(row.id, 'due_date', e.target.value);
             }}
@@ -648,6 +663,10 @@ export default function ObservationsTable({ projectId, lots, decoupage = DECOUPA
   const table = useReactTable({
     data: filtered,
     columns,
+    // Sans cela l'identifiant d'une ligne est sa position dans la liste : dès qu'une ligne apparaît ou
+    // disparaît (ajout, suppression, filtre « Ouverts seulement »), les champs de saisie sont réutilisés
+    // par une autre observation et lui écrivent le texte de la précédente.
+    getRowId: observation => observation.id,
     state: { columnFilters, columnVisibility: groupByLot ? { ...columnVisibility, lot: false } : columnVisibility, columnSizing },
     onColumnSizingChange: setColumnSizing,
     enableColumnResizing: true,
