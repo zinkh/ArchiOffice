@@ -114,3 +114,19 @@ describe('détection de doublons', () => {
     expect(findDuplicateGroups(list)).toEqual([]);
   });
 });
+
+import { isSafeDuplicateGroup, planSafeMerges } from '../contactMerge';
+
+describe('fusion automatique des doublons sûrs', () => {
+  it('même nom sans conflit : sûr ; téléphones différents ou noms différents : non', () => {
+    expect(isSafeDuplicateGroup([{ id: 'a', company_name: 'SOCOTEC' }, { id: 'b', company_name: 'Socotec', email: 'x@y.fr' }])).toBe(true);
+    expect(isSafeDuplicateGroup([{ id: 'a', company_name: 'LCR', phone: '1' }, { id: 'b', company_name: 'LCR', phone: '2' }])).toBe(false);
+    expect(isSafeDuplicateGroup([{ id: 'a', first_name: 'A', last_name: 'Durand', email: 'z@z.fr' }, { id: 'b', first_name: 'P', last_name: 'Martin', email: 'z@z.fr' }])).toBe(false);
+  });
+
+  it('planSafeMerges garde la fiche la plus renseignée comme fiche conservée', () => {
+    const { safe, skipped } = planSafeMerges([{ id: 'a', company_name: 'SOCOTEC' }, { id: 'b', company_name: 'Socotec', email: 'x@y.fr', city: 'Nancy' }]);
+    expect(skipped).toBe(0);
+    expect(safe).toEqual([{ primaryId: 'b', duplicateIds: ['a'] }]);
+  });
+});
