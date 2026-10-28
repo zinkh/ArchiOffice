@@ -1,12 +1,13 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconX, IconDownload, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
+  IconX, IconDownload, IconSend, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
 } from '@tabler/icons-react';
 import type { Proposal, MafCostResult } from '../types';
 import { useSettings } from '../hooks/useSettings';
 import { useMafCost } from '../hooks/useMafCost';
 import { MafCostBadge } from './MafCostBadge';
+import { SendProposalMail } from './proposal/SendProposalMail';
 import { loadCotraitantIdentities } from '../lib/pdfLetterhead';
 import { paginateFlow, PAGE_HEIGHT_MM, CONTENT_TOP_MM, CONTENT_BOTTOM_MM } from '../lib/pdfPagination';
 import {
@@ -365,9 +366,10 @@ const renderObjet: SectionRenderer = (d, t, _ctx, newPage) => {
           <Table>
             <thead><tr><Th template={t}>État</Th><Th template={t}>Description</Th></tr></thead>
             <tbody>
-              <tr><Td>Avant Travaux</Td><Td>{d.avantTravaux}</Td></tr>
-              <tr><Td>Après Travaux</Td><Td>{d.apresTravaux}</Td></tr>
-              <tr><Td>Type / Catégorie</Td><Td>{d.typeEtCat} ({d.type} - {d.categorie})</Td></tr>
+              {d.isErp && <tr><Td>Avant Travaux</Td><Td>{d.avantTravaux}</Td></tr>}
+              {d.isErp && <tr><Td>Après Travaux</Td><Td>{d.apresTravaux}</Td></tr>}
+              {d.isErp && d.typeEtCat && <tr><Td>Type / Catégorie ERP</Td><Td>{d.typeEtCat}</Td></tr>}
+              <tr><Td>Type / Catégorie de projet</Td><Td>{[d.type, d.categorie].filter(Boolean).join(' - ') || '-'}</Td></tr>
             </tbody>
           </Table>
 
@@ -392,12 +394,15 @@ const renderSurfaces: SectionRenderer = (d, t, _ctx, newPage) => (
     <Table>
       <thead><tr><Th template={t}>Désignation</Th><Th template={t}>Surface (m²)</Th></tr></thead>
       <tbody>
-        <tr><Td>Surface de Plancher</Td><Td>{d.surfPlancher} m²</Td></tr>
-        <tr><Td>Surface d'Extension</Td><Td>{d.surfExtension} m²</Td></tr>
-        <tr><Td>Surface ERP</Td><Td>{d.surfERP} m²</Td></tr>
-        <tr><Td>Surface ERT</Td><Td>{d.surfERT} m²</Td></tr>
+        {d.nature === 'rehabilitation' && <tr><Td>Surface existante</Td><Td>{d.surfExistante} m²</Td></tr>}
+        {d.nature === 'rehabilitation' && <tr><Td>Surface réhabilitée</Td><Td>{d.surfRehabilitee} m²</Td></tr>}
+        {d.nature === 'rehabilitation' && <tr><Td>Surface d'Extension</Td><Td>{d.surfExtension} m²</Td></tr>}
+        <tr><Td>{d.nature === 'rehabilitation' ? 'Surface de Plancher après travaux' : 'Surface de Plancher'}</Td><Td>{d.surfPlancher} m²</Td></tr>
+        {d.isErp && <tr><Td>Surface ERP</Td><Td>{d.surfERP} m²</Td></tr>}
+        {d.isErp && <tr><Td>Surface ERT</Td><Td>{d.surfERT} m²</Td></tr>}
       </tbody>
     </Table>
+    {d.isErp && (<>
     <H3>Effectifs</H3>
     <Table>
       <tbody>
@@ -405,6 +410,7 @@ const renderSurfaces: SectionRenderer = (d, t, _ctx, newPage) => (
         <tr><Td>Personnel</Td><Td>{d.effectifPersonnel} personnes</Td></tr>
       </tbody>
     </Table>
+    </>)}
     <H3>Budget & Programme</H3>
     <div data-pdf-keep="true" style={{ marginTop: '6mm', padding: '5mm', border: '1px solid #eee', borderRadius: '2mm' }}>
       <div style={{ fontSize: '10pt', fontWeight: 'bold', color: t.visual.primaryColor, marginBottom: '2mm' }}>Montant estimatif des travaux</div>
@@ -944,11 +950,24 @@ function TemplateEditorPanel({
 const PARTNER_LOGO_MAX_W = 600;
 const PARTNER_LOGO_MAX_H = 300;
 
-export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal; onClose: () => void }) {
+interface ProposalExportModalProps {
+  proposal: Proposal;
+  onClose: () => void;
+  /** Adresse e-mail du client (fiche contact ou saisie de la proposition), préremplie à l'envoi. */
+  clientEmail?: string;
+  /** Appelé quand le message a bien été envoyé au client. */
+  onSent?: () => void;
+  /** `send` : ouverte depuis « Envoyer au client », l'envoi est l'action principale. */
+  intent?: 'export' | 'send';
+}
+
+export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSent, intent = 'export' }: ProposalExportModalProps) {
   const { t } = useTranslation();
   const { settings } = useSettings();
   const [template, setTemplate] = useState<ProposalTemplate>(() => loadStoredTemplate());
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPreparingMail, setIsPreparingMail] = useState(false);
+  const [mailFile, setMailFile] = useState<File | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
@@ -1026,6 +1045,22 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
     }
   };
 
+  // Envoi au client : le PDF est préparé comme pour l'export (sans téléchargement),
+  // puis joint à un message prérempli que la personne relit avant de l'envoyer.
+  const handleSend = async () => {
+    if (!previewRef.current) return;
+    setIsPreparingMail(true);
+    try {
+      const { blob, filename } = await exportProposalPdf(previewRef.current, data, { download: false });
+      setMailFile(new File([blob], filename, { type: 'application/pdf' }));
+    } catch (err) {
+      console.error('PDF Generation Error:', err);
+      alert(t('proposals_send_pdf_error'));
+    } finally {
+      setIsPreparingMail(false);
+    }
+  };
+
   // Le contenu, la densité des tableaux ou l'arrivée d'un logo changent les
   // hauteurs : on repagine après chaque rendu (idempotent, voir paginateFlow).
   const repaginate = () => {
@@ -1070,12 +1105,24 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={handleSend}
+              disabled={isPreparingMail || isGenerating}
+              className={intent === 'send'
+                ? 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
+            >
+              <IconSend size={16} />
+              {isPreparingMail ? t('proposals_send_preparing') : t('proposals_send_to_client')}
+            </button>
+            <button
               onClick={handleExport}
-              disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition"
+              disabled={isGenerating || isPreparingMail}
+              className={intent === 'send'
+                ? 'flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'}
             >
               <IconDownload size={16} />
-              {isGenerating ? 'Génération...' : 'Exporter PDF'}
+              {isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}
             </button>
             <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-lg transition-colors">
               <IconX size={20} />
@@ -1126,6 +1173,16 @@ export function ProposalExportModal({ proposal, onClose }: { proposal: Proposal;
           </div>
         </div>
       </div>
+      {mailFile && (
+        <SendProposalMail
+          file={mailFile}
+          to={clientEmail}
+          reference={data.reference}
+          title={data.titre}
+          onSent={() => { setMailFile(null); onSent?.(); }}
+          onClose={() => setMailFile(null)}
+        />
+      )}
     </div>
   );
 }

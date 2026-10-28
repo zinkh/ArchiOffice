@@ -4802,4 +4802,11 @@ export default {
       "opr_export_all": "Tout exporter (ZIP)",
       "opr_export_all_empty": "Aucun PV à exporter.",
       "opr_reopen": "Rouvrir la signature",
+  "proposals_send_to_client": "Envoyer au client",
+  "proposals_send_preparing": "Préparation du PDF…",
+  "proposals_send_pdf_error": "Impossible de préparer le PDF à envoyer. Réessayez.",
+  "proposals_send_mail_subject": "Proposition d'honoraires {{reference}} - {{title}}",
+  "proposals_send_mail_body": "Bonjour,\n\nVeuillez trouver ci-joint notre proposition {{reference}} relative à l'opération « {{title}} ».\n\nNous restons à votre disposition pour en discuter et répondre à vos questions.\n\nCordialement,",
+  "proposals_export_generating": "Génération…",
+  "proposals_export_pdf": "Exporter PDF",
 };

@@ -41,7 +41,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
       
       const geoData = await geoRes.json();
       if (!geoData.features?.length) {
-        setError('Address not found');
+        setError('Adresse introuvable');
         setLoading(false);
         return;
       }
@@ -87,11 +87,11 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
           surface: p.contenance
         });
       } else {
-        setError('No parcel found at this location');
+        setError('Aucune parcelle trouvée à cet emplacement');
       }
     } catch (err: any) {
       console.error('Cadastre API error:', err);
-      setError(`Could not retrieve cadastre info: ${err.message || 'Unknown error'}`);
+      setError(`Impossible de récupérer les informations cadastrales : ${err.message || 'erreur inconnue'}`);
     } finally {
       setLoading(false);
     }
@@ -113,7 +113,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Cadastre Download</span>
+          <span className="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Téléchargement cadastre</span>
         </div>
         {loading && <div className="w-3 h-3 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>}
       </div>
@@ -130,20 +130,20 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
             className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
           >
             <IconRefresh size={14} />
-            Retry Lookup
+            Relancer la recherche
           </button>
         </div>
       ) : parcel ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-xs font-bold text-zinc-900 dark:text-white">Parcel {parcel.id}</p>
+              <p className="text-xs font-bold text-zinc-900 dark:text-white">Parcelle {parcel.id}</p>
               <div className="flex items-center gap-2 mt-0.5">
                 <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider">Section {parcel.section} - N° {parcel.numero}</p>
                 {parcel.surface && (
                   <>
                     <span className="text-zinc-300 dark:text-zinc-700">•</span>
-                    <p className="text-[0.6875rem] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Surface: {parcel.surface} m²</p>
+                    <p className="text-[0.6875rem] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">Surface : {parcel.surface} m²</p>
                   </>
                 )}
               </div>
@@ -158,7 +158,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
             >
               <IconFileTypePdf size={16} className="text-red-500" />
-              TIFF Image (Commune)
+              Image TIFF (commune)
             </a>
             <a 
               href={`https://www.cadastre.gouv.fr/scpc/rechercherParcelle.do?codeDepartement=${parcel.commune.startsWith('97') || parcel.commune.startsWith('98') ? parcel.commune.substring(0, 3) : parcel.commune.substring(0, 2)}&codeCommune=${parcel.commune.startsWith('97') || parcel.commune.startsWith('98') ? parcel.commune.substring(3) : parcel.commune.substring(2)}&prefixe=${parcel.prefixe}&section=${parcel.section}&numero=${parcel.numero}`}
@@ -167,7 +167,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
             >
               <IconExternalLink size={16} className="text-blue-600" />
-              Official Site (PDF)
+              Site officiel (PDF)
             </a>
             <a 
               href={`https://cadastre.data.gouv.fr/bundler/cadastre-etalab/communes/${parcel.commune}/shp/parcelles`}
@@ -176,7 +176,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
             >
               <IconDownload size={16} className="text-zinc-500" />
-              SHP (Parcelles)
+              SHP (parcelles)
             </a>
             <a 
               href={`https://cadastre.data.gouv.fr/bundler/pci-vecteur/feuilles/${parcel.id.substring(0, 10)}01/dxf`}
@@ -185,7 +185,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
             >
               <IconFileCode size={16} className="text-orange-500" />
-              DXF (Sheet ZIP)
+              DXF (feuille, ZIP)
             </a>
             <a 
               href={`https://cadastre.data.gouv.fr/carte?commune=${parcel.insee}#18/${coords?.lat}/${coords?.lon}`}
@@ -194,7 +194,7 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               className="col-span-2 flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs font-bold text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
             >
               <IconMap size={16} />
-              Interactive Map (Official)
+              Carte interactive (officielle)
             </a>
             <a 
               href={`https://www.geoportail.gouv.fr/carte?c=${coords?.lon},${coords?.lat}&z=19&l0=CADASTRALPARCELS.PARCELS::GEOPORTAIL:G:WMTS(1)&permalink=yes`}
@@ -203,16 +203,16 @@ export function CadastreDownload({ address }: CadastreDownloadProps) {
               className="col-span-2 flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg text-xs font-bold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
             >
               <IconMap size={16} className="text-emerald-600" />
-              View on Geoportail
+              Voir sur le Géoportail
             </a>
           </div>
-          <p className="text-[0.6875rem] text-zinc-400 italic">Source: cadastre.data.gouv.fr (Bundler API)</p>
+          <p className="text-[0.6875rem] text-zinc-400 italic">Source : cadastre.data.gouv.fr (API Bundler)</p>
           <p className="text-[0.6875rem] text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-100 dark:border-zinc-800">
-            Note: We are now using the official Bundler API. Vector data (DXF, SHP) and images (TIFF) are provided as ZIP archives for the commune or sheet.
+            Note : les données vectorielles (DXF, SHP) et les images (TIFF) sont fournies par l’API officielle Bundler, sous forme d’archives ZIP par commune ou par feuille.
           </p>
         </div>
       ) : !loading && (
-        <p className="text-xs text-zinc-400 italic">Searching for parcel information...</p>
+        <p className="text-xs text-zinc-400 italic">Recherche des informations de la parcelle...</p>
       )}
       </div>
     </div>

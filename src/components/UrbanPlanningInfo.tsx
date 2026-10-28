@@ -145,7 +145,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
         setDocuments(detailedDocs);
       } catch (err: any) {
         console.error('GPU API error:', err);
-        setError('Could not retrieve urban planning info');
+        setError('Impossible de récupérer les informations d’urbanisme');
       } finally {
         setLoading(false);
       }
@@ -181,7 +181,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
                     <IconFileDescription size={14} className="text-blue-500" />
                     {doc.type} - {doc.name}
                   </h4>
-                  <p className="text-[0.6875rem] text-zinc-500 mt-0.5">Updated: {new Date(doc.updateDate).toLocaleDateString()}</p>
+                  <p className="text-[0.6875rem] text-zinc-500 mt-0.5">Mis à jour : {Number.isNaN(new Date(doc.updateDate).getTime()) ? '-' : new Date(doc.updateDate).toLocaleDateString('fr-FR')}</p>
                 </div>
                 {doc.archiveUrl && (
                   <a 
@@ -215,14 +215,14 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
                     </a>
                   ))}
                   {doc.files.length > 5 && (
-                    <p className="text-[0.6875rem] text-zinc-400 italic mt-1">+{doc.files.length - 5} more files in archive</p>
+                    <p className="text-[0.6875rem] text-zinc-400 italic mt-1">+{doc.files.length - 5} autres fichiers dans l’archive</p>
                   )}
                 </div>
               )}
             </div>
           ))}
           <p className="text-[0.6875rem] text-zinc-400 bg-zinc-50 dark:bg-zinc-900/50 p-2 rounded border border-zinc-100 dark:border-zinc-800">
-            Note: Document availability depends on the commune's publication status on the Géoportail de l'Urbanisme.
+            Note : la disponibilité des documents dépend de leur publication par la commune sur le Géoportail de l’Urbanisme.
           </p>
           <a 
             href={coords ? `https://www.geoportail-urbanisme.gouv.fr/map/#tile=1&lon=${coords.lon}&lat=${coords.lat}&zoom=16` : `https://www.geoportail-urbanisme.gouv.fr/map/#tile=1&lon=${insee}&lat=${insee}&zoom=13`}
@@ -236,7 +236,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
         </div>
       ) : !loading && (
         <div className="space-y-3">
-          <p className="text-xs text-zinc-400 italic">No urban planning documents found for this commune ({insee}).</p>
+          <p className="text-xs text-zinc-400 italic">Aucun document d’urbanisme trouvé pour cette commune ({insee}).</p>
           <a 
             href={coords ? `https://www.geoportail-urbanisme.gouv.fr/map/#tile=1&lon=${coords.lon}&lat=${coords.lat}&zoom=16` : `https://www.geoportail-urbanisme.gouv.fr/map/#tile=1&lon=${insee}&lat=${insee}&zoom=13`}
             target="_blank"
@@ -244,7 +244,7 @@ export function UrbanPlanningInfo({ insee: initialInsee, coords: initialCoords, 
             className="flex items-center justify-center gap-2 w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-lg text-xs font-bold transition-colors"
           >
             <IconExternalLink size={14} />
-            Search manually on GPU
+            Rechercher manuellement sur le GPU
           </a>
         </div>
       )}

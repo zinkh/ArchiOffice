@@ -39,17 +39,17 @@ export const GeoportailMap = ({
               const [lon, lat] = data.features[0].geometry.coordinates;
               setCoords({ lat, lon });
             } else {
-              setError('Address not found');
+              setError('Adresse introuvable');
             }
           } else {
-            setError('Invalid response from geocoder');
+            setError('Réponse invalide du géocodeur');
           }
         } else {
-          setError('Failed to geocode address');
+          setError('Échec du géocodage de l’adresse');
         }
       } catch (err) {
         console.error(err);
-        setError('Error fetching coordinates');
+        setError('Erreur lors de la récupération des coordonnées');
       } finally {
         setLoading(false);
       }
@@ -61,7 +61,7 @@ export const GeoportailMap = ({
 
   // Une carte déjà affichée reste montée pendant qu'une nouvelle adresse se géocode :
   // la démonter ferait perdre la vue et la sélection de parcelles.
-  if (loading && !coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading map...</div>;
+  if (loading && !coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Chargement de la carte...</div>;
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address to see the map</div>;
 
@@ -130,15 +130,15 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
 
         // First geocode to get lat/lon using our local proxy
         const geoRes = await fetch(`/api/address-search?${queryParams.toString()}`);
-        if (!geoRes.ok) throw new Error('Geocoding failed');
+        if (!geoRes.ok) throw new Error('Échec du géocodage');
         
         const contentType = geoRes.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
-          throw new Error('Invalid response from geocoder');
+          throw new Error('Réponse invalide du géocodeur');
         }
         
         const geoData = await geoRes.json();
-        if (!geoData.features?.length) throw new Error('Address not found');
+        if (!geoData.features?.length) throw new Error('Adresse introuvable');
         
         const [lon, lat] = geoData.features[0].geometry.coordinates;
         
@@ -150,19 +150,19 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
             const data = await res.json();
             setRisks(data);
           } else {
-            setError('Invalid response from Georisques API');
+            setError('Réponse invalide de l’API Géorisques');
           }
         } else {
           try {
             const errorData = await res.json();
-            setError(errorData.error || `Georisques API Error (${res.status})`);
+            setError(errorData.error || `Erreur de l’API Géorisques (${res.status})`);
           } catch (e) {
-            setError(`Georisques API Error (${res.status})`);
+            setError(`Erreur de l’API Géorisques (${res.status})`);
           }
         }
       } catch (err: any) {
         console.error(err);
-        setError(err.message || 'Error fetching risks');
+        setError(err.message || 'Erreur lors de la récupération des risques');
       } finally {
         setLoading(false);
       }
@@ -173,7 +173,7 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
   }, [address, banId]);
 
   if (!address || address.length < 10) return null;
-  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Fetching risk data...</div>;
+  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Récupération des risques...</div>;
   // Le service public Géorisques expire régulièrement (504) : un code
   // d'erreur brut n'apprend rien à l'architecte, un lien vers le site oui.
   if (error) return (
@@ -189,7 +189,7 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between mb-1">
-        <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Risks Summary (API)</span>
+        <span className="px-1.5 py-0.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Synthèse des risques (API)</span>
         {risks.url && (
           <a 
             href={risks.url} 
@@ -197,7 +197,7 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
             rel="noopener noreferrer"
             className="text-[0.6875rem] text-zinc-400 hover:text-red-500 flex items-center gap-1 transition-colors"
           >
-            Full Report
+            Rapport complet
             <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
@@ -207,15 +207,15 @@ export const GeorisquesInfo = ({ address, banId }: { address: string; banId?: st
       <div className="p-3 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-700 shadow-sm">
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col">
-            <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Natural Risks</span>
+            <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Risques naturels</span>
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-              {risks.risques_naturels?.length || 0} identified
+              {risks.risques_naturels?.length || 0} identifié(s)
             </span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Tech Risks</span>
+            <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Risques technologiques</span>
             <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-              {risks.risques_technologiques?.length || 0} identified
+              {risks.risques_technologiques?.length || 0} identifié(s)
             </span>
           </div>
         </div>
@@ -285,11 +285,11 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
           const data = await res.json();
           setBuildings(data || []);
         } else {
-          setError(`BDNB API Error (${res.status})`);
+          setError(`Erreur de l’API BDNB (${res.status})`);
         }
       } catch (err) {
         console.error(err);
-        setError('Error connecting to BDNB API');
+        setError('Erreur de connexion à l’API BDNB');
       } finally {
         setLoading(false);
       }
@@ -300,14 +300,14 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
   }, [address]);
 
   if (!address || address.length < 10) return null;
-  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Searching BDNB database...</div>;
+  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Recherche dans la base BDNB...</div>;
   if (error) return <div className="text-xs text-red-500">{error}</div>;
-  if (buildings.length === 0) return <div className="text-xs text-zinc-400 italic">No building found in BDNB for this address.</div>;
+  if (buildings.length === 0) return <div className="text-xs text-zinc-400 italic">Aucun bâtiment trouvé dans la BDNB pour cette adresse.</div>;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 mb-1">
-        <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">BDNB Buildings</span>
+        <span className="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Bâtiments BDNB</span>
       </div>
       <div className="space-y-3">
         {buildings.map((b: any) => (
@@ -373,7 +373,7 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
                 </span>
               </div>
               <div className="flex flex-col">
-                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Immat. Copro</span>
+                <span className="text-[0.6875rem] text-zinc-400 uppercase font-bold">Immat. copropriété</span>
                 <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300 truncate">
                   {b.numero_immat_principal || 'N/A'}
                 </span>
@@ -430,6 +430,17 @@ export const BDNBInfo = ({ address, banId, cityCode }: { address: string; banId?
   );
 };
 
+const RNB_STATUS_LABELS: Record<string, string> = {
+  constructed: 'Construit',
+  inUse: 'En service',
+  notUsable: 'Hors d’usage',
+  demolished: 'Démoli',
+  constructionProject: 'En projet',
+  canceledConstructionProject: 'Projet abandonné',
+  ongoingConstruction: 'En construction',
+  ongoingChange: 'En transformation',
+};
+
 export const RNBInfo = ({ address }: { address: string }) => {
   const [buildings, setBuildings] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -455,13 +466,13 @@ export const RNBInfo = ({ address }: { address: string }) => {
             setBuildings(data.results || []);
           }
         } else if (res.status === 429) {
-          setError('RNB API quota exceeded. Please wait.');
+          setError('Quota de l’API RNB dépassé. Veuillez patienter.');
         } else {
-          setError(`RNB API Error (${res.status})`);
+          setError(`Erreur de l’API RNB (${res.status})`);
         }
       } catch (err) {
         console.error(err);
-        setError('Error connecting to RNB API');
+        setError('Erreur de connexion à l’API RNB');
       } finally {
         setLoading(false);
       }
@@ -472,14 +483,14 @@ export const RNBInfo = ({ address }: { address: string }) => {
   }, [address]);
 
   if (!address || address.length < 10) return null;
-  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Searching RNB database...</div>;
+  if (loading) return <div className="text-xs text-zinc-500 animate-pulse">Recherche dans la base RNB...</div>;
   if (error) return <div className="text-xs text-red-500">{error}</div>;
-  if (buildings.length === 0) return <div className="text-xs text-zinc-400 italic">No building found in RNB for this address.</div>;
+  if (buildings.length === 0) return <div className="text-xs text-zinc-400 italic">Aucun bâtiment trouvé dans le RNB pour cette adresse.</div>;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 mb-1">
-        <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">RNB Buildings Found</span>
+        <span className="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[0.6875rem] font-bold rounded uppercase tracking-wider">Bâtiments RNB trouvés</span>
       </div>
       <div className="space-y-3">
         {buildings.map((b: any) => (
@@ -496,19 +507,19 @@ export const RNBInfo = ({ address }: { address: string }) => {
                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
                 </a>
                 <span className={`text-[0.6875rem] uppercase font-bold mt-1 ${b.status === 'constructed' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                  {b.status}
+                  {RNB_STATUS_LABELS[b.status] || b.status}
                 </span>
               </div>
               <div className="flex flex-col items-end">
                 <span className={`text-[0.6875rem] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${b.is_active ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600' : 'bg-red-100 dark:bg-red-900/30 text-red-600'}`}>
-                  {b.is_active ? 'Active' : 'Inactive'}
+                  {b.is_active ? 'Actif' : 'Inactif'}
                 </span>
               </div>
             </div>
             
             {b.addresses && b.addresses.length > 0 && (
               <div className="mt-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
-                <p className="text-[0.6875rem] text-zinc-400 uppercase font-bold mb-1">Registered Addresses</p>
+                <p className="text-[0.6875rem] text-zinc-400 uppercase font-bold mb-1">Adresses enregistrées</p>
                 <div className="space-y-1">
                   {b.addresses.map((addr: any, idx: number) => (
                     <p key={idx} className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">

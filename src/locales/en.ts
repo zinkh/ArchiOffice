@@ -4652,4 +4652,11 @@ export default {
       "opr_export_all": "Export all (ZIP)",
       "opr_export_all_empty": "No report to export.",
       "opr_reopen": "Reopen the signature",
+  "proposals_send_to_client": "Send to client",
+  "proposals_send_preparing": "Preparing the PDF…",
+  "proposals_send_pdf_error": "Could not prepare the PDF to send. Please try again.",
+  "proposals_send_mail_subject": "Fee proposal {{reference}} - {{title}}",
+  "proposals_send_mail_body": "Hello,\n\nPlease find attached our proposal {{reference}} for the project \"{{title}}\".\n\nWe remain at your disposal to discuss it and answer any questions.\n\nKind regards,",
+  "proposals_export_generating": "Generating…",
+  "proposals_export_pdf": "Export PDF",
 };

@@ -10,6 +10,8 @@
 // This file is intentionally React-free — JSX section rendering lives in
 // src/components/ProposalExportModal.tsx, which is the only place that needs it.
 import type { Proposal, ProposalSpecialty } from '../types';
+import { isErpOperation } from './erp';
+import { operationNature, surfaceExistante, surfaceRehabilitee, surfaceDePlancher, toSurface } from './proposalSurfaces';
 import { autoSaveDocument } from './autoSaveDocument';
 import { compressImage } from './imageCompression';
 import { paginateFlow } from './pdfPagination';
@@ -175,6 +177,10 @@ export interface ProposalPdfData {
   type: string;
   categorie: string;
 
+  isErp: boolean;
+  nature: 'neuf' | 'rehabilitation';
+  surfExistante: number;
+  surfRehabilitee: number;
   surfPlancher: number;
   surfExtension: number;
   surfERP: number;
@@ -505,7 +511,11 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
     type: p.type_projet || '',
     categorie: p.categorie_projet || '',
 
-    surfPlancher: Number(p.surface_plancher) || 0,
+    isErp: isErpOperation(p),
+    nature: operationNature(p),
+    surfExistante: toSurface(surfaceExistante(p)),
+    surfRehabilitee: surfaceRehabilitee(p),
+    surfPlancher: surfaceDePlancher(p),
     surfExtension: Number(p.surface_plancher_ext) || 0,
     surfERP: Number(p.surface_erp) || 0,
     surfERT: Number(p.surface_ert) || 0,
@@ -592,7 +602,18 @@ export const getPdfStyles = (): string => `
 // tombe toujours dans une marge. Avant, chaque section était une page fixe et tout
 // ce qui dépassait était tronqué. L'en-tête et le pied de page (avec « P1|N ») sont
 // du HTML posé par le composant, ils font partie de la capture.
-export async function exportProposalPdf(container: HTMLElement, data: ProposalPdfData): Promise<void> {
+export interface ProposalPdfResult { blob: Blob; filename: string }
+
+/**
+ * Génère le PDF de la proposition, le range dans la GED et le rend. `download: false`
+ * (envoi par e-mail) ne le télécharge pas : la personne le joint à son message.
+ */
+export async function exportProposalPdf(
+  container: HTMLElement,
+  data: ProposalPdfData,
+  options: { download?: boolean } = {},
+): Promise<ProposalPdfResult> {
+  const { download = true } = options;
   const flow = container.querySelector<HTMLElement>('[data-pdf-flow]');
   if (!flow) throw new Error('Document introuvable : rien à exporter.');
 
@@ -619,14 +640,16 @@ export async function exportProposalPdf(container: HTMLElement, data: ProposalPd
 
     const clientLabel = (data.entreprise ? data.nomSociete : data.clientNom) || 'Client';
     const filename = `Proposition_${data.reference.replace(/\s+/g, '_')}_${clientLabel.replace(/\s+/g, '_')}.pdf`;
-    pdf.save(filename);
+    if (download) pdf.save(filename);
+    const blob = pdf.output('blob');
     await autoSaveDocument({
-      blob: pdf.output('blob'),
+      blob,
       filename,
       name: `Proposition - ${data.titre}`,
       phase: 'ESQ',
       category: 'Contract',
     });
+    return { blob, filename };
   } finally {
     hidden.forEach(node => { node.style.display = ''; });
     paginateFlow(flow);
