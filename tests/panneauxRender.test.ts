@@ -1,7 +1,7 @@
 // Rendu réel par Chromium : une seule page à la bonne taille, quels que soient le format,
 // l'orientation et le nombre de lots, et débordement détecté plutôt que rogné en silence.
 // Ignoré quand aucun Chromium n'est installé (poste de développement sans navigateur).
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
 import { resolveChromiumPath, renderHtmlToPdf } from '../server/referencesDossier/render';
 import { pageSpec, type PanneauFormat, type PanneauOrientation } from '../server/panneaux/pageSpec';
@@ -31,7 +31,16 @@ async function render(html: string, f: PanneauFormat, o: PanneauOrientation) {
   return { pages: doc.getPageCount(), overflow, widthMm: (width / 72) * 25.4, heightMm: (height / 72) * 25.4 };
 }
 
+// Chaque rendu lance son propre Chromium : sur un exécuteur de CI lent, le démarrage à froid
+// s'ajoutait au rendu A0 du premier cas et dépassait les 60 s (échec sans rapport avec le code).
+const RENDER_TIMEOUT_MS = 180_000;
+
 describe.skipIf(!chromium)('rendu Chromium des panneaux', () => {
+  // Rendu minimal pour amorcer Chromium (disque, bibliothèques) avant les cas qui mesurent un vrai panneau.
+  beforeAll(async () => {
+    await renderHtmlToPdf('<!doctype html><html><body><div class="body">amorce</div></body></html>', { width: '50mm', height: '50mm' });
+  }, RENDER_TIMEOUT_MS);
+
   const cases: Array<[string, number, PanneauFormat, PanneauOrientation]> = [
     ['25 lots A0 portrait', 25, 'A0', 'portrait'],
     ['27 lots A0 paysage', 27, 'A0', 'paysage'],
@@ -46,12 +55,12 @@ describe.skipIf(!chromium)('rendu Chromium des panneaux', () => {
       expect(r.overflow).toBe(false);
       expect(Math.abs(r.widthMm - spec.widthMm)).toBeLessThan(2);
       expect(Math.abs(r.heightMm - spec.heightMm)).toBeLessThan(2);
-    }, 60_000);
+    }, RENDER_TIMEOUT_MS);
   }
   it('un contenu trop long est signalé comme débordement, jamais rogné en silence', async () => {
     const r = await render(buildChantierHtml(chantier(120), { page: pageSpec('A2', 'portrait'), logos: true, colorLogos: false, hidden: new Set(), hiddenLogos: new Set() }), 'A2', 'portrait');
     expect(r.overflow).toBe(true);
-  }, 60_000);
+  }, RENDER_TIMEOUT_MS);
   for (const [f, o] of [['A0', 'portrait'], ['A0', 'paysage'], ['80x120', 'portrait'], ['A4', 'portrait']] as Array<[PanneauFormat, PanneauOrientation]>) {
     it(`panneau de permis ${f} ${o} : une page, sans débordement`, async () => {
       const spec = pageSpec(f, o);
@@ -59,6 +68,6 @@ describe.skipIf(!chromium)('rendu Chromium des panneaux', () => {
       expect(r.pages).toBe(1);
       expect(r.overflow).toBe(false);
       expect(Math.abs(r.widthMm - spec.widthMm)).toBeLessThan(2);
-    }, 60_000);
+    }, RENDER_TIMEOUT_MS);
   }
 });
