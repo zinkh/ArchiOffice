@@ -3685,6 +3685,8 @@ export default {
       "plans_reorder_handle": "Move drawing {{name}}",
       "plans_reorder_hint": "Drag to reorder (long press on touch)",
       "plans_reorder_failed": "Could not save the drawing order. {{error}}",
+      "plans_sort_name_asc": "Sort drawings by name (A to Z)",
+      "plans_sort_name_desc": "Sort drawings by name (Z to A)",
       "projectdetail_ar_title": "Acknowledgement of order {{number}}",
       "projectdetail_ar_date": "Received by the company on",
       "projectdetail_ar_execution": "Planned execution on",

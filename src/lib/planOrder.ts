@@ -44,3 +44,25 @@ export function appliquerOrdre<T extends PlanOrdonnable>(plans: T[], ids: string
   const rang = new Map(ids.map((id, i) => [id, i]));
   return plans.map(p => (rang.has(p.id) ? { ...p, sort_order: rang.get(p.id)! } : p));
 }
+
+// Ordre alphabétique du français : accents et casse ignorés, nombres lus comme des nombres
+// (« Plan 2 » avant « Plan 10 », « 01-Façade » avant « 02-Coupe »).
+const collator = new Intl.Collator('fr', { numeric: true, sensitivity: 'base' });
+
+/** Identifiants des plans triés par nom ; à noms égaux, l'ordre d'arrivée est conservé. */
+export function idsTriesParNom<T extends { id: string; name: string }>(plans: T[], sens: 'asc' | 'desc' = 'asc'): string[] {
+  const signe = sens === 'asc' ? 1 : -1;
+  return plans
+    .map((p, i) => ({ p, i }))
+    .sort((a, b) => signe * collator.compare(a.p.name, b.p.name) || a.i - b.i)
+    .map(({ p }) => p.id);
+}
+
+/**
+ * Sens du prochain tri par nom : A→Z, sauf si la liste est déjà dans cet ordre, auquel cas Z→A
+ * (un même bouton sert à trier puis à inverser).
+ */
+export function sensProchainTri<T extends { id: string; name: string }>(plans: T[]): 'asc' | 'desc' {
+  const actuel = plans.map(p => p.id).join();
+  return actuel === idsTriesParNom(plans, 'asc').join() ? 'desc' : 'asc';
+}

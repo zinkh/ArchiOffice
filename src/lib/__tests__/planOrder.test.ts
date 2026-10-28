@@ -40,3 +40,25 @@ describe('appliquerOrdre', () => {
     expect(r.map(x => x.sort_order)).toEqual([1, 0, 5]);
   });
 });
+
+import { idsTriesParNom, sensProchainTri } from '../planOrder';
+
+describe('idsTriesParNom', () => {
+  const n = (id: string, name: string) => ({ id, name });
+  it('ignore accents et casse, lit les nombres comme des nombres', () => {
+    const l = [n('a', 'plan 10.pdf'), n('b', 'Étage.pdf'), n('c', 'plan 2.pdf'), n('d', 'etage 1.pdf')];
+    expect(idsTriesParNom(l)).toEqual(['d', 'b', 'c', 'a']);
+    expect(idsTriesParNom(l, 'desc')).toEqual(['a', 'c', 'b', 'd']);
+  });
+  it('conserve l\'ordre d\'arrivée à noms égaux', () => {
+    expect(idsTriesParNom([n('x', 'a.pdf'), n('y', 'A.pdf')])).toEqual(['x', 'y']);
+  });
+});
+
+describe('sensProchainTri', () => {
+  it('A→Z d\'abord, puis Z→A quand la liste est déjà triée', () => {
+    const l = [{ id: 'b', name: 'b' }, { id: 'a', name: 'a' }];
+    expect(sensProchainTri(l)).toBe('asc');
+    expect(sensProchainTri([l[1], l[0]])).toBe('desc');
+  });
+});

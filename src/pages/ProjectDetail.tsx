@@ -43,7 +43,9 @@ import {
   IconClipboardCheck,
   IconSignRight,
   IconPaperclip,
-  } from '@tabler/icons-react';
+    IconSortAscendingLetters,
+  IconSortDescendingLetters,
+} from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { setProjectTabInfo } from '../lib/openProjectTabs';
@@ -68,7 +70,7 @@ import { AorLayout } from '../components/aor/AorLayout';
 import { OprPvSection } from '../components/aor/OprPvSection';
 import { PlansDropZone, PlansImportDialog, PlanName, PlanGrip } from '../components/aor/PlansImport';
 import { usePlanReorder } from '../hooks/usePlanReorder';
-import { appliquerOrdre, trierPlans } from '../lib/planOrder';
+import { appliquerOrdre, idsTriesParNom, sensProchainTri, trierPlans } from '../lib/planOrder';
 import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useUser } from '../UserContext';
 import { canWriteInvoices } from '../lib/invoicePermissions';
@@ -5686,6 +5688,20 @@ export default function ProjectDetail() {
                               if (files.length) setPlanImportFiles(files);
                             }}
                           />
+                          {aorPlans.length > 1 && (() => {
+                            const sens = sensProchainTri(aorPlans);
+                            const Icone = sens === 'asc' ? IconSortAscendingLetters : IconSortDescendingLetters;
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => void commitPlansOrder(idsTriesParNom(aorPlans, sens))}
+                                disabled={planUploading || planReorder.tenu !== null}
+                                title={t(sens === 'asc' ? 'plans_sort_name_asc' : 'plans_sort_name_desc')}
+                                aria-label={t(sens === 'asc' ? 'plans_sort_name_asc' : 'plans_sort_name_desc')}
+                                className="flex items-center justify-center min-h-11 min-w-11 sm:min-h-0 sm:min-w-0 sm:p-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg transition disabled:opacity-50"
+                              ><Icone size={16} /></button>
+                            );
+                          })()}
                           <button
                             type="button"
                             onClick={() => {

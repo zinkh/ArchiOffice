@@ -480,6 +480,10 @@ un doublon ou une liste vide sont refusés en 400 sans rien écrire, une instanc
 `PLAN_ORDER_UNAVAILABLE`. Un échec d'enregistrement remet l'ordre précédent à l'écran. Tri
 (`src/lib/planOrder.ts`, testé) : plans jamais rangés d'abord (le plus récent en tête, comme avant), puis les plans
 rangés selon leur rang : un plan déposé après un réordonnancement apparaît donc en haut de la liste. Tests :
+**Tri par nom** : un bouton de l'en-tête du bloc (visible à partir de deux plans) range les plans A à Z, puis Z à A
+au clic suivant (`idsTriesParNom`, `sensProchainTri` : accents et casse ignorés, nombres lus comme des nombres,
+« Plan 2 » avant « Plan 10 »). Il écrit l'ordre manuel par la même route `PUT /api/plans/order` : ce n'est pas un
+mode permanent, un plan déposé ensuite apparaît en haut et la poignée reste utilisable après le tri.
 `planOrder.test.ts`, `tests/plansRename.test.ts`. Pas vérifié dans un navigateur réel.
 
 ### Réserves de chantier : fiche, photos, export PDF

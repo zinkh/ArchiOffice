@@ -3835,6 +3835,8 @@ export default {
       "plans_reorder_handle": "Déplacer le plan {{name}}",
       "plans_reorder_hint": "Glisser pour réordonner (appui long au doigt)",
       "plans_reorder_failed": "Impossible d'enregistrer l'ordre des plans. {{error}}",
+      "plans_sort_name_asc": "Trier les plans par nom (A à Z)",
+      "plans_sort_name_desc": "Trier les plans par nom (Z à A)",
       "projectdetail_ar_title": "Accusé de réception de l'OS {{number}}",
       "projectdetail_ar_date": "Reçu par l'entreprise le",
       "projectdetail_ar_execution": "Exécution prévue le",
