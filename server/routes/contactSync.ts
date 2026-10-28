@@ -4,6 +4,8 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertPublicHttpUrl } from '../ssrfGuard';
+import { selectAllPages } from '../selectAllPages';
+import { addToSyncIndex, buildSyncIndex, findExistingContact, nonEmptyFields, type SyncContactRow } from '../contactSyncMatch';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -127,23 +129,38 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
         if (email) connectionByEmail.set(email, person);
       }
 
+      // Toutes les fiches du cabinet, lues UNE fois : rapprochement par identifiant Google,
+      // e-mail puis nom (voir contactSyncMatch.ts). L'index suit les créations de ce passage,
+      // pour que deux fiches Google du même nom n'en fassent pas deux locales.
+      const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
+        () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
+          .select('id, first_name, last_name, company_name, email, email_work, email_home, google_resource_name, is_personal, created_at') as any,
+      );
+      if (localError) throw localError;
+      const index = buildSyncIndex(localRows);
+
       for (const person of connections) {
         const fields = mapGooglePersonToContactFields(person);
-        if (!fields.first_name && !fields.last_name && !fields.email) continue;
+        if (!fields.first_name && !fields.last_name && !fields.email && !fields.company_name) continue;
 
-        // Check if contact already exists by email
-        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id')
-          .eq('email', fields.email)
-          .maybeSingle();
-
-        const contactData = { ...fields, updated_at: new Date().toISOString() };
+        const existing = findExistingContact(index, { resourceName: person.resourceName, ...fields });
+        const now = new Date().toISOString();
 
         if (existing) {
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(contactData).eq('id', existing.id);
+          // Une valeur vide côté Google n'efface jamais la fiche locale ; le lien Google se pose
+          // s'il manquait, pour que le prochain passage retrouve la fiche sans deviner.
+          const update: Record<string, any> = { ...nonEmptyFields(fields), updated_at: now };
+          if (!existing.google_resource_name && person.resourceName) {
+            update.google_resource_name = person.resourceName;
+            update.google_synced_at = now;
+          }
+          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(update).eq('id', existing.id);
+          if (update.google_resource_name) addToSyncIndex(index, { ...existing, google_resource_name: update.google_resource_name });
           updated++;
         } else {
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...contactData, id: crypto.randomUUID(), address: '', state: '', ca_amount: 0, created_at: new Date().toISOString(), google_resource_name: person.resourceName, google_synced_at: new Date().toISOString() });
+          const id = crypto.randomUUID();
+          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...fields, updated_at: now, id, address: '', state: '', ca_amount: 0, created_at: now, google_resource_name: person.resourceName, google_synced_at: now });
+          addToSyncIndex(index, { id, ...fields, google_resource_name: person.resourceName, created_at: now });
           imported++;
         }
       }
@@ -302,6 +319,13 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
       let imported = 0;
       let updated = 0;
 
+      const { data: localRows, error: localError } = await selectAllPages<SyncContactRow>(
+        () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
+          .select('id, first_name, last_name, company_name, email, email_work, email_home, google_resource_name, is_personal, created_at') as any,
+      );
+      if (localError) throw localError;
+      const index = buildSyncIndex(localRows);
+
       for (const vcard of vcards) {
         const fullName = getField(vcard, 'FN');
         const email = getField(vcard, 'EMAIL');
@@ -314,25 +338,23 @@ export function registerContactSyncRoutes(app: Express, { supabaseAdmin, getTena
 
         if (!fullName && !email) continue;
 
-        const { data: existing } = await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts')
-          .select('id')
-          .eq('email', email)
-          .maybeSingle();
-
-        const contactData = {
+        const fields = {
           first_name: firstName,
           last_name: lastName || fullName,
           email: email,
           phone: phone,
           company_name: org.split(';')[0] || '',
-          updated_at: new Date().toISOString()
         };
+        const existing = findExistingContact(index, fields);
+        const now = new Date().toISOString();
 
         if (existing) {
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update(contactData).eq('id', existing.id);
+          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').update({ ...nonEmptyFields(fields), updated_at: now }).eq('id', existing.id);
           updated++;
         } else {
-          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...contactData, id: crypto.randomUUID(), address: '', city: '', zip: '', state: '', country: '', ca_amount: 0, created_at: new Date().toISOString() });
+          const id = crypto.randomUUID();
+          await tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').insert({ ...fields, updated_at: now, id, address: '', city: '', zip: '', state: '', country: '', ca_amount: 0, created_at: now });
+          addToSyncIndex(index, { id, ...fields, created_at: now });
           imported++;
         }
       }

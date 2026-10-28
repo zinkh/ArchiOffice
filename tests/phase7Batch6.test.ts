@@ -135,11 +135,18 @@ describe('Contact Sync', () => {
       fakeSupabaseAdmin.seed('settings', [{ id: 's-2', tenant_id: tenantId, google_contacts_sync_categories: ['Client'] }]);
       fakeSupabaseAdmin.seed('contacts', [{ id: 'c-push-link', tenant_id: tenantId, email: 'a@example.com', category: 'Client', first_name: 'A', last_name: 'One' }]);
 
-      global.fetch = vi.fn(async (url: string) => {
+      // The pull step now links the local contact to the Google one it matched by email, so the
+      // push step sees it as already linked: it reads the Google side and updates it. Either way
+      // no second Google contact is created (a createContact POST would hit the throw below).
+      global.fetch = vi.fn(async (url: string, init?: any) => {
         if (String(url).includes('/people/me/connections')) {
           return { ok: true, json: async () => ({ connections: [{ resourceName: 'people/already123', emailAddresses: [{ value: 'a@example.com' }] }] }) };
         }
-        throw new Error(`Unexpected fetch: ${url}`);
+        if (String(url).includes('people/already123')) {
+          if (init?.method === 'PATCH') return { ok: true, json: async () => ({}) };
+          return { ok: true, status: 200, json: async () => ({ etag: 'e1', metadata: { sources: [{ type: 'CONTACT', updateTime: '2020-01-01T00:00:00.000Z' }] } }) };
+        }
+        throw new Error(`Unexpected fetch: ${init?.method || 'GET'} ${url}`);
       }) as any;
 
       const res = await request(app).post('/api/sync/google-contacts').set(authHeader(token)).send({ access_token: 'tok' });
