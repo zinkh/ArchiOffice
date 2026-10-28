@@ -357,7 +357,7 @@ CREATE TABLE IF NOT EXISTS proposals (
   construction_cost NUMERIC DEFAULT 0, ratio_rehab NUMERIC DEFAULT 0, ratio_extension NUMERIC DEFAULT 0,
   complexity_rate NUMERIC, base_fee_percent NUMERIC, exe_fee_percent NUMERIC,
   comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER,
-  miqcp_assessment TEXT
+  miqcp_assessment TEXT, parcelles_selection TEXT, is_erp BOOLEAN
 );
 
 CREATE TABLE IF NOT EXISTS proposal_specialties (

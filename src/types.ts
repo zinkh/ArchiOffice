@@ -1155,6 +1155,10 @@ export interface Proposal {
   feasibility_issue_date?: string | null;
   zone_plu?: string;
   surface_parcelle?: string;
+  /** JSON (`StoredParcel[]`, voir lib/terrainParcelles) des parcelles cochées sur la carte. */
+  parcelles_selection?: string | null;
+  /** L'opération est un ERP. Absent : déduit des champs ERP déjà saisis (`isErpOperation`). */
+  is_erp?: boolean | null;
   nom_etablissement?: string;
   avant_trav?: string;
   apres_trav?: string;

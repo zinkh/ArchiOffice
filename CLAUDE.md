@@ -1969,6 +1969,15 @@ dans une marge. La partie pure (`pageShiftMm`, `pageCountForHeight`) est testée
   ☑ et ☐ n'existent pas dans la police du PDF (ils sortaient en « & ») : ce sont des carrés dessinés.
   L'export repagine après avoir masqué ces éléments et après les avoir rétablis.
 
+### Terrain d'une proposition : carte sous l'adresse, parcelles enregistrées, ERP conditionnel
+
+Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/TerrainParcelles.tsx`) : la carte cadastrale est juste sous l'adresse du terrain (elle était en section 06). Logique pure dans `src/lib/terrainParcelles.ts` (testée).
+
+- **Parcelles persistantes** : `proposals.parcelles_selection` (TEXT, JSON de `StoredParcel[]` avec géométrie, 50 au plus, `supabase/migrate_proposal_parcelles_erp.sql`). L'écran en dérive la sélection (`parseStoredParcels`, jamais d'exception) et la renvoie à la carte par la prop `selection` de `MapLibreCadastre`, reportée sans rappeler `onSelectionChange` (comparaison par identifiant : pas de boucle). `GeoportailMap` ne démonte plus la carte pendant un nouveau géocodage (`loading && !coords`), sinon la sélection se perdait. Quand l'écran hôte tient la sélection, la carte ne la vide plus d'elle-même au recentrage ; l'écran la vide si une adresse choisie dans l'autocomplétion (`lon`/`lat` ajoutés à `onSelect`) tombe hors des parcelles.
+- **Adresse issue de la parcelle** : à la première parcelle cochée, `GET /api/address-reverse` (Géoplateforme puis BAN, `distance` en mètres, rien au-delà de 250 m) donne l'adresse du centre de la parcelle. Si elle diffère de l'adresse saisie (`sameAddress` : casse, accents, ponctuation ignorés), une bannière `role="alert"` propose « Changer l'adresse » ou « Garder l'adresse saisie ». Rien n'est appliqué sans accord ; l'adresse reste modifiable à la main.
+- **Tableau** : parcelle, commune, surface, retrait, total (« partielle » si une contenance est inconnue). Retirer une ligne la retire aussi de la carte. `ref_cadastrale` et `surface_parcelle` restent remplis depuis la sélection (modifiables).
+- **ERP conditionnel** : `proposals.is_erp` (BOOLEAN, NULL = non renseigné). `isErpOperation` (`src/lib/erp.ts`) : le choix explicite l'emporte, sinon l'opération est ERP dès qu'un champ ERP est déjà saisi (une donnée existante n'est jamais cachée). Type et catégorie, surfaces ERP/ERT et effectifs ne s'affichent que pour un ERP ; à l'enregistrement d'une opération non ERP ces champs sont vidés.
+
 ### Chaque ligne facturée devient un article dans Zoho
 
 `server/zohoSync.ts::zohoLineItems()` ne construisait que des lignes libres

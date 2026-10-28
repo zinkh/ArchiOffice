@@ -14,6 +14,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 import { IconX } from '@tabler/icons-react';
 import { toggleParcel, summarizeParcels, formatSurface } from '../lib/cadastreSelection';
+import { pointInGeometry } from '../lib/terrainParcelles';
 
 const CADASTRE_MIN_ZOOM = 13;
 
@@ -143,33 +144,20 @@ const geometryBounds = (geometry: GeoJSON.Geometry): [[number, number], [number,
   return [[west, south], [east, north]];
 };
 
-// Ray casting simple, sur le contour extérieur de chaque polygone — suffisant
-// pour repérer la parcelle sous le marqueur, sans dépendance à une lib SIG.
-const pointInGeometry = (point: [number, number], geometry: GeoJSON.Geometry): boolean => {
-  const inRing = (ring: number[][]): boolean => {
-    let inside = false;
-    const [x, y] = point;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [xi, yi] = ring[i];
-      const [xj, yj] = ring[j];
-      const intersects = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
-      if (intersects) inside = !inside;
-    }
-    return inside;
-  };
-  if (geometry.type === 'Polygon') return inRing(geometry.coordinates[0]);
-  if (geometry.type === 'MultiPolygon') return geometry.coordinates.some((poly) => inRing(poly[0]));
-  return false;
-};
-
 interface MapLibreCadastreProps {
   lat: number;
   lon: number;
   /** Rend les parcelles sélectionnables au clic (plusieurs à la fois, un second clic retire). */
   onSelectionChange?: (parcels: CadastreParcel[]) => void;
+  /**
+   * Sélection tenue par l'écran hôte (parcelles enregistrées, parcelle retirée du
+   * tableau...). Reportée sur la carte sans rappeler `onSelectionChange` : seuls
+   * les gestes de l'utilisateur sur la carte le déclenchent.
+   */
+  selection?: CadastreParcel[];
 }
 
-export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadastreProps) => {
+export const MapLibreCadastre = ({ lat, lon, onSelectionChange, selection: syncedSelection }: MapLibreCadastreProps) => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const marker = useRef<maplibregl.Marker | null>(null);
@@ -184,7 +172,13 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
   const onSelectionChangeRef = useRef(onSelectionChange);
   onSelectionChangeRef.current = onSelectionChange;
 
-  const applySelection = useCallback((next: CadastreParcel[]) => {
+  // Dernière sélection fournie par l'écran hôte : relue au chargement de la carte
+  // (création, ou recréation après une perte de contexte WebGL).
+  const syncedSelectionRef = useRef(syncedSelection);
+  syncedSelectionRef.current = syncedSelection;
+
+  // `silent` : la sélection vient de l'écran hôte, qui la connaît déjà.
+  const applySelection = useCallback((next: CadastreParcel[], silent = false) => {
     selectionRef.current = next;
     setSelection(next);
     const source = map.current?.getSource('selection') as maplibregl.GeoJSONSource | undefined;
@@ -194,7 +188,7 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
         type: 'Feature', geometry: p.geometry as GeoJSON.Geometry, properties: { id: p.id },
       })),
     });
-    onSelectionChangeRef.current?.(next);
+    if (!silent) onSelectionChangeRef.current?.(next);
   }, []);
   // Les messages d'échec de la recherche par point s'effacent d'eux-mêmes.
   useEffect(() => {
@@ -312,6 +306,7 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
         .setLngLat([lon, lat])
         .addTo(instance);
       setZoom(Math.round(instance.getZoom()));
+      if (syncedSelectionRef.current?.length) applySelectionRef.current(syncedSelectionRef.current, true);
       fetchParcelles(instance, [lon, lat]);
     });
 
@@ -428,11 +423,23 @@ export const MapLibreCadastre = ({ lat, lon, onSelectionChange }: MapLibreCadast
     if (!map.current) return;
     fittedParcel.current = false;
     // Nouvelle adresse, nouveau terrain : l'ancienne sélection n'a plus de sens.
-    if (selectionRef.current.length > 0) applySelection([]);
+    // Quand l'écran hôte tient lui-même la sélection (prop `selection`), c'est lui
+    // qui décide de la vider : l'adresse reprise d'une parcelle peut tomber côté rue.
+    if (syncedSelectionRef.current === undefined && selectionRef.current.length > 0) applySelection([]);
     map.current.setCenter([lon, lat]);
     marker.current?.setLngLat([lon, lat]);
     fetchParcelles(map.current, [lon, lat]);
   }, [lat, lon, fetchParcelles, applySelection]);
+
+  // Report d'une sélection venue de l'écran hôte (parcelle retirée du tableau,
+  // sélection enregistrée relue). Comparée par identifiant : le choix d'une
+  // parcelle sur la carte revient ici avec les mêmes identifiants, sans effet.
+  useEffect(() => {
+    if (!syncedSelection) return;
+    const current = selectionRef.current;
+    if (current.length === syncedSelection.length && current.every((p, i) => p.id === syncedSelection[i].id)) return;
+    applySelection(syncedSelection, true);
+  }, [syncedSelection, applySelection]);
 
   const handleReload = () => {
     setContextLost(false);

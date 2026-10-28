@@ -6,10 +6,13 @@ export const GeoportailMap = ({
   address,
   banId,
   onSelectionChange,
+  selection,
 }: {
   address: string;
   banId?: string;
   onSelectionChange?: (parcels: CadastreParcel[]) => void;
+  /** Sélection tenue par l'écran hôte, reportée sur la carte (voir MapLibreCadastre). */
+  selection?: CadastreParcel[];
 }) => {
   const [coords, setCoords] = useState<{ lat: number; lon: number } | null>(null);
   const [loading, setLoading] = useState(false);
@@ -56,11 +59,13 @@ export const GeoportailMap = ({
     return () => clearTimeout(timer);
   }, [address, banId]);
 
-  if (loading) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading map...</div>;
+  // Une carte déjà affichée reste montée pendant qu'une nouvelle adresse se géocode :
+  // la démonter ferait perdre la vue et la sélection de parcelles.
+  if (loading && !coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Loading map...</div>;
   if (error) return <div className="w-full h-full flex items-center justify-center text-red-400 text-sm">{error}</div>;
   if (!coords) return <div className="w-full h-full flex items-center justify-center text-zinc-400 text-sm">Enter a valid address to see the map</div>;
 
-  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onSelectionChange={onSelectionChange} />;
+  return <MapLibreCadastre lat={coords.lat} lon={coords.lon} onSelectionChange={onSelectionChange} selection={selection} />;
 };
 
 export const GoogleMap = ({ address }: { address: string }) => {
