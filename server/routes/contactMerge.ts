@@ -10,7 +10,8 @@
 //    personnel avec un contact partagé (ses données deviendraient visibles de tous).
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
-import { contactName, isMergeConfirmed, MERGE_MAX_CONTACTS, resolveMergePatch, type MergeContact } from '../../src/lib/contactMerge';
+import { contactName, isMergeConfirmed, MERGE_MAX_CONTACTS, planSafeMerges, resolveMergePatch, type MergeContact } from '../../src/lib/contactMerge';
+import { selectAllPages } from '../selectAllPages';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -19,6 +20,9 @@ export interface RouteDeps {
   logActivity: (tenantId: string, userId: string, userName: string, action: string, target: string, targetId: string, targetType: string, category: string) => void;
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
+
+/** Fusions exécutées par appel : le client rappelle la route jusqu'à épuisement. */
+const SAFE_BATCH_SIZE = 25;
 
 const MIGRATION_MISSING = 'La fusion de contacts n’est pas encore disponible sur cette instance (migration merge_contacts à appliquer).';
 
@@ -91,6 +95,59 @@ export function registerContactMergeRoutes(app: Express, { supabaseAdmin, getTen
     } catch (e: any) {
       console.error('Error merging contacts:', e?.message);
       res.status(500).json({ error: 'Échec de la fusion : ' + (e?.message || 'erreur inconnue') });
+    }
+  });
+
+  // Fusion automatique des doublons « sûrs » (même nom, aucune valeur en conflit).
+  // dry_run : aperçu seul. Sinon confirmation FUSIONNER exigée, SAFE_BATCH_SIZE groupes par appel.
+  app.post('/api/contacts/merge-safe', requireRole('admin', 'manager'), async (req: any, res: any) => {
+    try {
+      const tenantId: string = req.tenantId || await getTenantId(req.user.id);
+      const dryRun = req.body?.dry_run === true;
+      if (!dryRun && !isMergeConfirmed(req.body?.confirm)) {
+        return res.status(400).json({ error: 'Confirmation requise : tapez le mot FUSIONNER.', code: 'CONFIRMATION_REQUIRED' });
+      }
+      const { data, error: readError } = await selectAllPages<MergeContact>(
+        () => tenantScopedFrom(supabaseAdmin, tenantId, 'contacts').select('*') as any);
+      if (readError) throw readError;
+      const contacts = data.filter(c => !c.is_personal);
+      const byId = new Map(contacts.map(c => [c.id, c]));
+      const { safe, skipped } = planSafeMerges(contacts);
+      const label = (g: { primaryId: string; duplicateIds: string[] }) => ({
+        primary_id: g.primaryId,
+        duplicate_ids: g.duplicateIds,
+        name: contactName(byId.get(g.primaryId)!),
+        count: g.duplicateIds.length + 1,
+      });
+      if (dryRun) {
+        return res.json({ groups: safe.length, duplicates: safe.reduce((n, g) => n + g.duplicateIds.length, 0), skipped, sample: safe.slice(0, 50).map(label) });
+      }
+
+      const batch = safe.slice(0, SAFE_BATCH_SIZE);
+      const merged: string[] = [];
+      const failed: { primary_id: string; error: string }[] = [];
+      for (const g of batch) {
+        const members = [g.primaryId, ...g.duplicateIds].map(id => byId.get(id)!);
+        const patch = resolveMergePatch(members, g.primaryId, {});
+        const { error } = await supabaseAdmin.rpc('merge_contacts', {
+          p_tenant: tenantId, p_primary: g.primaryId, p_dups: g.duplicateIds, p_patch: patch, p_actor: req.user.id,
+        });
+        if (error) {
+          if (['PGRST202', '42883'].includes(error.code)) return res.status(503).json({ error: MIGRATION_MISSING, code: 'MIGRATION_MISSING' });
+          failed.push({ primary_id: g.primaryId, error: error.message || 'erreur inconnue' });
+          continue;
+        }
+        merged.push(g.primaryId);
+      }
+      if (merged.length) {
+        const userName = await getUserName(tenantId, req.user.id, req.user.email);
+        logActivity(tenantId, req.user.id, userName, `Fusion automatique de ${merged.length} groupe(s) de doublons`, '', merged[0], 'contact', 'Contacts');
+      }
+      // Les groupes en échec restent « sûrs » au prochain passage : le client s'arrête s'il n'avance plus.
+      res.json({ merged: merged.length, failed, remaining: Math.max(0, safe.length - batch.length) + failed.length, skipped });
+    } catch (e: any) {
+      console.error('Error merging safe duplicates:', e?.message);
+      res.status(500).json({ error: 'Échec de la fusion automatique : ' + (e?.message || 'erreur inconnue') });
     }
   });
 }

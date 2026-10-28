@@ -16,6 +16,7 @@ import { usePagination } from '../hooks/usePagination';
 import { useUser } from '../UserContext';
 import { ContactsDetailView } from '../components/contacts/ContactsDetailView';
 import { ContactMergeDialog } from '../components/ContactMergeDialog';
+import { SafeMergeDialog } from '../components/contacts/SafeMergeDialog';
 import { contactName, findDuplicateGroups, MERGE_MAX_CONTACTS } from '../lib/contactMerge';
 
 type SortField = 'prefix' | 'last_name' | 'first_name' | 'company_name' | 'ca_amount' | 'city' | 'job_title';
@@ -605,6 +606,7 @@ export default function Contacts() {
 
   const contactsPagination = usePagination(filteredAndSortedContacts);
 
+  const [showSafeMerge, setShowSafeMerge] = useState(false);
   const duplicateGroups = useMemo(
     () => (canMerge ? findDuplicateGroups(contacts.filter(c => !c.is_personal)) : []),
     [contacts, canMerge],
@@ -835,6 +837,14 @@ export default function Contacts() {
               {showDuplicates ? t('contacts_merge_duplicates_hide') : t('contacts_merge_duplicates_show')}
             </span>
           </button>
+          {showDuplicates && (
+            <div className="mt-3">
+              <button type="button" onClick={() => setShowSafeMerge(true)}
+                className="px-3 py-1 rounded-md text-xs font-medium" style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+                {t('contacts_safe_merge_button')}
+              </button>
+            </div>
+          )}
           {showDuplicates && (
             <ul className="mt-3 space-y-2">
               {duplicateGroups.map(g => (
@@ -1070,6 +1080,13 @@ export default function Contacts() {
           style={{ borderColor: 'var(--tblr-border)' }}
         />
       </div>
+
+      {showSafeMerge && (
+        <SafeMergeDialog
+          onClose={() => setShowSafeMerge(false)}
+          onDone={merged => { fetchContacts(); showToast(t('contacts_safe_merge_done', { count: merged })); }}
+        />
+      )}
 
       <AnimatePresence>
         {mergeIds && mergeContacts.length >= 2 && (

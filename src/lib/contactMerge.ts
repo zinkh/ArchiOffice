@@ -234,3 +234,38 @@ export function findDuplicateGroups(contacts: MergeContact[]): DuplicateGroup[] 
     .filter(g => g.ids.length > 1)
     .map(g => ({ ids: g.ids.slice(0, MERGE_MAX_CONTACTS), reasons: [...g.reasons] }));
 }
+
+// ─── Fusion automatique des doublons sûrs ────────────────────────────────────
+
+export interface SafeMergeGroup {
+  primaryId: string;
+  duplicateIds: string[];
+}
+
+/**
+ * Un groupe est « sûr » quand rien n'est à arbitrer : toutes les fiches portent la même clé
+ * de nom ET aucune colonne à choix n'a deux valeurs différentes (hors casse et espaces).
+ * Les valeurs vides se complètent, les listes se cumulent : la fusion ne perd donc rien.
+ * Un groupe réuni par e-mail ou SIRET mais de noms différents n'est jamais sûr.
+ */
+export function isSafeDuplicateGroup(contacts: MergeContact[]): boolean {
+  if (contacts.length < 2 || contacts.length > MERGE_MAX_CONTACTS) return false;
+  if (contacts.some(c => c.is_personal)) return false;
+  const keys = new Set(contacts.map(c => nameKey(c)));
+  if (keys.size !== 1 || keys.has('')) return false;
+  return !buildMergePlan(contacts, contacts[0].id).some(p => p.conflict);
+}
+
+/** Groupes sûrs à fusionner, la fiche conservée étant celle de `suggestPrimary`. */
+export function planSafeMerges(contacts: MergeContact[]): { safe: SafeMergeGroup[]; skipped: number } {
+  const byId = new Map(contacts.map(c => [c.id, c]));
+  const safe: SafeMergeGroup[] = [];
+  let skipped = 0;
+  for (const group of findDuplicateGroups(contacts)) {
+    const members = group.ids.map(id => byId.get(id)).filter((c): c is MergeContact => !!c);
+    if (!isSafeDuplicateGroup(members)) { skipped += 1; continue; }
+    const primaryId = suggestPrimary(members);
+    safe.push({ primaryId, duplicateIds: members.map(c => c.id).filter(id => id !== primaryId) });
+  }
+  return { safe, skipped };
+}

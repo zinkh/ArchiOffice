@@ -109,3 +109,53 @@ describe('POST /api/contacts/merge', () => {
     expect(res.body.code).toBe('MIGRATION_MISSING');
   });
 });
+
+describe('POST /api/contacts/merge-safe', () => {
+  function seedSafe() {
+    const tenantId = makeTenant();
+    const admin = makeUser(tenantId, 'admin');
+    fakeSupabaseAdmin.seed('contacts', [
+      // groupe sûr : même société, valeurs compatibles
+      { id: `${tenantId}-a1`, tenant_id: tenantId, company_name: 'SOCOTEC', phone: '0383000001' },
+      { id: `${tenantId}-a2`, tenant_id: tenantId, company_name: 'Socotec', email: 'x@socotec.fr' },
+      // groupe non sûr : même e-mail, noms différents
+      { id: `${tenantId}-b1`, tenant_id: tenantId, first_name: 'Anne', last_name: 'Durand', email: 'shared@x.fr' },
+      { id: `${tenantId}-b2`, tenant_id: tenantId, first_name: 'Paul', last_name: 'Martin', email: 'shared@x.fr' },
+      // groupe non sûr : même nom mais téléphones en conflit
+      { id: `${tenantId}-c1`, tenant_id: tenantId, company_name: 'LCR', phone: '0383111111' },
+      { id: `${tenantId}-c2`, tenant_id: tenantId, company_name: 'LCR', phone: '0383222222' },
+    ]);
+    return { tenantId, admin };
+  }
+
+  it('aperçu : ne fusionne rien et ne retient que les groupes sûrs', async () => {
+    const { admin } = seedSafe();
+    const rpc = mockRpc();
+    const res = await request(app).post('/api/contacts/merge-safe').set(authHeader(admin.token)).send({ dry_run: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ groups: 1, duplicates: 1, skipped: 2 });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('exige la confirmation et un rôle administrateur ou manager', async () => {
+    const { tenantId, admin } = seedSafe();
+    const rpc = mockRpc();
+    const none = await request(app).post('/api/contacts/merge-safe').set(authHeader(admin.token)).send({});
+    expect(none.body.code).toBe('CONFIRMATION_REQUIRED');
+    const pm = makeUser(tenantId, 'pm');
+    const denied = await request(app).post('/api/contacts/merge-safe').set(authHeader(pm.token)).send({ confirm: 'FUSIONNER' });
+    expect(denied.status).toBe(403);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it('fusionne uniquement le groupe sûr', async () => {
+    const { admin } = seedSafe();
+    const rpc = mockRpc();
+    const res = await request(app).post('/api/contacts/merge-safe').set(authHeader(admin.token)).send({ confirm: 'FUSIONNER' });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ merged: 1, remaining: 0, skipped: 2 });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    const args = rpc.mock.calls[0][1] as any;
+    expect(args.p_dups).toHaveLength(1);
+  });
+});

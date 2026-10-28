@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft, IconBuilding, IconEdit, IconUser, IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import type { Contact, Invoice, Project } from '../../types';
-import { fetchJson, apiFetch } from '../../lib/api';
+import { fetchJson } from '../../lib/api';
 import { contactName } from '../../lib/contactMerge';
 import { missingBuyerMentions } from '../../lib/invoiceLegalMentions';
 import CorrespondenceTab from '../CorrespondenceTab';
@@ -61,8 +61,8 @@ export function ContactsDetailView({ contacts, projects, canSelect, selectedIds,
   const saveRelation = async (id: string, patch: Partial<Pick<Contact, 'company_contact_id' | 'relation_status' | 'relation_reminder_on' | 'relation_reminder_note'>>) => {
     setSaveError('');
     try {
-      const res = await apiFetch(`/api/contacts/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || String(res.status));
+      // fetchJson rend le JSON décodé et lève une erreur au message du serveur : pas de Response à lire.
+      await fetchJson(`/api/contacts/${id}`, { method: 'PUT', body: JSON.stringify(patch) });
       onChanged();
     } catch (e: any) {
       setSaveError(e?.message || t('contacts_relation_save_failed'));
