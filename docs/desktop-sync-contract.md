@@ -909,3 +909,46 @@ interrompue, refus de licence, reprise des deux journaux, version d’origine de
 l’envoi suivant, confirmation UI et ouverture sécurisée du dossier. Les essais
 OS sont simulés sous Linux ; validation Windows/macOS réelle encore nécessaire.
 Aucune migration SQL.
+
+## 29. Vérifier et mettre à jour une copie sans conflit
+
+Documents propose « Vérifier la version distante » pour une copie de travail
+existante. Cette action volontaire charge les métadonnées courantes, compare la
+version technique et vérifie si le fichier local a changé depuis sa référence.
+Elle distingue absence de copie, même version, version distante plus récente,
+version locale plus récente, modifications locales et opération en attente.
+L’inspection ne matérialise pas de nouvelle version dans le cache ; le transport
+peut sonder la taille d’un ancien document sans taille connue. Une empreinte
+distante différente sous le même numéro de version est signalée comme une erreur.
+
+Si la version distante est plus récente et qu’aucune modification locale n’est
+détectée, une confirmation propose de créer une copie à jour. L’utilisateur doit
+fermer le fichier dans son application. La commande recharge les métadonnées et
+revérifie les conditions : aucune opération sur le document en attente ni conflit
+non réconcilié. Elle télécharge ensuite la version explicitement choisie, vérifie
+le cache et utilise la publication exclusive déjà employée pour les reprises.
+L’ancien fichier et son journal restent conservés ; le nouveau chemin actif est
+annoncé avant confirmation et l’utilisateur rouvre la copie avec Drive.
+
+Le worker revérifie le fichier local avant la publication du nouveau pointeur.
+Une modification observée pendant la préparation empêche cette publication.
+Il contrôle également que les opérations documentaires n’ont pas changé entre
+les premiers contrôles et cette publication. L’identifiant de préparation est
+dérivé du document et des versions concernées pour récupérer une publication
+interrompue compatible. Un refus d’autorisation ou une réponse d’un autre compte
+empêche le retour d’un état de réussite. Les réponses du pont natif ne contiennent
+que des états énumérés et des numéros de version positifs, sans chemin ou empreinte.
+
+La vérification reste ponctuelle : elle ne promet pas que le serveur ou un
+logiciel ouvert ne modifiera plus le fichier ensuite. Les anciens fichiers ne
+sont jamais écrasés, y compris si une application continue à enregistrer après
+les contrôles. Les envois suivants restent conditionnés par la nouvelle version
+d’origine. Aucun contrôle lourd du contenu des copies n’est ajouté à la boucle
+de suivi périodique ; aucune mise à jour ni aucun envoi n’est automatique.
+
+Tests : vérification sans hydratation, version courante ou distante plus récente,
+refus des modifications locales et envois en attente, empreinte distante mutée,
+enregistrement local tardif, conservation des anciens chemins, nouvelle version
+d’origine des envois, confirmation UI, filtrage des réponses et refus de licence
+dans le processus séparé. Les tests natifs restent simulés sur Linux : essais
+Windows/macOS et références CAO encore à valider. Aucune migration SQL.

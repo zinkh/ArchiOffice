@@ -56,3 +56,13 @@ it('requires an accepted snapshot and an explicit second click before restarting
   await act(async()=>{[...host.querySelectorAll('button')].find(b=>b.textContent==='drive_restart_confirm')!.click();});
   expect(restart).toHaveBeenCalledWith('doc:one');expect(host.textContent).toContain('drive_document_restarted');
 });
+it('checks remote versions and requires confirmation before refreshing; a new check clears stale success',async()=>{
+  const check=vi.fn().mockResolvedValue({status:'remote_newer',localVersion:1,remoteVersion:2});
+  const refresh=vi.fn().mockResolvedValue({status:'refreshed',localVersion:2,remoteVersion:2});
+  Object.assign((window as any).archiofficeDesktop,{checkDriveRemoteVersion:check,refreshDriveDocument:refresh});await render();
+  const click=async(text:string)=>act(async()=>{[...host.querySelectorAll('button')].find(b=>b.textContent===text)!.click();});
+  await click('drive_remote_check');expect(check).toHaveBeenCalledWith('doc:one');expect(host.textContent).toContain('drive_remote_remote_newer');
+  await click('drive_remote_refresh_action');expect(refresh).not.toHaveBeenCalled();expect(host.textContent).toContain('drive_remote_confirm_explanation');
+  await click('drive_remote_confirm');expect(refresh).toHaveBeenCalledWith('doc:one');expect(host.textContent).toContain('drive_remote_refreshed');
+  check.mockRejectedValue(new Error('offline'));await click('drive_remote_check');expect(host.textContent).not.toContain('drive_remote_refreshed');expect(host.textContent).toContain('drive_document_error');
+});

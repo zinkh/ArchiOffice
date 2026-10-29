@@ -7,3 +7,9 @@ export interface DriveDocumentStatus {
   version?: number;
   preservation?: 'pending' | 'blocked' | 'done';
 }
+
+export interface DriveRemoteCheck {
+  status: 'current' | 'remote_newer' | 'local_newer' | 'modified' | 'busy' | 'missing' | 'refreshed' | 'changed' | 'error';
+  localVersion?: number;
+  remoteVersion?: number;
+}
