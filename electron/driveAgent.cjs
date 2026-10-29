@@ -74,6 +74,11 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive status timeout'));},30000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:document-statuses',requestId,nodeIds});
     });},
+    windowsPreview(action,input) {return new Promise((resolve,reject)=> {
+      if(!['catalog','hydrate'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
+      const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Preview timeout'));},action==='catalog'?300000:60000);
+      jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:windows-preview',requestId,action,input});
+    });},
     retryBlocked() {return new Promise((resolve,reject)=> {
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
       const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive retry timeout'));},30000);

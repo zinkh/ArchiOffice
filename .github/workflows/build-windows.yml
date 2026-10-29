@@ -48,6 +48,12 @@ jobs:
           npm version --no-git-tag-version --allow-same-version "$version"
           echo "Building version $version (from tag $GITHUB_REF_NAME)"
 
+      - name: Configure CFAPI preview provider
+        run: cmake -S native/windows-drive -B native/windows-drive/build -A x64
+
+      - name: Compile CFAPI preview provider
+        run: cmake --build native/windows-drive/build --config Release
+
       - name: Build SPA (offline desktop build)
         run: npm run build
         env:

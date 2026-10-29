@@ -121,6 +121,9 @@ extraResources:
   - from: node_modules/xtend
     to: node_modules/xtend
 win:
+  extraResources:
+    - from: native/windows-drive/build/Release/archioffice-drive-cfapi.exe
+      to: drive-windows/archioffice-drive-cfapi.exe
   target:
     - target: nsis
       arch:

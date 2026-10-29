@@ -1,3 +1,4 @@
+const { createWindowsPreview } = require('./windowsDrive.cjs');
 const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -369,6 +370,7 @@ function registerDataLocationIpc() {
 }
 
 // Le coffre reste dans le serveur local ; le worker ne reçoit des jetons que par IPC.
+let windowsDrivePreview = null;
 function startDriveAgent() {
   if (!['win32', 'darwin'].includes(process.platform) || !driveTrust.cloudOrigin || !Object.keys(driveTrust.publicKeys).length) return;
   const { cwd } = resolvePaths();
@@ -402,6 +404,20 @@ function startDriveAgent() {
   const trustedDriveSender = (event) => event.sender === mainWindow?.webContents
     && event.senderFrame === mainWindow?.webContents.mainFrame
     && new URL(event.senderFrame?.url || '').origin === `http://127.0.0.1:${PORT}`;
+  const nativeExecutable=app.isPackaged?path.join(cwd,'drive-windows','archioffice-drive-cfapi.exe'):path.join(cwd,'native','windows-drive','build','Release','archioffice-drive-cfapi.exe');
+  windowsDrivePreview=createWindowsPreview({spawn,agent:driveAgent,vault:()=>requestVault(serverProcess),
+    root:path.join(app.getPath('userData'),'drive-windows-preview'),cacheRoot:path.join(app.getPath('userData'),'drive-transfers'),executable:nativeExecutable,shell,
+    enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW==='1'&&fs.existsSync(nativeExecutable)});
+  ipcMain.handle('desktop:drive-windows-status',(event)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.status();
+  });
+  ipcMain.handle('desktop:drive-windows-start',async(event,projectId)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');
+    try{return await windowsDrivePreview.start(projectId);}catch{return {status:'error'};}
+  });
+  ipcMain.handle('desktop:drive-windows-stop',(event)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');windowsDrivePreview.stop();return {status:'stopped'};
+  });
   ipcMain.handle('desktop:drive-working-open', async (event, nodeId) => {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');
     return openDriveWorking({agent:driveAgent,vault:()=>requestVault(serverProcess),
@@ -588,6 +604,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  windowsDrivePreview?.stop();
   driveAgent?.stop();
   driveTray?.destroy();
   if (serverProcess) serverProcess.kill();
