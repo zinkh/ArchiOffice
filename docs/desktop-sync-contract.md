@@ -525,8 +525,9 @@ présenter cette limite comme une garantie absolue.
 `electron/driveTrust.json` est une configuration **publique embarquée au build** :
 `cloudOrigin` est l’origine HTTPS du serveur ArchiOffice, sans chemin, identifiant
 ni redirection ; `publicKeys` associe chaque identifiant de clé à sa clé publique
-Ed25519 PEM. Le fichier livré dans cette PR est volontairement non configuré :
-aucune origine réelle ou clé publique n’a été inventée. Les clés privées restent
+Ed25519 PEM. La configuration embarquée utilise `https://www.archioffice.fr` et la clé publique
+Ed25519 `drive-2026-10-29-01`, générée le 29 octobre 2026. La clé privée correspondante
+doit être configurée uniquement dans les secrets du serveur. Les clés privées restent
 uniquement dans les secrets du serveur de signature (section 19).
 
 Tant que l’origine et les clés ne sont pas provisionnées dans une nouvelle
