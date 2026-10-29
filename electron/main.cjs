@@ -9,7 +9,8 @@ const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 const { resolveDataLocation } = require('./dataLocation.cjs');
 const { resolveStorageFile, isSafeToOpen } = require('./fileAccess.cjs');
 const { createAppMenu } = require('./menu.cjs');
-const { createDriveAgent } = require('./driveAgent.cjs');
+const { createDriveAgent, requestVault } = require('./driveAgent.cjs');
+const { openDriveWorking } = require('./driveWorking.cjs');
 const driveTrust = require('./driveTrust.json');
 
 // package.json's "name" is the npm workspace root ("react-example", a
@@ -398,6 +399,21 @@ function startDriveAgent() {
     driveTray.on('double-click', open);
   } catch { log('[drive] Zone de notification indisponible : maintien en arrière-plan désactivé.'); }
   driveAgent.start();
+  const trustedDriveSender = (event) => event.sender === mainWindow?.webContents
+    && event.senderFrame === mainWindow?.webContents.mainFrame
+    && new URL(event.senderFrame?.url || '').origin === `http://127.0.0.1:${PORT}`;
+  ipcMain.handle('desktop:drive-working-open', async (event, nodeId) => {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');
+    return openDriveWorking({agent:driveAgent,vault:()=>requestVault(serverProcess),
+      root:path.join(app.getPath('userData'),'drive-transfers'),nodeId,shell});
+  });
+  ipcMain.handle('desktop:drive-working-upload', async (event, nodeId) => {
+    if(!trustedDriveSender(event)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))throw new Error('Accès refusé');
+    try {
+      const result=await driveAgent.working('upload',nodeId);
+      return {status:result?.pending?'pending':result?.queued?'queued':'unchanged'};
+    } catch(e) {return {status:e.code==='WORKING_UPLOAD_CONFLICT'?'conflict':'error'};}
+  });
   ipcMain.handle('desktop:drive-retry', (event) => {
     if (event.sender !== mainWindow?.webContents || new URL(event.senderFrame?.url || '').origin !== `http://127.0.0.1:${PORT}`) throw new Error('Accès refusé');
     return driveAgent.retryBlocked();

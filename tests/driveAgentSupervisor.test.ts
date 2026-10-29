@@ -33,3 +33,13 @@ it('restarts only after exit and bounds repeated crashes',async()=>{
   for(let i=0;i<4;i++){spawned[i].emit('exit',1);await vi.advanceTimersByTimeAsync(60000);}
   expect(spawn).toHaveBeenCalledTimes(4);agent.stop();
 });
+it('correlates private working-copy replies and rejects invalid document commands',async()=>{
+  const worker=child();const agent=createDriveAgent({spawn:()=>worker,executable:'electron',entry:'agent',root:'/cache',origin:'https://www.archioffice.fr',getServer:()=>null});
+  agent.start();await expect(agent.working('open','../../file')).rejects.toThrow('Invalid document');
+  const result=agent.working('open','doc:one');const req=worker.send.mock.calls.at(-1)[0];
+  expect(req).toMatchObject({type:'drive:open-working',nodeId:'doc:one'});
+  worker.emit('message',{type:'drive:working-result',requestId:req.requestId,result:{file:'/private/Plan.pdf'}});
+  expect(await result).toEqual({file:'/private/Plan.pdf'});
+  const waiting=agent.working('upload','doc:one');worker.emit('exit',1);
+  await expect(waiting).rejects.toThrow('Agent unavailable');agent.stop();
+});
