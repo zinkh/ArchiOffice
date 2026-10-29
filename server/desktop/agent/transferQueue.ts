@@ -16,6 +16,7 @@ export interface TransferJob extends UploadInput, TransferIdentity {
   formatVersion: 1; id: string; state: 'queued' | 'uploading' | 'retry' | 'conflict' | 'blocked' | 'done';
   createdAt: number; attempts: number; nextAttemptAt: number; errorCode: string | null;
   conflictSourceId?: string;
+  reconciledVersion?: number;
   uploadId?: string; chunkSize?: number; result?: { node: { id: string }; version: number };
 }
 const ID = /^[0-9a-f-]{36}$/;
@@ -69,6 +70,7 @@ export class TransferQueue {
       if (!j || !ID.test(j.id) || name !== `${j.id}.json` || j.formatVersion !== 1
         || j.userId !== this.identity.userId || j.tenantId !== this.identity.tenantId
         || !['queued','uploading','retry','conflict','blocked','done'].includes(j.state)
+        || (j.reconciledVersion !== undefined && (j.state !== 'conflict' || !Number.isSafeInteger(j.reconciledVersion) || j.reconciledVersion < 1))
         || (j.conflictSourceId !== undefined && !ID.test(j.conflictSourceId))
         || !Number.isSafeInteger(j.size) || j.size < 0 || !/^[a-f0-9]{64}$/.test(j.sha256)
         || !Number.isFinite(j.createdAt) || !Number.isSafeInteger(j.attempts) || j.attempts < 0 || !Number.isFinite(j.nextAttemptAt)) throw error('QUEUE_CORRUPT');
@@ -143,6 +145,12 @@ export class TransferQueue {
       size:source.size,sha256:source.sha256,bumpIndice:false,state:'queued',createdAt:jobs.reduce((n,j)=>Math.max(n,j.createdAt+1),this.now()),
       attempts:0,nextAttemptAt:0,errorCode:null,conflictSourceId:source.id};
     await this.save(job);return job;
+  }); }
+  reconcileConflict(id: string, version: number) { return this.serial(async()=> {
+    const jobs=await this.jobs();const source=jobs.find(j=>j.id===id);
+    if(!source||source.state!=='conflict'||!Number.isSafeInteger(version)||version<1||!jobs.some(j=>j.conflictSourceId===id&&j.state==='done'))throw error('CONFLICT_PRESERVATION_REQUIRED');
+    if(source.reconciledVersion!==undefined) {if(source.reconciledVersion!==version)throw error('CONFLICT_ALREADY_RECONCILED');return;}
+    source.reconciledVersion=version;await this.save(source);
   }); }
   /** Explicit retry of a blocked job; conflicts require a new target/base version. */
   retry(id: string) { return this.serial(async () => {

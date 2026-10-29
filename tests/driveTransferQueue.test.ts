@@ -123,3 +123,14 @@ it('recovers an unpublished conflict snapshot but refuses corrupt bytes and non-
   await expect(queue().preserveConflict(job.id)).rejects.toThrow('SNAPSHOT_CORRUPT');
   expect(await fs.readFile(path.join(dir,'queue',`${job.id}.snapshot`),'utf8')).toBe('abcdefgh');
 });
+it('only marks a conflict reconciled after its preservation has completed and keeps both journals',async()=>{
+  const q=queue();const job=await q.enqueue(file,{documentId:'doc:d1'},1);
+  transport.open=vi.fn().mockRejectedValue(Object.assign(new Error('conflict'),{status:409,code:'VERSION_CONFLICT'}));await q.runNext(transport);
+  await expect(q.reconcileConflict(job.id,2)).rejects.toThrow('CONFLICT_PRESERVATION_REQUIRED');
+  await q.preserveConflict(job.id);await expect(q.reconcileConflict(job.id,2)).rejects.toThrow('CONFLICT_PRESERVATION_REQUIRED');
+  transport.open=vi.fn().mockResolvedValue({uploadId:id,chunkSize:3});await q.runNext(transport);
+  await q.reconcileConflict(job.id,2);await queue().reconcileConflict(job.id,2);
+  expect((await q.list()).find(j=>j.id===job.id)).toMatchObject({state:'conflict',reconciledVersion:2});
+  await expect(q.reconcileConflict(job.id,3)).rejects.toThrow('CONFLICT_ALREADY_RECONCILED');
+  expect(await fs.readFile(path.join(dir,'queue',`${job.id}.snapshot`),'utf8')).toBe('abcdefgh');
+});

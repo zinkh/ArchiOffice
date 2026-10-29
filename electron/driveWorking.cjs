@@ -39,9 +39,9 @@ async function driveDocumentStatuses({agent,vault,nodeIds}) {
   if(!Array.isArray(result.documents)||result.documents.length!==nodeIds.length)throw new Error('Invalid status response');
   const seen=new Set();
   return result.documents.map(doc=> {
-    if(!doc||!nodeIds.includes(doc.nodeId)||seen.has(doc.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded'].includes(doc.state))throw new Error('Invalid status response');
+    if(!doc||!nodeIds.includes(doc.nodeId)||seen.has(doc.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(doc.state))throw new Error('Invalid status response');
     seen.add(doc.nodeId);
-    if(doc.state==='uploaded') {
+    if(doc.state==='uploaded'||doc.state==='reconciled') {
       if(!Number.isSafeInteger(doc.version)||doc.version<1)throw new Error('Invalid version');
       return {nodeId:doc.nodeId,state:doc.state,version:doc.version};
     }
@@ -49,4 +49,20 @@ async function driveDocumentStatuses({agent,vault,nodeIds}) {
     return {nodeId:doc.nodeId,state:doc.state,...(doc.preservation ? {preservation:doc.preservation} : {})};
   });
 }
-module.exports={openDriveWorking,driveDocumentStatuses};
+async function revealDriveCopies({vault,root,nodeId,shell}) {
+  if(typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))return {status:'error'};
+  try {
+    const active=await vault();
+    const owner=crypto.createHash('sha256').update(JSON.stringify([active.userId,active.tenantId])).digest('hex');
+    const document=crypto.createHash('sha256').update(JSON.stringify([active.userId,active.tenantId,nodeId])).digest('hex');
+    const files=path.join(root,owner,'working',document,'files');let current=root;
+    if((await fs.lstat(current)).isSymbolicLink())return {status:'error'};
+    for(const segment of path.relative(root,files).split(path.sep)) {
+      current=path.join(current,segment);const stat=await fs.lstat(current);
+      if(stat.isSymbolicLink()||!stat.isDirectory())return {status:'error'};
+    }
+    const latest=await vault();if(['userId','tenantId','deviceId'].some(k=>latest[k]!==active[k]))return {status:'error'};
+    return {status:await shell.openPath(files)?'error':'copies_shown'};
+  }catch{return {status:'error'};}
+}
+module.exports={openDriveWorking,driveDocumentStatuses,revealDriveCopies};

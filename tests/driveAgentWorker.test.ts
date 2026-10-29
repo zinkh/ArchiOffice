@@ -201,3 +201,29 @@ it('preserves only the conflicting snapshot and keeps the original upload blocke
   expect(await fs.readFile(copy.file,'utf8')).toBe('later edits');
   session.mockRejectedValue(new Error('expired'));await expect(worker.preserveConflict(meta.nodeId)).rejects.toThrow('expired');await worker.stop();
 });
+it('requires preservation then restarts from the remote version, replays a cross-journal crash and permits a new upload',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const config={root:path.join(root,'reconcile'),origin:'https://www.archioffice.fr',session:async()=>session(),status};
+  const worker=createAgentWorker(config);await worker.keepOffline(meta.nodeId);const old=await worker.prepareWorkingCopy(meta);await fs.writeFile(old.file,'edits');
+  transfer.open.mockRejectedValueOnce(Object.assign(new Error('conflict'),{status:409,code:'VERSION_CONFLICT'}));
+  await worker.uploadWorkingCopy(meta.nodeId);await worker.tick();
+  await expect(worker.restartWorkingCopy(meta.nodeId)).rejects.toMatchObject({code:'CONFLICT_PRESERVATION_REQUIRED'});
+  await worker.preserveConflict(meta.nodeId);transfer.complete.mockResolvedValue({node:{id:'doc:copy'},version:1});await worker.tick();
+  await fs.writeFile(old.file,'later local edits');
+  const remote={...meta,version:2};download.metadata.mockResolvedValue(remote);
+  expect(await worker.restartWorkingCopy(meta.nodeId)).toEqual({version:2});
+  expect((await worker.documentStatuses([meta.nodeId])).documents[0]).toEqual({nodeId:meta.nodeId,state:'reconciled',version:2});
+  const opened=await worker.openWorkingCopy(meta.nodeId);expect(opened.file).not.toBe(old.file);
+  expect(await fs.readFile(old.file,'utf8')).toBe('later local edits');await worker.stop();
+  // Simulate the durable working pointer but an uncommitted queue marker.
+  const [scope]=await fs.readdir(config.root);const folder=path.join(config.root,scope);
+  const journals=(await fs.readdir(folder)).filter(n=>n.endsWith('.json'));
+  for(const name of journals){const file=path.join(folder,name);const j=JSON.parse(await fs.readFile(file,'utf8'));if(j.state==='conflict'){delete j.reconciledVersion;await fs.writeFile(file,JSON.stringify(j));}}
+  const restarted=createAgentWorker(config);expect(await restarted.restartWorkingCopy(meta.nodeId)).toEqual({version:2});
+  expect((await restarted.openWorkingCopy(meta.nodeId)).file).toBe(opened.file);
+  await fs.writeFile(opened.file,'newer');await restarted.uploadWorkingCopy(meta.nodeId);transfer.complete.mockResolvedValue({node:{id:meta.nodeId},version:3});await restarted.tick();
+  expect(transfer.open.mock.calls.at(-1)![0]).toMatchObject({target:{documentId:meta.nodeId},baseVersion:2});
+  expect((await restarted.documentStatuses([meta.nodeId])).documents[0]).toMatchObject({state:'uploaded',version:3});
+  expect(await fs.readFile(old.file,'utf8')).toBe('later local edits');await restarted.stop();
+});

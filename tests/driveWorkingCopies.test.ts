@@ -83,3 +83,20 @@ it('isolates identities and serializes simultaneous materializations',async()=> 
   const other=await new WorkingCopies(path.join(root,'working'),{...identity,userId:'other'}).prepare(meta(),source);
   expect(other.file).not.toBe(a.file);
 });
+it('restarts into a distinct verified file and leaves the previous file and later edits at their original path',async()=>{
+  const old=await copies.prepare(meta(),source);await fs.writeFile(old.file,'latest local edits');
+  const remote={...meta(2),size:6,sha256:sha('remote')};await fs.writeFile(source.file,'remote');const id=crypto.randomUUID();
+  const next=await copies.restart(remote,{...source,sha256:sha('remote')},id,async()=>{});
+  expect(next).toMatchObject({baseVersion:2,modified:false});expect(next.file).not.toBe(old.file);
+  expect(await fs.readFile(next.file,'utf8')).toBe('remote');expect(await fs.readFile(old.file,'utf8')).toBe('latest local edits');
+  // An app still holding the old file may save again; those bytes are retained.
+  await fs.writeFile(old.file,'even newer edits');
+  expect((await new WorkingCopies(path.join(root,'working'),identity).restart(remote,{...source,sha256:sha('remote')},id,async()=>{})).file).toBe(next.file);
+  expect(await fs.readFile(old.file,'utf8')).toBe('even newer edits');
+});
+it('does not switch the working pointer after authorization refusal and recovers exclusive publication on retry',async()=>{
+  const old=await copies.prepare(meta(),source);const remote={...meta(2),size:6,sha256:sha('remote')};await fs.writeFile(source.file,'remote');const id=crypto.randomUUID();
+  await expect(copies.restart(remote,{...source,sha256:sha('remote')},id,async()=>{throw new Error('revoked');})).rejects.toThrow('revoked');
+  expect((await copies.inspect('doc:plan')).file).toBe(old.file);
+  expect(await copies.restart(remote,{...source,sha256:sha('remote')},id,async()=>{})).toMatchObject({baseVersion:2});
+});

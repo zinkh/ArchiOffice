@@ -37,10 +37,10 @@ process.on('message',async (msg:any)=> {
     try {const result=await worker.retryBlocked();send({type:'drive:retried',requestId:msg.requestId,result});void worker.tick();}
     catch {send({type:'drive:retried',requestId:msg.requestId,error:{code:'DRIVE_RETRY_FAILED'}});}
   }
-  if(['drive:open-working','drive:upload-working','drive:preserve-working'].includes(msg?.type) && worker && typeof msg.nodeId==='string'
+  if(['drive:open-working','drive:upload-working','drive:preserve-working','drive:restart-working'].includes(msg?.type) && worker && typeof msg.nodeId==='string'
     && /^doc:[a-zA-Z0-9_-]{1,200}$/.test(msg.nodeId) && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
     try {
-      const result=msg.type==='drive:open-working'?await worker.openWorkingCopy(msg.nodeId):msg.type==='drive:preserve-working'?await worker.preserveConflict(msg.nodeId):await worker.uploadWorkingCopy(msg.nodeId);
+      const result=msg.type==='drive:open-working'?await worker.openWorkingCopy(msg.nodeId):msg.type==='drive:restart-working'?await worker.restartWorkingCopy(msg.nodeId):msg.type==='drive:preserve-working'?await worker.preserveConflict(msg.nodeId):await worker.uploadWorkingCopy(msg.nodeId);
       send({type:'drive:working-result',requestId:msg.requestId,result});
       if(msg.type!=='drive:open-working')void worker.tick();
     } catch(e:any) {
