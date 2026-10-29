@@ -239,6 +239,37 @@ export async function queuedMultipartRequest<T = any>(request: MultipartWriteReq
 /** Émis sur `window` quand une écriture en file atteint enfin le serveur. */
 export const OFFLINE_WRITE_SYNCED_EVENT = 'archioffice:offline-write-synced';
 
+/** Émis sur `window` quand une photo entre dans la file ou en est retirée à la main : les écrans qui superposent la file à leur liste se relisent. */
+export const OFFLINE_QUEUE_CHANGED_EVENT = 'archioffice:offline-queue-changed';
+
+/** Retire une écriture de la file avant son envoi (photo qu'on renonce à envoyer). */
+export async function discardPendingWrite(id: string, entity: PendingWrite['entity']): Promise<void> {
+  await db.pendingWrites.delete(id);
+  window.dispatchEvent(new CustomEvent(OFFLINE_QUEUE_CHANGED_EVENT, { detail: { id, entity } }));
+}
+
+/**
+ * Met une photo en file SANS tenter l'envoi dans l'appel : l'écran n'attend jamais le réseau.
+ * L'envoi part tout de suite en arrière-plan (`replayNow`), un fichier à la fois, avec reprise
+ * automatique : la photo vit dans IndexedDB, donc elle survit à une fermeture de l'onglet et à
+ * une connexion qui tombe. C'est le chemin des photos de réserves, qu'on prend par dizaines.
+ */
+export async function enqueueMultipartRequest(request: MultipartWriteRequest): Promise<void> {
+  await enqueue({
+    id: request.id,
+    entity: request.entity,
+    method: request.method,
+    url: request.url,
+    kind: 'multipart',
+    blob: request.blob,
+    blobFieldName: request.blobFieldName,
+    blobFilename: request.blobFilename,
+    extraFields: request.extraFields,
+  });
+  window.dispatchEvent(new CustomEvent(OFFLINE_QUEUE_CHANGED_EVENT, { detail: { id: request.id, entity: request.entity } }));
+  void replayNow();
+}
+
 let replaying = false;
 let replayingSince = 0;
 
@@ -406,11 +437,14 @@ export async function replayPendingWrites(): Promise<ReplayProgress> {
         if (!response.ok) await throwForHttpError(response);
 
         consecutiveFailures = 0;
+        // La réponse du serveur (la photo créée, avec son `file_url`) voyage avec l'événement : l'écran
+        // remplace son aperçu local sans relire toute la liste. Illisible = pas de données, jamais une erreur.
+        const data = await parseJsonResponse(response).catch(() => null);
         await db.pendingWrites.delete(entry.id);
         setProgress({ processed: progress.processed + 1, sent: progress.sent + 1 });
         // Permet à l'écran qui a mis l'écriture en file (toujours ouvert ou rouvert depuis) de lever
         // son badge « en attente » — voir Reunions.tsx. Chaque écran filtre par entity/id ce qui le concerne.
-        window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_SYNCED_EVENT, { detail: { id: entry.id, entity: entry.entity } }));
+        window.dispatchEvent(new CustomEvent(OFFLINE_WRITE_SYNCED_EVENT, { detail: { id: entry.id, entity: entry.entity, data } }));
       } catch (error) {
         if (isNetworkError(error)) {
           // Entrée gardée en attente, raison enregistrée (visible dans la liste), on passe à la suivante.
