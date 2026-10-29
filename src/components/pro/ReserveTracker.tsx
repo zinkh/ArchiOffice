@@ -23,7 +23,6 @@ import { cn } from '../../lib/utils';
 import { CardHeader } from '../ui/Card';
 import { StatTile } from '../ui/StatTile';
 import { PlanAnnotator } from '../PlanAnnotator';
-import { SignedImage } from '../SignedImage';
 import {
   queuedJsonRequest, listPendingWrites, getReplayProgress, subscribeReplayProgress,
   OFFLINE_WRITE_SYNCED_EVENT, OFFLINE_QUEUE_CHANGED_EVENT,
@@ -35,7 +34,7 @@ import type { Plan, ReservePhoto } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
-import { type ReserveLike, StatusSelect, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+import { type ReserveLike, StatusSelect, ReservePhotoImage, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
 
 interface ReserveTrackerProps {
   projectId: string;
@@ -244,7 +243,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         ) : (
           // Une liste peut compter des centaines de réserves : seules les miniatures qui approchent de
           // l'écran sont demandées (URL signée puis image), le reste attend le défilement.
-          <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" deferUntilVisible />
+          <ReservePhotoImage photo={first} alt="" className="w-full h-full object-cover rounded-lg" deferUntilVisible />
         )}
         {(r.photos?.length || 0) > 1 && (
           <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[0.6875rem] font-bold">{r.photos!.length}</span>

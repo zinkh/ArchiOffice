@@ -7,6 +7,15 @@
 import type { PendingWrite } from '../db';
 import type { ReservePhoto } from '../types';
 
+/**
+ * Fichier à afficher pour une photo : la miniature du serveur quand elle existe (une case de liste
+ * n'a pas à télécharger la photo de 1600 px), sinon la photo elle-même. `thumbFailed` : la miniature
+ * n'a pas pu être lue, on retombe sur la photo plutôt que d'afficher une case vide.
+ */
+export function photoDisplaySrc(photo: Pick<ReservePhoto, 'file_url' | 'thumb_url'>, thumbFailed = false): string {
+  return photo.thumb_url && !thumbFailed ? photo.thumb_url : photo.file_url;
+}
+
 /** Entité de file des photos, selon le jeu de réserves (OPR ou GPA). */
 export function photoEntityFor(apiBase: '/api/reserves' | '/api/gpa-reserves'): 'reservePhoto' | 'gpaReservePhoto' {
   return apiBase === '/api/gpa-reserves' ? 'gpaReservePhoto' : 'reservePhoto';

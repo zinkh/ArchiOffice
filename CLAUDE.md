@@ -542,10 +542,23 @@ suivante). Quatre règles à garder :
   demandes simultanées fusionnées, 4 résolutions en parallèle au plus. Avant, chaque rendu redemandait
   une URL différente par photo, donc le navigateur ne retrouvait jamais l'image dans son cache. Les
   miniatures de la liste ne se chargent que lorsqu'elles approchent de l'écran (`deferUntilVisible`).
-- **Pas encore fait** : vraie miniature serveur (la liste télécharge la photo de 1600 px, environ
-  300 Ko, pour une case de 64 px), route groupée d'URL signées, pagination de `GET /api/reserves`
-  (elle rend toutes les réserves et toutes leurs photos) et fenêtrage de la liste au-delà de quelques
-  centaines de lignes. Non vérifié sur un iPad réel.
+- **Miniature d'affichage générée par le serveur** (`makeThumbnail`, `server/imageUpload.ts`, 480 px,
+  JPEG 78 %) : à l'envoi, `POST .../photos` range `<cabinet>/<réserve>/<photo>-thumb.<ext>` à côté de la
+  photo et renseigne `reserve_photos.thumb_url` (`supabase/migrate_reserve_photos_thumb.sql`, colonne
+  facultative). **Elle ne sert qu'à l'affichage** (case de liste, grille de la fiche) : la photo
+  complète à 1600 px reste la référence, et la fiche (appui sur la photo), l'export PDF
+  (`reservesExport.ts` lit `file_url`) et l'impression ne lisent jamais la miniature. Une miniature
+  n'est pas créée pour une image déjà plus petite qu'elle ; sa création est au meilleur effort (un
+  échec garde la photo). `ReservePhotoImage` (`reserveShared.tsx`, `photoDisplaySrc`) affiche la
+  miniature, retombe sur `file_url` pour une photo antérieure ou si la miniature ne se charge pas.
+  Instance non migrée : l'insertion est rejouée sans `thumb_url` (et la miniature déposée retirée), la
+  lecture ET la suppression utilisent `select('*')` et non `thumb_url` nommée, sans quoi elles
+  répondraient 404. Supprimer une photo ou une réserve retire aussi les miniatures. Les photos
+  d'avant se rattrapent avec `npx tsx scripts/backfill-reserve-photo-thumbs.ts` (`--dry-run` d'abord,
+  relançable). `tests/fakeSupabaseAdmin.ts` sait simuler une colonne absente (`dropColumn`).
+- **Pas encore fait** : route groupée d'URL signées, pagination de `GET /api/reserves` (elle rend
+  toutes les réserves et toutes leurs photos) et fenêtrage de la liste au-delà de quelques centaines de
+  lignes. Non vérifié sur un iPad réel.
 
 **Suivi / réponse.** Une réserve peut être faite sans être satisfaisante : `reserves.reponse` et
 `gpa_reserves.reponse` (`supabase/migrate_reserves_reponse.sql`, TEXT, 5000 caractères) portent la

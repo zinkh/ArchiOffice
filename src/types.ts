@@ -531,6 +531,8 @@ export interface ReservePhoto {
   reserve_id: string;
   reserve_kind: 'opr' | 'gpa';
   file_url: string;
+  /** Miniature d'affichage générée par le serveur (480 px). Absente des photos antérieures : on affiche alors `file_url`. */
+  thumb_url?: string | null;
   caption?: string | null;
   uploaded_at: string;
   /** Posé côté client tant que l'envoi n'a pas atteint le serveur (voir src/lib/offlineQueue.ts). */

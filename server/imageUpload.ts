@@ -128,6 +128,25 @@ export async function resizeImage(
   }
 }
 
+/** Côté maximal d'une miniature d'affichage : 3 x une case de liste de 160 px, net sur un écran Retina d'iPad. */
+export const THUMBNAIL_MAX_DIMENSION = 480;
+const THUMBNAIL_JPEG_QUALITY = 78;
+
+/**
+ * Miniature D'AFFICHAGE d'une photo déjà réduite (listes, grilles). Elle ne remplace jamais la photo : les
+ * exports et l'impression lisent le fichier complet. Rend `null` quand il n'y a rien à gagner (l'image tient
+ * déjà dans la miniature, WebP non réduit, image illisible) : l'appelant garde alors la photo elle-même.
+ */
+export async function makeThumbnail(
+  buffer: Buffer,
+  mimetype: 'image/png' | 'image/jpeg' | 'image/webp',
+  maxDimension = THUMBNAIL_MAX_DIMENSION,
+): Promise<{ buffer: Buffer; mimetype: 'image/png' | 'image/jpeg' | 'image/webp' } | null> {
+  const thumb = await resizeImage(buffer, mimetype, maxDimension, THUMBNAIL_JPEG_QUALITY);
+  // `resizeImage` rend le tampon d'origine tel quel quand rien n'a été réduit.
+  return thumb.buffer === buffer ? null : thumb;
+}
+
 /** imageUpload.single(field) as middleware, but turns a rejected/oversized
  *  file into the same JSON error shape the rest of this app's routes use
  *  instead of falling through to Express's generic (HTML) error handler. */

@@ -4,7 +4,9 @@
 import { useEffect, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { renderPlanExcerpt } from '../../lib/planRender';
-import type { Reserve, GpaReserve } from '../../types';
+import { SignedImage } from '../SignedImage';
+import { photoDisplaySrc } from '../../lib/reservePhotoQueue';
+import type { Reserve, GpaReserve, ReservePhoto } from '../../types';
 
 export type ReserveLike = Reserve | GpaReserve;
 export type ReserveStatus = ReserveLike['status'];
@@ -94,4 +96,31 @@ export function PlanExcerpt({ fileUrl, x, y, label, className }: { fileUrl: stri
     return <div className={cn('animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800', className)} aria-label="Extrait de plan en cours de rendu" />;
   }
   return <img src={src} alt={`Extrait de plan, repère ${label}`} className={cn('rounded-lg border border-[var(--tblr-border)] bg-white', className)} />;
+}
+
+/**
+ * Une photo de réserve enregistrée, en miniature quand le serveur en a une (liste, grille) : la case
+ * de 64 px ne télécharge plus la photo de 1600 px. Si la miniature ne se charge pas, la photo prend
+ * le relais. `full` force le fichier complet (aperçu agrandi).
+ */
+export function ReservePhotoImage({ photo, alt, className, onClick, deferUntilVisible, full }: {
+  photo: Pick<ReservePhoto, 'file_url' | 'thumb_url'>;
+  alt?: string;
+  className?: string;
+  onClick?: React.MouseEventHandler<HTMLImageElement>;
+  deferUntilVisible?: boolean;
+  full?: boolean;
+}) {
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const src = photoDisplaySrc(photo, full || thumbFailed);
+  return (
+    <SignedImage
+      src={src}
+      alt={alt}
+      className={className}
+      onClick={onClick}
+      deferUntilVisible={deferUntilVisible}
+      onLoadError={photo.thumb_url && src === photo.thumb_url ? () => setThumbFailed(true) : undefined}
+    />
+  );
 }

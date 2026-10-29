@@ -1,8 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import type { ReservePhoto } from '../../types';
 import {
-  overlayPendingPhotos, pendingPhotosByReserve, photoEntityFor, reserveIdFromPhotoUrl,
+  overlayPendingPhotos, pendingPhotosByReserve, photoDisplaySrc, photoEntityFor, reserveIdFromPhotoUrl,
 } from '../reservePhotoQueue';
+
+describe('photoDisplaySrc', () => {
+  const full = 'https://x/reserve-photos/t/r/p.jpg';
+  const thumb = 'https://x/reserve-photos/t/r/p-thumb.jpg';
+
+  it('affiche la miniature quand le serveur en a une', () => {
+    expect(photoDisplaySrc({ file_url: full, thumb_url: thumb })).toBe(thumb);
+  });
+
+  it('affiche la photo pour une photo antérieure aux miniatures', () => {
+    expect(photoDisplaySrc({ file_url: full })).toBe(full);
+    expect(photoDisplaySrc({ file_url: full, thumb_url: null })).toBe(full);
+    expect(photoDisplaySrc({ file_url: full, thumb_url: '' })).toBe(full);
+  });
+
+  it('retombe sur la photo quand la miniature ne se charge pas', () => {
+    expect(photoDisplaySrc({ file_url: full, thumb_url: thumb }, true)).toBe(full);
+  });
+});
 
 const write = (over: Record<string, unknown> = {}) => ({
   id: 'p1', entity: 'reservePhoto' as const, method: 'POST' as const, url: '/api/reserves/r1/photos',

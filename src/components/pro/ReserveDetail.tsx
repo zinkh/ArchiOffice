@@ -9,13 +9,13 @@ import { cn } from '../../lib/utils';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { PANEL_SPRING, FLICK_SPRING, FLICK_VELOCITY, projectMomentum } from '../../lib/motion';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
-import { SignedImage } from '../SignedImage';
+import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
-  type ReserveLike, type ReserveStatus, RESERVE_STATUSES, StatusSelect, PlanExcerpt,
+  type ReserveLike, type ReserveStatus, RESERVE_STATUSES, StatusSelect, PlanExcerpt, ReservePhotoImage,
   parseJsonList, reserveOverdueDays,
 } from './reserveShared';
 
@@ -392,7 +392,13 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                   {photo.pendingSync ? (
                     <img src={photo.localPreviewUrl} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg opacity-90" />
                   ) : (
-                    <SignedImage src={photo.file_url} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg" />
+                    // Miniature dans la grille ; un appui ouvre la photo complète dans un nouvel onglet.
+                    <ReservePhotoImage
+                      photo={photo}
+                      alt={photo.caption || 'Photo de la réserve'}
+                      className="w-full h-full object-cover rounded-lg cursor-zoom-in"
+                      onClick={() => { void openSignedUrl(photo.file_url); }}
+                    />
                   )}
                   {photo.pendingSync && (
                     <span className={cn('absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-white text-[0.6875rem] font-bold', photo.syncError ? 'bg-red-600/90' : 'bg-black/60')} title={photo.syncError}>
