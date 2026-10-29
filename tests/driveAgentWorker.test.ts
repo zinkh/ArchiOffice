@@ -194,7 +194,7 @@ it('preserves only the conflicting snapshot and keeps the original upload blocke
   await Promise.all([worker.preserveConflict(meta.nodeId),worker.preserveConflict(meta.nodeId)]);
   expect((await worker.documentStatuses([meta.nodeId])).documents[0]).toMatchObject({state:'conflict',preservation:'pending'});
   transfer.complete.mockResolvedValue({node:{id:'doc:copy'},version:1});await worker.tick();
-  expect(transfer.open.mock.calls.at(-1)[0]).toMatchObject({target:{create:{parentId:'inbox:tenant',conflictOf:meta.nodeId}},baseVersion:null,size:5});
+  expect(transfer.open.mock.calls.at(-1)![0]).toMatchObject({target:{create:{parentId:'inbox:tenant',conflictOf:meta.nodeId}},baseVersion:null,size:5});
   expect((await worker.documentStatuses([meta.nodeId])).documents[0]).toMatchObject({state:'conflict',preservation:'done'});
   expect(await worker.preserveConflict(meta.nodeId)).toMatchObject({alreadyDone:true});
   await expect(worker.uploadWorkingCopy(meta.nodeId)).rejects.toMatchObject({code:'WORKING_UPLOAD_CONFLICT'});
