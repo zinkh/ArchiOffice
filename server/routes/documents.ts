@@ -92,7 +92,10 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
       const file = req.file;
       if (!file) return res.status(400).json({ error: "No file uploaded" });
       await checkQuota(tenantId, 'documents');
-      const { project_id, name, category, phase, description } = req.body;
+      const { project_id, name, phase, description } = req.body;
+      // `documents.category` est NOT NULL : une pièce déposée sans catégorie (bibliothèque du cabinet,
+      // pièces d'OS ou de FTM) retombe sur « Autre » plutôt que d'échouer.
+      const category = typeof req.body.category === 'string' && req.body.category.trim() ? req.body.category.trim() : 'Autre';
       // Envoi multipart : le corps n'est lu qu'ici, le garde d'affaire archivée
       // (server/archivedProjectGuard.ts) n'a pas pu le voir.
       if (project_id && await isProjectArchived(supabaseAdmin, tenantId, String(project_id))) {

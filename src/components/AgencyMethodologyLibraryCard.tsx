@@ -19,7 +19,7 @@ export function AgencyMethodologyLibraryCard() {
     <div className="rounded-xl p-5 space-y-3" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
       <h2 className="text-sm font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>{t('agency_library_title')}</h2>
       <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('agency_library_explanation')}</p>
-      <ResourceAttachments resourceType="agency_library" resourceId={tenantId} />
+      <ResourceAttachments resourceType="agency_library" resourceId={tenantId} category="Bibliothèque" />
     </div>
   );
 }
