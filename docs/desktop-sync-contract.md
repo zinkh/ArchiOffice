@@ -708,3 +708,43 @@ par ce lot. L’export, la copie de travail modifiable, l’éviction, les réf�
 CAO, la détection des modifications, le montage et l’hydratation native restent
 à raccorder. La lecture directe du cache comme fichier de travail n’est pas le
 parcours retenu : une copie de travail séparée sera nécessaire.
+
+## 24. Copies de travail distinctes et version d’origine
+
+Le worker dispose d’un socle privé `prepareWorkingCopy(metadata)` : après
+vérification de la licence locale et de la version présente dans le cache, il
+matérialise une copie modifiable sur un inode distinct. Son répertoire est dérivé
+du compte, du cabinet et de l’identifiant du document. Le nom initial est nettoyé
+pour Windows/macOS ; les noms distants ne peuvent pas fournir un chemin disque.
+Le nom et le chemin de cette copie restent ensuite stables, même si le document
+est renommé côté serveur. Ce classement technique par document ne reproduit pas
+encore les chemins relatifs d’un projet CAO.
+
+Un journal conserve la version technique et l’empreinte d’origine. Une copie
+déjà présente n’est jamais remplacée, même si elle paraît inchangée ou si une
+nouvelle version distante est disponible. Le résultat expose séparément
+`baseVersion`, `remoteVersion` et `modified`. Un fichier disparu, une publication
+interrompue déjà modifiée ou un fichier sans journal exigent une résolution
+explicite ; aucun de ces cas ne provoque une recréation silencieuse. Les octets du
+cache et les modifications locales sont préservés.
+
+`uploadWorkingCopy(documentId)` compare le fichier à son origine et place un
+instantané durable dans la file existante avec cette `baseVersion`. Un fichier
+inchangé ne produit pas de transfert. Les conflits restent pris en charge par
+la file et le contrôle de version côté serveur. Après succès, seule la référence
+d’origine est avancée à la version renvoyée par le serveur : le fichier modifiable
+n’est pas réécrit. Si l’application l’a encore modifié pendant l’envoi, ses derniers
+changements restent présents et sont détectés au prochain envoi. Les succès sont
+rejoués au redémarrage depuis les journaux persistants, de manière idempotente.
+Les files par identité conservent un seul propriétaire dans le worker même si le
+compte lié change puis revient.
+
+Tests : séparation des octets, noms non sûrs, renommage/version distante,
+modifications pendant l’envoi, reprise d’une publication interrompue, fichiers
+supprimés ou non suivis, corruption de journal, isolement des comptes, refus de
+licence et progression de version. Aucun nouvel IPC public, bouton, surveillance
+de dossier, ouverture via l’OS, résolution de conflit ou rafraîchissement automatique
+de copie n’est ajouté par ce lot. Le raccordement utilisateur et les adaptateurs
+CFAPI/File Provider restent à réaliser. Les tests utilisent le système de fichiers
+Linux du banc d’essai ; les comportements natifs Windows/macOS et les références
+CAO restent à valider sur leurs systèmes respectifs. Aucune migration SQL.

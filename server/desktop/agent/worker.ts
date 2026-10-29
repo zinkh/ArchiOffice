@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { WorkingCopies } from './workingCopies';
 import { DownloadCache } from './downloadCache';
 import { createDownloadTransport, type DownloadMetadata } from './downloadTransport';
 import crypto from 'node:crypto';
@@ -15,13 +16,17 @@ export function createAgentWorker(config: WorkerConfig) {
   let stopped = false; let running: Promise<void> | null = null;
   const abort = new AbortController();
   const downloads = new Set<Promise<unknown>>();
-  let owner: { id: string; queue: TransferQueue; cache: DownloadCache; session: AgentSession } | null = null;
+  type Owner = { id: string; queue: TransferQueue; cache: DownloadCache; working: WorkingCopies; session: AgentSession };
+  // Retain a single writer when the linked account changes and later returns.
+  const owners = new Map<string, Owner>();
   async function current() {
     const session = await config.session();
     if (!session?.userId || !session.tenantId || !session.deviceId || !session.token?.startsWith('ds_at_')) throw Object.assign(new Error('Invalid vault response'),{status:401,code:'DRIVE_VAULT_UNAVAILABLE'});
     const id = crypto.createHash('sha256').update(JSON.stringify([session.userId,session.tenantId])).digest('hex');
-    if (!owner || owner.id !== id) owner = { id, session, queue: new TransferQueue(path.join(config.root,id),{userId:session.userId,tenantId:session.tenantId}), cache:new DownloadCache(path.join(config.root,id,'downloads'),{userId:session.userId,tenantId:session.tenantId}) };
+    let owner = owners.get(id);
+    if (!owner) owner = { id, session, queue: new TransferQueue(path.join(config.root,id),{userId:session.userId,tenantId:session.tenantId}), cache:new DownloadCache(path.join(config.root,id,'downloads'),{userId:session.userId,tenantId:session.tenantId}), working:new WorkingCopies(path.join(config.root,id,'working'),{userId:session.userId,tenantId:session.tenantId}) };
     else owner.session = session;
+    owners.set(id, owner);
     return owner;
   }
   async function tick() {
@@ -44,6 +49,8 @@ export function createAgentWorker(config: WorkerConfig) {
         }
       }
       const jobs = await ctx.queue.list();
+      // Replay completed snapshots before accepting another edit's baseline.
+      for (const job of jobs) await ctx.working.acknowledge(job);
       const blocked = jobs.filter(j=>j.state==='blocked').length;
       const conflicts = jobs.filter(j=>j.state==='conflict').length;
       config.status({state:blocked || conflicts ? 'paused':'running',blocked,conflicts,
@@ -77,6 +84,35 @@ export function createAgentWorker(config: WorkerConfig) {
       if(stopped)throw new Error('Agent stopped');
       const ctx=await current(); // offline signed authorization is still mandatory
       abort.signal.throwIfAborted();return ctx.cache.lookup(meta);
+    },
+    /** Private adapter API: known cached metadata permits offline materialization.
+     * The returned path must stay in the native process, never a browser API. */
+    prepareWorkingCopy(meta: DownloadMetadata) {
+      const task=(async()=> {
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();const expected={...ctx.session};
+        const cached=await ctx.cache.lookup(meta);
+        if(!cached)throw Object.assign(new Error('Version not cached'),{code:'DRIVE_VERSION_NOT_CACHED'});
+        abort.signal.throwIfAborted();
+        const result=await ctx.working.prepare(meta,cached);
+        const session=await config.session();abort.signal.throwIfAborted();
+        if(session.userId!==expected.userId||session.tenantId!==expected.tenantId||session.deviceId!==expected.deviceId)throw Object.assign(new Error('Account changed'),{code:'DRIVE_IDENTITY_MISMATCH'});
+        return result;
+      })();
+      downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
+    uploadWorkingCopy(nodeId: string) {
+      const task=(async()=> {
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();
+        // Recover a completed upload if the previous process exited before ack.
+        for(const job of await ctx.queue.list())await ctx.working.acknowledge(job);
+        const copy=await ctx.working.inspect(nodeId);abort.signal.throwIfAborted();
+        if(!copy.modified)return {queued:false};
+        const job=await ctx.queue.enqueue(copy.file,{documentId:nodeId},copy.baseVersion);
+        return {queued:true,jobId:job.id};
+      })();
+      downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
     async retryBlocked() {
       if (stopped) throw new Error('Agent stopped');
