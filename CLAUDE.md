@@ -556,9 +556,24 @@ suivante). Quatre règles à garder :
   répondraient 404. Supprimer une photo ou une réserve retire aussi les miniatures. Les photos
   d'avant se rattrapent avec `npx tsx scripts/backfill-reserve-photo-thumbs.ts` (`--dry-run` d'abord,
   relançable). `tests/fakeSupabaseAdmin.ts` sait simuler une colonne absente (`dropColumn`).
-- **Pas encore fait** : route groupée d'URL signées, pagination de `GET /api/reserves` (elle rend
-  toutes les réserves et toutes leurs photos) et fenêtrage de la liste au-delà de quelques centaines de
-  lignes. Non vérifié sur un iPad réel.
+- **Pagination progressive de la liste** (`src/lib/reservePagination.ts`, testée) : le suivi n'affiche
+  que 50 réserves à la fois (`RESERVE_PAGE_SIZE`), la suite vient au défilement (`ListFooter`,
+  IntersectionObserver, `rootMargin` 600 px) avec un bouton « Afficher N de plus » pour le clavier. Le
+  tableau groupé par lot est paginé sur l'ENSEMBLE de ses lignes (`paginateGroups`) : un groupe replié
+  garde son en-tête sans consommer de lignes, un groupe entièrement au-delà de la fenêtre n'a pas encore
+  d'en-tête. **Un seul rendu à la fois** (`useMediaQuery('(min-width: 768px)')`) : la liste mobile ET le
+  tableau étaient montés ensemble, l'un masqué par CSS, donc chaque réserve existait deux fois dans le
+  DOM. Ce n'est pas `usePagination` (pages numérotées, retour à la page 1 quand le nombre de lignes
+  change) : créer une réserve ou changer un statut ne doit pas remonter la liste. Un autre filtre ou une
+  autre recherche repart de la première page ; une réserve qu'on vient de créer est révélée même au-delà
+  de la fenêtre (`revealId`, `limitToReveal` : par pages entières). **Seul l'affichage est limité** :
+  compteurs, repères de plan et export PDF portent toujours sur toute la liste en mémoire.
+- **Pas encore fait, volontairement** : pagination des DONNÉES (`GET /api/reserves` rend toutes les
+  réserves et leurs photos, et `GET /api/projects/:id/full` aussi). `ProjectDetail` s'appuie sur la liste
+  COMPLÈTE (réserves d'un procès-verbal de réception, compteur de l'onglet, prochaine visite), et le cache
+  hors ligne (`cachedListFirst`) supprime du cache tout ce que la réponse ne contient plus : paginer la
+  réponse sans changer ces usages viderait le cache et fausserait les compteurs. Route groupée d'URL
+  signées non faite. Non vérifié sur un iPad réel.
 
 **Suivi / réponse.** Une réserve peut être faite sans être satisfaisante : `reserves.reponse` et
 `gpa_reserves.reponse` (`supabase/migrate_reserves_reponse.sql`, TEXT, 5000 caractères) portent la

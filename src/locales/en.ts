@@ -4302,6 +4302,8 @@ export default {
       "reserve_tracker_settings_not_loaded": "The firm's settings have not finished loading yet.",
       "reserve_tracker_no_reserves_to_export": "No reserves to export with this filter.",
       "reserve_tracker_export_failed": "The PDF export failed.",
+      "reserve_tracker_shown_of": "{{shown}} of {{total}} shown",
+      "reserve_tracker_show_more": "Show {{count}} more",
       "documents_upload_failed": "Upload failed: {{error}}",
       "documents_error": "Error: {{error}}",
       "documents_update_failed": "Failed: {{error}}",

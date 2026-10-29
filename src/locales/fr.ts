@@ -4452,6 +4452,8 @@ export default {
       "reserve_tracker_settings_not_loaded": "Les réglages du cabinet ne sont pas encore chargés.",
       "reserve_tracker_no_reserves_to_export": "Aucune réserve à exporter avec ce filtre.",
       "reserve_tracker_export_failed": "L'export PDF a échoué.",
+      "reserve_tracker_shown_of": "{{shown}} sur {{total}} affichées",
+      "reserve_tracker_show_more": "Afficher {{count}} de plus",
       "documents_upload_failed": "Échec de l'upload : {{error}}",
       "documents_error": "Erreur : {{error}}",
       "documents_update_failed": "Échec : {{error}}",

@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { AnimatePresence } from 'motion/react';
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconClipboardCheck,
@@ -30,6 +30,10 @@ import {
 import {
   photoEntityFor, pendingPhotosByReserve, overlayPendingPhotos, previewUrlFor, releasePreviewUrl,
 } from '../../lib/reservePhotoQueue';
+import {
+  RESERVE_PAGE_SIZE, paginateFlat, paginateGroups, nextLimit, nextChunk, rankInFlat, rankInGroups, limitToReveal,
+} from '../../lib/reservePagination';
+import { useMediaQuery } from '../../hooks/useMediaQuery';
 import type { Plan, ReservePhoto } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
@@ -120,6 +124,13 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [openReserveId, setOpenReserveId] = useState<string | null>(null);
 
+  // Affichage progressif (src/lib/reservePagination.ts) : un OPR compte des centaines, parfois des
+  // milliers de réserves. Seules les `limit` premières lignes sont rendues, la suite vient au défilement.
+  // Un seul rendu à la fois (liste mobile OU tableau) : les deux étaient montés, l'un masqué par CSS.
+  const isDesktop = useMediaQuery('(min-width: 768px)');
+  const [limit, setLimit] = useState(RESERVE_PAGE_SIZE);
+  const [revealId, setRevealId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!initialOpenReserveId || reserves.length === 0) return;
     if (reserves.some(r => r.id === initialOpenReserveId)) setOpenReserveId(initialOpenReserveId);
@@ -179,6 +190,29 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   }, [visible]);
 
   const mobileList = useMemo(() => [...visible].sort((a, b) => (b.number || 0) - (a.number || 0)), [visible]);
+
+  const isGroupExpanded = useCallback((key: string) => expandedGroups[key] ?? true, [expandedGroups]);
+  // Seule la présentation active est paginée : l'autre n'est pas montée.
+  const flatPage = useMemo(() => (isDesktop ? null : paginateFlat(mobileList, limit)), [isDesktop, mobileList, limit]);
+  const groupsPage = useMemo(() => (isDesktop ? paginateGroups(groups, limit, isGroupExpanded) : null), [isDesktop, groups, limit, isGroupExpanded]);
+  const shownCount = flatPage?.shown ?? groupsPage?.shown ?? 0;
+  const totalCount = flatPage?.total ?? groupsPage?.total ?? 0;
+  const showMore = useCallback(() => setLimit(l => nextLimit(l)), []);
+
+  // Un autre filtre ou une autre recherche repart de la première page : sinon on resterait sur une
+  // fenêtre de 500 lignes pour trois résultats, ou en bas d'une liste qui n'existe plus.
+  useEffect(() => { setLimit(RESERVE_PAGE_SIZE); }, [filter, search]);
+
+  // Une réserve qu'on vient de créer se montre même si elle tombe au-delà de la fenêtre (elle clôt son
+  // lot dans le tableau, et la liste mobile est triée du plus récent au plus ancien).
+  useEffect(() => {
+    if (!revealId || !reserves.some(r => r.id === revealId)) return;
+    const rank = isDesktop
+      ? rankInGroups(groups, isGroupExpanded, r => r.id, revealId)
+      : rankInFlat(mobileList, r => r.id, revealId);
+    if (rank !== null) setLimit(l => limitToReveal(rank, l));
+    setRevealId(null);
+  }, [revealId, isDesktop, groups, mobileList, isGroupExpanded, reserves]);
 
   const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
 
@@ -357,8 +391,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         </div>
 
         {/* Mobile : une carte par réserve */}
-        <div className="md:hidden divide-y divide-[var(--tblr-border)]">
-          {mobileList.map(res => {
+        {!isDesktop && (
+        <div className="divide-y divide-[var(--tblr-border)]">
+          {(flatPage?.items ?? []).map(res => {
             const retard = reserveOverdueDays(res);
             const entreprises = parseJsonList(res.entreprises);
             const lots = parseJsonList(res.lots);
@@ -408,9 +443,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             <div className="px-6 py-8 text-center text-[var(--tblr-muted)] italic text-sm">Aucune réserve.</div>
           )}
         </div>
+        )}
 
         {/* Bureau : tableau groupé par lot / entreprise */}
-        <div className="hidden md:block overflow-x-auto">
+        {isDesktop && (
+        <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
               <tr>
@@ -425,8 +462,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--tblr-border)]">
-              {groups.map(([groupKey, groupReserves]) => {
-                const expanded = expandedGroups[groupKey] ?? true;
+              {(groupsPage?.groups ?? []).map(({ key: groupKey, rows: groupRows, total: groupTotal, expanded }) => {
                 return (
                   <React.Fragment key={groupKey}>
                     <tr
@@ -437,11 +473,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                           <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
-                          <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupReserves.length} réserve{groupReserves.length > 1 ? 's' : ''})</span>
+                          <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupTotal} réserve{groupTotal > 1 ? 's' : ''})</span>
                         </div>
                       </td>
                     </tr>
-                    {expanded && groupReserves.map(res => {
+                    {expanded && groupRows.map(res => {
                       const retard = reserveOverdueDays(res);
                       return (
                         <tr
@@ -502,6 +538,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             </tbody>
           </table>
         </div>
+        )}
+
+        <ListFooter shown={shownCount} total={totalCount} onMore={showMore} />
       </div>
 
       <AnimatePresence>
@@ -516,6 +555,8 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           pendingPlan={creating ? { planId: selectedPlanId, x: annotationCoords?.x, y: annotationCoords?.y } : null}
           onClose={() => { setCreating(false); setOpenReserveId(null); }}
           onSaved={saved => {
+            // Une réserve créée est montrée même au-delà de la fenêtre affichée (voir revealId).
+            if (!serverReserves.some(r => r.id === saved.id)) setRevealId(saved.id);
             setReserves(prev => prev.some(r => r.id === saved.id) ? prev.map(r => r.id === saved.id ? saved : r) : [...prev, saved]);
             setAnnotationCoords(null);
           }}
@@ -524,6 +565,45 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       )}
       </AnimatePresence>
     </>
+  );
+}
+
+/**
+ * Pied de la liste : « 50 sur 312 affichées » et la suite. La suite se charge toute seule quand le pied
+ * approche de l'écran (défilement au doigt) ; le bouton reste pour le clavier et pour un navigateur sans
+ * IntersectionObserver. Ne s'affiche pas pour une liste vide.
+ */
+function ListFooter({ shown, total, onMore }: { shown: number; total: number; onMore: () => void }) {
+  const { t } = useTranslation();
+  const sentinel = useRef<HTMLDivElement>(null);
+  const remaining = total - shown;
+
+  // Recréé à chaque page : si le pied est encore à l'écran après l'ajout (grand écran), l'observateur
+  // le signale de nouveau et la page suivante vient, jusqu'à ce que le pied sorte du champ.
+  useEffect(() => {
+    const el = sentinel.current;
+    if (remaining <= 0 || !el || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) onMore();
+    }, { rootMargin: '600px 0px' });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [remaining, shown, onMore]);
+
+  if (total === 0) return null;
+  return (
+    <div ref={sentinel} className="px-3 sm:px-4 py-3 border-t border-[var(--tblr-border)] flex items-center justify-between gap-3 flex-wrap">
+      <span className="text-xs text-[var(--tblr-muted)] font-medium" aria-live="polite">{t('reserve_tracker_shown_of', { shown, total })}</span>
+      {remaining > 0 && (
+        <button
+          type="button"
+          onClick={onMore}
+          className="px-4 py-2 pointer-coarse:min-h-11 rounded-lg text-sm font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)]"
+        >
+          {t('reserve_tracker_show_more', { count: nextChunk(shown, total) })}
+        </button>
+      )}
+    </div>
   );
 }
 
