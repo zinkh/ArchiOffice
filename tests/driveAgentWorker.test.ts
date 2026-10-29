@@ -273,3 +273,14 @@ it('keeps the active copy when the document queue changes during remote download
   await expect(worker.checkRemoteVersion(meta.nodeId,true)).rejects.toMatchObject({code:'WORKING_REFRESH_BUSY'});
   expect((await worker.openWorkingCopy(meta.nodeId)).file).toBe(old.file);expect(await fs.readFile(old.file,'utf8')).toBe('hello');await worker.stop();
 });
+it('hydrates an explicitly bound Windows catalog version and refuses another device or an expired grant',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.pdf',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'windows'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  const identity={userId:'user',tenantId:'tenant',deviceId:'device'};
+  await expect(worker.windowsPreview('hydrate',{meta,identity:{...identity,deviceId:'other'}})).rejects.toThrow('Identity changed');
+  const result=await worker.windowsPreview('hydrate',{meta,identity});expect('file' in result).toBe(true);
+  if(typeof result.file==='string')expect(await fs.readFile(result.file,'utf8')).toBe('hello');
+  download.read.mockClear();await worker.windowsPreview('hydrate',{meta,identity});expect(download.read).not.toHaveBeenCalled();
+  session.mockRejectedValue(new Error('expired'));await expect(worker.windowsPreview('hydrate',{meta,identity})).rejects.toThrow('expired');await worker.stop();
+});

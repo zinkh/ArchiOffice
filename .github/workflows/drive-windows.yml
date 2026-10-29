@@ -1,0 +1,33 @@
+name: Windows Drive prototype
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/windows-drive/**'
+      - 'electron/windowsDrive.cjs'
+      - '.github/workflows/drive-windows.yml'
+  workflow_dispatch:
+jobs:
+  native-cfapi:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Configure Windows SDK provider
+        run: cmake -S native/windows-drive -B native/windows-drive/build -A x64
+      - name: Compile CFAPI provider
+        run: cmake --build native/windows-drive/build --config Release
+      - name: Exercise CFAPI on Windows
+        run: node native/windows-drive/smoke.mjs
+      - name: Exercise shipping broker with CFAPI
+        run: node native/windows-drive/broker-smoke.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-drive-preview-x64
+          path: native/windows-drive/build/Release/archioffice-drive-cfapi.exe

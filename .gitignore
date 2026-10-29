@@ -15,3 +15,6 @@ uploads/
 scripts/eval-agents-reports/
 vendor/
 .npmrc
+
+# Native Windows CFAPI build outputs
+native/windows-drive/build/

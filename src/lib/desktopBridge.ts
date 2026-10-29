@@ -6,6 +6,9 @@ import type { DriveDocumentStatus, DriveRemoteCheck } from '../../shared/driveDo
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
+  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean}>;
+  startWindowsDrivePreview?: (projectId:string) => Promise<{status:'opened'|'error'}>;
+  stopWindowsDrivePreview?: () => Promise<{status:'stopped'}>;
   checkDriveRemoteVersion?: (nodeId: string) => Promise<DriveRemoteCheck>;
   refreshDriveDocument?: (nodeId: string) => Promise<DriveRemoteCheck>;
   restartDriveDocument?: (nodeId: string) => Promise<{status:'restarted'|'error'}>;

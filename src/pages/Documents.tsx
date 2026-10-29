@@ -1,3 +1,4 @@
+import { WindowsDrivePreview } from '../components/WindowsDrivePreview';
 import { useState, useEffect, useRef } from 'react';
 import { desktopBridge } from '../lib/desktopBridge';
 import { useDriveDocumentStatuses } from '../hooks/useDriveDocumentStatuses';
@@ -504,6 +505,8 @@ export default function Documents() {
             </button>
           </div>
         </div>
+
+        {driveEnabled && <WindowsDrivePreview key={`${currentUser?.id}:${activeTenantId}`} projectId={activeProject && activeProject!=='unassigned'?activeProject:null} />}
 
         {/* Documents table */}
         <div className="rounded-3xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
