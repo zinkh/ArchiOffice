@@ -433,3 +433,45 @@ paiement. Les contrats Entreprise doivent donc aussi renseigner cette échéance
 Validation : tests de contrôle d’accès et suites desktop ; aucune migration SQL
 requise par ce lot. Les composants natifs, l’autorisation hors connexion et la
 fiabilisation complète du renouvellement de facturation restent des lots séparés.
+
+## 19. Préparation de l’activation et autorisations signées
+
+Les réglages **Mon profil** affichent désormais l’éligibilité du cabinet actif et
+les appareils personnels, tous cabinets confondus. La déconnexion demande une
+confirmation et reste proposée si le contrôle d’abonnement échoue. L’écran
+n’inscrit pas de nouvel appareil : l’inscription sera assurée par l’agent, avec
+transfert du jeton directement vers son stockage sécurisé, jamais par un champ
+à copier dans le navigateur.
+
+### Socle d’autorisation hors connexion
+
+`POST /api/desktop/v1/offline-license` exige un jeton d’appareil valide et un
+cabinet sélectionné dont l’abonnement est actif. L’identité est déduite du jeton,
+pas du corps de la requête. Réponse sans cache : `{ license, expiresAt, keyId }`.
+
+- Signature Ed25519, en-tête `alg: EdDSA`, identifiant de clé `kid`.
+- Émetteur `archioffice-drive`, destinataire `archioffice-drive-agent`, droit
+  `archioffice_drive`, utilisateur/cabinet/appareil, dates d’émission/expiration.
+- Durée maximale : 72 h, bornée aussi par la fin de période payée.
+- Variables serveur : `DRIVE_LICENSE_PRIVATE_KEY` (PEM PKCS#8 Ed25519),
+  `DRIVE_LICENSE_KEY_ID` (1–64 caractères alphanumériques, `_` ou `-`). La clé doit
+  être créée et conservée dans le gestionnaire de secrets du déploiement ; elle
+  n’est ni générée au démarrage, ni envoyée aux clients, ni committée.
+- Sans clé correctement configurée : `503 DRIVE_LICENSE_UNAVAILABLE` ; le reste
+  de Drive reste indépendant de cette configuration.
+- `verifyOfflineLicense` vérifie la signature, les identités, l’émetteur, le
+  destinataire et les bornes temporelles. Le registre des clés publiques doit
+  être provisionné indépendamment dans le client, jamais fourni par la licence.
+  La rotation conserve les anciennes clés publiques jusqu’à expiration des
+  autorisations déjà émises, ou les retire explicitement pour les invalider.
+
+**État livré : protocole d’émission et vérificateur testés, pas encore une
+activation hors connexion de bout en bout.** Le client natif doit encore stocker
+la licence dans le coffre système, épingler les clés publiques, conserver une
+heure de référence protégée contre le recul de l’horloge, renouveler la licence
+en ligne et gérer son expiration sans perdre les modifications. Aucun garde
+local de la section 18 n’est levé dans ce lot.
+
+Un poste déconnecté ne peut pas apprendre immédiatement une révocation : la
+licence constitue au plus 72 h de tolérance. À la reconnexion, les refus serveur
+font foi. Les modifications non synchronisées doivent rester récupérables.

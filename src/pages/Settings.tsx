@@ -1,3 +1,4 @@
+import { DriveAccessPanel } from '../components/DriveAccessPanel';
 import { DeleteProjectCard } from '../components/settings/DeleteProjectCard';
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -3362,6 +3363,8 @@ export default function Settings() {
       )}
 
       {/* ── User section ── */}
+      {activeTab === 'profil' && <DriveAccessPanel key={currentUser?.tenantId} />}
+
       {activeTab === 'profil' && (
         <>
       <h2 className="text-xl font-bold" style={{ color: 'var(--tblr-text)' }}>{t('user_information')}</h2>

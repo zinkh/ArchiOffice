@@ -14,6 +14,7 @@
 // Pas encore fait (voir le contrat) : flux SSE /events (le sondage de /changes suffit),
 // notification de la personne dont on rompt le verrou, création de dossier.
 import express from 'express';
+import { signOfflineLicense } from '../desktop/offlineLicense';
 import { driveCapability, requireDriveSubscription } from '../desktop/driveAccess';
 import type { Express } from 'express';
 import { isCadFileName, isIgnoredFileName, fileExtension } from '../../src/lib/cadFiles';
@@ -143,6 +144,20 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
   app.get(`${BASE}/capabilities`, handle(async (req, res) => {
     const tenantId = await deps.getTenantId(req.user.id);
     res.set('Cache-Control', 'no-store').json(await driveCapability(db, tenantId));
+  }));
+
+  // Only a registered, authenticated device can obtain its own bounded grant.
+  // The paid middleware above rechecks tenant membership/subscription first.
+  app.post(`${BASE}/offline-license`, handle(async (req, res) => {
+    if (!req.deviceId) throw new DesktopError(403, 'DEVICE_TOKEN_REQUIRED', 'Connectez un appareil Drive pour obtenir son autorisation hors connexion.');
+    const tenantId = await deps.getTenantId(req.user.id);
+    const { data, error } = await db.from('tenants').select('plan, trial_ends_at, suspended_at').eq('id', tenantId).maybeSingle();
+    if (error) throw new DesktopError(503, 'DRIVE_ENTITLEMENT_UNAVAILABLE', 'Vérification de l’abonnement indisponible.');
+    try {
+      res.set('Cache-Control', 'no-store').json(signOfflineLicense({ userId: req.user.id, tenantId, deviceId: req.deviceId }, data));
+    } catch (e: any) {
+      throw new DesktopError(e.status || 503, e.code || 'DRIVE_LICENSE_UNAVAILABLE', e.message);
+    }
   }));
 
   // ── Appareils ──────────────────────────────────────────────────────────────
