@@ -65,4 +65,14 @@ async function revealDriveCopies({vault,root,nodeId,shell}) {
     return {status:await shell.openPath(files)?'error':'copies_shown'};
   }catch{return {status:'error'};}
 }
-module.exports={openDriveWorking,driveDocumentStatuses,revealDriveCopies};
+async function remoteDriveVersion({agent,nodeId,refresh=false}) {
+  if(typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))return {status:'error'};
+  try {
+    const result=await agent.working(refresh?'refresh':'check',nodeId);
+    if(['busy','missing'].includes(result?.status))return {status:result.status};
+    if(!['current','remote_newer','local_newer','modified','refreshed'].includes(result?.status)
+      ||!Number.isSafeInteger(result.localVersion)||result.localVersion<1||!Number.isSafeInteger(result.remoteVersion)||result.remoteVersion<1)return {status:'error'};
+    return {status:result.status,localVersion:result.localVersion,remoteVersion:result.remoteVersion};
+  }catch(e){return {status:['WORKING_LOCAL_MODIFICATIONS','WORKING_REFRESH_BUSY'].includes(e?.code)?'changed':'error'};}
+}
+module.exports={openDriveWorking,driveDocumentStatuses,revealDriveCopies,remoteDriveVersion};

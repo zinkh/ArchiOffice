@@ -71,3 +71,13 @@ it('opens only the derived copies folder and refuses symbolic links or a final v
   c.vault.mockResolvedValue(identity);const dir=path.dirname(file);await fs.rename(dir,dir+'-old');await fs.symlink(dir+'-old',dir);
   expect(await revealDriveCopies(c)).toEqual({status:'error'});expect(c.shell.openPath).not.toHaveBeenCalled();
 });
+it('returns only version numbers from remote checks and rejects malformed or private replies',async()=>{
+  const {remoteDriveVersion}=require('../electron/driveWorking.cjs');
+  const agent={working:vi.fn().mockResolvedValue({status:'remote_newer',localVersion:1,remoteVersion:2,file:'/private',token:'secret'})};
+  expect(await remoteDriveVersion({agent,nodeId:'doc:one'})).toEqual({status:'remote_newer',localVersion:1,remoteVersion:2});
+  expect(agent.working).toHaveBeenCalledWith('check','doc:one');
+  agent.working.mockResolvedValue({status:'refreshed',localVersion:2,remoteVersion:2});await remoteDriveVersion({agent,nodeId:'doc:one',refresh:true});
+  expect(agent.working).toHaveBeenLastCalledWith('refresh','doc:one');
+  agent.working.mockResolvedValue({status:'current',localVersion:-1,remoteVersion:2});expect(await remoteDriveVersion({agent,nodeId:'doc:one'})).toEqual({status:'error'});
+  expect(await remoteDriveVersion({agent,nodeId:'../../private'})).toEqual({status:'error'});
+});

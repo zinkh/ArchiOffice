@@ -73,7 +73,7 @@ export class WorkingCopies {
   private file(r: WorkingRecord) { return path.join(this.directory(r.nodeId), 'files', r.name); }
   private async describe(r: WorkingRecord) {
     const file = this.file(r); const actual = await digest(file);
-    return { file, nodeId: r.nodeId, baseVersion: r.baseVersion, modified: actual.sha256 !== r.baseSha256 || actual.size !== r.baseSize };
+    return { file, baselineSha256: r.baseSha256, nodeId: r.nodeId, baseVersion: r.baseVersion, modified: actual.sha256 !== r.baseSha256 || actual.size !== r.baseSize };
   }
   /** Source must be the independently verified immutable cache, never renderer input. */
   prepare(meta: DownloadMetadata, source: { file: string; sha256: string }) { return this.serial(async () => {
@@ -112,14 +112,14 @@ export class WorkingCopies {
   }); }
   /** Explicit restart after preservation. Old files remain byte-for-byte at
    * their old paths; a new journal pointer is published only after verification. */
-  restart(meta: DownloadMetadata, source: {file:string;sha256:string}, conflictId: string, authorize:()=>Promise<unknown>) { return this.serial(async()=> {
+  restart(meta: DownloadMetadata, source: {file:string;sha256:string}, conflictId: string, authorize:()=>Promise<unknown>, requireUnmodified = false) { return this.serial(async()=> {
     if(!/^[a-f0-9-]{36}$/.test(conflictId)||!Number.isSafeInteger(meta.version)||meta.version<1||!Number.isSafeInteger(meta.size)||meta.size<0||meta.size>200*1024*1024
       ||typeof meta.name!=='string'||!/^[a-f0-9]{64}$/.test(source.sha256)||(meta.sha256!==null&&meta.sha256!==source.sha256))throw fail('INVALID_WORKING_SOURCE');
     const r=await this.read(meta.nodeId);if(!r||r.state!=='ready')throw fail('WORKING_COPY_UNAVAILABLE');
     if(r.reconciliationId===conflictId)return this.describe(r);
     if(meta.version<r.baseVersion)throw fail('WORKING_REMOTE_VERSION_OLDER');
     // Prove the old path is still a regular readable file; never recreate it.
-    await this.describe(r);
+    if((await this.describe(r)).modified && requireUnmodified)throw fail('WORKING_LOCAL_MODIFICATIONS');
     const dir=this.directory(meta.nodeId);const safe=filename(meta.name);const ext=path.extname(safe).slice(0,20);
     const stem=safe.slice(0,safe.length-path.extname(safe).length).slice(0,40);
     const next:WorkingRecord={...r,name:filename(`${stem} (reprise ${conflictId})${ext}`),baseVersion:meta.version,
@@ -138,7 +138,9 @@ export class WorkingCopies {
         try {await fs.link(tmp,archive);}catch(e:any){if(e.code!=='EEXIST')throw e;}
         if(await fs.readFile(archive,'utf8')!==JSON.stringify(r))throw fail('WORKING_RECOVERY_REQUIRED');
       }finally {await fs.rm(tmp,{force:true});}
-      await authorize();await this.save(next);return await this.describe(next);
+      await authorize();
+      if(requireUnmodified && (await this.describe(r)).modified)throw fail('WORKING_LOCAL_MODIFICATIONS');
+      await this.save(next);return await this.describe(next);
     }finally {await fs.rm(temporary,{force:true});}
   }); }
   inspect(nodeId: string) { return this.serial(async () => {

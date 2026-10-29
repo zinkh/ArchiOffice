@@ -47,6 +47,12 @@ it('correlates private working-copy replies and rejects invalid document command
   const restart=agent.working('restart','doc:one');const restartReq=worker.send.mock.calls.at(-1)[0];
   expect(restartReq.type).toBe('drive:restart-working');
   worker.emit('message',{type:'drive:working-result',requestId:restartReq.requestId,result:{version:2}});expect(await restart).toEqual({version:2});
+  for(const action of ['check','refresh']) {
+    const read=agent.working(action,'doc:one');const req=worker.send.mock.calls.at(-1)[0];
+    expect(req.type).toBe(`drive:${action}-working`);
+    worker.emit('message',{type:'drive:working-result',requestId:req.requestId,result:{status:'current',localVersion:2,remoteVersion:2}});
+    expect(await read).toMatchObject({status:'current'});
+  }
   const waiting=agent.working('upload','doc:one');worker.emit('exit',1);
   await expect(waiting).rejects.toThrow('Agent unavailable');agent.stop();
 });

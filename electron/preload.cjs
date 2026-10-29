@@ -13,6 +13,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('archiofficeDesktop', {
   isDesktop: true,
+  checkDriveRemoteVersion: (nodeId) => ipcRenderer.invoke('desktop:drive-check-remote',nodeId),
+  refreshDriveDocument: (nodeId) => ipcRenderer.invoke('desktop:drive-refresh-working',nodeId),
   restartDriveDocument: (nodeId) => ipcRenderer.invoke('desktop:drive-restart-working',nodeId),
   revealDriveCopies: (nodeId) => ipcRenderer.invoke('desktop:drive-reveal-copies',nodeId),
   preserveDriveConflict: (nodeId) => ipcRenderer.invoke('desktop:drive-preserve-conflict',nodeId),

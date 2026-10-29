@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { DriveDocumentStatus } from '../../../shared/driveDocumentStatus';
+import type { DriveDocumentStatus, DriveRemoteCheck } from '../../../shared/driveDocumentStatus';
 import { WorkingCopies } from './workingCopies';
 import { DownloadCache } from './downloadCache';
 import { createDownloadTransport, type DownloadMetadata } from './downloadTransport';
@@ -96,6 +96,40 @@ export function createAgentWorker(config: WorkerConfig) {
         const copy=await ctx.working.restart(meta,cached,conflict.id,authorize);
         await authorize();await ctx.queue.reconcileConflict(conflict.id,copy.baseVersion);
         return {version:copy.baseVersion};
+      });
+      workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
+    checkRemoteVersion(nodeId: string, refresh = false) {
+      const task:Promise<DriveRemoteCheck>=workingUploads.then(async()=> {
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();const expected={...ctx.session};
+        const authorize=async()=> {
+          abort.signal.throwIfAborted();const active=await config.session();
+          if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)throw Object.assign(new Error('Account changed'),{code:'DRIVE_IDENTITY_MISMATCH'});
+          return active.token;
+        };
+        const jobs=await ctx.queue.listPersisted();for(const job of jobs)await ctx.working.acknowledge(job);
+        const relevant=(items:typeof jobs)=>items.filter(j=>'documentId' in j.target&&j.target.documentId===nodeId);
+        const baseline=JSON.stringify(relevant(jobs));
+        if(relevant(jobs).some(j=>j.state!=='done'&&j.reconciledVersion===undefined)){await authorize();return {status:'busy'};}
+        let copy;
+        try {copy=await ctx.working.inspect(nodeId);}catch(e:any){if(e.code!=='WORKING_COPY_UNAVAILABLE')throw e;await authorize();return {status:'missing'};}
+        const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);const meta=await transport.metadata(nodeId,abort.signal);
+        await authorize();
+        const versions={localVersion:copy.baseVersion,remoteVersion:meta.version};
+        if(meta.version===copy.baseVersion&&meta.sha256&&meta.sha256!==copy.baselineSha256)throw Object.assign(new Error('Remote version mutated'),{code:'REMOTE_VERSION_MUTATED'});
+        if(copy.modified)return {status:'modified',...versions};
+        if(meta.version<copy.baseVersion)return {status:'local_newer',...versions};
+        if(meta.version===copy.baseVersion)return {status:'current',...versions};
+        if(!refresh)return {status:'remote_newer',...versions};
+        await ctx.cache.hydrate(meta,transport,abort.signal);const cached=await ctx.cache.lookup(meta);if(!cached)throw new Error('Version not cached');
+        const hex=crypto.createHash('sha256').update(JSON.stringify(['refresh',ctx.id,nodeId,copy.baseVersion,meta.version,meta.sha256])).digest('hex').slice(0,32);
+        const operation=`${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+        const next=await ctx.working.restart(meta,cached,operation,async()=> {
+          await authorize();
+          if(JSON.stringify(relevant(await ctx.queue.listPersisted()))!==baseline)throw Object.assign(new Error('Queue changed'),{code:'WORKING_REFRESH_BUSY'});
+        },true);
+        await authorize();return {status:'refreshed',localVersion:next.baseVersion,remoteVersion:meta.version};
       });
       workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },

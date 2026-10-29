@@ -100,3 +100,8 @@ it('does not switch the working pointer after authorization refusal and recovers
   expect((await copies.inspect('doc:plan')).file).toBe(old.file);
   expect(await copies.restart(remote,{...source,sha256:sha('remote')},id,async()=>{})).toMatchObject({baseVersion:2});
 });
+it('refuses a clean-only update if an application saves local changes before final publication',async()=>{
+  const old=await copies.prepare(meta(),source);const remote={...meta(2),size:6,sha256:sha('remote')};await fs.writeFile(source.file,'remote');
+  await expect(copies.restart(remote,{...source,sha256:sha('remote')},crypto.randomUUID(),async()=>{await fs.writeFile(old.file,'late app save');},true)).rejects.toMatchObject({code:'WORKING_LOCAL_MODIFICATIONS'});
+  expect((await copies.inspect('doc:plan')).file).toBe(old.file);expect(await fs.readFile(old.file,'utf8')).toBe('late app save');
+});

@@ -1,4 +1,4 @@
-import type { DriveDocumentStatus } from '../../shared/driveDocumentStatus';
+import type { DriveDocumentStatus, DriveRemoteCheck } from '../../shared/driveDocumentStatus';
 // Pont vers le processus principal Electron (electron/preload.cjs) — ne
 // fait rien si absent, c'est-à-dire dans un navigateur ou sur le web.
 // Centralise le type et l'accesseur partagés par les différents usages du
@@ -6,6 +6,8 @@ import type { DriveDocumentStatus } from '../../shared/driveDocumentStatus';
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
+  checkDriveRemoteVersion?: (nodeId: string) => Promise<DriveRemoteCheck>;
+  refreshDriveDocument?: (nodeId: string) => Promise<DriveRemoteCheck>;
   restartDriveDocument?: (nodeId: string) => Promise<{status:'restarted'|'error'}>;
   revealDriveCopies?: (nodeId: string) => Promise<{status:'copies_shown'|'error'}>;
   preserveDriveConflict?: (nodeId: string) => Promise<{status:'preserved'|'preserve_queued'|'error'}>;

@@ -227,3 +227,49 @@ it('requires preservation then restarts from the remote version, replays a cross
   expect((await restarted.documentStatuses([meta.nodeId])).documents[0]).toMatchObject({state:'uploaded',version:3});
   expect(await fs.readFile(old.file,'utf8')).toBe('later local edits');await restarted.stop();
 });
+it('checks versions without downloading, refreshes an unmodified copy explicitly and preserves its old path',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'fresh'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  expect(await worker.checkRemoteVersion(meta.nodeId)).toEqual({status:'missing'});
+  await worker.keepOffline(meta.nodeId);const original=await worker.openWorkingCopy(meta.nodeId);download.read.mockClear();
+  expect(await worker.checkRemoteVersion(meta.nodeId)).toEqual({status:'current',localVersion:1,remoteVersion:1});
+  download.metadata.mockResolvedValue({...meta,version:2});
+  expect(await worker.checkRemoteVersion(meta.nodeId)).toEqual({status:'remote_newer',localVersion:1,remoteVersion:2});
+  expect(download.read).not.toHaveBeenCalled();
+  expect(await worker.checkRemoteVersion(meta.nodeId,true)).toEqual({status:'refreshed',localVersion:2,remoteVersion:2});
+  const current=await worker.openWorkingCopy(meta.nodeId);expect(current.file).not.toBe(original.file);
+  expect(await fs.readFile(original.file,'utf8')).toBe('hello');
+  expect(await worker.checkRemoteVersion(meta.nodeId,true)).toMatchObject({status:'current',localVersion:2});
+  download.metadata.mockResolvedValue(meta);expect(await worker.checkRemoteVersion(meta.nodeId,true)).toMatchObject({status:'local_newer',localVersion:2,remoteVersion:1});
+  download.metadata.mockResolvedValue({...meta,version:2});
+  await fs.writeFile(current.file,'edits');transfer.complete.mockResolvedValue({node:{id:meta.nodeId},version:3});
+  await worker.uploadWorkingCopy(meta.nodeId);await worker.tick();
+  expect(transfer.open.mock.calls.at(-1)![0]).toMatchObject({baseVersion:2});await worker.stop();
+});
+it('refuses refresh for local edits, pending uploads, changed identities and mutated remote versions',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'guards'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  await worker.keepOffline(meta.nodeId);const old=await worker.openWorkingCopy(meta.nodeId);
+  download.metadata.mockResolvedValue({...meta,sha256:'f'.repeat(64)});
+  await expect(worker.checkRemoteVersion(meta.nodeId)).rejects.toMatchObject({code:'REMOTE_VERSION_MUTATED'});
+  download.metadata.mockResolvedValue({...meta,version:2});await fs.writeFile(old.file,'edits');
+  expect(await worker.checkRemoteVersion(meta.nodeId,true)).toMatchObject({status:'modified'});
+  expect((await worker.openWorkingCopy(meta.nodeId)).file).toBe(old.file);
+  await worker.uploadWorkingCopy(meta.nodeId);
+  expect(await worker.checkRemoteVersion(meta.nodeId,true)).toEqual({status:'busy'});
+  session.mockRejectedValue(new Error('expired'));await expect(worker.checkRemoteVersion(meta.nodeId,true)).rejects.toThrow('expired');await worker.stop();
+});
+it('keeps the active copy when the document queue changes during remote download',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'queue-change'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  await worker.keepOffline(meta.nodeId);const old=await worker.openWorkingCopy(meta.nodeId);download.metadata.mockResolvedValue({...meta,version:2});
+  download.read.mockImplementationOnce(async()=>{
+    await worker.enqueue(old.file,{documentId:meta.nodeId},1);
+    return {start:0,body:(async function*(){yield Buffer.from('hello');})()};
+  });
+  await expect(worker.checkRemoteVersion(meta.nodeId,true)).rejects.toMatchObject({code:'WORKING_REFRESH_BUSY'});
+  expect((await worker.openWorkingCopy(meta.nodeId)).file).toBe(old.file);expect(await fs.readFile(old.file,'utf8')).toBe('hello');await worker.stop();
+});
