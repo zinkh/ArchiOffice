@@ -1295,6 +1295,8 @@ CREATE TABLE IF NOT EXISTS reserve_photos (
   caption      TEXT,
   uploaded_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Miniature d'affichage de 480 px (migrate_reserve_photos_thumb.sql) ; NULL = on affiche file_url.
+ALTER TABLE reserve_photos ADD COLUMN IF NOT EXISTS thumb_url TEXT;
 CREATE INDEX IF NOT EXISTS idx_reserve_photos_reserve ON reserve_photos(tenant_id, reserve_kind, reserve_id);
 
 CREATE TABLE IF NOT EXISTS project_recent_views (

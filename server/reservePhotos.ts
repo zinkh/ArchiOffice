@@ -8,7 +8,9 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from './tenantScopedFrom';
 import { sanitizeFilename } from './sanitizeFilename';
-import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from './imageUpload';
+import {
+  handleSingleSitePhotoUpload, sniffImageMime, resizeImage, makeThumbnail, extensionForImageMime, MEETING_PHOTO_MAX_DIMENSION,
+} from './imageUpload';
 
 export const RESERVE_PHOTO_BUCKET = 'reserve-photos';
 
@@ -28,6 +30,12 @@ export function normalizeReponse(value: unknown): string | null {
 export function isMissingReponseColumn(error: any): boolean {
   if (!error) return false;
   return error.code === '42703' || error.code === 'PGRST204' || /reponse/i.test(String(error.message || ''));
+}
+
+/** Vrai quand l'écriture échoue faute de la colonne `thumb_url` (instance non migrée). */
+export function isMissingThumbColumn(error: any): boolean {
+  if (!error) return false;
+  return error.code === '42703' || error.code === 'PGRST204' || /thumb_url/i.test(String(error.message || ''));
 }
 
 export interface ReserveKindConfig {
@@ -71,11 +79,15 @@ export async function deleteReservePhotos(
   deleteFromStorage?: (bucket: string, fileUrl: string) => Promise<void>,
 ): Promise<void> {
   try {
+    // `*` et non `file_url, thumb_url` : sur une instance non migrée, nommer la colonne absente ferait échouer la lecture.
     const { data: photos } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos')
-      .select('file_url').eq('reserve_kind', kind).eq('reserve_id', reserveId);
+      .select('*').eq('reserve_kind', kind).eq('reserve_id', reserveId);
     await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos').delete().eq('reserve_kind', kind).eq('reserve_id', reserveId);
     if (deleteFromStorage) {
-      for (const p of (photos || []) as any[]) deleteFromStorage(RESERVE_PHOTO_BUCKET, p.file_url).catch(() => {});
+      for (const p of (photos || []) as any[]) {
+        deleteFromStorage(RESERVE_PHOTO_BUCKET, p.file_url).catch(() => {});
+        if (p.thumb_url) deleteFromStorage(RESERVE_PHOTO_BUCKET, p.thumb_url).catch(() => {});
+      }
     }
   } catch { /* table absente : rien à supprimer */ }
 }
@@ -135,12 +147,35 @@ export function registerReservePhotoRoutes(app: Express, { supabaseAdmin, getTen
         const photoId = clientPhotoId || crypto.randomUUID();
         const storagePath = `${tenantId}/${id}/${photoId}-${sanitizeFilename(file.originalname || 'photo.jpg')}`;
         const file_url = await uploadToStorage(RESERVE_PHOTO_BUCKET, storagePath, buffer, mimetype);
+
+        // Miniature d'AFFICHAGE (listes, grilles), à côté de la photo : la liste d'un OPR montre des
+        // centaines de cases de 64 px, qui téléchargeaient chacune la photo de 1600 px. La photo
+        // complète reste la référence (fiche, export PDF, impression). Au meilleur effort : sans
+        // miniature, l'écran retombe sur la photo, rien n'est perdu.
+        let thumb_url: string | null = null;
+        try {
+          const thumb = await makeThumbnail(buffer, mimetype);
+          if (thumb) {
+            const thumbPath = `${tenantId}/${id}/${photoId}-thumb.${extensionForImageMime(thumb.mimetype)}`;
+            thumb_url = await uploadToStorage(RESERVE_PHOTO_BUCKET, thumbPath, thumb.buffer, thumb.mimetype);
+          }
+        } catch (thumbError: any) {
+          console.warn(`[POST ${apiBase}/:id/photos] miniature non créée :`, thumbError?.message);
+        }
+
         const uploaded_at = new Date().toISOString();
         const caption = typeof req.body?.caption === 'string' && req.body.caption.trim() ? req.body.caption.trim() : null;
         const row = { id: photoId, reserve_id: id, reserve_kind: kind, file_url, caption, uploaded_at };
-        const { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos').insert(row);
+        let saved: Record<string, unknown> = thumb_url ? { ...row, thumb_url } : row;
+        let { error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos').insert(saved);
+        if (error && thumb_url && isMissingThumbColumn(error)) {
+          // Instance dont la base n'a pas encore la colonne : la photo s'enregistre sans miniature.
+          deleteFromStorage(RESERVE_PHOTO_BUCKET, thumb_url).catch(() => {});
+          saved = row;
+          ({ error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos').insert(saved));
+        }
         if (error) throw error;
-        res.status(201).json(row);
+        res.status(201).json(saved);
       } catch (e: any) { console.error(`[POST ${apiBase}/:id/photos]`, e); res.status(500).json({ error: e.message }); }
     });
 
@@ -160,11 +195,13 @@ export function registerReservePhotoRoutes(app: Express, { supabaseAdmin, getTen
       try {
         const tenantId = await getTenantId(req.user.id);
         const { id, photoId } = req.params;
+        // `*` : nommer `thumb_url` ferait échouer la lecture, donc répondre 404, sur une instance non migrée.
         const { data: photo } = await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos')
-          .select('file_url').eq('id', photoId).eq('reserve_id', id).eq('reserve_kind', kind).maybeSingle();
+          .select('*').eq('id', photoId).eq('reserve_id', id).eq('reserve_kind', kind).maybeSingle();
         if (!photo) return res.status(404).json({ error: 'Photo introuvable.' });
         await tenantScopedFrom(supabaseAdmin, tenantId, 'reserve_photos').delete().eq('id', photoId);
         deleteFromStorage(RESERVE_PHOTO_BUCKET, (photo as any).file_url).catch(() => {});
+        if ((photo as any).thumb_url) deleteFromStorage(RESERVE_PHOTO_BUCKET, (photo as any).thumb_url).catch(() => {});
         res.json({ success: true });
       } catch (e: any) { console.error(`[DELETE ${apiBase}/:id/photos/:photoId]`, e); res.status(500).json({ error: e.message }); }
     });

@@ -368,8 +368,25 @@ export class FakeSupabaseAdmin {
     this.brokenTables.delete(table);
   }
 
+  private missingColumns = new Map<string, Set<string>>();
+
+  /**
+   * Test setup: simule une instance dont la base n'a pas encore la colonne `column` de `table`
+   * (migration non jouée). Une écriture (insert, update, upsert) dont le corps la nomme répond comme
+   * PostgREST (`PGRST204`) ; le reste de la table continue de fonctionner, contrairement à breakTable().
+   */
+  dropColumn(table: string, column: string) {
+    if (!this.missingColumns.has(table)) this.missingColumns.set(table, new Set());
+    this.missingColumns.get(table)!.add(column);
+  }
+
+  /** Test cleanup: undoes dropColumn(). */
+  restoreColumn(table: string, column: string) {
+    this.missingColumns.get(table)?.delete(column);
+  }
+
   from(table: string) {
-    return new FakeQueryBuilder(this.tables, table, this.brokenTables, () => this.writeLatencyMs);
+    return new FakeQueryBuilder(this.tables, table, this.brokenTables, () => this.writeLatencyMs, this.missingColumns.get(table));
   }
 }
 
@@ -383,7 +400,13 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
   private wantSingle = false;
   private wantMaybeSingle = false;
 
-  constructor(private tables: Map<string, Row[]>, private table: string, private brokenTables?: Set<string>, private writeLatency?: () => number) {}
+  constructor(
+    private tables: Map<string, Row[]>,
+    private table: string,
+    private brokenTables?: Set<string>,
+    private writeLatency?: () => number,
+    private missingColumns?: Set<string>,
+  ) {}
 
   select(_columns?: string, _opts?: { count?: string; head?: boolean }) {
     return this;
@@ -566,6 +589,14 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       // will see `data` come back `undefined`/`null` and treat that as "no
       // rows", not as a failure.
       return { data: null, error: { message: `simulated failure: table "${this.table}" is broken`, code: '42703' } };
+    }
+
+    if (this.missingColumns?.size && this.payload && (this.op === 'insert' || this.op === 'update' || this.op === 'upsert')) {
+      const bodies = Array.isArray(this.payload) ? this.payload : [this.payload];
+      const missing = [...this.missingColumns].find(col => bodies.some(body => Object.prototype.hasOwnProperty.call(body, col)));
+      if (missing) {
+        return { data: null, error: { code: 'PGRST204', message: `Could not find the '${missing}' column of '${this.table}' in the schema cache` } };
+      }
     }
 
     const rows = this.getRows();
