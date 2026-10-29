@@ -6,6 +6,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sanitizeFilename } from '../sanitizeFilename';
+import { reporterConvocation } from '../../src/lib/siteReportCarryOver';
 import { handleSingleSitePhotoUpload, sniffImageMime, resizeImage, MEETING_PHOTO_MAX_DIMENSION } from '../imageUpload';
 
 export interface RouteDeps {
@@ -82,9 +83,24 @@ export function registerSiteReportRoutes(app: Express, { supabaseAdmin, getTenan
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `Création du compte-rendu de chantier N° ${number} (${projectName})`, projectName, id, 'site_report', 'Notes de site');
       // Copy open notes from previous report
-      const { data: previousReports } = await supabaseAdmin.from('site_reports').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
+      const { data: previousReports } = await supabaseAdmin.from('site_reports').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).neq('id', id).order('date', { ascending: false }).limit(1);
       if (previousReports && previousReports.length > 0) {
         const prevId = previousReports[0].id;
+        // Convocation reportée : une entreprise « Non convoquée » le reste au CR suivant, avec son
+        // lieu, son heure et « Convoqué suiv. ». Meilleur effort : le CR est déjà créé.
+        try {
+          const reportee = reporterConvocation(previousReports[0]);
+          const carry: Record<string, unknown> = {};
+          if (reportee.attendance.length) carry.attendance = reportee.attendance;
+          if (reportee.lot_tracking.length) carry.lot_tracking = reportee.lot_tracking;
+          if (reportee.heure_convocation) carry.heure_convocation = reportee.heure_convocation;
+          if (Object.keys(carry).length) {
+            const { error: carryErr } = await supabaseAdmin.from('site_reports').update(carry).eq('id', id).eq('tenant_id', tenantId);
+            if (carryErr) console.error('[POST /api/projects/:projectId/reports] report de la convocation', carryErr);
+          }
+        } catch (carryError) {
+          console.error('[POST /api/projects/:projectId/reports] report de la convocation', carryError);
+        }
         const { data: openNotes } = await supabaseAdmin.from('site_report_notes').select('*').eq('report_id', prevId).eq('status', 'open');
         if (openNotes && openNotes.length > 0) {
           const newNotes = openNotes.map((note: any) => ({ id: crypto.randomUUID(), tenant_id: tenantId, report_id: id, category: note.category, note_number: note.note_number, responsible_company: note.responsible_company, issue_date: note.issue_date, due_date: note.due_date, status: 'open' }));
