@@ -21,7 +21,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
     if(!available()||busy||typeof projectId!=='string'||!/^[a-zA-Z0-9_-]{1,200}$/.test(projectId))throw new Error('Preview unavailable');
     busy=true;let created=false;
     try {
-      const active=await vault();
+      const grant=await vault();const active={userId:grant.userId,tenantId:grant.tenantId,deviceId:grant.deviceId};
       if(mount) {
         if(!same(mount.identity,active)){stop();throw new Error('Identity changed');}
         if(mount.projectId!==projectId)throw new Error('Stop previous preview first');

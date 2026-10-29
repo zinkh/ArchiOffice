@@ -24,6 +24,8 @@ jobs:
         run: cmake --build native/windows-drive/build --config Release
       - name: Exercise CFAPI on Windows
         run: node native/windows-drive/smoke.mjs
+      - name: Exercise shipping broker with CFAPI
+        run: node native/windows-drive/broker-smoke.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

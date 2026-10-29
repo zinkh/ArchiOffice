@@ -952,3 +952,46 @@ enregistrement local tardif, conservation des anciens chemins, nouvelle version
 d’origine des envois, confirmation UI, filtrage des réponses et refus de licence
 dans le processus séparé. Les tests natifs restent simulés sur Linux : essais
 Windows/macOS et références CAO encore à valider. Aucune migration SQL.
+
+## 30. Prototype de consultation Windows CFAPI
+
+Le composant `native/windows-drive` est un exécutable C++ construit avec le
+Windows SDK, distinct du processus Electron et sans accès aux secrets. Il utilise
+CfRegisterSyncRoot, CfConnectSyncRoot, CfCreatePlaceholders et CfExecute pour
+publier un catalogue de projet figé et transférer les octets lors des demandes
+FETCH_DATA. Le mode FULL hydrate une version entière depuis le cache vérifié.
+Les fichiers sont en lecture seule ; aucun envoi ou traitement de sauvegarde
+native n’est ajouté par ce lot.
+
+Le parcours est opt-in (`ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW=1`) et réservé au poste
+autorisé d’un cabinet payant. Documents affiche le contrôle uniquement si le
+composant est présent et le mode disponible. Le renderer ne transmet qu’un
+identifiant de projet. Le worker charge un catalogue borné depuis les API
+existantes, nettoie les noms, ignore tout chemin fourni par le serveur et lie
+chaque fichier à sa version, taille et empreinte disponible. Les limites du
+prototype sont 100 fichiers, 50 Mio par fichier et 256 entrées.
+
+Le courtier Electron crée une racine fraîche sous les données applicatives et
+lance le composant avec un environnement filtré. Les échanges JSON privés ne
+fournissent aucun jeton ou URL au composant natif. Une clé de fichier inconnue,
+un compte différent, un refus du coffre, un chemin de cache incompatible ou un
+lien symbolique empêche la remise de contenu. Les demandes ne sont pas servies
+par une API HTTP locale ni exposées au preload. Les droits réseau sont appliqués
+par les API documentaires ; la lecture du cache exige le bail signé existant.
+
+Une déconnexion ferme CFAPI sans désinscrire ni supprimer la racine. Les fichiers
+hydratés restent présents et les autres deviennent indisponibles. Une vérification
+du coffre déconnecte aussi le composant après un refus observé ou un changement
+d’identité. La reprise persistante d’une racine, le nettoyage, le renouvellement
+du catalogue et la synchronisation des modifications sont à traiter avant usage
+généralisé. Ce prototype ne crée pas encore d’entrée dédiée dans la barre de
+navigation de l’Explorateur ni de menus métier Windows.
+
+Le workflow Windows compile le composant et exerce réellement CFAPI sur le
+runner : placeholder, chemin Unicode, hydratation de 9 001 octets, refus de
+lecture et conservation après déconnexion. Il utilise un courtier synthétique ;
+les tests Node/React vérifient séparément le courtier, le catalogue, les contrôles
+d’identité et le raccordement utilisateur. Les essais visuels sur le poste du
+cabinet, les logiciels CAO, les références liées et le fonctionnement complet de
+l’installateur restent à valider. Voir `native/windows-drive/README.md` pour la
+construction, l’activation et les limites. Aucune migration SQL.
