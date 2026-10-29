@@ -16,3 +16,12 @@ it('rejects HTTP origins and preserves stable server error codes', async () => {
   vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({code:'VERSION_CONFLICT'}),{status:409})));
   await expect(createUploadTransport('https://example.test','t',async()=> 'token').complete('up_1','hash')).rejects.toMatchObject({status:409,code:'VERSION_CONFLICT'});
 });
+it('converts public node ids to API document ids for updates and conflict copies',async()=>{
+  const fetch=vi.fn().mockImplementation(async()=>new Response(JSON.stringify({uploadId:'up_1'}),{status:200}));vi.stubGlobal('fetch',fetch);
+  const transport=createUploadTransport('https://www.archioffice.fr','tenant',async()=>'ds_at_secret');
+  const input={baseVersion:1,name:'Plan.dwg',mimeType:'application/octet-stream',size:0,sha256:'a'.repeat(64),bumpIndice:false as const};
+  await transport.open({...input,target:{documentId:'doc:d1'}});
+  expect(JSON.parse(fetch.mock.calls[0][1].body).target).toEqual({documentId:'d1'});
+  await transport.open({...input,baseVersion:null,target:{create:{parentId:'inbox:tenant',conflictOf:'doc:d1'}}});
+  expect(JSON.parse(fetch.mock.calls[1][1].body).target).toEqual({create:{parentId:'inbox:tenant',conflictOf:'d1'}});
+});

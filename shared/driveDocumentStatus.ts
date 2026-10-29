@@ -5,4 +5,5 @@ export interface DriveDocumentStatus {
   nodeId: string;
   state: DriveDocumentTransferState;
   version?: number;
+  preservation?: 'pending' | 'blocked' | 'done';
 }

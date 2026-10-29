@@ -45,7 +45,8 @@ async function driveDocumentStatuses({agent,vault,nodeIds}) {
       if(!Number.isSafeInteger(doc.version)||doc.version<1)throw new Error('Invalid version');
       return {nodeId:doc.nodeId,state:doc.state,version:doc.version};
     }
-    return {nodeId:doc.nodeId,state:doc.state};
+    if(doc.preservation!==undefined&&(doc.state!=='conflict'||!['pending','blocked','done'].includes(doc.preservation)))throw new Error('Invalid preservation state');
+    return {nodeId:doc.nodeId,state:doc.state,...(doc.preservation ? {preservation:doc.preservation} : {})};
   });
 }
 module.exports={openDriveWorking,driveDocumentStatuses};

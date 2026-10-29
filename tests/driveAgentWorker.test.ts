@@ -184,3 +184,20 @@ it('keeps restart states, prioritizes conflicts, and refuses invalid batches or 
   await expect(next.documentStatuses(['doc:one'])).rejects.toMatchObject({code:'DRIVE_IDENTITY_MISMATCH'});
   session.mockRejectedValue(new Error('expired'));await expect(next.documentStatuses(['doc:one'])).rejects.toThrow('expired');await next.stop();
 });
+it('preserves only the conflicting snapshot and keeps the original upload blocked after the copy succeeds',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'preserve'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  await worker.keepOffline(meta.nodeId);const copy=await worker.prepareWorkingCopy(meta);await fs.writeFile(copy.file,'edits');
+  transfer.open.mockRejectedValueOnce(Object.assign(new Error('conflict'),{status:409,code:'VERSION_CONFLICT'}));
+  await worker.uploadWorkingCopy(meta.nodeId);await worker.tick();await fs.writeFile(copy.file,'later edits');
+  await Promise.all([worker.preserveConflict(meta.nodeId),worker.preserveConflict(meta.nodeId)]);
+  expect((await worker.documentStatuses([meta.nodeId])).documents[0]).toMatchObject({state:'conflict',preservation:'pending'});
+  transfer.complete.mockResolvedValue({node:{id:'doc:copy'},version:1});await worker.tick();
+  expect(transfer.open.mock.calls.at(-1)[0]).toMatchObject({target:{create:{parentId:'inbox:tenant',conflictOf:meta.nodeId}},baseVersion:null,size:5});
+  expect((await worker.documentStatuses([meta.nodeId])).documents[0]).toMatchObject({state:'conflict',preservation:'done'});
+  expect(await worker.preserveConflict(meta.nodeId)).toMatchObject({alreadyDone:true});
+  await expect(worker.uploadWorkingCopy(meta.nodeId)).rejects.toMatchObject({code:'WORKING_UPLOAD_CONFLICT'});
+  expect(await fs.readFile(copy.file,'utf8')).toBe('later edits');
+  session.mockRejectedValue(new Error('expired'));await expect(worker.preserveConflict(meta.nodeId)).rejects.toThrow('expired');await worker.stop();
+});

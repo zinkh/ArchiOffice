@@ -15,6 +15,7 @@ export interface UploadTransport {
 export interface TransferJob extends UploadInput, TransferIdentity {
   formatVersion: 1; id: string; state: 'queued' | 'uploading' | 'retry' | 'conflict' | 'blocked' | 'done';
   createdAt: number; attempts: number; nextAttemptAt: number; errorCode: string | null;
+  conflictSourceId?: string;
   uploadId?: string; chunkSize?: number; result?: { node: { id: string }; version: number };
 }
 const ID = /^[0-9a-f-]{36}$/;
@@ -68,6 +69,7 @@ export class TransferQueue {
       if (!j || !ID.test(j.id) || name !== `${j.id}.json` || j.formatVersion !== 1
         || j.userId !== this.identity.userId || j.tenantId !== this.identity.tenantId
         || !['queued','uploading','retry','conflict','blocked','done'].includes(j.state)
+        || (j.conflictSourceId !== undefined && !ID.test(j.conflictSourceId))
         || !Number.isSafeInteger(j.size) || j.size < 0 || !/^[a-f0-9]{64}$/.test(j.sha256)
         || !Number.isFinite(j.createdAt) || !Number.isSafeInteger(j.attempts) || j.attempts < 0 || !Number.isFinite(j.nextAttemptAt)) throw error('QUEUE_CORRUPT');
       jobs.push(j);
@@ -108,6 +110,40 @@ export class TransferQueue {
       finally { await output?.close(); await source.close(); }
     });
   }
+  /** Fork the original conflict snapshot once. Never recapture a mutable workfile
+   * or reuse the failed update's upload session. The deterministic id recovers a
+   * crash before manifest publication without creating a second logical job. */
+  preserveConflict(sourceId: string) { return this.serial(async () => {
+    const jobs = await this.jobs();
+    const source = jobs.find(j => j.id === sourceId);
+    if (!source || source.state !== 'conflict' || !('documentId' in source.target)) throw error('CONFLICT_REQUIRED');
+    const hex = crypto.createHash('sha256').update('conflict-copy:' + source.id).digest('hex').slice(0,32);
+    const id = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    const target: TransferTarget = {create:{parentId:`inbox:${this.identity.tenantId}`,conflictOf:source.target.documentId}};
+    const existing = jobs.find(j => j.id === id);
+    if (existing) {
+      if (existing.conflictSourceId !== source.id || existing.sha256 !== source.sha256 || existing.size !== source.size
+        || JSON.stringify(existing.target) !== JSON.stringify(target)) throw error('QUEUE_CORRUPT');
+      return existing;
+    }
+    const original = this.snapshot(source.id);const snapshot = this.snapshot(id);
+    const actual = await digest(original);
+    if (actual.size !== source.size || actual.sha256 !== source.sha256) throw error('SNAPSHOT_CORRUPT');
+    try { await fs.copyFile(original,snapshot,constants.COPYFILE_EXCL); }
+    catch (e:any) { if (e.code !== 'EEXIST') throw e; }
+    // An incomplete copy before a crash is retained for explicit recovery.
+    const copied = await digest(snapshot);
+    if (copied.size !== source.size || copied.sha256 !== source.sha256) throw error('SNAPSHOT_CORRUPT');
+    await fs.chmod(snapshot,0o600);
+    const fd = await fs.open(snapshot,'r+');try {await fd.sync();}finally {await fd.close();}
+    const ext = path.extname(source.name);
+    const suffix = ` (conflit ${source.id.slice(0,8)})`;
+    const name = source.name.slice(0,source.name.length-ext.length).slice(0,Math.max(1,255-ext.length-suffix.length)) + suffix + ext;
+    const job: TransferJob = {...this.identity,formatVersion:1,id,target,baseVersion:null,name,mimeType:source.mimeType,
+      size:source.size,sha256:source.sha256,bumpIndice:false,state:'queued',createdAt:jobs.reduce((n,j)=>Math.max(n,j.createdAt+1),this.now()),
+      attempts:0,nextAttemptAt:0,errorCode:null,conflictSourceId:source.id};
+    await this.save(job);return job;
+  }); }
   /** Explicit retry of a blocked job; conflicts require a new target/base version. */
   retry(id: string) { return this.serial(async () => {
     const job = (await this.jobs()).find(j => j.id === id); if (!job || job.state === 'conflict' || job.state === 'done') throw error('RETRY_NOT_ALLOWED');

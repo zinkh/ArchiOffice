@@ -414,6 +414,11 @@ function startDriveAgent() {
       return {status:result?.pending?'pending':result?.queued?'queued':'unchanged'};
     } catch(e) {return {status:e.code==='WORKING_UPLOAD_CONFLICT'?'conflict':'error'};}
   });
+  ipcMain.handle('desktop:drive-preserve-conflict', async (event,nodeId) => {
+    if(!trustedDriveSender(event)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))throw new Error('Accès refusé');
+    try {const result=await driveAgent.working('preserve',nodeId);return {status:result?.alreadyDone?'preserved':'preserve_queued'};}
+    catch {return {status:'error'};}
+  });
   ipcMain.handle('desktop:drive-document-statuses', async (event, nodeIds) => {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');
     return driveDocumentStatuses({agent:driveAgent,vault:()=>requestVault(serverProcess),nodeIds});

@@ -7,12 +7,12 @@ import { desktopBridge } from '../lib/desktopBridge';
 export function DriveDocumentActions({ documentId, transfer, unavailable = false, onActivity }: { documentId: string; transfer?: DriveDocumentStatus; unavailable?: boolean; onActivity?: () => void }) {
   const { t } = useTranslation();
   const busyRef = useRef(false);
-  const [busy, setBusy] = useState<'open' | 'upload' | null>(null);
+  const [busy, setBusy] = useState<'open' | 'upload' | 'preserve' | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const run = async (action: 'open' | 'upload') => {
+  const run = async (action: 'open' | 'upload' | 'preserve') => {
     if (busyRef.current) return;
     const bridge = desktopBridge();
-    const command = action === 'open' ? bridge?.openDriveDocument : bridge?.uploadDriveDocument;
+    const command = action === 'open' ? bridge?.openDriveDocument : action === 'preserve' ? bridge?.preserveDriveConflict : bridge?.uploadDriveDocument;
     if (!command) return;
     busyRef.current = true; setBusy(action); setMessage(null);
     try {
@@ -29,6 +29,12 @@ export function DriveDocumentActions({ documentId, transfer, unavailable = false
     {(unavailable || (transfer && transfer.state !== 'none')) && <p className="text-xs max-w-xs break-words" role={transfer?.state === 'conflict' || transfer?.state === 'blocked' ? 'alert' : 'status'}>
       {t(unavailable ? 'drive_document_transfer_unavailable' : `drive_document_transfer_${transfer!.state}`, { version: transfer?.version })}
     </p>}
+    {transfer?.state === 'conflict' && !unavailable && <div className="space-y-1 max-w-xs">
+      <p className="text-xs break-words" role="status">{t(transfer.preservation ? `drive_conflict_copy_${transfer.preservation}` : 'drive_conflict_copy_explanation')}</p>
+      {!transfer.preservation && desktopBridge()?.preserveDriveConflict && <button type="button" className="btn btn-ghost min-h-11" disabled={!!busy} onClick={() => void run('preserve')}>
+        {t(busy === 'preserve' ? 'drive_conflict_copy_preparing' : 'drive_conflict_copy_action')}
+      </button>}
+    </div>}
     {message && <p className="text-xs max-w-xs" role={['drive_document_error', 'drive_document_conflict', 'drive_document_unsupported'].includes(message) ? 'alert' : 'status'}>{t(message)}</p>}
   </div>;
 }

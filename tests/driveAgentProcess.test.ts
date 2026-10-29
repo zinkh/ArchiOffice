@@ -24,6 +24,12 @@ it('runs as a separate process, stays paused on vault refusal, then exits on sto
     });
     child.send({type:'drive:open-working',nodeId:'doc:one',requestId:'open-one'});
     expect(await refused).toMatchObject({type:'drive:working-result',error:{code:'DRIVE_LICENSE_EXPIRED'}});
+    const preserveRefused=new Promise<any>((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('Preserve timeout')),10000);
+      child!.on('message',(msg:any)=>{if(msg.type==='drive:working-result'&&msg.requestId==='preserve-one'){clearTimeout(timer);resolve(msg);}});
+    });
+    child.send({type:'drive:preserve-working',nodeId:'doc:one',requestId:'preserve-one'});
+    expect(await preserveRefused).toMatchObject({error:{code:'DRIVE_LICENSE_EXPIRED'}});
     const stateRefused=new Promise<any>((resolve,reject)=>{
       const timer=setTimeout(()=>reject(new Error('Status command timeout')),10000);
       child!.on('message',(msg:any)=>{if(msg.type==='drive:document-statuses-result'){clearTimeout(timer);resolve(msg);}});

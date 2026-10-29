@@ -99,3 +99,27 @@ it('blocks a missing snapshot without deleting the original file', async () => {
   expect((await q.runNext(transport))?.state).toBe('blocked');
   expect(transport.open).not.toHaveBeenCalled(); expect(await fs.readFile(file,'utf8')).toBe('abcdefgh');
 });
+it('forks the conflicting snapshot exactly once and keeps the original conflict and newer working edits',async()=>{
+  const q=queue();const original=await q.enqueue(file,{documentId:'doc:d1'},1);
+  transport.open=vi.fn().mockRejectedValue(Object.assign(new Error('conflict'),{status:409,code:'VERSION_CONFLICT'}));
+  await q.runNext(transport);await fs.writeFile(file,'later edits');
+  const [copy,again]=await Promise.all([q.preserveConflict(original.id),q.preserveConflict(original.id)]);
+  expect(copy.id).toBe(again.id);expect(copy).toMatchObject({state:'queued',baseVersion:null,conflictSourceId:original.id,target:{create:{parentId:'inbox:t1',conflictOf:'doc:d1'}}});
+  expect(copy.name).toMatch(/^Plan \(conflit [a-f0-9]{8}\)\.txt$/);expect(copy.uploadId).toBeUndefined();
+  expect(await fs.readFile(path.join(dir,'queue',`${copy.id}.snapshot`),'utf8')).toBe('abcdefgh');
+  expect(await fs.readFile(file,'utf8')).toBe('later edits');
+  expect((await queue().preserveConflict(original.id)).id).toBe(copy.id);expect(await q.list()).toHaveLength(2);
+  transport.open=vi.fn().mockResolvedValue({uploadId:id,chunkSize:3});
+  expect(await q.runNext(transport)).toMatchObject({id:copy.id,state:'done'});
+  expect((await q.list()).find(j=>j.id===original.id)?.state).toBe('conflict');
+});
+it('recovers an unpublished conflict snapshot but refuses corrupt bytes and non-conflict sources',async()=>{
+  const q=queue();const job=await q.enqueue(file,{documentId:'doc:d1'},1);
+  await expect(q.preserveConflict(job.id)).rejects.toThrow('CONFLICT_REQUIRED');
+  transport.open=vi.fn().mockRejectedValue(Object.assign(new Error('conflict'),{status:409,code:'VERSION_CONFLICT'}));await q.runNext(transport);
+  const copy=await q.preserveConflict(job.id);await fs.unlink(path.join(dir,'queue',`${copy.id}.json`));
+  expect((await queue().preserveConflict(job.id)).id).toBe(copy.id);
+  await fs.unlink(path.join(dir,'queue',`${copy.id}.json`));await fs.writeFile(path.join(dir,'queue',`${copy.id}.snapshot`),'corrupt');
+  await expect(queue().preserveConflict(job.id)).rejects.toThrow('SNAPSHOT_CORRUPT');
+  expect(await fs.readFile(path.join(dir,'queue',`${job.id}.snapshot`),'utf8')).toBe('abcdefgh');
+});
