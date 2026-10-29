@@ -4,11 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { DriveDocumentActions } from '../src/components/DriveDocumentActions';
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
-let host:HTMLDivElement;let root:Root;const open=vi.fn();const upload=vi.fn();
+let host:HTMLDivElement;let root:Root;const open=vi.fn();const upload=vi.fn();const preserve=vi.fn();
 beforeEach(()=>{
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
-  (window as any).archiofficeDesktop={isDesktop:true,openDriveDocument:open,uploadDriveDocument:upload};
-  open.mockReset();upload.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  (window as any).archiofficeDesktop={isDesktop:true,openDriveDocument:open,uploadDriveDocument:upload,preserveDriveConflict:preserve};
+  open.mockReset();upload.mockReset();preserve.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();delete (window as any).archiofficeDesktop;});
 const render=()=>act(async()=>{root.render(React.createElement(DriveDocumentActions,{documentId:'one'}));});
@@ -36,4 +36,14 @@ it('shows durable transfer states separately from action feedback and never pres
   }
   await act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',unavailable:true})));
   expect(host.textContent).toContain('drive_document_transfer_unavailable');expect(host.textContent).not.toContain('drive_document_transfer_uploaded');
+});
+it('offers snapshot preservation only for an unsaved conflict and distinguishes queuing from completion',async()=>{
+  await act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',transfer:{nodeId:'doc:one',state:'conflict'}})));
+  expect(host.textContent).toContain('drive_conflict_copy_explanation');preserve.mockResolvedValue({status:'preserve_queued'});
+  await act(async()=>{host.querySelectorAll('button')[2].click();});
+  expect(preserve).toHaveBeenCalledWith('doc:one');expect(host.textContent).toContain('drive_document_preserve_queued');
+  for(const preservation of ['pending','blocked','done'] as const) {
+    await act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',transfer:{nodeId:'doc:one',state:'conflict',preservation}})));
+    expect(host.textContent).toContain(`drive_conflict_copy_${preservation}`);expect(host.querySelectorAll('button')).toHaveLength(2);
+  }
 });

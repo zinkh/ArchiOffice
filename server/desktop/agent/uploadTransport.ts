@@ -26,7 +26,13 @@ export function createUploadTransport(origin: string, tenantId: string,
     return data;
   }
   return {
-    open: (input, signal) => call('/uploads', 'POST', input, signal),
+    open: (input, signal) => {
+      // Public node ids have a doc: prefix; upload targets use database ids.
+      const raw = (id: string) => id.startsWith('doc:') ? id.slice(4) : id;
+      const target = 'documentId' in input.target ? {documentId:raw(input.target.documentId)}
+        : {create:{...input.target.create,...(input.target.create.conflictOf ? {conflictOf:raw(input.target.create.conflictOf)} : {})}};
+      return call('/uploads', 'POST', {...input,target}, signal);
+    },
     status: (id, signal) => call(`/uploads/${encodeURIComponent(id)}`, 'GET', undefined, signal),
     chunk: async (id, start, total, bytes, signal) => { await call(`/uploads/${encodeURIComponent(id)}`, 'PUT', bytes, signal, `bytes ${start}-${start+bytes.length-1}/${total}`); },
     complete: (id, sha256, signal) => call(`/uploads/${encodeURIComponent(id)}/complete`, 'POST', { sha256 }, signal),

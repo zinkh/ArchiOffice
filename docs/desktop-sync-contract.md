@@ -823,3 +823,45 @@ absence de chevauchement, page masquée, retour au premier plan, échec et répo
 tardive d’un autre compte. Les adaptateurs Explorateur/Finder, les essais réels
 Windows/macOS et la résolution des conflits restent à réaliser. Aucune migration
 SQL, modification du stockage documentaire ou automatisation des envois.
+
+## 27. Préserver l’instantané d’un conflit dans un document distinct
+
+Lorsqu’un envoi est en conflit, Documents propose « Conserver l’instantané dans
+À classer ». Cette action crée une opération de création de document avec
+`conflictOf`, à partir de l’instantané conservé lors de l’envoi échoué. Elle ne
+reprend pas le contenu actuel de la copie de travail. L’interface annonce cette
+différence : les retouches ultérieures restent dans le fichier local et ne sont
+pas incluses dans la sauvegarde. La version distante et le fichier de travail ne
+sont ni remplacés, ni supprimés, ni réécrits.
+
+La file produit une copie indépendante de l’instantané, vérifie taille et SHA-256,
+la synchronise sur disque et publie son journal. L’identifiant de l’opération est
+dérivé de celui de l’envoi en conflit : double clic et redémarrage réutilisent la
+même opération. La session d’envoi échouée n’est jamais réutilisée pour créer le
+document distinct. Une interruption avant la publication du journal peut être
+récupérée si la copie complète est vérifiable ; une copie partielle corrompue est
+conservée et signalée, sans suppression automatique de l’original. Le nouveau
+nom comporte un suffixe de conflit et conserve l’extension du fichier.
+
+Les états affichés distinguent sauvegarde en attente, bloquée et terminée. Le
+conflit d’origine reste présent et interdit toujours un nouvel envoi sur le même
+document. Cette action est une sauvegarde préalable à la résolution ; elle ne
+fusionne pas les changements, ne réinitialise pas la version d’origine et ne
+rafraîchit pas automatiquement la copie de travail. Le nouveau document se trouve
+côté serveur dans À classer ; son apparition dans la liste locale dépend du
+rafraîchissement habituel des données. Les droits et quotas de création sont
+contrôlés par les routes documentaires existantes.
+
+Correction de contrat associée : les identifiants publics du worker portent le
+préfixe `doc:`, tandis que les cibles d’envoi `documentId` et `create.conflictOf`
+attendent les identifiants de base de données. Le transport retire ce préfixe à
+la frontière HTTP, sans modifier les identifiants de dossier. Les résultats du
+serveur restent des identifiants publics pour le cache et les copies de travail.
+
+Tests : conflit et création liée à travers le transport et les routes réelles,
+conservation de la version distante et des dernières retouches locales, double
+clic, reprise après redémarrage, intégrité de l’instantané, refus de licence,
+filtrage IPC et messages d’interface. Les fournisseurs réseau sont simulés dans
+le banc d’essai et les tests natifs utilisent Linux ; les essais réels
+Windows/macOS restent nécessaires. Aucune migration SQL ni modification des
+adaptateurs Explorateur/Finder.

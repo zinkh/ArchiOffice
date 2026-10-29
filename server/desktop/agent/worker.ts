@@ -67,6 +67,17 @@ export function createAgentWorker(config: WorkerConfig) {
       const job = await ctx.queue.enqueue(file,target || {create:{parentId:`inbox:${ctx.session.tenantId}`}},baseVersion);
       return { queued:true,jobId:job.id }; // no local path, token or license
     },
+    preserveConflict(nodeId: string) {
+      const task=workingUploads.then(async()=> {
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();
+        const conflict=(await ctx.queue.list()).find(j=>'documentId' in j.target&&j.target.documentId===nodeId&&j.state==='conflict');
+        if(!conflict)throw Object.assign(new Error('No conflict'),{code:'CONFLICT_REQUIRED'});
+        const copy=await ctx.queue.preserveConflict(conflict.id);
+        return {queued:true,alreadyDone:copy.state==='done'};
+      });
+      workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
     async documentStatuses(nodeIds: string[]) {
       if(stopped)throw new Error('Agent stopped');
       if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)
@@ -76,6 +87,10 @@ export function createAgentWorker(config: WorkerConfig) {
       const documents:DriveDocumentStatus[]=nodeIds.map(nodeId=> {
         const matching=jobs.filter(j=>'documentId' in j.target&&j.target.documentId===nodeId);
         const conflict=matching.find(j=>j.state==='conflict');
+        if(conflict) {
+          const copy=jobs.find(j=>j.conflictSourceId===conflict.id);
+          return {nodeId,state:'conflict',...(copy ? {preservation:copy.state==='done'?'done':copy.state==='blocked'||copy.state==='conflict'?'blocked':'pending'} : {})};
+        }
         const pending=matching.find(j=>j.state!=='done');
         const job=conflict||pending||matching.at(-1);
         if(!job)return {nodeId,state:'none'};

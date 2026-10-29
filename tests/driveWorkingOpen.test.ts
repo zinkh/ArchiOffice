@@ -55,3 +55,11 @@ it('returns only whitelisted document states and rejects a mismatched identity o
   vault.mockResolvedValue({...identity,userId:'other'});await expect(driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).rejects.toThrow('Identity changed');
   await expect(driveDocumentStatuses({agent,vault,nodeIds:['../../bad']})).rejects.toThrow('Invalid documents');
 });
+it('filters the conflict preservation state without returning new document paths or credentials',async()=>{
+  const {driveDocumentStatuses}=require('../electron/driveWorking.cjs');const identity={userId:'user',tenantId:'tenant',deviceId:'device'};
+  const agent={documentStatuses:vi.fn().mockResolvedValue({identity,documents:[{nodeId:'doc:one',state:'conflict',preservation:'done',file:'/private',token:'secret'}]})};
+  const vault=async()=>identity;
+  expect(await driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).toEqual([{nodeId:'doc:one',state:'conflict',preservation:'done'}]);
+  agent.documentStatuses.mockResolvedValue({identity,documents:[{nodeId:'doc:one',state:'conflict',preservation:'invalid'}]});
+  await expect(driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).rejects.toThrow('Invalid preservation state');
+});
