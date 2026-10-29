@@ -106,7 +106,41 @@ it('preserves a conflicting working file and rejects a path after account change
   await worker.uploadWorkingCopy(meta.nodeId);await worker.tick();
   expect(await worker.prepareWorkingCopy(meta)).toMatchObject({baseVersion:1,modified:true});
   expect(await fs.readFile(copy.file,'utf8')).toBe('edited');
+  await expect(worker.uploadWorkingCopy(meta.nodeId)).rejects.toMatchObject({code:'WORKING_UPLOAD_CONFLICT'});
   session.mockResolvedValueOnce({userId:'user',tenantId:'tenant',deviceId:'device',token:'ds_at_secret'})
     .mockResolvedValueOnce({userId:'other',tenantId:'tenant',deviceId:'device',token:'ds_at_other'});
   await expect(worker.prepareWorkingCopy(meta)).rejects.toMatchObject({code:'DRIVE_IDENTITY_MISMATCH'});await worker.stop();
+});
+
+it('opens once online, reuses the editable copy offline after restart, and refuses an expired license',async()=>{
+  const meta={nodeId:'doc:open',version:1,size:5,name:'Plan.pdf',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockReset().mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const config={root:path.join(root,'open'),origin:'https://www.archioffice.fr',session:async()=>session(),status};
+  const first=createAgentWorker(config);const opened=await first.openWorkingCopy(meta.nodeId);
+  expect(opened.identity).toEqual({userId:'user',tenantId:'tenant',deviceId:'device'});
+  await fs.writeFile(opened.file,'my edits');await first.stop();
+  download.metadata.mockRejectedValue(new Error('offline'));
+  const second=createAgentWorker(config);expect((await second.openWorkingCopy(meta.nodeId)).file).toBe(opened.file);
+  expect(download.metadata).toHaveBeenCalledTimes(1);expect(await fs.readFile(opened.file,'utf8')).toBe('my edits');
+  session.mockRejectedValue(new Error('expired'));await expect(second.openWorkingCopy(meta.nodeId)).rejects.toThrow('expired');
+  await second.stop();
+});
+it('does not return a working file when identity changes during the initial download',async()=>{
+  const meta={nodeId:'doc:open',version:1,size:5,name:'Plan.pdf',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  session.mockResolvedValueOnce({userId:'user',tenantId:'tenant',deviceId:'device',token:'ds_at_secret'})
+    .mockResolvedValue({userId:'other',tenantId:'tenant',deviceId:'device',token:'ds_at_other'});
+  const worker=createAgentWorker({root,origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  await expect(worker.openWorkingCopy(meta.nodeId)).rejects.toMatchObject({code:'DRIVE_IDENTITY_MISMATCH'});await worker.stop();
+});
+it('coalesces simultaneous upload requests for one working copy into one snapshot',async()=>{
+  const meta={nodeId:'doc:dedup',version:1,size:5,name:'Plan.pdf',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root,origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  const copy=await worker.openWorkingCopy(meta.nodeId);await fs.writeFile(copy.file,'edited');
+  const [a,b]=await Promise.all([worker.uploadWorkingCopy(meta.nodeId),worker.uploadWorkingCopy(meta.nodeId)]);
+  expect(a.jobId).toBe(b.jobId);await worker.stop();
 });

@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { desktopBridge } from '../lib/desktopBridge';
+import { DriveDocumentActions } from '../components/DriveDocumentActions';
 import { KnowledgeSharingPanel } from '../components/KnowledgeSharingPanel';
 import {
   IconFile, IconPlus, IconHistory, IconDownload, IconTrash, IconX,
@@ -68,7 +70,19 @@ export default function Documents() {
   const { t } = useTranslation();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
-  const { currentUser } = useUser();
+  const { currentUser, activeTenantId } = useUser();
+  const [driveEnabled, setDriveEnabled] = useState(false);
+  useEffect(() => {
+    setDriveEnabled(false);
+    if (!desktopBridge()?.openDriveDocument) return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    let current = true;
+    void apiFetch<{ enabled: boolean; local?: boolean }>('/api/desktop/v1/capabilities', { signal: controller.signal })
+      .then(cap => { if (current) setDriveEnabled(cap.enabled && cap.local === true); })
+      .catch(() => {}).finally(() => clearTimeout(timeout));
+    return () => { current = false; clearTimeout(timeout); controller.abort(); };
+  }, [currentUser?.id, activeTenantId]);
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -613,6 +627,7 @@ export default function Documents() {
                               </button>
                             </>
                           )}
+                          {driveEnabled && <DriveDocumentActions key={`${activeTenantId}:${doc.id}`} documentId={doc.id} />}
                           <button className="p-1.5 rounded-lg transition-colors" style={{ color: isPerime ? '#d63939' : 'var(--tblr-muted)' }} onClick={() => handleDownload(doc)} title="Télécharger">
                             <IconDownload size={15} />
                           </button>

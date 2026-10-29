@@ -37,6 +37,10 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
         finally{outstanding--;}
       }
       if(msg?.type==='drive:status' && ['running','paused','stopped'].includes(msg.state))onStatus({state:msg.state,...Object.fromEntries(['pending','blocked','conflicts'].map(k=>[k,Number.isSafeInteger(msg[k])&&msg[k]>=0?msg[k]:0]))});
+      if(msg?.type==='drive:working-result') {
+        const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
+        if(msg.error)p.reject(Object.assign(new Error('Drive working copy failed'),{code:msg.error.code}));else p.resolve(msg.result);
+      }
       if(msg?.type==='drive:enqueued'||msg?.type==='drive:retried') {const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
         if(msg.error)p.reject(new Error('Drive enqueue failed'));else p.resolve(msg.type==='drive:retried'?{retried:Number.isSafeInteger(msg.result?.retried)?msg.result.retried:0}:{queued:true,jobId:msg.result?.jobId});}
     });
@@ -55,6 +59,13 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
       const requestId=crypto.randomUUID();const timer=setTimeout(()=> {jobs.delete(requestId);reject(new Error('Drive enqueue timeout'));},30000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:enqueue',requestId,file});
+    });},
+    working(action,nodeId) {return new Promise((resolve,reject)=> {
+      if(!['open','upload'].includes(action)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))return reject(new Error('Invalid document'));
+      if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
+      const requestId=crypto.randomUUID();
+      const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive working copy timeout'));},300000);
+      jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:`drive:${action}-working`,requestId,nodeId});
     });},
     retryBlocked() {return new Promise((resolve,reject)=> {
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));

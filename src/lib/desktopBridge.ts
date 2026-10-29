@@ -5,6 +5,8 @@
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
+  openDriveDocument?: (nodeId: string) => Promise<{ status: 'opened' | 'unsupported' | 'error' }>;
+  uploadDriveDocument?: (nodeId: string) => Promise<{ status: 'queued' | 'pending' | 'unchanged' | 'conflict' | 'error' }>;
   /** Native picker, then snapshot into the active cabinet inbox. No file path or credential crosses this bridge. */
   retryDriveTransfers?: () => Promise<{ retried: number }>;
   getDriveStatus?: () => Promise<{ state: string; pending: number; blocked: number; conflicts: number }>;

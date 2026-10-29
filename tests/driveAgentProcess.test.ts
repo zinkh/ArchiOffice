@@ -18,6 +18,12 @@ it('runs as a separate process, stays paused on vault refusal, then exits on sto
     });
     child.send({type:'drive:init',root:path.join(root,'queue'),origin:'https://www.archioffice.fr'});
     expect(await ready).toMatchObject({state:'paused',code:'DRIVE_LICENSE_EXPIRED'});
+    const refused=new Promise<any>((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('Working command timeout')),10000);
+      child!.on('message',(msg:any)=>{if(msg.type==='drive:working-result'){clearTimeout(timer);resolve(msg);}});
+    });
+    child.send({type:'drive:open-working',nodeId:'doc:one',requestId:'open-one'});
+    expect(await refused).toMatchObject({type:'drive:working-result',error:{code:'DRIVE_LICENSE_EXPIRED'}});
     const exited=new Promise(resolve=>child!.once('exit',resolve));child.send({type:'drive:stop'});expect(await exited).toBe(0);
   }finally{child?.kill();await fs.rm(root,{recursive:true,force:true});}
 },15000);

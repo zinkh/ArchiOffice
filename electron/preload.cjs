@@ -13,6 +13,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('archiofficeDesktop', {
   isDesktop: true,
+  openDriveDocument: (nodeId) => ipcRenderer.invoke('desktop:drive-working-open', nodeId),
+  uploadDriveDocument: (nodeId) => ipcRenderer.invoke('desktop:drive-working-upload', nodeId),
   retryDriveTransfers: () => ipcRenderer.invoke('desktop:drive-retry'),
   getDriveStatus: () => ipcRenderer.invoke('desktop:drive-status'),
   enqueueDriveFile: () => ipcRenderer.invoke('desktop:drive-enqueue'),

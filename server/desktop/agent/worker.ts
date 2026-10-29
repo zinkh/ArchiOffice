@@ -16,6 +16,7 @@ export function createAgentWorker(config: WorkerConfig) {
   let stopped = false; let running: Promise<void> | null = null;
   const abort = new AbortController();
   const downloads = new Set<Promise<unknown>>();
+  let workingUploads: Promise<unknown> = Promise.resolve();
   type Owner = { id: string; queue: TransferQueue; cache: DownloadCache; working: WorkingCopies; session: AgentSession };
   // Retain a single writer when the linked account changes and later returns.
   const owners = new Map<string, Owner>();
@@ -65,6 +66,33 @@ export function createAgentWorker(config: WorkerConfig) {
       const job = await ctx.queue.enqueue(file,target || {create:{parentId:`inbox:${ctx.session.tenantId}`}},baseVersion);
       return { queued:true,jobId:job.id }; // no local path, token or license
     },
+    /** Native-only command: reuse the tracked file offline; fetch only on first open. */
+    openWorkingCopy(nodeId: string) {
+      const task=(async()=> {
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();const expected={...ctx.session};
+        const authorize=async()=> {
+          abort.signal.throwIfAborted();const active=await config.session();
+          if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)
+            throw Object.assign(new Error('Account changed'),{code:'DRIVE_IDENTITY_MISMATCH'});
+          return active.token;
+        };
+        let copy;
+        try { copy=await ctx.working.inspect(nodeId); }
+        catch(e:any) {
+          if(e.code!=='WORKING_COPY_UNAVAILABLE')throw e;
+          const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);
+          const meta=await transport.metadata(nodeId,abort.signal);
+          await ctx.cache.hydrate(meta,transport,abort.signal);
+          const cached=await ctx.cache.lookup(meta);
+          if(!cached)throw Object.assign(new Error('Version not cached'),{code:'DRIVE_VERSION_NOT_CACHED'});
+          copy=await ctx.working.prepare(meta,cached);
+        }
+        await authorize();abort.signal.throwIfAborted();
+        return {file:copy.file,identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId}};
+      })();
+      downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
     /** Private entry point for future native adapters; no arbitrary URL/path. */
     keepOffline(nodeId: string) {
       const task=(async()=> {
@@ -102,16 +130,22 @@ export function createAgentWorker(config: WorkerConfig) {
       downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
     uploadWorkingCopy(nodeId: string) {
-      const task=(async()=> {
+      const task=workingUploads.then(async()=> {
         if(stopped)throw new Error('Agent stopped');
         const ctx=await current();
         // Recover a completed upload if the previous process exited before ack.
         for(const job of await ctx.queue.list())await ctx.working.acknowledge(job);
+        const jobs=await ctx.queue.list();
+        if(jobs.some(j=>'documentId' in j.target && j.target.documentId===nodeId && j.state==='conflict'))
+          throw Object.assign(new Error('Resolve conflict first'),{code:'WORKING_UPLOAD_CONFLICT'});
+        const pending=jobs.find(j=>'documentId' in j.target && j.target.documentId===nodeId && j.state!=='done');
+        if(pending)return {queued:true,jobId:pending.id,pending:true};
         const copy=await ctx.working.inspect(nodeId);abort.signal.throwIfAborted();
         if(!copy.modified)return {queued:false};
         const job=await ctx.queue.enqueue(copy.file,{documentId:nodeId},copy.baseVersion);
         return {queued:true,jobId:job.id};
-      })();
+      });
+      workingUploads=task.catch(()=>{});
       downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
     async retryBlocked() {

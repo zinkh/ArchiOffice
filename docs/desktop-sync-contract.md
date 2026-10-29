@@ -748,3 +748,37 @@ de copie n’est ajouté par ce lot. Le raccordement utilisateur et les adaptate
 CFAPI/File Provider restent à réaliser. Les tests utilisent le système de fichiers
 Linux du banc d’essai ; les comportements natifs Windows/macOS et les références
 CAO restent à valider sur leurs systèmes respectifs. Aucune migration SQL.
+
+## 25. Ouverture et envoi explicites des copies de travail
+
+Dans la page Documents du client Electron, un poste disposant d’une autorisation
+Drive locale active propose « Ouvrir avec Drive » et « Envoyer les modifications ».
+La page vérifie la capacité une fois par compte/cabinet ; chaque action reste
+contrôlée par le coffre. Aucun chemin, jeton ou URL de stockage ne vient du renderer.
+Les méthodes du preload ne reçoivent que l’identifiant `doc:<id>`.
+
+Le worker `openWorkingCopy` réutilise d’abord la copie suivie, après vérification
+du journal et du fichier. Ce parcours fonctionne hors connexion sous autorisation
+signée valide, y compris après redémarrage. Si aucune copie n’existe, les métadonnées
+et les octets sont téléchargés par le transport épinglé existant, puis matérialisés
+séparément du cache. Un fichier supprimé ou un journal corrompu provoquent un refus,
+sans téléchargement de remplacement. Une copie existante n’est pas rafraîchie
+silencieusement et n’est pas annoncée comme la dernière version distante.
+
+Le chemin circule uniquement sur l’IPC privé worker/main. Avant `shell.openPath`,
+Electron vérifie le compte, le cabinet et l’appareil auprès du coffre, reconstruit
+le répertoire attendu depuis ces identités et le document, rejette les liens
+symboliques et applique la liste de formats ouvrables existante. Une dernière
+vérification du coffre précède l’ouverture. Les réponses publiques sont limitées
+à un statut (`opened`, `unsupported`, `error`). Les essais de lancement des
+applications associées restent à réaliser sur Windows/macOS.
+
+Les demandes d’envoi sont sérialisées dans le worker. Un envoi déjà présent pour
+le même document renvoie `pending` sans créer de deuxième instantané ; les retouches
+plus récentes devront être envoyées après sa fin. Un conflit existant renvoie
+`conflict` et conserve les fichiers. Un fichier inchangé renvoie `unchanged`.
+`queued` signifie uniquement que l’instantané est durablement placé dans la file,
+pas que le serveur l’a déjà accepté. Les erreurs ne divulguent aucun chemin.
+
+Aucune surveillance automatique de dossier, résolution de conflit, hiérarchie CAO
+partagée ni intégration CFAPI/File Provider n’est incluse. Aucune migration SQL.
