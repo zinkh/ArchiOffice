@@ -3,13 +3,14 @@ import { useTranslation } from 'react-i18next';
 import Select from 'react-select';
 import { motion, animate, useDragControls, useMotionValue, useReducedMotion } from 'motion/react';
 import {
-  IconX, IconCamera, IconPhotoPlus, IconTrash, IconDeviceFloppy, IconMapPin, IconLoader2,
+  IconX, IconCamera, IconPhotoPlus, IconTrash, IconDeviceFloppy, IconMapPin, IconLoader2, IconArrowsExchange,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { launchOriginRef } from '../../lib/launchOrigin';
 import { PANEL_SPRING, FLICK_SPRING, FLICK_VELOCITY, projectMomentum } from '../../lib/motion';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { openSignedUrl } from '../../lib/signedStorageUrl';
+import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
@@ -33,6 +34,8 @@ interface ReserveDetailProps {
   onClose: () => void;
   onSaved: (reserve: ReserveLike) => void;
   onDeleted: (id: string) => void;
+  /** Réserve d'OPR transformée en réserve GPA : reçoit la nouvelle réserve GPA (l'appelant la range dans sa liste). */
+  onConvertedToGpa?: (gpa: ReserveLike) => void;
 }
 
 interface FormState {
@@ -82,7 +85,7 @@ const labelClass = 'text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercas
  * puis envoyées une à une une fois la réserve créée (il faut son id pour les
  * rattacher) ; en modification, chaque photo part immédiatement.
  */
-export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, onClose, onSaved, onDeleted }: ReserveDetailProps) {
+export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, onClose, onSaved, onDeleted, onConvertedToGpa }: ReserveDetailProps) {
   const { t } = useTranslation();
   const isNew = !reserve;
   const [form, setForm] = useState<FormState>(() => formFromReserve(reserve));
@@ -285,6 +288,28 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
     await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${reserve.id}` });
     onDeleted(reserve.id);
     onClose();
+  };
+
+  const [converting, setConverting] = useState(false);
+  // Une photo encore en file d'envoi viserait, après la transformation, une réserve d'OPR qui n'existe plus.
+  const hasPendingUpload = !!reserve?.pendingSync || photos.some(p => (p as any).pendingSync) || queued.length > 0;
+
+  const handleConvertToGpa = async () => {
+    if (!reserve || converting) return;
+    if (hasPendingUpload) { setError(t('reserve_detail_to_gpa_pending')); return; }
+    if (!confirm(t('reserve_detail_to_gpa_confirm', { number: reserve.number ?? '' }))) return;
+    setConverting(true);
+    setError(null);
+    try {
+      const gpa = await apiFetch<ReserveLike>(`${apiBase}/${reserve.id}/to-gpa`, { method: 'POST' });
+      onDeleted(reserve.id);
+      onConvertedToGpa?.(gpa);
+      onClose();
+    } catch (err: any) {
+      setError(err?.message || t('reserve_detail_to_gpa_failed'));
+    } finally {
+      setConverting(false);
+    }
   };
 
   const retard = reserve ? reserveOverdueDays({ status: form.status, due_date: form.due_date }) : 0;
@@ -534,6 +559,13 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           {!isNew && (
             <button type="button" onClick={handleDelete} className="p-2.5 rounded-lg text-[var(--tblr-muted)] hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20" title="Supprimer la réserve" aria-label="Supprimer la réserve">
               <IconTrash size={18} />
+            </button>
+          )}
+          {!isNew && onConvertedToGpa && apiBase === '/api/reserves' && (
+            <button type="button" onClick={handleConvertToGpa} disabled={converting}
+              className="p-2.5 rounded-lg text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] hover:bg-[var(--tblr-surface-2)] disabled:opacity-50"
+              title={t('reserve_detail_to_gpa')} aria-label={t('reserve_detail_to_gpa')}>
+              {converting ? <IconLoader2 size={18} className="animate-spin" /> : <IconArrowsExchange size={18} />}
             </button>
           )}
           <div className="flex-1" />

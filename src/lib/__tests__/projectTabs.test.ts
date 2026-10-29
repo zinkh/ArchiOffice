@@ -5,10 +5,10 @@ import {
 } from '../projectTabs';
 
 describe('navigation de la fiche affaire', () => {
-  it('range chacun des quinze onglets dans une seule famille', () => {
+  it('range chacun des seize onglets dans une seule famille', () => {
     const all = PROJECT_TAB_GROUPS.flatMap(g => g.tabs);
-    expect(all).toHaveLength(15);
-    expect(new Set(all).size).toBe(15);
+    expect(all).toHaveLength(16);
+    expect(new Set(all).size).toBe(16);
   });
 
   it('accepte les identifiants des liens existants (?tab=) et refuse le reste', () => {
@@ -35,14 +35,20 @@ describe('navigation de la fiche affaire', () => {
     expect(groups.map(g => g.id)).toEqual(['INFOS', 'TACHES', 'HONOS', 'ETUDES', 'CORRESPONDANCE']);
   });
 
-  it('en mission chantier, ramène douze onglets à sept entrées', () => {
+  it('en mission chantier, ramène seize onglets à sept entrées', () => {
     expect(visibleTabGroups(() => true)).toHaveLength(7);
   });
 
   it("retire d'une famille les onglets masqués sans la vider", () => {
     const hidden: ProjectTabId[] = ['VISA', 'RDT'];
     const chantier = visibleTabGroups(tab => !hidden.includes(tab)).find(g => g.id === 'CHANTIER');
-    expect(chantier?.tabs).toEqual(['DET', 'AOR']);
+    expect(chantier?.tabs).toEqual(['DET', 'AOR', 'GPA']);
+  });
+
+  it("place l'onglet GPA juste après l'AOR, dans la famille chantier", () => {
+    const chantier = PROJECT_TAB_GROUPS.find(g => g.id === 'CHANTIER')!;
+    expect(chantier.tabs.indexOf('GPA')).toBe(chantier.tabs.indexOf('AOR') + 1);
+    expect(CHANTIER_ONLY_TABS).toContain('GPA');
   });
 
   it("rouvre l'onglet déjà consulté dans la famille, sinon le premier", () => {

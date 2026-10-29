@@ -491,7 +491,7 @@ export default function ProjectDetail() {
   const aorPlansAffiches = planReorder.ordre
     ? planReorder.ordre.map(pid => aorPlansTries.find(p => p.id === pid)).filter((p): p is Plan => !!p)
     : aorPlansTries;
-  const reservesOuvertes = reserves.filter(r => !isReserveClosed(r)).length + gpaReserves.filter(r => !isReserveClosed(r)).length;
+  const reservesOuvertes = reserves.filter(r => !isReserveClosed(r)).length;
 
   // Reception PV form state
   const [showPvForm, setShowPvForm] = useState(false);
@@ -749,7 +749,7 @@ export default function ProjectDetail() {
   // savoir si la mission est prévue : on garde le repli historique (gate sur
   // is_chantier seul). RDT n'a pas de mission MOP dédiée et suit DET.
   const CHANTIER_TAB_MISSION_ID: Partial<Record<string, string>> = {
-    ACT: 'act', VISA: 'visa', DET: 'det', RDT: 'det', AOR: 'aor',
+    ACT: 'act', VISA: 'visa', DET: 'det', RDT: 'det', AOR: 'aor', GPA: 'aor',
   };
   const chantierTabState = useMemo(() => {
     const missionsList = contratHonoraires?.missions_list;
@@ -759,6 +759,7 @@ export default function ProjectDetail() {
       DET: ordresDeService.length > 0 || marchesTravaux.length > 0,
       RDT: ordresDeService.length > 0 || marchesTravaux.length > 0,
       AOR: receptions.length > 0 || reserves.length > 0,
+      GPA: gpaReserves.length > 0,
     };
     const result: Record<string, { visible: boolean; horsMission: boolean }> = {};
     for (const tabId of Object.keys(CHANTIER_TAB_MISSION_ID)) {
@@ -773,7 +774,7 @@ export default function ProjectDetail() {
         : { visible: hasData[tabId], horsMission: hasData[tabId] };
     }
     return result;
-  }, [contratHonoraires, marchesTravaux, visas, ordresDeService, receptions, reserves]);
+  }, [contratHonoraires, marchesTravaux, visas, ordresDeService, receptions, reserves, gpaReserves]);
 
   // Rapatrie les honoraires initiaux et le coût travaux prévisionnel depuis le
   // contrat MOE lié, plutôt que de laisser ces montants — déjà saisis dans le
@@ -5126,6 +5127,22 @@ export default function ProjectDetail() {
               </div>
             )}
 
+            {activeTab === 'GPA' && (
+              <div className="space-y-8">
+                <ReserveTracker
+                  projectId={id || ''}
+                  apiBase="/api/gpa-reserves"
+                  title={t('projectdetail_reserves_gpa_title')}
+                  shortTitle={t('projectdetail_reserves_gpa_short')}
+                  reserves={gpaReserves}
+                  setReserves={setGpaReserves}
+                  plans={plans}
+                  lotsList={project?.lots_list}
+                  project={project}
+                  settings={settings}
+                />
+              </div>
+            )}
             {activeTab === 'CORRESPONDANCE' && (
               <div className="space-y-8">
                 <LinkedPhoneCalls projectId={id!} />
@@ -5148,19 +5165,7 @@ export default function ProjectDetail() {
                   project={project}
                   settings={settings}
                   initialOpenReserveId={openResourceKey === 'reserves' ? openRecordId : undefined}
-                />
-
-                <ReserveTracker
-                  projectId={id || ''}
-                  apiBase="/api/gpa-reserves"
-                  title={t('projectdetail_reserves_gpa_title')}
-                  shortTitle={t('projectdetail_reserves_gpa_short')}
-                  reserves={gpaReserves}
-                  setReserves={setGpaReserves}
-                  plans={plans}
-                  lotsList={project?.lots_list}
-                  project={project}
-                  settings={settings}
+                  onConvertedToGpa={gpa => setGpaReserves(prev => prev.some(r => r.id === gpa.id) ? prev : [...prev, gpa as GpaReserve])}
                 />
                 </>) },
                 { id: 'doe', label: t('aor_section_doe'), count: doeATraiter, alert: true, children: (

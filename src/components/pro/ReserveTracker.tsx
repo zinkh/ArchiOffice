@@ -57,6 +57,8 @@ interface ReserveTrackerProps {
    *  depuis un agent (?open=reserves:<id> sur /projects/:id, voir
    *  recordLinks.ts côté serveur et ProjectDetail.tsx). */
   initialOpenReserveId?: string | null;
+  /** Réserve d'OPR transformée en réserve GPA (la fiche expose alors l'action). */
+  onConvertedToGpa?: (gpa: ReserveLike) => void;
 }
 
 type Filter = 'ouvertes' | 'retard' | 'levees' | 'toutes';
@@ -77,7 +79,7 @@ const FILTERS: { id: Filter; label: string }[] = [
  * avec la photo prise sur place. L'export PDF (lib/reservesExport.ts) sort
  * la liste filtrée à l'écran.
  */
-export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves: serverReserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
+export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves: serverReserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId, onConvertedToGpa }: ReserveTrackerProps) {
   const { t } = useTranslation();
 
   // Photos prises sur l'appareil et pas encore arrivées sur le serveur : elles partent en arrière-plan
@@ -561,6 +563,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             setAnnotationCoords(null);
           }}
           onDeleted={id => setReserves(prev => prev.filter(r => r.id !== id))}
+          onConvertedToGpa={onConvertedToGpa}
         />
       )}
       </AnimatePresence>

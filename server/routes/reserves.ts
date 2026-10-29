@@ -123,6 +123,58 @@ export function registerReserveRoutes(app: Express, { supabaseAdmin, getTenantId
     } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to update reserve" }); }
   });
 
+  // Transforme une réserve d'OPR en réserve de garantie de parfait achèvement. La réserve garde son
+  // identifiant (les photos, rangées sous cet identifiant, n'ont qu'à changer de jeu), reçoit le
+  // numéro suivant de la série GPA de l'affaire et quitte la liste des réserves AOR. La nature
+  // (propre aux cerfas d'OPR) n'a pas d'équivalent en GPA et n'est pas reprise.
+  app.post("/api/reserves/:id/to-gpa", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { id } = req.params;
+      const { data: source } = await supabaseAdmin.from('reserves').select('*').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (!source) return res.status(404).json({ error: "Réserve introuvable." });
+      const r = source as any;
+      const { data: dejaGpa } = await supabaseAdmin.from('gpa_reserves').select('id').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+      if (dejaGpa) return res.status(409).json({ error: "Cette réserve est déjà une réserve GPA." });
+
+      const { data: lastRow } = await supabaseAdmin.from('gpa_reserves').select('number').eq('tenant_id', tenantId).eq('project_id', r.project_id).order('number', { ascending: false }).limit(1).single();
+      const number = ((lastRow as any)?.number || 0) + 1;
+      const row: Record<string, unknown> = {
+        id, tenant_id: tenantId, project_id: r.project_id, reception_id: r.reception_id ?? null, title: r.title,
+        batiment: r.batiment, local: r.local, status: r.status || 'A faire', lots: r.lots, entreprises: r.entreprises,
+        created_at: r.created_at, due_date: r.due_date, plan_id: r.plan_id, x: r.x, y: r.y, number,
+        description: r.description ?? null,
+      };
+      if (r.reponse) row.reponse = r.reponse;
+      const { data: created, error } = await supabaseAdmin.from('gpa_reserves').insert(row).select().single();
+      if (error && isMissingReponseColumn(error)) return res.status(503).json({ error: "Le suivi des réserves n'est pas disponible : migration à appliquer." });
+      if (error) throw error;
+
+      // Les photos suivent la réserve : seule leur appartenance change, les objets restent en place.
+      try {
+        const { error: photoError } = await supabaseAdmin.from('reserve_photos').update({ reserve_kind: 'gpa' })
+          .eq('tenant_id', tenantId).eq('reserve_kind', 'opr').eq('reserve_id', id);
+        // Table absente (instance non migrée) : il n'y a pas de photos à déplacer.
+        if (photoError && (photoError as any).code !== '42P01') throw photoError;
+      } catch (photoError) {
+        await supabaseAdmin.from('gpa_reserves').delete().eq('id', id).eq('tenant_id', tenantId);
+        throw photoError;
+      }
+      const { error: deleteError } = await supabaseAdmin.from('reserves').delete().eq('id', id).eq('tenant_id', tenantId);
+      if (deleteError) {
+        // Retour arrière complet : la réserve ne doit exister qu'à un seul endroit.
+        await supabaseAdmin.from('reserve_photos').update({ reserve_kind: 'opr' }).eq('tenant_id', tenantId).eq('reserve_kind', 'gpa').eq('reserve_id', id);
+        await supabaseAdmin.from('gpa_reserves').delete().eq('id', id).eq('tenant_id', tenantId);
+        throw deleteError;
+      }
+
+      const userName = await getUserName(tenantId, req.user.id, req.user.email);
+      logActivity(tenantId, req.user.id, userName, `Réserve N° ${r.number} "${r.title || ''}" transformée en réserve GPA N° ${number}`, r.title || '', id, 'gpa_reserve', 'Réserves GPA');
+      const [withPhotos] = await attachReservePhotos(supabaseAdmin, tenantId, 'gpa', [created as any]);
+      res.json(withPhotos);
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Failed to convert reserve to GPA" }); }
+  });
+
   // Ne change que la nature d'une réserve (le PUT d'une réserve réécrit tous ses champs).
   app.put("/api/reserves/:id/nature", async (req: any, res: any) => {
     try {
