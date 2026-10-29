@@ -6,6 +6,8 @@ import type { DriveDocumentStatus } from '../../shared/driveDocumentStatus';
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
+  restartDriveDocument?: (nodeId: string) => Promise<{status:'restarted'|'error'}>;
+  revealDriveCopies?: (nodeId: string) => Promise<{status:'copies_shown'|'error'}>;
   preserveDriveConflict?: (nodeId: string) => Promise<{status:'preserved'|'preserve_queued'|'error'}>;
   getDriveDocumentStatuses?: (nodeIds: string[]) => Promise<DriveDocumentStatus[]>;
   openDriveDocument?: (nodeId: string) => Promise<{ status: 'opened' | 'unsupported' | 'error' }>;

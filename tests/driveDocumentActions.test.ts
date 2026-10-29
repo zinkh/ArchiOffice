@@ -4,11 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { DriveDocumentActions } from '../src/components/DriveDocumentActions';
 vi.mock('react-i18next',()=>({useTranslation:()=>({t:(key:string)=>key})}));
-let host:HTMLDivElement;let root:Root;const open=vi.fn();const upload=vi.fn();const preserve=vi.fn();
+let host:HTMLDivElement;let root:Root;const open=vi.fn();const upload=vi.fn();const preserve=vi.fn();const restart=vi.fn();
 beforeEach(()=>{
   (globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;
   (window as any).archiofficeDesktop={isDesktop:true,openDriveDocument:open,uploadDriveDocument:upload,preserveDriveConflict:preserve};
-  open.mockReset();upload.mockReset();preserve.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  open.mockReset();upload.mockReset();preserve.mockReset();restart.mockReset();host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();delete (window as any).archiofficeDesktop;});
 const render=()=>act(async()=>{root.render(React.createElement(DriveDocumentActions,{documentId:'one'}));});
@@ -46,4 +46,13 @@ it('offers snapshot preservation only for an unsaved conflict and distinguishes 
     await act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',transfer:{nodeId:'doc:one',state:'conflict',preservation}})));
     expect(host.textContent).toContain(`drive_conflict_copy_${preservation}`);expect(host.querySelectorAll('button')).toHaveLength(2);
   }
+});
+it('requires an accepted snapshot and an explicit second click before restarting the working copy',async()=>{
+  (window as any).archiofficeDesktop.restartDriveDocument=restart;restart.mockResolvedValue({status:'restarted'});
+  const show=(preservation:'pending'|'done')=>act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',transfer:{nodeId:'doc:one',state:'conflict',preservation}})));
+  await show('pending');expect(host.textContent).not.toContain('drive_restart_action');await show('done');
+  await act(async()=>{[...host.querySelectorAll('button')].find(b=>b.textContent==='drive_restart_action')!.click();});
+  expect(restart).not.toHaveBeenCalled();expect(host.textContent).toContain('drive_restart_explanation');
+  await act(async()=>{[...host.querySelectorAll('button')].find(b=>b.textContent==='drive_restart_confirm')!.click();});
+  expect(restart).toHaveBeenCalledWith('doc:one');expect(host.textContent).toContain('drive_document_restarted');
 });

@@ -61,7 +61,7 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:enqueue',requestId,file});
     });},
     working(action,nodeId) {return new Promise((resolve,reject)=> {
-      if(!['open','upload','preserve'].includes(action)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))return reject(new Error('Invalid document'));
+      if(!['open','upload','preserve','restart'].includes(action)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))return reject(new Error('Invalid document'));
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
       const requestId=crypto.randomUUID();
       const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive working copy timeout'));},300000);

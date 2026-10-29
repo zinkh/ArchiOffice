@@ -13,6 +13,7 @@ interface WorkingRecord extends TransferIdentity {
   baseSha256: string;
   baseSize: number;
   state: 'prepared' | 'ready';
+  reconciliationId?: string;
 }
 const fail = (code: string) => Object.assign(new Error(code), { status: 400, code });
 function filename(name: string) {
@@ -56,6 +57,7 @@ export class WorkingCopies {
       if (!r || r.formatVersion !== 1 || r.nodeId !== nodeId || r.userId !== this.identity.userId || r.tenantId !== this.identity.tenantId
         || typeof r.name !== 'string' || filename(r.name) !== r.name || !Number.isSafeInteger(r.baseVersion) || r.baseVersion < 1
         || !/^[a-f0-9]{64}$/.test(r.baseSha256) || !Number.isSafeInteger(r.baseSize) || r.baseSize < 0 || r.baseSize > 200 * 1024 * 1024
+        || (r.reconciliationId !== undefined && !/^[a-f0-9-]{36}$/.test(r.reconciliationId))
         || !['prepared', 'ready'].includes(r.state)) throw fail('WORKING_RECORD_CORRUPT');
       return r;
     } catch (e: any) { if (e.code === 'ENOENT') return null; throw e; }
@@ -107,6 +109,37 @@ export class WorkingCopies {
     if (actual.size !== record.baseSize || actual.sha256 !== record.baseSha256) throw fail('WORKING_RECOVERY_REQUIRED');
     record.state = 'ready'; await this.save(record);
     return { ...await this.describe(record), remoteVersion: meta.version };
+  }); }
+  /** Explicit restart after preservation. Old files remain byte-for-byte at
+   * their old paths; a new journal pointer is published only after verification. */
+  restart(meta: DownloadMetadata, source: {file:string;sha256:string}, conflictId: string, authorize:()=>Promise<unknown>) { return this.serial(async()=> {
+    if(!/^[a-f0-9-]{36}$/.test(conflictId)||!Number.isSafeInteger(meta.version)||meta.version<1||!Number.isSafeInteger(meta.size)||meta.size<0||meta.size>200*1024*1024
+      ||typeof meta.name!=='string'||!/^[a-f0-9]{64}$/.test(source.sha256)||(meta.sha256!==null&&meta.sha256!==source.sha256))throw fail('INVALID_WORKING_SOURCE');
+    const r=await this.read(meta.nodeId);if(!r||r.state!=='ready')throw fail('WORKING_COPY_UNAVAILABLE');
+    if(r.reconciliationId===conflictId)return this.describe(r);
+    if(meta.version<r.baseVersion)throw fail('WORKING_REMOTE_VERSION_OLDER');
+    // Prove the old path is still a regular readable file; never recreate it.
+    await this.describe(r);
+    const dir=this.directory(meta.nodeId);const safe=filename(meta.name);const ext=path.extname(safe).slice(0,20);
+    const stem=safe.slice(0,safe.length-path.extname(safe).length).slice(0,40);
+    const next:WorkingRecord={...r,name:filename(`${stem} (reprise ${conflictId})${ext}`),baseVersion:meta.version,
+      baseSha256:source.sha256,baseSize:meta.size,reconciliationId:conflictId};
+    const file=this.file(next);const temporary=path.join(dir,crypto.randomUUID()+'.part');
+    try {
+      await fs.copyFile(source.file,temporary,constants.COPYFILE_EXCL);await fs.chmod(temporary,0o600);
+      const actual=await digest(temporary);if(actual.size!==meta.size||actual.sha256!==source.sha256)throw fail('WORKING_SOURCE_CORRUPT');
+      const fd=await fs.open(temporary,'r+');try {await fd.sync();}finally {await fd.close();}
+      try {await fs.link(temporary,file);}catch(e:any){if(e.code!=='EEXIST')throw e;}
+      const published=await digest(file);if(published.size!==meta.size||published.sha256!==source.sha256)throw fail('WORKING_RECOVERY_REQUIRED');
+      // Archive the old pointer atomically, without moving the old working file.
+      const archive=path.join(dir,`before-${conflictId}.json`);const tmp=path.join(dir,crypto.randomUUID()+'.tmp');
+      try {
+        const fd=await fs.open(tmp,'wx',0o600);try{await fd.writeFile(JSON.stringify(r));await fd.sync();}finally{await fd.close();}
+        try {await fs.link(tmp,archive);}catch(e:any){if(e.code!=='EEXIST')throw e;}
+        if(await fs.readFile(archive,'utf8')!==JSON.stringify(r))throw fail('WORKING_RECOVERY_REQUIRED');
+      }finally {await fs.rm(tmp,{force:true});}
+      await authorize();await this.save(next);return await this.describe(next);
+    }finally {await fs.rm(temporary,{force:true});}
   }); }
   inspect(nodeId: string) { return this.serial(async () => {
     const r = await this.read(nodeId); if (!r || r.state !== 'ready') throw fail('WORKING_COPY_UNAVAILABLE');

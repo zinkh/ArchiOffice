@@ -865,3 +865,47 @@ filtrage IPC et messages d’interface. Les fournisseurs réseau sont simulés d
 le banc d’essai et les tests natifs utilisent Linux ; les essais réels
 Windows/macOS restent nécessaires. Aucune migration SQL ni modification des
 adaptateurs Explorateur/Finder.
+
+## 28. Repartir explicitement de la version distante après conflit
+
+Après acceptation de la sauvegarde de l’instantané en document distinct,
+Documents propose « Repartir de la version distante ». Une confirmation demande
+de fermer le fichier dans l’application associée et explique que les prochaines
+modifications devront concerner une nouvelle copie. Il s’agit du choix explicite
+de reprendre la version distante, sans fusion binaire ou comparaison automatique.
+
+Le worker vérifie de nouveau l’autorisation, charge les métadonnées courantes et
+hydrate cette version dans le cache vérifié. Il crée ensuite une nouvelle copie
+de travail avec un nom distinct dérivé du conflit. L’ancien fichier reste à son
+ancien emplacement : les éventuelles retouches postérieures à l’instantané
+sauvegardé restent sur le poste. Le journal de l’ancien pointeur est archivé avant
+le changement de pointeur actif. Aucun fichier de travail n’est remplacé, déplacé
+ou supprimé. La commande « Voir les copies locales » ouvre le dossier calculé
+côté Electron après contrôle de licence, identité, périmètre et liens symboliques ;
+aucun chemin n’est fourni par le renderer ni renvoyé à celui-ci.
+
+Le journal actif contient l’identifiant du conflit qui a produit cette nouvelle
+copie. Une interruption après sa publication, mais avant le marquage de la file,
+se récupère en relançant le même choix : la copie existante est réutilisée et le
+marquage est idempotent. Les publications préparées et les anciens fichiers sont
+conservés ; une publication incompatible ou modifiée avant sa validation produit
+une erreur de récupération plutôt qu’un écrasement silencieux. Un refus observé
+de licence avant le changement de pointeur empêche ce changement.
+
+La file ne marque le conflit réconcilié qu’après succès de la préservation et
+publication de la copie de travail. L’ancien journal et l’instantané du conflit
+restent conservés. Le conflit réconcilié ne bloque plus les prochains envois ;
+ceux-ci capturent la nouvelle copie avec sa version d’origine distante. Si le
+serveur a encore changé entre-temps, le contrôle de version existant peut produire
+un nouveau conflit. Les anciennes copies ne sont pas envoyées automatiquement.
+Le suivi distingue « copie reprise depuis la version N » d’un envoi accepté.
+
+Ce choix change volontairement le chemin de la copie active. Les références
+relatives CAO, les fichiers dépendants, la comparaison manuelle assistée et les
+adaptateurs CFAPI/File Provider restent hors de ce lot. L’utilisateur rouvre la
+nouvelle copie avec « Ouvrir avec Drive » ; aucune application n’est lancée pendant
+la confirmation. Les tests couvrent conservation des retouches, publication
+interrompue, refus de licence, reprise des deux journaux, version d’origine de
+l’envoi suivant, confirmation UI et ouverture sécurisée du dossier. Les essais
+OS sont simulés sous Linux ; validation Windows/macOS réelle encore nécessaire.
+Aucune migration SQL.

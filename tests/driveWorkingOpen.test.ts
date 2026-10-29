@@ -63,3 +63,11 @@ it('filters the conflict preservation state without returning new document paths
   agent.documentStatuses.mockResolvedValue({identity,documents:[{nodeId:'doc:one',state:'conflict',preservation:'invalid'}]});
   await expect(driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).rejects.toThrow('Invalid preservation state');
 });
+it('opens only the derived copies folder and refuses symbolic links or a final vault refusal',async()=>{
+  const {revealDriveCopies}=require('../electron/driveWorking.cjs');const c=config();
+  expect(await revealDriveCopies(c)).toEqual({status:'copies_shown'});expect(c.shell.openPath).toHaveBeenCalledWith(path.dirname(file));
+  c.shell.openPath.mockClear();c.vault.mockResolvedValueOnce(identity).mockRejectedValueOnce(new Error('revoked'));
+  expect(await revealDriveCopies(c)).toEqual({status:'error'});expect(c.shell.openPath).not.toHaveBeenCalled();
+  c.vault.mockResolvedValue(identity);const dir=path.dirname(file);await fs.rename(dir,dir+'-old');await fs.symlink(dir+'-old',dir);
+  expect(await revealDriveCopies(c)).toEqual({status:'error'});expect(c.shell.openPath).not.toHaveBeenCalled();
+});

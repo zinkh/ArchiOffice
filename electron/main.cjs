@@ -10,7 +10,7 @@ const { resolveDataLocation } = require('./dataLocation.cjs');
 const { resolveStorageFile, isSafeToOpen } = require('./fileAccess.cjs');
 const { createAppMenu } = require('./menu.cjs');
 const { createDriveAgent, requestVault } = require('./driveAgent.cjs');
-const { openDriveWorking, driveDocumentStatuses } = require('./driveWorking.cjs');
+const { openDriveWorking, driveDocumentStatuses, revealDriveCopies } = require('./driveWorking.cjs');
 const driveTrust = require('./driveTrust.json');
 
 // package.json's "name" is the npm workspace root ("react-example", a
@@ -413,6 +413,14 @@ function startDriveAgent() {
       const result=await driveAgent.working('upload',nodeId);
       return {status:result?.pending?'pending':result?.queued?'queued':'unchanged'};
     } catch(e) {return {status:e.code==='WORKING_UPLOAD_CONFLICT'?'conflict':'error'};}
+  });
+  ipcMain.handle('desktop:drive-restart-working',async(event,nodeId)=> {
+    if(!trustedDriveSender(event)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))throw new Error('Accès refusé');
+    try {await driveAgent.working('restart',nodeId);return {status:'restarted'};}catch{return {status:'error'};}
+  });
+  ipcMain.handle('desktop:drive-reveal-copies',async(event,nodeId)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');
+    return revealDriveCopies({vault:()=>requestVault(serverProcess),root:path.join(app.getPath('userData'),'drive-transfers'),nodeId,shell});
   });
   ipcMain.handle('desktop:drive-preserve-conflict', async (event,nodeId) => {
     if(!trustedDriveSender(event)||typeof nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(nodeId))throw new Error('Accès refusé');

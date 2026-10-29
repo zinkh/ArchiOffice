@@ -54,7 +54,7 @@ export function createAgentWorker(config: WorkerConfig) {
       // Replay completed snapshots before accepting another edit's baseline.
       for (const job of jobs) await ctx.working.acknowledge(job);
       const blocked = jobs.filter(j=>j.state==='blocked').length;
-      const conflicts = jobs.filter(j=>j.state==='conflict').length;
+      const conflicts = jobs.filter(j=>j.state==='conflict'&&j.reconciledVersion===undefined).length;
       config.status({state:blocked || conflicts ? 'paused':'running',blocked,conflicts,
         pending:jobs.filter(j=>['queued','uploading','retry'].includes(j.state)).length});
     } catch (e: any) { if (!stopped) config.status({state:'paused',code:/^[A-Z_]{1,64}$/.test(e.code) ? e.code : 'DRIVE_AGENT_UNAVAILABLE'}); }
@@ -71,10 +71,31 @@ export function createAgentWorker(config: WorkerConfig) {
       const task=workingUploads.then(async()=> {
         if(stopped)throw new Error('Agent stopped');
         const ctx=await current();
-        const conflict=(await ctx.queue.list()).find(j=>'documentId' in j.target&&j.target.documentId===nodeId&&j.state==='conflict');
+        const conflict=(await ctx.queue.list()).find(j=>'documentId' in j.target&&j.target.documentId===nodeId&&j.state==='conflict'&&j.reconciledVersion===undefined);
         if(!conflict)throw Object.assign(new Error('No conflict'),{code:'CONFLICT_REQUIRED'});
         const copy=await ctx.queue.preserveConflict(conflict.id);
         return {queued:true,alreadyDone:copy.state==='done'};
+      });
+      workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
+    restartWorkingCopy(nodeId: string) {
+      const task=workingUploads.then(async()=> {
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();const expected={...ctx.session};
+        const authorize=async()=> {
+          abort.signal.throwIfAborted();const active=await config.session();
+          if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)throw Object.assign(new Error('Account changed'),{code:'DRIVE_IDENTITY_MISMATCH'});
+          return active.token;
+        };
+        const jobs=await ctx.queue.list();
+        const conflict=jobs.find(j=>'documentId' in j.target&&j.target.documentId===nodeId&&j.state==='conflict'&&j.reconciledVersion===undefined);
+        if(!conflict||!jobs.some(j=>j.conflictSourceId===conflict.id&&j.state==='done'))throw Object.assign(new Error('Preserve conflict first'),{code:'CONFLICT_PRESERVATION_REQUIRED'});
+        const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);
+        const meta=await transport.metadata(nodeId,abort.signal);await ctx.cache.hydrate(meta,transport,abort.signal);
+        const cached=await ctx.cache.lookup(meta);if(!cached)throw new Error('Version not cached');
+        const copy=await ctx.working.restart(meta,cached,conflict.id,authorize);
+        await authorize();await ctx.queue.reconcileConflict(conflict.id,copy.baseVersion);
+        return {version:copy.baseVersion};
       });
       workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
@@ -86,14 +107,15 @@ export function createAgentWorker(config: WorkerConfig) {
       const jobs=await ctx.queue.listPersisted();
       const documents:DriveDocumentStatus[]=nodeIds.map(nodeId=> {
         const matching=jobs.filter(j=>'documentId' in j.target&&j.target.documentId===nodeId);
-        const conflict=matching.find(j=>j.state==='conflict');
+        const conflict=matching.find(j=>j.state==='conflict'&&j.reconciledVersion===undefined);
         if(conflict) {
           const copy=jobs.find(j=>j.conflictSourceId===conflict.id);
           return {nodeId,state:'conflict',...(copy ? {preservation:copy.state==='done'?'done':copy.state==='blocked'||copy.state==='conflict'?'blocked':'pending'} : {})};
         }
-        const pending=matching.find(j=>j.state!=='done');
+        const pending=matching.find(j=>j.state!=='done'&&j.reconciledVersion===undefined);
         const job=conflict||pending||matching.at(-1);
         if(!job)return {nodeId,state:'none'};
+        if(job.reconciledVersion!==undefined)return {nodeId,state:'reconciled',version:job.reconciledVersion};
         if(job.state==='done') {
           if(job.result?.node.id!==nodeId||!Number.isSafeInteger(job.result.version)||job.result.version<1)throw new Error('Invalid completed upload');
           return {nodeId,state:'uploaded',version:job.result.version};
@@ -175,9 +197,9 @@ export function createAgentWorker(config: WorkerConfig) {
         // Recover a completed upload if the previous process exited before ack.
         for(const job of await ctx.queue.list())await ctx.working.acknowledge(job);
         const jobs=await ctx.queue.list();
-        if(jobs.some(j=>'documentId' in j.target && j.target.documentId===nodeId && j.state==='conflict'))
+        if(jobs.some(j=>'documentId' in j.target && j.target.documentId===nodeId && j.state==='conflict'&&j.reconciledVersion===undefined))
           throw Object.assign(new Error('Resolve conflict first'),{code:'WORKING_UPLOAD_CONFLICT'});
-        const pending=jobs.find(j=>'documentId' in j.target && j.target.documentId===nodeId && j.state!=='done');
+        const pending=jobs.find(j=>'documentId' in j.target && j.target.documentId===nodeId && j.state!=='done'&&j.reconciledVersion===undefined);
         if(pending)return {queued:true,jobId:pending.id,pending:true};
         const copy=await ctx.working.inspect(nodeId);abort.signal.throwIfAborted();
         if(!copy.modified)return {queued:false};
