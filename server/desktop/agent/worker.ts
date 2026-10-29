@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { DownloadCache } from './downloadCache';
+import { createDownloadTransport, type DownloadMetadata } from './downloadTransport';
 import crypto from 'node:crypto';
 import { TransferQueue, type TransferTarget } from './transferQueue';
 import { createUploadTransport } from './uploadTransport';
@@ -12,12 +14,13 @@ export interface WorkerConfig {
 export function createAgentWorker(config: WorkerConfig) {
   let stopped = false; let running: Promise<void> | null = null;
   const abort = new AbortController();
-  let owner: { id: string; queue: TransferQueue; session: AgentSession } | null = null;
+  const downloads = new Set<Promise<unknown>>();
+  let owner: { id: string; queue: TransferQueue; cache: DownloadCache; session: AgentSession } | null = null;
   async function current() {
     const session = await config.session();
     if (!session?.userId || !session.tenantId || !session.deviceId || !session.token?.startsWith('ds_at_')) throw Object.assign(new Error('Invalid vault response'),{status:401,code:'DRIVE_VAULT_UNAVAILABLE'});
     const id = crypto.createHash('sha256').update(JSON.stringify([session.userId,session.tenantId])).digest('hex');
-    if (!owner || owner.id !== id) owner = { id, session, queue: new TransferQueue(path.join(config.root,id),{userId:session.userId,tenantId:session.tenantId}) };
+    if (!owner || owner.id !== id) owner = { id, session, queue: new TransferQueue(path.join(config.root,id),{userId:session.userId,tenantId:session.tenantId}), cache:new DownloadCache(path.join(config.root,id,'downloads'),{userId:session.userId,tenantId:session.tenantId}) };
     else owner.session = session;
     return owner;
   }
@@ -55,6 +58,26 @@ export function createAgentWorker(config: WorkerConfig) {
       const job = await ctx.queue.enqueue(file,target || {create:{parentId:`inbox:${ctx.session.tenantId}`}},baseVersion);
       return { queued:true,jobId:job.id }; // no local path, token or license
     },
+    /** Private entry point for future native adapters; no arbitrary URL/path. */
+    keepOffline(nodeId: string) {
+      const task=(async()=> {
+      if(stopped)throw new Error('Agent stopped');
+      const ctx=await current();const expected={...ctx.session};
+      const transport=createDownloadTransport(config.origin,expected.tenantId,async()=> {
+        const session=await config.session();
+        if(session.userId!==expected.userId||session.tenantId!==expected.tenantId||session.deviceId!==expected.deviceId)throw Object.assign(new Error('Account changed'),{status:403,code:'DRIVE_IDENTITY_MISMATCH'});
+        return session.token;
+      });
+      const meta=await transport.metadata(nodeId,abort.signal);
+      return ctx.cache.hydrate(meta,transport,abort.signal);
+      })();
+      downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
+    async cachedVersion(meta: DownloadMetadata) {
+      if(stopped)throw new Error('Agent stopped');
+      const ctx=await current(); // offline signed authorization is still mandatory
+      abort.signal.throwIfAborted();return ctx.cache.lookup(meta);
+    },
     async retryBlocked() {
       if (stopped) throw new Error('Agent stopped');
       const ctx = await current();
@@ -62,6 +85,6 @@ export function createAgentWorker(config: WorkerConfig) {
       for (const job of jobs) await ctx.queue.retry(job.id);
       return { retried: jobs.length };
     },
-    async stop() { stopped=true; abort.abort(); await running; config.status({state:'stopped'}); },
+    async stop() { stopped=true; abort.abort(); await Promise.allSettled([running, ...downloads]); config.status({state:'stopped'}); },
   };
 }

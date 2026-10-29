@@ -5,6 +5,8 @@ import { beforeEach, afterEach, expect, it, vi, type Mock } from 'vitest';
 import { createAgentWorker, type WorkerConfig } from '../server/desktop/agent/worker';
 const { transfer } = vi.hoisted(()=>({transfer:{open:vi.fn(),status:vi.fn(),chunk:vi.fn(),complete:vi.fn()}}));
 vi.mock('../server/desktop/agent/uploadTransport',()=>({createUploadTransport:()=>transfer}));
+const { download } = vi.hoisted(()=>({download:{metadata:vi.fn(),read:vi.fn()}}));
+vi.mock('../server/desktop/agent/downloadTransport',()=>({createDownloadTransport:()=>download}));
 let root:string;let session:Mock<WorkerConfig['session']>;let status:Mock<WorkerConfig['status']>;
 beforeEach(async()=>{
   root=await fs.mkdtemp(path.join(os.tmpdir(),'drive-worker-'));status=vi.fn<WorkerConfig['status']>();
@@ -35,4 +37,16 @@ it('coalesces overlapping ticks and stops without deleting queued work',async()=
   await worker.enqueue(file);await Promise.all([worker.tick(),worker.tick()]);
   expect(transfer.complete).toHaveBeenCalledTimes(1);await worker.stop();await worker.tick();expect(transfer.complete).toHaveBeenCalledTimes(1);
   expect((await fs.readdir(path.join(root,'queue'))).length).toBe(1);
+});
+
+it('retains a downloaded version and rechecks authorization before offline lookup',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.pdf',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'cache'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  expect(await worker.keepOffline('doc:file1')).toMatchObject({version:1,verifiedAgainstRemote:true});
+  expect(await fs.readFile((await worker.cachedVersion(meta))!.file,'utf8')).toBe('hello');
+  session.mockRejectedValue(Object.assign(new Error('expired'),{status:402}));
+  await expect(worker.cachedVersion(meta)).rejects.toThrow('expired');
+  await worker.stop();
 });

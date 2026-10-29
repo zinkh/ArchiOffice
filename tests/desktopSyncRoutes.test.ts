@@ -693,3 +693,12 @@ describe('Instance non migrée', () => {
     expect((await get(actor, '/nodes/doc:d1')).status).toBe(200);
   });
 });
+
+describe('Téléchargement des documents historiques', () => {
+  it('sert la version courante explicite même sans ligne d’historique', async () => {
+    const tenantId = makeTenant(); const actor = await makeActor(app, tenantId);
+    seedProject(tenantId, 'legacy-p'); seedDocument(tenantId, { id: 'legacy-doc', project_id: 'legacy-p', version: 1 });
+    expect((await get(actor, '/nodes/doc:legacy-doc/content?version=1')).status).toBe(302);
+    expect((await get(actor, '/nodes/doc:legacy-doc/content?version=2')).body.code).toBe('VERSION_NOT_FOUND');
+  });
+});

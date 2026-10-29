@@ -266,10 +266,14 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
     if (req.query.version !== undefined) {
       const version = Number(req.query.version);
       if (!Number.isInteger(version) || version < 1) throw new DesktopError(400, 'INVALID_VERSION', 'Version invalide.');
-      const { data } = await db.from('document_versions').select('file_url')
-        .eq('tenant_id', ctx.tenantId).eq('document_id', doc.id).eq('version', version).maybeSingle();
-      if (!data) throw new DesktopError(404, 'VERSION_NOT_FOUND', 'Version introuvable.');
-      fileUrl = data.file_url;
+      // Legacy/imported current versions may have no history row yet. The
+      // current document still identifies their exact file reference.
+      if (version !== (doc.version ?? 1)) {
+        const { data } = await db.from('document_versions').select('file_url')
+          .eq('tenant_id', ctx.tenantId).eq('document_id', doc.id).eq('version', version).maybeSingle();
+        if (!data) throw new DesktopError(404, 'VERSION_NOT_FOUND', 'Version introuvable.');
+        fileUrl = data.file_url;
+      }
     } else {
       res.set('ETag', `"v${doc.version ?? 1}"`);
       if (doc.content_sha256) res.set('X-Content-SHA256', doc.content_sha256);

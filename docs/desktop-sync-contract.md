@@ -642,3 +642,69 @@ Windows/macOS réelles. Ce lot ne fournit ni démarrage automatique à l’ouver
 de session, ni placeholders CFAPI/File Provider, ni surveillance de fichiers CAO,
 ni téléchargement à la demande. Il prépare ces intégrations sur un processus
 séparé tout en gardant un seul propriétaire du coffre.
+
+## 23. Téléchargement repris et cache interne de versions
+
+Le worker dispose de `keepOffline(nodeId)` pour préparer une version locale et
+de `cachedVersion(metadata)` pour consulter une copie vérifiée après contrôle de
+la licence par le coffre. Ces méthodes restent privées : aucun nouveau bouton,
+commande preload ou montage natif ne les expose dans ce lot. Elles constituent
+le socle de l’hydratation et de la conservation hors connexion à raccorder aux
+adaptateurs Windows/macOS et au parcours documentaire.
+
+### Version et intégrité
+
+`downloadTransport.ts` charge le nœud puis demande explicitement sa version
+technique au point d’accès de contenu. Les documents importés dont la version
+courante n’a pas encore de ligne d’historique restent téléchargeables : cette
+version utilise la référence du document courant ; les versions plus anciennes
+exigent toujours leur ligne d’historique. Une taille ancienne absente peut être
+obtenue par une requête de sonde, sinon le téléchargement est refusé proprement.
+
+Le cache écrit les octets dans un fichier partiel, reprend les plages manquantes
+et compare le SHA-256 à celui du serveur lorsqu’il existe. Si le stockage ignore
+Range et renvoie le fichier entier, la partie incomplète repart de zéro plutôt
+que d’ajouter un second fichier à la suite. Une empreinte erronée, une réponse
+trop volumineuse ou une version incohérente empêche la publication.
+
+Pour les anciens documents sans empreinte serveur, les réponses ne sont jamais
+assemblées et le préfixe n’est pas repris après coupure : le fichier est repris
+en une seule réponse complète. Son empreinte locale est conservée et contrôlée
+aux lectures ultérieures, mais `verifiedAgainstRemote: false` distingue cette
+intégrité locale d’une comparaison avec une empreinte distante. Une empreinte
+locale déjà connue ne peut pas être remplacée silencieusement par d’autres
+octets sous le même numéro de version.
+
+### Cache séparé des fichiers de travail
+
+`downloadCache.ts` dérive ses noms de fichiers d’une empreinte du compte, du
+cabinet, du document et de la version. Aucun nom ni chemin renvoyé par le serveur
+n’est interprété comme un chemin disque. Une publication exclusive conserve les
+versions déjà présentes ; le journal permet de terminer la validation après une
+interruption entre publication et enregistrement de l’état. Les anciennes
+versions et les fichiers de travail ne sont ni écrasés ni supprimés. La limite
+initiale est 200 Mo par fichier. Une future politique de rétention devra prévoir
+explicitement la gestion du volume total et des fichiers partiels bloqués.
+
+### Redirections et accès
+
+Les connexions HTTPS passent par le garde DNS public épinglé existant, afin de
+refuser les destinations privées et le rebinding DNS. L’option de redirection
+manuelle ajoutée au transport partagé ne change pas le comportement par défaut
+des connecteurs WebDAV existants. Le jeton d’appareil n’est envoyé que sur la
+requête initiale à l’API documentaire : il n’est jamais transmis aux URL de
+stockage signées, même si une redirection reste sur la même origine. Les liens
+signés ne sont pas écrits dans les journaux de cache. L’autorisation est revérifiée
+avant chaque connexion ; la lecture locale exige aussi une licence valide.
+
+### Validation et limites
+
+Tests : reprise après interruption/redémarrage, réponse ignorant Range,
+checksum invalide, conservation des anciennes versions, corruption locale,
+isolation de compte, documents historiques, métadonnées UTF-8, redirections et
+absence de fuite du jeton vers le stockage. Les tests du transport utilisent des
+doubles réseau ; aucun fournisseur de stockage réel ni OS natif n’est validé
+par ce lot. L’export, la copie de travail modifiable, l’éviction, les références
+CAO, la détection des modifications, le montage et l’hydratation native restent
+à raccorder. La lecture directe du cache comme fichier de travail n’est pas le
+parcours retenu : une copie de travail séparée sera nécessaire.
