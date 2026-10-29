@@ -10,7 +10,9 @@ import { launchOriginRef } from '../../lib/launchOrigin';
 import { PANEL_SPRING, FLICK_SPRING, FLICK_VELOCITY, projectMomentum } from '../../lib/motion';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { SignedImage } from '../SignedImage';
-import { queuedJsonRequest, queuedMultipartRequest } from '../../lib/offlineQueue';
+import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
+import { prepareSitePhoto } from '../../lib/sitePhoto';
+import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
   type ReserveLike, type ReserveStatus, RESERVE_STATUSES, StatusSelect, PlanExcerpt,
@@ -87,8 +89,11 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const [photos, setPhotos] = useState<ReservePhoto[]>(reserve?.photos || []);
   const [queued, setQueued] = useState<{ file: File; preview: string }[]>([]);
   const [saving, setSaving] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  // Photos en cours de réduction sur l'appareil (une demi-seconde chacune) : c'est tout ce que la
+  // saisie attend. L'envoi lui-même part en arrière-plan, voir `enqueuePhoto`.
+  const [preparing, setPreparing] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const queuedRef = useRef<{ file: File; preview: string }[]>([]);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
@@ -108,7 +113,8 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const setPanelRef = useCallback((el: HTMLDivElement | null) => { panelRef.current = el; launchOriginRef(el); }, []);
 
   useEffect(() => { setForm(formFromReserve(reserve)); setPhotos(reserve?.photos || []); }, [reserve?.id]);
-  useEffect(() => () => { queued.forEach(q => URL.revokeObjectURL(q.preview)); }, []);
+  queuedRef.current = queued;
+  useEffect(() => () => { queuedRef.current.forEach(q => URL.revokeObjectURL(q.preview)); }, []);
 
   const planId = isNew ? pendingPlan?.planId || null : reserve?.plan_id || null;
   const planX = isNew ? pendingPlan?.x : reserve?.x ?? undefined;
@@ -132,50 +138,76 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
 
   const reserveKind = apiBase === '/api/gpa-reserves' ? 'gpa' : 'opr';
   const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
-  const photoEntity = apiBase === '/api/gpa-reserves' ? 'gpaReservePhoto' : 'reservePhoto';
+  const photoEntity = photoEntityFor(apiBase);
 
-  // Id généré côté client, comme la réserve elle-même : un envoi rejoué
-  // après coupure réseau (src/lib/offlineQueue.ts) retrouve la même photo
-  // au lieu de la déposer une seconde fois, et n'a pas besoin d'attendre
-  // que la réserve ait elle-même atteint le serveur pour partir.
-  const uploadOne = async (reserveId: string, file: File): Promise<ReservePhoto> => {
+  // Une photo ne bloque jamais la saisie : elle est rangée dans la file d'écritures (IndexedDB) et
+  // part en arrière-plan, une à la fois, avec reprise automatique (src/lib/offlineQueue.ts). Avant,
+  // l'écran attendait le réseau pour chaque photo, et sur un iPad au bout d'une dizaine de réserves
+  // les envois de plusieurs Mo s'empilaient pendant qu'on essayait de saisir la suivante.
+  //
+  // Id généré côté client, comme la réserve elle-même : un envoi rejoué après coupure réseau retrouve
+  // la même photo au lieu de la déposer une seconde fois, et n'a pas besoin d'attendre que la réserve
+  // ait elle-même atteint le serveur (la file envoie les saisies avant les photos).
+  const enqueuePhoto = async (reserveId: string, file: File): Promise<ReservePhoto> => {
     const photoId = window.crypto.randomUUID();
-    const { queued: wasQueued, data } = await queuedMultipartRequest<ReservePhoto>({
+    await enqueueMultipartRequest({
       entity: photoEntity, id: photoId, method: 'POST', url: `${apiBase}/${reserveId}/photos`,
       blob: file, blobFieldName: 'file', blobFilename: file.name || 'photo.jpg', extraFields: { id: photoId },
     });
-    if (wasQueued) {
-      return {
-        id: photoId, reserve_id: reserveId, reserve_kind: reserveKind, file_url: '',
-        uploaded_at: new Date().toISOString(), pendingSync: true, localPreviewUrl: URL.createObjectURL(file),
-      };
-    }
-    return data!;
+    return {
+      id: photoId, reserve_id: reserveId, reserve_kind: reserveKind, file_url: '',
+      uploaded_at: new Date().toISOString(), pendingSync: true, localPreviewUrl: previewUrlFor(photoId, file),
+    };
   };
 
   const handleFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const list = Array.from(files);
-    if (isNew) {
-      setQueued(prev => [...prev, ...list.map(file => ({ file, preview: URL.createObjectURL(file) }))]);
-      return;
-    }
-    setUploading(true); setError(null);
-    try {
-      for (const file of list) {
-        const photo = await uploadOne(reserve!.id, file);
-        if (photo) setPhotos(prev => [...prev, photo]);
+    setError(null);
+    setPreparing(n => n + list.length);
+    // Une photo à la fois : décoder plusieurs images de 12 Mpx en parallèle ferait plier la mémoire d'un iPad.
+    for (const original of list) {
+      try {
+        const file = await prepareSitePhoto(original);
+        if (isNew) {
+          setQueued(prev => [...prev, { file, preview: URL.createObjectURL(file) }]);
+        } else {
+          const photo = await enqueuePhoto(reserve!.id, file);
+          setPhotos(prev => [...prev, photo]);
+        }
+      } catch (err: any) {
+        setError(err.message || "Photo non ajoutée : l'appareil n'a pas pu la conserver.");
+      } finally {
+        setPreparing(n => n - 1);
       }
-    } catch (err: any) {
-      setError(err.message || 'Envoi impossible.');
-    } finally {
-      setUploading(false);
     }
   };
+
+  // L'envoi d'une photo en attente a abouti (éventuellement alors que la fiche est restée ouverte) :
+  // l'aperçu local est remplacé par la photo enregistrée.
+  useEffect(() => {
+    const onSynced = (e: Event) => {
+      const { id, entity: syncedEntity, data } = (e as CustomEvent).detail || {};
+      if (syncedEntity !== photoEntity || !data?.file_url) return;
+      setPhotos(prev => prev.map(p => p.id === id ? { ...(data as ReservePhoto), pendingSync: false } : p));
+      releasePreviewUrl(id);
+    };
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+    return () => window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onSynced);
+  }, [photoEntity]);
 
   const removePhoto = async (photo: ReservePhoto) => {
     if (!reserve) return;
     if (!confirm(t('reserve_detail_confirm_delete_photo'))) return;
+    // Une photo pas encore envoyée n'existe que sur l'appareil : on la retire de la file, le serveur ne la connaît pas.
+    if (photo.pendingSync) {
+      try {
+        await discardPendingWrite(photo.id, photoEntity);
+        releasePreviewUrl(photo.id);
+        setPhotos(prev => prev.filter(p => p.id !== photo.id));
+      } catch { /* la file n'a pas pu être modifiée : la photo reste affichée */ }
+      return;
+    }
     try {
       await queuedJsonRequest({ entity: photoEntity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${reserve.id}/photos/${photo.id}` });
       setPhotos(prev => prev.filter(p => p.id !== photo.id));
@@ -220,18 +252,23 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           entity, id, method: 'POST', url: apiBase, body: { ...payload, id },
         });
         saved = wasQueued ? ({ ...payload, id, photos: [], pendingSync: true } as ReserveLike) : data!;
-        const uploaded: ReservePhoto[] = [];
+        // Mise en file seulement (quelques millisecondes) : la fiche se referme tout de suite et la
+        // liste montre les photos avec leur aperçu local pendant que l'envoi se fait derrière.
+        let notKept = 0;
         for (const q of queued) {
           try {
-            uploaded.push(await uploadOne(saved.id, q.file));
+            await enqueuePhoto(saved.id, q.file);
           } catch (err) {
-            console.error('[ReserveDetail] photo non envoyée', err);
+            notKept++;
+            console.error('[ReserveDetail] photo non conservée', err);
           }
         }
-        saved = { ...saved, photos: uploaded };
+        if (notKept > 0) window.alert(`${notKept} photo${notKept > 1 ? 's n\'ont pas pu être conservées' : ' n\'a pas pu être conservée'} sur cet appareil : reprenez-les depuis la fiche de la réserve.`);
+        saved = { ...saved, photos: [] };
       } else {
         await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'PUT', url: `${apiBase}/${reserve!.id}`, body: payload });
-        saved = { ...(reserve as ReserveLike), ...payload, photos } as ReserveLike;
+        // Les photos en attente ne sont pas enregistrées dans la liste : elles sont superposées depuis la file (ReserveTracker).
+        saved = { ...(reserve as ReserveLike), ...payload, photos: photos.filter(p => !p.pendingSync) } as ReserveLike;
       }
       onSaved(saved);
       onClose();
@@ -331,7 +368,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className={labelClass}>Photos ({photos.length + queued.length})</label>
-              {uploading && <span className="flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)]"><IconLoader2 size={12} className="animate-spin" /> Envoi…</span>}
+              {preparing > 0 && <span className="flex items-center gap-1 text-[0.6875rem] text-[var(--tblr-muted)]"><IconLoader2 size={12} className="animate-spin" /> Préparation…</span>}
             </div>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
               <button
@@ -358,7 +395,9 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                     <SignedImage src={photo.file_url} alt={photo.caption || 'Photo de la réserve'} className="w-full h-full object-cover rounded-lg" />
                   )}
                   {photo.pendingSync && (
-                    <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[0.6875rem] font-bold">En attente d'envoi</span>
+                    <span className={cn('absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-white text-[0.6875rem] font-bold', photo.syncError ? 'bg-red-600/90' : 'bg-black/60')} title={photo.syncError}>
+                      {photo.syncError ? "Envoi refusé" : "En attente d'envoi"}
+                    </span>
                   )}
                   <button
                     type="button"
@@ -496,7 +535,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           <button
             type="button"
             onClick={handleSave}
-            disabled={saving || uploading}
+            disabled={saving || preparing > 0}
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50"
           >
             {saving ? <IconLoader2 size={16} className="animate-spin" /> : <IconDeviceFloppy size={16} />}

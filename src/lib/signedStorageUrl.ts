@@ -7,9 +7,65 @@
 import { apiFetch } from './api';
 import i18n from '../i18n';
 
+// Une liste de réserves affiche une miniature par ligne : sans cache, chaque rendu, chaque retour
+// sur l'onglet et chaque rechargement de la liste redemandait une URL au serveur pour CHAQUE
+// photo, et obtenait une URL différente, donc une image que le navigateur ne retrouvait jamais
+// dans son cache. Sur iPad, ces requêtes se disputaient la connexion avec les envois de photos.
+//
+// On garde donc l'URL signée jusqu'à 80 % de sa durée de vie (le reste est une marge pour une
+// page restée ouverte), on fusionne les demandes simultanées pour une même référence, et on limite
+// le nombre de résolutions en parallèle pour ne pas saturer la connexion.
+const FALLBACK_TTL_MS = 20 * 60_000;
+const TTL_SHARE = 0.8;
+const MAX_CACHED = 500;
+const MAX_PARALLEL = 4;
+
+const cache = new Map<string, { url: string; expiresAt: number }>();
+const inFlight = new Map<string, Promise<string>>();
+let active = 0;
+const waiting: Array<() => void> = [];
+
+/** Une place parmi `MAX_PARALLEL` ; la place libérée passe directement au suivant en attente. */
+async function withSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (active >= MAX_PARALLEL) await new Promise<void>(resolve => waiting.push(resolve));
+  else active++;
+  try {
+    return await task();
+  } finally {
+    const next = waiting.shift();
+    if (next) next(); else active--;
+  }
+}
+
+function remember(fileUrl: string, url: string, expiresInSeconds: unknown): void {
+  const ttl = typeof expiresInSeconds === 'number' && expiresInSeconds > 0 ? expiresInSeconds * 1000 * TTL_SHARE : FALLBACK_TTL_MS;
+  if (cache.size >= MAX_CACHED) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  cache.set(fileUrl, { url, expiresAt: Date.now() + ttl });
+}
+
+/** Oublie une URL signée (fichier remplacé, ou changement de cabinet : les références ne sont plus les mêmes). */
+export function forgetSignedUrls(fileUrl?: string): void {
+  if (fileUrl) cache.delete(fileUrl);
+  else cache.clear();
+}
+
 export async function resolveSignedUrl(fileUrl: string): Promise<string> {
-  const { url } = await apiFetch<{ url: string }>(`/api/storage/signed-url?url=${encodeURIComponent(fileUrl)}`);
-  return url;
+  const cached = cache.get(fileUrl);
+  if (cached && cached.expiresAt > Date.now()) return cached.url;
+
+  const pending = inFlight.get(fileUrl);
+  if (pending) return pending;
+
+  const request = withSlot(async () => {
+    const { url, expiresIn } = await apiFetch<{ url: string; expiresIn?: number }>(`/api/storage/signed-url?url=${encodeURIComponent(fileUrl)}`);
+    remember(fileUrl, url, expiresIn);
+    return url;
+  }).finally(() => { inFlight.delete(fileUrl); });
+  inFlight.set(fileUrl, request);
+  return request;
 }
 
 /** Resolves `fileUrl` to a signed URL and opens it in a new tab — the

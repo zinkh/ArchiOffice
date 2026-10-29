@@ -537,6 +537,8 @@ export interface ReservePhoto {
   pendingSync?: boolean;
   /** Aperçu local (`URL.createObjectURL`) affiché à la place du fichier tant que `pendingSync` est vrai. */
   localPreviewUrl?: string;
+  /** Raison du refus quand le serveur a rejeté la photo en attente (elle reste sur l'appareil, visible). */
+  syncError?: string;
 }
 
 export interface Reserve {

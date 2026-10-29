@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { AnimatePresence } from 'motion/react';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   IconClipboardCheck,
@@ -24,8 +24,14 @@ import { CardHeader } from '../ui/Card';
 import { StatTile } from '../ui/StatTile';
 import { PlanAnnotator } from '../PlanAnnotator';
 import { SignedImage } from '../SignedImage';
-import { queuedJsonRequest, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
-import type { Plan } from '../../types';
+import {
+  queuedJsonRequest, listPendingWrites, getReplayProgress, subscribeReplayProgress,
+  OFFLINE_WRITE_SYNCED_EVENT, OFFLINE_QUEUE_CHANGED_EVENT,
+} from '../../lib/offlineQueue';
+import {
+  photoEntityFor, pendingPhotosByReserve, overlayPendingPhotos, previewUrlFor, releasePreviewUrl,
+} from '../../lib/reservePhotoQueue';
+import type { Plan, ReservePhoto } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
@@ -68,8 +74,48 @@ const FILTERS: { id: Filter; label: string }[] = [
  * avec la photo prise sur place. L'export PDF (lib/reservesExport.ts) sort
  * la liste filtrée à l'écran.
  */
-export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
+export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves: serverReserves, setReserves, plans, lotsList, project, settings, initialOpenReserveId }: ReserveTrackerProps) {
   const { t } = useTranslation();
+
+  // Photos prises sur l'appareil et pas encore arrivées sur le serveur : elles partent en arrière-plan
+  // (voir ReserveDetail) et sont superposées ici à la liste lue, pour rester visibles, avec leur aperçu
+  // local, après un rechargement ou la fermeture de la fiche.
+  const photoEntity = photoEntityFor(apiBase);
+  const [pendingPhotos, setPendingPhotos] = useState<Map<string, ReservePhoto[]>>(() => new Map());
+  const refreshPendingPhotos = useCallback(async () => {
+    const writes = await listPendingWrites(photoEntity);
+    const blobs = new Map(writes.map(w => [w.id, w.blob]));
+    setPendingPhotos(pendingPhotosByReserve(writes, photoEntity, id => previewUrlFor(id, blobs.get(id))));
+  }, [photoEntity]);
+  const reserves = useMemo(() => overlayPendingPhotos(serverReserves, pendingPhotos), [serverReserves, pendingPhotos]);
+
+  useEffect(() => {
+    void refreshPendingPhotos();
+    const onQueueChanged = (e: Event) => {
+      if ((e as CustomEvent).detail?.entity === photoEntity) void refreshPendingPhotos();
+    };
+    const onPhotoSynced = (e: Event) => {
+      const { id, entity: syncedEntity, data } = (e as CustomEvent).detail || {};
+      if (syncedEntity !== photoEntity) return;
+      // La photo enregistrée remplace son aperçu : on l'ajoute à la réserve lue avant de relire la file.
+      if (data?.file_url) {
+        setReserves(prev => prev.map(r => r.id === data.reserve_id && !(r.photos || []).some((p: ReservePhoto) => p.id === data.id)
+          ? { ...r, photos: [...(r.photos || []), { ...data, pendingSync: false }] }
+          : r));
+        releasePreviewUrl(id);
+      }
+      void refreshPendingPhotos();
+    };
+    window.addEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);
+    window.addEventListener(OFFLINE_WRITE_SYNCED_EVENT, onPhotoSynced);
+    // Fin d'un passage d'envoi : une photo refusée par le serveur change d'état sans autre signal.
+    const unsubscribe = subscribeReplayProgress(() => { if (!getReplayProgress().running) void refreshPendingPhotos(); });
+    return () => {
+      window.removeEventListener(OFFLINE_QUEUE_CHANGED_EVENT, onQueueChanged);
+      window.removeEventListener(OFFLINE_WRITE_SYNCED_EVENT, onPhotoSynced);
+      unsubscribe();
+    };
+  }, [photoEntity, refreshPendingPhotos, setReserves]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -196,7 +242,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         {first.pendingSync ? (
           <img src={first.localPreviewUrl} alt="" className="w-full h-full object-cover rounded-lg opacity-90" />
         ) : (
-          <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" />
+          // Une liste peut compter des centaines de réserves : seules les miniatures qui approchent de
+          // l'écran sont demandées (URL signée puis image), le reste attend le défilement.
+          <SignedImage src={first.file_url} alt="" className="w-full h-full object-cover rounded-lg" deferUntilVisible />
         )}
         {(r.photos?.length || 0) > 1 && (
           <span className="absolute bottom-0.5 right-0.5 px-1 rounded bg-black/60 text-white text-[0.6875rem] font-bold">{r.photos!.length}</span>

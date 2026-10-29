@@ -518,6 +518,35 @@ directement l'appareil photo sur un téléphone ; en création, les photos
 prises avant l'enregistrement sont mises en file et envoyées une à une une
 fois la réserve créée (il faut son id pour les rattacher).
 
+**Photos : la saisie n'attend jamais le réseau** (retour d'un test OPR sur iPad : après une
+quinzaine de réserves avec photos, les envois de plusieurs Mo s'empilaient et bloquaient la saisie
+suivante). Quatre règles à garder :
+
+- **Réduite sur l'appareil avant tout** (`src/lib/sitePhoto.ts`, `prepareSitePhoto`, réutilise
+  `photoToJpeg`) : 1600 px et JPEG 82 %, exactement ce que le serveur stockait déjà
+  (`MEETING_PHOTO_MAX_DIMENSION`), pour un dixième du trafic. Une photo ne bloque jamais : un échec de
+  décodage renvoie la photo d'origine. Un JPEG de 450 Ko ou moins part tel quel.
+- **Mise en file, pas d'envoi dans l'appel** (`enqueueMultipartRequest`, `offlineQueue.ts`) : la photo
+  entre dans IndexedDB puis part en arrière-plan, une à la fois, avec reprise et progression (le
+  chemin de rejeu existant). La fiche se referme tout de suite, y compris à la création d'une
+  réserve ; seul « Préparation… » (la réduction, une demi-seconde par photo) retient le bouton
+  Enregistrer. L'événement `OFFLINE_WRITE_SYNCED_EVENT` porte désormais `data` (la ligne
+  `reserve_photos` renvoyée par le serveur) pour remplacer l'aperçu local sans relire la liste.
+- **Les photos en attente sont superposées à la liste** (`src/lib/reservePhotoQueue.ts`, testé) :
+  `GET /api/reserves` ne les connaît pas, elles réapparaissent donc avec leur aperçu après un
+  rechargement. La liste enregistrée (`setReserves`, `onSaved`) ne garde JAMAIS une photo
+  `pendingSync` : seule la superposition les montre. Retirer une photo en attente la retire de la
+  file (`discardPendingWrite`), le serveur ne la connaît pas. Une photo refusée par le serveur reste
+  visible « Envoi refusé » avec sa raison (`syncError`).
+- **Lecture : URL signées en cache** (`signedStorageUrl.ts`) : gardées 80 % de leur durée de vie,
+  demandes simultanées fusionnées, 4 résolutions en parallèle au plus. Avant, chaque rendu redemandait
+  une URL différente par photo, donc le navigateur ne retrouvait jamais l'image dans son cache. Les
+  miniatures de la liste ne se chargent que lorsqu'elles approchent de l'écran (`deferUntilVisible`).
+- **Pas encore fait** : vraie miniature serveur (la liste télécharge la photo de 1600 px, environ
+  300 Ko, pour une case de 64 px), route groupée d'URL signées, pagination de `GET /api/reserves`
+  (elle rend toutes les réserves et toutes leurs photos) et fenêtrage de la liste au-delà de quelques
+  centaines de lignes. Non vérifié sur un iPad réel.
+
 **Suivi / réponse.** Une réserve peut être faite sans être satisfaisante : `reserves.reponse` et
 `gpa_reserves.reponse` (`supabase/migrate_reserves_reponse.sql`, TEXT, 5000 caractères) portent la
 réponse de l'entreprise ou la remarque de la maîtrise d'œuvre, comme la réponse d'une observation du
