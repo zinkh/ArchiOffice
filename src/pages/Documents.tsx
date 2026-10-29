@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { desktopBridge } from '../lib/desktopBridge';
+import { useDriveDocumentStatuses } from '../hooks/useDriveDocumentStatuses';
 import { DriveDocumentActions } from '../components/DriveDocumentActions';
 import { KnowledgeSharingPanel } from '../components/KnowledgeSharingPanel';
 import {
@@ -178,6 +179,9 @@ export default function Documents() {
     if (filterStatut !== 'all') docs = docs.filter(d => (d.doc_statut || 'en_cours') === filterStatut);
     return docs;
   })();
+
+  const driveTransfers = useDriveDocumentStatuses(visibleDocs.map(doc => `doc:${doc.id}`),
+    driveEnabled ? `${currentUser?.id}:${activeTenantId}` : null);
 
   // Upload
   const handleFileUpload = async () => {
@@ -627,7 +631,8 @@ export default function Documents() {
                               </button>
                             </>
                           )}
-                          {driveEnabled && <DriveDocumentActions key={`${activeTenantId}:${doc.id}`} documentId={doc.id} />}
+                          {driveEnabled && <DriveDocumentActions key={`${currentUser?.id}:${activeTenantId}:${doc.id}`} documentId={doc.id}
+                            transfer={driveTransfers.statuses[`doc:${doc.id}`]} unavailable={driveTransfers.unavailable} onActivity={driveTransfers.refresh} />}
                           <button className="p-1.5 rounded-lg transition-colors" style={{ color: isPerime ? '#d63939' : 'var(--tblr-muted)' }} onClick={() => handleDownload(doc)} title="Télécharger">
                             <IconDownload size={15} />
                           </button>

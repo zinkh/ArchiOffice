@@ -782,3 +782,44 @@ pas que le serveur l’a déjà accepté. Les erreurs ne divulguent aucun chemin
 
 Aucune surveillance automatique de dossier, résolution de conflit, hiérarchie CAO
 partagée ni intégration CFAPI/File Provider n’est incluse. Aucune migration SQL.
+
+## 26. Suivi des envois par document
+
+La liste Documents du client Electron affiche les états persistants de la file :
+en attente, transfert en cours, reprise automatique, blocage, conflit et dernier
+envoi accepté, avec son numéro de version technique. Un état « dernier envoi
+terminé » concerne uniquement l’instantané accepté ; il ne garantit pas que
+l’application associée n’a pas enregistré de nouvelles retouches depuis. Les
+textes invitent à envoyer celles-ci séparément. Les conflits non résolus restent
+prioritaires sur les succès d’autres opérations.
+
+Une commande native bornée à 100 identifiants permet une lecture groupée des
+journaux. L’agent vérifie l’autorisation avant et après cette lecture. Electron
+revérifie l’identité auprès du coffre et ne transmet au renderer que les
+identifiants demandés, un état énuméré et, pour un succès, une version positive.
+Aucun chemin, jeton, nom d’utilisateur, message serveur, URL signée ou contenu de
+fichier ne traverse cette réponse. Les états ne donnent aucun droit de transfert :
+les opérations restent soumises aux contrôles déjà en place côté agent et serveur.
+
+La lecture utilise les journaux publiés par renommage atomique et ne prend pas
+le verrou de mutation de la file. Elle reste donc disponible pendant un transfert
+réseau long. Il s’agit d’une observation locale, pas d’une transaction entre tous
+les documents ; elle ne peut pas être utilisée pour modifier la file. Elle ne
+crée pas de dossier, n’effectue pas de hachage des copies de travail et ne contacte
+pas le stockage documentaire.
+
+L’interface dispose d’une seule boucle pour les documents affichés, en lots de
+100, actualisée toutes les dix secondes après la fin de la lecture précédente.
+Les lectures ne se chevauchent pas. Un retour au premier plan ou une action
+utilisateur déclenche une lecture ; la boucle est suspendue quand la page est
+masquée. Un changement de compte, de cabinet, de filtre ou un démontage ignore
+les anciennes réponses. Un échec de lecture efface les anciens états de réussite
+et affiche que le suivi est indisponible. Les fichiers locaux restent conservés.
+
+Validation : état lisible pendant un transfert suspendu par le banc d’essai,
+reprise depuis les journaux, priorité du conflit, limites d’entrée, filtrage des
+réponses IPC, refus de licence et changement d’identité. Tests React : lots,
+absence de chevauchement, page masquée, retour au premier plan, échec et réponse
+tardive d’un autre compte. Les adaptateurs Explorateur/Finder, les essais réels
+Windows/macOS et la résolution des conflits restent à réaliser. Aucune migration
+SQL, modification du stockage documentaire ou automatisation des envois.

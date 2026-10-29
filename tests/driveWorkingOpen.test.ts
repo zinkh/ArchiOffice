@@ -39,3 +39,19 @@ it('rejects untrusted identifiers before asking the worker and handles OS launch
   expect(c.agent.working).not.toHaveBeenCalled();c.shell.openPath.mockResolvedValue('No associated application');
   expect(await openDriveWorking(c)).toEqual({status:'error'});
 });
+
+it('returns only whitelisted document states and rejects a mismatched identity or unrequested result',async()=>{
+  const {driveDocumentStatuses}=require('../electron/driveWorking.cjs');
+  const identity={userId:'user',tenantId:'tenant',deviceId:'device'};
+  const agent={documentStatuses:vi.fn().mockResolvedValue({identity,documents:[{nodeId:'doc:one',state:'uploaded',version:2,file:'/private/plan',token:'secret'}]})};
+  const vault=vi.fn().mockResolvedValue({...identity,token:'ds_at_secret'});
+  expect(await driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).toEqual([{nodeId:'doc:one',state:'uploaded',version:2}]);
+  for(const document of [{nodeId:'doc:other',state:'queued'},{nodeId:'doc:one',state:'alien'},{nodeId:'doc:one',state:'uploaded',version:-1}]) {
+    agent.documentStatuses.mockResolvedValue({identity,documents:[document]});
+    await expect(driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).rejects.toThrow();
+  }
+  agent.documentStatuses.mockResolvedValue({identity,documents:[{nodeId:'doc:one',state:'queued'}]});
+  vault.mockRejectedValueOnce(new Error('license expired'));await expect(driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).rejects.toThrow('license expired');
+  vault.mockResolvedValue({...identity,userId:'other'});await expect(driveDocumentStatuses({agent,vault,nodeIds:['doc:one']})).rejects.toThrow('Identity changed');
+  await expect(driveDocumentStatuses({agent,vault,nodeIds:['../../bad']})).rejects.toThrow('Invalid documents');
+});

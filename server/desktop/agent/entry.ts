@@ -48,5 +48,9 @@ process.on('message',async (msg:any)=> {
       send({type:'drive:working-result',requestId:msg.requestId,error:{code:allowed.includes(e.code)?e.code:'DRIVE_WORKING_FAILED'}});
     }
   }
+  if(msg?.type==='drive:document-statuses' && worker && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
+    try { const result=await worker.documentStatuses(msg.nodeIds);send({type:'drive:document-statuses-result',requestId:msg.requestId,result}); }
+    catch {send({type:'drive:document-statuses-result',requestId:msg.requestId,error:{code:'DRIVE_STATUS_UNAVAILABLE'}});}
+  }
   if(msg?.type==='drive:stop')void stop();
 });

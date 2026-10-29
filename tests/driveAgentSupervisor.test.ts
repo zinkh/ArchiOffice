@@ -43,3 +43,12 @@ it('correlates private working-copy replies and rejects invalid document command
   const waiting=agent.working('upload','doc:one');worker.emit('exit',1);
   await expect(waiting).rejects.toThrow('Agent unavailable');agent.stop();
 });
+it('correlates batched state replies and rejects excessive or duplicate requests',async()=>{
+  const worker=child();const agent=createDriveAgent({spawn:()=>worker,executable:'electron',entry:'agent',root:'/cache',origin:'https://www.archioffice.fr',getServer:()=>null});
+  agent.start();
+  for(const ids of [Array(101).fill('doc:one'),['doc:one','doc:one'],['../bad']])await expect(agent.documentStatuses(ids)).rejects.toThrow('Invalid documents');
+  const waiting=agent.documentStatuses(['doc:one']);const req=worker.send.mock.calls.at(-1)[0];
+  expect(req).toMatchObject({type:'drive:document-statuses',nodeIds:['doc:one']});
+  worker.emit('message',{type:'drive:document-statuses-result',requestId:req.requestId,result:{documents:[{nodeId:'doc:one',state:'retry'}]}});
+  expect(await waiting).toEqual({documents:[{nodeId:'doc:one',state:'retry'}]});agent.stop();worker.emit('exit',0);
+});

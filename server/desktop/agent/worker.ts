@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { DriveDocumentStatus } from '../../../shared/driveDocumentStatus';
 import { WorkingCopies } from './workingCopies';
 import { DownloadCache } from './downloadCache';
 import { createDownloadTransport, type DownloadMetadata } from './downloadTransport';
@@ -65,6 +66,29 @@ export function createAgentWorker(config: WorkerConfig) {
       const ctx = await current();
       const job = await ctx.queue.enqueue(file,target || {create:{parentId:`inbox:${ctx.session.tenantId}`}},baseVersion);
       return { queued:true,jobId:job.id }; // no local path, token or license
+    },
+    async documentStatuses(nodeIds: string[]) {
+      if(stopped)throw new Error('Agent stopped');
+      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)
+        throw Object.assign(new Error('Invalid documents'),{code:'INVALID_DOCUMENTS'});
+      const ctx=await current();const expected={...ctx.session};
+      const jobs=await ctx.queue.listPersisted();
+      const documents:DriveDocumentStatus[]=nodeIds.map(nodeId=> {
+        const matching=jobs.filter(j=>'documentId' in j.target&&j.target.documentId===nodeId);
+        const conflict=matching.find(j=>j.state==='conflict');
+        const pending=matching.find(j=>j.state!=='done');
+        const job=conflict||pending||matching.at(-1);
+        if(!job)return {nodeId,state:'none'};
+        if(job.state==='done') {
+          if(job.result?.node.id!==nodeId||!Number.isSafeInteger(job.result.version)||job.result.version<1)throw new Error('Invalid completed upload');
+          return {nodeId,state:'uploaded',version:job.result.version};
+        }
+        return {nodeId,state:job.state};
+      });
+      const active=await config.session();abort.signal.throwIfAborted();
+      if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)
+        throw Object.assign(new Error('Account changed'),{code:'DRIVE_IDENTITY_MISMATCH'});
+      return {documents,identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId}};
     },
     /** Native-only command: reuse the tracked file offline; fetch only on first open. */
     openWorkingCopy(nodeId: string) {
