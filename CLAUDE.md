@@ -575,6 +575,8 @@ suivante). Quatre règles à garder :
   réponse sans changer ces usages viderait le cache et fausserait les compteurs. Route groupée d'URL
   signées non faite. Non vérifié sur un iPad réel.
 
+**Onglet GPA et passage d'une réserve AOR en GPA.** Les réserves de garantie de parfait achèvement ont leur onglet `GPA`, juste après `AOR` dans la famille Chantier (`projectTabs.ts` ; masqué comme l'AOR quand la mission `aor` du contrat MOE n'est pas incluse, sauf s'il porte déjà des réserves). L'onglet AOR ne montre plus que les réserves d'OPR, et son compteur aussi. Dans la fiche d'une réserve d'OPR, une icône discrète du pied (`IconArrowsExchange`, « Passer en réserve GPA ») appelle `POST /api/reserves/:id/to-gpa` (`server/routes/reserves.ts`, `tests/reserveToGpa.test.ts`) : la réserve **garde son identifiant**, reçoit le numéro suivant de la série GPA de l'affaire, ses photos changent de jeu (`reserve_photos.reserve_kind`, les objets ne bougent pas) puis la ligne d'OPR est supprimée ; un échec en cours de route défait les étapes déjà faites. La nature (propre aux cerfas d'OPR) n'est pas reprise. Refusé côté écran tant qu'une photo attend son envoi (elle viserait une réserve d'OPR disparue). Pas de chemin inverse, ni de migration SQL.
+
 **Suivi / réponse.** Une réserve peut être faite sans être satisfaisante : `reserves.reponse` et
 `gpa_reserves.reponse` (`supabase/migrate_reserves_reponse.sql`, TEXT, 5000 caractères) portent la
 réponse de l'entreprise ou la remarque de la maîtrise d'œuvre, comme la réponse d'une observation du

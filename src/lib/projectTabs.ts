@@ -1,4 +1,4 @@
-// Navigation de la fiche affaire : douze onglets regroupés par famille.
+// Navigation de la fiche affaire : seize onglets regroupés par famille.
 //
 // L'inspiration rejoint la famille Études sans ajouter une famille principale.
 // Les missions de chantier restent regroupées pour préserver une barre compacte.
@@ -7,7 +7,7 @@
 
 export type ProjectTabId =
   | 'INFOS' | 'TACHES' | 'HONOS' | 'INSPIRATION' | 'DIAG' | 'CT' | 'CSPS' | 'PRO' | 'NOTICES' | 'ACT'
-  | 'VISA' | 'DET' | 'RDT' | 'AOR' | 'CORRESPONDANCE';
+  | 'VISA' | 'DET' | 'RDT' | 'AOR' | 'GPA' | 'CORRESPONDANCE';
 
 export type ProjectTabGroupId =
   | 'INFOS' | 'TACHES' | 'HONOS' | 'ETUDES' | 'CONSULTATION' | 'CHANTIER' | 'CORRESPONDANCE';
@@ -24,12 +24,12 @@ export const PROJECT_TAB_GROUPS: readonly ProjectTabGroup[] = [
   { id: 'HONOS', tabs: ['HONOS'] },
   { id: 'ETUDES', tabs: ['INSPIRATION', 'DIAG', 'CT', 'CSPS', 'PRO', 'NOTICES'] },
   { id: 'CONSULTATION', tabs: ['ACT'] },
-  { id: 'CHANTIER', tabs: ['VISA', 'DET', 'RDT', 'AOR'] },
+  { id: 'CHANTIER', tabs: ['VISA', 'DET', 'RDT', 'AOR', 'GPA'] },
   { id: 'CORRESPONDANCE', tabs: ['CORRESPONDANCE'] },
 ];
 
 /** Onglets qui n'existent qu'en mission chantier (`project.is_chantier`). */
-export const CHANTIER_ONLY_TABS: readonly ProjectTabId[] = ['ACT', 'VISA', 'DET', 'RDT', 'AOR'];
+export const CHANTIER_ONLY_TABS: readonly ProjectTabId[] = ['ACT', 'VISA', 'DET', 'RDT', 'AOR', 'GPA'];
 
 export const DEFAULT_PROJECT_TAB: ProjectTabId = 'INFOS';
 
