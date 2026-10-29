@@ -32,6 +32,8 @@ export interface PinnedRequestInit {
   body?: Buffer;
   /** Délai jusqu'aux en-têtes de la réponse (le corps d'un téléchargement n'est pas borné). */
   timeoutMs: number;
+  /** Caller handles redirects and decides which credentials may follow. */
+  redirect?: 'manual';
 }
 
 const MAX_REDIRECTS = 3;
@@ -126,7 +128,7 @@ export async function pinnedRequest(rawUrl: string, init: PinnedRequestInit): Pr
     if (!res) throw lastError;
 
     const location = res.headers.location;
-    if (REDIRECT_STATUSES.has(res.status) && location) {
+    if (init.redirect !== 'manual' && REDIRECT_STATUSES.has(res.status) && location) {
       res.stream.resume();
       current = resolveRedirect(url, location).toString();
       continue;
