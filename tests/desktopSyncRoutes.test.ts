@@ -4,9 +4,9 @@
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { connectExternalStorage, fakeSupabaseAdmin, getTestApp, makeTenant } from './testServer';
+import { connectExternalStorage, fakeSupabaseAdmin, getTestApp } from './testServer';
 import {
-  API, makeActor, seedChange, seedDocument, seedLockMode, seedProject, type Actor,
+  makeDriveTenant as makeTenant, API, makeActor, seedChange, seedDocument, seedLockMode, seedProject, type Actor,
 } from './desktopSyncSupport';
 import { buildExternalRef } from '../server/externalStorage/externalRef';
 

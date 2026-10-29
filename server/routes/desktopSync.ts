@@ -14,6 +14,7 @@
 // Pas encore fait (voir le contrat) : flux SSE /events (le sondage de /changes suffit),
 // notification de la personne dont on rompt le verrou, création de dossier.
 import express from 'express';
+import { driveCapability, requireDriveSubscription } from '../desktop/driveAccess';
 import type { Express } from 'express';
 import { isCadFileName, isIgnoredFileName, fileExtension } from '../../src/lib/cadFiles';
 import { DEFAULT_PHASE_CODE, documentNodeId, parseNodeId } from '../../src/lib/desktopNodes';
@@ -120,6 +121,30 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
     return (await nodesForDocuments(ctx, [doc]))[0];
   };
 
+  // Checked before route-specific body parsing and on EVERY upload request, including
+  // resume/complete. Device tokens are personal; entitlement belongs to the active tenant.
+  app.use(BASE, async (req: any, res: any, next: any) => {
+    const recovery = (req.method === 'GET' && ['/devices', '/roots', '/capabilities'].includes(req.path))
+      || (req.method === 'DELETE' && (/^\/devices\/[^/]+$/.test(req.path)
+        || /^\/nodes\/[^/]+\/lock$/.test(req.path)));
+    if (recovery) return next();
+    try {
+      const tenantId = await deps.getTenantId(req.user.id);
+      await requireDriveSubscription(db, tenantId);
+      next();
+    } catch (e: any) {
+      res.status(e.status || 503).json({
+        error: e.message || 'Vérification de l’abonnement indisponible.',
+        code: e.code || 'DRIVE_ENTITLEMENT_UNAVAILABLE',
+      });
+    }
+  });
+
+  app.get(`${BASE}/capabilities`, handle(async (req, res) => {
+    const tenantId = await deps.getTenantId(req.user.id);
+    res.set('Cache-Control', 'no-store').json(await driveCapability(db, tenantId));
+  }));
+
   // ── Appareils ──────────────────────────────────────────────────────────────
 
   app.post(`${BASE}/devices`, handle(async (req, res) => {
@@ -151,7 +176,9 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
 
   app.get(`${BASE}/roots`, handle(async (req, res) => {
     const memberships = await listMembershipsWithTenants(db, req.user.id);
-    res.json(memberships.map(m => ({
+    const eligible = await Promise.all(memberships.map(async m =>
+      (await driveCapability(db, m.tenantId)).enabled ? m : null));
+    res.set('Cache-Control', 'no-store').json(eligible.filter((m): m is NonNullable<typeof m> => m !== null).map(m => ({
       tenantId: m.tenantId, name: m.tenantName, role: m.systemRole, isDefault: m.isDefault,
       nodeId: `tenant:${m.tenantId}`,
     })));

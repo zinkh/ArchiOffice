@@ -3,7 +3,7 @@
 import crypto from 'crypto';
 import request from 'supertest';
 import type { Express } from 'express';
-import { authHeader, fakeSupabaseAdmin, makeUser } from './testServer';
+import { authHeader, fakeSupabaseAdmin, makeUser, makeTenant } from './testServer';
 
 export const API = '/api/desktop/v1';
 
@@ -79,4 +79,9 @@ export function seedChange(tenantId: string, type: string, nodeId: string, proje
 
 export function seedLockMode(tenantId: string, mode: 'off' | 'advisory' | 'enforced') {
   fakeSupabaseAdmin.seed('settings', [{ tenant_id: tenantId, desktop_lock_mode: mode }]);
+}
+
+/** A cloud subscription with a paid-through date, including Enterprise contracts. */
+export function makeDriveTenant(overrides: Record<string, any> = {}) {
+  return makeTenant({ plan: 'pro', trial_ends_at: new Date(Date.now() + 86400000).toISOString(), ...overrides });
 }

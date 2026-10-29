@@ -4,9 +4,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
 import {
-  addMembership, authHeader, fakeSupabaseAdmin, getTestApp, makeTenant, makeUser, tenantHeader,
+  addMembership, authHeader, fakeSupabaseAdmin, getTestApp, makeUser, tenantHeader,
 } from './testServer';
-import { API, registerDevice } from './desktopSyncSupport';
+import { makeDriveTenant as makeTenant, API, registerDevice } from './desktopSyncSupport';
 import { hashToken } from '../server/telegramBot';
 import { invalidateSuspensionCache, TENANT_SUSPENDED_CODE } from '../server/tenantSuspension';
 

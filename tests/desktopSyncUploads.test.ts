@@ -7,9 +7,9 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { connectExternalStorage, fakeSupabaseAdmin, getTestApp, makeTenant } from './testServer';
+import { connectExternalStorage, fakeSupabaseAdmin, getTestApp } from './testServer';
 import {
-  API, makeActor, seedDocument, seedLockMode, seedProject, sha256, type Actor,
+  makeDriveTenant as makeTenant, API, makeActor, seedDocument, seedLockMode, seedProject, sha256, type Actor,
 } from './desktopSyncSupport';
 import { invalidateConnectionCache } from '../server/externalStorage/externalConnection';
 import { memoryDrive } from '../server/externalStorage/memoryProvider';
