@@ -3,6 +3,7 @@
 import type { Express } from 'express';
 import { rgeExigeParDefaut } from '../../src/lib/rgeLots';
 import { validerNumeroDeLot, numeroDeLotPris, numerosPourOrdre } from '../../src/lib/lotsOrder';
+import { assertTenantEntity } from '../assertTenantEntity';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -54,7 +55,29 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
   app.put("/api/lots/:id", async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const patch: Record<string, string | boolean> = {};
+      const patch: Record<string, string | boolean | null> = {};
+      // Entreprise du lot (attribution directe, sans passer par l'ACT) : seule une fiche
+      // contact du cabinet est acceptée, le nom est relu sur la fiche et jamais pris dans
+      // la requête. `contact_id: null` retire l'entreprise du lot.
+      const attribution = req.body?.contact_id !== undefined;
+      if (attribution) {
+        const contactId = req.body.contact_id;
+        if (contactId === null || contactId === '') {
+          patch.contact_id = null;
+          patch.contact_name = null;
+        } else if (typeof contactId !== 'string') {
+          return res.status(400).json({ error: "Entreprise invalide." });
+        } else {
+          if (!(await assertTenantEntity(supabaseAdmin, 'contacts', contactId, tenantId))) {
+            return res.status(400).json({ error: "Contact introuvable pour ce cabinet." });
+          }
+          const { data: contact, error: contactErr } = await supabaseAdmin.from('contacts').select('*').eq('id', contactId).eq('tenant_id', tenantId).maybeSingle();
+          if (contactErr) throw contactErr;
+          const personne = [contact?.first_name, contact?.last_name].filter(Boolean).join(' ');
+          patch.contact_id = contactId;
+          patch.contact_name = String(contact?.company_name || contact?.name || personne || '').trim() || null;
+        }
+      }
       if (req.body?.lot_number !== undefined) {
         const numero = validerNumeroDeLot(req.body.lot_number);
         if (!numero.ok) return res.status(400).json({ error: numero.error });
@@ -81,6 +104,11 @@ export function registerLotRoutes(app: Express, { supabaseAdmin, getTenantId }: 
       if (error && patch.rge_required !== undefined && req.body?.rge_required === undefined) {
         const { rge_required: _ignore, ...sansRge } = patch;
         ({ error } = await supabaseAdmin.from('project_lots').update(sansRge).eq('id', req.params.id).eq('tenant_id', tenantId));
+      }
+      // Instance sans la colonne du nom : l'identifiant du contact suffit, le nom se relit sur la fiche.
+      if (error && attribution) {
+        const { contact_name: _nom, ...sansNom } = patch;
+        ({ error } = await supabaseAdmin.from('project_lots').update(sansNom).eq('id', req.params.id).eq('tenant_id', tenantId));
       }
       if (error) throw error;
       res.json({ success: true });

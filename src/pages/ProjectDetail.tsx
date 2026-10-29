@@ -4806,6 +4806,7 @@ export default function ProjectDetail() {
                   projectName={project.name}
                   lots={project.lots_list || []}
                   contacts={contacts}
+                  isPublicClient={!!project.is_public_client}
                   operation={{
                     code: project.project_code,
                     adresse: project.address,
