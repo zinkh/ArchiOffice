@@ -16,7 +16,7 @@
     "start": "node --import ./dist-api/instrument.mjs dist-api/server.mjs",
     "start:tsx": "tsx --import ./instrument.ts server.ts",
     "build": "mkdir -p dist && vite build && cp proxy.json dist/ && node scripts/build-server.mjs",
-    "build:server": "esbuild server.ts --bundle --platform=node --format=cjs --outfile=dist-server/server.cjs --external:vite --external:playwright-core",
+    "build:server": "node scripts/build-desktop.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist dist-api dist-server release",
     "lint": "tsc --noEmit",

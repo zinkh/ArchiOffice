@@ -1,0 +1,23 @@
+import { build } from 'esbuild';
+import { fork } from 'node:child_process';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { expect,it } from 'vitest';
+it('runs as a separate process, stays paused on vault refusal, then exits on stop',async()=>{
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'drive-process-'));let child:ReturnType<typeof fork>|undefined;
+  try{
+    const entry=path.join(root,'agent.cjs');await build({entryPoints:['server/desktop/agent/entry.ts'],outfile:entry,bundle:true,platform:'node',format:'cjs',logLevel:'silent'});
+    child=fork(entry,[],{stdio:['ignore','ignore','ignore','ipc']});
+    const ready=new Promise<any>((resolve,reject)=>{
+      const timeout=setTimeout(()=>reject(new Error('Agent timeout')),10000);
+      child!.on('message',(msg:any)=>{
+        if(msg.type==='drive:authorize')child!.send({type:'drive:authorization',requestId:msg.requestId,error:{status:402,code:'DRIVE_LICENSE_EXPIRED'}});
+        if(msg.type==='drive:status'){clearTimeout(timeout);resolve(msg);}
+      });
+    });
+    child.send({type:'drive:init',root:path.join(root,'queue'),origin:'https://www.archioffice.fr'});
+    expect(await ready).toMatchObject({state:'paused',code:'DRIVE_LICENSE_EXPIRED'});
+    const exited=new Promise(resolve=>child!.once('exit',resolve));child.send({type:'drive:stop'});expect(await exited).toBe(0);
+  }finally{child?.kill();await fs.rm(root,{recursive:true,force:true});}
+},15000);

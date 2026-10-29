@@ -99,3 +99,11 @@ describe('Local Drive licensing lifecycle', () => {
     expect(api).not.toHaveBeenCalled();
   });
 });
+it('rechecks a grant before giving a credential to the private agent bridge', async () => {
+  const manager = createLocalDrive(deps);
+  await expect(manager.authorize(identity)).rejects.toMatchObject({status:402});
+  await manager.connect(identity);
+  expect(await manager.authorize(identity)).toMatchObject({userId:'user1',tenantId:'tenant1',token:'ds_at_secret1'});
+  now += 73 * 3600000; mono += 73 * 3600000;
+  await expect(manager.authorize(identity)).rejects.toMatchObject({status:402});
+});

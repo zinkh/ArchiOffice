@@ -4686,4 +4686,11 @@ export default {
   "drive_local_error": "Drive verification failed. Check the linked cloud account, subscription, connection and workstation clock. Local files are retained.",
   "drive_local_revoke_pending": "This workstation is disconnected locally. Server revocation will be retried when online.",
   "drive_local_device": "This workstation",
+  "drive_transfer_add": "Send a file to Unclassified",
+  "drive_transfer_preparing": "Preparing upload…",
+  "drive_transfer_queued": "File added to the upload queue.",
+  "drive_transfer_error": "Upload preparation failed. Check Drive access and that the file is available and no larger than 200 MB.",
+  "drive_transfer_counts": "Upload queue: {{pending}} pending, {{blocked}} blocked, {{conflicts}} conflicts.",
+  "drive_transfer_retry": "Retry blocked uploads",
+  "drive_transfer_retried": "Blocked uploads returned to the queue. Conflicts require separate resolution.",
 };

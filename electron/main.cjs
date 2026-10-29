@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell } = require('electron');
+const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -9,12 +9,16 @@ const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 const { resolveDataLocation } = require('./dataLocation.cjs');
 const { resolveStorageFile, isSafeToOpen } = require('./fileAccess.cjs');
 const { createAppMenu } = require('./menu.cjs');
+const { createDriveAgent } = require('./driveAgent.cjs');
+const driveTrust = require('./driveTrust.json');
 
 // package.json's "name" is the npm workspace root ("react-example", a
 // leftover scaffold name) — Electron otherwise uses it verbatim for both the
 // title bar and the default userData path (%APPDATA%\react-example\...), so
 // this must be set explicitly, before anything calls app.getPath('userData').
 app.setName('ArchiOffice Client');
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
 
 // Sans identifiant AppUserModelID explicite, Windows n'attribue les
 // notifications système à aucune application installée et les avale
@@ -39,6 +43,10 @@ let serverProcess = null;
 let mainWindow = null;
 let splashWindow = null;
 let offlineStack = null;
+let driveAgent = null;
+let driveTray = null;
+let driveInBackground = false;
+let driveStatus = { state: 'paused', pending: 0, blocked: 0, conflicts: 0 };
 
 // Les étapes réelles du démarrage, dans leur ordre d'exécution — reprises
 // telles quelles par electron/splash.html, qui n'en connaît que la liste
@@ -359,6 +367,54 @@ function registerDataLocationIpc() {
   });
 }
 
+// Le coffre reste dans le serveur local ; le worker ne reçoit des jetons que par IPC.
+function startDriveAgent() {
+  if (!['win32', 'darwin'].includes(process.platform) || !driveTrust.cloudOrigin || !Object.keys(driveTrust.publicKeys).length) return;
+  const { cwd } = resolvePaths();
+  driveAgent = createDriveAgent({
+    spawn, executable: process.execPath, entry: path.join(cwd, 'dist-server', 'drive-agent.cjs'),
+    root: path.join(app.getPath('userData'), 'drive-transfers'), origin: driveTrust.cloudOrigin,
+    getServer: () => serverProcess,
+    onStatus: (status) => {
+      driveStatus = { ...driveStatus, ...status };
+      const { state } = status;
+      driveInBackground = driveInBackground || (state === 'running' && !!driveTray);
+      if (driveTray) driveTray.setToolTip(state === 'running' ? 'ArchiOffice Drive : actif' : 'ArchiOffice Drive : en pause');
+    },
+  });
+  // Le contrôle Quitter reste disponible quand aucune fenêtre n'est ouverte.
+  try {
+    const icon = nativeImage.createFromPath(path.join(__dirname, 'drive-tray.png')).resize({ width: 18, height: 18 });
+    driveTray = new Tray(icon);
+    const open = () => {
+      if (!mainWindow || mainWindow.isDestroyed()) { void showMainWindow(); return; }
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show(); mainWindow.focus();
+    };
+    driveTray.setContextMenu(Menu.buildFromTemplate([
+      { label: 'Ouvrir ArchiOffice', click: open },
+      { type: 'separator' }, { label: 'Quitter ArchiOffice et arrêter Drive', click: () => app.quit() },
+    ]));
+    driveTray.on('double-click', open);
+  } catch { log('[drive] Zone de notification indisponible : maintien en arrière-plan désactivé.'); }
+  driveAgent.start();
+  ipcMain.handle('desktop:drive-retry', (event) => {
+    if (event.sender !== mainWindow?.webContents || new URL(event.senderFrame?.url || '').origin !== `http://127.0.0.1:${PORT}`) throw new Error('Accès refusé');
+    return driveAgent.retryBlocked();
+  });
+  ipcMain.handle('desktop:drive-status', (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error('Accès refusé');
+    return driveStatus;
+  });
+  ipcMain.handle('desktop:drive-enqueue', async (event) => {
+    // Aucun chemin, cabinet ou jeton fourni par le renderer n'est accepté.
+    if (event.sender !== mainWindow?.webContents || new URL(event.senderFrame?.url || '').origin !== `http://127.0.0.1:${PORT}`) throw new Error('Accès refusé');
+    const picked = await dialog.showOpenDialog(mainWindow, { title: 'Envoyer vers À classer dans ArchiOffice Drive', properties: ['openFile'] });
+    if (picked.canceled || !picked.filePaths[0]) return { queued: false };
+    return driveAgent.enqueue(picked.filePaths[0]);
+  });
+}
+
 // ── Mise à jour automatique ─────────────────────────────────────────────────
 // GitHub Releases as the feed (electron-builder.yml's `publish` block) — the
 // repo is public, so no token is needed to check/download from a packaged
@@ -446,6 +502,7 @@ async function showMainWindow() {
 let serverStartPromise = null;
 
 app.whenReady().then(async () => {
+  if (!primaryInstance) return;
   initLogging();
   log('ArchiOffice démarre — journal :', logFilePath);
   registerNotificationIpc();
@@ -461,7 +518,7 @@ app.whenReady().then(async () => {
   await createSplashWindow();
 
   serverStartPromise = startServer()
-    .then(() => showMainWindow())
+    .then(async () => { await showMainWindow(); startDriveAgent(); })
     .catch((err) => {
       log('Échec du démarrage :', err);
       // L'étape en cause s'est déjà marquée 'error' à l'endroit précis de la
@@ -488,10 +545,17 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin' && !driveInBackground) app.quit();
 });
 
 app.on('before-quit', () => {
+  driveAgent?.stop();
+  driveTray?.destroy();
   if (serverProcess) serverProcess.kill();
   if (offlineStack) offlineStack.stop().catch(() => {});
+});
+
+app.on('second-instance', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+  else if (offlineStack) { void showMainWindow(); }
 });

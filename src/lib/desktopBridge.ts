@@ -5,6 +5,10 @@
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
+  /** Native picker, then snapshot into the active cabinet inbox. No file path or credential crosses this bridge. */
+  retryDriveTransfers?: () => Promise<{ retried: number }>;
+  getDriveStatus?: () => Promise<{ state: string; pending: number; blocked: number; conflicts: number }>;
+  enqueueDriveFile?: () => Promise<{ queued: boolean; jobId?: string }>;
   notify: (payload: { title: string; body?: string; url?: string }) => Promise<boolean>;
   setBadgeCount: (count: number) => Promise<boolean>;
   onNotificationClick: (callback: (url: string) => void) => () => void;
