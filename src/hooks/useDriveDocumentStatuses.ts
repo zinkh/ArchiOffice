@@ -12,9 +12,10 @@ export function useDriveDocumentStatuses(nodeIds: string[], scope: string | null
     const request = desktopBridge()?.getDriveDocumentStatuses;
     const [activeScope, ids]: [string | null, string[]] = JSON.parse(key);
     if (!activeScope || !request || !ids.length) { refreshRef.current = () => {}; return; }
+    const visible = () => document.visibilityState !== 'hidden';
     let live = true; let running = false; let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
-      if (!live || running || document.visibilityState === 'hidden') return;
+      if (!live || running || !visible()) return;
       clearTimeout(timer); running = true;
       try {
         const statuses: Record<string, DriveDocumentStatus> = {};
@@ -26,11 +27,11 @@ export function useDriveDocumentStatuses(nodeIds: string[], scope: string | null
       } catch { if (live) setSnapshot({ key, statuses: {}, unavailable: true }); }
       finally {
         running = false;
-        if (live && document.visibilityState !== 'hidden') timer = setTimeout(() => void poll(), 10000);
+        if (live && visible()) timer = setTimeout(() => void poll(), 10000);
       }
     };
     const refresh = () => { void poll(); };
-    const visibility = () => { clearTimeout(timer); if (document.visibilityState !== 'hidden') refresh(); };
+    const visibility = () => { clearTimeout(timer); if (visible()) refresh(); };
     refreshRef.current = refresh;
     document.addEventListener('visibilitychange', visibility);
     window.addEventListener('focus', refresh);
