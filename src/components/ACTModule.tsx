@@ -34,6 +34,8 @@ import {
 import { genererPVOuverture } from '../lib/actNegociationExport';
 import MarcheDocumentsPanel, { type OperationMarche } from './act/MarcheDocumentsPanel';
 import MarchesPhase from './act/MarchesPhase';
+import AttributionDirecte from './act/AttributionDirecte';
+import { attribuerSansOffre, estAttributionDirecte, retirerAttribution } from '../lib/attributionDirecte';
 import type { ParametresMarche } from '../lib/actMarche';
 import { useConsultationDepot } from '../hooks/useConsultationDepot';
 import DepotsRecusPanel from './act/DepotsRecusPanel';
@@ -116,6 +118,8 @@ interface Attribution {
   lot_id: string;
   entreprise_id: string;
   montant: number;
+  /** Entreprise désignée sans offre ni montant (voir src/lib/attributionDirecte.ts). */
+  directe?: boolean;
 }
 
 interface ComparatifArticle {
@@ -216,9 +220,11 @@ interface ACTModuleProps {
   contacts: Contact[];
   /** Données de l'affaire reprises dans les documents du marché. */
   operation?: Omit<OperationMarche, 'nom'>;
+  /** Maître d'ouvrage public : une attribution sans offre est alors signalée par un avertissement. */
+  isPublicClient?: boolean;
 }
 
-export default function ACTModule({ projectId, projectName, lots, contacts, operation }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, lots, contacts, operation, isPublicClient }: ACTModuleProps) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>('preparation');
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
@@ -381,6 +387,34 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
 
   const updateEntreprise = (id: string, patch: Partial<EntrepriseConsultee>) => {
     update({ ...consultation, entreprises: consultation.entreprises.map(e => e.id === id ? { ...e, ...patch } : e) });
+  };
+
+  // Attribution directe (sans offre ni montant) : l'entreprise est posée sur le lot du projet
+  // d'abord, d'où le chantier la lit ; la consultation n'est modifiée qu'ensuite, pour qu'un
+  // échec n'en laisse pas une moitié.
+  const [directeEnCours, setDirecteEnCours] = useState<string | null>(null);
+  const [directeErreurs, setDirecteErreurs] = useState<Record<string, string>>({});
+  const poserEntrepriseDuLot = async (lotId: string, contactId: string | null) => {
+    setDirecteEnCours(lotId);
+    setDirecteErreurs(prev => { const { [lotId]: _ancienne, ...reste } = prev; return reste; });
+    try {
+      await apiFetch(`/api/lots/${encodeURIComponent(lotId)}`, { method: 'PUT', body: JSON.stringify({ contact_id: contactId }) });
+      return true;
+    } catch (e: any) {
+      setDirecteErreurs(prev => ({ ...prev, [lotId]: e?.message || 'Impossible d\'enregistrer l\'entreprise sur le lot.' }));
+      return false;
+    } finally {
+      setDirecteEnCours(null);
+    }
+  };
+  const attribuerDirectement = async (lotId: string, contact: Contact) => {
+    if (!(await poserEntrepriseDuLot(lotId, contact.id))) return;
+    const r = attribuerSansOffre(consultation, lotId, contact, () => crypto.randomUUID());
+    update({ ...consultation, attributions: r.attributions, entreprises: r.entreprises });
+  };
+  const retirerAttributionDirecte = async (lotId: string) => {
+    if (!(await poserEntrepriseDuLot(lotId, null))) return;
+    update({ ...consultation, attributions: retirerAttribution(consultation.attributions, lotId) });
   };
 
   const patchNegociation = (patch: Partial<DonneesNegociation>) => update({ ...consultation, ...patch });
@@ -1639,6 +1673,16 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                     <IconDownload size={13} /> RAO Lot
                   </button>
                 </div>
+                <AttributionDirecte
+                  contacts={entrepriseContacts}
+                  attribueSansOffre={estAttributionDirecte(attribution)}
+                  attribueParOffre={!!attribution && !estAttributionDirecte(attribution)}
+                  marchePublic={!!isPublicClient}
+                  enCours={directeEnCours === lot.id}
+                  erreur={directeErreurs[lot.id] ?? null}
+                  onAttribuer={contact => { void attribuerDirectement(lot.id, contact); }}
+                  onRetirer={() => { void retirerAttributionDirecte(lot.id); }}
+                />
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[700px]">
                     <thead className="bg-[var(--tblr-surface-2)]">
