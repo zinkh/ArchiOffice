@@ -37,7 +37,7 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
         finally{outstanding--;}
       }
       if(msg?.type==='drive:status' && ['running','paused','stopped'].includes(msg.state))onStatus({state:msg.state,...Object.fromEntries(['pending','blocked','conflicts'].map(k=>[k,Number.isSafeInteger(msg[k])&&msg[k]>=0?msg[k]:0]))});
-      if(msg?.type==='drive:working-result') {
+      if(msg?.type==='drive:working-result'||msg?.type==='drive:document-statuses-result') {
         const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
         if(msg.error)p.reject(Object.assign(new Error('Drive working copy failed'),{code:msg.error.code}));else p.resolve(msg.result);
       }
@@ -66,6 +66,13 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       const requestId=crypto.randomUUID();
       const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive working copy timeout'));},300000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:`drive:${action}-working`,requestId,nodeId});
+    });},
+    documentStatuses(nodeIds) {return new Promise((resolve,reject)=> {
+      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
+      if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
+      const requestId=crypto.randomUUID();
+      const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive status timeout'));},30000);
+      jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:document-statuses',requestId,nodeIds});
     });},
     retryBlocked() {return new Promise((resolve,reject)=> {
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));

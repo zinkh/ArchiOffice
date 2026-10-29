@@ -31,4 +31,21 @@ async function openDriveWorking({ agent, vault, root, nodeId, shell }) {
     return {status:await shell.openPath(result.file)?'error':'opened'};
   } catch {return {status:'error'};}
 }
-module.exports={openDriveWorking};
+/** Return only enumerated state and a version; no native paths or credentials. */
+async function driveDocumentStatuses({agent,vault,nodeIds}) {
+  if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)throw new Error('Invalid documents');
+  const result=await agent.documentStatuses(nodeIds);const active=await vault();
+  if(!result?.identity||['userId','tenantId','deviceId'].some(k=>result.identity[k]!==active[k]))throw new Error('Identity changed');
+  if(!Array.isArray(result.documents)||result.documents.length!==nodeIds.length)throw new Error('Invalid status response');
+  const seen=new Set();
+  return result.documents.map(doc=> {
+    if(!doc||!nodeIds.includes(doc.nodeId)||seen.has(doc.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded'].includes(doc.state))throw new Error('Invalid status response');
+    seen.add(doc.nodeId);
+    if(doc.state==='uploaded') {
+      if(!Number.isSafeInteger(doc.version)||doc.version<1)throw new Error('Invalid version');
+      return {nodeId:doc.nodeId,state:doc.state,version:doc.version};
+    }
+    return {nodeId:doc.nodeId,state:doc.state};
+  });
+}
+module.exports={openDriveWorking,driveDocumentStatuses};

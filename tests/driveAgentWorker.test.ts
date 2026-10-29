@@ -144,3 +144,43 @@ it('coalesces simultaneous upload requests for one working copy into one snapsho
   const [a,b]=await Promise.all([worker.uploadWorkingCopy(meta.nodeId),worker.uploadWorkingCopy(meta.nodeId)]);
   expect(a.jobId).toBe(b.jobId);await worker.stop();
 });
+
+it('reports the persisted upload state while the transfer is still running, without exposing native details',async()=>{
+  const file=path.join(root,'PrivatePlan.dwg');await fs.writeFile(file,'hello');
+  const worker=createAgentWorker({root:path.join(root,'statuses'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  expect((await worker.documentStatuses(['doc:one'])).documents).toEqual([{nodeId:'doc:one',state:'none'}]);
+  await worker.enqueue(file,{documentId:'doc:one'},1);
+  expect((await worker.documentStatuses(['doc:one'])).documents).toEqual([{nodeId:'doc:one',state:'queued'}]);
+  let release!:()=>void;let started!:()=>void;
+  const active=new Promise<void>(resolve=>{started=resolve;});
+  transfer.chunk.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;started();}));
+  transfer.complete.mockResolvedValue({node:{id:'doc:one'},version:2});
+  const tick=worker.tick();await active;
+  try {
+    const snapshot=await Promise.race([worker.documentStatuses(['doc:one']),new Promise<never>((_,reject)=>setTimeout(()=>reject(new Error('status waited behind network')),1000))]);
+    expect(snapshot.documents).toEqual([{nodeId:'doc:one',state:'uploading'}]);
+    expect(JSON.stringify(snapshot)).not.toMatch(/secret|PrivatePlan|snapshot|sha256|\/tmp\//);
+  } finally {release();await tick;}
+  expect((await worker.documentStatuses(['doc:one'])).documents).toEqual([{nodeId:'doc:one',state:'uploaded',version:2}]);
+  await worker.stop();
+});
+it('keeps restart states, prioritizes conflicts, and refuses invalid batches or an identity change',async()=>{
+  const config={root:path.join(root,'persisted'),origin:'https://www.archioffice.fr',session:async()=>session(),status};
+  const worker=createAgentWorker(config);const file=path.join(root,'Plan.dwg');await fs.writeFile(file,'hello');
+  const job=await worker.enqueue(file,{documentId:'doc:one'},1);await worker.stop();
+  const [scope]=await fs.readdir(config.root);const journal=path.join(config.root,scope,`${job.jobId}.json`);
+  const record=JSON.parse(await fs.readFile(journal,'utf8'));const next=createAgentWorker(config);
+  for(const state of ['retry','blocked','conflict']) {
+    record.state=state;await fs.writeFile(journal,JSON.stringify(record));
+    expect((await next.documentStatuses(['doc:one','doc:two'])).documents).toEqual([{nodeId:'doc:one',state},{nodeId:'doc:two',state:'none'}]);
+  }
+  // A later successful upload must not hide an unresolved conflict.
+  const later={...record,id:'11111111-1111-1111-1111-111111111111',createdAt:record.createdAt+1,state:'done',result:{node:{id:'doc:one'},version:3}};
+  await fs.writeFile(path.join(config.root,scope,`${later.id}.json`),JSON.stringify(later));
+  expect((await next.documentStatuses(['doc:one'])).documents[0].state).toBe('conflict');
+  for(const ids of [['../../private'],Array(101).fill('doc:one'),['doc:one','doc:one']])await expect(next.documentStatuses(ids)).rejects.toMatchObject({code:'INVALID_DOCUMENTS'});
+  session.mockResolvedValueOnce({userId:'user',tenantId:'tenant',deviceId:'device',token:'ds_at_secret'})
+    .mockResolvedValueOnce({userId:'other',tenantId:'tenant',deviceId:'device',token:'ds_at_other'});
+  await expect(next.documentStatuses(['doc:one'])).rejects.toMatchObject({code:'DRIVE_IDENTITY_MISMATCH'});
+  session.mockRejectedValue(new Error('expired'));await expect(next.documentStatuses(['doc:one'])).rejects.toThrow('expired');await next.stop();
+});

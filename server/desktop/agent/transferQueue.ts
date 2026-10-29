@@ -55,10 +55,13 @@ export class TransferQueue {
     }
     finally { await fs.rm(temporary, { force: true }).catch(() => {}); }
   }
-  private async jobs(): Promise<TransferJob[]> {
-    await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
+  private async jobs(create = true): Promise<TransferJob[]> {
+    if (create) await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
+    let names: string[];
+    try { names = await fs.readdir(this.root); }
+    catch (e: any) { if (!create && e.code === 'ENOENT') return []; throw e; }
     const jobs: TransferJob[] = [];
-    for (const name of (await fs.readdir(this.root)).filter(n => n.endsWith('.json')).sort()) {
+    for (const name of names.filter(n => n.endsWith('.json')).sort()) {
       const file = path.join(this.root, name);
       if ((await fs.stat(file)).size > 65536) throw error('QUEUE_CORRUPT');
       let j: TransferJob; try { j = JSON.parse(await fs.readFile(file, 'utf8')); } catch { throw error('QUEUE_CORRUPT'); }
@@ -72,6 +75,9 @@ export class TransferQueue {
     return jobs.sort((a,b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }
   list() { return this.serial(() => this.jobs()); }
+  /** Read atomic, committed manifests without waiting behind a network upload.
+   * Advisory snapshot only; callers must not use it to mutate the queue. */
+  listPersisted() { return this.jobs(false); }
   enqueue(file: string, target: TransferTarget, baseVersion: number | null, mimeType = 'application/octet-stream') {
     return this.serial(async () => {
       if ('documentId' in target && (!target.documentId || !Number.isSafeInteger(baseVersion) || baseVersion! < 1)) throw error('BASE_VERSION_REQUIRED');

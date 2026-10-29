@@ -10,7 +10,7 @@ const { resolveDataLocation } = require('./dataLocation.cjs');
 const { resolveStorageFile, isSafeToOpen } = require('./fileAccess.cjs');
 const { createAppMenu } = require('./menu.cjs');
 const { createDriveAgent, requestVault } = require('./driveAgent.cjs');
-const { openDriveWorking } = require('./driveWorking.cjs');
+const { openDriveWorking, driveDocumentStatuses } = require('./driveWorking.cjs');
 const driveTrust = require('./driveTrust.json');
 
 // package.json's "name" is the npm workspace root ("react-example", a
@@ -413,6 +413,10 @@ function startDriveAgent() {
       const result=await driveAgent.working('upload',nodeId);
       return {status:result?.pending?'pending':result?.queued?'queued':'unchanged'};
     } catch(e) {return {status:e.code==='WORKING_UPLOAD_CONFLICT'?'conflict':'error'};}
+  });
+  ipcMain.handle('desktop:drive-document-statuses', async (event, nodeIds) => {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');
+    return driveDocumentStatuses({agent:driveAgent,vault:()=>requestVault(serverProcess),nodeIds});
   });
   ipcMain.handle('desktop:drive-retry', (event) => {
     if (event.sender !== mainWindow?.webContents || new URL(event.senderFrame?.url || '').origin !== `http://127.0.0.1:${PORT}`) throw new Error('Accès refusé');

@@ -28,3 +28,12 @@ it('distinguishes queued, unchanged, conflict and failure without claiming compl
     expect(host.querySelector('[role=alert]')!==null).toBe(['conflict','error'].includes(status));
   }
 });
+it('shows durable transfer states separately from action feedback and never presents stale success after a refusal',async()=>{
+  for(const state of ['queued','uploading','retry','blocked','conflict','uploaded'] as const) {
+    await act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',transfer:{nodeId:'doc:one',state,version:2}})));
+    expect(host.textContent).toContain(`drive_document_transfer_${state}`);
+    expect(host.querySelector('[role=alert]')!==null).toBe(['blocked','conflict'].includes(state));
+  }
+  await act(async()=>root.render(React.createElement(DriveDocumentActions,{documentId:'one',unavailable:true})));
+  expect(host.textContent).toContain('drive_document_transfer_unavailable');expect(host.textContent).not.toContain('drive_document_transfer_uploaded');
+});
