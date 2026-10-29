@@ -546,3 +546,47 @@ serveur déployé et les clés configurées, reste obligatoire avant le pilote.
 L’accès aux documents sur disque continue d’utiliser les mécanismes locaux
 existants ; cette livraison n’ajoute ni placeholders, ni cache de fichiers
 à la demande, ni montage CFAPI/File Provider, ni agent persistant après fermeture.
+
+## 21. Socle de file de transferts de l’agent
+
+`server/desktop/agent/transferQueue.ts` fournit une file persistante d’envois,
+scopée à un utilisateur et un cabinet. Chaque enregistrement capture une copie
+locale distincte du fichier et son SHA-256 ; une modification ultérieure du
+fichier de travail ne modifie pas la version déjà en attente. Les copies sont
+privées (0600), le répertoire de file est créé en 0700, les métadonnées sont
+écrites par remplacement atomique avec synchronisation du fichier journal.
+Les jetons d’appareil et de session ne sont jamais écrits dans ce journal.
+
+Le moteur conserve la session de dépôt, relit les plages reçues côté serveur,
+puis n’envoie que les octets manquants. Après une réponse de finalisation perdue,
+il redemande la fin de la même session au lieu de créer automatiquement un autre
+document. Cette reprise dépend des garanties de finalisation du serveur ; elle
+ne remplace pas une transaction serveur entre document, historique et session.
+
+États : queued, uploading, retry, conflict, blocked, done. Les erreurs réseau et
+5xx/429 sont reprises avec délai croissant ; les refus d’accès sont bloqués. Un
+409 VERSION_CONFLICT conserve la copie et attend une résolution explicite avec
+une nouvelle version de base ou une destination de conflit. Une session expirée
+ou disparue est bloquée, sans recréation automatique pouvant dupliquer un
+document déjà enregistré. Le fichier de travail et les copies terminées restent
+conservés ; la rétention et la purge devront être des actions séparées.
+
+`uploadTransport.ts` implémente le protocole HTTP existant, en HTTPS, sans suivi
+de redirection, avec réponses bornées et délais d’attente. Le propriétaire du
+coffre doit fournir le jeton via une fonction d’autorisation appelée à chaque
+requête. Le moteur ne reçoit ni clé privée ni clé Supabase privilégiée.
+
+**Périmètre de ce lot : moteur d’envoi utilisable et testé, pas un démon activé.**
+Aucun répertoire utilisateur n’est surveillé et aucun transfert n’est lancé au
+démarrage par ce code. Il reste à raccorder le propriétaire du coffre, les
+adaptateurs natifs et la sélection explicite des fichiers. La file doit avoir
+un seul propriétaire écrivain par répertoire ; la synchronisation entre plusieurs
+processus n’est pas fournie. La limite initiale de copie est 200 Mo, cohérente
+avec la limite serveur actuelle. Les téléchargements/hydratations, la détection
+des enregistrements CAO, le cache et le processus autonome sont des lots suivants.
+
+Tests : copies indépendantes du fichier de travail, reprise après redémarrage,
+finalisation perdue, conflits, refus d’accès, corruption, isolation cabinet,
+transport HTTP et envoi à travers les vraies routes desktop avec backend de test.
+Les garanties de survie à une coupure électrique brutale ou de concurrence entre
+processus devront faire l’objet de tests sur les OS cibles avant activation.
