@@ -3,8 +3,10 @@
 #define WIN32_NO_STATUS
 #include <windows.h>
 #undef WIN32_NO_STATUS
+#include <winternl.h>
 #include <ntstatus.h>
 #include <cfapi.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
 #include <algorithm>
 #include <cwctype>

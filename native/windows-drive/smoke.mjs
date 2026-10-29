@@ -1,4 +1,6 @@
-import {spawn,execFileSync} from 'node:child_process';
+import {promisify} from 'node:util';
+const exec=promisify(execFile);
+import {spawn,execFile,execFileSync} from 'node:child_process';
 import fs from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';
 const executable=path.resolve(process.argv[2]||'native/windows-drive/build/Release/archioffice-drive-cfapi.exe');
 const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'archioffice-cfapi-'));const root=path.join(temporary,'root');await fs.mkdir(root);
@@ -28,7 +30,7 @@ try {
     {path:directory+'\\_Denied.txt',key:denied,folder:false,size:5},
   ]})+'\n');await ready;
   const file=path.join(root,directory,name);
-  const attributes=execFileSync('powershell.exe',['-NoProfile','-Command',`(Get-Item -LiteralPath '${file.replaceAll("'","''")}').Attributes.ToString()`],{encoding:'utf8'});
+  const attributes=(await exec('powershell.exe',['-NoProfile','-Command',`(Get-Item -LiteralPath '${file.replaceAll("'","''")}').Attributes.ToString()`],{encoding:'utf8'})).stdout;
   assert.match(attributes,/ReparsePoint/);assert.equal((await fs.stat(file)).size,bytes.length);
   assert.deepEqual(await fs.readFile(file),bytes);assert.ok(hydrated>0,'CFAPI hydration callback was not exercised');
   await assert.rejects(fs.readFile(path.join(root,directory,'_Denied.txt')));
