@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { IconCloud, IconRefresh } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import { desktopBridge } from '../lib/desktopBridge';
 
 interface Capability { enabled: boolean; code: string | null; message: string | null; local?: boolean; expiresAt?: string | null }
 interface Device { id: string; name: string; platform: string; expiresAt: string | null }
@@ -19,6 +20,31 @@ export function DriveAccessPanel() {
   const [busy, setBusy] = useState(false);
   const [revokeError, setRevokeError] = useState(false);
   const [localError, setLocalError] = useState(false);
+  const bridge = desktopBridge();
+  const [uploading, setUploading] = useState(false);
+  const [uploadMessage, setUploadMessage] = useState<'queued' | 'retried' | 'error' | null>(null);
+  const [transfers, setTransfers] = useState<{ pending: number; blocked: number; conflicts: number } | null>(null);
+  const enqueueFile = async () => {
+    if (!bridge?.enqueueDriveFile || uploading) return;
+    setUploading(true); setUploadMessage(null);
+    try { const result = await bridge.enqueueDriveFile(); if (result.queued) setUploadMessage('queued'); }
+    catch { setUploadMessage('error'); }
+    finally { setUploading(false); }
+  };
+  const retryTransfers = async () => {
+    if (!bridge?.retryDriveTransfers || uploading) return;
+    setUploading(true); setUploadMessage(null);
+    try { await bridge.retryDriveTransfers(); setUploadMessage('retried'); }
+    catch { setUploadMessage('error'); }
+    finally { setUploading(false); }
+  };
+  useEffect(() => {
+    if (!capability?.local || !capability.enabled || !bridge?.getDriveStatus) { setTransfers(null); return; }
+    let current = true;
+    const load = async () => { try { const value = await bridge.getDriveStatus!(); if (current) setTransfers(value); } catch { if (current) setTransfers(null); } };
+    void load(); const timer = setInterval(() => void load(), 10000);
+    return () => { current = false; clearInterval(timer); };
+  }, [capability?.local, capability?.enabled]);
   const [remotePending, setRemotePending] = useState(false);
   const localAction = async (action: 'connect' | 'refresh') => {
     if (busy) return;
@@ -81,6 +107,14 @@ export function DriveAccessPanel() {
       {remotePending && <p role="status">{t('drive_local_revoke_pending')}</p>}
     </div>
     <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('drive_access_native_pending')}</p>
+    {capability?.local && capability.enabled && bridge?.enqueueDriveFile && <div className="space-y-2 text-sm">
+      <button type="button" className="btn btn-primary" disabled={busy || uploading} onClick={() => void enqueueFile()}>{t(uploading ? 'drive_transfer_preparing' : 'drive_transfer_add')}</button>
+      {transfers && transfers.blocked > 0 && bridge.retryDriveTransfers && <button type="button" className="btn btn-ghost" disabled={busy || uploading} onClick={() => void retryTransfers()}>{t('drive_transfer_retry')}</button>}
+      <div aria-live="polite">
+        {uploadMessage && <p role={uploadMessage === 'error' ? 'alert' : 'status'}>{t(uploadMessage === 'queued' ? 'drive_transfer_queued' : uploadMessage === 'retried' ? 'drive_transfer_retried' : 'drive_transfer_error')}</p>}
+        {transfers && <p>{t('drive_transfer_counts', transfers)}</p>}
+      </div>
+    </div>}
     <div className="pt-4 space-y-3" style={{ borderTop: '1px solid var(--tblr-border)' }}>
       <h3 className="text-sm font-semibold">{t(capability?.local ? 'drive_local_device' : 'drive_access_devices')}</h3>
       {!loading && !error && devices.length === 0 && <p className="text-sm">{t('drive_access_empty')}</p>}

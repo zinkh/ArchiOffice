@@ -14,6 +14,7 @@
 // Pas encore fait (voir le contrat) : flux SSE /events (le sondage de /changes suffit),
 // notification de la personne dont on rompt le verrou, création de dossier.
 import express from 'express';
+import { registerDriveVaultBridge } from '../desktop/agent/vaultBridge';
 import { localDrive, startLocalDriveRefresh } from '../desktop/localDriveRuntime';
 import { signOfflineLicense } from '../desktop/offlineLicense';
 import { driveCapability, requireDriveSubscription } from '../desktop/driveAccess';
@@ -72,7 +73,7 @@ function expectedVersion(req: any): number | null {
 export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) {
   const { supabaseAdmin: db } = deps;
   const BASE = '/api/desktop/v1';
-  if (process.env.OFFLINE_MODE === 'true') startLocalDriveRefresh();
+  if (process.env.OFFLINE_MODE === 'true') { startLocalDriveRefresh(); registerDriveVaultBridge(); }
 
   async function contextFor(req: any): Promise<NodeContext> {
     const tenantId = await deps.getTenantId(req.user.id);

@@ -107,3 +107,10 @@ export function startLocalDriveRefresh(): void {
   };
   void tick(); setInterval(() => void tick(), 15 * 60 * 1000).unref();
 }
+
+/** Private Node IPC only. Never expose this result through an HTTP route. */
+export async function authorizeDriveAgent() {
+  const link = readCloudLinkState();
+  if (!link?.importCompleted) throw Object.assign(new Error('Compte cloud requis.'), { status: 403, code: 'DRIVE_CLOUD_LINK_REQUIRED' });
+  return manager.authorize({ userId: link.cloudUserId, tenantId: link.tenantId });
+}

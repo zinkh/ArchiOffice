@@ -590,3 +590,55 @@ finalisation perdue, conflits, refus d’accès, corruption, isolation cabinet,
 transport HTTP et envoi à travers les vraies routes desktop avec backend de test.
 Les garanties de survie à une coupure électrique brutale ou de concurrence entre
 processus devront faire l’objet de tests sur les OS cibles avant activation.
+
+## 22. Processus de transfert et coffre conservé dans Electron
+
+Le build desktop produit maintenant deux exécutables Node embarqués : le
+serveur local et `dist-server/drive-agent.cjs`. Le second tourne dans un processus
+séparé, surveillé par `electron/driveAgent.cjs`, et traite la file d’envoi toutes
+les dix secondes. Les reprises après incident sont limitées à trois
+redémarrages du processus par lancement de l’application. Les files appartiennent
+au profil local et sont séparées par empreinte du couple utilisateur/cabinet.
+Une seule instance de l’application est autorisée par profil Electron.
+
+Le worker ne lit pas le coffre et n’hérite pas des secrets de l’application.
+Avant chaque requête de transfert, il demande une autorisation sur un canal Node
+IPC privé. Le processus principal transmet la demande au serveur local, qui
+vérifie la licence dans son coffre via safeStorage et rend le jeton d’appareil.
+La réponse ne traverse jamais le preload ou une route HTTP. Ni clé privée de
+signature ni clé Supabase privilégiée n’est transmise au worker. Les variables
+réseau/proxy et les certificats nécessaires sont conservés dans son environnement.
+
+### Premier parcours d’envoi
+
+Dans Mon profil, un client Electron autorisé affiche « Envoyer un fichier vers
+À classer ». Le processus principal ouvre une boîte de dialogue native ; aucun
+chemin choisi par le renderer n’est accepté. Le fichier sélectionné est copié
+dans la file, puis envoyé vers la boîte À classer du cabinet lié au coffre.
+Les compteurs distinguent attente, blocage et conflit. « Réessayer les envois
+bloqués » est une action explicite ; les conflits ne sont pas remis en envoi
+par ce bouton. La résolution détaillée des conflits reste à ajouter.
+
+### Fermeture et arrêt
+
+Avec un accès Drive vérifié et une icône de zone de notification créée, fermer
+la fenêtre laisse Electron, son coffre et le worker actifs. La zone de
+notification permet de rouvrir ArchiOffice ou de quitter l’application et
+arrêter Drive. Sans icône disponible, le maintien en arrière-plan n’est pas
+activé sur Windows, pour éviter un processus sans commande d’arrêt visible.
+L’arrêt explicite ou la fermeture de session arrête le worker ; il n’est pas un
+service système indépendant d’Electron. Les opérations en cours restent dans
+la file pour reprise au prochain lancement, sans suppression du fichier de
+travail. Un arrêt forcé peut laisser une copie partielle sans journal, qui ne
+sera pas envoyée automatiquement.
+
+### Vérifications et limites
+
+Tests : lancement réel d’un processus Node, pause sur refus du coffre, arrêt,
+filtrage de l’environnement, corrélation IPC, file persistante, pont de sélection
+native simulé et compteur d’envois. Les comportements de Tray, de safeStorage et
+de fermeture de fenêtre doivent encore être validés sur des installations
+Windows/macOS réelles. Ce lot ne fournit ni démarrage automatique à l’ouverture
+de session, ni placeholders CFAPI/File Provider, ni surveillance de fichiers CAO,
+ni téléchargement à la demande. Il prépare ces intégrations sur un processus
+séparé tout en gardant un seul propriétaire du coffre.

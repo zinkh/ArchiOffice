@@ -4836,4 +4836,11 @@ export default {
   "drive_local_error": "Vérification Drive impossible. Vérifiez le compte cloud lié, l’abonnement, la connexion et l’heure du poste. Les fichiers locaux sont conservés.",
   "drive_local_revoke_pending": "Ce poste est déconnecté localement. La révocation sur le serveur sera réessayée à la reconnexion.",
   "drive_local_device": "Ce poste",
+  "drive_transfer_add": "Envoyer un fichier vers À classer",
+  "drive_transfer_preparing": "Préparation de l’envoi…",
+  "drive_transfer_queued": "Fichier ajouté à la file d’envoi.",
+  "drive_transfer_error": "Impossible de préparer l’envoi. Vérifiez l’accès Drive et que le fichier est disponible et ne dépasse pas 200 Mo.",
+  "drive_transfer_counts": "File d’envoi : {{pending}} en attente, {{blocked}} bloqués, {{conflicts}} conflits.",
+  "drive_transfer_retry": "Réessayer les envois bloqués",
+  "drive_transfer_retried": "Envois bloqués remis dans la file. Les conflits nécessitent une résolution séparée.",
 };

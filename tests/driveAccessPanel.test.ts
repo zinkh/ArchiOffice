@@ -59,3 +59,19 @@ it('does not offer local activation before trust configuration exists', async ()
   await render(); expect(host.textContent).toContain('drive_local_unconfigured');
   expect(button('drive_local_connect')).toBeUndefined();
 });
+it('uses the native file picker bridge without accepting a path in the page and permits explicit retry', async () => {
+  const pick = vi.fn().mockResolvedValue({ queued: true, jobId: 'job1' });
+  const retry = vi.fn().mockResolvedValue({ retried: 1 });
+  (window as any).archiofficeDesktop = { isDesktop: true, enqueueDriveFile: pick, retryDriveTransfers: retry,
+    getDriveStatus: vi.fn().mockResolvedValue({state:'paused',pending:0,blocked:1,conflicts:0}) };
+  api.mockImplementation(async (url: string) => url.endsWith('capabilities') ? {enabled:true,local:true} : []);
+  try {
+    await render();
+    await act(async () => button('drive_transfer_add').click());
+    expect(pick).toHaveBeenCalledWith();
+    expect(host.textContent).toContain('drive_transfer_queued');
+    expect(host.querySelector('input[type="file"]')).toBeNull();
+    await act(async () => button('drive_transfer_retry').click());
+    expect(retry).toHaveBeenCalledWith();expect(host.textContent).toContain('drive_transfer_retried');
+  } finally { delete (window as any).archiofficeDesktop; }
+});

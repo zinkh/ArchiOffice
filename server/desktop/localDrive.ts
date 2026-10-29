@@ -107,6 +107,13 @@ export function createLocalDrive(deps: LocalDriveDeps) {
     return capability(identity);
   }
   return {
+    authorize: (id: LocalDriveIdentity) => serial(async () => {
+      const access = await capability(id);
+      if (!access.enabled) throw failure(402, access.code || 'DRIVE_ACCESS_SUSPENDED', access.message || 'Drive indisponible.');
+      const state = await load(id);
+      if (!state?.deviceToken) throw failure(401, 'DEVICE_TOKEN_REQUIRED', 'Appareil Drive non connecté.');
+      return { ...id, deviceId: state.deviceId, token: state.deviceToken };
+    }),
     capability: (id: LocalDriveIdentity) => serial(() => capability(id)),
     connect: (id: LocalDriveIdentity) => serial(() => refresh(id, true)),
     refresh: (id: LocalDriveIdentity) => serial(() => refresh(id, false)),

@@ -13,6 +13,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('archiofficeDesktop', {
   isDesktop: true,
+  retryDriveTransfers: () => ipcRenderer.invoke('desktop:drive-retry'),
+  getDriveStatus: () => ipcRenderer.invoke('desktop:drive-status'),
+  enqueueDriveFile: () => ipcRenderer.invoke('desktop:drive-enqueue'),
 
   /** Affiche une notification système. { title, body, url } */
   notify: (payload) => ipcRenderer.invoke('desktop:notify', payload),
