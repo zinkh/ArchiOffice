@@ -395,3 +395,41 @@ Un jeu de scénarios exécuté contre un serveur de test, par le client Windows 
 - Purge automatique des documents de la corbeille après 30 jours.
 - Essais de gros fichiers sur un Nextcloud et un kDrive réels.
 - Application de la migration à une base Supabase distante.
+
+
+## 18. Accès payant — premier lot
+
+ArchiOffice Drive est réservé aux membres autorisés d’un cabinet disposant d’un
+abonnement Starter, Pro ou Entreprise actif. La date `tenants.trial_ends_at`,
+réutilisée par la facturation comme fin de période payée, doit être valide et
+future. Une formule seule, une date absente ou une base locale ne prouvent pas le
+paiement. Les contrats Entreprise doivent donc aussi renseigner cette échéance.
+
+- `GET /api/desktop/v1/capabilities` : `{ enabled, code, message }`, sans cache.
+  Ce résultat prépare le parcours d’activation ; il ne constitue pas une licence
+  hors connexion. L’interface d’activation reste à raccorder.
+- Les racines gratuites/expirées sont filtrées. Les lectures et écritures Drive,
+  l’enregistrement d’appareil et chaque appel de dépôt (morceau, reprise,
+  finalisation) recontrôlent le cabinet actif côté serveur.
+- Absence de droit : `402 DRIVE_SUBSCRIPTION_REQUIRED`. Indisponibilité de la
+  vérification : `503 DRIVE_ENTITLEMENT_UNAVAILABLE`, sans autorisation implicite.
+- Liste/révocation de ses appareils et libération de verrou restent accessibles
+  sans abonnement ; les contrôles existants d’identité, d’adhésion et de rôle
+  continuent de s’appliquer.
+- Une annulation programmée ne coupe pas le droit avant la fin de période payée.
+- En mode local, `402 DRIVE_ONLINE_VERIFICATION_REQUIRED` : aucune activation
+  depuis les seules données locales avant implémentation d’une licence cloud
+  signée et bornée. Les fonctions documentaires locales existantes restent
+  indépendantes de ce garde.
+- Aucune suppression de fichiers ou de sessions de dépôt n’est déclenchée par
+  ce contrôle ; leur rétention existante reste applicable. Les futurs clients
+  doivent préserver les modifications locales après refus, expiration ou
+  révocation. La consigne d’effacement des sections 3.1/14 ne doit jamais être
+  appliquée aux modifications non synchronisées ; la politique native détaillée
+  reste à implémenter avant le pilote.
+- Les URL de lecture signées déjà émises restent valides jusqu’à leur échéance
+  existante : cette restriction ne constitue pas une révocation instantanée.
+
+Validation : tests de contrôle d’accès et suites desktop ; aucune migration SQL
+requise par ce lot. Les composants natifs, l’autorisation hors connexion et la
+fiabilisation complète du renouvellement de facturation restent des lots séparés.
