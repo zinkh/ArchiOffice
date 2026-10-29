@@ -50,3 +50,63 @@ it('retains a downloaded version and rechecks authorization before offline looku
   await expect(worker.cachedVersion(meta)).rejects.toThrow('expired');
   await worker.stop();
 });
+
+it('uploads edits against their original version and acknowledges only the uploaded snapshot',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'workspace'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  await worker.keepOffline(meta.nodeId);const copy=await worker.prepareWorkingCopy(meta);
+  expect(await worker.uploadWorkingCopy(meta.nodeId)).toEqual({queued:false});
+  await fs.writeFile(copy.file,'edited');
+  transfer.status.mockResolvedValue({size:6,received:[],completed:false});
+  transfer.complete.mockResolvedValue({node:{id:meta.nodeId},version:2});
+  expect(await worker.uploadWorkingCopy(meta.nodeId)).toMatchObject({queued:true});
+  // The next edit happens after the durable snapshot, before completion.
+  await fs.writeFile(copy.file,'later!');await worker.tick();
+  expect(transfer.open.mock.calls[0][0]).toMatchObject({target:{documentId:meta.nodeId},baseVersion:1});
+  expect(await worker.prepareWorkingCopy(meta)).toMatchObject({baseVersion:2,modified:true});
+  expect(await fs.readFile(copy.file,'utf8')).toBe('later!');
+  transfer.complete.mockResolvedValue({node:{id:meta.nodeId},version:3});
+  await worker.uploadWorkingCopy(meta.nodeId);await worker.tick();
+  expect(transfer.open.mock.calls[1][0]).toMatchObject({baseVersion:2});
+  expect(await worker.uploadWorkingCopy(meta.nodeId)).toEqual({queued:false});await worker.stop();
+});
+it('does not expose a working path or snapshot new edits after license refusal',async()=>{
+  const worker=createAgentWorker({root,origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  session.mockRejectedValue(new Error('expired'));
+  await expect(worker.prepareWorkingCopy({nodeId:'doc:file1',version:1,size:0,name:'x',sha256:null})).rejects.toThrow('expired');
+  await expect(worker.uploadWorkingCopy('doc:file1')).rejects.toThrow('expired');
+  expect(await fs.readdir(root)).toEqual([]);await worker.stop();
+});
+it('replays a completed upload after restart without uploading the same edit again',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const config={root:path.join(root,'restart'),origin:'https://www.archioffice.fr',session:async()=>session(),status};
+  const first=createAgentWorker(config);await first.keepOffline(meta.nodeId);
+  const copy=await first.prepareWorkingCopy(meta);await fs.writeFile(copy.file,'edited');
+  const queued=await first.uploadWorkingCopy(meta.nodeId);await first.stop();
+  // Crash point: the queue's completion is durable but working.json is not acked.
+  const [scope]=await fs.readdir(config.root);const journal=path.join(config.root,scope,`${queued.jobId}.json`);
+  const job=JSON.parse(await fs.readFile(journal,'utf8'));job.state='done';job.result={node:{id:meta.nodeId},version:2};
+  await fs.writeFile(journal,JSON.stringify(job));
+  const restarted=createAgentWorker(config);
+  expect(await restarted.uploadWorkingCopy(meta.nodeId)).toEqual({queued:false});
+  expect(await restarted.prepareWorkingCopy(meta)).toMatchObject({baseVersion:2,modified:false});
+  expect(transfer.open).not.toHaveBeenCalled();await restarted.stop();
+});
+it('preserves a conflicting working file and rejects a path after account changes',async()=>{
+  const meta={nodeId:'doc:file1',version:1,size:5,name:'Plan.dwg',sha256:'2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824'};
+  download.metadata.mockResolvedValue(meta);
+  download.read.mockImplementation(async()=>({start:0,body:(async function*(){yield Buffer.from('hello');})()}));
+  const worker=createAgentWorker({root:path.join(root,'conflict'),origin:'https://www.archioffice.fr',session:async()=>session(),status});
+  await worker.keepOffline(meta.nodeId);const copy=await worker.prepareWorkingCopy(meta);await fs.writeFile(copy.file,'edited');
+  transfer.open.mockRejectedValue(Object.assign(new Error('conflict'),{status:409,code:'VERSION_CONFLICT'}));
+  await worker.uploadWorkingCopy(meta.nodeId);await worker.tick();
+  expect(await worker.prepareWorkingCopy(meta)).toMatchObject({baseVersion:1,modified:true});
+  expect(await fs.readFile(copy.file,'utf8')).toBe('edited');
+  session.mockResolvedValueOnce({userId:'user',tenantId:'tenant',deviceId:'device',token:'ds_at_secret'})
+    .mockResolvedValueOnce({userId:'other',tenantId:'tenant',deviceId:'device',token:'ds_at_other'});
+  await expect(worker.prepareWorkingCopy(meta)).rejects.toMatchObject({code:'DRIVE_IDENTITY_MISMATCH'});await worker.stop();
+});
