@@ -1,9 +1,9 @@
 import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { parseMarkdown, type Block, type Inline } from './chatMarkdown.js';
+import { parseMarkdown, type Block, type Inline } from './chatMarkdownParser.js';
 import { useAgentChat } from './AgentChat.js';
 
-// Rendu des réponses d'agent (voir chatMarkdown.ts : analyse pure, aucun HTML brut).
+// Rendu des réponses d'agent (voir chatMarkdownParser.ts : analyse pure, aucun HTML brut).
 // Un lien vers l'application s'ouvre dans l'application, sans recharger la page ; un lien
 // externe s'ouvre dans un nouvel onglet.
 

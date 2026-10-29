@@ -12,7 +12,7 @@ import {
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
   IconPencil, IconFilter, IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
 } from '@tabler/icons-react';
-import { useProToolbar } from './toolbar/proToolbar';
+import { useProToolbar } from './toolbar/toolbarState';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { useMediaQuery } from '../../hooks/useMediaQuery';

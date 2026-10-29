@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { IconChevronDown, IconDots, IconX } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
 import { ToolbarMenu } from './ToolbarMenu';
-import type { ToolbarAction, ToolbarMenuEntry } from './proToolbar';
+import type { ToolbarAction, ToolbarMenuEntry } from './toolbarState';
 
 export interface SelectionAction extends ToolbarAction {
   /** Reste dans la barre sur téléphone ; sinon l'action passe dans « Plus ». */

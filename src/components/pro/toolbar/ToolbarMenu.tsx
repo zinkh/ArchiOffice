@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState
 import { createPortal } from 'react-dom';
 import { IconCheck, IconMinus } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
-import { isHeading, isSeparator, type ToolbarMenuEntry } from './proToolbar';
+import { isHeading, isSeparator, type ToolbarMenuEntry } from './toolbarState';
 
 interface ToolbarMenuProps {
   /** Entrées, ou fonction qui les calcule à l'ouverture (menu de ligne). */
