@@ -18,10 +18,11 @@ it('offers billing only when payment is required, without claiming native sync i
   expect(host.textContent).toContain('drive_access_native_pending'); expect(host.textContent).toContain('drive_access_empty');
 });
 it('keeps devices manageable when capability lookup fails and confirms disconnection', async () => {
+  let disconnected = false;
   api.mockImplementation(async (url: string, options: any) => {
     if (url.endsWith('capabilities')) throw new Error('unavailable');
-    if (options?.method === 'DELETE') return { success: true };
-    return [{ id: 'device1', name: 'Poste atelier', platform: 'windows' }];
+    if (options?.method === 'DELETE') { disconnected = true; return { success: true }; }
+    return disconnected ? [] : [{ id: 'device1', name: 'Poste atelier', platform: 'windows' }];
   });
   await render(); expect(host.textContent).toContain('drive_access_error'); expect(host.textContent).toContain('Poste atelier');
   await act(async () => button('drive_access_disconnect').click());
@@ -39,4 +40,22 @@ it('shows eligible access and retains a device when disconnection fails', async 
   await act(async () => button('drive_access_disconnect').click());
   await act(async () => button('drive_access_confirm_action').click());
   expect(host.textContent).toContain('drive_access_revoke_error'); expect(host.textContent).toContain('Poste atelier');
+});
+it('connects a local workstation without placing credentials in the page', async () => {
+  let connected = false;
+  api.mockImplementation(async (url: string, options: any) => {
+    if (url.endsWith('/local/connect')) { connected = true; return { enabled: true, local: true }; }
+    if (url.endsWith('capabilities')) return { enabled: connected, local: true, code: connected ? null : 'DRIVE_ONLINE_VERIFICATION_REQUIRED' };
+    return [];
+  });
+  await render();
+  await act(async () => button('drive_local_connect').click());
+  expect(api.mock.calls.some(([url, o]) => url.endsWith('/local/connect') && o?.method === 'POST')).toBe(true);
+  expect(host.textContent).toContain('drive_local_authorized');
+  expect(host.querySelector('input')).toBeNull();
+});
+it('does not offer local activation before trust configuration exists', async () => {
+  api.mockImplementation(async (url: string) => url.endsWith('capabilities') ? { enabled: false, local: true, code: 'DRIVE_TRUST_UNCONFIGURED' } : []);
+  await render(); expect(host.textContent).toContain('drive_local_unconfigured');
+  expect(button('drive_local_connect')).toBeUndefined();
 });

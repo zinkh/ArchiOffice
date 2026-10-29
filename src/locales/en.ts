@@ -4677,4 +4677,13 @@ export default {
   "drive_access_cancel": "Cancel",
   "drive_access_revoke_error": "Disconnection failed. Try again.",
   "drive_access_devices_help": "You can disconnect your devices even after your subscription ends.",
+  "drive_local_authorized": "This workstation’s authorization is verified",
+  "drive_local_unconfigured": "This client’s Drive configuration must be completed before activation.",
+  "drive_local_required": "This workstation requires online verification. Also check the system date and time.",
+  "drive_local_until": "Authorization valid until {{date}}",
+  "drive_local_connect": "Connect this workstation",
+  "drive_local_connecting": "Connecting…",
+  "drive_local_error": "Drive verification failed. Check the linked cloud account, subscription, connection and workstation clock. Local files are retained.",
+  "drive_local_revoke_pending": "This workstation is disconnected locally. Server revocation will be retried when online.",
+  "drive_local_device": "This workstation",
 };

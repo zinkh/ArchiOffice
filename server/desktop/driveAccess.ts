@@ -10,10 +10,13 @@ export function hasActiveDriveSubscription(tenant: any, now = Date.now()): boole
     && !tenant?.suspended_at;
 }
 
-export async function driveCapability(db: any, tenantId: string) {
-  // Offline licenses require a signed, bounded cloud grant. Until implemented,
-  // a writable local database must not be able to enable a paid cloud feature.
+export async function driveCapability(db: any, tenantId: string, userId?: string) {
+  // A local plan never grants access: validate a device-bound cloud signature.
   if (process.env.OFFLINE_MODE === 'true') {
+    if (userId) {
+      const { localDrive } = await import('./localDriveRuntime');
+      return localDrive.capability({ userId, tenantId });
+    }
     return { enabled: false, code: 'DRIVE_ONLINE_VERIFICATION_REQUIRED',
       message: 'Activez ArchiOffice Drive depuis une connexion au service en ligne.' };
   }
@@ -28,8 +31,8 @@ export async function driveCapability(db: any, tenantId: string) {
     message: enabled ? null : 'ArchiOffice Drive est réservé aux cabinets disposant d’un abonnement payant actif.' };
 }
 
-export async function requireDriveSubscription(db: any, tenantId: string): Promise<void> {
-  const capability = await driveCapability(db, tenantId);
+export async function requireDriveSubscription(db: any, tenantId: string, userId?: string): Promise<void> {
+  const capability = await driveCapability(db, tenantId, userId);
   if (!capability.enabled) {
     throw Object.assign(new Error(capability.message!), { status: 402, code: capability.code });
   }

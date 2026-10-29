@@ -475,3 +475,73 @@ local de la section 18 n’est levé dans ce lot.
 Un poste déconnecté ne peut pas apprendre immédiatement une révocation : la
 licence constitue au plus 72 h de tolérance. À la reconnexion, les refus serveur
 font foi. Les modifications non synchronisées doivent rester récupérables.
+
+## 20. Raccordement au client Electron : activation locale et renouvellement
+
+Le panneau Mon profil propose « Connecter ce poste » sur un client de bureau
+configuré et relié au compte cloud. Les clés et jetons ne passent pas par le
+navigateur. Les routes locales d’activation sont authentifiées par la session
+locale et vérifient le couple utilisateur/cabinet contre le lien cloud terminé :
+
+- `POST /api/desktop/v1/local/connect` restaure la session cloud en interne,
+  inscrit le poste auprès du serveur et demande sa licence signée.
+- `POST /api/desktop/v1/local/refresh` renouvelle une inscription existante,
+  sans inscrire automatiquement un poste non activé.
+- `GET /capabilities` vérifie la signature, le compte, le cabinet, le poste et
+  les dates ; le plan dans la base locale ne donne aucun droit.
+- En mode local, `/devices` expose uniquement l’inscription de ce poste, sans
+  secret. Une déconnexion bloque le poste avant l’appel réseau ; si celui-ci
+  échoue, la révocation distante reste en attente dans le coffre chiffré.
+- Une boucle toutes les 15 minutes et au démarrage renouvelle seulement une
+  inscription existante. Elle s’arrête avec le serveur Electron : elle ne
+  constitue pas encore l’agent autonome.
+
+### Stockage et conditions de sécurité
+
+Le jeton d’appareil, la licence et l’heure de référence sont stockés ensemble
+par écriture atomique dans `drive-state.enc`, sous OFFLINE_DATA_DIR. Le contenu
+est chiffré via le pont IPC Electron safeStorage (DPAPI sous Windows, mécanisme
+système sous macOS), avec permissions restrictives. Il n’existe aucun repli en
+clair en cas d’indisponibilité du coffre. Les opérations sont sérialisées dans
+le serveur local pour éviter les inscriptions concurrentes et les écrasements
+d’état. Les futurs processus natifs devront passer par un seul propriétaire
+du coffre, sans écrire concurremment ce fichier.
+
+Une erreur réseau/5xx ne prolonge jamais la licence existante. Un refus
+401/402/403/404 reçu du serveur invalide immédiatement l’autorisation locale.
+Une signature invalide ne permet aucun repli sur une ancienne licence. Aucune
+branche de ce mécanisme ne supprime de document ni de modification locale.
+L’API de signature elle-même est refusée en mode local.
+
+Le processus utilise une horloge monotone en plus de l’horloge système et garde
+une borne de temps chiffrée. Un recul de plus d’une seconde depuis cette borne
+est refusé. Cette protection détecte le recul ordinaire et le gel d’horloge en
+session ; elle n’est pas une attestation matérielle contre un administrateur
+restaurant simultanément un ancien disque, son coffre et l’horloge. Ne pas
+présenter cette limite comme une garantie absolue.
+
+### Configuration nécessaire avant publication du client
+
+`electron/driveTrust.json` est une configuration **publique embarquée au build** :
+`cloudOrigin` est l’origine HTTPS du serveur ArchiOffice, sans chemin, identifiant
+ni redirection ; `publicKeys` associe chaque identifiant de clé à sa clé publique
+Ed25519 PEM. Le fichier livré dans cette PR est volontairement non configuré :
+aucune origine réelle ou clé publique n’a été inventée. Les clés privées restent
+uniquement dans les secrets du serveur de signature (section 19).
+
+Tant que l’origine et les clés ne sont pas provisionnées dans une nouvelle
+version du client, `DRIVE_TRUST_UNCONFIGURED` empêche l’activation locale. Les
+requêtes utilisateur ne peuvent modifier ni l’origine ni les clés de confiance.
+Les appels réseau sont limités en durée et en taille de réponse, sans suivi de
+redirection. Le jeton cloud de renouvellement est conservé chiffré après rotation.
+Les versions anciennes d’un client ne reçoivent pas automatiquement de nouvelles
+clés : la rotation de confiance doit accompagner les mises à jour du client.
+
+### État et validation
+
+Le cycle d’autorisation local est raccordé et testé avec doubles du réseau et du
+pont cryptographique. La vérification sur un vrai poste Windows/macOS, avec le
+serveur déployé et les clés configurées, reste obligatoire avant le pilote.
+L’accès aux documents sur disque continue d’utiliser les mécanismes locaux
+existants ; cette livraison n’ajoute ni placeholders, ni cache de fichiers
+à la demande, ni montage CFAPI/File Provider, ni agent persistant après fermeture.
