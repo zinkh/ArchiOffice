@@ -30,8 +30,8 @@ try {
     {path:directory+'\\_Denied.txt',key:denied,folder:false,size:5},
   ]})+'\n');await ready;
   const file=path.join(root,directory,name);
-  const attributes=(await exec('powershell.exe',['-NoProfile','-Command',`(Get-Item -LiteralPath '${file.replaceAll("'","''")}').Attributes.ToString()`],{encoding:'utf8'})).stdout;
-  assert.match(attributes,/ReparsePoint/);assert.equal((await fs.stat(file)).size,bytes.length);
+  const attributes=(await exec('powershell.exe',['-NoProfile','-Command',`(Get-Item -LiteralPath '${file.replaceAll("'","''")}').Attributes.value__`],{encoding:'utf8'})).stdout;
+  assert.ok((Number(attributes.trim()) & 0x400)!==0,'Windows reparse-point attribute is missing');assert.equal((await fs.stat(file)).size,bytes.length);
   assert.deepEqual(await fs.readFile(file),bytes);assert.ok(hydrated>0,'CFAPI hydration callback was not exercised');
   await assert.rejects(fs.readFile(path.join(root,directory,'_Denied.txt')));
   child.stdin.end(JSON.stringify({type:'stop'})+'\n');assert.equal(await exited,0);
