@@ -893,7 +893,7 @@ de suite), les actions du document affiché, puis un menu « ⋯ » pour le doss
 impression).
 
 - **Chaque atelier déclare ses actions** par `useProToolbar(items)`
-  (`src/components/pro/toolbar/proToolbar.ts`) : boutons, menus déroulants,
+  (`src/components/pro/toolbar/toolbarState.ts`) : boutons, menus déroulants,
   sélecteurs. ProTab ne se re-rend que si leur apparence change
   (`toolbarSignature`) et exécute toujours la DERNIÈRE version d'une action
   (`invokeToolbarAction`) : une fermeture périmée exporterait un document
@@ -2591,7 +2591,7 @@ fuseau Europe/Paris, jour entier à fin exclusive) ; ce sont des événements pr
 maintenant les lignes (`items`) et se supprime tant qu'elle est en brouillon (le serveur refuse le
 reste) ; le numéro n'est jamais écrit par un agent.
 
-**Réponses d'agent en Markdown** : `client/chatMarkdown.ts` (analyse pure, testée) puis
+**Réponses d'agent en Markdown** : `client/chatMarkdownParser.ts` (analyse pure, testée) puis
 `ChatMarkdown.tsx` rendent titres, listes, tableaux, gras et liens sans HTML brut. Seuls http(s),
 mailto, tel et les chemins relatifs sont des liens ; un lien vers l'application navigue sans recharger.
 

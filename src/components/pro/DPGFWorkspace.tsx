@@ -20,7 +20,7 @@ import { DpgfGroupedView } from './DpgfGroupedView';
 import { DpgfMobileList } from './DpgfMobileList';
 import { EditableCell, type EditingCell } from './EditableCell';
 import type { ArticleBibliotheque } from '../../types/library';
-import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
+import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';

@@ -14,7 +14,7 @@ import { formatCopilotSuggestion } from '@/src/lib/copilotSuggestions';
 import { useDictation } from './useDictation.js';
 import { useSpeech } from './useSpeech.js';
 import { ChatMarkdown } from './ChatMarkdown.js';
-import { markdownToPlainText } from './chatMarkdown.js';
+import { markdownToPlainText } from './chatMarkdownParser.js';
 import type { Speech } from './useSpeech.js';
 import type { CopilotSuggestion, CopilotSuggestionRaw } from '@/src/lib/copilotSuggestions';
 import type { Agent, AgentMessage, AgentArtifact } from '../types.js';

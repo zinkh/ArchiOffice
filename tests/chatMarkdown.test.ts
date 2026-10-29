@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseInline, parseMarkdown, markdownToPlainText, safeHref } from '../packages/archioffice-agents/src/client/chatMarkdown';
+import { parseInline, parseMarkdown, markdownToPlainText, safeHref } from '../packages/archioffice-agents/src/client/chatMarkdownParser';
 
 describe('Markdown des réponses d\'agent', () => {
   it('rend un lien en gras comme dans la réponse de Sophie', () => {

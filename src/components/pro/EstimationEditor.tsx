@@ -10,7 +10,7 @@ import { DPGF, NATURES_HORS_BASE } from '../../types/dpgf';
 import { evalFormula, parsePrixSaisi, estHorsBase, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
 import { appliquerStatutLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
-import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
+import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from '../src/components/pro/selectionOps';
-import { foldForMobile, invokeToolbarAction, toolbarSignature, type ToolbarItem } from '../src/components/pro/toolbar/proToolbar';
+import { foldForMobile, invokeToolbarAction, toolbarSignature, type ToolbarItem } from '../src/components/pro/toolbar/toolbarState';
 import type { Ligne, Lot } from '../src/types/dpgf';
 
 const ligne = (id: string, numero: string, prixTotal: number, children: Ligne[] = []): Ligne => ({

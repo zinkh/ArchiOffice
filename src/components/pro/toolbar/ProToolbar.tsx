@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { IconChevronDown, IconDots, IconDownload } from '@tabler/icons-react';
 import { cn } from '../../../lib/utils';
 import { ToolbarMenu } from './ToolbarMenu';
-import { foldForMobile, invokeToolbarAction, type ToolbarItem, type ToolbarMenuEntry } from './proToolbar';
+import { foldForMobile, invokeToolbarAction, type ToolbarItem, type ToolbarMenuEntry } from './toolbarState';
 
 interface ProToolbarProps {
   /** Actions du document affiché, telles qu'au dernier changement d'apparence. */

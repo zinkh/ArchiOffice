@@ -8,7 +8,7 @@ import {
   IconSubtask, IconArrowBarToLeft, IconArrowBarToRight, IconArrowsMaximize, IconArrowsMinimize,
   IconLayoutSidebarLeftCollapse,
 } from '@tabler/icons-react';
-import { useProToolbar, type ToolbarMenuEntry } from './toolbar/proToolbar';
+import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { hierarchyKey } from './hierarchyOps';
 import { VARIABLES_CCTP, jeton, type ContexteCctp } from '../../lib/cctpVariables';
