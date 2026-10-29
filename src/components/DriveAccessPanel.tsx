@@ -4,8 +4,8 @@ import { Link } from 'react-router-dom';
 import { IconCloud, IconRefresh } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 
-interface Capability { enabled: boolean; code: string | null; message: string | null }
-interface Device { id: string; name: string; platform: string; expiresAt: string }
+interface Capability { enabled: boolean; code: string | null; message: string | null; local?: boolean; expiresAt?: string | null }
+interface Device { id: string; name: string; platform: string; expiresAt: string | null }
 
 /** Readiness and personal device management. Native enrollment ships with the agent. */
 export function DriveAccessPanel() {
@@ -18,6 +18,16 @@ export function DriveAccessPanel() {
   const [pending, setPending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [revokeError, setRevokeError] = useState(false);
+  const [localError, setLocalError] = useState(false);
+  const [remotePending, setRemotePending] = useState(false);
+  const localAction = async (action: 'connect' | 'refresh') => {
+    if (busy) return;
+    setBusy(true); setLocalError(false);
+    try {
+      await apiFetch(`/api/desktop/v1/local/${action}`, { method: 'POST', signal: AbortSignal.timeout(30000) });
+    } catch { setLocalError(true); }
+    finally { setBusy(false); setRevision(v => v + 1); }
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -42,8 +52,9 @@ export function DriveAccessPanel() {
     if (!pending || busy) return;
     setBusy(true); setRevokeError(false);
     try {
-      await apiFetch(`/api/desktop/v1/devices/${encodeURIComponent(pending)}`, { method: 'DELETE', signal: AbortSignal.timeout(15000) });
-      setDevices(list => list.filter(d => d.id !== pending)); setPending(null);
+      const result = await apiFetch<{ remoteRevocationPending?: boolean }>(`/api/desktop/v1/devices/${encodeURIComponent(pending)}`, { method: 'DELETE', signal: AbortSignal.timeout(15000) });
+      setRemotePending(!!result.remoteRevocationPending);
+      setDevices(list => list.filter(d => d.id !== pending)); setPending(null); setRevision(v => v + 1);
     } catch { setRevokeError(true); }
     finally { setBusy(false); }
   };
@@ -54,20 +65,24 @@ export function DriveAccessPanel() {
         <h2 id="drive-title" className="text-base font-semibold flex items-center gap-2"><IconCloud size={20} aria-hidden="true" />ArchiOffice Drive</h2>
         <p className="text-sm">{t('drive_access_intro')}</p>
       </div>
-      <button type="button" className="btn btn-ghost" disabled={loading || busy} onClick={() => setRevision(v => v + 1)}>
+      <button type="button" className="btn btn-ghost" disabled={loading || busy} onClick={() => capability?.local ? void localAction('refresh') : setRevision(v => v + 1)}>
         <IconRefresh size={16} aria-hidden="true" />{t('drive_access_refresh')}
       </button>
     </div>
     <div aria-live="polite" className="text-sm space-y-2">
       {loading ? <p>{t('drive_access_loading')}</p> : capability && <>
-        <p className="font-semibold">{t(capability.enabled ? 'drive_access_eligible' : capability.code === 'DRIVE_ONLINE_VERIFICATION_REQUIRED' ? 'drive_access_online' : 'drive_access_paid')}</p>
+        <p className="font-semibold">{t(capability.enabled ? (capability.local ? 'drive_local_authorized' : 'drive_access_eligible') : capability.local ? (capability.code === 'DRIVE_TRUST_UNCONFIGURED' ? 'drive_local_unconfigured' : 'drive_local_required') : 'drive_access_paid')}</p>
+        {capability.local && capability.expiresAt && <p>{t('drive_local_until', { date: new Date(capability.expiresAt).toLocaleString() })}</p>}
+        {capability.local && !capability.enabled && capability.code !== 'DRIVE_TRUST_UNCONFIGURED' && <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void localAction('connect')}>{t(busy ? 'drive_local_connecting' : 'drive_local_connect')}</button>}
         {!capability.enabled && capability.code === 'DRIVE_SUBSCRIPTION_REQUIRED' && <Link className="btn btn-primary" to="/billing">{t('drive_access_billing')}</Link>}
       </>}
       {error && <p role="alert">{t('drive_access_error')}</p>}
+      {localError && <p role="alert">{t('drive_local_error')}</p>}
+      {remotePending && <p role="status">{t('drive_local_revoke_pending')}</p>}
     </div>
     <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('drive_access_native_pending')}</p>
     <div className="pt-4 space-y-3" style={{ borderTop: '1px solid var(--tblr-border)' }}>
-      <h3 className="text-sm font-semibold">{t('drive_access_devices')}</h3>
+      <h3 className="text-sm font-semibold">{t(capability?.local ? 'drive_local_device' : 'drive_access_devices')}</h3>
       {!loading && !error && devices.length === 0 && <p className="text-sm">{t('drive_access_empty')}</p>}
       <ul className="space-y-3">
         {devices.map(device => <li key={device.id} className="flex flex-wrap items-center justify-between gap-3 text-sm">

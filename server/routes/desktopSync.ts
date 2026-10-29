@@ -14,6 +14,7 @@
 // Pas encore fait (voir le contrat) : flux SSE /events (le sondage de /changes suffit),
 // notification de la personne dont on rompt le verrou, création de dossier.
 import express from 'express';
+import { localDrive, startLocalDriveRefresh } from '../desktop/localDriveRuntime';
 import { signOfflineLicense } from '../desktop/offlineLicense';
 import { driveCapability, requireDriveSubscription } from '../desktop/driveAccess';
 import type { Express } from 'express';
@@ -71,6 +72,7 @@ function expectedVersion(req: any): number | null {
 export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) {
   const { supabaseAdmin: db } = deps;
   const BASE = '/api/desktop/v1';
+  if (process.env.OFFLINE_MODE === 'true') startLocalDriveRefresh();
 
   async function contextFor(req: any): Promise<NodeContext> {
     const tenantId = await deps.getTenantId(req.user.id);
@@ -125,13 +127,14 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
   // Checked before route-specific body parsing and on EVERY upload request, including
   // resume/complete. Device tokens are personal; entitlement belongs to the active tenant.
   app.use(BASE, async (req: any, res: any, next: any) => {
-    const recovery = (req.method === 'GET' && ['/devices', '/roots', '/capabilities'].includes(req.path))
+    const recovery = (process.env.OFFLINE_MODE === 'true' && req.method === 'POST' && ['/local/connect', '/local/refresh'].includes(req.path))
+      || (req.method === 'GET' && ['/devices', '/roots', '/capabilities'].includes(req.path))
       || (req.method === 'DELETE' && (/^\/devices\/[^/]+$/.test(req.path)
         || /^\/nodes\/[^/]+\/lock$/.test(req.path)));
     if (recovery) return next();
     try {
       const tenantId = await deps.getTenantId(req.user.id);
-      await requireDriveSubscription(db, tenantId);
+      await requireDriveSubscription(db, tenantId, req.user.id);
       next();
     } catch (e: any) {
       res.status(e.status || 503).json({
@@ -143,12 +146,26 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
 
   app.get(`${BASE}/capabilities`, handle(async (req, res) => {
     const tenantId = await deps.getTenantId(req.user.id);
-    res.set('Cache-Control', 'no-store').json(await driveCapability(db, tenantId));
+    res.set('Cache-Control', 'no-store').json(await driveCapability(db, tenantId, req.user.id));
   }));
+
+  for (const action of ['connect', 'refresh'] as const) {
+    app.post(`${BASE}/local/${action}`, handle(async (req, res) => {
+      if (process.env.OFFLINE_MODE !== 'true') throw new DesktopError(404, 'LOCAL_ONLY', 'Disponible dans le client de bureau uniquement.');
+      if (req.deviceId) throw new DesktopError(403, 'DEVICE_TOKEN_NOT_ALLOWED', 'Utilisez votre session du client de bureau.');
+      const tenantId = await deps.getTenantId(req.user.id);
+      try {
+        res.set('Cache-Control', 'no-store').json(await localDrive[action]({ userId: req.user.id, tenantId }));
+      } catch (e: any) {
+        throw new DesktopError(e.status || 503, e.code || 'DRIVE_LOCAL_UNAVAILABLE', e.status ? e.message : 'Le service Drive local est indisponible.');
+      }
+    }));
+  }
 
   // Only a registered, authenticated device can obtain its own bounded grant.
   // The paid middleware above rechecks tenant membership/subscription first.
   app.post(`${BASE}/offline-license`, handle(async (req, res) => {
+    if (process.env.OFFLINE_MODE === 'true') throw new DesktopError(404, 'CLOUD_ONLY', 'Les autorisations Drive sont émises uniquement par le service en ligne.');
     if (!req.deviceId) throw new DesktopError(403, 'DEVICE_TOKEN_REQUIRED', 'Connectez un appareil Drive pour obtenir son autorisation hors connexion.');
     const tenantId = await deps.getTenantId(req.user.id);
     const { data, error } = await db.from('tenants').select('plan, trial_ends_at, suspended_at').eq('id', tenantId).maybeSingle();
@@ -163,6 +180,7 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
   // ── Appareils ──────────────────────────────────────────────────────────────
 
   app.post(`${BASE}/devices`, handle(async (req, res) => {
+    if (process.env.OFFLINE_MODE === 'true') throw new DesktopError(409, 'DRIVE_USE_LOCAL_CONNECT', 'Utilisez la connexion Drive du client de bureau.');
     // Un appareil ne s'enregistre pas lui-même : il faut la session de l'application.
     if (req.deviceId) throw new DesktopError(403, 'DEVICE_TOKEN_NOT_ALLOWED', "Un appareil ne peut pas en enregistrer un autre.");
     const parsed = parseDeviceInput(req.body);
@@ -177,11 +195,19 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
   }));
 
   app.get(`${BASE}/devices`, handle(async (req, res) => {
+    if (process.env.OFFLINE_MODE === 'true') {
+      const tenantId = await deps.getTenantId(req.user.id);
+      return void res.set('Cache-Control', 'no-store').json(await localDrive.devices({ userId: req.user.id, tenantId }));
+    }
     const devices = await listDevices(db, req.user.id);
     res.json(devices.map(d => ({ ...d, current: d.id === req.deviceId })));
   }));
 
   app.delete(`${BASE}/devices/:id`, handle(async (req, res) => {
+    if (process.env.OFFLINE_MODE === 'true') {
+      const tenantId = await deps.getTenantId(req.user.id);
+      return void res.json(await localDrive.disconnect({ userId: req.user.id, tenantId }, String(req.params.id)));
+    }
     const revoked = await revokeDevice(db, req.user.id, String(req.params.id));
     if (!revoked) throw new DesktopError(404, 'DEVICE_NOT_FOUND', 'Appareil introuvable.');
     res.json({ success: true });
@@ -191,8 +217,16 @@ export function registerDesktopSyncRoutes(app: Express, deps: DesktopRouteDeps) 
 
   app.get(`${BASE}/roots`, handle(async (req, res) => {
     const memberships = await listMembershipsWithTenants(db, req.user.id);
-    const eligible = await Promise.all(memberships.map(async m =>
-      (await driveCapability(db, m.tenantId)).enabled ? m : null));
+    const eligible = await Promise.all(memberships.map(async m => {
+      try { return (await driveCapability(db, m.tenantId, req.user.id)).enabled ? m : null; }
+      catch (e: any) {
+        // A local install currently links one cabinet; do not let another
+        // membership hide the valid root or leak into its device-bound grant.
+        if (process.env.OFFLINE_MODE === 'true'
+          && ['DRIVE_CLOUD_LINK_REQUIRED', 'DRIVE_IDENTITY_MISMATCH'].includes(e.code)) return null;
+        throw e;
+      }
+    }));
     res.set('Cache-Control', 'no-store').json(eligible.filter((m): m is NonNullable<typeof m> => m !== null).map(m => ({
       tenantId: m.tenantId, name: m.tenantName, role: m.systemRole, isDefault: m.isDefault,
       nodeId: `tenant:${m.tenantId}`,

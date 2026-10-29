@@ -4827,4 +4827,13 @@ export default {
   "drive_access_cancel": "Annuler",
   "drive_access_revoke_error": "La déconnexion a échoué. Réessayez.",
   "drive_access_devices_help": "Vous pouvez déconnecter vos appareils même après la fin de votre abonnement.",
+  "drive_local_authorized": "Autorisation de ce poste vérifiée",
+  "drive_local_unconfigured": "La configuration Drive de ce client doit être finalisée avant activation.",
+  "drive_local_required": "Une vérification en ligne de ce poste est nécessaire. Vérifiez aussi la date et l’heure du système.",
+  "drive_local_until": "Autorisation valable jusqu’au {{date}}",
+  "drive_local_connect": "Connecter ce poste",
+  "drive_local_connecting": "Connexion…",
+  "drive_local_error": "Vérification Drive impossible. Vérifiez le compte cloud lié, l’abonnement, la connexion et l’heure du poste. Les fichiers locaux sont conservés.",
+  "drive_local_revoke_pending": "Ce poste est déconnecté localement. La révocation sur le serveur sera réessayée à la reconnexion.",
+  "drive_local_device": "Ce poste",
 };
