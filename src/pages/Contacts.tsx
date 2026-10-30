@@ -1,6 +1,6 @@
 import { useState, useEffect, FormEvent, useMemo, ChangeEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud, IconGitMerge, IconTable, IconLayoutSidebar } from '@tabler/icons-react';
+import { IconPlus, IconSearch, IconUser, IconBuilding, IconSettings, IconTrash, IconFileText, IconEdit, IconChevronUp, IconChevronDown, IconFilter, IconAlertTriangle, IconRefresh, IconCloud, IconGitMerge, IconTable, IconLayoutSidebar, IconUpload, IconDownload } from '@tabler/icons-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { launchOriginRef } from '../lib/launchOrigin';
 import { useTranslation } from 'react-i18next';
@@ -646,18 +646,18 @@ export default function Contacts() {
         )}
       </AnimatePresence>
 
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3 xl:gap-4">
+        <div className="shrink-0">
           <h2 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('contacts')}</h2>
           <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('contacts_subtitle')}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 xl:justify-end">
           <button
             onClick={() => document.getElementById('file-upload')?.click()}
             className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
-            <IconFileText size={14} className="md:size-[18px]" />
+            <IconUpload size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('contacts_import_label')}</span>
           </button>
           <input id="file-upload" type="file" className="hidden" accept=".vcf,.xlsx,.xls,.csv,.xml" onChange={handleImport} />
@@ -666,7 +666,7 @@ export default function Contacts() {
             className="flex items-center gap-1 md:gap-2 px-2 py-1 md:px-4 md:py-2 rounded-md text-xs md:text-sm font-medium transition-colors shadow-sm"
             style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
           >
-            <IconFileText size={14} className="md:size-[18px]" />
+            <IconDownload size={14} className="md:size-[18px]" />
             <span className="hidden md:inline">{t('contacts_export_label')}</span>
           </button>
           <button
@@ -735,8 +735,8 @@ export default function Contacts() {
       </div>
 
       {/* Search and Filters */}
-      <div className="flex flex-col md:flex-row gap-4">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-3">
+        <div className="relative w-full">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
           <input
             type="text"
@@ -747,7 +747,7 @@ export default function Contacts() {
             onChange={e => setSearchQuery(e.target.value)}
           />
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:flex xl:flex-wrap gap-2">
           <div className="relative">
             <IconFilter className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
             <select

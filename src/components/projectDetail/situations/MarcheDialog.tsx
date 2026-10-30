@@ -79,7 +79,12 @@ export function MarcheDialog({
 
   const set = <K extends keyof MarcheForm>(k: K, v: MarcheForm[K]) => setForm((f) => ({ ...f, [k]: v }));
 
+  const lotSelectionne = lots.find((l) =>
+    String(l.lot_number ?? '').trim() === form.lot_numero.trim()
+    && String(l.lot_title ?? '').trim() === form.lot_titre.trim());
+
   const reprendreLot = (lotId: string) => {
+    if (lotId === '') { setForm((f) => ({ ...f, lot_numero: '', lot_titre: '' })); return; }
     const lot = lots.find((l) => l.id === lotId);
     if (!lot) return;
     setForm((f) => ({
@@ -137,26 +142,36 @@ export function MarcheDialog({
       )}
     >
       <div className="space-y-4">
-        {!marche && lots.length > 0 && (
-          <Champ label={t('situations_travaux_marche_from_lot')} htmlFor={id('lot')}>
-            <select id={id('lot')} className={inputClass} defaultValue="" onChange={(e) => reprendreLot(e.target.value)}>
-              <option value="">{t('situations_travaux_marche_from_lot_none')}</option>
-              {lots.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {[l.lot_number, l.lot_title, l.contact_name].filter(Boolean).join(' · ')}
-                </option>
-              ))}
-            </select>
-          </Champ>
+        {lots.length > 0 ? (
+          // La liste des lots de l'opération (ACT) fait foi : numéro et intitulé ne se saisissent plus.
+          <div className="grid grid-cols-1 sm:grid-cols-[6rem_1fr] gap-3">
+            <Champ label={t('situations_travaux_lot_number')} htmlFor={id('num')}>
+              <input id={id('num')} className={inputClass} value={form.lot_numero} readOnly tabIndex={-1} />
+            </Champ>
+            <Champ label={t('situations_travaux_lot_title')} htmlFor={id('lot')}>
+              <select id={id('lot')} className={inputClass} value={lotSelectionne?.id ?? (form.lot_numero || form.lot_titre ? '__courant__' : '')} onChange={(e) => reprendreLot(e.target.value)}>
+                <option value="">{t('situations_travaux_marche_from_lot_none')}</option>
+                {!lotSelectionne && (form.lot_numero || form.lot_titre) && (
+                  <option value="__courant__">{[form.lot_numero, form.lot_titre].filter(Boolean).join(' · ')}</option>
+                )}
+                {lots.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {[l.lot_number, l.lot_title, l.contact_name].filter(Boolean).join(' · ')}
+                  </option>
+                ))}
+              </select>
+            </Champ>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-[6rem_1fr] gap-3">
+            <Champ label={t('situations_travaux_lot_number')} htmlFor={id('num')}>
+              <input id={id('num')} className={inputClass} value={form.lot_numero} onChange={(e) => set('lot_numero', e.target.value)} />
+            </Champ>
+            <Champ label={t('situations_travaux_lot_title')} htmlFor={id('titre')}>
+              <input id={id('titre')} className={inputClass} value={form.lot_titre} onChange={(e) => set('lot_titre', e.target.value)} />
+            </Champ>
+          </div>
         )}
-        <div className="grid grid-cols-1 sm:grid-cols-[6rem_1fr] gap-3">
-          <Champ label={t('situations_travaux_lot_number')} htmlFor={id('num')}>
-            <input id={id('num')} className={inputClass} value={form.lot_numero} onChange={(e) => set('lot_numero', e.target.value)} />
-          </Champ>
-          <Champ label={t('situations_travaux_lot_title')} htmlFor={id('titre')}>
-            <input id={id('titre')} className={inputClass} value={form.lot_titre} onChange={(e) => set('lot_titre', e.target.value)} />
-          </Champ>
-        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Champ label={t('situations_travaux_company')} htmlFor={id('ent')}>
             <input id={id('ent')} className={inputClass} value={form.entreprise_nom} onChange={(e) => set('entreprise_nom', e.target.value)} required />
