@@ -13,6 +13,7 @@ import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
+import { keepLocalCopy } from '../../lib/localPhotoCopy';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
@@ -450,7 +451,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                 </div>
               ))}
             </div>
-            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { keepLocalCopy(Array.from(e.target.files ?? [])); handleFiles(e.target.files); e.target.value = ''; }} />
             <input ref={galleryInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           </div>
 

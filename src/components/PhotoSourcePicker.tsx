@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { IconCamera, IconPhotoPlus, IconX } from '@tabler/icons-react';
+import { keepLocalCopy } from '../lib/localPhotoCopy';
 
 /** Un doigt (téléphone, tablette) : c'est là que l'appareil photo a un sens. */
 function isTouchDevice(): boolean {
@@ -46,10 +47,14 @@ export function PhotoSourcePicker({
     else galleryRef.current?.click();
   };
 
-  const deliver = (input: HTMLInputElement) => {
+  const deliver = (input: HTMLInputElement, fromCamera = false) => {
     const files = Array.from(input.files ?? []);
     input.value = '';
-    if (files.length) onFiles(multiple ? files : files.slice(0, 1));
+    if (!files.length) return;
+    const kept = multiple ? files : files.slice(0, 1);
+    // Copie sur l'appareil (réglage personnel) : seulement pour une photo qui vient d'être prise.
+    if (fromCamera) keepLocalCopy(kept);
+    onFiles(kept);
   };
 
   // `click()` doit partir du geste de l'utilisateur : on déclenche l'entrée AVANT de fermer la feuille.
@@ -62,7 +67,7 @@ export function PhotoSourcePicker({
     <>
       {children(open)}
       <input ref={cameraRef} type="file" accept={accept} capture="environment" className="hidden" tabIndex={-1} aria-hidden
-        onChange={e => deliver(e.currentTarget)} />
+        onChange={e => deliver(e.currentTarget, true)} />
       <input ref={galleryRef} type="file" accept={accept} multiple={multiple} className="hidden" tabIndex={-1} aria-hidden
         onChange={e => deliver(e.currentTarget)} />
       {sheet && createPortal(
