@@ -231,6 +231,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
       size="xl"
       onClose={onClose}
       busy={!!busy}
+      bodyClassName="p-4 sm:p-6"
       footer={<button type="button" onClick={onClose} disabled={!!busy} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>Fermer</button>}
     >
       <div className="space-y-6">
