@@ -37,6 +37,8 @@ const SMTP_SOCKET_TIMEOUT_MS = 40_000;
 
 /** Réponse « en cours » donnée avant le délai des passerelles (~60 s), pour ne jamais finir en 504 muet. */
 export const DIFFUSION_RESPONSE_DEADLINE_MS = 45_000;
+/** Même quand le téléversement a déjà consommé le budget, on laisse cette fenêtre aux envois rapides avant de répondre « en cours ». */
+const MIN_RESPONSE_WINDOW_MS = 2_000;
 
 /** Un compte-rendu avec ses photos reste sous ce poids ; au-delà, la plupart des boîtes refuseraient le message. */
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
@@ -56,7 +58,10 @@ const safeFilename = (name: unknown, fallback: string): string => {
 };
 
 export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  app.post("/api/reports/:reportId/diffuse", sendEmailLimiter, handleDocumentUpload('file'), async (req: any, res: any) => {
+  // `startedAt` est pris AVANT le téléversement du PDF : sur une connexion lente il peut durer plusieurs dizaines
+  // de secondes, et la passerelle compte son délai depuis le début de la requête, pas depuis la fin de l'envoi du fichier.
+  const markStart = (req: any, _res: any, next: any) => { req.diffusionStartedAt = Date.now(); next(); };
+  app.post("/api/reports/:reportId/diffuse", sendEmailLimiter, markStart, handleDocumentUpload('file'), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
       const { reportId } = req.params;
@@ -212,7 +217,10 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
       // ne coupe (504 sans corps) : les envois se poursuivent et le statut passe à « diffusé » à
       // leur terme. Le client relit alors le compte-rendu (voir sendDiffusion).
       let timer: NodeJS.Timeout | undefined;
-      const deadline = new Promise<'deadline'>(resolve => { timer = setTimeout(() => resolve('deadline'), DIFFUSION_RESPONSE_DEADLINE_MS); });
+      // Délai restant sur le budget total de la requête (téléversement et lectures déjà écoulés compris).
+      const elapsed = Date.now() - (req.diffusionStartedAt ?? Date.now());
+      const remaining = Math.max(MIN_RESPONSE_WINDOW_MS, DIFFUSION_RESPONSE_DEADLINE_MS - elapsed);
+      const deadline = new Promise<'deadline'>(resolve => { timer = setTimeout(() => resolve('deadline'), remaining); });
       const outcome = await Promise.race([allDone, deadline]);
       clearTimeout(timer);
       if (outcome === 'deadline') {
