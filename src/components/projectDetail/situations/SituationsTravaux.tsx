@@ -606,7 +606,7 @@ export function SituationsTravaux({ projectId, lots, operation, clientSiret, isP
       <MarcheDialog
         open={marcheEdite !== null}
         marche={marcheEdite && marcheEdite !== 'new' ? marcheEdite : null}
-        lots={lots.filter((l) => !!(l.lot_number || l.lot_title) && (montantLot(l) > 0 || !!l.contact_name))}
+        lots={lots.filter((l) => !!(l.lot_number || l.lot_title))}
         onClose={() => setMarcheEdite(null)}
         onSave={enregistrerMarche}
       />

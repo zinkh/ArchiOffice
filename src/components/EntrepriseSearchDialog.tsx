@@ -51,6 +51,7 @@ export function EntrepriseSearchDialog({ onClose, lots = [], dejaConsultes = new
   const entree = useRef<HTMLInputElement>(null);
   // Une réponse qui arrive après une recherche plus récente ne doit pas l'écraser.
   const derniere = useRef(0);
+  const annulation = useRef<AbortController | null>(null);
 
   useEffect(() => { entree.current?.focus(); }, []);
   useEffect(() => {
@@ -61,6 +62,11 @@ export function EntrepriseSearchDialog({ onClose, lots = [], dejaConsultes = new
 
   const chercher = async (numeroPage = 1) => {
     if (q.trim().length < 2) { setErreur('Saisissez au moins deux caractères.'); return; }
+    // Une recherche précédente restée sans réponse est abandonnée : elle ne doit pas bloquer la suivante.
+    annulation.current?.abort();
+    const ctrl = new AbortController();
+    annulation.current = ctrl;
+    const delai = setTimeout(() => ctrl.abort(), 20000);
     const id = ++derniere.current;
     setChargement(true);
     setErreur(null);
@@ -69,15 +75,16 @@ export function EntrepriseSearchDialog({ onClose, lots = [], dejaConsultes = new
     if (batiment) params.set('batiment', '1');
     if (rge) params.set('rge', '1');
     try {
-      const r = await apiFetch<ReponseRecherche>(`/api/entreprises/search?${params.toString()}`);
+      const r = await apiFetch<ReponseRecherche>(`/api/entreprises/search?${params.toString()}`, { signal: ctrl.signal });
       if (id !== derniere.current) return;
       setReponse(r);
       setPage(numeroPage);
     } catch (e: any) {
       if (id !== derniere.current) return;
       setReponse(null);
-      setErreur(e?.message || 'La recherche a échoué.');
+      setErreur(e?.name === 'AbortError' ? 'La recherche a mis trop de temps. Réessayez.' : (e?.message || 'La recherche a échoué.'));
     } finally {
+      clearTimeout(delai);
       if (id === derniere.current) setChargement(false);
     }
   };
@@ -160,7 +167,7 @@ export function EntrepriseSearchDialog({ onClose, lots = [], dejaConsultes = new
           <label className="flex items-center gap-1.5 text-xs pb-2" style={{ color: 'var(--tblr-text)' }}>
             <input type="checkbox" className="w-3.5 h-3.5 rounded" checked={rge} onChange={e => setRge(e.target.checked)} /> RGE uniquement
           </label>
-          <button type="submit" disabled={chargement} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5">
+          <button type="submit" className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5">
             {chargement ? <IconLoader2 size={13} className="animate-spin" /> : <IconSearch size={13} />} Rechercher
           </button>
         </form>

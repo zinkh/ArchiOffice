@@ -17,6 +17,9 @@ export function CompanyAutocomplete({ label, value, onChange, placeholder, requi
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // Une réponse qui arrive après une saisie plus récente ne doit pas l'écraser.
+  const lastRequest = useRef(0);
+  const controller = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setQuery(value || '');
@@ -48,17 +51,30 @@ export function CompanyAutocomplete({ label, value, onChange, placeholder, requi
   }, [query, showSuggestions]);
 
   const fetchCompanies = async (searchQuery: string) => {
+    controller.current?.abort();
+    const ctrl = new AbortController();
+    controller.current = ctrl;
+    const id = ++lastRequest.current;
+    // Un appel qui ne répond jamais (réseau instable sur tablette) ne doit pas bloquer les recherches suivantes.
+    const timeout = setTimeout(() => ctrl.abort(), 10000);
     setIsLoading(true);
     try {
-      const response = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(searchQuery)}&per_page=5`);
+      const response = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(searchQuery)}&per_page=5`, { signal: ctrl.signal });
+      if (id !== lastRequest.current) return;
       if (response.ok) {
         const data = await response.json();
+        if (id !== lastRequest.current) return;
         setSuggestions(data.results || []);
+      } else {
+        setSuggestions([]);
       }
     } catch (error) {
-      console.error("Error fetching companies:", error);
+      if (id !== lastRequest.current) return;
+      setSuggestions([]);
+      if ((error as any)?.name !== 'AbortError') console.error("Error fetching companies:", error);
     } finally {
-      setIsLoading(false);
+      clearTimeout(timeout);
+      if (id === lastRequest.current) setIsLoading(false);
     }
   };
 
