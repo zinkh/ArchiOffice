@@ -19,6 +19,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
 import { sendViaAccount } from '../mailSend';
+import { combinedSendError, sendMailWithSenderFallback } from '../smtpSend';
 import {
   buildDiffusionMail, buildDiffusionRecipients, MAX_DIFFUSION_RECIPIENTS,
   type DiffusionRecipient,
@@ -175,6 +176,7 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
         const attachments = [{ filename, content: file.buffer, contentType: 'application/pdf' }];
         try {
           let viaAccount = false;
+          let accountError: unknown = null;
           if (defaultAccount) {
             try {
               await sendViaAccount(supabaseAdmin, defaultAccount, { to: r.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
@@ -182,15 +184,21 @@ export function registerSiteReportDiffusionRoutes(app: Express, { supabaseAdmin,
             } catch (accountErr: any) {
               // Jeton révoqué, IMAP sans SMTP propre, pièce trop lourde : repli sur le SMTP du cabinet s'il existe.
               console.warn('[POST /api/reports/:reportId/diffuse] envoi via la boîte connectée impossible', accountErr?.message);
+              accountError = accountErr;
               if (!transporter) throw accountErr;
             }
           }
           if (!viaAccount) {
-            await transporter!.sendMail({
-              from, replyTo, to: r.email,
-              subject: mail.subject, text: mail.text, html: mail.html,
-              attachments,
-            });
+            try {
+              await sendMailWithSenderFallback(transporter!, {
+                from, replyTo, to: r.email,
+                subject: mail.subject, text: mail.text, html: mail.html,
+                attachments,
+              }, smtpUser);
+            } catch (smtpErr) {
+              // Les deux chemins ont échoué : on garde les deux messages, la vraie cause est souvent celle de la boîte connectée.
+              throw accountError ? new Error(combinedSendError(defaultAccount, accountError, smtpErr)) : smtpErr;
+            }
           }
           sent.push({ contact_id: r.contactId, name: r.name, email: r.email, observations: r.observations.length + r.previousObservations.length });
         } catch (err: any) {

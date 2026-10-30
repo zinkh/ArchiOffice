@@ -16,6 +16,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
 import { sendViaAccount } from '../mailSend';
+import { combinedSendError, sendMailWithSenderFallback } from '../smtpSend';
 import { loadReserveContext, RESERVE_KINDS, RESERVE_TITLE, readKind, readLots, type ReserveKind } from '../reserveDiffusionContext';
 import {
   buildReserveMail, statutDiffusion,
@@ -179,17 +180,24 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
 
       try {
         let viaAccount = false;
+        let accountError: unknown = null;
         if (defaultAccount) {
           try {
             await sendViaAccount(supabaseAdmin, defaultAccount, { to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
             viaAccount = true;
           } catch (accountErr: any) {
             console.warn('[POST reserve-exports/send] envoi via la boîte connectée impossible', accountErr?.message);
+            accountError = accountErr;
             if (!transporter) throw accountErr;
           }
         }
         if (!viaAccount) {
-          await transporter!.sendMail({ from: sender.from, replyTo, to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
+          try {
+            await sendMailWithSenderFallback(transporter!, { from: sender.from, replyTo, to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments }, smtpUser);
+          } catch (smtpErr) {
+            // Les deux chemins ont échoué : on garde les deux messages, la vraie cause est souvent celle de la boîte connectée.
+            throw accountError ? new Error(combinedSendError(defaultAccount, accountError, smtpErr)) : smtpErr;
+          }
         }
       } catch (err: any) {
         console.error('[POST reserve-exports/send] envoi impossible', recipient.key, err?.message);
