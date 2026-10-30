@@ -173,7 +173,8 @@ export async function exportReservesToPDF(
     summaryBody.push([{
       content: `${g.label} (${g.rows.length} réserve${g.rows.length > 1 ? 's' : ''})`,
       colSpan: 6,
-      styles: { fontStyle: 'bold', fillColor: [229, 231, 235], textColor: GRIS_TEXTE },
+      // `halign: 'left'` : sans lui, la cellule étendue hérite de la colonne des numéros, alignée à droite.
+      styles: { halign: 'left', fontStyle: 'bold', fillColor: [229, 231, 235], textColor: GRIS_TEXTE },
     }]);
     for (const r of g.rows) {
       const retard = reserveIsOverdue(r);
