@@ -167,7 +167,7 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
         connectionTimeout: SMTP_TIMEOUT_MS, greetingTimeout: SMTP_TIMEOUT_MS, socketTimeout: 40_000,
       }) : null;
       const sender = await resolveEmailSender(supabaseAdmin, { tenantId, userId: req.user.id, settings });
-      const replyTo = sender.replyTo || req.user.email || settings.email || undefined;
+      const replyTo = sender.replyTo || settings.email || req.user.email || undefined;
 
       const open = ctx.reserves.filter(r => recipient.reserveIds.includes(r.id) && !['Levée', 'Quitus Transmis'].includes(r.status)).length;
       const mail = buildReserveMail({
@@ -179,24 +179,25 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
       const attachments = [{ filename, content: file.buffer, contentType: 'application/pdf' }];
 
       try {
-        let viaAccount = false;
-        let accountError: unknown = null;
-        if (defaultAccount) {
+        // Le SMTP du cabinet d'abord : le message part de l'adresse de l'agence. La boîte connectée de la
+        // personne ne sert qu'en repli, ou quand le cabinet n'a pas de SMTP.
+        let smtpError: unknown = null;
+        let sentBySmtp = false;
+        if (transporter) {
           try {
-            await sendViaAccount(supabaseAdmin, defaultAccount, { to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
-            viaAccount = true;
-          } catch (accountErr: any) {
-            console.warn('[POST reserve-exports/send] envoi via la boîte connectée impossible', accountErr?.message);
-            accountError = accountErr;
-            if (!transporter) throw accountErr;
+            await sendMailWithSenderFallback(transporter, { from: sender.from, replyTo, to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments }, smtpUser);
+            sentBySmtp = true;
+          } catch (err) {
+            console.warn('[POST reserve-exports/send] envoi par le SMTP du cabinet impossible', (err as any)?.message);
+            smtpError = err;
+            if (!defaultAccount) throw err;
           }
         }
-        if (!viaAccount) {
+        if (!sentBySmtp) {
           try {
-            await sendMailWithSenderFallback(transporter!, { from: sender.from, replyTo, to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments }, smtpUser);
-          } catch (smtpErr) {
-            // Les deux chemins ont échoué : on garde les deux messages, la vraie cause est souvent celle de la boîte connectée.
-            throw accountError ? new Error(combinedSendError(defaultAccount, accountError, smtpErr)) : smtpErr;
+            await sendViaAccount(supabaseAdmin, defaultAccount, { to: recipient.email, subject: mail.subject, text: mail.text, html: mail.html, attachments });
+          } catch (accountErr) {
+            throw smtpError ? new Error(combinedSendError(defaultAccount, accountErr, smtpError)) : accountErr;
           }
         }
       } catch (err: any) {
