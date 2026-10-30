@@ -342,7 +342,8 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
+        // Pas de fermeture au clic sur le fond : un appui involontaire faisait perdre la saisie.
+        // On ferme par la croix ou « Annuler ».
       />
       <motion.div
         ref={setPanelRef}
