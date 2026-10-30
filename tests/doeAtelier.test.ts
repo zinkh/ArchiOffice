@@ -65,6 +65,15 @@ function cabinet(options: { smtp?: boolean } = {}): Cabinet {
 const etat = (c: Cabinet) => request(app).get(`/api/projects/${c.projectId}/doe`).set(authHeader(c.token));
 const entrepriseDe = (body: any, key: string) => body.entreprises.find((e: any) => e.key === key);
 
+it('affiche le nom de la fiche contact quand le lot n\u2019a pas de nom saisi', async () => {
+  const c = cabinet();
+  const contactId = uid('contact');
+  fakeSupabaseAdmin.seed('contacts', [{ id: contactId, tenant_id: c.tenantId, company_name: 'Couvertures Martin', email: 'cm@example.test' }]);
+  fakeSupabaseAdmin.seed('project_lots', [{ id: uid('lot'), tenant_id: c.tenantId, project_id: c.projectId, lot_number: '04', lot_title: 'Zinguerie', contact_id: contactId, contact_name: '' }]);
+  const res = await etat(c);
+  expect(entrepriseDe(res.body, contactId)).toMatchObject({ nom: 'Couvertures Martin', email: 'cm@example.test' });
+});
+
 async function lien(c: Cabinet, key: string, extra: Record<string, any> = {}) {
   const res = await request(app).post(`/api/projects/${c.projectId}/doe/requests`).set(authHeader(c.token))
     .send({ entreprise_key: key, mode: 'lien', ...extra });

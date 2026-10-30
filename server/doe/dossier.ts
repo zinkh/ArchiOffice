@@ -7,6 +7,7 @@ import {
   statutEntreprise, syntheseOperation,
   type Couverture, type DoeAvisVisa, type DoePieceKey, type DoeStatut, type SyntheseDoe,
 } from '../../src/lib/doeAtelier';
+import { contactLabel } from '../../src/lib/crDiffusion';
 
 /** Une instance dont la base n'a pas joué migrate_doe_atelier.sql lit un atelier vide. */
 export function tableAbsente(error: any): boolean {
@@ -124,9 +125,19 @@ export async function chargerDossier(supabaseAdmin: any, tenantId: string, proje
   // Adresses des fiches contact.
   const idsContacts = [...new Set([...parCle.values()].map(e => e.contact_id).filter((x): x is string => !!x))];
   const emailsContacts = new Map<string, string>();
+  const nomsContacts = new Map<string, string>();
   if (idsContacts.length) {
-    const { data } = await supabaseAdmin.from('contacts').select('id, email').eq('tenant_id', tenantId).in('id', idsContacts);
-    for (const c of (data as any[]) || []) if (c.email) emailsContacts.set(c.id, c.email);
+    const { data } = await supabaseAdmin.from('contacts').select('id, email, name, company_name, first_name, last_name').eq('tenant_id', tenantId).in('id', idsContacts);
+    for (const c of (data as any[]) || []) {
+      if (c.email) emailsContacts.set(c.id, c.email);
+      const libelle = contactLabel(c);
+      if (libelle) nomsContacts.set(c.id, libelle);
+    }
+  }
+  // Un lot rattaché à une fiche mais sans nom saisi retombait sur l'identifiant : on affiche le nom de la fiche.
+  for (const e of parCle.values()) {
+    const fiche = e.contact_id ? nomsContacts.get(e.contact_id) : null;
+    if (fiche && (!e.nom || e.nom === e.key || e.nom === e.contact_id)) e.nom = fiche;
   }
 
   for (const e of parCle.values()) {
