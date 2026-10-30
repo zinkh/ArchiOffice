@@ -14,9 +14,8 @@ import {
   IconChevronRight,
   IconMapPin,
   IconCamera,
-  IconFileTypePdf,
+  IconSend,
   IconSearch,
-  IconLoader2,
   IconMessage,
   IconTag,
   IconStack2,
@@ -42,6 +41,7 @@ import type { Plan, ReservePhoto } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
+import { ReserveDiffusionDialog } from './ReserveDiffusionDialog';
 import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
 // Sélection multiple : les mêmes composants que le DPGF et le BPU (barre d'actions et menus à cocher).
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
@@ -153,7 +153,6 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const [filter, setFilter] = useState<Filter>('toutes');
   const [search, setSearch] = useState('');
   const [entrepriseFilter, setEntrepriseFilter] = useState('');
-  const [exporting, setExporting] = useState<string | null>(null);
 
   const reserveStats = useMemo(() => ({
     ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
@@ -383,19 +382,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     />
   );
 
-  const handleExport = async () => {
+  // « Diffusion et export » : fenêtre de périmètre (liste ou lots), téléchargement, envoi par e-mail et suivi.
+  const [diffusionOpen, setDiffusionOpen] = useState(false);
+  const openDiffusion = () => {
     if (!project || !settings) { alert(t('reserve_tracker_settings_not_loaded')); return; }
-    if (visible.length === 0) { alert(t('reserve_tracker_no_reserves_to_export')); return; }
-    setExporting('Préparation…');
-    try {
-      const { exportReservesToPDF } = await import('../../lib/reservesExport');
-      await exportReservesToPDF(visible, plans, project, settings, { title, onProgress: setExporting });
-    } catch (err) {
-      console.error('[ReserveTracker] export', err);
-      alert(t('reserve_tracker_export_failed'));
-    } finally {
-      setExporting(null);
-    }
+    setDiffusionOpen(true);
   };
 
   const openForCreation = () => setCreating(true);
@@ -461,14 +452,14 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 </select>
               )}
               <button
-                onClick={handleExport}
-                disabled={!!exporting || reserves.length === 0}
+                onClick={openDiffusion}
+                disabled={reserves.length === 0}
                 className="flex items-center justify-center gap-2 px-3 py-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-sm font-bold transition disabled:opacity-50"
-                title="Exporter la liste de réserves en PDF"
-                aria-label="Exporter la liste de réserves en PDF"
+                title="Diffusion et export de la liste de réserves"
+                aria-label="Diffusion et export de la liste de réserves"
               >
-                {exporting ? <IconLoader2 size={14} className="animate-spin" /> : <IconFileTypePdf size={14} />}
-                <span className="hidden sm:inline">{exporting || 'Exporter PDF'}</span>
+                <IconSend size={14} />
+                <span className="hidden sm:inline">Diffusion et export</span>
               </button>
               <button
                 onClick={openForCreation}
@@ -718,6 +709,20 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
 
         <ListFooter shown={shownCount} total={totalCount} onMore={showMore} />
       </div>
+
+      {diffusionOpen && project && settings && (
+        <ReserveDiffusionDialog
+          kind={apiBase === '/api/gpa-reserves' ? 'gpa' : 'opr'}
+          title={title}
+          projectId={projectId}
+          reserves={reserves}
+          plans={plans}
+          project={project}
+          settings={settings}
+          lots={(lotsList ?? []).map(l => ({ id: l.id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id, contact_name: l.contact_name }))}
+          onClose={() => setDiffusionOpen(false)}
+        />
+      )}
 
       <AnimatePresence>
       {(creating || openReserve) && (
