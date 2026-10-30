@@ -28,6 +28,13 @@ export interface SendViaAccountParams {
   attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
 
+/**
+ * Gmail : l'appel simple (`raw` en base64url dans du JSON) double l'encodage d'un message qui contient déjà ses pièces jointes
+ * en base64 : un PDF de 4 Mo pèse alors plus de 7 Mo dans la requête et dépasse ce que l'appel accepte. Au-delà de ce seuil,
+ * le message part en « media upload » (corps RFC 822 brut, jusqu'à 35 Mo), sans le second encodage.
+ */
+export const GMAIL_INLINE_LIMIT_BYTES = 3 * 1024 * 1024;
+
 /** Outlook (Graph sendMail) n'accepte que des pièces jointes en ligne de moins de ~3 Mo. */
 const OUTLOOK_MAX_INLINE_ATTACHMENT_BYTES = 3 * 1024 * 1024;
 
@@ -52,13 +59,19 @@ export async function sendViaAccount(supabaseAdmin: any, account: MailAccountRow
       composer.compile().build((err: any, msg: Buffer) => (err ? reject(err) : resolve(msg)));
     });
     const accessToken = await getGmailAccessToken(account);
-    const resp = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ raw: message.toString('base64url') }),
-    });
-    const data: any = await resp.json();
-    if (!resp.ok) throw new Error(data.error?.message || "Échec de l'envoi via Gmail");
+    const resp = message.length > GMAIL_INLINE_LIMIT_BYTES
+      ? await fetch('https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'message/rfc822' },
+        body: new Uint8Array(message),
+      })
+      : await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw: message.toString('base64url') }),
+      });
+    const data: any = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(data.error?.message || `Échec de l'envoi via Gmail (${resp.status})`);
     return { id: data.id ?? null };
   }
 

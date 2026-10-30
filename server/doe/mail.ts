@@ -5,6 +5,7 @@
 // l'entreprise reçoive toujours le même expéditeur.
 import nodemailer from 'nodemailer';
 import { isValidEmail } from '../../src/lib/crDiffusion';
+import { sendMailWithSenderFallback } from '../smtpSend';
 
 export interface PieceJointeMail {
   filename: string;
@@ -47,17 +48,19 @@ export async function envoyerMailCabinet(supabaseAdmin: any, tenantId: string, m
     });
     const agence = isValidEmail(s.email) ? String(s.email).trim() : undefined;
     const nom = String(s.agency_name || 'Le cabinet').replace(/["\r\n]/g, '');
-    await transporter.sendMail({
+    await sendMailWithSenderFallback(transporter, {
       from: `"${nom}" <${agence || user}>`,
       to: String(mail.to).trim(),
       replyTo: agence,
       subject: mail.subject.replace(/[\r\n]/g, ' '),
       html: mail.html,
       attachments: mail.attachments,
-    });
+    }, user);
     return { ok: true };
   } catch (err: any) {
     console.error('[doe] Message non envoyé :', err?.message);
-    return { ok: false, raison: "Le message n'a pas pu être envoyé par le serveur d'envoi du cabinet." };
+    // Le motif du serveur (expéditeur refusé, identifiants, délai...) est repris : sans lui, rien ne permet de corriger le réglage.
+    const motif = String(err?.message || '').replace(/\s+/g, ' ').trim().slice(0, 200);
+    return { ok: false, raison: `Le message n'a pas pu être envoyé par le serveur d'envoi du cabinet${motif ? ` : ${motif}` : '.'}` };
   }
 }

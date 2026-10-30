@@ -151,6 +151,8 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
     setBusy('Préparation de la diffusion…');
     let ok = 0;
     let echecs = 0;
+    // Premier motif d'échec renvoyé par le serveur (boîte sans SMTP, pièce jointe trop lourde, identifiants refusés...).
+    let raison = '';
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
       const entree = await apiFetch<JournalRow>(`/api/projects/${projectId}/reserve-exports`, {
@@ -178,10 +180,13 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
         } catch (err: any) {
           console.error('[ReserveDiffusionDialog] envoi', dest.key, err);
           echecs += 1;
+          if (!raison) raison = String(err?.message || '').trim();
         }
       }
+      // Le détail de la diffusion en échec s'ouvre dans le suivi.
+      if (echecs > 0) setOpen(entree.id);
       setMessage(echecs
-        ? { text: `${ok} envoi${ok > 1 ? 's' : ''} réussi${ok > 1 ? 's' : ''}, ${echecs} en échec (voir le suivi ci-dessous).`, error: true }
+        ? { text: `${ok} envoi${ok > 1 ? 's' : ''} réussi${ok > 1 ? 's' : ''}, ${echecs} en échec${raison ? ` : ${raison}` : ' (voir le suivi ci-dessous)'}`, error: true }
         : { text: `${ok} message${ok > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}.` });
     } catch (err: any) {
       console.error('[ReserveDiffusionDialog] diffusion', err);
@@ -231,6 +236,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
       size="xl"
       onClose={onClose}
       busy={!!busy}
+      bodyClassName="p-4 sm:p-6"
       footer={<button type="button" onClick={onClose} disabled={!!busy} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>Fermer</button>}
     >
       <div className="space-y-6">
