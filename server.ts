@@ -112,6 +112,7 @@ import { registerReceptionRoutes } from "./server/routes/receptions";
 import { registerDoeAtelierRoutes } from "./server/routes/doeAtelier";
 import { registerDoeAtelierPublicRoutes } from "./server/routes/doeAtelierPublic";
 import { startDoeReminders } from "./server/doe/relances";
+import { startReserveReminders } from "./server/reserveReminders";
 import { registerReserveRoutes } from "./server/routes/reserves";
 import { registerGpaReserveRoutes } from "./server/routes/gpaReserves";
 import { registerReservePhotoRoutes } from "./server/reservePhotos";
@@ -130,6 +131,7 @@ import { registerSendEmailRoutes } from "./server/routes/sendEmail";
 import { registerMailDraftRoutes } from "./server/routes/mailDrafts";
 import { registerSiteReportRoutes } from "./server/routes/siteReports";
 import { registerSiteReportDiffusionRoutes } from "./server/routes/siteReportDiffusion";
+import { registerReserveExportRoutes } from "./server/routes/reserveExports";
 import { registerSettingsRoutes } from "./server/routes/settings";
 import { registerUploadRoutes } from "./server/routes/uploads";
 import { registerStorageAccessRoutes } from "./server/routes/storageAccess";
@@ -1217,6 +1219,7 @@ export async function createApp() {
   registerMailDraftRoutes(app, { supabaseAdmin, getTenantId });
   registerSiteReportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, captureWithContext, uploadToStorage });
   registerSiteReportDiffusionRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerReserveExportRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerSettingsRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin });
   registerUploadRoutes(app, { supabaseAdmin, getTenantId, uploadToStorage, requireRole });
   registerStorageAccessRoutes(app, { supabaseAdmin, getTenantId });
@@ -1454,6 +1457,7 @@ async function startServer() {
     // Relances automatiques des entreprises qui n'ont pas remis leur DOE
     // (atelier DOE de l'onglet AOR, server/doe/relances.ts).
     startDoeReminders(supabaseAdmin);
+    startReserveReminders(supabaseAdmin);
     // Alertes métier des agents (situations à signaler sans qu'on les
     // demande : études sans contrat signé, facture échue, réserves non
     // levées...) et exécutions planifiées d'agents.

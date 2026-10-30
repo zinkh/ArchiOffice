@@ -14,10 +14,13 @@ import {
   IconChevronRight,
   IconMapPin,
   IconCamera,
-  IconFileTypePdf,
+  IconSend,
   IconSearch,
-  IconLoader2,
   IconMessage,
+  IconTag,
+  IconStack2,
+  IconUsers,
+  IconCalendarDue,
 } from '@tabler/icons-react';
 import { cn } from '../../lib/utils';
 import { CardHeader } from '../ui/Card';
@@ -38,7 +41,13 @@ import type { Plan, ReservePhoto } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
-import { type ReserveLike, StatusSelect, ReservePhotoImage, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+import { ReserveDiffusionDialog } from './ReserveDiffusionDialog';
+import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+// Sélection multiple : les mêmes composants que le DPGF et le BPU (barre d'actions et menus à cocher).
+import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
+import type { ToolbarMenuEntry } from './toolbar/toolbarState';
+import { useReserveOptions } from './useReserveOptions';
+import { dueInDays, listState, setDueDate, setStatus, toggleListValue, type ListField } from '../../lib/reserveBulk';
 
 interface ReserveTrackerProps {
   projectId: string;
@@ -144,7 +153,6 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const [filter, setFilter] = useState<Filter>('toutes');
   const [search, setSearch] = useState('');
   const [entrepriseFilter, setEntrepriseFilter] = useState('');
-  const [exporting, setExporting] = useState<string | null>(null);
 
   const reserveStats = useMemo(() => ({
     ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
@@ -260,19 +268,125 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     } catch (err) { console.error(err); }
   };
 
-  const handleExport = async () => {
-    if (!project || !settings) { alert(t('reserve_tracker_settings_not_loaded')); return; }
-    if (visible.length === 0) { alert(t('reserve_tracker_no_reserves_to_export')); return; }
-    setExporting('Préparation…');
-    try {
-      const { exportReservesToPDF } = await import('../../lib/reservesExport');
-      await exportReservesToPDF(visible, plans, project, settings, { title, onProgress: setExporting });
-    } catch (err) {
-      console.error('[ReserveTracker] export', err);
-      alert(t('reserve_tracker_export_failed'));
-    } finally {
-      setExporting(null);
+  // ── Sélection et modifications en masse ─────────────────────────────────────
+  const { lotOptions, entrepriseOptions } = useReserveOptions(projectId, lotsList);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkNotice, setBulkNotice] = useState<{ text: string; error?: boolean } | null>(null);
+  // Seules les réserves affichées comptent : une réserve masquée par un filtre n'est jamais modifiée sans qu'on la voie.
+  const selected = useMemo(() => visible.filter(r => selectedIds.has(r.id)), [visible, selectedIds]);
+  const allSelected = visible.length > 0 && selected.length === visible.length;
+  const someSelected = selected.length > 0 && !allSelected;
+  const toggleSelected = (id: string) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const selectMany = (ids: string[], on: boolean) => setSelectedIds(prev => {
+    const next = new Set(prev);
+    for (const id of ids) { if (on) next.add(id); else next.delete(id); }
+    return next;
+  });
+  const clearSelection = () => setSelectedIds(new Set());
+
+  useEffect(() => {
+    if (selectedIds.size === 0) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !openReserveId && !creating) clearSelection(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectedIds.size, openReserveId, creating]);
+
+  useEffect(() => {
+    if (!bulkNotice) return;
+    const timer = window.setTimeout(() => setBulkNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [bulkNotice]);
+
+  // Même chemin que le changement de statut d'une réserve (file hors ligne comprise), une réserve à la fois :
+  // l'affichage change tout de suite, et seule une réserve refusée revient à son état d'avant.
+  const applyBulk = async (changed: ReserveLike[]) => {
+    if (!changed.length) return;
+    const originals = new Map(reserves.map(r => [r.id, r]));
+    const updated = new Map(changed.map(r => [r.id, r]));
+    setReserves(prev => prev.map(r => updated.get(r.id) ?? r));
+    let failed = 0;
+    for (const reserve of changed) {
+      try {
+        await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'PUT', url: `${apiBase}/${reserve.id}`, body: reserve });
+      } catch (err) {
+        failed += 1;
+        console.error(err);
+        const original = originals.get(reserve.id);
+        if (original) setReserves(prev => prev.map(r => r.id === reserve.id ? original : r));
+      }
     }
+    setBulkNotice(failed
+      ? { text: `${failed} réserve${failed > 1 ? 's' : ''} sur ${changed.length} n'${failed > 1 ? 'ont' : 'a'} pas pu être modifiée${failed > 1 ? 's' : ''}.`, error: true }
+      : { text: `${changed.length} réserve${changed.length > 1 ? 's modifiées' : ' modifiée'}.` });
+  };
+
+  const deleteSelected = async () => {
+    const count = selected.length;
+    if (!count || !confirm(`Supprimer ${count} réserve${count > 1 ? 's' : ''} ? Cette action est définitive.`)) return;
+    const done: string[] = [];
+    for (const reserve of selected) {
+      try {
+        await queuedJsonRequest({ entity, id: window.crypto.randomUUID(), method: 'DELETE', url: `${apiBase}/${reserve.id}` });
+        done.push(reserve.id);
+      } catch (err) { console.error(err); }
+    }
+    setReserves(prev => prev.filter(r => !done.includes(r.id)));
+    selectMany(done, false);
+    setBulkNotice(done.length === count
+      ? { text: `${count} réserve${count > 1 ? 's supprimées' : ' supprimée'}.` }
+      : { text: `${count - done.length} réserve${count - done.length > 1 ? 's' : ''} sur ${count} n'ont pas pu être supprimée${count - done.length > 1 ? 's' : ''}.`, error: true });
+  };
+
+  const checkedOf = (state: 'tous' | 'certains' | 'aucun'): boolean | 'mixed' => (state === 'tous' ? true : state === 'certains' ? 'mixed' : false);
+
+  const statutEntries = (): ToolbarMenuEntry[] => RESERVE_STATUSES.map(status => ({
+    id: `statut-${status}`, label: status, checked: selected.every(r => r.status === status),
+    onClick: () => applyBulk(setStatus(selected, status)),
+  }));
+
+  const listEntries = (field: ListField, options: { value: string; label: string }[]): ToolbarMenuEntry[] => (
+    options.length === 0
+      ? [{ id: `${field}-none`, label: field === 'lots' ? 'Aucun lot déclaré' : 'Aucune entreprise connue', disabled: true, onClick: () => {} }]
+      : options.map(o => ({
+        id: `${field}-${o.value}`, label: o.label, checked: checkedOf(listState(selected, field, o.value)), keepOpen: true,
+        onClick: () => applyBulk(toggleListValue(selected, field, o.value)),
+      }))
+  );
+
+  const echeanceEntries = (): ToolbarMenuEntry[] => [
+    { id: 'echeance-titre', heading: "À partir d'aujourd'hui" },
+    ...[7, 15, 30].map(days => ({
+      id: `echeance-${days}`, label: `Dans ${days} jours`, onClick: () => applyBulk(setDueDate(selected, dueInDays(days))),
+    })),
+  ];
+
+  const selectionActions: SelectionAction[] = [
+    { id: 'statut', label: 'Statut', icon: <IconTag size={16} />, onClick: () => {}, menu: statutEntries },
+    { id: 'lots', label: 'Lots', icon: <IconStack2 size={16} />, onClick: () => {}, menu: () => listEntries('lots', lotOptions) },
+    { id: 'entreprises', label: 'Entreprises', icon: <IconUsers size={16} />, onClick: () => {}, menu: () => listEntries('entreprises', entrepriseOptions) },
+    { id: 'echeance', label: 'Échéance', icon: <IconCalendarDue size={16} />, onClick: () => {}, menu: echeanceEntries },
+    { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected },
+  ];
+
+  const selectCell = (res: ReserveLike) => (
+    <input
+      type="checkbox"
+      checked={selectedIds.has(res.id)}
+      onChange={() => toggleSelected(res.id)}
+      aria-label={t('pro_select_row', { numero: `#${res.number ?? ''}` })}
+      className="w-4 h-4 align-middle accent-[var(--tblr-primary)]"
+    />
+  );
+
+  // « Diffusion et export » : fenêtre de périmètre (liste ou lots), téléchargement, envoi par e-mail et suivi.
+  const [diffusionOpen, setDiffusionOpen] = useState(false);
+  const openDiffusion = () => {
+    if (!project || !settings) { alert(t('reserve_tracker_settings_not_loaded')); return; }
+    setDiffusionOpen(true);
   };
 
   const openForCreation = () => setCreating(true);
@@ -311,7 +425,15 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         <StatTile label="Levées" color="green" icon={IconCheck} value={reserveStats.levees} sub="Levée + Quitus" />
       </div>
 
-      <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+      <div className={cn('relative rounded-lg overflow-hidden', selected.length > 0 && 'pb-20')} style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+        {selected.length > 0 && (
+          <SelectionBar
+            label={t('pro_selection_count', { count: selected.length })}
+            actions={selectionActions}
+            onClear={clearSelection}
+            isMobile={!isDesktop}
+          />
+        )}
         <CardHeader
           icon={IconClipboardCheck}
           title={title}
@@ -330,14 +452,14 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 </select>
               )}
               <button
-                onClick={handleExport}
-                disabled={!!exporting || reserves.length === 0}
+                onClick={openDiffusion}
+                disabled={reserves.length === 0}
                 className="flex items-center justify-center gap-2 px-3 py-2 pointer-coarse:min-h-11 pointer-coarse:min-w-11 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] rounded-lg text-sm font-bold transition disabled:opacity-50"
-                title="Exporter la liste de réserves en PDF"
-                aria-label="Exporter la liste de réserves en PDF"
+                title="Diffusion et export de la liste de réserves"
+                aria-label="Diffusion et export de la liste de réserves"
               >
-                {exporting ? <IconLoader2 size={14} className="animate-spin" /> : <IconFileTypePdf size={14} />}
-                <span className="hidden sm:inline">{exporting || 'Exporter PDF'}</span>
+                <IconSend size={14} />
+                <span className="hidden sm:inline">Diffusion et export</span>
               </button>
               <button
                 onClick={openForCreation}
@@ -417,6 +539,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           </div>
           <span className="text-xs text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
         </div>
+        {bulkNotice && (
+          <div role="status" className={cn('px-4 py-2 text-xs font-medium border-b border-[var(--tblr-border)]', bulkNotice.error ? 'text-red-700 bg-red-50 dark:bg-red-950/20' : 'text-[var(--tblr-text)] bg-[var(--tblr-surface-2)]')}>
+            {bulkNotice.text}
+          </div>
+        )}
 
         {/* Mobile : une carte par réserve */}
         {!isDesktop && (
@@ -461,7 +588,8 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 </div>
               </button>
               {/* Aligné sur la colonne de texte : vignette de 4 rem + espacement de 0,75 rem. */}
-              <div className="mt-2 pl-[4.75rem]">
+              <div className="mt-2 flex items-center gap-2">
+                <label className="flex h-11 w-11 shrink-0 items-center justify-center">{selectCell(res)}</label>
                 <StatusSelect value={res.status} onChange={s => changeStatus(res, s)} className="max-w-full min-h-9 pointer-coarse:min-h-11 px-3 text-xs" />
               </div>
               </div>
@@ -479,6 +607,16 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           <table className="min-w-full text-sm">
             <thead className="bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] font-bold uppercase text-[0.6875rem] tracking-wider">
               <tr>
+                <th className="pl-4 pr-1 py-3 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected; }}
+                    onChange={() => selectMany(visible.map(r => r.id), !allSelected)}
+                    aria-label={t('pro_select_all')}
+                    className="w-4 h-4 align-middle accent-[var(--tblr-primary)]"
+                  />
+                </th>
                 <th className="px-4 py-3 text-left w-12">N°</th>
                 <th className="px-4 py-3 text-left w-16">Photo</th>
                 <th className="px-4 py-3 text-left">Intitulé</th>
@@ -497,7 +635,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                       className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
                       onClick={() => setExpandedGroups(prev => ({ ...prev, [groupKey]: !expanded }))}
                     >
-                      <td colSpan={8} className="px-4 py-3">
+                      <td colSpan={9} className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                           <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
@@ -513,6 +651,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                           onClick={() => setOpenReserveId(res.id)}
                           className={cn('transition-colors group cursor-pointer', retard > 0 ? 'bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50' : 'hover:bg-[var(--tblr-surface-2)]')}
                         >
+                          <td className="pl-4 pr-1 py-3 w-8" onClick={e => e.stopPropagation()}>{selectCell(res)}</td>
                           <td className="px-4 py-3 font-mono text-[0.6875rem] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
                           <td className="px-4 py-3">
@@ -560,7 +699,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               })}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">Aucune réserve.</span></td>
+                  <td colSpan={9} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">Aucune réserve.</span></td>
                 </tr>
               )}
             </tbody>
@@ -570,6 +709,20 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
 
         <ListFooter shown={shownCount} total={totalCount} onMore={showMore} />
       </div>
+
+      {diffusionOpen && project && settings && (
+        <ReserveDiffusionDialog
+          kind={apiBase === '/api/gpa-reserves' ? 'gpa' : 'opr'}
+          title={title}
+          projectId={projectId}
+          reserves={reserves}
+          plans={plans}
+          project={project}
+          settings={settings}
+          lots={(lotsList ?? []).map(l => ({ id: l.id, lot_number: l.lot_number, lot_title: l.lot_title, contact_id: l.contact_id, contact_name: l.contact_name }))}
+          onClose={() => setDiffusionOpen(false)}
+        />
+      )}
 
       <AnimatePresence>
       {(creating || openReserve) && (

@@ -4,7 +4,8 @@
 // signature. À monter comme enfant direct d'un AnimatePresence (ModalShell).
 import { useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconDownload, IconLock, IconTrash } from '@tabler/icons-react';
+import { IconDownload, IconLock } from '@tabler/icons-react';
+import { reservesDuPv } from '../../lib/oprPvReserves';
 import { ModalShell } from '../ui/ModalShell';
 import type { AgencySettings } from '../../lib/proposalExport';
 import {
@@ -16,7 +17,7 @@ import { libelleLot, dateFr, type DonneesPvPrive } from '../../lib/oprPvDocument
 import type { FormulaireExeAvecRendu } from '../../lib/oprPvExe';
 import { donneesExe, donneesPvPrive, telechargerExe, telechargerPvDocx, telechargerPvPdf } from '../../lib/oprPvExport';
 import {
-  STATUTS_RESERVE_LEVEE, type MarcheOpr, type NouvelleReserve, type PvOpr, type ReserveOpr, type useOprPv,
+  STATUTS_RESERVE_LEVEE, type MarcheOpr, type PvOpr, type ReserveOpr, type useOprPv,
 } from '../../hooks/useOprPv';
 
 const CHAMP = 'w-full px-3 py-2 pointer-coarse:min-h-11 text-sm border border-[var(--tblr-border)] rounded-lg bg-[var(--tblr-surface)] text-[var(--tblr-text)] focus:outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] disabled:opacity-60';
@@ -284,12 +285,10 @@ function LeveePublique({ levee, onChange }: { levee: Levee; onChange: (l: Levee)
 
 const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
-export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, api, onClose }: Props) {
+export function OprPvDialog({ pv, regime, marches, reserves: toutesReserves, projet, settings, api, onClose }: Props) {
   const { t } = useTranslation();
   const [form, setForm] = useState<OprPv>(() => pv?.pv ?? pvVierge(regime));
   const [lieu, setLieu] = useState(pv?.lieu ?? '');
-  const [nouvelles, setNouvelles] = useState<NouvelleReserve[]>([]);
-  const [brouillon, setBrouillon] = useState<NouvelleReserve>({ batiment: '', localisation: '', points: '' });
   const [modeSignature, setModeSignature] = useState<'papier' | 'electronique'>('papier');
   const [dateSignature, setDateSignature] = useState(aujourdhui());
   const [enCours, setEnCours] = useState(false);
@@ -301,7 +300,9 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
   const marche = marches.find(m => m.id === form.marche_id) ?? null;
   const lot = libelleLot(marche?.lot_numero, marche?.lot_titre);
   const entreprise = marche?.entreprise_nom ?? '';
-  const modifie = JSON.stringify(form) !== initial.current || lieu !== (pv?.lieu ?? '') || nouvelles.length > 0;
+  // Les réserves ne se saisissent pas dans le PV : elles viennent de la liste des réserves, celles de l'entreprise du marché.
+  const reserves = useMemo(() => reservesDuPv(toutesReserves, marche, pv?.id), [toutesReserves, marche, pv?.id]);
+  const modifie = JSON.stringify(form) !== initial.current || lieu !== (pv?.lieu ?? '');
   const set = <K extends keyof OprPv>(cle: K, valeur: OprPv[K]) => setForm(f => ({ ...f, [cle]: valeur }));
   const setInfo = (patch: Partial<OprPv['public_info']>) => set('public_info', { ...form.public_info, ...patch });
 
@@ -310,17 +311,11 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
   const liste = useMemo(() => echeances(form, aujourdhui()), [form]);
   const statut = statutPv(form);
 
-  /** Ce que l'écran montre : le formulaire tel que saisi, réserves non encore enregistrées comprises. */
-  const donneesExport = (): DonneesPvPrive => {
-    const base = donneesPvPrive({
-      pv: form, reference: pv?.reference_pv, maitreOuvrage: projet.maitreOuvrage, objet: projet.objet || projet.nom,
-      marche, reserves, agence: settings.agencyName,
-    });
-    return {
-      ...base,
-      reserves: [...base.reserves, ...nouvelles.map(r => ({ numero: null, batiment: r.batiment, localisation: r.localisation, date: null, points: r.points }))],
-    };
-  };
+  /** Ce que l'écran montre : le formulaire tel que saisi, avec les réserves de la liste. */
+  const donneesExport = (): DonneesPvPrive => donneesPvPrive({
+    pv: form, reference: pv?.reference_pv, maitreOuvrage: projet.maitreOuvrage, objet: projet.objet || projet.nom,
+    marche, reserves, agence: settings.agencyName,
+  });
 
   const exporter = async (format: 'pdf' | 'docx') => {
     setErreur(null);
@@ -339,10 +334,7 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
       ]);
       const donnees = donneesExe({
         pv: form, reference: pv?.reference_pv, projet, maitreOuvrageContact, marche, titulaireContact, agence: settings, lieu: lieu || null,
-        reserves: [
-          ...reserves,
-          ...nouvelles.map(r => ({ number: null, batiment: r.batiment, local: r.localisation, created_at: null, title: r.points, nature: r.nature || null, status: 'A faire' })),
-        ],
+        reserves,
       });
       await telechargerExe(code, donnees, format, settings);
     } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); }
@@ -363,7 +355,6 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
       const id: string = pv
         ? (await api.modifier(pv.id, corps), pv.id)
         : (await api.creer({ ...corps, date: form.date_opr || aujourdhui() })).id;
-      for (const r of nouvelles.filter(x => x.points.trim())) await api.ajouterReserve(id, r, lot, entreprise);
       onClose();
     } catch (e: any) {
       setErreur(e?.message || t('opr_error_generic'));
@@ -378,22 +369,10 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
     try { await action(); onClose(); } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); } finally { setEnCours(false); }
   };
 
-  /** Retire une réserve déjà enregistrée sans fermer la fenêtre : la saisie en cours est conservée. */
-  const retirer = async (id: string) => {
-    setErreur(null);
-    try { await api.retirerReserve(id); } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); }
-  };
-
   /** Change la nature d'une réserve déjà enregistrée sans fermer la fenêtre. */
   const changerNature = async (id: string, nature: NatureReserve | '') => {
     setErreur(null);
     try { await api.changerNatureReserve(id, nature); } catch (e: any) { setErreur(e?.message || t('opr_error_generic')); }
-  };
-
-  const ajouterBrouillon = () => {
-    if (!brouillon.points.trim()) return;
-    setNouvelles(n => [...n, brouillon]);
-    setBrouillon({ batiment: brouillon.batiment, localisation: '', points: '', nature: brouillon.nature });
   };
 
   const avis: Array<[AvisReception, string]> = publique
@@ -528,7 +507,8 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
         )}
 
         {section(t('opr_reserves_title'))}
-        {reserves.length === 0 && nouvelles.length === 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_reserves_empty')}</p>}
+        <p className="text-xs text-[var(--tblr-muted)]">{t('opr_reserves_from_list', { entreprise: entreprise || t('opr_unset') })}</p>
+        {reserves.length === 0 && <p className="text-sm text-[var(--tblr-muted)]">{t('opr_reserves_empty')}</p>}
         <ul className="space-y-1">
           {reserves.map(r => (
             <li key={r.id} className="flex items-start gap-2 text-sm">
@@ -540,33 +520,9 @@ export function OprPvDialog({ pv, regime, marches, reserves, projet, settings, a
                   {NATURES_RESERVE.map(n => <option key={n} value={n}>{t(`opr_nature_${n}`)}</option>)}
                 </select>
               )}
-              <button type="button" aria-label={t('opr_reserve_remove')} className="p-2 pointer-coarse:min-h-11 text-[var(--tblr-muted)] hover:text-red-600" onClick={() => retirer(r.id)}><IconTrash size={14} /></button>
-            </li>
-          ))}
-          {nouvelles.map((r, i) => (
-            <li key={`n${i}`} className="flex items-start gap-2 text-sm">
-              <span className="w-8 shrink-0 text-[var(--tblr-muted)]">+</span>
-              <span className="flex-1 min-w-0">{[r.batiment, r.localisation].filter(Boolean).join(' · ')}{r.batiment || r.localisation ? ' : ' : ''}{r.points}{r.nature ? ` (${t(`opr_nature_${r.nature}`)})` : ''}</span>
-              <button type="button" aria-label={t('opr_reserve_remove')} className="p-2 pointer-coarse:min-h-11 text-[var(--tblr-muted)] hover:text-red-600" onClick={() => setNouvelles(n => n.filter((_, j) => j !== i))}><IconTrash size={14} /></button>
             </li>
           ))}
         </ul>
-        {publique && (
-          <Champ label={t('opr_reserve_nature')}>
-            {id => (
-              <select id={id} className={`${CHAMP} sm:w-80`} value={brouillon.nature ?? ''} onChange={e => setBrouillon(b => ({ ...b, nature: e.target.value as NatureReserve | '' }))}>
-                <option value="">{t('opr_unset')}</option>
-                {NATURES_RESERVE.map(n => <option key={n} value={n}>{t(`opr_nature_${n}`)}</option>)}
-              </select>
-            )}
-          </Champ>
-        )}
-        <div className="grid gap-2 sm:grid-cols-[8rem_10rem_1fr_auto] items-end">
-          <Champ label={t('opr_reserve_building')}>{id => <input id={id} className={CHAMP} value={brouillon.batiment} onChange={e => setBrouillon(b => ({ ...b, batiment: e.target.value }))} />}</Champ>
-          <Champ label={t('opr_reserve_location')}>{id => <input id={id} className={CHAMP} value={brouillon.localisation} onChange={e => setBrouillon(b => ({ ...b, localisation: e.target.value }))} />}</Champ>
-          <Champ label={t('opr_reserve_points')}>{id => <input id={id} className={CHAMP} value={brouillon.points} onChange={e => setBrouillon(b => ({ ...b, points: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); ajouterBrouillon(); } }} />}</Champ>
-          <button type="button" className="btn btn-secondary" onClick={ajouterBrouillon} disabled={!brouillon.points.trim()}>{t('opr_reserve_add')}</button>
-        </div>
 
         {section(t('opr_deadlines_title'))}
         <p className="text-xs text-[var(--tblr-muted)]">{t('opr_delays_note')}</p>

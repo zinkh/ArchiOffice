@@ -50,16 +50,7 @@ export function statusPillClass(status: ReserveStatus): string {
   );
 }
 
-export function parseJsonList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
-  if (typeof value !== 'string' || !value.trim()) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [String(parsed)];
-  } catch {
-    return value.split(',').map(s => s.trim()).filter(Boolean);
-  }
-}
+export { parseJsonList } from '../../lib/jsonList';
 
 /** Sélecteur de statut en pastille colorée — le même dans la liste et la fiche. */
 export function StatusSelect({ value, onChange, className }: { value: ReserveStatus; onChange: (s: ReserveStatus) => void; className?: string }) {

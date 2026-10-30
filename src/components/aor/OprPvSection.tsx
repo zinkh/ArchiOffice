@@ -19,6 +19,7 @@ import { formulairesDuPv } from '../../lib/oprPv';
 import { construirePvPrive } from '../../lib/oprPvDocument';
 import { construireExe } from '../../lib/oprPvExe';
 import { donneesExe, donneesPvPrive, telechargerArchivePv, telechargerPvDocx, telechargerPvPdf, type DocumentAExporter } from '../../lib/oprPvExport';
+import { reservesDuPv } from '../../lib/oprPvReserves';
 import { OprPvDialog, type ProjetOpr } from './OprPvDialog';
 
 interface Props {
@@ -42,7 +43,8 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
   const [erreur, setErreur] = useState<string | null>(null);
 
   const marcheDe = (pv: PvOpr) => api.marches.find(m => m.id === pv.pv.marche_id) ?? null;
-  const reservesDe = (pv: PvOpr) => api.reserves.filter(r => r.reception_id === pv.id);
+  // Les réserves d'un PV viennent de la liste des réserves : celles de l'entreprise du marché (une entreprise, un PV).
+  const reservesDe = (pv: PvOpr) => reservesDuPv(api.reserves, marcheDe(pv), pv.id);
   const ouvertes = (pv: PvOpr) => reservesDe(pv).filter(r => !STATUTS_RESERVE_LEVEE.has(r.status ?? '')).length;
   const donnees = (pv: PvOpr) => donneesPvPrive({
     pv: pv.pv, reference: pv.reference_pv, maitreOuvrage: projet.maitreOuvrage, objet: projet.objet || projet.nom,
@@ -200,10 +202,10 @@ export function OprPvSection({ projectId, projet, marchePublic, settings, onRese
 
       <AnimatePresence>
         {ouvert === 'nouveau' && (
-          <OprPvDialog key="nouveau" pv={null} regime={regime} marches={api.marches} reserves={[]} projet={projet} settings={settings} api={api} onClose={fermer} />
+          <OprPvDialog key="nouveau" pv={null} regime={regime} marches={api.marches} reserves={api.reserves} projet={projet} settings={settings} api={api} onClose={fermer} />
         )}
         {edite && (
-          <OprPvDialog key={edite.id} pv={edite} regime={regime} marches={api.marches} reserves={reservesDe(edite)} projet={projet} settings={settings} api={api} onClose={fermer} />
+          <OprPvDialog key={edite.id} pv={edite} regime={regime} marches={api.marches} reserves={api.reserves} projet={projet} settings={settings} api={api} onClose={fermer} />
         )}
       </AnimatePresence>
       {dialog}

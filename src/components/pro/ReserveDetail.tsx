@@ -14,6 +14,7 @@ import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
 import { keepLocalCopy } from '../../lib/localPhotoCopy';
+import { useReserveOptions } from './useReserveOptions';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
@@ -125,31 +126,8 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const planY = isNew ? pendingPlan?.y : reserve?.y ?? undefined;
   const plan = useMemo(() => plans.find(p => p.id === planId) || null, [plans, planId]);
 
-  // Entreprises des marchés de travaux : la fiche du lot n'a souvent pas d'entreprise renseignée
-  // (elle se désigne par l'ACT puis le marché), la liste « En charge » restait alors vide.
-  const [marcheEntreprises, setMarcheEntreprises] = useState<string[]>([]);
-  useEffect(() => {
-    let vivant = true;
-    apiFetch<{ entreprise_nom?: string | null; type_marche?: string | null; statut?: string | null }[]>(`/api/marches-entreprises/${projectId}`)
-      .then(rows => {
-        if (!vivant || !Array.isArray(rows)) return;
-        setMarcheEntreprises(rows.filter(r => r.entreprise_nom && r.type_marche !== 'subsequent' && r.statut !== 'resilie').map(r => r.entreprise_nom as string));
-      })
-      .catch(() => { /* les entreprises des lots restent proposées */ });
-    return () => { vivant = false; };
-  }, [projectId]);
-
-  // Lots classés par numéro (« 2 » avant « 10 », « 01A » après « 01 »). La valeur enregistrée reste l'intitulé.
-  const lotOptions = useMemo(() => [...(lotsList || [])]
-    .sort((a, b) => (a.lot_number ?? '').localeCompare(b.lot_number ?? '', 'fr', { numeric: true }))
-    .map(l => ({ value: l.lot_title, label: l.lot_number ? `${l.lot_number} · ${l.lot_title}` : l.lot_title })), [lotsList]);
-  const entrepriseOptions = useMemo(() => {
-    const seen = new Set<string>();
-    return [...(lotsList || []).map(l => l.contact_name), ...marcheEntreprises]
-      .filter((nom): nom is string => !!nom && !seen.has(nom.trim().toLowerCase()) && !!seen.add(nom.trim().toLowerCase()))
-      .sort((a, b) => a.localeCompare(b, 'fr'))
-      .map(nom => ({ value: nom, label: nom }));
-  }, [lotsList, marcheEntreprises]);
+  // Mêmes lots (triés par numéro) et entreprises (lots + marchés) que les actions en masse du suivi.
+  const { lotOptions, entrepriseOptions } = useReserveOptions(projectId, lotsList);
   // Une valeur déjà enregistrée qui ne figure plus dans les lots du projet
   // reste sélectionnable : la retirer silencieusement perdrait une donnée.
   const withCurrent = (options: { value: string; label: string }[], current: string[]) => [

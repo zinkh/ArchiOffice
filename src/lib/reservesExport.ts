@@ -9,6 +9,7 @@ import type { AgencySettings } from './proposalExport';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLetterhead';
 import { renderPlanWithMarkers, renderPlanExcerpt, loadPhotoDataUrl } from './planRender';
 import type { Reserve, GpaReserve, Plan, ReservePhoto } from '../types';
+import { groupReservesByLot, type LotGroup, type LotRef } from './reserveDiffusion';
 
 type ReserveLike = Reserve | GpaReserve;
 
@@ -25,6 +26,19 @@ export interface ReservesExportOptions {
   /** « Réserves » ou « Réserves GPA » — le titre du document. */
   title: string;
   onProgress?: (message: string) => void;
+  /** Lots de l'opération : le document est classé par lot, dans l'ordre des numéros de lot. */
+  lots?: LotRef[];
+  /** Périmètre choisi (intitulés de lot) : une réserve est rangée sous le premier de ses lots retenus. */
+  allowedLots?: string[] | null;
+  /** Mention de la page de garde : « Lots : 02 · Plâtrerie », « Entreprise : Martin SARL »... */
+  scopeLabel?: string;
+  /** « blob » : rend le PDF sans le télécharger (envoi par e-mail). Le Blob est rendu dans les deux cas. */
+  output?: 'download' | 'blob';
+}
+
+/** Nom du fichier PDF : titre, code et nom de l'opération, puis le suffixe (entreprise, lot...). */
+export function reservesPdfFilename(title: string, project: { name: string; project_code?: string }, suffix?: string): string {
+  return `${sanitize(title)}_${sanitize(project.project_code || '')}_${sanitize(project.name)}${suffix ? `_${sanitize(suffix)}` : ''}.pdf`;
 }
 
 const GRIS_TEXTE: [number, number, number] = [17, 24, 39];
@@ -85,12 +99,16 @@ export async function exportReservesToPDF(
   project: ReservesExportProject,
   settings: AgencySettings,
   opts: ReservesExportOptions,
-): Promise<void> {
+): Promise<Blob> {
   const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
     import('jspdf'), import('jspdf-autotable'),
   ]);
   const progress = opts.onProgress || (() => {});
-  const sorted = [...reserves].sort((a, b) => (a.number || 0) - (b.number || 0));
+  // Classé par lot (ordre des numéros de lot, « Sans lot » en dernier), puis par numéro de réserve.
+  const allowed = opts.allowedLots ? new Set(opts.allowedLots) : null;
+  const groups: LotGroup<ReserveLike>[] = groupReservesByLot(reserves, opts.lots ?? [], allowed);
+  const sorted = groups.flatMap(g => g.rows);
+  const groupOfId = new Map(groups.flatMap(g => g.rows.map(r => [r.id, g] as const)));
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const logo = await loadLogoDataUrl(settings.logoUrl);
@@ -118,6 +136,7 @@ export async function exportReservesToPDF(
     ['Projet', [project.project_code, project.name].filter(Boolean).join(' - ')],
     ['Adresse chantier', adresse],
     ["Maître d'ouvrage", project.client || ''],
+    ...(opts.scopeLabel ? [['Périmètre', opts.scopeLabel]] : []),
     ["Date d'édition", new Date().toLocaleDateString('fr-FR')],
   ].filter(([, v]) => v) as [string, string][];
   doc.setFontSize(9.5);
@@ -149,23 +168,31 @@ export async function exportReservesToPDF(
   y = (doc as any).lastAutoTable.finalY + 8;
 
   const planById = new Map(plans.map(p => [p.id, p]));
-  autoTable(doc, {
-    startY: y,
-    head: [['N°', 'Intitulé', 'Localisation', 'Lot / Entreprise', 'Échéance', 'Statut']],
-    body: sorted.map(r => {
+  const summaryBody: any[][] = [];
+  for (const g of groups) {
+    summaryBody.push([{
+      content: `${g.label} (${g.rows.length} réserve${g.rows.length > 1 ? 's' : ''})`,
+      colSpan: 6,
+      styles: { fontStyle: 'bold', fillColor: [229, 231, 235], textColor: GRIS_TEXTE },
+    }]);
+    for (const r of g.rows) {
       const retard = reserveIsOverdue(r);
-      return [
+      summaryBody.push([
         String(r.number ?? ''),
         r.title || '',
         [r.batiment, r.local].filter(Boolean).join(' / '),
-        [...parseJsonList(r.lots), ...parseJsonList(r.entreprises)].join(', '),
+        parseJsonList(r.entreprises).join(', '),
         `${fmtDate(r.due_date)}${retard ? ` (+${retard} j)` : ''}`,
         r.status,
-      ];
-    }),
+      ]);
+    }
+  }
+  autoTable(doc, {
+    startY: y,
+    head: [['N°', 'Intitulé', 'Localisation', 'En charge', 'Échéance', 'Statut']],
+    body: summaryBody,
     styles: { fontSize: 8, textColor: GRIS_TEXTE, cellPadding: 1.6, overflow: 'linebreak' },
     headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 8 },
-    alternateRowStyles: { fillColor: GRIS_FOND },
     columnStyles: { 0: { cellWidth: 10, halign: 'right' }, 1: { cellWidth: 62 }, 4: { cellWidth: 24 }, 5: { cellWidth: 26, fontStyle: 'bold' } },
     margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
   });
@@ -213,9 +240,24 @@ export async function exportReservesToPDF(
     }
   };
 
+  let currentGroup = '';
   for (let i = 0; i < sorted.length; i++) {
     const r = sorted[i];
     progress(`Fiche ${i + 1} / ${sorted.length}…`);
+
+    // Bandeau du lot à chaque changement de lot.
+    const group = groupOfId.get(r.id);
+    if (group && group.key !== currentGroup) {
+      currentGroup = group.key;
+      ensureRoom(22);
+      doc.setFillColor(...GRIS_FOND);
+      doc.rect(MARGIN, y - 1, contentW(), 8, 'F');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...GRIS_TEXTE);
+      doc.text(`${group.label}`, MARGIN + 2, y + 4.5);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(...GRIS_DOUX);
+      doc.text(`${group.rows.length} réserve${group.rows.length > 1 ? 's' : ''}`, pageW() - MARGIN - 2, y + 4.5, { align: 'right' });
+      y += 11;
+    }
 
     const thumbs: Thumb[] = [];
     const plan = r.plan_id ? planById.get(r.plan_id) : undefined;
@@ -328,5 +370,7 @@ export async function exportReservesToPDF(
 
   progress('Finalisation…');
   drawAgencyFooters(doc, settings, letterhead);
-  doc.save(`${sanitize(opts.title)}_${sanitize(project.project_code || '')}_${sanitize(project.name)}.pdf`);
+  const blob = doc.output('blob') as Blob;
+  if (opts.output !== 'blob') doc.save(reservesPdfFilename(opts.title, project));
+  return blob;
 }

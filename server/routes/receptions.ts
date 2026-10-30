@@ -5,6 +5,7 @@
 // d'origine), soit un PV d'OPR par lot (régime `prive` ou `public`, voir src/lib/oprPv.ts) :
 // les champs d'OPR sont assainis (`sanitizeOprPayload`), le régime est déduit de l'affaire
 // et jamais lu dans la requête, et le lot d'un PV ne change plus une fois créé.
+import { reservesDuPv } from '../../src/lib/oprPvReserves';
 import type { Express } from 'express';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { controlerPv, estDateIso, regimeDepuisAffaire } from '../../src/lib/oprPv';
@@ -207,8 +208,12 @@ export function registerReceptionRoutes(app: Express, { supabaseAdmin, getTenant
       if (!pv) return res.status(400).json({ error: "Seul un PV d'OPR par lot se signe." });
       if (existant.signed_at) return res.status(409).json(REPONSE_PV_SIGNE);
 
-      const { data: reserves } = await supabaseAdmin.from('reserves').select('status').eq('tenant_id', tenantId).eq('reception_id', existant.id);
-      const reservesOuvertes = (reserves ?? []).filter((r: any) => !STATUTS_RESERVE_LEVEE.has(r.status)).length;
+      // Les réserves d'un PV viennent de la liste des réserves : celles de l'entreprise du marché (src/lib/oprPvReserves.ts).
+      const { data: marche } = existant.marche_id
+        ? await supabaseAdmin.from('marches_entreprises').select('entreprise_nom, lot_numero, lot_titre').eq('id', existant.marche_id).eq('tenant_id', tenantId).maybeSingle()
+        : { data: null };
+      const { data: reserves } = await supabaseAdmin.from('reserves').select('id, number, status, reception_id, lots, entreprises').eq('tenant_id', tenantId).eq('project_id', existant.project_id);
+      const reservesOuvertes = reservesDuPv(reserves ?? [], marche, existant.id).filter((r: any) => !STATUTS_RESERVE_LEVEE.has(r.status)).length;
       const controle = controlerPv(pv, { reservesOuvertes });
       if (controle.erreurs.length) {
         return res.status(409).json({ error: "Le PV est incohérent : corrigez-le avant de le signer.", code: 'PV_INCOHERENT', erreurs: controle.erreurs });
