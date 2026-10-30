@@ -4587,6 +4587,7 @@ export default {
       "opr_refaction": "Price reduction (€)",
       "opr_reserves_title": "Snags to clear (annex)",
       "opr_reserves_empty": "No snag: the annex prints empty lines to fill in by hand.",
+      "opr_reserves_from_list": "Snags come from the snag list (AOR tab): those {{entreprise}} is in charge of. To add, edit or remove one, use the list.",
       "opr_reserve_building": "Building",
       "opr_reserve_location": "Location",
       "opr_reserve_points": "Points to clear",

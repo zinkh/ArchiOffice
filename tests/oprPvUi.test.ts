@@ -107,12 +107,16 @@ describe('PV public (EXE4, EXE5)', () => {
   const formulaires = (dialogue: Element) =>
     [...dialogue.querySelectorAll('li')].map(l => l.textContent ?? '').filter(t => t.includes('opr_form_')).map(t => t.slice(0, 4));
 
-  it('le formulaire porte les champs du cerfa, les décisions et la nature des réserves', async () => {
+  it('le formulaire porte les champs du cerfa et les décisions, sans saisie de réserves', async () => {
     await monter(true);
     const dialogue = await ouvrir('OPR-2026-003');
     const texte = dialogue.textContent ?? '';
-    for (const cle of ['opr_ccag', 'opr_market_reference', 'opr_signatory', 'opr_place', 'opr_scope', 'opr_c_pose_equipements', 'opr_avis_sous_reserve_public', 'opr_avis_avec_reserve_public', 'opr_section_c', 'opr_date_effet', 'opr_reserve_nature']) {
+    for (const cle of ['opr_ccag', 'opr_market_reference', 'opr_signatory', 'opr_place', 'opr_scope', 'opr_c_pose_equipements', 'opr_avis_sous_reserve_public', 'opr_avis_avec_reserve_public', 'opr_section_c', 'opr_date_effet', 'opr_reserves_from_list']) {
       expect(texte).toContain(cle);
+    }
+    // Les réserves ne se saisissent plus dans le PV : elles viennent de la liste des réserves.
+    for (const cle of ['opr_reserve_add', 'opr_reserve_points', 'opr_reserve_building', 'opr_reserve_remove']) {
+      expect(texte).not.toContain(cle);
     }
     // Sans proposition ni décision : seuls EXE4 et EXE5 sont à produire.
     expect(formulaires(dialogue)).toEqual(['EXE4', 'EXE5']);

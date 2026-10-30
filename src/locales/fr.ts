@@ -4737,6 +4737,7 @@ export default {
       "opr_refaction": "Réfaction (€)",
       "opr_reserves_title": "Réserves à lever (annexe)",
       "opr_reserves_empty": "Aucune réserve : l'annexe imprime des lignes vides à compléter à la main.",
+      "opr_reserves_from_list": "Les réserves sont reprises de la liste des réserves (onglet AOR) : celles dont {{entreprise}} est en charge. Pour en ajouter, en modifier ou en retirer, passez par la liste.",
       "opr_reserve_building": "Bâtiment",
       "opr_reserve_location": "Localisation",
       "opr_reserve_points": "Points à lever",

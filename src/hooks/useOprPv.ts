@@ -31,6 +31,9 @@ export interface ReserveOpr {
   status: string | null;
   created_at: string | null;
   nature: NatureReserve | null;
+  /** Lots et entreprises en charge (JSON) : c'est ce qui rattache la réserve au PV d'une entreprise. */
+  lots?: string | null;
+  entreprises?: string | null;
 }
 
 export interface PvOpr {
@@ -79,9 +82,9 @@ export function useOprPv(projectId: string) {
         const pv = lirePv(row);
         return pv ? [{ id: row.id, reference_pv: row.reference_pv ?? null, signed_at: row.signed_at ?? null, signed_mode: row.signed_mode ?? null, lieu: row.lieu ?? null, pv }] : [];
       });
-      const ids = new Set(lus.map(p => p.id));
       setPvs(lus.sort((a, b) => (b.pv.date_opr ?? '').localeCompare(a.pv.date_opr ?? '')));
-      setReserves(toutesReserves.filter(r => r.reception_id && ids.has(r.reception_id)));
+      // Toutes les réserves d'OPR de l'affaire : chaque PV reprend celles de son entreprise (src/lib/oprPvReserves.ts).
+      setReserves(toutesReserves);
       // Un accord-cadre n'a pas de PV : seuls les marchés exécutables se proposent.
       setMarches(tousMarches.filter(m => m.type_marche !== 'accord_cadre'));
       setErreur(null);
@@ -113,21 +116,6 @@ export function useOprPv(projectId: string) {
     envoyer(`/api/receptions/${id}/signature`, 'POST', { mode, date }), [envoyer]);
   const rouvrir = useCallback((id: string) => envoyer(`/api/receptions/${id}/signature/rouvrir`, 'POST', {}), [envoyer]);
 
-  /** Une réserve de l'annexe : rattachée au PV, au lot et à l'entreprise du marché. */
-  const ajouterReserve = useCallback(async (pvId: string, r: NouvelleReserve, lot: string, entreprise: string) => {
-    const jour = new Date().toISOString().slice(0, 10);
-    await apiFetch('/api/reserves', {
-      method: 'POST',
-      body: JSON.stringify({
-        project_id: projectId, reception_id: pvId, title: r.points.trim(), batiment: r.batiment.trim() || null, local: r.localisation.trim() || null,
-        status: 'A faire', lots: JSON.stringify(lot ? [lot] : []), entreprises: JSON.stringify(entreprise ? [entreprise] : []),
-        created_at: jour, due_date: jour,
-        ...(r.nature ? { nature: r.nature } : {}),
-      }),
-    });
-    await recharger();
-  }, [projectId, recharger]);
-
   /** Fiche d'un contact (titulaire, maître d'ouvrage), lue une fois pour toutes : l'annuaire du cabinet reste petit. */
   const obtenirContact = useCallback(async (id?: string | null): Promise<ContactIdentite | null> => {
     if (!id) return null;
@@ -142,7 +130,5 @@ export function useOprPv(projectId: string) {
   const changerNatureReserve = useCallback((id: string, nature: NatureReserve | '') =>
     envoyer(`/api/reserves/${id}/nature`, 'PUT', { nature: nature || null }), [envoyer]);
 
-  const retirerReserve = useCallback((id: string) => envoyer(`/api/reserves/${id}`, 'DELETE'), [envoyer]);
-
-  return { pvs, marches, reserves, chargement, erreur, recharger, creer, modifier, supprimer, signer, rouvrir, ajouterReserve, retirerReserve, changerNatureReserve, obtenirContact };
+  return { pvs, marches, reserves, chargement, erreur, recharger, creer, modifier, supprimer, signer, rouvrir, changerNatureReserve, obtenirContact };
 }
