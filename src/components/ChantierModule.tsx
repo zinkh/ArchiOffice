@@ -458,6 +458,19 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
     setDiffusionOpen(true);
   };
 
+  // Le serveur poursuit les envois après sa réponse (202) ou après une coupure de la passerelle (502, 503, 504) :
+  // on relit le compte-rendu jusqu'à ce qu'il passe en « diffusé » plutôt que d'inviter à renvoyer, ce qui
+  // doublerait les messages. Une minute d'attente au plus (12 relectures espacées de 5 secondes).
+  const attendreDiffusion = async (reportId: string, essais = 12): Promise<SiteReport | undefined> => {
+    for (let essai = 0; essai < essais; essai++) {
+      await new Promise(r => setTimeout(r, 5000));
+      const relu = await apiFetch<SiteReport[]>(`/api/projects/${project.id}/reports`).catch(() => null);
+      const serveur = Array.isArray(relu) ? relu.find(r => r.id === reportId) : undefined;
+      if (serveur?.statut === 'diffuse') return serveur;
+    }
+    return undefined;
+  };
+
   const sendDiffusion = async (contactIds: string[]) => {
     if (!selectedReport || contactIds.length === 0) return;
     if (!settings) { setDiffusionError('Réglages du cabinet non chargés, réessayez dans un instant.'); return; }
@@ -492,19 +505,14 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
       applyTenantHeader(headers);
       const res = await baseFetchJson<DiffusionResult & { statut?: string; pending?: boolean }>(`/api/reports/${selectedReport.id}/diffuse`, { method: 'POST', body, headers });
       if (res.pending) {
-        // Le serveur poursuit les envois en arrière-plan (réponse 202) : on attend que le compte-rendu
-        // passe en « diffusé » plutôt que d'inviter à renvoyer, ce qui doublerait les messages.
-        for (let essai = 0; essai < 12; essai++) {
-          await new Promise(r => setTimeout(r, 5000));
-          const relu = await apiFetch<SiteReport[]>(`/api/projects/${project.id}/reports`).catch(() => null);
-          const serveur = Array.isArray(relu) ? relu.find(r => r.id === selectedReport.id) : undefined;
-          if (serveur?.statut === 'diffuse') {
-            setReports(prev => prev.map(r => (r.id === serveur.id ? { ...r, statut: 'diffuse' } : r)));
-            db.siteReportsCache.put({ ...selectedReport, statut: 'diffuse' }).catch(() => {});
-            setDiffusionOpen(false);
-            showToast('Compte-rendu diffusé.', 'success', { duration: 6000 });
-            return;
-          }
+        // Le serveur poursuit les envois en arrière-plan (réponse 202).
+        const serveur = await attendreDiffusion(selectedReport.id);
+        if (serveur) {
+          setReports(prev => prev.map(r => (r.id === serveur.id ? { ...r, statut: 'diffuse' } : r)));
+          db.siteReportsCache.put({ ...selectedReport, statut: 'diffuse' }).catch(() => {});
+          setDiffusionOpen(false);
+          showToast('Compte-rendu diffusé.', 'success', { duration: 6000 });
+          return;
         }
         setDiffusionError('L’envoi prend plus de temps que prévu et se poursuit sur le serveur. Ne cliquez pas de nouveau sur Envoyer : vérifiez le dossier des éléments envoyés, puis l’état du compte-rendu dans quelques minutes.');
         return;
@@ -536,7 +544,17 @@ export default function ChantierModule({ project, lots_list: lotsBruts, ordresDe
         } else if (dejaDiffuse) {
           setDiffusionError('Le serveur n’a pas répondu à temps. Les messages sont peut-être partis : vérifiez le dossier des éléments envoyés avant de renvoyer, pour éviter les doublons.');
         } else {
-          setDiffusionError('Le serveur n’a pas répondu à temps et rien n’indique que l’envoi ait abouti (le compte-rendu n’est pas passé en « diffusé »). Patientez un instant, puis cliquez de nouveau sur Envoyer.');
+          // Une coupure de la passerelle n'arrête pas le serveur : l'envoi peut se terminer après elle (PDF lourd,
+          // téléversement lent). On attend avant de conclure, au lieu d'inviter tout de suite à renvoyer.
+          const attendu = await attendreDiffusion(selectedReport.id);
+          if (attendu) {
+            setReports(prev => prev.map(r => (r.id === attendu.id ? { ...r, statut: 'diffuse' } : r)));
+            db.siteReportsCache.put({ ...selectedReport, statut: 'diffuse' }).catch(() => {});
+            setDiffusionOpen(false);
+            showToast('Le serveur a répondu trop lentement, mais le compte-rendu a bien été diffusé.', 'success', { duration: 8000 });
+          } else {
+            setDiffusionError('Le serveur n’a pas répondu à temps et le compte-rendu n’est pas encore passé en « diffusé ». L’envoi a pu se poursuivre : vérifiez le dossier des éléments envoyés avant de cliquer de nouveau sur Envoyer, pour éviter les doublons.');
+          }
         }
       } else {
         setDiffusionError((err as Error).message || 'La diffusion a échoué.');
