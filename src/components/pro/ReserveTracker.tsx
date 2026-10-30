@@ -62,6 +62,8 @@ interface ReserveTrackerProps {
 }
 
 type Filter = 'ouvertes' | 'retard' | 'levees' | 'toutes';
+/** Valeur du filtre entreprise pour les réserves qu'aucune entreprise n'a en charge. */
+const SANS_ENTREPRISE = '__sans_entreprise__';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'ouvertes', label: 'Ouvertes' },
@@ -141,6 +143,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const [creating, setCreating] = useState(false);
   const [filter, setFilter] = useState<Filter>('toutes');
   const [search, setSearch] = useState('');
+  const [entrepriseFilter, setEntrepriseFilter] = useState('');
   const [exporting, setExporting] = useState<string | null>(null);
 
   const reserveStats = useMemo(() => ({
@@ -156,9 +159,20 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     levees: reserves.filter(isReserveClosed).length,
   }), [reserves]);
 
+  // Entreprises présentes dans les réserves (une réserve peut en viser plusieurs).
+  const entrepriseChoices = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of reserves) for (const nom of parseJsonList(r.entreprises)) if (nom) names.add(nom);
+    return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [reserves]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return reserves.filter(r => {
+      if (entrepriseFilter) {
+        const noms = parseJsonList(r.entreprises);
+        if (entrepriseFilter === SANS_ENTREPRISE ? noms.length > 0 : !noms.includes(entrepriseFilter)) return false;
+      }
       if (filter === 'ouvertes' && isReserveClosed(r)) return false;
       if (filter === 'retard' && reserveOverdueDays(r) === 0) return false;
       if (filter === 'levees' && !isReserveClosed(r)) return false;
@@ -167,7 +181,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         .filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
-  }, [reserves, filter, search]);
+  }, [reserves, filter, search, entrepriseFilter]);
 
   const selectedPlan = plans.find(p => p.id === selectedPlanId) || null;
   const openReserve = reserves.find(r => r.id === openReserveId) || null;
@@ -203,7 +217,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
 
   // Un autre filtre ou une autre recherche repart de la première page : sinon on resterait sur une
   // fenêtre de 500 lignes pour trois résultats, ou en bas d'une liste qui n'existe plus.
-  useEffect(() => { setLimit(RESERVE_PAGE_SIZE); }, [filter, search]);
+  useEffect(() => { setLimit(RESERVE_PAGE_SIZE); }, [filter, search, entrepriseFilter]);
 
   // Une réserve qu'on vient de créer se montre même si elle tombe au-delà de la fenêtre (elle clôt son
   // lot dans le tableau, et la liste mobile est triée du plus récent au plus ancien).
@@ -379,6 +393,18 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               </button>
             ))}
           </div>
+          {entrepriseChoices.length > 0 && (
+            <select
+              value={entrepriseFilter}
+              onChange={e => setEntrepriseFilter(e.target.value)}
+              aria-label="Filtrer par entreprise"
+              className="max-w-[14rem] px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg text-sm bg-zinc-100 dark:bg-zinc-800 border-none outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Toutes les entreprises</option>
+              {entrepriseChoices.map(nom => <option key={nom} value={nom}>{nom}</option>)}
+              <option value={SANS_ENTREPRISE}>Sans entreprise</option>
+            </select>
+          )}
           <div className="relative flex-1 min-w-[160px]">
             <IconSearch size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--tblr-muted)]" />
             <input

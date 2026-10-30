@@ -26,6 +26,7 @@ import type { ProjectCategory } from '../types';
 import { PushNotificationsCard } from '../components/PushNotificationsCard';
 import { OfflineQueueBackupCard } from '../components/OfflineQueueBackupCard';
 import { MailAccountsCard } from '../components/MailAccountsCard';
+import { LocalPhotoCopyCard } from '../components/LocalPhotoCopyCard';
 import { McpConnectionsCard } from '../components/McpConnectionsCard';
 import { TelegramConnectionsCard } from '../components/TelegramConnectionsCard';
 import { AgentMailInboxCard } from '../components/AgentMailInboxCard';
@@ -2742,6 +2743,9 @@ export default function Settings() {
         <>
           {/* Mes boîtes mail : actions immédiates (useMailAccounts), personnelles. */}
           <MailAccountsCard />
+
+          {/* Copie locale des photos de chantier : personnelle, propre à l'appareil. */}
+          <LocalPhotoCopyCard />
 
           {isAdmin && (
           <>

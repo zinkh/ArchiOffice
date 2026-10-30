@@ -13,6 +13,7 @@ import { openSignedUrl } from '../../lib/signedStorageUrl';
 import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
+import { keepLocalCopy } from '../../lib/localPhotoCopy';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
 import {
@@ -20,7 +21,7 @@ import {
   parseJsonList, reserveOverdueDays,
 } from './reserveShared';
 
-export interface LotOption { id: string; lot_title: string; contact_id?: string; contact_name?: string }
+export interface LotOption { id: string; lot_number?: string; lot_title: string; contact_id?: string; contact_name?: string }
 
 interface ReserveDetailProps {
   apiBase: '/api/reserves' | '/api/gpa-reserves';
@@ -124,12 +125,31 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   const planY = isNew ? pendingPlan?.y : reserve?.y ?? undefined;
   const plan = useMemo(() => plans.find(p => p.id === planId) || null, [plans, planId]);
 
-  const lotOptions = useMemo(() => (lotsList || []).map(l => ({ value: l.lot_title, label: l.lot_title })), [lotsList]);
+  // Entreprises des marchés de travaux : la fiche du lot n'a souvent pas d'entreprise renseignée
+  // (elle se désigne par l'ACT puis le marché), la liste « En charge » restait alors vide.
+  const [marcheEntreprises, setMarcheEntreprises] = useState<string[]>([]);
+  useEffect(() => {
+    let vivant = true;
+    apiFetch<{ entreprise_nom?: string | null; type_marche?: string | null; statut?: string | null }[]>(`/api/marches-entreprises/${projectId}`)
+      .then(rows => {
+        if (!vivant || !Array.isArray(rows)) return;
+        setMarcheEntreprises(rows.filter(r => r.entreprise_nom && r.type_marche !== 'subsequent' && r.statut !== 'resilie').map(r => r.entreprise_nom as string));
+      })
+      .catch(() => { /* les entreprises des lots restent proposées */ });
+    return () => { vivant = false; };
+  }, [projectId]);
+
+  // Lots classés par numéro (« 2 » avant « 10 », « 01A » après « 01 »). La valeur enregistrée reste l'intitulé.
+  const lotOptions = useMemo(() => [...(lotsList || [])]
+    .sort((a, b) => (a.lot_number ?? '').localeCompare(b.lot_number ?? '', 'fr', { numeric: true }))
+    .map(l => ({ value: l.lot_title, label: l.lot_number ? `${l.lot_number} · ${l.lot_title}` : l.lot_title })), [lotsList]);
   const entrepriseOptions = useMemo(() => {
     const seen = new Set<string>();
-    return (lotsList || []).filter(l => l.contact_name && !seen.has(l.contact_name) && seen.add(l.contact_name))
-      .map(l => ({ value: l.contact_name as string, label: l.contact_name as string }));
-  }, [lotsList]);
+    return [...(lotsList || []).map(l => l.contact_name), ...marcheEntreprises]
+      .filter((nom): nom is string => !!nom && !seen.has(nom.trim().toLowerCase()) && !!seen.add(nom.trim().toLowerCase()))
+      .sort((a, b) => a.localeCompare(b, 'fr'))
+      .map(nom => ({ value: nom, label: nom }));
+  }, [lotsList, marcheEntreprises]);
   // Une valeur déjà enregistrée qui ne figure plus dans les lots du projet
   // reste sélectionnable : la retirer silencieusement perdrait une donnée.
   const withCurrent = (options: { value: string; label: string }[], current: string[]) => [
@@ -322,7 +342,8 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        onClick={onClose}
+        // Pas de fermeture au clic sur le fond : un appui involontaire faisait perdre la saisie.
+        // On ferme par la croix ou « Annuler ».
       />
       <motion.div
         ref={setPanelRef}
@@ -450,7 +471,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
                 </div>
               ))}
             </div>
-            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={e => { keepLocalCopy(Array.from(e.target.files ?? [])); handleFiles(e.target.files); e.target.value = ''; }} />
             <input ref={galleryInputRef} type="file" accept="image/*" multiple className="hidden" onChange={e => { handleFiles(e.target.files); e.target.value = ''; }} />
           </div>
 
@@ -466,11 +487,6 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           ) : plan ? (
             <div className="text-xs text-[var(--tblr-muted)] flex items-center gap-1"><IconMapPin size={14} /> Plan : {plan.name} (sans position)</div>
           ) : null}
-
-          <div className="space-y-1">
-            <label className={labelClass}>Commentaire</label>
-            <textarea className={cn(inputClass, 'min-h-[72px]')} value={form.description} onChange={e => set('description', e.target.value)} placeholder="État constaté, ce qui reste à faire…" />
-          </div>
 
           {/* Suivi : réponse de l'entreprise ou remarque de la maîtrise d'œuvre, comme la réponse d'une observation du DET */}
           {!isNew && (
@@ -551,6 +567,12 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
             <select className={inputClass} value={form.status} onChange={e => set('status', e.target.value as ReserveStatus)}>
               {RESERVE_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
+          </div>
+
+          {/* En bas de la fiche : on le saisit une fois les champs structurés renseignés. */}
+          <div className="space-y-1">
+            <label className={labelClass}>Commentaire</label>
+            <textarea className={cn(inputClass, 'min-h-[72px]')} value={form.description} onChange={e => set('description', e.target.value)} placeholder="État constaté, ce qui reste à faire…" />
           </div>
         </div>
 
