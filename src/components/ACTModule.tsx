@@ -224,8 +224,15 @@ interface ACTModuleProps {
   isPublicClient?: boolean;
 }
 
-export default function ACTModule({ projectId, projectName, lots, contacts, operation, isPublicClient }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, contacts, operation, isPublicClient }: ACTModuleProps) {
   const { t } = useTranslation();
+  // Les lots s'affichent toujours par numéro (01, 02, 10...), quel que soit l'ordre de la liste reçue.
+  const lots = useMemo(
+    () => [...lotsDuProjet].sort((a, b) =>
+      String(a.lot_number ?? '').localeCompare(String(b.lot_number ?? ''), 'fr', { numeric: true })
+      || String(a.lot_title ?? '').localeCompare(String(b.lot_title ?? ''), 'fr')),
+    [lotsDuProjet],
+  );
   const [phase, setPhase] = useState<Phase>('preparation');
   const [consultation, setConsultation] = useState<Consultation>(EMPTY_CONSULTATION);
   const [saving, setSaving] = useState(false);
@@ -273,6 +280,8 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
 
   // Nouvelle fiche entreprise à créer depuis la saisie de la consultation.
   const [contactModalFor, setContactModalFor] = useState<{ rowId: string; name: string } | null>(null);
+  // Entreprise manquante créée depuis l'attribution directe d'un lot.
+  const [creationPourLot, setCreationPourLot] = useState<{ lotId: string; name: string } | null>(null);
 
   /** Codes FFB déjà déclarés sur la fiche contact, pour préremplir la consultation à la sélection. */
   const corpsEtatCodesFromContact = useCallback((contact: Contact): string[] => {
@@ -1682,6 +1691,7 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
                   erreur={directeErreurs[lot.id] ?? null}
                   onAttribuer={contact => { void attribuerDirectement(lot.id, contact); }}
                   onRetirer={() => { void retirerAttributionDirecte(lot.id); }}
+                  onCreerEntreprise={name => setCreationPourLot({ lotId: lot.id, name })}
                 />
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm min-w-[700px]">
@@ -1840,6 +1850,20 @@ export default function ACTModule({ projectId, projectName, lots, contacts, oper
           entrepriseInitiale={importOuvert.entreprise ? { id: importOuvert.entreprise.id, nom: importOuvert.entreprise.nom } : undefined}
           onClose={() => setImportOuvert(null)}
           onConfirm={confirmerImport}
+        />
+      )}
+
+      {creationPourLot && (
+        <ContactModal
+          isOpen
+          initialCategory={CONTACT_CATEGORY_ENTREPRISE}
+          initialData={{ company_name: creationPourLot.name }}
+          onClose={() => setCreationPourLot(null)}
+          onSuccess={c => {
+            setExtraContacts(prev => [...prev.filter(x => x.id !== c.id), c]);
+            void attribuerDirectement(creationPourLot.lotId, c);
+            setCreationPourLot(null);
+          }}
         />
       )}
 
