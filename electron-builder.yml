@@ -63,11 +63,48 @@ files:
   # launch. Previously missing entirely, causing "ENOENT, supabase not
   # found in ...app.asar" on a real Windows install.
   - supabase/**/*
+  # electron-builder packs every package.json "dependencies" entry (76 of them,
+  # hundreds of MB) into app.asar by default, although the server is one
+  # esbuild bundle and the SPA is static. Size report of the 1.0.18 build: 1.1 GB
+  # in resources/ against ~110 MB of Postgres. The main process only needs
+  # electron-updater (electron/main.cjs, menu.cjs) and its dependency closure
+  # below; embedded-postgres and pg are loaded from resources/node_modules
+  # (extraResources). A NEW require() of an npm package from electron/*.cjs
+  # must be added here, or the packaged app crashes at launch (MODULE_NOT_FOUND).
+  - "!node_modules/**/*"
+  - node_modules/electron-updater/**/*
+  - node_modules/builder-util-runtime/**/*
+  - node_modules/fs-extra/**/*
+  - node_modules/graceful-fs/**/*
+  - node_modules/jsonfile/**/*
+  - node_modules/universalify/**/*
+  - node_modules/js-yaml/**/*
+  - node_modules/argparse/**/*
+  - node_modules/lazy-val/**/*
+  - node_modules/lodash.escaperegexp/**/*
+  - node_modules/lodash.isequal/**/*
+  - node_modules/semver/**/*
+  - node_modules/tiny-typed-emitter/**/*
+  - node_modules/debug/**/*
+  - node_modules/ms/**/*
+  - node_modules/sax/**/*
+# Chromium ships ~55 locale packs (~45 MB); the app is French/English only.
+electronLanguages:
+  - fr
+  - en-US
 extraResources:
+  # Source maps are only useful when debugging a build; the server one
+  # (scripts/build-server.mjs, sourcemap: true) alone is tens of MB.
   - from: dist
     to: dist
+    filter:
+      - "**/*"
+      - "!**/*.map"
   - from: dist-server
     to: dist-server
+    filter:
+      - "**/*"
+      - "!**/*.map"
   - from: proxy.json
     to: proxy.json
   # Fetched in CI (see .github/workflows/build-windows.yml) — PostgREST has no

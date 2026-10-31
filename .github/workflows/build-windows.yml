@@ -2,6 +2,11 @@ name: Build Windows installer
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version à compiler (ex. 1.0.19). Vide : dernière release publiée.'
+        required: false
+        default: ''
   push:
     branches: [claude/windows-offline-app-install-okof14]
     tags: ['v*']
@@ -39,14 +44,36 @@ jobs:
       # ever updated. The tag is the release's identity, so it is what the
       # build must use; package.json is aligned to it here, on the runner
       # only (nothing is committed).
+      #
+      # A manual run or a branch push has no tag, and package.json is never
+      # bumped in the repo (it said 1.0.5 while the releases were at 1.0.18),
+      # so those builds produced "Setup 1.0.5.exe". They now take, in order:
+      # the `version` input, else the latest published release. They still
+      # never publish (--publish onTagOrDraft only publishes on a tag).
       - name: Align package.json version with the release tag
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            source="tag $GITHUB_REF_NAME"
+          elif [ -n "${INPUT_VERSION:-}" ]; then
+            version="${INPUT_VERSION#v}"
+            source="input"
+          else
+            latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName || true)
+            if [ -z "$latest" ]; then
+              echo "::warning::No published release found, keeping package.json version."
+              exit 0
+            fi
+            version="${latest#v}"
+            source="latest release $latest"
+          fi
           npm version --no-git-tag-version --allow-same-version "$version"
-          echo "Building version $version (from tag $GITHUB_REF_NAME)"
+          echo "Building version $version (from $source)"
 
       - name: Configure CFAPI preview provider
         run: cmake -S native/windows-drive -B native/windows-drive/build -A x64
@@ -123,6 +150,21 @@ jobs:
         run: npx electron-builder --win --x64 --publish onTagOrDraft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Size report of the unpacked app, largest first, to see what actually
+      # weighs on the user's disk before trimming anything else.
+      - name: Report installed size breakdown
+        shell: bash
+        run: |
+          du -sh release/win-unpacked || true
+          # Separate du calls: one call with nested paths skips the children
+          # of a directory it already counted, hiding what is inside resources/.
+          du -sh release/win-unpacked/* 2>/dev/null | sort -h | tail -8 || true
+          echo "--- resources/"
+          du -sh release/win-unpacked/resources/* 2>/dev/null | sort -h | tail -12 || true
+          echo "--- resources/node_modules"
+          du -sh release/win-unpacked/resources/node_modules/* 2>/dev/null | sort -h | tail -8 || true
+          du -sh release/win-unpacked/resources/node_modules/@embedded-postgres/*/native/* 2>/dev/null | sort -h | tail -10 || true
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
