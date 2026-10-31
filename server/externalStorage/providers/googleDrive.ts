@@ -241,6 +241,28 @@ class GoogleDriveProvider implements ExternalStorageProvider {
     if (!res.ok) await this.fail(res, 'suppression');
   }
 
+  /** Changement de dossier parent (addParents / removeParents) : l'identifiant du
+   *  fichier ne change pas. Un fichier qui a plusieurs parents les perd tous au profit
+   *  du nouveau dossier, comme un déplacement dans l'interface de Drive. */
+  async moveFile(externalId: string, newParentExternalId: string): Promise<string> {
+    const base = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(externalId)}`;
+    const get = await this.call(`${base}?${new URLSearchParams({ ...SHARED_DRIVE_PARAMS, fields: 'parents' })}`);
+    if (get.status === 404) throw new ExternalFolderMissingError('Fichier introuvable');
+    if (!get.ok) await this.fail(get, 'déplacement');
+    const parents: string[] = ((await get.json()) as any)?.parents ?? [];
+    if (parents.length === 1 && parents[0] === newParentExternalId) return externalId;
+    const params = new URLSearchParams({ ...SHARED_DRIVE_PARAMS, addParents: newParentExternalId });
+    const toRemove = parents.filter((p) => p !== newParentExternalId);
+    if (toRemove.length) params.set('removeParents', toRemove.join(','));
+    const res = await this.call(`${base}?${params}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (!res.ok) await this.fail(res, 'déplacement');
+    return externalId;
+  }
+
   /** Drive ne sait produire un lien lisible sans authentification qu'au prix
    *  d'une permission « toute personne disposant du lien » posée sur le fichier
    *  — un élargissement du partage dans l'espace du cabinet qu'on se refuse à

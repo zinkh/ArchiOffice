@@ -203,6 +203,17 @@ class DropboxProvider implements ExternalStorageProvider {
     if (!res.ok) throw statusError(res.status, text, 'suppression');
   }
 
+  /** `files/move_v2` depuis l'`id:xxx` : l'identifiant ne change pas. `autorename`
+   *  évite d'écraser un fichier homonyme du dossier d'arrivée. */
+  async moveFile(externalId: string, newParentExternalId: string, fileName: string): Promise<string> {
+    const data = await this.rpc('files/move_v2', {
+      from_path: externalId,
+      to_path: `${asPath(newParentExternalId)}/${fileName}`,
+      autorename: true,
+    }, 'déplacement');
+    return data?.metadata?.id ?? externalId;
+  }
+
   /**
    * Dropbox sait produire un lien de téléchargement direct valable quatre
    * heures. Il est propre au porteur et expire de lui-même : il n'élargit PAS

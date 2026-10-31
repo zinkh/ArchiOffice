@@ -289,6 +289,19 @@ class WebdavProvider implements ExternalStorageProvider {
     throw statusError(status, 'suppression');
   }
 
+  /** MOVE WebDAV (RFC 4918). L'identifiant d'un fichier est son chemin : il change.
+   *  `Overwrite: F` + recherche d'un nom libre : jamais d'écrasement silencieux. */
+  async moveFile(externalId: string, newParentExternalId: string, fileName: string): Promise<string> {
+    const target = await this.freeName(newParentExternalId, fileName);
+    if (target === externalId) return externalId;
+    const status = await this.callStatus('MOVE', this.url(externalId), {
+      headers: { Destination: this.url(target), Overwrite: 'F' },
+    });
+    if (status === 201 || status === 204 || status === 200) return target;
+    if (status === 404 || status === 409) throw new ExternalFolderMissingError();
+    throw statusError(status, 'déplacement');
+  }
+
   /** WebDAV n'a aucune notion de lien temporaire. Les partages publics de
    *  Nextcloud (API OCS) créeraient un partage PERSISTANT dans l'espace du
    *  cabinet, et kDrive n'expose pas la même chose : on streame plutôt. */

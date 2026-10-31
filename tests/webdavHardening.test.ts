@@ -191,3 +191,49 @@ describe('WebdavProvider.uploadFile : contrôle de taille', () => {
     await expect(provider().probe()).rejects.toMatchObject({ status: 403 });
   });
 });
+
+describe('WebdavProvider.moveFile', () => {
+  const calls: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
+  const reply = (status: number) => ({ status, headers: {}, stream: Readable.from([]) } as any);
+
+  function provider() {
+    registerWebdavProvider();
+    return createProvider({
+      id: 'conn-1', tenant_id: 't1', provider: 'webdav',
+      base_url: 'https://cloud.test/dav/', username: 'khaldoun', password_encrypted: 'mdp-app',
+      root_folder_path: 'ArchiOffice', is_active: true, status: 'ok',
+    });
+  }
+
+  beforeEach(() => { calls.length = 0; vi.mocked(pinnedRequest).mockReset(); });
+
+  it('déplace par MOVE sans écraser et rend le nouveau chemin', async () => {
+    vi.mocked(pinnedRequest).mockImplementation(async (url, init) => {
+      calls.push({ method: init.method, url, headers: init.headers || {} });
+      if (init.method === 'PROPFIND') return reply(404); // le nom est libre à l'arrivée
+      return reply(201);
+    });
+    const id = await provider().moveFile('ArchiOffice/A/DCE/plan.pdf', 'ArchiOffice/B/PRO', 'plan.pdf');
+    expect(id).toBe('ArchiOffice/B/PRO/plan.pdf');
+    const move = calls.find((c) => c.method === 'MOVE')!;
+    expect(move.url).toBe('https://cloud.test/dav/ArchiOffice/A/DCE/plan.pdf');
+    expect(move.headers.Destination).toBe('https://cloud.test/dav/ArchiOffice/B/PRO/plan.pdf');
+    expect(move.headers.Overwrite).toBe('F');
+  });
+
+  it('suffixe le nom quand le dossier d’arrivée a déjà un fichier homonyme', async () => {
+    vi.mocked(pinnedRequest).mockImplementation(async (url, init) => {
+      calls.push({ method: init.method, url, headers: init.headers || {} });
+      if (init.method === 'PROPFIND') return url.endsWith('/PRO/plan.pdf') ? reply(207) : reply(404);
+      return reply(201);
+    });
+    const id = await provider().moveFile('ArchiOffice/A/DCE/plan.pdf', 'ArchiOffice/B/PRO', 'plan.pdf');
+    expect(id).toBe('ArchiOffice/B/PRO/plan (2).pdf');
+  });
+
+  it('traduit un fichier ou un dossier introuvable en erreur de dossier manquant', async () => {
+    vi.mocked(pinnedRequest).mockImplementation(async (_url, init) => reply(init.method === 'PROPFIND' ? 404 : 404));
+    await expect(provider().moveFile('ArchiOffice/A/plan.pdf', 'ArchiOffice/B', 'plan.pdf'))
+      .rejects.toMatchObject({ code: 'folder_missing' });
+  });
+});

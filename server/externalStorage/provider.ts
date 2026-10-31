@@ -57,6 +57,13 @@ export interface ExternalStorageProvider {
    *  exemplaire que le cabinet possède. */
   deleteFile(externalId: string): Promise<void>;
 
+  /** Déplace un fichier existant dans un autre dossier (classement d'un document d'une
+   *  affaire ou d'une phase à l'autre). Renvoie l'identifiant du fichier APRÈS le
+   *  déplacement : inchangé chez Google Drive et Dropbox, nouveau chemin en WebDAV.
+   *  Ne remplace jamais un fichier de même nom (suffixe numéroté). `fileName` sert à
+   *  nommer le fichier à l'arrivée quand le fournisseur identifie par chemin. */
+  moveFile(externalId: string, newParentExternalId: string, fileName: string): Promise<string>;
+
   /** Lien temporaire du fournisseur, ou null s'il n'en produit pas (Google Drive, WebDAV).
    *  Quand il en produit un, la route de lecture redirige dessus et aucun octet ne
    *  transite par le serveur. */

@@ -755,7 +755,7 @@ export async function createApp() {
   // la seule à le savoir : les dix autres modules de routes continuent d'appeler
   // uploadToStorage/deleteFromStorage directement, sans rien changer. Voir
   // server/externalStorage/storeBusinessFile.ts.
-  const { storeBusinessFile, removeBusinessFile } = createBusinessFileStore({
+  const { storeBusinessFile, removeBusinessFile, relocateBusinessFile } = createBusinessFileStore({
     supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota,
   });
   registerStorageProviders(supabaseAdmin);
@@ -1198,7 +1198,7 @@ export async function createApp() {
   registerRfiRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, captureWithContext, requireRole });
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
-  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole });
+  registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, relocateBusinessFile, requireRole });
   // Synchronisation desktop (Explorateur Windows, Finder macOS) : /api/desktop/v1.
   registerDesktopSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, getSystemRole });
   // Client de bureau seulement (répond 404 ailleurs) : ouverture d'un fichier dans

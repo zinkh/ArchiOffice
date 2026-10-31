@@ -4359,7 +4359,14 @@ drive fait échouer le dépôt en `ExternalFolderMissingError` ; on oublie alors
 sous-arbre et on rejoue **une** fois. Conséquence assumée : un dossier renommé à
 la main voit réapparaître un dossier au nom d'origine à côté du sien — on ne
 poursuit pas les renommages. Les fichiers déjà déposés ne bougent pas, étant
-référencés par leur propre identifiant.
+référencés par leur propre identifiant, SAUF au classement d'un document (glisser-déposer vers une autre
+affaire ou phase, `PUT /api/documents/:id` avec `project_id` / `phase`) : `relocateBusinessFile`
+(`storeBusinessFile.ts`) appelle `moveFile` de l'adaptateur (WebDAV `MOVE`, Drive `addParents`/`removeParents`,
+Dropbox `move_v2`), puis la route enregistre la nouvelle `file_url` (et celle de la version courante : en WebDAV
+l'identifiant est le chemin et change). Si le fournisseur refuse, la route répond en erreur et rien ne change en
+base ; si l'écriture en base échoue après le déplacement, le fichier est remis en place. Les anciennes versions,
+les fichiers Supabase et l'arborescence locale du poste Electron ne sont pas déplacés. Non vérifié contre un
+vrai Nextcloud, Drive ou Dropbox. Tests : `tests/externalStorageRelocate.test.ts`, `tests/webdavHardening.test.ts`.
 
 **Ne pas réutiliser `sanitizeFilename` pour les noms de dossiers** : sa règle
 `[^a-zA-Z0-9._-] → _` transforme « Général » en « G_n_ral ». Acceptable pour un
