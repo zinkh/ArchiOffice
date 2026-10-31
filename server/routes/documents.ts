@@ -269,6 +269,16 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        // Classement par glisser-déposer : rattacher le document à une autre affaire
+        // (ou le détacher avec une chaîne vide). Le fichier ne bouge pas chez le fournisseur.
+        if (req.body.project_id !== undefined) {
+          const newProjectId = req.body.project_id || null;
+          if (newProjectId && !(await assertTenantEntity(supabaseAdmin, 'projects', newProjectId, tenantId))) {
+            return res.status(400).json({ error: "Affaire introuvable pour ce cabinet." });
+          }
+          updateFields.project_id = newProjectId;
+          if (newProjectId) { updateFields.resource_type = 'projects'; updateFields.resource_id = newProjectId; }
+        }
         if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
         if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
         if (validation_status !== undefined) updateFields.validation_status = validation_status;

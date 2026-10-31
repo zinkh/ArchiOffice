@@ -19,7 +19,7 @@ export function WindowsDrivePreview({projectId}:{projectId:string|null}) {
       else if(projectId){const result=await bridge?.startWindowsDrivePreview?.(projectId);setMessage(result?.status==='opened'?'windows_drive_opened':'windows_drive_error');if(result?.status==='opened')setActive(true);}
     }catch{setMessage('windows_drive_error');}finally{lock.current=false;setBusy(false);}
   };
-  if(!enabled)return null;
+  if(!enabled)return <p className="text-xs max-w-prose" role="status" style={{color:'var(--tblr-muted)'}}><strong style={{color:'var(--tblr-text)'}}>{t('windows_drive_unavailable_title')}</strong>{' : '}{t('windows_drive_unavailable_preview')}</p>;
   return <div className="space-y-2" aria-busy={busy}>
     <p className="text-sm max-w-prose">{t('windows_drive_explanation')}</p>
     <div className="flex flex-wrap gap-2">
