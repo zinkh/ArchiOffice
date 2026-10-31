@@ -151,6 +151,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      # Size report of the unpacked app, largest first, to see what actually
+      # weighs on the user's disk before trimming anything else.
+      - name: Report installed size breakdown
+        shell: bash
+        run: |
+          du -sh release/win-unpacked || true
+          du -sh release/win-unpacked/* release/win-unpacked/resources/* 2>/dev/null | sort -h | tail -15 || true
+          du -sh release/win-unpacked/resources/node_modules/@embedded-postgres/*/native/* 2>/dev/null | sort -h | tail -10 || true
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v7
         with:

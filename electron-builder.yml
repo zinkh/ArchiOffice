@@ -63,11 +63,23 @@ files:
   # launch. Previously missing entirely, causing "ENOENT, supabase not
   # found in ...app.asar" on a real Windows install.
   - supabase/**/*
+# Chromium ships ~55 locale packs (~45 MB); the app is French/English only.
+electronLanguages:
+  - fr
+  - en-US
 extraResources:
+  # Source maps are only useful when debugging a build; the server one
+  # (scripts/build-server.mjs, sourcemap: true) alone is tens of MB.
   - from: dist
     to: dist
+    filter:
+      - "**/*"
+      - "!**/*.map"
   - from: dist-server
     to: dist-server
+    filter:
+      - "**/*"
+      - "!**/*.map"
   - from: proxy.json
     to: proxy.json
   # Fetched in CI (see .github/workflows/build-windows.yml) — PostgREST has no
