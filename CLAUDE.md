@@ -2339,8 +2339,15 @@ de cabinet, affaire et pièces, jamais de donnée en clair) et facture les jeton
 servis par le cache (`usage.prompt_tokens_details.cached_tokens`) à 10 % : succès
 possible mais jamais garanti, blocs de 64 jetons. Le
 plan, lancé seul avant les lots, écrit le cache que les lots lisent ensuite. Le
-texte extrait des pièces est gardé 15 min en mémoire (`sourceCache`) pour ne pas
-relire ni réOCRiser les plans à chaque lot.
+texte extrait des pièces est gardé 15 min en mémoire, PAR PIÈCE (`pieceCache`), pour ne pas
+relire ni réOCRiser les plans à chaque lot. **La lecture des pièces a sa propre route** :
+`POST .../cctp/read-piece` (une pièce par requête, sans modèle ni crédit) est appelée une pièce après l'autre
+par l'écran AVANT le plan. Lues dans la requête du plan, l'OCR d'un plan scanné plus l'appel au modèle dépassaient
+le délai des passerelles (~60 s) et l'écran affichait « ArchiOffice est en cours de mise à jour » (502/503/504 sans
+corps JSON). **Le choix des lots est en deux temps** : « Lister les lots » (lecture + plan) puis liste de cases à cocher
+(tous cochés au départ, « Tout cocher / Tout décocher »), « Rédiger N lots » ne rédige que les lots cochés (chacun est
+facturé) ; « Réessayer les lots en échec » ne reprend que les lots cochés. Cache par pièce : si une requête tombe sur une
+autre instance du serveur, la pièce est relue (plus lent, jamais faux).
 
 ### Chantier hors ligne, en plusieurs bâtiments et phases
 

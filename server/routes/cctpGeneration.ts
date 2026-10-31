@@ -55,7 +55,7 @@ const LLM_GENERATION_TIMEOUT_MS = 270_000;
 // effet. Le texte restant identique d'un appel à l'autre, le cache de prompt du
 // fournisseur peut le reconnaître.
 const SOURCE_CACHE_TTL_MS = 15 * 60_000;
-const SOURCE_CACHE_MAX = 50;
+const SOURCE_CACHE_MAX = 200; // pièces (jusqu'à MAX_DOCUMENTS par génération)
 const MAX_LOTS = 40;
 const MAX_CHAPITRES = 40;
 const MAX_ARTICLES = 80;
@@ -301,7 +301,30 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
   // appel par lot. Les pièces sont placées en tête de chaque prompt, dans le
   // même ordre, pour que le cache de prompt du fournisseur serve les appels
   // suivants (voir LlmChatParams.cachePrefix).
-  const sourceCache = new Map<string, { at: number; combined: string; ignored: string[]; read: number }>();
+  //
+  // La lecture d'une pièce (OCR d'un plan scanné compris) peut durer plus
+  // longtemps que le délai des passerelles (~60 s) : dans une seule requête
+  // avec l'appel du plan, elle finissait en 502/503/504 sans corps. Le texte
+  // est donc mis en cache PAR PIÈCE et l'écran lit les pièces une par une
+  // (POST .../cctp/read-piece) avant de demander le plan, qui ne fait plus
+  // que retrouver ces textes puis appeler le modèle.
+  const pieceCache = new Map<string, { at: number; text: string }>();
+
+  async function readPiece(tenantId: string, projectId: string, doc: any): Promise<string | null> {
+    const key = `${tenantId}|${projectId}|${doc.id}`;
+    const now = Date.now();
+    for (const [k, v] of pieceCache) if (now - v.at > SOURCE_CACHE_TTL_MS) pieceCache.delete(k);
+    const hit = pieceCache.get(key);
+    if (hit) return hit.text;
+    const agents = await import('@zinkh/archioffice-agents/server');
+    const text = await agents.extractKnowledgeDocText(supabaseAdmin, tenantId, doc).catch(() => null);
+    if (!text) return null;
+    if (pieceCache.size >= SOURCE_CACHE_MAX) pieceCache.delete(pieceCache.keys().next().value as string);
+    // Le plafond d'une pièce dans le prompt est MAX_SOURCE_CHARS : inutile de garder plus.
+    const kept = text.slice(0, MAX_SOURCE_CHARS);
+    pieceCache.set(key, { at: now, text: kept });
+    return kept;
+  }
 
   async function loadSources(tenantId: string, projectId: string, body: any) {
     const instructions = str(body?.instructions, MAX_INSTRUCTIONS_CHARS);
@@ -313,30 +336,21 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
     const { data: project } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects').select('id, name, address').eq('id', projectId).maybeSingle();
     if (!project) return { status: 404, error: 'Affaire introuvable.' };
     const { data: docRows } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('id, name, file_url, project_id').in('id', documentIds);
-    const docs = ((docRows as any[]) || []).filter(d => d.project_id === projectId);
+    // Ordre fixe : le préfixe de prompt doit rester identique d'un appel à l'autre (cache du fournisseur).
+    const docs = ((docRows as any[]) || []).filter(d => d.project_id === projectId).sort((a, b) => String(a.id).localeCompare(String(b.id)));
     if (!docs.length) return { status: 400, error: 'Aucune des pièces sélectionnées n\'appartient à cette affaire.' };
 
     const context = `Affaire : ${(project as any).name}${(project as any).address ? ` (${(project as any).address})` : ''}.${instructions ? `\nConsignes de l'architecte : ${instructions}` : ''}`;
-    const key = `${tenantId}|${projectId}|${docs.map(d => d.id).sort().join(',')}`;
-    const now = Date.now();
-    for (const [k, v] of sourceCache) if (now - v.at > SOURCE_CACHE_TTL_MS) sourceCache.delete(k);
-    let entry = sourceCache.get(key);
-    if (!entry) {
-      const agents = await import('@zinkh/archioffice-agents/server');
-      const ignored: string[] = [];
-      let combined = '';
-      for (const doc of docs) {
-        if (combined.length >= MAX_SOURCE_CHARS) break;
-        const text = await agents.extractKnowledgeDocText(supabaseAdmin, tenantId, doc).catch(() => null);
-        if (!text) { ignored.push(doc.name); continue; }
-        combined += `\n\n--- ${doc.name} ---\n${text.slice(0, MAX_SOURCE_CHARS - combined.length)}`;
-      }
-      entry = { at: now, combined, ignored, read: docs.length - ignored.length };
-      if (combined.trim()) {
-        if (sourceCache.size >= SOURCE_CACHE_MAX) sourceCache.delete(sourceCache.keys().next().value as string);
-        sourceCache.set(key, entry);
-      }
+    const key = `${tenantId}|${projectId}|${docs.map(d => d.id).join(',')}`;
+    const ignored: string[] = [];
+    let combined = '';
+    for (const doc of docs) {
+      if (combined.length >= MAX_SOURCE_CHARS) break;
+      const text = await readPiece(tenantId, projectId, doc);
+      if (!text) { ignored.push(doc.name); continue; }
+      combined += `\n\n--- ${doc.name} ---\n${text.slice(0, MAX_SOURCE_CHARS - combined.length)}`;
     }
+    const entry = { combined, ignored, read: docs.length - ignored.length };
     if (!entry.combined.trim()) return { status: 400, error: 'Impossible d\'extraire le contenu des pièces sélectionnées.', ignored: entry.ignored };
     // Préfixe identique d'un appel à l'autre : contexte puis pièces.
     return { cacheKey: `cctp-${createHash('sha256').update(key).digest('hex').slice(0, 32)}`, prefix: `${context}\n\nContenu des pièces :\n${entry.combined}`, ignored: entry.ignored, read: entry.read };
@@ -377,6 +391,22 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
     Sentry.captureException(e, { tags: { feature: 'cctp-generation' } });
     res.status(500).json({ error: 'Échec de la génération du CCTP : ' + e.message });
   };
+
+  // Lit UNE pièce (sans modèle ni crédit) et met son texte en cache pour le plan
+  // et les lots. Une requête courte par pièce, sous le délai des passerelles.
+  app.post('/api/projects/:projectId/cctp/read-piece', cctpLotLimiter, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const documentId = str(req.body?.document_id, 100);
+      if (!documentId) return res.status(400).json({ error: 'Pièce à lire manquante.' });
+      const { data: doc } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents').select('id, name, file_url, project_id').eq('id', documentId).maybeSingle();
+      if (!doc || (doc as any).project_id !== req.params.projectId) return res.status(404).json({ error: 'Pièce introuvable dans cette affaire.' });
+      const text = await readPiece(tenantId, req.params.projectId, doc);
+      res.json({ name: (doc as any).name, read: !!text, chars: text?.length ?? 0 });
+    } catch (e: any) {
+      handleError(e, res, 'POST /api/projects/:projectId/cctp/read-piece');
+    }
+  });
 
   app.post('/api/projects/:projectId/cctp/plan', aiGenerationLimiter, async (req: any, res: any) => {
     try {

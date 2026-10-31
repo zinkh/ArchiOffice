@@ -131,6 +131,33 @@ describe('routes plan et generate-lot', () => {
     expect(res.status).toBe(502);
   });
 
+  it('read-piece lit une pièce une seule fois : le plan réutilise son texte sans relire', async () => {
+    const agents: any = await import('@zinkh/archioffice-agents/server');
+    const { token, projectId, docId } = seed();
+    agents.extractKnowledgeDocText.mockClear();
+    const lue = await request(app).post(`/api/projects/${projectId}/cctp/read-piece`).set(authHeader(token)).send({ document_id: docId });
+    expect(lue.status).toBe(200);
+    expect(lue.body).toMatchObject({ name: 'plan.pdf', read: true });
+    expect(lue.body.chars).toBeGreaterThan(0);
+    chat.mockResolvedValueOnce(reply('{"lots":[{"titre":"Gros œuvre"}]}'));
+    const plan = await request(app).post(`/api/projects/${projectId}/cctp/plan`).set(authHeader(token)).send({ document_ids: [docId] });
+    expect(plan.status).toBe(200);
+    expect(agents.extractKnowledgeDocText).toHaveBeenCalledTimes(1);
+  });
+
+  it('read-piece : pièce d\'une autre affaire ou absente refusée, pièce illisible signalée', async () => {
+    const agents: any = await import('@zinkh/archioffice-agents/server');
+    const { token, projectId, docId } = seed();
+    const autre = await request(app).post(`/api/projects/${crypto.randomUUID()}/cctp/read-piece`).set(authHeader(token)).send({ document_id: docId });
+    expect(autre.status).toBe(404);
+    const sans = await request(app).post(`/api/projects/${projectId}/cctp/read-piece`).set(authHeader(token)).send({});
+    expect(sans.status).toBe(400);
+    agents.extractKnowledgeDocText.mockResolvedValueOnce(null);
+    const illisible = await request(app).post(`/api/projects/${projectId}/cctp/read-piece`).set(authHeader(token)).send({ document_id: docId });
+    expect(illisible.status).toBe(200);
+    expect(illisible.body).toMatchObject({ read: false, chars: 0 });
+  });
+
   it('crédit épuisé : 402 sans appel au modèle', async () => {
     const { token, projectId, docId } = seed();
     const tenants = fakeSupabaseAdmin.getTable('tenants');
