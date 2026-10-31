@@ -99,7 +99,22 @@ export default function Documents() {
   const [selectedProject, setSelectedProject] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('General');
   const [selectedPhase, setSelectedPhase] = useState<DocumentPhase>('Général');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadErrors, setUploadErrors] = useState<Record<string, string>>({});
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
+  const fileKey = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+  const addSelectedFiles = (incoming: FileList | File[] | null | undefined) => {
+    const list = Array.from(incoming || []);
+    if (!list.length) return;
+    setSelectedFiles(prev => {
+      const known = new Set(prev.map(fileKey));
+      return [...prev, ...list.filter(f => !known.has(fileKey(f)))];
+    });
+  };
+  const removeSelectedFile = (file: File) => {
+    setSelectedFiles(prev => prev.filter(f => fileKey(f) !== fileKey(file)));
+    setUploadErrors(prev => { const next = { ...prev }; delete next[fileKey(file)]; return next; });
+  };
   const [uploadIndice, setUploadIndice] = useState('A');
   const [uploadEmetteur, setUploadEmetteur] = useState('');
   const [uploadDocType, setUploadDocType] = useState('');
@@ -185,12 +200,12 @@ export default function Documents() {
     driveEnabled ? `${currentUser?.id}:${activeTenantId}` : null);
 
   // Upload
-  const handleFileUpload = async () => {
-    if (!selectedFile) return;
+  // Les fichiers partent un par un : un échec s'affiche sur sa ligne et n'arrête pas les suivants.
+  const uploadOneFile = async (file: File, token: string | null): Promise<string | null> => {
     const formData = new FormData();
-    formData.append('file', selectedFile);
+    formData.append('file', file);
     formData.append('project_id', selectedProject);
-    formData.append('name', selectedFile.name);
+    formData.append('name', file.name);
     formData.append('category', selectedCategory);
     formData.append('phase', selectedPhase);
     formData.append('description', '');
@@ -198,29 +213,54 @@ export default function Documents() {
     formData.append('indice', uploadIndice || 'A');
     formData.append('emetteur', uploadEmetteur);
     formData.append('doc_type', uploadDocType);
-    setIsUploading(true);
     try {
-      const token = await getAccessToken();
       const response = await fetch('/api/documents', {
         method: 'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
-      if (response.ok) {
-        refreshDocuments();
-        setIsModalOpen(false);
-        setSelectedFile(null);
-        setUploadIndice('A');
-        setUploadEmetteur('');
-        setUploadDocType('');
-      } else {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-        alert(t('documents_upload_failed', { error: errorData.error || response.statusText }));
-      }
+      if (response.ok) return null;
+      const errorData = await response.json().catch(() => ({ error: '' }));
+      return errorData.error || response.statusText || 'Erreur inconnue';
     } catch (error) {
-      alert(t('documents_error', { error }));
+      return error instanceof Error ? error.message : 'Erreur réseau';
+    }
+  };
+
+  const handleFileUpload = async () => {
+    if (!selectedFiles.length) return;
+    const queue = [...selectedFiles];
+    const failed: Record<string, string> = {};
+    const remaining: File[] = [];
+    setUploadErrors({});
+    setIsUploading(true);
+    setUploadProgress({ done: 0, total: queue.length });
+    try {
+      const token = await getAccessToken();
+      for (let i = 0; i < queue.length; i++) {
+        const error = await uploadOneFile(queue[i], token);
+        if (error) {
+          failed[fileKey(queue[i])] = error;
+          remaining.push(queue[i]);
+        }
+        setUploadProgress({ done: i + 1, total: queue.length });
+      }
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
+    }
+    await refreshDocuments();
+    if (remaining.length === 0) {
+      setIsModalOpen(false);
+      setSelectedFiles([]);
+      setUploadErrors({});
+      setUploadIndice('A');
+      setUploadEmetteur('');
+      setUploadDocType('');
+    } else {
+      // Les fichiers en échec restent dans la liste pour pouvoir relancer l'envoi.
+      setSelectedFiles(remaining);
+      setUploadErrors(failed);
     }
   };
 
@@ -717,24 +757,59 @@ export default function Documents() {
               <div
                 className="border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition"
                 style={{ borderColor: 'var(--tblr-border)' }}
-                onDrop={e => { e.preventDefault(); setSelectedFile(e.dataTransfer.files[0]); }}
+                onDrop={e => { e.preventDefault(); addSelectedFiles(e.dataTransfer.files); }}
                 onDragOver={e => e.preventDefault()}
                 onClick={() => fileInputRef.current?.click()}
               >
                 <IconUpload className="mx-auto mb-2" size={28} style={{ color: 'var(--tblr-muted)' }} />
                 <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>
-                  {selectedFile ? selectedFile.name : 'Glissez un fichier ou cliquez'}
+                  {selectedFiles.length ? 'Glissez d’autres fichiers ou cliquez pour en ajouter' : 'Glissez un ou plusieurs fichiers, ou cliquez'}
                 </p>
-                <input type="file" className="hidden" ref={fileInputRef} onChange={e => setSelectedFile(e.target.files?.[0] || null)} />
+                <input
+                  type="file"
+                  multiple
+                  className="hidden"
+                  ref={fileInputRef}
+                  onChange={e => { addSelectedFiles(e.target.files); e.target.value = ''; }}
+                />
               </div>
+
+              {selectedFiles.length > 0 && (
+                <ul className="space-y-1.5 max-h-48 overflow-y-auto" aria-label="Fichiers à importer">
+                  {selectedFiles.map(file => {
+                    const error = uploadErrors[fileKey(file)];
+                    return (
+                      <li key={fileKey(file)} className="flex items-center gap-2 text-sm rounded-lg px-3 py-1.5" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)' }}>
+                        <IconFile size={14} style={{ color: 'var(--tblr-muted)' }} className="shrink-0" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate">{file.name}</span>
+                          {error && <span className="block text-xs" style={{ color: '#d63939' }}>{error}</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => removeSelectedFile(file)}
+                          disabled={isUploading}
+                          aria-label={`Retirer ${file.name}`}
+                          className="p-1 rounded disabled:opacity-40"
+                          style={{ color: 'var(--tblr-muted)' }}
+                        >
+                          <IconX size={14} />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
 
               <button
                 onClick={handleFileUpload}
-                disabled={isUploading || !selectedFile || !isOnline}
+                disabled={isUploading || selectedFiles.length === 0 || !isOnline}
                 className="w-full py-2.5 rounded-xl font-bold transition disabled:opacity-40 disabled:cursor-not-allowed"
                 style={{ background: 'var(--tblr-primary)', color: '#fff' }}
               >
-                {isUploading ? 'Envoi...' : 'Ajouter le document'}
+                {isUploading && uploadProgress
+                  ? `Envoi ${uploadProgress.done}/${uploadProgress.total}...`
+                  : selectedFiles.length > 1 ? `Ajouter ${selectedFiles.length} documents` : 'Ajouter le document'}
               </button>
             </motion.div>
           </div>
