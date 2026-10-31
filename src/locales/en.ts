@@ -4775,7 +4775,7 @@ export default {
   "drive_transfer_retry": "Retry blocked uploads",
   "drive_transfer_retried": "Blocked uploads returned to the queue. Conflicts require separate resolution.",
   "storage_cartouche_title": "Storage",
-  "storage_cartouche_of": "{{used}} of {{limit}}",
+  "storage_cartouche_of": "{{used}} / {{limit}}",
   "storage_cartouche_aria": "Storage used: {{used}} of {{limit}}",
   "storage_cartouche_expired": "Subscription expired",
   "storage_cartouche_upgrade": "Change plan",
