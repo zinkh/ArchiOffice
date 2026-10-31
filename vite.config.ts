@@ -51,7 +51,9 @@ export default defineConfig(({mode}) => {
           name: 'ArchiOffice - Architectural Office Management',
           short_name: 'ArchiOffice',
           description: 'Gestion de cabinet d\'architecture : projets, propositions, factures et équipe.',
-          theme_color: '#2563eb',
+          // Blanc, comme la balise theme-color de index.html : Android reprend cette valeur pour la barre
+          // de navigation du système, qui s'affichait en bleu en bas de l'écran.
+          theme_color: '#ffffff',
           background_color: '#ffffff',
           display: 'standalone',
           scope: '/',

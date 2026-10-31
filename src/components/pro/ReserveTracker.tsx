@@ -501,13 +501,14 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
 
         {/* Filtres et recherche */}
         <div className="px-3 sm:px-4 py-3 border-b border-[var(--tblr-border)] flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1 flex-wrap">
+          {/* Une seule ligne, même sur téléphone : boutons bas (32 px au doigt) et défilement si l'écran est trop étroit. */}
+          <div className="flex items-center gap-1 flex-nowrap w-full sm:w-auto overflow-x-auto">
             {FILTERS.map(f => (
               <button
                 key={f.id}
                 onClick={() => setFilter(f.id)}
                 className={cn(
-                  'px-3 py-1.5 rounded-full text-sm font-bold transition-colors pointer-coarse:min-h-11',
+                  'shrink-0 whitespace-nowrap px-2.5 py-1 rounded-full text-[0.8125rem] font-bold transition-colors pointer-coarse:min-h-8',
                   filter === f.id ? 'bg-blue-600 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]',
                 )}
               >
