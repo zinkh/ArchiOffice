@@ -22,7 +22,22 @@ export interface ReservesExportProject {
   client?: string;
 }
 
+/**
+ * Contenu du PDF, trois blocs indépendants : la liste récapitulative (sans le détail), le détail de chaque
+ * réserve (champs, extrait de plan, photos) et les plans en annexe avec leurs pastilles. La page de garde
+ * (identification de l'opération et chiffres) est toujours imprimée.
+ */
+export interface ReservesExportContent {
+  liste: boolean;
+  details: boolean;
+  plans: boolean;
+}
+
+export const DEFAULT_RESERVES_CONTENT: ReservesExportContent = { liste: true, details: true, plans: true };
+
 export interface ReservesExportOptions {
+  /** Blocs imprimés ; tous par défaut. */
+  content?: Partial<ReservesExportContent>;
   /** « Réserves » ou « Réserves GPA » — le titre du document. */
   title: string;
   onProgress?: (message: string) => void;
@@ -104,6 +119,7 @@ export async function exportReservesToPDF(
     import('jspdf'), import('jspdf-autotable'),
   ]);
   const progress = opts.onProgress || (() => {});
+  const content = { ...DEFAULT_RESERVES_CONTENT, ...opts.content };
   // Classé par lot (ordre des numéros de lot, « Sans lot » en dernier), puis par numéro de réserve.
   const allowed = opts.allowedLots ? new Set(opts.allowedLots) : null;
   const groups: LotGroup<ReserveLike>[] = groupReservesByLot(reserves, opts.lots ?? [], allowed);
@@ -188,7 +204,7 @@ export async function exportReservesToPDF(
       ]);
     }
   }
-  autoTable(doc, {
+  if (content.liste) autoTable(doc, {
     startY: y,
     head: [['N°', 'Intitulé', 'Localisation', 'En charge', 'Échéance', 'Statut']],
     body: summaryBody,
@@ -198,41 +214,11 @@ export async function exportReservesToPDF(
     margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
   });
 
-  // ── Plans avec repères ─────────────────────────────────────────────────
-  const planIds = [...new Set(sorted.filter(r => r.plan_id && r.x != null && r.y != null).map(r => r.plan_id as string))]
-    .filter(id => planById.has(id));
-  for (const planId of planIds) {
-    const plan = planById.get(planId)!;
-    progress(`Rendu du plan ${plan.name}…`);
-    const markers = sorted
-      .filter(r => r.plan_id === planId && r.x != null && r.y != null)
-      .map(r => ({ x: r.x as number, y: r.y as number, label: String(r.number ?? '') }));
-    let image: { dataUrl: string; width: number; height: number };
-    try {
-      image = await renderPlanWithMarkers(plan.file_url, markers);
-    } catch (err) {
-      console.error('[reservesExport] Plan illisible :', plan.name, err);
-      continue;
-    }
-    const landscape = image.width > image.height;
-    doc.addPage('a4', landscape ? 'landscape' : 'portrait');
-    let py = drawAgencyHeader(doc, settings, { ...letterhead, subtitle: plan.name });
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...GRIS_TEXTE);
-    doc.text(plan.name, MARGIN, py + 2);
-    py += 6;
-    const availW = contentW();
-    const availH = pageH() - py - FOOTER_RESERVE;
-    const scale = Math.min(availW / image.width, availH / image.height);
-    const w = image.width * scale;
-    const h = image.height * scale;
-    doc.addImage(image.dataUrl, 'JPEG', MARGIN + (availW - w) / 2, py, w, h);
-    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...GRIS_DOUX);
-    doc.text(`Repères : ${markers.map(m => m.label).join(' ; ')}`, MARGIN, Math.min(py + h + 4, pageH() - FOOTER_RESERVE + 2));
-  }
-
   // ── Une fiche par réserve ──────────────────────────────────────────────
-  if (sorted.length > 0) doc.addPage('a4', 'portrait');
-  y = drawAgencyHeader(doc, settings, letterhead);
+  if (content.details && sorted.length > 0) {
+    doc.addPage('a4', 'portrait');
+    y = drawAgencyHeader(doc, settings, letterhead);
+  }
 
   const ensureRoom = (needed: number) => {
     if (y + needed > pageH() - FOOTER_RESERVE) {
@@ -242,7 +228,7 @@ export async function exportReservesToPDF(
   };
 
   let currentGroup = '';
-  for (let i = 0; i < sorted.length; i++) {
+  for (let i = 0; content.details && i < sorted.length; i++) {
     const r = sorted[i];
     progress(`Fiche ${i + 1} / ${sorted.length}…`);
 
@@ -367,6 +353,40 @@ export async function exportReservesToPDF(
     doc.setDrawColor(...GRIS_FILET); doc.setLineWidth(0.25);
     doc.line(MARGIN, y, pageW() - MARGIN, y);
     y += 6;
+  }
+
+  // ── Annexe : un plan par page avec les pastilles numérotées des réserves ─
+  if (content.plans) {
+    const planIds = [...new Set(sorted.filter(r => r.plan_id && r.x != null && r.y != null).map(r => r.plan_id as string))]
+      .filter(id => planById.has(id));
+    for (const planId of planIds) {
+      const plan = planById.get(planId)!;
+      progress(`Rendu du plan ${plan.name}…`);
+      const markers = sorted
+        .filter(r => r.plan_id === planId && r.x != null && r.y != null)
+        .map(r => ({ x: r.x as number, y: r.y as number, label: String(r.number ?? '') }));
+      let image: { dataUrl: string; width: number; height: number };
+      try {
+        image = await renderPlanWithMarkers(plan.file_url, markers);
+      } catch (err) {
+        console.error('[reservesExport] Plan illisible :', plan.name, err);
+        continue;
+      }
+      const landscape = image.width > image.height;
+      doc.addPage('a4', landscape ? 'landscape' : 'portrait');
+      let py = drawAgencyHeader(doc, settings, { ...letterhead, subtitle: plan.name });
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...GRIS_TEXTE);
+      doc.text(`Annexe : ${plan.name}`, MARGIN, py + 2);
+      py += 6;
+      const availW = contentW();
+      const availH = pageH() - py - FOOTER_RESERVE;
+      const scale = Math.min(availW / image.width, availH / image.height);
+      const w = image.width * scale;
+      const h = image.height * scale;
+      doc.addImage(image.dataUrl, 'JPEG', MARGIN + (availW - w) / 2, py, w, h);
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...GRIS_DOUX);
+      doc.text(`Repères : ${markers.map(m => m.label).join(' ; ')}`, MARGIN, Math.min(py + h + 4, pageH() - FOOTER_RESERVE + 2));
+    }
   }
 
   progress('Finalisation…');
