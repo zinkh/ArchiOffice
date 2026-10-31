@@ -963,7 +963,8 @@ FETCH_DATA. Le mode FULL hydrate une version entière depuis le cache vérifié.
 Les fichiers sont en lecture seule ; aucun envoi ou traitement de sauvegarde
 native n’est ajouté par ce lot.
 
-Le parcours est opt-in (`ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW=1`) et réservé au poste
+Le parcours est activé par défaut sur Windows (`ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW=0`
+le coupe) et réservé au poste
 autorisé d’un cabinet payant. Documents affiche le contrôle uniquement si le
 composant est présent et le mode disponible. Le renderer ne transmet qu’un
 identifiant de projet. Le worker charge un catalogue borné depuis les API

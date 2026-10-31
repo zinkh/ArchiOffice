@@ -407,7 +407,10 @@ function startDriveAgent() {
   const nativeExecutable=app.isPackaged?path.join(cwd,'drive-windows','archioffice-drive-cfapi.exe'):path.join(cwd,'native','windows-drive','build','Release','archioffice-drive-cfapi.exe');
   windowsDrivePreview=createWindowsPreview({spawn,agent:driveAgent,vault:()=>requestVault(serverProcess),
     root:path.join(app.getPath('userData'),'drive-windows-preview'),cacheRoot:path.join(app.getPath('userData'),'drive-transfers'),executable:nativeExecutable,shell,
-    enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW==='1'&&fs.existsSync(nativeExecutable)});
+    // Activé par défaut sur Windows dès que l'exécutable natif est livré ; la
+    // variable à « 0 » le coupe (diagnostic). Le droit Drive (abonnement payant
+    // vérifié en ligne) reste exigé en amont par l'écran Documents.
+    enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   ipcMain.handle('desktop:drive-windows-status',(event)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.status();
   });
