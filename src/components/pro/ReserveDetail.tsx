@@ -14,6 +14,7 @@ import { apiFetch } from '../../lib/api';
 import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLINE_WRITE_SYNCED_EVENT } from '../../lib/offlineQueue';
 import { prepareSitePhoto } from '../../lib/sitePhoto';
 import { keepLocalCopy } from '../../lib/localPhotoCopy';
+import { PlanAnnotator } from '../PlanAnnotator';
 import { useReserveOptions } from './useReserveOptions';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
@@ -121,10 +122,24 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
   queuedRef.current = queued;
   useEffect(() => () => { queuedRef.current.forEach(q => URL.revokeObjectURL(q.preview)); }, []);
 
-  const planId = isNew ? pendingPlan?.planId || null : reserve?.plan_id || null;
-  const planX = isNew ? pendingPlan?.x : reserve?.x ?? undefined;
-  const planY = isNew ? pendingPlan?.y : reserve?.y ?? undefined;
+  // Repère posé depuis la fiche (réserve saisie sans repère, ou repère à déplacer) : il l'emporte sur celui de la réserve.
+  const [placed, setPlaced] = useState<{ planId: string; x: number; y: number } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [pickPlanId, setPickPlanId] = useState<string | null>(null);
+  const [pickCoords, setPickCoords] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => { setPlaced(null); setPicking(false); }, [reserve?.id]);
+
+  const planId = placed?.planId ?? (isNew ? pendingPlan?.planId || null : reserve?.plan_id || null);
+  const planX = placed ? placed.x : isNew ? pendingPlan?.x : reserve?.x ?? undefined;
+  const planY = placed ? placed.y : isNew ? pendingPlan?.y : reserve?.y ?? undefined;
   const plan = useMemo(() => plans.find(p => p.id === planId) || null, [plans, planId]);
+
+  const openPicker = () => {
+    setPickPlanId(planId || plans[0]?.id || null);
+    setPickCoords(planX != null && planY != null ? { x: planX, y: planY } : null);
+    setPicking(true);
+  };
+  const pickPlan = useMemo(() => plans.find(p => p.id === pickPlanId) || null, [plans, pickPlanId]);
 
   // Mêmes lots (triés par numéro) et entreprises (lots + marchés) que les actions en masse du suivi.
   const { lotOptions, entrepriseOptions } = useReserveOptions(projectId, lotsList);
@@ -459,11 +474,23 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               <label className={labelClass}>Repérage sur le plan</label>
               <div className="flex gap-3 items-start">
                 <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} className="w-40 h-40 object-cover shrink-0" />
-                <div className="text-xs text-[var(--tblr-muted)] flex items-center gap-1 pt-1"><IconMapPin size={14} /> {plan.name}</div>
+                <div className="text-xs text-[var(--tblr-muted)] space-y-2 pt-1">
+                  <div className="flex items-center gap-1"><IconMapPin size={14} /> {plan.name}</div>
+                  <button type="button" onClick={openPicker} className="px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg bg-[var(--tblr-surface-2)] text-[var(--tblr-text)] font-bold">Déplacer le repère</button>
+                </div>
               </div>
             </div>
-          ) : plan ? (
-            <div className="text-xs text-[var(--tblr-muted)] flex items-center gap-1"><IconMapPin size={14} /> Plan : {plan.name} (sans position)</div>
+          ) : plans.length > 0 ? (
+            <div className="space-y-1">
+              <label className={labelClass}>Repérage sur le plan</label>
+              <button
+                type="button"
+                onClick={openPicker}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 pointer-coarse:min-h-11 rounded-lg border-2 border-dashed border-[var(--tblr-border)] text-sm font-bold text-[var(--tblr-muted)] hover:border-blue-500 hover:text-blue-600 transition-colors"
+              >
+                <IconMapPin size={16} /> Localiser sur le plan
+              </button>
+            </div>
           ) : null}
 
           {/* Suivi : réponse de l'entreprise ou remarque de la maîtrise d'œuvre, comme la réponse d'une observation du DET */}
@@ -581,6 +608,56 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
           </button>
         </div>
       </motion.div>
+
+      {/* Choix de l'emplacement sur le plan, plein écran au-dessus de la fiche */}
+      {picking && (
+        <div className="absolute inset-0 z-10 flex flex-col" style={{ background: 'var(--tblr-surface)' }} role="dialog" aria-modal="true" aria-label="Localiser la réserve sur le plan">
+          <div className="flex items-center gap-2 px-3 py-2 border-b border-[var(--tblr-border)] shrink-0" style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top))' }}>
+            <select
+              aria-label="Plan"
+              className="flex-1 min-w-0 bg-zinc-100 dark:bg-zinc-800 border-none rounded-lg px-3 py-2 pointer-coarse:min-h-11 text-sm font-bold outline-none"
+              value={pickPlanId || ''}
+              onChange={e => { setPickPlanId(e.target.value || null); setPickCoords(null); }}
+            >
+              {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <button type="button" onClick={() => setPicking(false)} className="p-2 rounded-lg hover:bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)]" aria-label="Fermer sans placer">
+              <IconX size={18} />
+            </button>
+          </div>
+          <div className="px-3 py-2 text-xs font-medium text-[var(--tblr-muted)] flex items-center gap-1 shrink-0">
+            <IconMapPin size={14} className={pickCoords ? 'text-green-600' : 'text-blue-600'} />
+            {pickCoords ? 'Repère posé. Touchez ailleurs pour le déplacer.' : 'Touchez le plan à l\'emplacement de la réserve.'}
+          </div>
+          <div className="flex-1 min-h-0 px-3">
+            {pickPlan && (
+              <PlanAnnotator
+                key={pickPlan.id}
+                fileUrl={pickPlan.file_url}
+                markers={[]}
+                pendingMarker={pickCoords}
+                onAddMarker={(x, y) => setPickCoords({ x, y })}
+                isAddingMode
+              />
+            )}
+          </div>
+          <div className="flex items-center gap-2 px-4 py-3 border-t border-[var(--tblr-border)] shrink-0" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+            <div className="flex-1" />
+            <button type="button" onClick={() => setPicking(false)} className="px-4 py-2.5 text-sm font-bold text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]">Annuler</button>
+            <button
+              type="button"
+              disabled={!pickCoords || !pickPlanId}
+              onClick={() => {
+                if (pickCoords && pickPlanId) setPlaced({ planId: pickPlanId, x: pickCoords.x, y: pickCoords.y });
+                setPicking(false);
+              }}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-bold disabled:opacity-50"
+            >
+              <IconMapPin size={16} /> Valider l'emplacement
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
