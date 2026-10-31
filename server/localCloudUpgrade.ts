@@ -110,7 +110,7 @@ export function createLocalCloudUpgradeRouter(
 
     const { data: tenant, error: tenantErr } = await cloudClient
       .from('tenants')
-      .select('id, slug, name')
+      .select('id, slug, name, plan, trial_ends_at')
       .eq('id', profile.tenant_id)
       .single();
     if (tenantErr || !tenant) {
@@ -181,6 +181,14 @@ export function createLocalCloudUpgradeRouter(
          ON CONFLICT (id) DO UPDATE SET slug = EXCLUDED.slug, name = EXCLUDED.name`,
         [tenant.id, tenant.slug, tenant.name],
       );
+      // L'abonnement du cloud, pas l'essai de 14 jours par défaut de la base
+      // locale (voir server/cloudTenantPlan.ts).
+      if (tenant.plan) {
+        await pg.query(
+          'UPDATE tenants SET plan = $2, trial_ends_at = $3::timestamptz WHERE id = $1',
+          [tenant.id, tenant.plan, tenant.trial_ends_at ?? null],
+        );
+      }
       await pg.query(
         `INSERT INTO profiles (id, tenant_id, name, email, role, system_role) VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (id) DO UPDATE SET
