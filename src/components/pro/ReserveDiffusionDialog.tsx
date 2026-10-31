@@ -6,7 +6,7 @@ import { getAccessToken } from '../../lib/authToken';
 import { applyTenantHeader } from '../../lib/activeTenant';
 import type { Plan } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
-import { reservesPdfFilename, type ReservesExportProject } from '../../lib/reservesExport';
+import { reservesPdfFilename, DEFAULT_RESERVES_CONTENT, type ReservesExportContent, type ReservesExportProject } from '../../lib/reservesExport';
 import {
   LIBELLE_STATUT, SANS_LOT, lotLabel, orderedLotTitles, selectReserves,
   type ExportSend, type ExportStatus, type LotRef,
@@ -63,6 +63,8 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
   const [open, setOpen] = useState<string | null>(null);
   const [reminder, setReminder] = useState<ReminderSetting | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Contenu du PDF (téléchargement et diffusion) : tout par défaut, comme avant.
+  const [content, setContent] = useState<ReservesExportContent>({ ...DEFAULT_RESERVES_CONTENT });
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
   const lotsArg = useMemo(() => (scope === 'lots' ? [...chosenLots] : null), [scope, chosenLots]);
@@ -120,8 +122,10 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
   }, [projectId, kind, scope, chosenLots]);
 
   const exportOptions = (extra: Record<string, unknown> = {}) => ({
-    title, lots, allowedLots: lotsArg, scopeLabel, ...extra,
+    title, lots, allowedLots: lotsArg, scopeLabel, content, ...extra,
   });
+  const nothingToPrint = !content.liste && !content.details && !content.plans;
+  const toggleContent = (key: keyof ReservesExportContent) => setContent(prev => ({ ...prev, [key]: !prev[key] }));
 
   const telecharger = async () => {
     setMessage(null);
@@ -276,7 +280,24 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
         {/* 2. Export */}
         <section className="space-y-2">
           <h3 className={SECTION}>Export</h3>
-          <button type="button" onClick={telecharger} disabled={!!busy || scopeVide || scopeReserves.length === 0} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>
+          <fieldset className="space-y-0.5">
+            <legend className="text-xs text-[var(--tblr-muted)] mb-1">Contenu du PDF (aussi appliqué à la diffusion par e-mail)</legend>
+            {([
+              ['liste', 'Liste des réserves', 'Tableau récapitulatif, sans le détail.'],
+              ['details', 'Détail des réserves', 'Une fiche par réserve, avec photos et extrait du plan.'],
+              ['plans', 'Plans en annexe', 'Un plan par page avec la position des pastilles.'],
+            ] as const).map(([key, label, aide]) => (
+              <label key={key} className="flex items-start gap-3 py-1.5 min-h-11 cursor-pointer">
+                <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--tblr-primary)]" checked={content[key]} disabled={!!busy} onChange={() => toggleContent(key)} />
+                <span className="text-sm">
+                  <span className="font-medium text-[var(--tblr-text)]">{label}</span>
+                  <span className="block text-xs text-[var(--tblr-muted)]">{aide}</span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {nothingToPrint && <p className="text-sm text-red-600">Cochez au moins un contenu.</p>}
+          <button type="button" onClick={telecharger} disabled={!!busy || scopeVide || nothingToPrint || scopeReserves.length === 0} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>
             <IconDownload size={16} /> Télécharger le PDF ({scopeReserves.length})
           </button>
         </section>
@@ -304,7 +325,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
               <label className="block text-xs font-bold text-[var(--tblr-muted)]" htmlFor="reserve-diffusion-note">Message complémentaire (facultatif)</label>
               <textarea id="reserve-diffusion-note" value={note} onChange={e => setNote(e.target.value)} maxLength={2000} rows={3} disabled={!!busy}
                 className="w-full rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)] p-2 text-sm text-[var(--tblr-text)]" />
-              <button type="button" onClick={diffuser} disabled={!!busy || choisis.length === 0} className={BOUTON} style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
+              <button type="button" onClick={diffuser} disabled={!!busy || nothingToPrint || choisis.length === 0} className={BOUTON} style={{ background: 'var(--tblr-primary)', color: '#fff' }}>
                 <IconSend size={16} /> Envoyer à {choisis.length} destinataire{choisis.length > 1 ? 's' : ''}
               </button>
             </>
