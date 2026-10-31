@@ -1164,7 +1164,7 @@ export async function createApp() {
   registerTravauxModificatifsRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerMarchesSubsequentsRoutes(app, { supabaseAdmin, getTenantId });
   registerAccordCadreConsultationsRoutes(app, { supabaseAdmin, getTenantId });
-  registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
+  registerBillingRoutes(app, { supabaseAdmin, getTenantId, requireTenantAdmin, getUserName, getSystemRole, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS });
   registerZohoInvoiceRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, requireTenantAdmin });
   registerGoogleCalendarSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerCalendarAccountRoutes(app, { supabaseAdmin, getTenantId });
