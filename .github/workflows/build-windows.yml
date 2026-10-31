@@ -157,7 +157,13 @@ jobs:
         shell: bash
         run: |
           du -sh release/win-unpacked || true
-          du -sh release/win-unpacked/* release/win-unpacked/resources/* 2>/dev/null | sort -h | tail -15 || true
+          # Separate du calls: one call with nested paths skips the children
+          # of a directory it already counted, hiding what is inside resources/.
+          du -sh release/win-unpacked/* 2>/dev/null | sort -h | tail -8 || true
+          echo "--- resources/"
+          du -sh release/win-unpacked/resources/* 2>/dev/null | sort -h | tail -12 || true
+          echo "--- resources/node_modules"
+          du -sh release/win-unpacked/resources/node_modules/* 2>/dev/null | sort -h | tail -8 || true
           du -sh release/win-unpacked/resources/node_modules/@embedded-postgres/*/native/* 2>/dev/null | sort -h | tail -10 || true
 
       - name: Upload installer artifact
