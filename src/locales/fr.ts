@@ -4911,7 +4911,7 @@ export default {
   "windows_drive_unavailable_plan": "Le Drive n'est pas activé pour ce cabinet : il demande un abonnement payant en cours de validité (Starter, Pro ou Enterprise) et un poste relié au service en ligne.",
   "windows_drive_unavailable_unreachable": "Le service en ligne n'a pas répondu : l'autorisation Drive ne peut pas être vérifiée. Vérifiez la connexion puis rouvrez la page.",
   "windows_drive_unavailable_preview": "Le prototype de dossier virtuel est désactivé sur ce poste ou son composant natif est absent.",
-  "documents_drag_hint": "Glissez un document sur une affaire ou une phase de l'arborescence pour le classer.",
+  "documents_drag_hint": "Glissez un document (appui long au doigt) sur une affaire ou une phase de l'arborescence pour le classer.",
   "documents_moved": "Document classé.",
   "documents_move_failed": "Le classement a échoué.",
   "windows_drive_choose_project": "Sélectionnez un projet dans la navigation. Limites du prototype : 100 documents, 50 Mo par fichier.",

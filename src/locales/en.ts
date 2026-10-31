@@ -4761,7 +4761,7 @@ export default {
   "windows_drive_unavailable_plan": "Drive is not enabled for this firm: it requires a paid plan in good standing (Starter, Pro or Enterprise) and a device linked to the online service.",
   "windows_drive_unavailable_unreachable": "The online service did not answer: Drive authorization cannot be checked. Check the connection and reopen the page.",
   "windows_drive_unavailable_preview": "The virtual folder prototype is disabled on this device or its native component is missing.",
-  "documents_drag_hint": "Drag a document onto a project or phase in the tree to file it.",
+  "documents_drag_hint": "Drag a document (long-press on touch) onto a project or phase in the tree to file it.",
   "documents_moved": "Document filed.",
   "documents_move_failed": "Filing failed.",
   "windows_drive_choose_project": "Select a project in navigation. Prototype limits: 100 documents, 50 MB per file.",

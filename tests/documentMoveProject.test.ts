@@ -26,7 +26,7 @@ describe('PUT /api/documents/:id avec project_id', () => {
     const res = await request(app).put(`/api/documents/${docId}`).set(authHeader(token))
       .send({ name: 'plan.pdf', category: 'General', phase: 'APS', project_id: p2 });
     expect(res.status).toBe(200);
-    const row = fakeSupabaseAdmin.getTable('documents').find((d: any) => d.id === docId);
+    const row = fakeSupabaseAdmin.getTable('documents').find((d: any) => d.id === docId)!;
     expect(row.project_id).toBe(p2);
     expect(row.phase).toBe('APS');
   });
@@ -43,6 +43,6 @@ describe('PUT /api/documents/:id avec project_id', () => {
     const res = await request(app).put(`/api/documents/${docId}`).set(authHeader(token))
       .send({ name: 'plan.pdf', category: 'General', project_id: '' });
     expect(res.status).toBe(200);
-    expect(fakeSupabaseAdmin.getTable('documents').find((d: any) => d.id === docId).project_id).toBeNull();
+    expect(fakeSupabaseAdmin.getTable('documents').find((d: any) => d.id === docId)!.project_id).toBeNull();
   });
 });
