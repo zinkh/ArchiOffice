@@ -18,6 +18,7 @@ import {
 import { createCloudSupabaseClient, restoreCloudSession } from './cloudSyncClient';
 import { encryptForStorage, decryptFromStorage } from './ipcCrypto';
 import { runInitialImport, getImportJob } from './initialImport';
+import { pullTenantPlan } from './cloudTenantPlan';
 
 function accountResponse(account: LocalAccount) {
   return { access_token: signLocalJwt(account.userId), user: goTrueUserFromAccount(account) };
@@ -122,7 +123,7 @@ export function createCloudLinkRouter(
 
     const { data: tenant, error: tenantErr } = await cloudClient
       .from('tenants')
-      .select('id, slug, name')
+      .select('id, slug, name, plan, trial_ends_at')
       .eq('id', profile.tenant_id)
       .single();
     if (tenantErr || !tenant) {
@@ -132,9 +133,15 @@ export function createCloudLinkRouter(
     // Provision local tenants/profiles with the SAME ids as the cloud
     // rows — unlike local-setup's crypto.randomUUID(), this is what keeps
     // every subsequently-synced row's foreign keys valid on both sides.
+    // L'abonnement est recopié lui aussi : sans lui la base locale prend un
+    // essai de 14 jours par défaut, « expiré » deux semaines plus tard même
+    // pour un cabinet à jour (voir server/cloudTenantPlan.ts).
     const { error: localTenantErr } = await supabaseAdmin
       .from('tenants')
-      .upsert({ id: tenant.id, slug: tenant.slug, name: tenant.name });
+      .upsert({
+        id: tenant.id, slug: tenant.slug, name: tenant.name,
+        ...(tenant.plan ? { plan: tenant.plan, trial_ends_at: tenant.trial_ends_at ?? null } : {}),
+      });
     if (localTenantErr) return res.status(500).json({ error: localTenantErr.message });
 
     const { error: localProfileErr } = await supabaseAdmin.from('profiles').upsert({
@@ -248,6 +255,10 @@ export function createCloudLinkRouter(
       return res.status(500).json({ error: `Échec du chiffrement de la session cloud : ${err.message}` });
     }
 
+    // La session est neuve : c'est le bon moment pour rattraper l'abonnement
+    // (un poste lié avant ce correctif porte encore l'essai par défaut).
+    await pullTenantPlan(cloudClient, supabaseAdmin, state.tenantId);
+
     res.json({ ok: true });
   });
 
@@ -289,6 +300,8 @@ export function createCloudLinkRouter(
         error: `Impossible de rétablir la session cloud (${err.message}). Reconnectez-vous depuis Réglages.`,
       });
     }
+
+    await pullTenantPlan(cloudClient, supabaseAdmin, state.tenantId);
 
     const jobId = crypto.randomUUID();
     runInitialImport(jobId, cloudClient, supabaseAdmin, state.tenantId)

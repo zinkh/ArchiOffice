@@ -23,6 +23,7 @@ import {
   countPendingPush,
 } from './localPendingPush';
 import { SYNC_TABLES, JUNCTION_TABLES } from './syncTables';
+import { pullTenantPlan, TENANT_PLAN_REFRESH_MS } from './cloudTenantPlan';
 
 const POLL_INTERVAL_MS = 30000;
 const BACKOFF_STEPS_MS = [30000, 60000, 120000, 300000];
@@ -153,11 +154,20 @@ export async function startCloudSync(supabaseAdmin: SupabaseClient, linkState: C
 
   let timer: NodeJS.Timeout | null = null;
   let running = false;
+  let lastPlanPullAt = 0;
 
   async function runCycle() {
     if (running) return;
     running = true;
     try {
+      // L'abonnement vit sur le cloud et `tenants` n'est pas synchronisée par
+      // sync_log : sans ce rafraîchissement, la copie locale garde l'essai
+      // posé au premier lien. En premier, pour qu'un lot sortant en échec ne
+      // le bloque pas (voir server/cloudTenantPlan.ts).
+      if (Date.now() - lastPlanPullAt >= TENANT_PLAN_REFRESH_MS) {
+        lastPlanPullAt = Date.now();
+        await pullTenantPlan(cloudClient, supabaseAdmin, tenantId);
+      }
       await runOutboundBatch();
       await runInboundBatch();
       isOnline = true;

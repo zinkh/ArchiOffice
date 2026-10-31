@@ -18,7 +18,7 @@ node native/windows-drive/smoke.mjs
 node native/windows-drive/broker-smoke.mjs
 npm run build
 npm run build:server
-$env:ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW='1'
+# L'aperçu est activé par défaut ; pour le couper : $env:ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW='0'
 npx electron .
 ```
 

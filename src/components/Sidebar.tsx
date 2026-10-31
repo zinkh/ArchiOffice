@@ -35,6 +35,7 @@ import {
   IconPhone,
 } from '@tabler/icons-react';
 import { BrandLogo } from './ArchiOfficeLogo';
+import { StorageCartouche } from './StorageCartouche';
 import { useUser } from '../UserContext';
 import { useSettings } from '../hooks/useSettings';
 import { apiFetch } from '../lib/api';
@@ -395,6 +396,9 @@ export function SidebarNav({ onNavigate, collapsed = false }: { onNavigate?: () 
           </Link>
         </div>
       )}
+
+      {/* Espace de stockage du cabinet et détail par utilisateur */}
+      <StorageCartouche collapsed={collapsed} onNavigate={onNavigate} />
     </>
   );
 }

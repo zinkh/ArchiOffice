@@ -51,6 +51,10 @@ export class FakeSupabaseAdmin {
   private docSequences = new Map<string, number>();
   /** Quand vrai, rpc('next_document_number') répond comme une base sans la migration (PGRST202). */
   public documentSequencesUnavailable = false;
+  /** Octets hébergés par cabinet, tels que les mesurerait tenant_storage_bytes ; absent = fonction non migrée. */
+  public hostedStorageBytes = new Map<string, number>();
+  /** Quand vrai, rpc('tenant_storage_by_uploader') répond comme une base sans la migration (PGRST202). */
+  public storageBreakdownUnavailable = false;
   /** Latence (ms) avant chaque insertion : ouvre la fenêtre de course entre « lire » et « écrire » d'une base réelle. */
   public writeLatencyMs = 0;
 
@@ -231,6 +235,27 @@ export class FakeSupabaseAdmin {
       };
       this.seed('marches_entreprises', [created]);
       return { data: structuredClone(created), error: null };
+    }
+    // Stockage d'un cabinet (supabase/migrate_tenant_storage_bytes.sql et
+    // migrate_tenant_storage_by_uploader.sql). Absentes par défaut pour `bytes` :
+    // l'appelant retombe alors sur document_versions, comme une instance non migrée.
+    if (fnName === 'tenant_storage_bytes') {
+      const hosted = this.hostedStorageBytes.get(params.p_tenant_id);
+      if (hosted === undefined) return { data: null, error: { code: 'PGRST202', message: 'function not found' } };
+      return { data: hosted, error: null };
+    }
+    if (fnName === 'tenant_storage_by_uploader') {
+      if (this.storageBreakdownUnavailable) return { data: null, error: { code: 'PGRST202', message: 'function not found' } };
+      const groups = new Map<string, { uploaded_by: string; bytes: number; files: number }>();
+      for (const r of this.getTable('document_versions')) {
+        if (r.tenant_id !== params.p_tenant_id || r.storage_backend !== 'supabase') continue;
+        const name = String(r.uploaded_by ?? '').trim();
+        const group = groups.get(name) ?? { uploaded_by: name, bytes: 0, files: 0 };
+        group.bytes += Number(r.size_bytes) || 0;
+        group.files += 1;
+        groups.set(name, group);
+      }
+      return { data: [...groups.values()].sort((a, b) => b.bytes - a.bytes), error: null };
     }
     return { data: null, error: { message: `Unknown RPC function in FakeSupabaseAdmin: ${fnName}` } };
   }

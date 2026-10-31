@@ -19,6 +19,7 @@ import { IconLanguage } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
+import { CloudReconnectForm } from '../components/CloudReconnectForm';
 import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
@@ -997,6 +998,9 @@ export default function Settings() {
       navigate(`/cloud-import-progress?jobId=${result.importJobId}`);
     } catch (err: any) {
       setRetryCloudImportError(err?.message || "Échec de la relance de l'import.");
+      // Session cloud expirée ou révoquée : le message renvoie vers la
+      // reconnexion, autant ouvrir directement le formulaire qui la porte.
+      if (/reconnectez-vous|session cloud/i.test(err?.message || '')) setShowCloudReconnectForm(true);
       setIsRetryingCloudImport(false);
     }
   };
@@ -3227,16 +3231,42 @@ export default function Settings() {
                 qui est déjà présent ici.
               </p>
               {retryCloudImportError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{retryCloudImportError}</p>}
-              <button
-                type="button"
-                onClick={handleRetryCloudImport}
-                disabled={isRetryingCloudImport}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
-                style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
-              >
-                {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
-                Forcer une resynchronisation complète
-              </button>
+              {!showCloudReconnectForm ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={handleRetryCloudImport}
+                    disabled={isRetryingCloudImport}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                    style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-text)', border: '1px solid var(--tblr-border)' }}
+                  >
+                    {isRetryingCloudImport ? <IconLoader2 size={13} className="animate-spin" /> : <IconCloud size={13} />}
+                    Forcer une resynchronisation complète
+                  </button>
+                  {/* La session cloud (jeton de rafraîchissement) peut expirer ou
+                      être révoquée alors que l'import est déjà terminé : la
+                      resynchronisation répond alors « Reconnectez-vous depuis
+                      Réglages », et ce bouton est le seul chemin pour le faire. */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCloudReconnectForm(true)}
+                    className="text-xs font-medium underline"
+                    style={{ color: 'var(--tblr-muted)' }}
+                  >
+                    Se reconnecter au cloud
+                  </button>
+                </div>
+              ) : (
+                <CloudReconnectForm
+                  email={cloudLinkedEmail}
+                  password={cloudReconnectPassword}
+                  error={cloudReconnectError}
+                  busy={isReconnectingCloud}
+                  onPasswordChange={setCloudReconnectPassword}
+                  onSubmit={handleReconnectCloud}
+                  onCancel={() => { setShowCloudReconnectForm(false); setCloudReconnectPassword(''); setCloudReconnectError(null); }}
+                />
+              )}
             </div>
           )}
 

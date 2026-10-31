@@ -17,10 +17,39 @@
 // PostgREST ne sait pas analyser une URI, alors que c'est bien `file_url` qui
 // fait foi partout ailleurs.
 
+// Mesure exacte, tous buckets métier : la fonction SQL tenant_storage_bytes
+// (supabase/migrate_tenant_storage_bytes.sql) additionne les objets rangés sous
+// `<cabinet>/...` dans storage.objects. Les photos, plans, messages et CV n'entrent
+// pas dans document_versions : sans elle, un plafond se contournait par les photos
+// (en production, 51 Mo comptés pour 93 Mo réellement hébergés).
+//
+// Repli sur l'ancien calcul (versions de documents seulement) quand la fonction
+// n'existe pas (instance non migrée), rend NULL (Postgres local d'Electron, sans
+// schéma `storage`) ou échoue : mieux vaut sous-compter que refuser un dépôt à
+// cause d'une mesure indisponible.
+async function measuredStorageBytes(supabaseAdmin: any, tenantId: string): Promise<number | null> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('tenant_storage_bytes', { p_tenant_id: tenantId });
+    if (error) {
+      const missing = error.code === 'PGRST202' || error.code === '42883';
+      if (!missing) console.warn('[storageUsage] tenant_storage_bytes indisponible :', error.message);
+      return null;
+    }
+    // bigint : renvoyé en nombre par PostgREST, en texte au-delà de 2^53.
+    const bytes = data === null || data === undefined ? NaN : Number(data);
+    return Number.isFinite(bytes) && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function tenantSupabaseStorageBytes(
   supabaseAdmin: any,
   tenantId: string,
 ): Promise<number> {
+  const measured = await measuredStorageBytes(supabaseAdmin, tenantId);
+  if (measured !== null) return measured;
+
   const { data } = await supabaseAdmin
     .from('document_versions')
     .select('size_bytes')

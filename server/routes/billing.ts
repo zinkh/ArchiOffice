@@ -12,6 +12,7 @@ import express from 'express';
 import crypto from 'crypto';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { tenantSupabaseStorageBytes } from '../externalStorage/storageUsage';
+import { buildStorageBreakdown, type UploaderRow } from '../storageBreakdown';
 import { billingWebhookLimiter } from '../rateLimit';
 import type { PlanLimits } from '../../src/lib/billing';
 import { notifyTenantAdmins } from '../mailer';
@@ -22,6 +23,9 @@ export interface RouteDeps {
   supabaseAdmin: any;
   getTenantId: (userId: string) => Promise<string>;
   requireTenantAdmin: (userId: string) => Promise<string>;
+  /** Nom d'affichage (voir server.ts) : `document_versions.uploaded_by` porte ce nom, pas un identifiant. */
+  getUserName?: (tenantId: string, userId: string, email?: string) => Promise<string>;
+  getSystemRole?: (tenantId: string, userId: string) => Promise<string | null>;
   PLAN_LIMITS: Record<string, PlanLimits>;
   PLAN_AI_MONTHLY_CREDIT_CENTS: Record<string, number>;
   AI_CREDIT_PACKS: Record<string, { amount_cents: number; label: string }>;
@@ -61,7 +65,7 @@ async function stancerFetch(path: string, opts: { method?: string; body?: any } 
   return res.json();
 }
 
-export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS }: RouteDeps) {
+export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId, requireTenantAdmin, getUserName, getSystemRole, PLAN_LIMITS, PLAN_AI_MONTHLY_CREDIT_CENTS, AI_CREDIT_PACKS }: RouteDeps) {
   // GET /api/billing/status
   app.get('/api/billing/status', async (req: any, res: any) => {
     try {
@@ -116,6 +120,49 @@ export function registerBillingRoutes(app: Express, { supabaseAdmin, getTenantId
       });
     } catch (e: any) {
       console.error("[GET /api/billing/status]", e); res.status(500).json({ error: e.message }); }
+  });
+
+  // GET /api/billing/storage — cartouche « Stockage » de la barre latérale : ce que
+  // le cabinet occupe chez nous face à son plafond, et par personne. Ouvert à tous
+  // les rôles pour le total ; le détail par personne (administrateurs et managers)
+  // ou la seule ligne de l'appelant (les autres) sort de buildStorageBreakdown.
+  app.get('/api/billing/storage', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const [tenantRes, usedBytes, role, myName] = await Promise.all([
+        supabaseAdmin.from('tenants').select('plan, trial_ends_at').eq('id', tenantId).single(),
+        tenantSupabaseStorageBytes(supabaseAdmin, tenantId),
+        getSystemRole ? getSystemRole(tenantId, req.user.id) : Promise.resolve(null),
+        getUserName ? getUserName(tenantId, req.user.id, req.user.email) : Promise.resolve(''),
+      ]);
+      const tenant: any = tenantRes?.data;
+      const plan = tenant?.plan || 'trial';
+      const isExpired = plan === 'trial' && tenant?.trial_ends_at && new Date(tenant.trial_ends_at) < new Date();
+      const limits = PLAN_LIMITS[isExpired ? 'expired' : plan] ?? PLAN_LIMITS.trial;
+
+      // La répartition par auteur est un plus : sans la fonction SQL (instance non
+      // migrée), le cartouche garde son total et son plafond.
+      let breakdown: ReturnType<typeof buildStorageBreakdown> | null = null;
+      const { data: rows, error } = await supabaseAdmin.rpc('tenant_storage_by_uploader', { p_tenant_id: tenantId });
+      if (!error && Array.isArray(rows)) {
+        breakdown = buildStorageBreakdown({
+          usedBytes,
+          rows: rows as UploaderRow[],
+          canSeeAll: role === 'admin' || role === 'manager',
+          myName: String(myName || ''),
+        });
+      }
+
+      res.json({
+        plan: isExpired ? 'expired' : plan,
+        used_bytes: usedBytes,
+        limit_bytes: limits.storage_mb * 1024 * 1024,
+        breakdown,
+      });
+    } catch (e: any) {
+      console.error('[GET /api/billing/storage]', e);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // POST /api/billing/checkout — create Stancer payment, return redirect URL
