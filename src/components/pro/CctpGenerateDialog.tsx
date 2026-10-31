@@ -39,8 +39,11 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
   const [running, setRunning] = useState(false);
   const [erreur, setErreur] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ done: number; total: number; current: string[] } | null>(null);
-  // Reprise après un échec partiel : plan et lots déjà rédigés.
-  const [partial, setPartial] = useState<{ plan: PlannedLot[]; results: (GeneratedLot | null)[] } | null>(null);
+  // Étape 2 du moteur IA : lots proposés par le plan, que l'architecte coche
+  // avant toute rédaction (chaque lot rédigé est facturé).
+  const [proposition, setProposition] = useState<{ plan: PlannedLot[]; coches: Set<number> } | null>(null);
+  // Reprise après un échec partiel : plan, lots visés (`cibles`) et lots déjà rédigés.
+  const [partial, setPartial] = useState<{ plan: PlannedLot[]; results: (GeneratedLot | null)[]; cibles: number[] } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -64,11 +67,12 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
   const base = `/api/projects/${encodeURIComponent(projectId)}/cctp`;
 
   // Rédige les lots d'`indexes`, LOT_CONCURRENCY à la fois, en gardant leur place.
-  const redigerLots = async (plan: PlannedLot[], results: (GeneratedLot | null)[], indexes: number[]) => {
+  // `cibles` : tous les lots visés par la demande (cochés), pour la progression.
+  const redigerLots = async (plan: PlannedLot[], results: (GeneratedLot | null)[], indexes: number[], cibles: number[]) => {
     const queue = [...indexes];
     const enCours = new Set<string>();
-    let done = results.filter(Boolean).length;
-    const maj = () => setProgress({ done, total: plan.length, current: [...enCours] });
+    let done = cibles.filter(i => results[i]).length;
+    const maj = () => setProgress({ done, total: cibles.length, current: [...enCours] });
     maj();
     const worker = async () => {
       for (let i = queue.shift(); i !== undefined; i = queue.shift()) {
@@ -91,14 +95,14 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
     await Promise.all(Array.from({ length: Math.min(LOT_CONCURRENCY, queue.length) }, worker));
   };
 
-  const terminer = (plan: PlannedLot[], results: (GeneratedLot | null)[]) => {
-    const manquants = plan.filter((_, i) => !results[i]).map(l => l.titre);
+  const terminer = (plan: PlannedLot[], results: (GeneratedLot | null)[], cibles: number[]) => {
+    const manquants = cibles.filter(i => !results[i]).map(i => plan[i].titre);
     if (manquants.length === 0) {
       setPartial(null);
       onGenerated(results.filter((l): l is GeneratedLot => !!l), 'llm');
       return;
     }
-    setPartial({ plan, results });
+    setPartial({ plan, results, cibles });
     setErreur(`${manquants.length} lot(s) n'ont pas pu être rédigés : ${manquants.join(', ')}. Réessayez-les ou insérez ceux qui ont abouti.`);
   };
 
@@ -119,16 +123,52 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
         onGenerated(res.lots, engine);
         return;
       }
-      // Moteur IA : plan (liste des lots), puis un appel court par lot.
-      setProgress({ done: 0, total: 0, current: ['Lecture des pièces et plan des lots'] });
+      // Moteur IA : lecture des pièces une par une (une requête courte chacune,
+      // l'OCR d'un plan scanné pouvant dépasser le délai de la passerelle si elle
+      // partageait la requête du plan), puis le plan, puis un appel court par lot.
+      // Une pièce dont la lecture échoue ici n'arrête rien : le plan retentera.
+      const aLire = (documents ?? []).filter(d => selected.has(d.id));
+      for (let i = 0; i < aLire.length; i++) {
+        setProgress({ done: 0, total: 0, current: [`Lecture de ${aLire[i].name} (${i + 1}/${aLire.length})`] });
+        try {
+          await apiFetch(`${base}/read-piece`, { method: 'POST', body: JSON.stringify({ document_id: aLire[i].id }) });
+        } catch { /* le plan relira cette pièce */ }
+      }
+      setProgress({ done: 0, total: 0, current: ['Plan des lots'] });
       const { lots: plan } = await apiFetch<{ lots: PlannedLot[] }>(`${base}/plan`, { method: 'POST', body: JSON.stringify(body()) });
       if (!plan?.length) {
         setErreur("Aucun ouvrage n'a pu être déduit des pièces sélectionnées.");
         return;
       }
+      // Le plan s'arrête ici : l'architecte coche les lots à rédiger (tous cochés au départ).
+      setProposition({ plan, coches: new Set(plan.map((_, i) => i)) });
+    } catch (e: any) {
+      setErreur(e.message ?? 'Échec de la génération');
+    } finally {
+      setRunning(false);
+      setProgress(null);
+    }
+  };
+
+  const basculerLot = (i: number) => setProposition(p => {
+    if (!p) return p;
+    const coches = new Set(p.coches); coches.has(i) ? coches.delete(i) : coches.add(i);
+    return { ...p, coches };
+  });
+
+  const toutCocher = (cocher: boolean) => setProposition(p => (p ? { ...p, coches: new Set(cocher ? p.plan.map((_, i) => i) : []) } : p));
+
+  const redigerCoches = async () => {
+    if (!proposition || proposition.coches.size === 0) return;
+    const { plan } = proposition;
+    const cibles = [...proposition.coches].sort((a, b) => a - b);
+    setRunning(true);
+    setErreur(null);
+    setPartial(null);
+    try {
       const results: (GeneratedLot | null)[] = plan.map(() => null);
-      await redigerLots(plan, results, plan.map((_, i) => i));
-      terminer(plan, results);
+      await redigerLots(plan, results, cibles, cibles);
+      terminer(plan, results, cibles);
     } catch (e: any) {
       setErreur(e.message ?? 'Échec de la génération');
     } finally {
@@ -143,12 +183,18 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
     setErreur(null);
     try {
       const results = [...partial.results];
-      await redigerLots(partial.plan, results, partial.plan.map((_, i) => i).filter(i => !results[i]));
-      terminer(partial.plan, results);
+      await redigerLots(partial.plan, results, partial.cibles.filter(i => !results[i]), partial.cibles);
+      terminer(partial.plan, results, partial.cibles);
     } finally {
       setRunning(false);
       setProgress(null);
     }
+  };
+
+  const modifierPieces = () => {
+    setProposition(null);
+    setPartial(null);
+    setErreur(null);
   };
 
   const insererObtenus = () => {
@@ -174,6 +220,53 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
         )}
 
         <div className="p-5 space-y-4 overflow-y-auto">
+          {proposition ? (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className={`${label} mb-0`}>Lots à rédiger</span>
+                {!partial && (
+                  <span className="flex items-center gap-3 text-[0.6875rem]">
+                    <button type="button" disabled={running} onClick={() => toutCocher(true)} className="text-blue-600 hover:underline disabled:opacity-50">Tout cocher</button>
+                    <button type="button" disabled={running} onClick={() => toutCocher(false)} className="text-blue-600 hover:underline disabled:opacity-50">Tout décocher</button>
+                  </span>
+                )}
+              </div>
+              <ul className="max-h-72 overflow-y-auto border border-zinc-200 dark:border-zinc-700 rounded divide-y divide-zinc-100 dark:divide-zinc-800">
+                {proposition.plan.map((lot, i) => {
+                  const redige = !!partial?.results[i];
+                  const echec = !!partial && partial.cibles.includes(i) && !partial.results[i];
+                  return (
+                    <li key={i}>
+                      <label className={`flex items-start gap-2 px-3 py-1.5 text-xs ${partial || running ? '' : 'cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800'}`}>
+                        <input
+                          type="checkbox"
+                          className="mt-0.5"
+                          checked={proposition.coches.has(i)}
+                          disabled={running || !!partial}
+                          onChange={() => basculerLot(i)}
+                        />
+                        <span className="flex-1 min-w-0">
+                          <span className="font-semibold">{lot.titre}</span>
+                          {lot.perimetre && <span className="block text-zinc-500">{lot.perimetre}</span>}
+                        </span>
+                        {redige && <span className="text-[0.6875rem] text-green-700 shrink-0">Rédigé</span>}
+                        {echec && <span className="text-[0.6875rem] text-red-700 shrink-0">Échec</span>}
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="mt-1.5 text-[0.6875rem] text-zinc-500">
+                {proposition.coches.size} lot{proposition.coches.size > 1 ? 's' : ''} sur {proposition.plan.length} à rédiger.
+                Chaque lot rédigé est décompté des crédits IA du cabinet ; les lots décochés ne sont pas rédigés.
+              </p>
+              {!running && (
+                <button type="button" onClick={modifierPieces} className="mt-2 text-[0.6875rem] text-blue-600 hover:underline">
+                  Modifier les pièces ou les consignes
+                </button>
+              )}
+            </div>
+          ) : (<>
           <div>
             <span className={label}>Pièces à lire (10 au plus)</span>
             {documents === null ? (
@@ -239,6 +332,7 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
               className="w-full text-xs rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 px-2 py-1.5"
             />
           </div>
+          </>)}
 
           {running && progress && (
             <div role="status" className="text-xs text-zinc-600 dark:text-zinc-300">
@@ -268,12 +362,18 @@ export const CctpGenerateDialog: React.FC<Props> = ({ projectId, onClose, onGene
             </button>
           )}
           <button
-            onClick={partial ? reessayer : generer}
-            disabled={running || selected.size === 0}
+            onClick={partial ? reessayer : proposition ? redigerCoches : generer}
+            disabled={running || (proposition && !partial ? proposition.coches.size === 0 : selected.size === 0)}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded text-xs font-semibold"
           >
             {running ? <IconLoader2 size={14} className="animate-spin" /> : <IconSparkles size={14} />}
-            {running ? 'Génération en cours…' : partial ? 'Réessayer les lots en échec' : 'Générer'}
+            {running
+              ? 'Génération en cours…'
+              : partial
+                ? 'Réessayer les lots en échec'
+                : proposition
+                  ? `Rédiger ${proposition.coches.size} lot${proposition.coches.size > 1 ? 's' : ''}`
+                  : engine === 'llm' ? 'Lister les lots' : 'Générer'}
           </button>
         </div>
       </div>

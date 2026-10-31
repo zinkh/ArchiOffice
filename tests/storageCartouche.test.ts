@@ -106,14 +106,14 @@ describe('StorageCartouche', () => {
     expect(host.textContent).not.toContain('Samir');
   });
 
-  it('propose de changer de plan à partir de 80 % du plafond', async () => {
+  it('propose toujours de changer de forfait, près du plafond comme loin de celui-ci', async () => {
     await show({ ...adminUsage, used_bytes: 45 * GB });
     expect(host.querySelector('a[href="/billing"]')?.textContent).toBe('storage_cartouche_upgrade');
-  });
+    await act(async () => root.unmount());
+    root = createRoot(host);
 
-  it('ne propose pas de changer de plan loin du plafond', async () => {
     await show(adminUsage);
-    expect(host.querySelector('a[href="/billing"]')).toBeNull();
+    expect(host.querySelector('a[href="/billing"]')?.textContent).toBe('storage_cartouche_upgrade');
   });
 
   it('annonce un abonnement expiré sans jauge pour un plafond à zéro', async () => {

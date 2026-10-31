@@ -61,6 +61,17 @@ export type RemoveBusinessFile = (
   fileUrl: string,
 ) => Promise<void>;
 
+/** Range dans le drive du cabinet un fichier déjà déposé (classement d'un document
+ *  vers une autre affaire ou phase). Renvoie la nouvelle référence `file_url`, ou
+ *  `null` quand rien n'est à déplacer (fichier Supabase, ou poste hors ligne). Lève
+ *  si le fournisseur refuse : l'appelant ne doit alors rien changer en base. */
+export type RelocateBusinessFile = (
+  tenantId: string,
+  fileUrl: string,
+  folderPath: string[],
+  fileName: string,
+) => Promise<string | null>;
+
 export interface BusinessFileStoreDeps {
   supabaseAdmin: any;
   uploadToStorage: (bucket: string, path: string, buf: Buffer, mime: string) => Promise<string>;
@@ -78,6 +89,7 @@ function offlineMode(): boolean {
 export function createBusinessFileStore(deps: BusinessFileStoreDeps): {
   storeBusinessFile: StoreBusinessFile;
   removeBusinessFile: RemoveBusinessFile;
+  relocateBusinessFile: RelocateBusinessFile;
 } {
   const { supabaseAdmin, uploadToStorage, deleteFromStorage, checkStorageQuota } = deps;
 
@@ -214,5 +226,42 @@ export function createBusinessFileStore(deps: BusinessFileStoreDeps): {
     await createProvider(connection).deleteFile(ref.externalId);
   };
 
-  return { storeBusinessFile, removeBusinessFile };
+  const relocateBusinessFile: RelocateBusinessFile = async (tenantId, fileUrl, folderPath, fileName) => {
+    if (!isExternalRef(fileUrl)) return null;
+    const ref = parseExternalRef(fileUrl);
+    if (!ref) return null;
+    // Par identifiant de connexion, comme la suppression : un fichier déposé avant
+    // un changement de connexion active reste déplaçable.
+    const connection = await getConnectionById(supabaseAdmin, tenantId, ref.connectionId);
+    if (!connection) {
+      throw new ExternalStorageError("La connexion à l'espace de stockage du cabinet n'existe plus.", 'needs_reauth', 409);
+    }
+    const provider = createProvider(connection);
+    const name = sanitizeExternalFileName(ref.fileName || fileName);
+    const attempt = async () => {
+      const folderId = await ensureFolderPath(supabaseAdmin, tenantId, connection, provider, folderPath);
+      return provider.moveFile(ref.externalId, folderId, name);
+    };
+    let newId: string;
+    try {
+      try {
+        newId = await attempt();
+      } catch (err) {
+        if (!(err instanceof ExternalFolderMissingError)) throw err;
+        // Dossier mémorisé périmé : on l'oublie et on rejoue UNE fois (comme au dépôt).
+        await invalidateFolderSubtree(supabaseAdmin, connection.id, folderKeyFor(connection, folderPath));
+        newId = await attempt();
+      }
+    } catch (err) {
+      await recordConnectionError(supabaseAdmin, connection, err);
+      const detail = err instanceof Error ? err.message : String(err);
+      const wrapped: any = new Error(`Impossible de déplacer le fichier sur l'espace de stockage du cabinet : ${detail}`);
+      wrapped.status = err instanceof ExternalStorageError ? err.status : 502;
+      throw wrapped;
+    }
+    recordConnectionSuccess(supabaseAdmin, connection).catch(() => {});
+    return buildExternalRef({ provider: connection.provider, connectionId: connection.id, externalId: newId, fileName: name });
+  };
+
+  return { storeBusinessFile, removeBusinessFile, relocateBusinessFile };
 }

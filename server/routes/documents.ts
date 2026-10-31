@@ -21,7 +21,7 @@ import { isOwnStorageRef } from '../externalStorage/externalRef';
 import { isProjectArchived } from './projectArchive';
 import { buildDocumentFolderPath } from '../externalStorage/businessFolderPath';
 import { createDocumentFolderResolver } from '../externalStorage/documentFolders';
-import type { RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
+import type { RelocateBusinessFile, RemoveBusinessFile, StoreBusinessFile } from '../externalStorage/storeBusinessFile';
 
 // Ressources auxquelles une pièce jointe peut se rattacher au-delà d'un
 // projet (resource_type/resource_id, voir migrate_documents_attachments.sql).
@@ -59,10 +59,12 @@ export interface RouteDeps {
   checkQuota: (tenantId: string, resource: 'projects' | 'users' | 'documents') => Promise<void>;
   storeBusinessFile: StoreBusinessFile;
   removeBusinessFile: RemoveBusinessFile;
+  /** Facultatif : sans lui (tests anciens), un classement ne déplace pas le fichier. */
+  relocateBusinessFile?: RelocateBusinessFile;
   requireRole: (...roles: string[]) => (req: any, res: any, next: any) => Promise<void>;
 }
 
-export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, requireRole }: RouteDeps) {
+export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, relocateBusinessFile, requireRole }: RouteDeps) {
   // Dossier d'un document selon son rattachement (affaire, phase, ressource) :
   // règle partagée avec la migration des fichiers existants, voir
   // server/externalStorage/documentFolders.ts.
@@ -269,12 +271,53 @@ export function registerDocumentRoutes(app: Express, { supabaseAdmin, getTenantI
         const updateFields: any = { name, category, description, emetteur: emetteur || null, doc_type: doc_type || null };
         if (indice !== undefined) updateFields.indice = indice;
         if (phaseVal !== undefined) updateFields.phase = phaseVal;
+        // Classement par glisser-déposer : rattacher le document à une autre affaire
+        // (ou le détacher avec une chaîne vide). Le fichier ne bouge pas chez le fournisseur.
+        if (req.body.project_id !== undefined) {
+          const newProjectId = req.body.project_id || null;
+          if (newProjectId && !(await assertTenantEntity(supabaseAdmin, 'projects', newProjectId, tenantId))) {
+            return res.status(400).json({ error: "Affaire introuvable pour ce cabinet." });
+          }
+          updateFields.project_id = newProjectId;
+          if (newProjectId) { updateFields.resource_type = 'projects'; updateFields.resource_id = newProjectId; }
+        }
         if (contact_id !== undefined) updateFields.contact_id = contact_id || null;
         if (contact_name !== undefined) updateFields.contact_name = contact_name || null;
         if (validation_status !== undefined) updateFields.validation_status = validation_status;
         if (validation_comments !== undefined) updateFields.validation_comments = validation_comments || null;
+
+        // Classement : un fichier hébergé sur l'espace du cabinet suit son document dans
+        // l'arborescence du drive. Si le fournisseur refuse, rien n'est changé en base
+        // (jamais un document rangé ici et stocké là).
+        let relocated: { from: string; to: string; fromFolder: string[]; fileName: string } | null = null;
+        if (relocateBusinessFile) {
+          const { data: current } = await supabaseAdmin.from('documents')
+            .select('file_url, project_id, phase, name').eq('id', id).eq('tenant_id', tenantId).maybeSingle();
+          const cur = current as any;
+          const targetProject = 'project_id' in updateFields ? updateFields.project_id : (cur?.project_id || null);
+          const moved = cur?.file_url && ((targetProject || null) !== (cur.project_id || null) || (phaseVal || null) !== (cur.phase || null));
+          if (moved) {
+            const folderPath = buildDocumentFolderPath(await loadFolderProject(targetProject || null, tenantId), phaseVal);
+            const fileName = cur.name || name || 'document';
+            const newUrl = await relocateBusinessFile(tenantId, cur.file_url, folderPath, fileName);
+            if (newUrl && newUrl !== cur.file_url) {
+              updateFields.file_url = newUrl;
+              relocated = { from: cur.file_url, to: newUrl, fileName, fromFolder: buildDocumentFolderPath(await loadFolderProject(cur.project_id || null, tenantId), cur.phase || null) };
+            }
+          }
+        }
         const { error } = await supabaseAdmin.from('documents').update(updateFields).eq('id', id).eq('tenant_id', tenantId);
-        if (error) throw error;
+        if (error) {
+          // Le fichier a déjà bougé : on le remet à sa place plutôt que de le laisser orphelin.
+          if (relocated && relocateBusinessFile) await relocateBusinessFile(tenantId, relocated.to, relocated.fromFolder, relocated.fileName).catch(() => {});
+          throw error;
+        }
+        if (relocated) {
+          // La version courante pointe sur le même fichier : sa référence suit (WebDAV
+          // identifie par chemin). Les anciennes versions ne bougent pas.
+          await supabaseAdmin.from('document_versions').update({ file_url: relocated.to })
+            .eq('tenant_id', tenantId).eq('document_id', id).eq('file_url', relocated.from);
+        }
       }
       res.json({ success: true });
     } catch (e: any) { console.error(e); res.status(e.code === 'EXTERNAL_STORAGE_REQUIRED' ? 409 : 500).json({ error: e.code === 'EXTERNAL_STORAGE_REQUIRED' ? e.message : "Failed to update document: " + e.message, ...(e.code === 'EXTERNAL_STORAGE_REQUIRED' ? { code: e.code } : {}) }); }

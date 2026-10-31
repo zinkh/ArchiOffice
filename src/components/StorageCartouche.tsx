@@ -58,7 +58,6 @@ export function StorageCartouche({ collapsed = false, onNavigate }: { collapsed?
   const limit = formatBytes(usage.limit_bytes, lang);
   const summary = level === 'expired' ? t('storage_cartouche_expired') as string : t('storage_cartouche_of', { used, limit }) as string;
   const breakdown = usage.breakdown;
-  const showUpgrade = level !== 'ok';
 
   const toggle = () => {
     setOpen(prev => {
@@ -99,12 +98,11 @@ export function StorageCartouche({ collapsed = false, onNavigate }: { collapsed?
   const hasDetail = breakdown?.scope === 'all' && (teamLines.length > 0 || unattributed > 0);
 
   return (
-    <div className="border-t shrink-0 p-3 space-y-2" style={{ borderColor: 'var(--tblr-border)' }}>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-wider" style={{ color: 'var(--tblr-muted)' }}>
-          <IconDatabase size={13} aria-hidden /> {t('storage_cartouche_title')}
-        </span>
-        <span className="text-[0.75rem] tabular-nums font-medium" style={{ color: level === 'expired' ? color : 'var(--tblr-text)' }}>
+    <div className="shrink-0 p-3">
+      <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--tblr-surface-2)' }}>
+      <div className="flex items-baseline justify-between gap-2 text-sm">
+        <span style={{ color: 'var(--tblr-muted)' }}>{t('storage_cartouche_title')}</span>
+        <span className="tabular-nums" style={{ color: level === 'expired' ? color : 'var(--tblr-muted)' }}>
           {summary}
         </span>
       </div>
@@ -117,17 +115,20 @@ export function StorageCartouche({ collapsed = false, onNavigate }: { collapsed?
           aria-valuenow={percent}
           aria-label={t('storage_cartouche_aria', { used, limit }) as string}
           className="h-1.5 rounded-full overflow-hidden"
-          style={{ background: 'var(--tblr-surface-2)' }}
+          style={{ background: 'var(--tblr-surface)' }}
         >
           <div className="h-full rounded-full" style={{ width: `${percent}%`, background: color }} />
         </div>
       )}
 
-      {showUpgrade && (
-        <Link to="/billing" onClick={onNavigate} className="inline-block text-[0.75rem] font-medium underline" style={{ color }}>
-          {t('storage_cartouche_upgrade')}
-        </Link>
-      )}
+      <Link
+        to="/billing"
+        onClick={onNavigate}
+        className="flex items-center justify-center w-full min-h-10 pointer-coarse:min-h-11 rounded-lg border text-sm font-semibold"
+        style={{ background: 'var(--tblr-surface)', borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
+      >
+        {t('storage_cartouche_upgrade')}
+      </Link>
 
       {ownLine && (
         <div className="flex items-baseline justify-between gap-2 text-[0.75rem]" title={filesLabel(ownLine.files)}>
@@ -177,6 +178,7 @@ export function StorageCartouche({ collapsed = false, onNavigate }: { collapsed?
           )}
         </>
       )}
+      </div>
     </div>
   );
 }

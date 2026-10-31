@@ -41,6 +41,11 @@ export class MemoryDrive {
   createCalls = 0;
   uploadCalls = 0;
   deleteCalls = 0;
+  moveCalls = 0;
+  private moveFailure: Error | null = null;
+  /** Fait échouer le prochain moveFile (déplacement refusé par le fournisseur). */
+  failNextMoveWith(error: Error): void { this.moveFailure = error; }
+  takeMoveFailure(): Error | null { const e = this.moveFailure; this.moveFailure = null; return e; }
   lastRangeHeader: string | undefined;
   /** Renvoyé par getTemporaryLink ; null = le fournisseur n'en produit pas. */
   temporaryLink: string | null = null;
@@ -59,6 +64,8 @@ export class MemoryDrive {
     this.createCalls = 0;
     this.uploadCalls = 0;
     this.deleteCalls = 0;
+    this.moveCalls = 0;
+    this.moveFailure = null;
     this.lastRangeHeader = undefined;
     this.failNext = null;
   }
@@ -172,6 +179,17 @@ class MemoryProvider implements ExternalStorageProvider {
     this.drive.deleteCalls += 1;
     const file = this.drive.files.get(externalId);
     if (file) file.trashed = true;
+  }
+
+  async moveFile(externalId: string, newParentExternalId: string): Promise<string> {
+    const failure = this.drive.takeMoveFailure();
+    if (failure) throw failure;
+    this.drive.moveCalls += 1;
+    const file = this.drive.files.get(externalId);
+    if (!file || file.trashed) throw new ExternalFolderMissingError('Fichier introuvable');
+    if (!this.drive.folders.has(newParentExternalId)) throw new ExternalFolderMissingError();
+    file.parentId = newParentExternalId;
+    return externalId;
   }
 
   async getTemporaryLink(): Promise<string | null> {

@@ -1,6 +1,7 @@
 import { WindowsDrivePreview } from '../components/WindowsDrivePreview';
 import { useState, useEffect, useRef } from 'react';
 import { desktopBridge } from '../lib/desktopBridge';
+import { useDragToZone } from '../hooks/useDragToZone';
 import { useDriveDocumentStatuses } from '../hooks/useDriveDocumentStatuses';
 import { DriveDocumentActions } from '../components/DriveDocumentActions';
 import { KnowledgeSharingPanel } from '../components/KnowledgeSharingPanel';
@@ -74,17 +75,31 @@ export default function Documents() {
   const [projects, setProjects] = useState<Project[]>([]);
   const { currentUser, activeTenantId } = useUser();
   const [driveEnabled, setDriveEnabled] = useState(false);
+  // Pourquoi le Drive n'est pas proposé (client de bureau seulement) : sans cette ligne la zone
+  // disparaissait sans un mot et le diagnostic était impossible.
+  const [driveReason, setDriveReason] = useState<'component' | 'plan' | 'unreachable' | null>(null);
   useEffect(() => {
     setDriveEnabled(false);
-    if (!desktopBridge()?.openDriveDocument) return;
+    setDriveReason(null);
+    const bridge = desktopBridge();
+    if (!bridge) return;
+    if (!bridge.openDriveDocument) { setDriveReason('component'); return; }
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
     let current = true;
     void apiFetch<{ enabled: boolean; local?: boolean }>('/api/desktop/v1/capabilities', { signal: controller.signal })
-      .then(cap => { if (current) setDriveEnabled(cap.enabled && cap.local === true); })
-      .catch(() => {}).finally(() => clearTimeout(timeout));
+      .then(cap => {
+        if (!current) return;
+        const ok = cap.enabled && cap.local === true;
+        setDriveEnabled(ok);
+        setDriveReason(ok ? null : 'plan');
+      })
+      .catch(() => { if (current) setDriveReason('unreachable'); }).finally(() => clearTimeout(timeout));
     return () => { current = false; clearTimeout(timeout); controller.abort(); };
   }, [currentUser?.id, activeTenantId]);
+
+  // Classement par glisser-déposer d'un document vers l'arborescence.
+  const [moveMessage, setMoveMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Modals
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -166,13 +181,54 @@ export default function Documents() {
     refreshDocuments();
   }, []);
 
+  // Classe un document : affaire (null = sans projet) et/ou phase. Mise à jour optimiste,
+  // retour arrière si le serveur refuse. Le fichier lui-même ne bouge pas.
+  const moveDocument = async (docId: string, target: { projectId: string | null; phase?: DocumentPhase }) => {
+    const doc = documents.find(d => d.id === docId);
+    if (!doc) return;
+    const nextProject = target.projectId;
+    const nextPhase = target.phase ?? ((doc.phase || 'Général') as DocumentPhase);
+    if ((doc.project_id || null) === nextProject && (doc.phase || 'Général') === nextPhase) return;
+    const previous = documents;
+    setDocuments(prev => prev.map(d => d.id === docId ? { ...d, project_id: nextProject as any, phase: nextPhase } : d));
+    try {
+      await apiFetch(`/api/documents/${docId}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          name: doc.name, category: doc.category, description: doc.description || '',
+          emetteur: doc.emetteur || '', doc_type: doc.doc_type || '',
+          phase: nextPhase, project_id: nextProject ?? '',
+        }),
+      });
+      setMoveMessage({ ok: true, text: t('documents_moved') as string });
+      void refreshDocuments();
+    } catch {
+      setDocuments(previous);
+      setMoveMessage({ ok: false, text: t('documents_move_failed') as string });
+    }
+    setTimeout(() => setMoveMessage(null), 4000);
+  };
+  // Souris et doigt (appui long sur tablette) passent par le même mécanisme que le Kanban.
+  // Clés de zone : `p:<affaire>` ou `p:<affaire>:<phase>`, `p:none` pour « Sans projet ».
+  const { drag, itemProps, zoneProps: dropProps } = useDragToZone<string>({
+    onDrop: (id, zone) => {
+      const [, proj, phase] = zone.split(':');
+      void moveDocument(id, { projectId: proj === 'none' ? null : proj, phase: phase as DocumentPhase | undefined });
+    },
+  });
+  const draggedDocId = drag?.id ?? null;
+  const dropKey = drag?.over ?? null;
+  const dropStyle = (key: string) => (dropKey === key ? { outline: '2px dashed var(--tblr-primary)', outlineOffset: -2, background: 'var(--tblr-primary-lt)' } : {});
+
   // Tree helpers
-  const projectsWithDocs = projects.filter(p => documents.some(d => d.project_id === p.id));
+  // Pendant un glisser, toutes les affaires sont proposées comme cibles, même sans document.
+  const projectsWithDocs = projects.filter(p => draggedDocId || documents.some(d => d.project_id === p.id));
   const unassignedDocs = documents.filter(d => !d.project_id);
   const getProjectDocs = (projectId: string) => documents.filter(d => d.project_id === projectId);
   const getPhaseDocs = (projectId: string | null, phase: DocumentPhase) =>
     documents.filter(d => d.project_id === projectId && (d.phase || 'Général') === phase);
   const getPhasesForProject = (projectId: string | null): DocumentPhase[] => {
+    if (draggedDocId) return PHASES; // toutes les phases sont des cibles pendant un glisser
     const used = new Set(documents.filter(d => d.project_id === projectId).map(d => (d.phase || 'Général') as DocumentPhase));
     return PHASES.filter(p => used.has(p));
   };
@@ -411,7 +467,7 @@ export default function Documents() {
         <div className="px-3 pt-2 pb-1 uppercase tracking-widest text-[0.6875rem] font-bold" style={{ color: 'var(--tblr-muted)' }}>Par affaire</div>
 
         {projectsWithDocs.map(p => {
-          const isExpanded = expandedProjects.has(p.id);
+          const isExpanded = expandedProjects.has(p.id) || (dropKey?.startsWith(`p:${p.id}`) ?? false);
           const phases = getPhasesForProject(p.id);
           const isProjectActive = activeProject === p.id && !activePhase;
           return (
@@ -423,7 +479,8 @@ export default function Documents() {
                 <button
                   onClick={() => { setActiveProject(p.id); setActivePhase(null); setSidebarOpen(false); if (!isExpanded) toggleProject(p.id); }}
                   className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors text-left font-semibold"
-                  style={isProjectActive ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' } : { color: 'var(--tblr-text)' }}
+                  style={{ ...(isProjectActive ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' } : { color: 'var(--tblr-text)' }), ...dropStyle(`p:${p.id}`) }}
+                  {...dropProps(`p:${p.id}`)}
                 >
                   {isExpanded ? <IconFolderOpen size={14} className="shrink-0" /> : <IconFolder size={14} className="shrink-0" />}
                   <span className="truncate text-xs">{p.name}</span>
@@ -437,7 +494,8 @@ export default function Documents() {
                       key={phase}
                       onClick={() => { setActiveProject(p.id); setActivePhase(phase); setSidebarOpen(false); }}
                       className="w-full text-left px-2 py-1 rounded-lg text-xs transition-colors flex items-center justify-between gap-1"
-                      style={activeProject === p.id && activePhase === phase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-muted)' }}
+                      style={{ ...(activeProject === p.id && activePhase === phase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-muted)' }), ...dropStyle(`p:${p.id}:${phase}`) }}
+                      {...dropProps(`p:${p.id}:${phase}`)}
                     >
                       <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-bold ${PHASE_COLORS[phase]}`}>{phase}</span>
                       <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{getPhaseDocs(p.id, phase).length}</span>
@@ -449,7 +507,7 @@ export default function Documents() {
           );
         })}
 
-        {unassignedDocs.length > 0 && (
+        {(unassignedDocs.length > 0 || draggedDocId) && (
           <div>
             <div className="flex items-center gap-1">
               <button onClick={() => toggleProject('unassigned')} className="p-1 shrink-0" style={{ color: 'var(--tblr-muted)' }}>
@@ -458,21 +516,23 @@ export default function Documents() {
               <button
                 onClick={() => { setActiveProject('unassigned'); setActivePhase(null); setSidebarOpen(false); if (!expandedProjects.has('unassigned')) toggleProject('unassigned'); }}
                 className="flex-1 flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors text-left"
-                style={activeProject === 'unassigned' && !activePhase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-text)' }}
+                style={{ ...(activeProject === 'unassigned' && !activePhase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-text)' }), ...dropStyle('p:none') }}
+                {...dropProps('p:none')}
               >
                 <IconFolder size={14} className="shrink-0" />
                 <span className="text-xs">Sans projet</span>
                 <span className="ml-auto text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{unassignedDocs.length}</span>
               </button>
             </div>
-            {expandedProjects.has('unassigned') && (
+            {(expandedProjects.has('unassigned') || (dropKey?.startsWith('p:none') ?? false)) && (
               <div className="ml-7 mt-0.5 space-y-0.5">
                 {getPhasesForProject(null).map(phase => (
                   <button
                     key={phase}
                     onClick={() => { setActiveProject('unassigned'); setActivePhase(phase); setSidebarOpen(false); }}
                     className="w-full text-left px-2 py-1 rounded-lg text-xs transition-colors flex items-center justify-between gap-1"
-                    style={activeProject === 'unassigned' && activePhase === phase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-muted)' }}
+                    style={{ ...(activeProject === 'unassigned' && activePhase === phase ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)', fontWeight: 600 } : { color: 'var(--tblr-muted)' }), ...dropStyle(`p:none:${phase}`) }}
+                    {...dropProps(`p:none:${phase}`)}
                   >
                     <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-bold ${PHASE_COLORS[phase]}`}>{phase}</span>
                     <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{getPhaseDocs(null, phase).length}</span>
@@ -547,6 +607,16 @@ export default function Documents() {
         </div>
 
         {driveEnabled && <WindowsDrivePreview key={`${currentUser?.id}:${activeTenantId}`} projectId={activeProject && activeProject!=='unassigned'?activeProject:null} />}
+        {!driveEnabled && driveReason && (
+          <div className="rounded-lg px-3 py-2 text-xs max-w-prose" role="status" style={{ background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-muted)' }}>
+            <strong style={{ color: 'var(--tblr-text)' }}>{t('windows_drive_unavailable_title')}</strong>
+            {' : '}{t(`windows_drive_unavailable_${driveReason}`)}
+          </div>
+        )}
+        <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('documents_drag_hint')}</p>
+        {moveMessage && (
+          <p className="text-xs font-medium" role="status" style={{ color: moveMessage.ok ? 'var(--tblr-success, #2fb344)' : 'var(--tblr-danger)' }}>{moveMessage.text}</p>
+        )}
 
         {/* Documents table */}
         <div className="rounded-3xl overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -578,10 +648,10 @@ export default function Documents() {
                     <tr
                       key={doc.id}
                       className="transition-colors"
-                      style={{ borderTop: '1px solid var(--tblr-border)', opacity: isPerime ? 0.6 : 1 }}
+                      style={{ borderTop: '1px solid var(--tblr-border)', opacity: draggedDocId === doc.id ? 0.4 : isPerime ? 0.6 : 1 }}
                     >
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
+                        <div className="flex items-center gap-2.5 cursor-grab" {...itemProps(doc.id, 'doc')}>
                           <div className="w-9 h-9 flex items-center justify-center rounded-lg shrink-0" style={{ background: isPerime ? '#ffe3e3' : 'var(--tblr-surface-2)', color: isPerime ? '#d63939' : 'var(--tblr-muted)' }}>
                             <IconFile size={18} />
                           </div>
