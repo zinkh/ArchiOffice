@@ -132,7 +132,15 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       unsubscribe();
     };
   }, [photoEntity, refreshPendingPhotos, setReserves]);
-  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  // Le plan affiché est retenu pour la session : revenir sur l'onglet (ou le rouvrir) retrouve le plan et ses repères.
+  const planStorageKey = `reserves:plan:${apiBase}:${projectId}`;
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(() => {
+    try { return sessionStorage.getItem(planStorageKey) || null; } catch { return null; }
+  });
+  useEffect(() => {
+    try { selectedPlanId ? sessionStorage.setItem(planStorageKey, selectedPlanId) : sessionStorage.removeItem(planStorageKey); } catch { /* stockage indisponible */ }
+  }, [planStorageKey, selectedPlanId]);
+  const planViewerRef = useRef<HTMLDivElement>(null);
   const [annotationCoords, setAnnotationCoords] = useState<{ x: number; y: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [openReserveId, setOpenReserveId] = useState<string | null>(null);
@@ -194,11 +202,27 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
   const selectedPlan = plans.find(p => p.id === selectedPlanId) || null;
   const openReserve = reserves.find(r => r.id === openReserveId) || null;
 
+  // Tous les repères de l'affaire (réserves ayant un plan et une position), tous plans confondus : le plan
+  // affiché et le sélecteur de la fiche filtrent ensuite sur leur propre plan. `x` et `y` sont lus en nombres
+  // (colonnes NUMERIC) et une position illisible n'est jamais dessinée.
+  const allMarkers = useMemo(() => (
+    reserves.flatMap(r => {
+      const x = r.x == null ? NaN : Number(r.x);
+      const y = r.y == null ? NaN : Number(r.y);
+      if (!r.plan_id || !Number.isFinite(x) || !Number.isFinite(y)) return [];
+      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title }];
+    })
+  ), [reserves]);
   const planMarkers = useMemo(() => (
-    reserves
-      .filter(r => r.plan_id === selectedPlanId && r.x != null && r.y != null)
-      .map(r => ({ id: r.id, x: r.x as number, y: r.y as number, number: r.number, title: r.title }))
-  ), [reserves, selectedPlanId]);
+    allMarkers.filter(m => m.planId === selectedPlanId).map(({ planId: _planId, ...m }) => m)
+  ), [allMarkers, selectedPlanId]);
+  const hasPlanMarker = (r: ReserveLike) => allMarkers.some(m => m.id === r.id);
+  const showOnPlan = (r: ReserveLike) => {
+    if (!r.plan_id) return;
+    setSelectedPlanId(String(r.plan_id));
+    setAnnotationCoords(null);
+    setTimeout(() => planViewerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   const groupKeyOf = (r: ReserveLike) => {
     const lots = parseJsonList(r.lots);
@@ -473,7 +497,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
         />
 
         {selectedPlan && (
-          <div className="p-3 sm:p-4 border-b border-[var(--tblr-border)] space-y-2">
+          <div ref={planViewerRef} className="p-3 sm:p-4 border-b border-[var(--tblr-border)] space-y-2 scroll-mt-16">
             <div className="flex items-center gap-2 text-xs font-medium text-[var(--tblr-muted)] flex-wrap">
               <IconMapPin size={14} className={annotationCoords ? 'text-green-600' : 'text-blue-600'} />
               {annotationCoords ? (
@@ -566,6 +590,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 <div className="min-w-0 flex-1 space-y-1">
                   <div className="flex items-start gap-2">
                     <span className="font-mono text-xs font-bold text-[var(--tblr-muted)] pt-0.5">#{res.number ?? '-'}</span>
+                    {hasPlanMarker(res) && <IconMapPin size={14} className="mt-0.5 shrink-0 text-red-600" aria-label="Repérée sur le plan" />}
                     <span className="font-semibold text-sm text-[var(--tblr-text)] leading-snug line-clamp-2">{res.title}</span>
                     {res.pendingSync && (
                       <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
@@ -622,6 +647,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 <th className="px-4 py-3 text-left w-16">Photo</th>
                 <th className="px-4 py-3 text-left">Intitulé</th>
                 <th className="px-4 py-3 text-left">Bâtiment / Local</th>
+                <th className="px-2 py-3 text-center w-12" title="Repérage sur plan"><IconMapPin size={14} className="inline" aria-label="Repérage sur plan" /></th>
                 <th className="px-4 py-3 text-left">Statut</th>
                 <th className="px-4 py-3 text-left">Créé le</th>
                 <th className="px-4 py-3 text-left">Echéance / Retard</th>
@@ -636,7 +662,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                       className="bg-zinc-50/50 dark:bg-zinc-800/20 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800/40 transition-colors"
                       onClick={() => setExpandedGroups(prev => ({ ...prev, [groupKey]: !expanded }))}
                     >
-                      <td colSpan={9} className="px-4 py-3">
+                      <td colSpan={10} className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
                           <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
@@ -671,6 +697,19 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                             )}
                           </td>
                           <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
+                          <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
+                            {hasPlanMarker(res) && (
+                              <button
+                                type="button"
+                                onClick={() => showOnPlan(res)}
+                                className="p-1.5 rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                title="Repérée sur le plan : afficher le plan"
+                                aria-label="Repérée sur le plan : afficher le plan"
+                              >
+                                <IconMapPin size={16} />
+                              </button>
+                            )}
+                          </td>
                           <td className="px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} /></td>
                           <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
                           <td className="px-4 py-3">
@@ -700,7 +739,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
               })}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">Aucune réserve.</span></td>
+                  <td colSpan={10} className="px-6 py-8 text-left sm:text-center text-[var(--tblr-muted)] italic"><span className="table-empty-message">Aucune réserve.</span></td>
                 </tr>
               )}
             </tbody>
@@ -734,6 +773,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           reserve={creating ? null : openReserve}
           plans={plans}
           lotsList={lotsList}
+          existingMarkers={allMarkers}
           pendingPlan={creating ? { planId: selectedPlanId, x: annotationCoords?.x, y: annotationCoords?.y } : null}
           onClose={() => { setCreating(false); setOpenReserveId(null); }}
           onSaved={saved => {

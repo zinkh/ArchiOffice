@@ -34,6 +34,8 @@ interface ReserveDetailProps {
   lotsList?: LotOption[];
   /** Position choisie sur le plan avant la création (mode création seulement). */
   pendingPlan?: { planId: string | null; x?: number; y?: number } | null;
+  /** Repères des réserves déjà posées (tous plans) : montrés sur le plan du sélecteur d'emplacement. */
+  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string }[];
   onClose: () => void;
   onSaved: (reserve: ReserveLike) => void;
   onDeleted: (id: string) => void;
@@ -88,7 +90,7 @@ const labelClass = 'text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercas
  * puis envoyées une à une une fois la réserve créée (il faut son id pour les
  * rattacher) ; en modification, chaque photo part immédiatement.
  */
-export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, onClose, onSaved, onDeleted, onConvertedToGpa }: ReserveDetailProps) {
+export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, existingMarkers, onClose, onSaved, onDeleted, onConvertedToGpa }: ReserveDetailProps) {
   const { t } = useTranslation();
   const isNew = !reserve;
   const [form, setForm] = useState<FormState>(() => formFromReserve(reserve));
@@ -634,7 +636,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               <PlanAnnotator
                 key={pickPlan.id}
                 fileUrl={pickPlan.file_url}
-                markers={[]}
+                markers={(existingMarkers ?? []).filter(m => m.planId === pickPlan.id && m.id !== reserve?.id)}
                 pendingMarker={pickCoords}
                 onAddMarker={(x, y) => setPickCoords({ x, y })}
                 isAddingMode
