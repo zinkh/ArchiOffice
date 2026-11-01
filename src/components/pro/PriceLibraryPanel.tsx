@@ -11,6 +11,7 @@ import {
 import { apiFetch, fetchJson } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import type { ArticleBibliotheque, Referentiels } from '../../types/library';
+import { estClause, type DossierBibliotheque } from '../../lib/bibliothequeClauses';
 
 /** Conservé pour les appelants existants ; c'est la ligne d'articles_type. */
 export type ArticleType = ArticleBibliotheque;
@@ -24,9 +25,13 @@ interface Props {
   targetSelector?: React.ReactNode;
   /** Message d'aide quand `canInsert` est faux, propre à chaque éditeur. */
   hintCible?: string;
+  /** Propose le dossier « Clauses générales » (CCTP seulement : un DPGF n'a pas de texte à y insérer). */
+  avecClauses?: boolean;
 }
 
-export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInsert, hintCible, targetSelector }) => {
+export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInsert, hintCible, targetSelector, avecClauses }) => {
+  const [dossier, setDossier] = useState<DossierBibliotheque>('ouvrages');
+  const clauses = !!avecClauses && dossier === 'clauses';
   const [q, setQ] = useState('');
   const [corpsEtat, setCorpsEtat] = useState('');
   const [dtu, setDtu] = useState('');
@@ -48,9 +53,11 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
     setChargement(true); setErreur(null);
     try {
       const params = new URLSearchParams();
+      // Les clauses ne se mêlent jamais aux ouvrages d'un DPGF ou d'un BPU.
+      params.set('dossier', clauses ? 'clauses' : 'ouvrages');
       if (q.trim()) params.set('q', q.trim());
-      if (corpsEtat) params.set('corps_etat_code', corpsEtat);
-      if (dtu) params.set('dtu_code', dtu);
+      if (!clauses && corpsEtat) params.set('corps_etat_code', corpsEtat);
+      if (!clauses && dtu) params.set('dtu_code', dtu);
       params.set('limit', '80');
       setItems(await apiFetch<ArticleBibliotheque[]>(`/api/price-library?${params}`));
     } catch (e: any) {
@@ -58,7 +65,7 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
     } finally {
       setChargement(false);
     }
-  }, [q, corpsEtat, dtu]);
+  }, [q, corpsEtat, dtu, clauses]);
 
   // Débounce court : la frappe ne doit pas déclencher un appel par caractère.
   useEffect(() => {
@@ -117,6 +124,19 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
         <button onClick={onClose} className="text-zinc-400 hover:text-zinc-700"><IconX size={14} /></button>
       </div>
 
+      {avecClauses && (
+        <div role="tablist" aria-label="Dossier de la bibliothèque" className="flex border-b border-zinc-200 dark:border-zinc-700">
+          {([['ouvrages', 'Ouvrages'], ['clauses', 'Clauses générales']] as const).map(([id, libelle]) => (
+            <button
+              key={id} type="button" role="tab" aria-selected={dossier === id}
+              onClick={() => { setDossier(id); setCoches(new Set()); }}
+              className={`flex-1 px-2 py-1.5 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${dossier === id ? 'border-b-2 border-blue-600 text-blue-700' : 'text-zinc-500 hover:text-zinc-700'}`}
+            >
+              {libelle}
+            </button>
+          ))}
+        </div>
+      )}
       {targetSelector && <div className="p-2 border-b">{targetSelector}</div>}
       {!canInsert && <p role="status" className="px-2 text-xs text-amber-700">{hintCible ?? "Sélectionnez une destination pour insérer."}</p>}
       <div className="p-2 space-y-2 border-b border-zinc-200 dark:border-zinc-700">
@@ -125,7 +145,7 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
           <input className={`${champ} w-full pl-7`} placeholder="Rechercher une désignation…"
                  value={q} onChange={e => setQ(e.target.value)} />
         </div>
-        <select className={`${champ} w-full`} value={corpsEtat}
+        {!clauses && <select className={`${champ} w-full`} value={corpsEtat}
                 onChange={e => { setCorpsEtat(e.target.value); setDtu(''); }}>
           <option value="">Tous corps d’état</option>
           {familles.map(({ famille, metiers }) => (
@@ -133,11 +153,11 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
               {metiers.map(m => <option key={m.code} value={m.code}>{m.libelle}</option>)}
             </optgroup>
           ))}
-        </select>
-        <select className={`${champ} w-full`} value={dtu} onChange={e => setDtu(e.target.value)}>
+        </select>}
+        {!clauses && <select className={`${champ} w-full`} value={dtu} onChange={e => setDtu(e.target.value)}>
           <option value="">Tous les NF DTU</option>
           {dtuDisponibles.map(d => <option key={d.code} value={d.code}>{d.code} — {d.titre}</option>)}
-        </select>
+        </select>}
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -149,7 +169,9 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
         {erreur && <div className="p-4 text-xs text-red-600">{erreur}</div>}
         {!chargement && !erreur && items.length === 0 && (
           <div className="p-4 text-xs text-zinc-400">
-            {q || corpsEtat || dtu
+            {clauses
+              ? (q ? 'Aucune clause ne correspond.' : "Aucune clause générale. Exportez un lot ou un chapitre depuis le CCTP, ou créez-en depuis la page « Bibliothèque d’ouvrages ».")
+              : q || corpsEtat || dtu
               ? 'Aucun article ne correspond.'
               : "La bibliothèque est vide. Créez des articles depuis la page « Bibliothèque d’ouvrages », ou sélectionnez des lignes ici puis « Envoyer » depuis le ruban."}
           </div>
@@ -166,9 +188,12 @@ export const PriceLibraryPanel: React.FC<Props> = ({ onClose, onInsert, canInser
               <input type="checkbox" className="mt-0.5" checked={coches.has(a.id)} readOnly />
               <div className="flex-1 min-w-0">
                 <div className="truncate font-medium text-zinc-700 dark:text-zinc-300">{a.designation}</div>
+                {estClause(a) && a.description && (
+                  <div className="text-[0.6875rem] text-zinc-500 line-clamp-2">{a.description}</div>
+                )}
                 <div className="flex items-center gap-2 text-[0.6875rem] text-zinc-400">
-                  <span>{a.unite}</span>
-                  <span className="font-mono text-[#1e5090]">{formatCurrency(Number(a.prix_unitaire) || 0)}</span>
+                  {!estClause(a) && <span>{a.unite}</span>}
+                  {!estClause(a) && <span className="font-mono text-[#1e5090]">{formatCurrency(Number(a.prix_unitaire) || 0)}</span>}
                   {a.dtu_code && <span className="truncate">{a.dtu_code}</span>}
                   {/* Sans date, impossible de juger la fraîcheur d'un prix. */}
                   {a.date_prix && <span>{new Date(a.date_prix).getFullYear()}</span>}

@@ -14,7 +14,7 @@ import { partnerLogosParagraph } from './docxPartnerLogos';
 import { docxSectionChrome } from './docxRunningHeader';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
-import { resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
+import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
 import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
 
 export interface CctpBloc {
@@ -61,7 +61,9 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
   const ordre = new Map(batimentsParOrdre(doc.batiments).map((b, i) => [b.id, i]));
   const blocs: CctpBloc[] = [];
   const date = new Date();
-  const texte = (v: string | undefined, n: NoeudCctp) => resoudreVariables((v ?? '').trim(), contexte, n, date);
+  // La liste des lots suit le document exporté (un CCTP par bâtiment : ses seuls lots).
+  const contexteComplet: ContexteCctp = { ...contexte, lots: contexte.lots ?? libellesLots(source.lots) };
+  const texte = (v: string | undefined, n: NoeudCctp) => resoudreVariables((v ?? '').trim(), contexteComplet, n, date);
   const libelles = (ids: string[]) => ids
     .filter(id => parId.has(id))
     .sort((a, b) => (ordre.get(a) ?? 0) - (ordre.get(b) ?? 0))

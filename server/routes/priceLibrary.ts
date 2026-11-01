@@ -12,6 +12,7 @@ import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { ecrireObservations } from '../articlePrices';
+import { CATEGORIE_CLAUSES, cleClause, dossierValide } from '../../src/lib/bibliothequeClauses';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -44,10 +45,16 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
   app.get('/api/price-library', async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const { q, categorie, lot_type, sort, origine } = req.query;
+      const { q, categorie, lot_type, sort, origine, dossier } = req.query;
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, MAX_LIMIT);
 
       let query = tenantScopedFrom(supabaseAdmin, tenantId, 'articles_type').select('*');
+      // Dossier : les ouvrages et les clauses générales partagent la table. Sans
+      // paramètre, tout est rendu comme avant ; `ouvrages` exclut les clauses
+      // (catégorie vide comprise : un `neq` seul écarterait les NULL).
+      if (dossier !== undefined && !dossierValide(dossier)) return res.status(400).json({ error: 'Dossier inconnu' });
+      if (dossier === 'clauses') query = query.eq('categorie', CATEGORIE_CLAUSES);
+      else if (dossier === 'ouvrages') query = query.or(`categorie.is.null,categorie.neq.${CATEGORIE_CLAUSES}`);
       if (categorie) query = query.eq('categorie', categorie);
       if (lot_type) query = query.eq('lot_type', lot_type);
       if (origine) query = query.eq('origine', origine);
@@ -101,7 +108,7 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
     try {
       const tenantId = await getTenantId(req.user.id);
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'articles_type')
-        .select('corps_etat_code, dtu_code, origine');
+        .select('corps_etat_code, dtu_code, origine, categorie');
       if (error) throw error;
       const compte = (key: string) => {
         const out: Record<string, number> = {};
@@ -111,8 +118,11 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
         }
         return out;
       };
+      const clauses = ((data ?? []) as any[]).filter(r => r.categorie === CATEGORIE_CLAUSES).length;
       res.json({
-        total: (data ?? []).length,
+        // `total` ne compte que les ouvrages : les clauses ont leur propre dossier.
+        total: (data ?? []).length - clauses,
+        clauses,
         parCorpsEtat: compte('corps_etat_code'),
         parDtu: compte('dtu_code'),
         parOrigine: compte('origine'),
@@ -136,6 +146,16 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
 
       const origine = ORIGINES.includes(req.body?.origine) ? req.body.origine : 'saisie';
       const prix = Number(req.body?.prix_unitaire) || 0;
+
+      // Une clause générale ne se crée pas deux fois sous le même intitulé : on
+      // renvoie l'existante, l'écran propose de la modifier plutôt que de doubler.
+      if (nullIfBlank(req.body?.categorie) === CATEGORIE_CLAUSES) {
+        const { data: clauses, error: clErr } = await tenantScopedFrom(supabaseAdmin, tenantId, 'articles_type')
+          .select('id, designation').eq('categorie', CATEGORIE_CLAUSES);
+        if (clErr) throw clErr;
+        const existante = (clauses ?? []).find((c: any) => cleClause(c.designation) === cleClause(designation));
+        if (existante) return res.status(409).json({ error: 'Une clause générale porte déjà ce titre', existing_id: existante.id });
+      }
       const today = new Date().toISOString().slice(0, 10);
       const row: Record<string, any> = {
         id: crypto.randomUUID(),

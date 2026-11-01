@@ -1,12 +1,12 @@
 import { useTranslation } from 'react-i18next';
 import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
 import { LotTitleInput } from './LotTitleInput';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown, IconTag, IconBuildingStore,
   IconBuildingCommunity, IconSparkles, IconCopy, IconStackPush, IconRowInsertBottom,
   IconSubtask, IconArrowBarToLeft, IconArrowBarToRight, IconArrowsMaximize, IconArrowsMinimize,
-  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftCollapse, IconDatabaseExport,
 } from '@tabler/icons-react';
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
@@ -31,8 +31,11 @@ import type { CibleRecherche } from '../../lib/proRecherche';
 import { legendeImage, localisationsConnues, nouvelleImage, retirerImage } from '../../lib/cctpImages';
 import { envoyerIllustration } from '../../lib/cctpImagesUpload';
 import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
+import { chargerEtatArbre, ouvertsSauf, repliesParmi, sauverEtatArbre } from '../../lib/cctpTreeState';
 import { appliquerCouleur, basculerBalise, contientMiseEnForme, type BaliseRiche, type EditionTexte } from '../../lib/cctpRichText';
 import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
+import { CctpExportLibraryDialog } from './CctpExportLibraryDialog';
+import { ajouterClause, estClause, type ExportBibliotheque } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
@@ -71,12 +74,33 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const [localShowTree, setLocalShowTree] = useState(true);
   const showTree = showTreeProp ?? localShowTree;
   const toggleTree = onToggleTree ?? (() => setLocalShowTree(v => !v));
+  // L'arbre se rouvre comme on l'a laissé (voir lib/cctpTreeState) : on relit
+  // ce qui était replié, tout le reste est ouvert.
+  const [arbreInitial] = useState(() => chargerEtatArbre(dpgf.projectId));
   const [expandedLots, setExpandedLots] = useState<Set<string>>(
-    new Set(dpgf.lots.map(l => l.id))
+    () => ouvertsSauf(dpgf.lots.map(l => l.id), arbreInitial.lots)
   );
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
-    new Set(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)))
+    () => ouvertsSauf(dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)), arbreInitial.chapitres)
   );
+  // Éléments déjà vus : un lot ou un chapitre qui apparaît ensuite (ajout, import,
+  // IA, DPGF) s'ouvre ; un élément connu que l'on a replié le reste.
+  const elementsConnus = useRef(new Set<string>([
+    ...dpgf.lots.map(l => l.id), ...dpgf.lots.flatMap(l => l.chapitres.map(c => c.id)),
+  ]));
+  useEffect(() => {
+    const lotIds = dpgf.lots.map(l => l.id);
+    const chapIds = dpgf.lots.flatMap(l => l.chapitres.map(c => c.id));
+    const nouveauxLots = lotIds.filter(id => !elementsConnus.current.has(id));
+    const nouveauxChaps = chapIds.filter(id => !elementsConnus.current.has(id));
+    [...nouveauxLots, ...nouveauxChaps].forEach(id => elementsConnus.current.add(id));
+    if (nouveauxLots.length) setExpandedLots(prev => new Set([...prev, ...nouveauxLots]));
+    if (nouveauxChaps.length) setExpandedChaps(prev => new Set([...prev, ...nouveauxChaps]));
+    sauverEtatArbre(dpgf.projectId, {
+      lots: repliesParmi(lotIds, new Set([...expandedLots, ...nouveauxLots])),
+      chapitres: repliesParmi(chapIds, new Set([...expandedChaps, ...nouveauxChaps])),
+    });
+  }, [dpgf.lots, dpgf.projectId, expandedLots, expandedChaps]);
   const [selection, setSelection] = useState<Selection | null>(null);
 
   // Trouvaille choisie dans la recherche : dépliée, sélectionnée (son texte
@@ -92,6 +116,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const [showDecoupage, setShowDecoupage] = useState(false);
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showGenerate, setShowGenerate] = useState(false);
+  const [showExportLibrary, setShowExportLibrary] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
   const chapitreVise = selection && selection.kind !== 'lot'
@@ -153,8 +178,29 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   // CCTP : c'est précisément ce qu'on vient y chercher. La désignation, l'unité
   // et le prix suivent, pour que le même article serve aussi au DPGF sans
   // ressaisie, et `articleTypeId` garde le lien vers la bibliothèque.
-  const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]) => {
-    if (!chapitreVise) return;
+  const insererDepuisBibliotheque = (articles: ArticleBibliotheque[]): boolean | void => {
+    // Une clause générale n'est pas un article : son texte s'ajoute à la
+    // description de l'élément sélectionné (lot, chapitre ou article).
+    const clauses = articles.filter(estClause);
+    articles = articles.filter(a => !estClause(a));
+    if (clauses.length) {
+      if (!selection || !selData) return false;
+      let texte = selData.description;
+      let nb = 0;
+      for (const c of clauses) {
+        const r = ajouterClause(texte, c.description ?? '');
+        texte = r.texte;
+        if (r.ajoute) nb++;
+      }
+      if (nb) updateDescription(texte);
+      notify?.(nb ? t('pro_cctp_clause_added', { count: nb, cible: selData.name }) : t('pro_cctp_clause_present', { cible: selData.name }),
+        { type: nb ? 'success' : 'error' });
+    }
+    if (!articles.length) return;
+    if (!chapitreVise) {
+      notify?.(t('pro_cctp_library_need_chapter'), { type: 'error' });
+      return false;
+    }
     const { lotIdx, chapIdx } = chapitreVise;
     const chap = dpgf.lots[lotIdx].chapitres[chapIdx];
     const base = chap.lignes.length;
@@ -292,6 +338,19 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     }
   };
 
+  // ── Export vers la bibliothèque ───────────────────────────────────────────
+  const exportInitial = (sel: Selection, data: NonNullable<ReturnType<typeof getSelectedData>>): ExportBibliotheque => {
+    if (sel.kind === 'ligne' && data.ligne) {
+      return {
+        type: 'ouvrage', designation: data.ligne.designation, unite: data.ligne.unite,
+        prix_unitaire: data.ligne.prixUnitaire, description: data.description,
+      };
+    }
+    const lot = dpgf.lots[sel.lotIdx];
+    const titre = sel.kind === 'chapitre' ? lot?.chapitres[sel.chapIdx]?.titre : lot?.titre;
+    return { type: 'clause', designation: titre ?? '', description: data.description };
+  };
+
   // ── Derive selected data ──────────────────────────────────────────────────
   const getSelectedData = () => {
     if (!selection) return null;
@@ -329,8 +388,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     const totalHT = result.lots.reduce((sum, lot) => sum + lot.sousTotal, 0);
     onChange({ ...dpgf, lots: result.lots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
     setSelection(result.selection);
-    setExpandedLots(new Set(result.lots.map(l => l.id)));
-    setExpandedChaps(new Set(result.lots.flatMap(l => l.chapitres.map(c => c.id))));
+    // Seul le chemin de l'élément déplacé s'ouvre : le reste de l'arbre garde son état.
+    const sel = result.selection;
+    const lot = sel && result.lots[sel.lotIdx];
+    if (lot) {
+      setExpandedLots(prev => new Set([...prev, lot.id]));
+      if (sel.kind !== 'lot' && lot.chapitres[sel.chapIdx]) setExpandedChaps(prev => new Set([...prev, lot.chapitres[sel.chapIdx].id]));
+    }
   };
   const moveSelected = (direction: -1 | 1) => {
     if (selection) applyHierarchy(moveHierarchy(dpgf.lots, selection, direction));
@@ -442,7 +506,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => moveSelected(1), disabled: !canMove(dpgf.lots, selection, 1) },
     { id: 'promote', label: t('pro_promote'), icon: <IconArrowBarToLeft size={16} />, iconOnly: true, onClick: promoteSelected, disabled: selection?.kind !== 'ligne' },
     { id: 'demote', label: t('pro_demote'), icon: <IconArrowBarToRight size={16} />, iconOnly: true, onClick: () => selection && applyHierarchy(demoteHierarchy(dpgf.lots, selection, uid)), disabled: !canDemote(dpgf.lots, selection) },
-    { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, mobile: true, groupStart: true, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
+    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection, groupStart: true },
+    { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, mobile: true, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
     { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !canDeleteSelection, hint: canDeleteSelection ? undefined : t('pro_cctp_delete_hint') },
   ];
 
@@ -455,6 +520,26 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
           projectId={dpgf.projectId}
           onClose={() => setShowGenerate(false)}
           onGenerated={insererGeneration}
+        />
+      )}
+
+      {showExportLibrary && selection && selData && (
+        <CctpExportLibraryDialog
+          peutEtreOuvrage={selection.kind === 'ligne'}
+          initial={exportInitial(selection, selData)}
+          onClose={() => setShowExportLibrary(false)}
+          onDone={(article, type) => {
+            setShowExportLibrary(false);
+            // L'ouvrage exporté est lié à son article : les prix d'offres
+            // pourront remonter vers lui, comme pour un article inséré.
+            if (type === 'ouvrage' && selection.kind === 'ligne') {
+              mutateDPGF(d => {
+                const l = ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath);
+                if (l && !l.articleTypeId) l.articleTypeId = article.id;
+              });
+            }
+            notify?.(t(type === 'clause' ? 'pro_cctp_export_library_done_clause' : 'pro_cctp_export_library_done_ouvrage', { nom: article.designation }), { type: 'success' });
+          }}
         />
       )}
 
@@ -879,8 +964,9 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
           <PriceLibraryPanel
             onClose={() => setShowLibrary(false)}
             onInsert={insererDepuisBibliotheque}
-            canInsert={!!chapitreVise}
-            hintCible="Sélectionnez d’abord un chapitre ou un article dans l’arbre"
+            canInsert={!!selection}
+            avecClauses
+            hintCible="Sélectionnez d’abord un élément dans l’arbre"
           />
         )}
       </div>

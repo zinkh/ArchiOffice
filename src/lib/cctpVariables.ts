@@ -15,6 +15,8 @@ export interface ContexteCctp {
   zonePlu?: string;
   surface?: string;
   agence?: string;
+  /** Lots du document, un libellé « Lot 01 · Gros œuvre » chacun ; dérivés à l'export si absents. */
+  lots?: string[];
 }
 
 /** Position dans l'arbre de l'élément dont on résout le texte. */
@@ -55,6 +57,7 @@ export const VARIABLES_CCTP: VariableCctp[] = [
   { cle: 'numero', libelle: "Numéro de l'élément", groupe: 'arbre', valeur: (_c, n) => n.articleNumero ?? n.chapitreNumero ?? n.lotNumero },
   { cle: 'localisation', libelle: "Localisation de l'article", groupe: 'arbre', valeur: (_c, n) => n.localisation },
   { cle: 'batiments', libelle: 'Bâtiments concernés', groupe: 'arbre', valeur: (_c, n) => n.batiments?.length ? n.batiments.join(', ') : undefined },
+  { cle: 'liste_lots', libelle: 'Liste des lots', groupe: 'operation', valeur: c => c.lots?.length ? c.lots.map(l => `- ${l}`).join('\n') : undefined },
   { cle: 'agence', libelle: "Nom de l'agence", groupe: 'divers', valeur: c => c.agence },
   { cle: 'date', libelle: "Date du jour", groupe: 'divers', valeur: (_c, _n, d) => dateLongue(d) },
 ];
@@ -70,5 +73,9 @@ export function resoudreVariables(texte: string, contexte: ContexteCctp, noeud: 
     return v.valeur(contexte, noeud, date)?.trim() || `[${v.libelle.toLowerCase()} à renseigner]`;
   });
 }
+
+/** « Lot 01 · Gros œuvre » pour chaque lot du document, dans l'ordre. */
+export const libellesLots = (lots: { numero?: string; titre?: string }[]): string[] =>
+  lots.map(l => [l.numero && `Lot ${l.numero}`, l.titre?.trim()].filter(Boolean).join(' · ')).filter(Boolean);
 
 export const jeton = (cle: string) => `{{${cle}}}`;

@@ -105,7 +105,9 @@ export interface PrixStats {
 }
 
 export interface RepartitionBibliotheque {
+  /** Ouvrages seulement : les clauses générales ont leur compteur. */
   total: number;
+  clauses?: number;
   parCorpsEtat: Record<string, number>;
   parDtu: Record<string, number>;
   parOrigine: Record<string, number>;

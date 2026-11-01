@@ -21,6 +21,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { fetchJson, apiFetch } from '../lib/api';
 import { formatCurrency, cn } from '../lib/utils';
+import { CATEGORIE_CLAUSES, estClause } from '../lib/bibliothequeClauses';
 import type {
   Referentiels, ArticleBibliotheque, PrixObservation, PrixStats,
   RepartitionBibliotheque, OrigineArticle,
@@ -67,6 +68,8 @@ export default function Specifications() {
   const [corpsEtatActif, setCorpsEtatActif] = useState<string | null>(null);
   const [dtuActif, setDtuActif] = useState<string>('');
   const [origineActive, setOrigineActive] = useState<string>('');
+  // Dossier « Clauses générales » : textes réutilisables sans prix, même table (catégorie réservée).
+  const [dossierClauses, setDossierClauses] = useState(false);
   const [famillesOuvertes, setFamillesOuvertes] = useState<Record<string, boolean>>({});
 
   const [selection, setSelection] = useState<ArticleBibliotheque | null>(null);
@@ -92,6 +95,7 @@ export default function Specifications() {
     setChargement(true);
     try {
       const params = new URLSearchParams({ limit: '200' });
+      params.set('dossier', dossierClauses ? 'clauses' : 'ouvrages');
       if (recherche.trim()) params.set('q', recherche.trim());
       if (corpsEtatActif) params.set('corps_etat_code', corpsEtatActif);
       if (dtuActif) params.set('dtu_code', dtuActif);
@@ -105,7 +109,7 @@ export default function Specifications() {
     } finally {
       setChargement(false);
     }
-  }, [recherche, corpsEtatActif, dtuActif, origineActive]);
+  }, [recherche, corpsEtatActif, dtuActif, origineActive, dossierClauses]);
 
   // La recherche est débouncée : la requête part côté serveur, une frappe par
   // caractère la lancerait autant de fois.
@@ -154,7 +158,10 @@ export default function Specifications() {
     setSelection(null);
     setObservations([]);
     setStats(null);
-    setBrouillon({ ...ARTICLE_VIDE, corps_etat_code: corpsEtatActif ?? '', dtu_code: dtuActif });
+    setBrouillon({
+      ...ARTICLE_VIDE, corps_etat_code: corpsEtatActif ?? '', dtu_code: dtuActif,
+      ...(dossierClauses ? { categorie: CATEGORIE_CLAUSES, unite: '', prix_unitaire: 0 } : {}),
+    });
     navigate('/specifications', { replace: true });
   };
 
@@ -287,9 +294,19 @@ export default function Specifications() {
 
         <nav className="flex-1 overflow-y-auto py-2">
           <button
-            onClick={() => { setCorpsEtatActif(null); setDtuActif(''); }}
+            onClick={() => { setDossierClauses(true); setCorpsEtatActif(null); setDtuActif(''); setOrigineActive(''); }}
+            className="w-full flex items-center justify-between gap-2 px-4 py-2 text-[0.8125rem] font-medium text-left transition-colors"
+            style={dossierClauses
+              ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
+              : { color: 'var(--tblr-muted)' }}
+          >
+            <span className="flex items-center gap-2"><IconFileText size={14} aria-hidden />{t('library_clauses')}</span>
+            <span className="text-[0.6875rem] flex-shrink-0 tabular-nums">{repartition?.clauses || ''}</span>
+          </button>
+          <button
+            onClick={() => { setDossierClauses(false); setCorpsEtatActif(null); setDtuActif(''); }}
             className="w-full text-left px-4 py-2 text-[0.8125rem] font-medium transition-colors"
-            style={corpsEtatActif === null
+            style={!dossierClauses && corpsEtatActif === null
               ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
               : { color: 'var(--tblr-muted)' }}
           >
@@ -309,12 +326,12 @@ export default function Specifications() {
                   {famille}
                 </button>
                 {ouverte && metiers.map(metier => {
-                  const actif = corpsEtatActif === metier.code;
+                  const actif = !dossierClauses && corpsEtatActif === metier.code;
                   const nombre = repartition?.parCorpsEtat[metier.code] ?? 0;
                   return (
                     <button
                       key={metier.code}
-                      onClick={() => { setCorpsEtatActif(metier.code); setDtuActif(''); }}
+                      onClick={() => { setDossierClauses(false); setCorpsEtatActif(metier.code); setDtuActif(''); }}
                       className="w-full flex items-center justify-between gap-2 pl-8 pr-4 py-1.5 text-[0.8125rem] text-left transition-colors"
                       style={actif
                         ? { background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }
@@ -354,10 +371,10 @@ export default function Specifications() {
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors whitespace-nowrap"
             >
               <IconPlus size={16} />
-              {t('library_new_article')}
+              {dossierClauses ? t('library_new_clause') : t('library_new_article')}
             </button>
           </div>
-          <div className="flex gap-2">
+          {!dossierClauses && <div className="flex gap-2">
             <select
               value={dtuActif}
               onChange={e => setDtuActif(e.target.value)}
@@ -381,7 +398,7 @@ export default function Specifications() {
               <option value="offre">{t('library_origin_offre')}</option>
               <option value="reference">{t('library_origin_reference')}</option>
             </select>
-          </div>
+          </div>}
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -412,6 +429,9 @@ export default function Specifications() {
                     <p className="text-[0.8125rem] font-medium truncate" style={{ color: 'var(--tblr-text)' }}>
                       {article.designation}
                     </p>
+                    {estClause(article) && article.description && (
+                      <p className="text-[0.6875rem] mt-0.5 line-clamp-2" style={{ color: 'var(--tblr-muted)' }}>{article.description}</p>
+                    )}
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <BadgeOrigine origine={article.origine} />
                       {article.dtu_code && (
@@ -425,9 +445,11 @@ export default function Specifications() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <span className="text-[0.8125rem] font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
-                      {formatCurrency(Number(article.prix_unitaire) || 0)}
-                    </span>
+                    {!estClause(article) && (
+                      <span className="text-[0.8125rem] font-semibold tabular-nums" style={{ color: 'var(--tblr-text)' }}>
+                        {formatCurrency(Number(article.prix_unitaire) || 0)}
+                      </span>
+                    )}
                     <button
                       onClick={e => { e.stopPropagation(); basculerFavori(article); }}
                       style={{ color: article.favori ? '#f59f00' : 'var(--tblr-muted)' }}
@@ -468,7 +490,7 @@ export default function Specifications() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <h3 className="text-lg font-semibold truncate" style={{ color: 'var(--tblr-text)' }}>
-                  {selection ? selection.designation : t('library_new_article_title')}
+                  {selection ? selection.designation : estClause(brouillon) ? t('library_new_clause_title') : t('library_new_article_title')}
                 </h3>
                 <div className="flex items-center gap-2 mt-1">
                   {selection && <BadgeOrigine origine={selection.origine} />}
@@ -514,6 +536,7 @@ export default function Specifications() {
                   style={styleChamp}
                 />
               </label>
+              {!estClause(brouillon) && (<>
               <label className="text-sm">
                 <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('library_code')}</span>
                 <input
@@ -542,9 +565,10 @@ export default function Specifications() {
                   />
                 </div>
               </label>
+              </>)}
             </div>
 
-            {/* Classement */}
+            {!estClause(brouillon) && (
             <div>
               <h4 className="text-sm font-semibold mb-3" style={{ color: 'var(--tblr-text)' }}>{t('library_classification')}</h4>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -617,15 +641,16 @@ export default function Specifications() {
                 </p>
               )}
             </div>
+            )}
 
             {/* Prescriptions */}
             <div className="space-y-3">
               <label className="block text-sm">
                 <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>
-                  {t('library_description')}
+                  {estClause(brouillon) ? t('library_clause_text') : t('library_description')}
                 </span>
                 <textarea
-                  rows={5}
+                  rows={estClause(brouillon) ? 14 : 5}
                   value={brouillon.description ?? ''}
                   onChange={e => majBrouillon('description', e.target.value)}
                   placeholder={t('library_description_placeholder')}
@@ -645,8 +670,8 @@ export default function Specifications() {
               </label>
             </div>
 
-            {/* Historique de prix */}
-            {selection && (
+            {/* Historique de prix : une clause n'a pas de prix */}
+            {selection && !estClause(selection) && (
               <div>
                 <h4 className="text-sm font-semibold mb-3 flex items-center gap-2" style={{ color: 'var(--tblr-text)' }}>
                   <IconHistory size={16} />
