@@ -1,5 +1,6 @@
 'use strict';
 const fs=require('fs/promises');const path=require('path');const crypto=require('crypto');
+const {createWindowsEdits}=require('./windowsDriveEdits.cjs');
 const {agentEnvironment}=require('./driveAgent.cjs');const {isSafeToOpen}=require('./fileAccess.cjs');
 const hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const same=(a,b)=>a&&b&&['userId','tenantId','deviceId'].every(k=>typeof a[k]==='string'&&a[k]===b[k]);
@@ -35,7 +36,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
   const available=()=>enabled()===true;
   function stop() {
     epoch++;
-    const old=mount;mount=null;if(!old)return;clearInterval(old.lease);old.stopped=true;
+    const old=mount;mount=null;if(!old)return;clearInterval(old.lease);old.stopped=true;old.edits?.stop();
     for(const request of old.verifications.values()){clearTimeout(request.timer);request.reject(new Error('Preview stopped'));}old.verifications.clear();
     closing=old.exited?Promise.resolve():new Promise(resolve=>{
       const timeout=setTimeout(resolve,6500);timeout.unref();old.child.once('exit',()=>{clearTimeout(timeout);resolve();});
@@ -68,7 +69,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       if(snapshot&&snapshot.rootKey!==rootKey)throw new Error('Snapshot identity refused');
       const directory=snapshot?snapshot.directory:await fs.mkdtemp(path.join(root,hash([active.userId,active.tenantId]).slice(0,12)+'-'));
       await noLinks(root,directory);
-      const manifest={identity:active,projectId,directory,rootKey,catalog:savedEntries,nativeReady:snapshot?.nativeReady===true};
+      const manifest={identity:active,projectId,directory,rootKey,catalog:savedEntries,nativeReady:snapshot?.nativeReady===true,...(snapshot?.editable===true?{editable:true}:{})};
       await onPrepared(manifest);
       if(generation!==epoch)throw new Error('Preview stopped');
       const child=spawn(executable,[],{stdio:['pipe','pipe','ignore'],windowsHide:true,env:agentEnvironment(environment)});
@@ -85,9 +86,14 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
           while((newline=text.indexOf('\n'))>=0) {
             const frame=text.slice(0,newline);text=text.slice(newline+1);let msg;try{msg=JSON.parse(frame);}catch{fail();return;}
             if(msg.type==='ready'&&!ready){ready=true;clearTimeout(timeout);resolve();}
-            else if(msg.type==='verified') {
+            else if(msg.type==='changes') {
               const request=state.verifications.get(msg.requestId);
-              if(!request||typeof msg.valid!=='boolean'){fail();return;}
+              if(!request||request.type!=='changes'||!Array.isArray(msg.keys)||msg.keys.length>100||new Set(msg.keys).size!==msg.keys.length||msg.keys.some(key=>!files.has(key))){fail();return;}
+              clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.keys);
+            }
+            else if(msg.type==='verified'||msg.type==='locked') {
+              const request=state.verifications.get(msg.requestId);
+              if(!request||request.type!==(msg.type==='locked'?'lock':'verify')||typeof msg.valid!=='boolean'){fail();return;}
               clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.valid);
             }
             else if(msg.type==='error'){
@@ -114,10 +120,16 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
         });
       });
       // Catalog excludes tokens; the native helper never receives credentials.
-      send({type:'init',root:directory,entries,rootKey,resume:!!snapshot,initializing:!!snapshot&&!manifest.nativeReady,...(mountA?{mountA:true,previousRoot}:{})});await ready;
+      send({type:'init',root:directory,entries,rootKey,editable:manifest.editable===true,resume:!!snapshot,initializing:!!snapshot&&!manifest.nativeReady,...(mountA?{mountA:true,previousRoot}:{})});await ready;
       if(state.stopped||!same(await vault(),active))throw new Error('Access refused');
       await onReady({...manifest,nativeReady:true});
       if(state.stopped||!same(await vault(),active))throw new Error('Access refused');
+      if(manifest.editable)state.edits=createWindowsEdits({manifest,agent,vault,noLinks,changes:()=>request('changes'),lock:async key=>{
+        const id=crypto.randomUUID();
+        const release=()=>{if(!state.stopped&&!child.stdin.destroyed)child.stdin.write(JSON.stringify({type:'unlock',requestId:id})+'\n');};
+        try {if(!await request('lock',{key},id))return null;return release;}
+        catch(error){release();throw error;}
+      }});
       let checking=false;
       state.lease=setInterval(async()=> {
         if(checking)return;checking=true;
@@ -126,18 +138,17 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       if(open&&await shell.openPath(mountA?'A:\\':directory))throw new Error('Explorer unavailable');return {status:'opened'};
     }catch(e){if(created)stop();throw e;}finally{busy=false;}
   }
-  async function verify() {
+  async function request(type='verify',extra={},id=crypto.randomUUID()) {
     const state=mount;
     if(!state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');
     if(mount!==state||state.stopped||state.child.stdin.destroyed)throw new Error('Preview stopped');
-    const id=crypto.randomUUID();
     const result=await new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{state.verifications.delete(id);reject(new Error('Verification timeout'));},15000);
-      state.verifications.set(id,{resolve,reject,timer});
-      state.child.stdin.write(JSON.stringify({type:'verify',requestId:id})+'\n',error=>{if(error){clearTimeout(timer);state.verifications.delete(id);reject(error);}});
+      state.verifications.set(id,{resolve,reject,timer,type});
+      state.child.stdin.write(JSON.stringify({type,requestId:id,...extra})+'\n',error=>{if(error){clearTimeout(timer);state.verifications.delete(id);reject(error);}});
     });
     if(mount!==state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');return result;
   }
-  return {start,stop,verify,status:()=>({enabled:available(),active:!!mount})};
+  return {start,stop,verify:()=>request('verify'),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
 }
 module.exports={createWindowsPreview,noLinks,catalogDetails};

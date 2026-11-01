@@ -1,4 +1,4 @@
-// Experimental, read-only CFAPI provider. Network, authentication and integrity
+// Experimental CFAPI provider with explicit per-project editing. Network, authentication and integrity
 // belong to the agent. The private parent pipe supplies verified cache paths.
 #define WIN32_NO_STATUS
 #include <windows.h>
@@ -152,19 +152,23 @@ void validateRoot(fs::path const& root,std::string const& key) {
     throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
 }
 // Validate attributes and opaque identity without hydrating or rewriting bytes.
-void validateExisting(fs::path const& file,Entry const& entry) {
+void validateExisting(fs::path const& file,Entry const& entry,bool editable=false) {
   HANDLE handle=CreateFileW(file.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS,nullptr);
   if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
   try {
     BY_HANDLE_FILE_INFORMATION attributes{};LARGE_INTEGER size{};
     if(!GetFileInformationByHandle(handle,&attributes)||(!entry.folder&&!GetFileSizeEx(handle,&size)))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
     if(!!(attributes.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=entry.folder||attributes.nNumberOfLinks>1
-      ||(!entry.folder&&size.QuadPart!=entry.size))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+      ||(!entry.folder&&(size.QuadPart<0||size.QuadPart>MaxFile||(!editable&&size.QuadPart!=entry.size))))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
     alignas(CF_PLACEHOLDER_STANDARD_INFO) BYTE buffer[sizeof(CF_PLACEHOLDER_STANDARD_INFO)+128]{};DWORD returned=0;
-    check(CfGetPlaceholderInfo(handle,CF_PLACEHOLDER_INFO_STANDARD,buffer,sizeof(buffer),&returned));
+    auto status=CfGetPlaceholderInfo(handle,CF_PLACEHOLDER_INFO_STANDARD,buffer,sizeof(buffer),&returned);
+    // A replace-save produces an ordinary local file. Only an explicitly
+    // editable generation may reconnect it; unknown reparse points stay refused.
+    if(FAILED(status)&&editable&&!entry.folder&&!(attributes.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)){CloseHandle(handle);return;}
+    check(status);
     auto info=reinterpret_cast<CF_PLACEHOLDER_STANDARD_INFO*>(buffer);
     if(info->FileIdentityLength!=entry.key.size()||std::string(reinterpret_cast<char*>(info->FileIdentity),info->FileIdentityLength)!=entry.key
-      ||(!entry.folder&&(info->ModifiedDataSize.QuadPart!=0||info->InSyncState!=CF_IN_SYNC_STATE_IN_SYNC)))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+      ||(!entry.folder&&!editable&&(info->ModifiedDataSize.QuadPart!=0||info->InSyncState!=CF_IN_SYNC_STATE_IN_SYNC)))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
     CloseHandle(handle);
   } catch(...) {CloseHandle(handle);throw;}
 }
@@ -173,6 +177,7 @@ int wmain(int argc,wchar_t** argv) {
   bool connected=false;
   bool resuming=false;
   DriveA drive;
+  struct Leases {std::map<std::string,HANDLE> handles;~Leases(){for(auto const& item:handles)CloseHandle(item.second);}} leases;
   try {
     winrt::init_apartment();
     if(argc==3&&std::wstring(argv[1])==L"--unregister") {check(CfUnregisterSyncRoot(argv[2]));return 0;}
@@ -189,6 +194,8 @@ int wmain(int argc,wchar_t** argv) {
     }
     if(init.GetNamedString(L"type")!=L"init")throw std::runtime_error("init required");
     bool resume=init.GetNamedBoolean(L"resume",false),initializing=init.GetNamedBoolean(L"initializing",false);
+    bool editable=init.GetNamedBoolean(L"editable",false);
+    if(editable&&!resume)throw std::runtime_error("editing requires an existing generation");
     resuming=resume;
     std::string rootKey=winrt::to_string(init.GetNamedString(L"rootKey",L""));
     if(resume&&!hexKey(rootKey))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
@@ -219,15 +226,21 @@ int wmain(int argc,wchar_t** argv) {
       for(auto const& e:entries) {
         auto file=root/fs::path(e.path);DWORD attributes=GetFileAttributesW(file.c_str());
         if(attributes==INVALID_FILE_ATTRIBUTES) {
-          if(!initializing||(GetLastError()!=ERROR_FILE_NOT_FOUND&&GetLastError()!=ERROR_PATH_NOT_FOUND))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
-        } else validateExisting(file,e);
+          if((!initializing&&!(editable&&!e.folder))||(GetLastError()!=ERROR_FILE_NOT_FOUND&&GetLastError()!=ERROR_PATH_NOT_FOUND))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+        } else validateExisting(file,e,editable);
       }
     } else check(CfRegisterSyncRoot(root.c_str(),&reg,&policies,CF_REGISTER_FLAG_NONE));
     CF_CALLBACK_REGISTRATION callbacks[]={{CF_CALLBACK_TYPE_FETCH_DATA,fetch},{CF_CALLBACK_TYPE_NOTIFY_DELETE,denyDelete},{CF_CALLBACK_TYPE_NOTIFY_RENAME,denyRename},CF_CALLBACK_REGISTRATION_END};
-    check(CfConnectSyncRoot(root.c_str(),callbacks,nullptr,CF_CONNECT_FLAG_BLOCK_SELF_IMPLICIT_HYDRATION,&connection));connected=true;
+    CF_CALLBACK_REGISTRATION editCallbacks[]={{CF_CALLBACK_TYPE_FETCH_DATA,fetch},CF_CALLBACK_REGISTRATION_END};
+    check(CfConnectSyncRoot(root.c_str(),editable?editCallbacks:callbacks,nullptr,CF_CONNECT_FLAG_BLOCK_SELF_IMPLICIT_HYDRATION,&connection));connected=true;
     for(auto const& e:entries) {
       fs::path relative(e.path);auto base=root/relative.parent_path();auto name=relative.filename().wstring();
-      if(resume&&GetFileAttributesW((root/relative).c_str())!=INVALID_FILE_ATTRIBUTES)continue;
+      if(resume&&GetFileAttributesW((root/relative).c_str())!=INVALID_FILE_ATTRIBUTES) {
+        if(editable&&!e.folder){auto a=GetFileAttributesW((root/relative).c_str());if(a&FILE_ATTRIBUTE_READONLY)if(!SetFileAttributesW((root/relative).c_str(),a&~FILE_ATTRIBUTE_READONLY))winrt::throw_last_error();}
+        continue;
+      }
+      // Never recreate a document deleted locally from an editable generation.
+      if(resume&&editable&&!e.folder&&!initializing)continue;
       CF_PLACEHOLDER_CREATE_INFO p{};p.RelativeFileName=name.c_str();p.FileIdentity=e.key.data();p.FileIdentityLength=static_cast<DWORD>(e.key.size());
       p.FsMetadata.FileSize.QuadPart=e.size;p.FsMetadata.BasicInfo.FileAttributes=e.folder?FILE_ATTRIBUTE_DIRECTORY:FILE_ATTRIBUTE_READONLY|FILE_ATTRIBUTE_ARCHIVE;
       GetSystemTimeAsFileTime(reinterpret_cast<FILETIME*>(&p.FsMetadata.BasicInfo.CreationTime));p.FsMetadata.BasicInfo.LastWriteTime=p.FsMetadata.BasicInfo.CreationTime;
@@ -241,6 +254,34 @@ int wmain(int argc,wchar_t** argv) {
     while(line(text)) {
       auto message=JsonObject::Parse(winrt::to_hstring(text));auto type=message.GetNamedString(L"type");
       if(type==L"stop")break;
+      if(type==L"unlock") {
+        auto id=winrt::to_string(message.GetNamedString(L"requestId"));auto it=leases.handles.find(id);
+        if(it!=leases.handles.end()){CloseHandle(it->second);leases.handles.erase(it);}
+      }
+      if(type==L"lock") {
+        auto id=winrt::to_string(message.GetNamedString(L"requestId"));auto key=winrt::to_string(message.GetNamedString(L"key"));
+        if(!editable||id.size()!=36||id.find_first_not_of("0123456789abcdef-")!=std::string::npos||leases.handles.contains(id)||leases.handles.size()>=8)throw std::runtime_error("invalid capture request");
+        auto entry=std::find_if(entries.begin(),entries.end(),[&](Entry const& e){return !e.folder&&e.key==key;});
+        if(entry==entries.end())throw std::runtime_error("unknown capture identity");
+        HANDLE handle=INVALID_HANDLE_VALUE;
+        try {
+          validateRoot(root,rootKey);validateExisting(root/fs::path(entry->path),*entry,true);
+          // FILE_SHARE_READ denies concurrent writers and replace-saves until
+          // the parent has published its independently verified snapshot.
+          handle=CreateFileW((root/fs::path(entry->path)).c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        }catch(...){}
+        bool valid=handle!=INVALID_HANDLE_VALUE;if(valid)leases.handles.emplace(id,handle);
+        emit("{\"type\":\"locked\",\"requestId\":\""+id+"\",\"valid\":"+(valid?std::string("true"):std::string("false"))+"}");
+      }
+      if(type==L"changes") {
+        auto request=winrt::to_string(message.GetNamedString(L"requestId"));
+        if(!editable||request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid changes request");
+        validateRoot(root,rootKey);std::string keys;bool first=true;
+        for(auto const& entry:entries)if(!entry.folder) {
+          try{validateExisting(root/fs::path(entry.path),entry);}catch(...){if(!first)keys+=",";keys+="\""+entry.key+"\"";first=false;}
+        }
+        emit("{\"type\":\"changes\",\"requestId\":\""+request+"\",\"keys\":["+keys+"]}");
+      }
       if(type==L"verify") {
         auto request=winrt::to_string(message.GetNamedString(L"requestId"));
         if(request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid verification request");

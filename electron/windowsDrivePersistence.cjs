@@ -95,6 +95,23 @@ function createPersistentWindowsDrive(options) {
       return {status:'error',code:lastError};
     } finally { operation = false; }
   }
+  async function enableEditing(projectId) {
+    if(operation||stopped||!preview.status().active)return {status:'error',code:'DRIVE_BUSY'};
+    operation=true;
+    try {
+      const identity=await vault();const snapshot=await readSnapshot(identity,projectId);
+      if(!snapshot||!same(identity,await vault()))throw new Error('Access refused');
+      if(snapshot.editable===true)return {status:'editing'};
+      if(!await preview.verify())return {status:'error',code:'DRIVE_LOCAL_CHANGES'};
+      if(!same(identity,await vault()))throw new Error('Access refused');
+      // Durable intent precedes native write access. Reconnection can then
+      // retain dirty placeholders and ordinary files made by replace-save.
+      await save({...snapshot,editable:true});preview.stop();
+    }catch{return {status:'error',code:'DRIVE_UNAVAILABLE'};}
+    finally{operation=false;}
+    const result=await start(projectId,{open:false});
+    return result.status==='opened'?{status:'editing'}:result;
+  }
   async function restore() {
     if (stopped || operation || preview.status().active || !preview.status().enabled) return;
     const epoch = preferenceEpoch;
@@ -135,7 +152,7 @@ function createPersistentWindowsDrive(options) {
       return {status:'opened'};
     } catch { return {status:'error'}; }
   }
-  return { start, open, disconnect, resume, shutdown, verify:()=>preview.verify(), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
+  return { start, open, disconnect, resume, shutdown, enableEditing, verify:()=>preview.verify(), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
     status:()=>({...preview.status(),letter:'A:',error:lastError,configured}) };
 }
 module.exports = { createPersistentWindowsDrive };

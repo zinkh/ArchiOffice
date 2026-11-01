@@ -63,3 +63,19 @@ it('drops a reviewed plan when the selected project changes',async()=>{
  const {refresh}=await showCatalogPlan();await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'other'})));
  expect(Array.from(host.querySelectorAll('button')).some(button=>button.textContent==='windows_drive_refresh_apply')).toBe(false);expect(refresh).not.toHaveBeenCalled();
 });
+it('requires confirmation before enabling editing and displays upload problems',async()=>{
+ status.mockResolvedValue({enabled:true,active:true,projectIds:['project']});const edit=vi.fn().mockImplementation(async()=>{status.mockResolvedValue({enabled:true,active:true,projectIds:['project'],editReports:[{projectId:'project',editing:true,pending:1,blocked:0,conflicts:1,unavailable:1}]});return {status:'editing'};});(window as any).archiofficeDesktop.enableWindowsDriveEditing=edit;
+ await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'project'})));
+ await act(async()=>Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='windows_drive_edit_enable')!.click());expect(edit).not.toHaveBeenCalled();
+ const dialog=host.querySelector('[role="alertdialog"]')!;expect(dialog.textContent).toContain('windows_drive_edit_confirm');
+ await act(async()=>Array.from(dialog.querySelectorAll('button')).find(b=>b.textContent==='windows_drive_edit_enable')!.click());expect(edit).toHaveBeenCalledWith('project');expect(host.textContent).toContain('windows_drive_edit_attention');expect(host.textContent).toContain('windows_drive_edit_unavailable');
+ expect(Array.from(host.querySelectorAll('button')).some(b=>!b.closest('[role="alertdialog"]')&&b.textContent==='windows_drive_edit_enable')).toBe(false);
+});
+it('does not enable editing when the dialog is cancelled or the selected project changes',async()=>{
+ status.mockResolvedValue({enabled:true,active:true,projectIds:['project','other']});const edit=vi.fn();(window as any).archiofficeDesktop.enableWindowsDriveEditing=edit;
+ await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'project'})));
+ const open=async()=>act(async()=>Array.from(host.querySelectorAll('button')).find(b=>b.textContent==='windows_drive_edit_enable')!.click());await open();
+ await act(async()=>Array.from(host.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(b=>b.textContent==='cancel')!.click());expect(edit).not.toHaveBeenCalled();
+ await open();await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'other'})));
+ await act(async()=>Array.from(host.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(b=>b.textContent==='windows_drive_edit_enable')!.click());expect(edit).not.toHaveBeenCalled();
+});

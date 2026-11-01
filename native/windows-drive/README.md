@@ -1,11 +1,12 @@
 # Prototype Windows ArchiOffice Drive
 
-Ce composant est un **prototype de consultation**, disponible sur activation explicite dans Documents. Il ouvre
-un dossier de projet dans l’Explorateur, crée des fichiers CFAPI et hydrate une
-version documentaire à la demande via le cache vérifié de l’agent existant.
-Il ne synchronise pas les enregistrements, ajouts, suppressions ou renommages
-faits dans ce dossier. Utiliser le parcours Documents pour modifier et envoyer
-les copies de travail.
+Ce composant est un **prototype Windows à activation explicite**, disponible dans
+Documents. Le lecteur A: ouvre les projets sélectionnés avec téléchargement à la
+demande via le cache vérifié de l’agent. Chaque projet commence en consultation.
+« Activer l’édition » autorise ensuite l’enregistrement et l’envoi automatique des
+modifications de ses documents existants. Les ajouts, suppressions, déplacements
+et renommages restent locaux. Le parcours de copies de travail dans Documents
+reste indépendant.
 
 ## Construction et lancement
 
@@ -45,7 +46,7 @@ un répertoire surveillé par Nextcloud, kDrive ou un autre moteur de synchronis
 - Dossier fraîchement créé sous les données privées de l’application, séparé du
   cache et des copies de travail. Le chemin reste natif ; il n’est pas renvoyé au
   renderer. Les liens/jonctions sont refusés.
-- Attribut lecture seule sur les fichiers et refus CFAPI des suppressions et
+- En consultation : attribut lecture seule sur les fichiers et refus CFAPI des suppressions et
   renommages des placeholders. Ce n’est pas une protection contre une personne
   qui retire ces attributs ou crée un fichier normal : ces changements locaux
   ne sont pas envoyés au serveur et ne sont pas supprimés par le prototype.
@@ -158,7 +159,7 @@ dossier ; le manifeste marque son achèvement après le signal natif « ready »
 Les anciens dossiers créés avant cette évolution restent conservés. Leur première
 activation prépare une seule nouvelle racine avec manifeste, sans tenter de
 réutiliser une racine ancienne dont le catalogue n’a jamais été enregistré. Les
-références CAO, l’édition depuis A:, le catalogue de toutes les opérations et le
+références CAO sur poste réel, le catalogue de toutes les opérations et le
 nettoyage explicite des archives restent à réaliser. Aucun fichier de travail
 n’est supprimé. Ce lot n’ajoute pas de raccourci épinglé au volet de navigation ni
 d’intégration Finder.
@@ -200,7 +201,7 @@ stable par utilisateur/cabinet/appareil. Ses entrées sont des jonctions Windows
 vers les dossiers de projet déjà validés ; aucune racine CFAPI n’est déplacée.
 L’entrée reprend le nom mémorisé du projet et pointe directement vers son premier
 niveau : les chemins A:\Projet\Phase\Fichier gardent la même forme que dans le
-prototype précédent. Les catalogues sont actualisés sur demande et les documents restent en consultation.
+prototype précédent. Les catalogues sont actualisés sur demande et les nouveaux catalogues commencent en consultation.
 
 La sélection complète est enregistrée dans `drive-windows.json` (version 2).
 L’ancien format contenant un seul projet est repris à la première activation.
@@ -282,7 +283,7 @@ simulée du second renommage, reprise après redémarrage et refus après une re
 locale. L’interface attend une confirmation explicite avant toute application.
 
 
-### Préparation de l’envoi depuis A: (API privée, écriture non activée)
+### Transport des enregistrements depuis A: (API privée)
 
 L’agent accepte maintenant `windowsPreview('upload', {identity, projectId,
 rootKey, key})` uniquement par IPC privé. Il relit le manifeste courant pour
@@ -302,9 +303,46 @@ bloque les nouveaux envois de ce document. Un envoi Documents en attente bloque
 également la capture native. La reprise Documents ne réconcilie pas un conflit
 natif ; celui-ci attendra le parcours de résolution natif.
 
-Ce lot ne retire aucun attribut de lecture seule, ne surveille pas les fichiers
-et n’ajoute pas de commande publique. Il prépare le transport pour le prochain
-lot : activation explicite de l’édition, détection des sauvegardes Windows (dont
-le remplacement atomique des fichiers CAO), états et résolution des conflits
-depuis A:. La vérification CFAPI actuelle continue de bloquer l’actualisation
-d’un catalogue retouché. L’écriture dans A: reste donc désactivée à ce stade.
+### Édition explicite et capture des sauvegardes
+
+Dans Documents, sélectionner un projet déjà ajouté à A:, puis « Activer
+l’édition ». La confirmation demande de fermer ses fichiers et explique le
+périmètre. L’intention est enregistrée dans le manifeste privé avant le
+redémarrage du seul fournisseur de ce projet. Le lecteur A:, ses jonctions et les
+autres projets restent en place. Le choix survit à une fermeture ou une
+reconnexion ; déconnecter A: arrête les captures et les envois à venir.
+
+Un projet éditable retrouve ses placeholders modifiés et les fichiers ordinaires
+produits par une sauvegarde avec remplacement. La reconnexion ne remplace aucun
+fichier et ne recrée pas un document supprimé localement. Les identités des
+racines et des placeholders sont toujours contrôlées, les liens et fichiers
+étrangers refusés. La vérification pour actualiser le catalogue reste stricte :
+un fichier retouché bloque l’actualisation, même après son envoi. Un nouveau
+catalogue sans retouche s’ouvre en consultation.
+
+Le courtier demande au fournisseur les clés des fichiers modifiés en lisant les
+métadonnées CFAPI, sans hydrater les fichiers intacts. Il attend au moins deux
+secondes de stabilité. Avant chaque capture, le fournisseur ouvre le fichier avec
+`FILE_SHARE_READ` seulement et conserve ce handle jusqu’à la réponse de l’agent.
+Un logiciel gardant un handle en écriture fait attendre la capture ; les
+modifications et remplacements sont interdits pendant le gel du snapshot.
+L’agent vérifie indépendamment l’identité, le manifeste, les liens et le digest
+avant publication. Les erreurs libèrent le verrou, y compris après un refus du
+coffre. Les fermetures de processus libèrent les handles Windows.
+
+Les documents encore en cours d’envoi sont réexaminés après l’envoi pour capturer
+les sauvegardes suivantes. Au redémarrage, la file persistée reconstitue la
+version et le digest de départ. Une version en conflit n’est jamais remplacée :
+le snapshot et le fichier local restent présents. L’écran présente les attentes,
+blocages et conflits, avec renvoi aux états Documents pour réessayer ou préserver
+une copie. La reprise d’un conflit natif dans A: et l’actualisation des fichiers
+déjà retouchés restent à implémenter. Les fichiers sans digest initial et sans
+copie originale vérifiée en cache ne sont pas envoyés.
+
+`edit-smoke.mjs` vérifie avec CFAPI et le courtier livrés : activation explicite,
+écriture simple, attente d’un handle d’écriture ouvert, remplacement par fichier
+temporaire, maintien d’un autre projet en consultation, reprise d’un fichier
+ordinaire modifié, conflit conservé, suppression locale non recréée et refus
+après changement de cabinet. Les tests de capture et de file d’envoi s’exécutent
+aussi sur Windows avant fabrication de l’installateur. Des essais avec les
+logiciels CAO réellement utilisés sur le poste restent nécessaires.
