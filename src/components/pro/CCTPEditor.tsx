@@ -34,9 +34,10 @@ import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { chargerEtatArbre, ouvertsSauf, repliesParmi, sauverEtatArbre } from '../../lib/cctpTreeState';
 import { appliquerCouleur, basculerBalise, contientMiseEnForme, type BaliseRiche, type EditionTexte } from '../../lib/cctpRichText';
 import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
-import { CctpExportLibraryDialog } from './CctpExportLibraryDialog';
+import { CctpExportLibraryDialog, type ResultatExport } from './CctpExportLibraryDialog';
+import { elementsAExporter } from './cctpExportOps';
 import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog';
-import { ajouterClause, estClause, type ExportBibliotheque } from '../../lib/bibliothequeClauses';
+import { ajouterClause, estClause } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey } from './treeOps';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
@@ -344,16 +345,22 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   };
 
   // ── Export vers la bibliothèque ───────────────────────────────────────────
-  const exportInitial = (sel: Selection, data: NonNullable<ReturnType<typeof getSelectedData>>): ExportBibliotheque => {
-    if (sel.kind === 'ligne' && data.ligne) {
-      return {
-        type: 'ouvrage', designation: data.ligne.designation, unite: data.ligne.unite,
-        prix_unitaire: data.ligne.prixUnitaire, description: data.description,
-      };
+  // Les ouvrages exportés sont reliés à leur article (`articleTypeId`) : les prix
+  // d'offres pourront remonter vers eux, et un second export les écarte d'office.
+  const finirExportBibliotheque = (res: ResultatExport) => {
+    const liens = res.crees.filter(c => c.type === 'ouvrage');
+    if (liens.length) {
+      mutateDPGF(d => {
+        for (const c of liens) {
+          const k = parseRowKey(c.cle);
+          if (k?.kind !== 'ligne') continue;
+          const l = ligneAtPath(d.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
+          if (l && !l.articleTypeId) l.articleTypeId = c.id;
+        }
+      });
     }
-    const lot = dpgf.lots[sel.lotIdx];
-    const titre = sel.kind === 'chapitre' ? lot?.chapitres[sel.chapIdx]?.titre : lot?.titre;
-    return { type: 'clause', designation: titre ?? '', description: data.description };
+    notify?.(t('pro_cctp_export_library_done', { created: res.crees.length, existing: res.existants.length, errors: res.erreurs.length }),
+      { type: res.erreurs.length ? 'error' : 'success' });
   };
 
   // ── Rédaction IA d'un poste ───────────────────────────────────────────────
@@ -681,7 +688,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     { id: 'bulk', label: t('pro_cctp_bulk_title'), icon: <IconAdjustmentsHorizontal size={16} />, mobile: true, groupStart: true, onClick: () => setShowBulk(true), disabled: !multi, hint: multi ? undefined : t('pro_cctp_bulk_hint_select') },
     { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+C', onClick: copier, disabled: !selection, hint: t('pro_copy_articles_only') },
     { id: 'paste', label: t('pro_paste'), icon: <IconClipboard size={16} />, iconOnly: true, shortcut: 'Ctrl+V', onClick: coller, disabled: !peutColler },
-    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection || multi },
+    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection },
     { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopyPlus size={16} />, shortcut: 'Ctrl+D', mobile: true, onClick: dupliquer, disabled: !selection },
     { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !canDeleteSelection, hint: canDeleteSelection ? undefined : t('pro_cctp_delete_hint') },
   ];
@@ -711,23 +718,11 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         />
       )}
 
-      {showExportLibrary && selection && selData && (
+      {showExportLibrary && selection && (
         <CctpExportLibraryDialog
-          peutEtreOuvrage={selection.kind === 'ligne'}
-          initial={exportInitial(selection, selData)}
+          construire={avecSous => elementsAExporter(dpgf.lots, clesActives, { avecSousElements: avecSous })}
           onClose={() => setShowExportLibrary(false)}
-          onDone={(article, type) => {
-            setShowExportLibrary(false);
-            // L'ouvrage exporté est lié à son article : les prix d'offres
-            // pourront remonter vers lui, comme pour un article inséré.
-            if (type === 'ouvrage' && selection.kind === 'ligne') {
-              mutateDPGF(d => {
-                const l = ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath);
-                if (l && !l.articleTypeId) l.articleTypeId = article.id;
-              });
-            }
-            notify?.(t(type === 'clause' ? 'pro_cctp_export_library_done_clause' : 'pro_cctp_export_library_done_ouvrage', { nom: article.designation }), { type: 'success' });
-          }}
+          onDone={finirExportBibliotheque}
         />
       )}
 
