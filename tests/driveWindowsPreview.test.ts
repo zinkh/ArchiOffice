@@ -40,3 +40,26 @@ it('removes only the selected project and reports that its files are preserved',
  await act(async()=>Array.from(host.querySelectorAll('button')).find(button=>button.textContent==='windows_drive_remove')!.click());
  expect(remove).toHaveBeenCalledWith('project');expect(host.textContent).toContain('windows_drive_removed');expect(Array.from(host.querySelectorAll('button')).some(button=>button.textContent==='windows_drive_remove')).toBe(false);
 });
+const catalogPlan={status:'update_available',token:'reviewed-token',added:2,updated:1,removed:1,moved:0,folders:0};
+async function showCatalogPlan(refreshResult={status:'refreshed'}) {
+ status.mockResolvedValue({enabled:true,active:true,configured:true,projectCount:1,projectIds:['project']});
+ const check=vi.fn().mockResolvedValue(catalogPlan);const refresh=vi.fn().mockImplementation(async()=>{status.mockResolvedValue({enabled:true,active:true,configured:true,projectCount:1,projectIds:['project'],previousProjectIds:['project']});return refreshResult;});
+ (window as any).archiofficeDesktop.checkWindowsDriveCatalog=check;(window as any).archiofficeDesktop.refreshWindowsDriveCatalog=refresh;
+ await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'project'})));
+ await act(async()=>Array.from(host.querySelectorAll('button')).find(button=>button.textContent==='windows_drive_check_catalog')!.click());return {check,refresh};
+}
+it('shows reviewed changes and waits for explicit confirmation before refreshing',async()=>{
+ const {refresh}=await showCatalogPlan();expect(host.textContent).toContain('windows_drive_change_removed');
+ await act(async()=>Array.from(host.querySelectorAll('button')).find(button=>button.textContent==='windows_drive_refresh_apply')!.click());
+ const dialog=host.querySelector('[role="alertdialog"]')!;expect(dialog.textContent).toContain('windows_drive_refresh_confirm');expect(refresh).not.toHaveBeenCalled();
+ await act(async()=>Array.from(dialog.querySelectorAll('button')).find(button=>button.textContent==='windows_drive_refresh_apply')!.click());
+ expect(refresh).toHaveBeenCalledWith('project','reviewed-token');expect(host.textContent).toContain('windows_drive_refreshed');expect(host.textContent).toContain('windows_drive_previous');
+});
+it('does not refresh when the confirmation is cancelled',async()=>{
+ const {refresh}=await showCatalogPlan();await act(async()=>Array.from(host.querySelectorAll('button')).find(button=>button.textContent==='windows_drive_refresh_apply')!.click());
+ const dialog=host.querySelector('[role="alertdialog"]')!;await act(async()=>Array.from(dialog.querySelectorAll('button')).find(button=>button.textContent==='cancel')!.click());expect(refresh).not.toHaveBeenCalled();
+});
+it('drops a reviewed plan when the selected project changes',async()=>{
+ const {refresh}=await showCatalogPlan();await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'other'})));
+ expect(Array.from(host.querySelectorAll('button')).some(button=>button.textContent==='windows_drive_refresh_apply')).toBe(false);expect(refresh).not.toHaveBeenCalled();
+});

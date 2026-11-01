@@ -11,6 +11,15 @@ const normalized=value=>process.platform==='win32'?path.resolve(value).toLowerCa
 function createWindowsNamespace({spawn,executable,root,projectRoot,vault,environment=process.env}) {
  let mount=null;let closing=Promise.resolve();
  const directory=identity=>path.join(root,hash([identity.userId,identity.tenantId,identity.deviceId]));
+ async function definition(identity,saved) {
+  if(!same(saved.identity,identity)||path.dirname(saved.directory)!==path.resolve(projectRoot))throw error('DRIVE_SNAPSHOT_INVALID');
+  const first=saved.catalog[0];
+  const name=first?.folder&&typeof first.path==='string'&&!first.path.includes('\\')?first.path:'_Projet-'+hash(saved.projectId).slice(0,12);
+  if(!/^_[^<>:"/\\|?*\x00-\x1f]{1,119}$/.test(name)||/[. ]$/.test(name))throw error('DRIVE_SNAPSHOT_INVALID');
+  const target=first?.folder?path.join(saved.directory,name):saved.directory;
+  await noLinks(projectRoot,target);if(!(await fs.stat(target)).isDirectory())throw error('DRIVE_SNAPSHOT_INVALID');
+  return {name,target};
+ }
  function stop() {
   const old=mount;mount=null;if(!old)return;
   if(old.exited)return;
@@ -26,13 +35,9 @@ function createWindowsNamespace({spawn,executable,root,projectRoot,vault,environ
   const base=directory(identity);await fs.mkdir(base,{recursive:true,mode:0o700});await noLinks(root,base);
   const links=[];const names=new Set();
   for(const saved of snapshots) {
-   if(!same(saved.identity,identity)||path.dirname(saved.directory)!==path.resolve(projectRoot))throw error('DRIVE_SNAPSHOT_INVALID');
-   const first=saved.catalog[0];
-   const name=first?.folder&&typeof first.path==='string'&&!first.path.includes('\\')?first.path:'_Projet-'+hash(saved.projectId).slice(0,12);
-   if(!/^_[^<>:"/\\|?*\x00-\x1f]{1,119}$/.test(name)||/[. ]$/.test(name)||names.has(name.toLowerCase()))throw error('DRIVE_SNAPSHOT_INVALID');
+   const {name,target}=await definition(identity,saved);
+   if(names.has(name.toLowerCase()))throw error('DRIVE_SNAPSHOT_INVALID');
    names.add(name.toLowerCase());
-   const target=first?.folder?path.join(saved.directory,name):saved.directory;
-   await noLinks(projectRoot,target);if(!(await fs.stat(target)).isDirectory())throw error('DRIVE_SNAPSHOT_INVALID');
    links.push({name,target});
   }
   // Extra files/junctions are preserved, but prevent mapping an unverified tree.
@@ -72,16 +77,44 @@ function createWindowsNamespace({spawn,executable,root,projectRoot,vault,environ
   }catch(e){if(mount===state)stop();throw e;}
  }
  async function remove(identity,saved) {
-  if(!same(await vault(),identity)||!same(saved.identity,identity)||path.dirname(saved.directory)!==path.resolve(projectRoot))throw error('DRIVE_SNAPSHOT_INVALID');
-  const first=saved.catalog[0];const name=first?.folder&&typeof first.path==='string'&&!first.path.includes('\\')?first.path:'_Projet-'+hash(saved.projectId).slice(0,12);
-  if(!/^_[^<>:"/\\|?*\x00-\x1f]{1,119}$/.test(name)||/[. ]$/.test(name))throw error('DRIVE_SNAPSHOT_INVALID');
+  if(!same(await vault(),identity))throw error('DRIVE_SNAPSHOT_INVALID');
+  const {name,target}=await definition(identity,saved);
   const base=directory(identity);await noLinks(root,base);
-  const target=first?.folder?path.join(saved.directory,name):saved.directory;await noLinks(projectRoot,target);
   const link=path.join(base,name);
   if(!(await fs.lstat(link)).isSymbolicLink()||normalized(await fs.realpath(link))!==normalized(await fs.realpath(target)))throw error('DRIVE_SNAPSHOT_INVALID');
   // unlink removes only this verified junction, never the project directory.
   await fs.unlink(link);
  }
- return {prepare,start,stop,remove,directory,status:()=>({active:!!mount})};
+ async function retarget(identity,previous,next,operation) {
+  if(!same(await vault(),identity)||previous.projectId!==next.projectId||!/^[a-f0-9-]{36}$/.test(operation))throw error('DRIVE_SNAPSHOT_INVALID');
+  const old=await definition(identity,previous),fresh=await definition(identity,next);
+  if(old.name!==fresh.name)throw error('DRIVE_SNAPSHOT_INVALID');
+  const base=directory(identity);await noLinks(root,base);
+  const updatesRoot=root+'-updates';const updates=path.join(updatesRoot,hash([identity.userId,identity.tenantId,identity.deviceId]));
+  await fs.mkdir(updates,{recursive:true,mode:0o700});await noLinks(updatesRoot,updates);
+  const prefix=hash(previous.projectId).slice(0,12)+'-'+operation;
+  const backup=path.join(updates,prefix+'.old'),staging=path.join(updates,prefix+'.new'),link=path.join(base,old.name);
+  async function pointer(file) {
+   let stat;try{stat=await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return null;throw e;}
+   if(!stat.isSymbolicLink())throw error('DRIVE_SNAPSHOT_INVALID');return normalized(await fs.realpath(file));
+  }
+  const oldTarget=normalized(await fs.realpath(old.target)),nextTarget=normalized(await fs.realpath(fresh.target));
+  const current=await pointer(link),saved=await pointer(backup),staged=await pointer(staging);
+  if((current!==null&&current!==oldTarget&&current!==nextTarget)||(saved!==null&&saved!==oldTarget)||(staged!==null&&staged!==nextTarget))throw error('DRIVE_SNAPSHOT_INVALID');
+  if(current===nextTarget)return;
+  if(current===null&&saved!==oldTarget)throw error('DRIVE_SNAPSHOT_INVALID');
+  if(current===oldTarget&&saved!==null)throw error('DRIVE_SNAPSHOT_INVALID');
+  if(staged===null)await fs.symlink(fresh.target,staging,'junction');
+  if(!same(await vault(),identity))throw error('DRIVE_UNAVAILABLE');
+  if(current===oldTarget)await fs.rename(link,backup);
+  try{await fs.rename(staging,link);}catch(e){
+   // Restore availability if the second rename failed. Both physical project
+   // trees and the refresh journal remain intact for a subsequent retry.
+   if(await pointer(link)===null&&await pointer(backup)===oldTarget)await fs.rename(backup,link).catch(()=>{});
+   throw e;
+  }
+  if(!same(await vault(),identity))throw error('DRIVE_UNAVAILABLE');
+ }
+ return {prepare,start,stop,remove,retarget,directory,status:()=>({active:!!mount})};
 }
 module.exports={createWindowsNamespace};

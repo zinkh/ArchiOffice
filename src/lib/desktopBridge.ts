@@ -1,4 +1,6 @@
 import type { DriveDocumentStatus, DriveRemoteCheck } from '../../shared/driveDocumentStatus';
+export interface DriveCatalogUpdate {status:'update_available';token:string;added:number;updated:number;removed:number;moved:number;folders:number}
+export type DriveCatalogCheck = DriveCatalogUpdate | {status:'up_to_date'} | {status:'error';code?:string};
 // Pont vers le processus principal Electron (electron/preload.cjs) — ne
 // fait rien si absent, c'est-à-dire dans un navigateur ou sur le web.
 // Centralise le type et l'accesseur partagés par les différents usages du
@@ -6,7 +8,10 @@ import type { DriveDocumentStatus, DriveRemoteCheck } from '../../shared/driveDo
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
-  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean;letter?:string;error?:string|null;configured?:boolean;projectCount?:number;projectIds?:string[]}>;
+  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean;letter?:string;error?:string|null;configured?:boolean;projectCount?:number;projectIds?:string[];previousProjectIds?:string[]}>;
+  checkWindowsDriveCatalog?: (projectId:string) => Promise<DriveCatalogCheck>;
+  refreshWindowsDriveCatalog?: (projectId:string,token:string) => Promise<{status:'refreshed'|'error';code?:string}>;
+  openPreviousWindowsDriveProject?: (projectId:string) => Promise<{status:'copies_shown'|'error';code?:string}>;
   removeWindowsDriveProject?: (projectId:string) => Promise<{status:'removed'|'error';code?:string}>;
   startWindowsDrivePreview?: (projectId:string) => Promise<{status:'opened'|'error';code?:string}>;
   openWindowsDrive?: () => Promise<{status:'opened'|'error';code?:string}>;
