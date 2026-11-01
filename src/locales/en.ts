@@ -4890,7 +4890,7 @@ export default {
   "windows_drive_edit_enable": "Enable editing",
   "windows_drive_edit_confirm": "Close this project’s files before continuing. Saves to existing documents will be uploaded automatically with version checks. New files, moves and deletions remain local. A conflict blocks the upload and preserves your file. This choice is remembered for this project on this computer.",
   "windows_drive_edit_enabled": "Editing and upload of changes enabled",
-  "windows_drive_edit_help": "Save your changes to existing documents in this project. New files, moves and deletions are not uploaded. Catalog refresh remains blocked after a file is edited. Disconnect A: to stop uploads. Some applications keep the file locked: close the document to finish uploading.",
+  "windows_drive_edit_help": "Save your changes to existing documents in this project. New files, moves and deletions are not uploaded. Catalog refresh remains blocked after a file is edited. Disconnect A: to stop new captures. Uploads already queued continue. Some applications keep the file locked: close the document to finish uploading.",
   "windows_drive_edit_status": "Uploads: {{pending}} pending, {{blocked}} blocked, {{conflicts}} conflicts.",
   "windows_drive_edit_unavailable": "Some files cannot be captured. Close them to finish saving, then check they are still at their original paths. Local files are preserved.",
   "windows_drive_edit_attention": "Check Documents to retry blocked uploads or preserve a conflict copy. Conflicts are never overwritten automatically.",

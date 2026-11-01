@@ -310,7 +310,8 @@ l’édition ». La confirmation demande de fermer ses fichiers et explique le
 périmètre. L’intention est enregistrée dans le manifeste privé avant le
 redémarrage du seul fournisseur de ce projet. Le lecteur A:, ses jonctions et les
 autres projets restent en place. Le choix survit à une fermeture ou une
-reconnexion ; déconnecter A: arrête les captures et les envois à venir.
+reconnexion ; déconnecter A: arrête les nouvelles captures. Les transferts déjà
+en file continuent via l’agent.
 
 Un projet éditable retrouve ses placeholders modifiés et les fichiers ordinaires
 produits par une sauvegarde avec remplacement. La reconnexion ne remplace aucun
