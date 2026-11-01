@@ -1,6 +1,6 @@
 # Prototype Windows ArchiOffice Drive
 
-Ce composant est un **prototype de consultation**, désactivé par défaut. Il ouvre
+Ce composant est un **prototype de consultation**, disponible sur activation explicite dans Documents. Il ouvre
 un dossier de projet dans l’Explorateur, crée des fichiers CFAPI et hydrate une
 version documentaire à la demande via le cache vérifié de l’agent existant.
 Il ne synchronise pas les enregistrements, ajouts, suppressions ou renommages
@@ -22,9 +22,8 @@ npm run build:server
 npx electron .
 ```
 
-Dans une version installée contenant ce composant compilé, définir la même
-variable **dans le processus de lancement d’ArchiOffice**, puis relancer
-l’application. La publication de cette PR n’installe pas une nouvelle version
+Dans une version installée contenant ce composant compilé, ouvrir Documents
+et activer le lecteur A: pour le projet sélectionné. La publication de cette PR n’installe pas une nouvelle version
 sur le poste. Le workflow de l’installateur construit et embarque l’exécutable
 comme ressource externe à l’ASAR. Le workflow `Windows Drive prototype` compile
 également le composant et conserve son exécutable en artefact de CI.
@@ -64,8 +63,8 @@ un répertoire surveillé par Nextcloud, kDrive ou un autre moteur de synchronis
   prototype. Des octets déjà remis au système restent accessibles localement.
 - Une déconnexion n’effectue que `CfDisconnectSyncRoot`, sans suppression ni
   remplacement des fichiers. Le processus s’arrête sur fermeture du parent.
-  Les anciens dossiers et enregistrements de racine sont conservés. Leur reprise
-  persistante et leur nettoyage explicite sont à concevoir avant généralisation.
+  Les anciens dossiers et enregistrements de racine sont conservés. Le lecteur A: est reconnecté vers un nouvel instantané au lancement. Le nettoyage
+  explicite des anciennes racines reste à concevoir avant généralisation.
 
 Le prototype ouvre un dossier normal dans l’Explorateur ; il n’enregistre pas
 encore d’entrée de navigation dédiée via StorageProviderSyncRootManager, de
@@ -101,3 +100,53 @@ Références primaires Microsoft :
 - [CfCreatePlaceholders](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfcreateplaceholders)
 - [Transfert et alignement des octets](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/ns-cfapi-cf_operation_parameters)
 - [Effets de la désinscription](https://learn.microsoft.com/en-us/windows/win32/api/cfapi/nf-cfapi-cfunregistersyncroot)
+
+## Lecteur persistant A: (remplace l’activation par variable)
+
+Dans un client Windows livré avec le composant natif, sélectionner un projet dans
+Documents puis **Activer le lecteur A: pour ce projet**. La variable de préversion
+n’est plus nécessaire ; `ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW=0` reste un coupe-circuit.
+Les réglages du compte affichent également l’état et un lien vers Documents.
+
+L’activation crée un lecteur logique DOS `A:` pour la session Windows courante,
+visible sous **Ce PC**. Ce n’est ni un formatage ni un disque réseau : il expose
+le dossier CFAPI de consultation. Une lettre A: déjà utilisée bloque l’activation,
+sans remplacement et sans choix automatique d’une autre lettre. Le libellé
+« ArchiOffice Drive » est proposé via la personnalisation utilisateur de
+l’Explorateur, si aucun libellé personnalisé n’existe déjà.
+
+Le choix du projet et de l’identité utilisateur/cabinet/appareil est enregistré
+sans jeton dans `drive-windows.json` sous userData. L’application est inscrite au
+démarrage de session par l’API Electron `setLoginItemSettings`. Au lancement, elle
+attend un coffre valide pour cette identité, puis reconnecte le dernier projet
+sans ouvrir de fenêtre Explorateur. Une identité différente ne déclenche pas de
+connexion automatique. Un échec de montage est affiché et demande une nouvelle
+tentative explicite ; l’attente d’initialisation du coffre est reprise toutes les
+30 secondes. Le serveur continue de contrôler l’abonnement et les droits.
+
+**Permanence du choix, pas service système indépendant :** A: est présent tant
+que le courtier natif fonctionne. Quitter ArchiOffice retire le mappage mais garde
+le choix pour le prochain lancement. Déconnecter A: dans l’application retire aussi
+la reconnexion et le lancement automatique. Windows peut désactiver ce dernier
+dans ses réglages. L’installation et le lancement doivent utiliser la même
+session Windows que l’Explorateur, sans élévation manuelle.
+
+Chaque reconnexion prépare un **nouvel instantané** du projet. Les anciens
+instantanés et leurs octets téléchargés restent dans les données privées de
+l’application ; aucun fichier n’est supprimé ou réutilisé silencieusement.
+Les placeholders non téléchargés des anciens instantanés ne sont pas reconnectés.
+A: désigne le nouvel instantané, pas une racine durable pour des références CAO.
+Le test de la stabilité des références, l’édition depuis A:, le catalogue de tous
+les projets et le nettoyage explicite des archives restent à réaliser. Ce lot
+n’ajoute pas de raccourci épinglé au volet de navigation ni d’intégration Finder.
+
+Le composant utilise `QueryDosDeviceW` avant `DefineDosDeviceW`, puis retire
+uniquement son chemin exact avec `DDD_EXACT_MATCH_ON_REMOVE`. Après arrêt brutal,
+le prochain lancement peut remplacer seulement le mappage du dernier instantané
+mémorisé. `mapping-smoke.mjs`, exécuté dans la CI Windows, vérifie la lecture via
+A:, cette reprise après arrêt forcé, la déconnexion et le refus d’un lecteur A:
+existant créé séparément. Un essai visuel sur Windows 10/11 reste nécessaire.
+
+Références : [DefineDosDeviceW](https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-definedosdevicew),
+[QueryDosDeviceW](https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-querydosdevicew),
+[Electron login items](https://www.electronjs.org/docs/latest/api/app#appsetloginitemsettingssettings-macos-windows).

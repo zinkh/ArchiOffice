@@ -1,0 +1,105 @@
+'use strict';
+const fs = require('fs/promises');
+const path = require('path');
+const { createWindowsPreview, noLinks } = require('./windowsDrive.cjs');
+const same = (a,b) => a && b && ['userId','tenantId','deviceId'].every(k => typeof a[k] === 'string' && a[k] === b[k]);
+
+// Only identifiers and the last private snapshot path are persisted. Authorization
+// always comes from the vault. No registry Run command, shell command or token.
+function createPersistentWindowsDrive(options) {
+  const { stateFile, login, vault, root } = options;
+  const preview = createWindowsPreview({ ...options, mountA: true });
+  let operation = false;
+  let lastError = null;
+  let retry = null;
+  let stopped = false;
+  let configured = false;
+  let preferenceEpoch = 0;
+  async function read() {
+    try {
+      const stat = await fs.lstat(stateFile);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8192) return null;
+      const data = JSON.parse(await fs.readFile(stateFile, 'utf8'));
+      if (!/^[a-zA-Z0-9_-]{1,200}$/.test(data.projectId) || !same(data.identity,data.identity)
+        || typeof data.directory !== 'string' || path.dirname(data.directory) !== path.resolve(root)) return null;
+      await noLinks(root,data.directory);
+      return data;
+    } catch { return null; }
+  }
+  async function save(data) {
+    const temporary = stateFile + '.tmp';
+    await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
+    await fs.writeFile(temporary,JSON.stringify(data),{mode:0o600});
+    await fs.rename(temporary,stateFile);
+    configured = true;
+  }
+  async function start(projectId, { restore=false } = {}) {
+    if (operation || stopped) return {status:'error',code:'DRIVE_BUSY'};
+    operation = true;
+    let previous;
+    try {
+      previous = await read();
+      const identity = await vault();
+      if (restore && (!previous || !same(previous.identity,identity))) return {status:'error'};
+      const result = await preview.start(projectId, {
+        open: !restore,
+        previousRoot: previous?.directory || '',
+        onPrepared: save,
+      });
+      if (stopped) { preview.stop(); return {status:'error'}; }
+      // Enabling the persistent reader explicitly also enables the desktop app
+      // at logon. Disable removes this setting; quitting preserves the choice.
+      await login(true);
+      lastError = null;
+      return result;
+    } catch (error) {
+      preview.stop();
+      lastError = error.code === 'DRIVE_LETTER_IN_USE' ? error.code : 'DRIVE_UNAVAILABLE';
+      // Keep the latest prepared path for crash recovery; never delete snapshots.
+      return {status:'error',code:lastError};
+    } finally { operation = false; }
+  }
+  async function restore() {
+    if (stopped || operation || preview.status().active || !preview.status().enabled) return;
+    const epoch = preferenceEpoch;
+    const saved = await read();
+    if (!saved) return;
+    configured = true;
+    // Wait for local account/cabinet initialization, without creating snapshots.
+    try { if (!same(saved.identity,await vault())) return; } catch { return; }
+    // A failed native mount requires explicit retry; avoid generating snapshots
+    // repeatedly when a real A: disk is present or a project exceeds the limits.
+    if (!lastError && epoch === preferenceEpoch && !stopped) await start(saved.projectId,{restore:true});
+  }
+  async function disconnect() {
+    if (operation) throw new Error('Drive operation in progress');
+    operation = true;
+    preferenceEpoch++;
+    try {
+      preview.stop();
+      await fs.rm(stateFile,{force:true});
+      configured = false;
+      await login(false);
+      lastError = null;
+    } finally { operation = false; }
+  }
+  function resume() {
+    if (retry) return;
+    void restore();
+    retry = setInterval(()=>void restore(),30000); retry.unref();
+  }
+  function shutdown() {
+    stopped=true; clearInterval(retry); retry=null; preview.stop();
+  }
+  async function open() {
+    try {
+      const saved = await read();
+      if (!preview.status().active || !saved || !same(saved.identity,await vault())) throw new Error('Access refused');
+      if (await options.shell.openPath('A:\\')) throw new Error('Explorer unavailable');
+      return {status:'opened'};
+    } catch { return {status:'error'}; }
+  }
+  return { start, open, disconnect, resume, shutdown,
+    status:()=>({...preview.status(),letter:'A:',error:lastError,configured}) };
+}
+module.exports = { createPersistentWindowsDrive };
