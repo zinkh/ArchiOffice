@@ -124,10 +124,10 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       if(state.stopped||!same(await vault(),active))throw new Error('Access refused');
       await onReady({...manifest,nativeReady:true});
       if(state.stopped||!same(await vault(),active))throw new Error('Access refused');
-      if(manifest.editable)state.edits=createWindowsEdits({manifest,agent,vault,noLinks,changes:()=>request('changes'),lock:async key=>{
+      if(manifest.editable)state.edits=createWindowsEdits({manifest,agent,vault,noLinks,changes:()=>request('changes',{},undefined,state),lock:async key=>{
         const id=crypto.randomUUID();
         const release=()=>{if(!state.stopped&&!child.stdin.destroyed)child.stdin.write(JSON.stringify({type:'unlock',requestId:id})+'\n');};
-        try {if(!await request('lock',{key},id))return null;return release;}
+        try {if(!await request('lock',{key},id,state))return null;return release;}
         catch(error){release();throw error;}
       }});
       let checking=false;
@@ -138,8 +138,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       if(open&&await shell.openPath(mountA?'A:\\':directory))throw new Error('Explorer unavailable');return {status:'opened'};
     }catch(e){if(created)stop();throw e;}finally{busy=false;}
   }
-  async function request(type='verify',extra={},id=crypto.randomUUID()) {
-    const state=mount;
+  async function request(type='verify',extra={},id=crypto.randomUUID(),state=mount) {
     if(!state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');
     if(mount!==state||state.stopped||state.child.stdin.destroyed)throw new Error('Preview stopped');
     const result=await new Promise((resolve,reject)=>{

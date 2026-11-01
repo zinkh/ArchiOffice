@@ -43,3 +43,8 @@ it('waits for writers to close and releases its read lease after capture refusal
  options.lock.mockResolvedValue(null);await begin();clock=3000;await scanner.scan();expect(options.agent.windowsPreview).not.toHaveBeenCalled();expect(scanner.status().pending).toBe(1);
  const release=vi.fn();options.lock.mockResolvedValue(release);options.agent.windowsPreview.mockRejectedValueOnce(new Error('refused'));clock=6000;await scanner.scan();expect(release).toHaveBeenCalledTimes(1);
 });
+
+it('does not query a new provider when stopped during authorization',async()=>{
+ await begin();options.changes.mockClear();let release:(value:any)=>void=()=>{};options.vault.mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+ const pending=scanner.scan();scanner.stop();release(identity);await pending;expect(options.changes).not.toHaveBeenCalled();expect(options.agent.windowsPreview).not.toHaveBeenCalled();
+});

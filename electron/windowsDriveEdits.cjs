@@ -7,7 +7,7 @@ const same=(a,b)=>a&&b&&['userId','tenantId','deviceId'].every(k=>a[k]===b[k]);
 function createWindowsEdits({manifest,agent,vault,changes,lock,noLinks,now=Date.now}) {
  const entries=new Map(manifest.catalog.filter(e=>!e.folder).map(e=>[e.key,e]));const observed=new Map();
  let stopped=false,busy=false,cursor=0;let report={editing:true,pending:0,blocked:0,conflicts:0,unavailable:0};
- async function authorized(){if(stopped||!same(await vault(),manifest.identity))throw new Error('Access refused');}
+ async function authorized(){const active=await vault();if(stopped||!same(active,manifest.identity))throw new Error('Access refused');}
  async function scan() {
   if(stopped||busy)return;busy=true;
   try {
