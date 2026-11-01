@@ -6,7 +6,7 @@ import {
   IconPlus, IconTrash, IconChevronRight, IconChevronDown, IconTag, IconBuildingStore,
   IconBuildingCommunity, IconSparkles, IconCopy, IconStackPush, IconRowInsertBottom,
   IconSubtask, IconArrowBarToLeft, IconArrowBarToRight, IconArrowsMaximize, IconArrowsMinimize,
-  IconLayoutSidebarLeftCollapse, IconDatabaseExport,
+  IconLayoutSidebarLeftCollapse, IconDatabaseExport, IconCopyPlus, IconClipboard, IconAdjustmentsHorizontal,
 } from '@tabler/icons-react';
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
 import { ToolbarMenu } from './toolbar/ToolbarMenu';
@@ -37,7 +37,10 @@ import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
 import { CctpExportLibraryDialog } from './CctpExportLibraryDialog';
 import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog';
 import { ajouterClause, estClause, type ExportBibliotheque } from '../../lib/bibliothequeClauses';
-import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
+import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey } from './treeOps';
+import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
+import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
+import { CctpBulkEditDialog } from './CctpBulkEditDialog';
 
 interface CCTPEditorProps {
   /** Ouvre l'import d'un fichier qui remplit le CCTP (les lignes absentes deviennent des articles). */
@@ -452,10 +455,139 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const promoteSelected = () => {
     if (selection) applyHierarchy(promoteHierarchy(dpgf.lots, selection, uid));
   };
+  // ── Sélection multiple, copier / coller, dupliquer, modifier en masse ──────
+  // `selection` reste l'élément affiché dans l'éditeur ; `multiKeys` porte la
+  // sélection groupée (Ctrl/⌘ + clic, Maj + clic, cases à cocher). Elle ne vaut
+  // que tant que l'élément affiché en fait partie, et elle est abandonnée dès
+  // que la structure de l'arbre change (clés positionnelles, voir treeOps).
+  const [multiKeys, setMultiKeys] = useState<Set<string>>(new Set());
+  const [ancre, setAncre] = useState<string | null>(null);
+  const [presse, setPresse] = useState<Ligne[]>([]);
+  const [showBulk, setShowBulk] = useState(false);
+  const arbreRef = useRef<HTMLDivElement>(null);
+  const signatureArbre = dpgf.lots.map(l => `${l.id}:${l.chapitres.map(c => `${c.id}[${flattenCctpLignes(c.lignes).map(x => x.ligne.id).join(',')}]`).join('|')}`).join('/');
+  useEffect(() => { setMultiKeys(prev => (prev.size ? new Set() : prev)); setAncre(null); }, [signatureArbre]);
+
+  const clePrimaire = selection ? hierarchyKey(selection) : null;
+  const multi = multiKeys.size > 1 && !!clePrimaire && multiKeys.has(clePrimaire);
+  const clesActives: string[] = multi ? [...multiKeys] : clePrimaire ? [clePrimaire] : [];
+  const estSel = (cle: string) => (multi ? multiKeys.has(cle) : cle === clePrimaire);
+  const totauxDe = (lots: typeof dpgf.lots) => {
+    const totalHT = lots.reduce((sum, lot) => sum + lot.sousTotal, 0);
+    return { totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) };
+  };
+
+  const clesVisibles = (): string[] => dpgf.lots.flatMap((lot, li) => [
+    `lot-${li}`,
+    ...(expandedLots.has(lot.id) ? lot.chapitres.flatMap((c, ci) => [
+      `chap-${li}-${ci}`,
+      ...(expandedChaps.has(c.id) ? flattenCctpLignes(c.lignes).map(x => `ligne-${li}-${ci}-${x.path.join('-')}`) : []),
+    ]) : []),
+  ]);
+  const basculer = (sel: Selection) => {
+    const cle = hierarchyKey(sel);
+    const base = new Set(multi ? multiKeys : clePrimaire ? [clePrimaire] : []);
+    if (base.has(cle)) base.delete(cle); else base.add(cle);
+    setMultiKeys(base);
+    setAncre(cle);
+    setSelection(base.has(cle) ? sel : base.size ? (parseRowKey([...base].at(-1)!) as Selection) : null);
+  };
+  const cliquer = (sel: Selection, e: React.MouseEvent) => {
+    // Le focus passe à l'arbre pour que Ctrl+C, V et D répondent aussitôt.
+    arbreRef.current?.focus({ preventScroll: true });
+    if (e.metaKey || e.ctrlKey) { basculer(sel); return; }
+    const cle = hierarchyKey(sel);
+    if (e.shiftKey && ancre) {
+      const cles = clesVisibles();
+      const a = cles.indexOf(ancre);
+      const b = cles.indexOf(cle);
+      if (a >= 0 && b >= 0) {
+        setMultiKeys(new Set(cles.slice(Math.min(a, b), Math.max(a, b) + 1)));
+        setSelection(sel);
+        return;
+      }
+    }
+    setMultiKeys(new Set([cle]));
+    setAncre(cle);
+    setSelection(sel);
+  };
+
+  const noeudDe = (s: Selection): any => {
+    const lot = dpgf.lots[s.lotIdx];
+    if (!lot) return undefined;
+    return s.kind === 'lot' ? lot : s.kind === 'chapitre' ? lot.chapitres[s.chapIdx] : ligneAtPath(lot.chapitres[s.chapIdx]?.lignes ?? [], s.lignePath);
+  };
+  const libelleDe = (s: Selection): string => {
+    const lot = dpgf.lots[s.lotIdx];
+    if (!lot) return '';
+    if (s.kind === 'lot') return `${lot.numero} — ${lot.titre}`;
+    const chap = lot.chapitres[s.chapIdx];
+    if (s.kind === 'chapitre') return `${chap?.numero ?? ''} — ${chap?.titre ?? ''}`;
+    const l = ligneAtPath(chap?.lignes ?? [], s.lignePath);
+    return `${l?.numero ?? ''} — ${l?.designation ?? ''}`;
+  };
+  const selectionsActives = parseSelection(clesActives);
+  const resume = {
+    lots: selectionsActives.filter(s => s.kind === 'lot').length,
+    chapitres: selectionsActives.filter(s => s.kind === 'chapitre').length,
+    articles: selectionsActives.filter(s => s.kind === 'ligne').length,
+  };
+
+  const copier = () => {
+    const lignes = collectSelectedLignes<Ligne>(dpgf.lots, clesActives);
+    if (!lignes.length) { notify?.(t('pro_copy_articles_only'), { type: 'error' }); return; }
+    setPresse(lignes);
+    notify?.(t('pro_cctp_copied', { count: lignes.length }), { type: 'success' });
+  };
+  const peutColler = presse.length > 0 && !!selection && selection.kind !== 'lot';
+  const coller = () => {
+    const r = pasteLignes(dpgf.lots, selection, presse, uid);
+    if (!r) { notify?.(t('pro_cctp_paste_target'), { type: 'error' }); return; }
+    onChange({ ...dpgf, lots: r.lots, ...totauxDe(r.lots) });
+    const premier = r.pasted[0];
+    if (premier && premier.kind !== 'lot') {
+      setSelection(premier);
+      const chapId = dpgf.lots[premier.lotIdx]?.chapitres[premier.chapIdx]?.id;
+      if (chapId) setExpandedChaps(prev => new Set([...prev, chapId]));
+    }
+    notify?.(t('pro_cctp_pasted', { count: r.pasted.length }), { type: 'success' });
+  };
+  const dupliquer = () => {
+    if (!multi) { if (selection) applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)); return; }
+    const r = dupliquerSelection(dpgf.lots, clesActives, uid);
+    onChange({ ...dpgf, lots: r.lots, ...totauxDe(r.lots) });
+    setSelection(null);
+    notify?.(t('pro_cctp_duplicated', { count: r.copies }), { type: 'success' });
+  };
+  const appliquerMasse = (patch: PatchMasse) => {
+    const r = modifierEnMasse(dpgf.lots, clesActives, patch);
+    setShowBulk(false);
+    if (!r.modifies) { notify?.(t('pro_cctp_bulk_none'), { type: 'error' }); return; }
+    onChange({ ...dpgf, lots: r.lots });
+    notify?.(t('pro_cctp_bulk_done', { count: r.modifies }), { type: 'success' });
+  };
+  const surClavierArbre = (e: React.KeyboardEvent) => {
+    const cible = e.target as HTMLElement;
+    if (cible.tagName === 'TEXTAREA' || cible.tagName === 'SELECT' || (cible instanceof HTMLInputElement && cible.type !== 'checkbox')) return;
+    if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+    const touche = e.key.toLowerCase();
+    if (touche === 'c') { e.preventDefault(); copier(); }
+    else if (touche === 'v' && peutColler) { e.preventDefault(); coller(); }
+    else if (touche === 'd') { e.preventDefault(); dupliquer(); }
+  };
+
   // ── Barre d'outils et barre de sélection ──────────────────────────────────
   const selectedLot = selection ? dpgf.lots[selection.lotIdx] : null;
-  const canDeleteSelection = !!selection && selection.kind !== 'lot' && isSelCctpOnly;
+  const canDeleteSelection = multi
+    ? selectionsActives.every(s => s.kind !== 'lot' && !!noeudDe(s)?.cctpOnly)
+    : !!selection && selection.kind !== 'lot' && isSelCctpOnly;
   const deleteSelected = () => {
+    if (multi) {
+      if (!canDeleteSelection) return;
+      onChange({ ...dpgf, lots: deleteSelection(dpgf.lots, clesActives), ...totauxDe(deleteSelection(dpgf.lots, clesActives)) });
+      setSelection(null);
+      return;
+    }
     if (!selection || selection.kind === 'lot') return;
     if (selection.kind === 'chapitre') deleteCCTPChapitre(selection.lotIdx, selection.chapIdx);
     else deleteCCTPLigne(selection.lotIdx, selection.chapIdx, selection.lignePath);
@@ -542,12 +674,15 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     { kind: 'button', id: 'cctp-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />, pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v) },
   ]);
   const selectionActions: SelectionAction[] = [
-    { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: !canMove(dpgf.lots, selection, -1) },
-    { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => moveSelected(1), disabled: !canMove(dpgf.lots, selection, 1) },
-    { id: 'promote', label: t('pro_promote'), icon: <IconArrowBarToLeft size={16} />, iconOnly: true, onClick: promoteSelected, disabled: selection?.kind !== 'ligne' },
-    { id: 'demote', label: t('pro_demote'), icon: <IconArrowBarToRight size={16} />, iconOnly: true, onClick: () => selection && applyHierarchy(demoteHierarchy(dpgf.lots, selection, uid)), disabled: !canDemote(dpgf.lots, selection) },
-    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection, groupStart: true },
-    { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopy size={16} />, mobile: true, onClick: () => selection && applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)), disabled: !selection },
+    { id: 'up', label: t('pro_move_up'), icon: <IconArrowUp size={16} />, mobile: true, onClick: () => moveSelected(-1), disabled: multi || !canMove(dpgf.lots, selection, -1) },
+    { id: 'down', label: t('pro_move_down'), icon: <IconArrowDown size={16} />, mobile: true, onClick: () => moveSelected(1), disabled: multi || !canMove(dpgf.lots, selection, 1) },
+    { id: 'promote', label: t('pro_promote'), icon: <IconArrowBarToLeft size={16} />, iconOnly: true, onClick: promoteSelected, disabled: multi || selection?.kind !== 'ligne' },
+    { id: 'demote', label: t('pro_demote'), icon: <IconArrowBarToRight size={16} />, iconOnly: true, onClick: () => selection && applyHierarchy(demoteHierarchy(dpgf.lots, selection, uid)), disabled: multi || !canDemote(dpgf.lots, selection) },
+    { id: 'bulk', label: t('pro_cctp_bulk_title'), icon: <IconAdjustmentsHorizontal size={16} />, mobile: true, groupStart: true, onClick: () => setShowBulk(true), disabled: !multi, hint: multi ? undefined : t('pro_cctp_bulk_hint_select') },
+    { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+C', onClick: copier, disabled: !selection, hint: t('pro_copy_articles_only') },
+    { id: 'paste', label: t('pro_paste'), icon: <IconClipboard size={16} />, iconOnly: true, shortcut: 'Ctrl+V', onClick: coller, disabled: !peutColler },
+    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection || multi },
+    { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopyPlus size={16} />, shortcut: 'Ctrl+D', mobile: true, onClick: dupliquer, disabled: !selection },
     { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !canDeleteSelection, hint: canDeleteSelection ? undefined : t('pro_cctp_delete_hint') },
   ];
 
@@ -561,6 +696,10 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
           onClose={() => setShowGenerate(false)}
           onGenerated={insererGeneration}
         />
+      )}
+
+      {showBulk && multi && (
+        <CctpBulkEditDialog doc={dpgf} resume={resume} onClose={() => setShowBulk(false)} onApply={appliquerMasse} />
       )}
 
       {showDraft && selection && selData && (
@@ -604,7 +743,12 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
 
         {/* ── Left tree panel ────────────────────────────────────────────── */}
         {showTree && (
-          <div className="w-72 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm select-none">
+          <div
+            ref={arbreRef}
+            tabIndex={0}
+            onKeyDown={surClavierArbre}
+            aria-label={t('pro_structure')}
+            className="w-72 shrink-0 border-r border-zinc-200 dark:border-zinc-700 overflow-y-auto bg-[#f5f7fa] dark:bg-zinc-800/50 text-sm select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--tblr-primary)]">
             <div className="flex items-center gap-0.5 pl-3 pr-1 py-1.5 border-b" style={{ borderColor: 'var(--tblr-border)' }}>
               <span className="flex-1 text-xs font-semibold" style={{ color: 'var(--tblr-muted)' }}>{t('pro_structure')}</span>
               {[
@@ -625,13 +769,21 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                 {/* Lot row */}
                 <div
                   data-search-id={lot.id}
-                  onClick={() => setSelection({ kind: 'lot', lotIdx: li })}
-                  className={`flex items-center gap-1 px-2 py-1.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
-                    selection?.kind === 'lot' && selection.lotIdx === li
+                  onClick={e => cliquer({ kind: 'lot', lotIdx: li }, e)}
+                  className={`group flex items-center gap-1 px-2 py-1.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
+                    estSel(`lot-${li}`)
                       ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-300'
                       : 'text-zinc-700 dark:text-zinc-200'
                   }`}
                 >
+                  <input
+                    type="checkbox"
+                    aria-label={t('pro_cctp_select_row', { nom: lot.titre })}
+                    checked={estSel(`lot-${li}`)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => basculer({ kind: 'lot', lotIdx: li })}
+                    className={`shrink-0 w-3.5 h-3.5 accent-blue-600 cursor-pointer ${multi || estSel(`lot-${li}`) ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100'}`}
+                  />
                   <button
                     className="shrink-0 text-zinc-500"
                     onClick={e => { e.stopPropagation(); toggleLot(lot.id); }}
@@ -649,16 +801,24 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                         {/* Chapitre row */}
                         <div
                           data-search-id={chap.id}
-                          onClick={() => setSelection({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
+                          onClick={e => cliquer({ kind: 'chapitre', lotIdx: li, chapIdx: ci }, e)}
                           onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                           onDrop={e => { e.preventDefault(); if (!dragSource) { const raw = e.dataTransfer.getData('application/json'); if (raw && onDropExternal) { try { onDropExternal(JSON.parse(raw) as Ligne); } catch {} } return; } const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = renumeroterLignes([...dest.lignes, taken.ligne], String(dest.numero || ci + 1)); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); onChange(next); } setDragSource(null); }}
-                          className={`flex items-center gap-1 pl-6 pr-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
-                            selection?.kind === 'chapitre' && selection.lotIdx === li && selection.chapIdx === ci
+                          className={`group flex items-center gap-1 pl-6 pr-2 py-1 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
+                            estSel(`chap-${li}-${ci}`)
                               ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                               : 'text-zinc-600 dark:text-zinc-300'
                           } ${chap.cctpOnly ? 'italic' : ''}`}
                         >
-                          <button
+                          <input
+                    type="checkbox"
+                    aria-label={t('pro_cctp_select_row', { nom: chap.titre })}
+                    checked={estSel(`chap-${li}-${ci}`)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => basculer({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
+                    className={`shrink-0 w-3.5 h-3.5 accent-blue-600 cursor-pointer ${multi || estSel(`chap-${li}-${ci}`) ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100'}`}
+                  />
+                  <button
                             className="shrink-0 text-zinc-400"
                             onClick={e => { e.stopPropagation(); toggleChap(chap.id); }}
                           >
@@ -692,15 +852,23 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                                 onDragStart={e => { const s = { lotIdx: li, chapIdx: ci, path }; setDragSource(s); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('application/x-archioffice-row', JSON.stringify(s)); e.dataTransfer.setData('application/json', JSON.stringify(ligne)); }}
                                 onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }}
                                 onDrop={e => { e.preventDefault(); if (!dragSource) { const raw = e.dataTransfer.getData('application/json'); if (raw && onDropExternal) { try { onDropExternal(JSON.parse(raw) as Ligne); } catch {} } return; } const next = JSON.parse(JSON.stringify(dpgf)) as DPGF; const source = next.lots[dragSource.lotIdx].chapitres[dragSource.chapIdx]; const dest = next.lots[li].chapitres[ci]; const taken = takeLigneAtPath(source.lignes, dragSource.path); if (taken.ligne) { source.lignes = taken.lignes; dest.lignes = insertLigneAtPath(dest.lignes, path.slice(0, -1), path[path.length - 1], taken.ligne); source.lignes = renumeroterLignes(source.lignes, String(source.numero || dragSource.chapIdx + 1)); if (source !== dest) dest.lignes = renumeroterLignes(dest.lignes, String(dest.numero || ci + 1)); onChange(next); } setDragSource(null); }}
-                                onClick={() => { setSelection({ kind: 'ligne', lotIdx: li, chapIdx: ci, lignePath: path }); }}
+                                onClick={e => cliquer({ kind: 'ligne', lotIdx: li, chapIdx: ci, lignePath: path }, e)}
                                 style={{ paddingLeft: `${3 + depth * 1.1}rem` }}
-                                className={`flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
-                                  selection?.kind === 'ligne' && selection.lotIdx === li && selection.chapIdx === ci && selection.lignePath.join('.') === path.join('.')
+                                className={`group flex items-center gap-1 pr-2 py-0.5 cursor-pointer hover:bg-blue-50 dark:hover:bg-zinc-700 transition-colors ${
+                                  estSel(`ligne-${li}-${ci}-${path.join('-')}`)
                                     ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                                     : 'text-zinc-500 dark:text-zinc-400'
                                 } ${ligne.cctpOnly ? 'italic' : ''}`}
                               >
-                                <span className="font-medium text-zinc-400 text-[0.6875rem] mr-1 shrink-0">{ligne.numero}</span>
+                                <input
+                    type="checkbox"
+                    aria-label={t('pro_cctp_select_row', { nom: ligne.designation })}
+                    checked={estSel(`ligne-${li}-${ci}-${path.join('-')}`)}
+                    onClick={e => e.stopPropagation()}
+                    onChange={() => basculer({ kind: 'ligne', lotIdx: li, chapIdx: ci, lignePath: path })}
+                    className={`shrink-0 w-3.5 h-3.5 accent-blue-600 cursor-pointer ${multi || estSel(`ligne-${li}-${ci}-${path.join('-')}`) ? '' : 'opacity-0 group-hover:opacity-100 focus:opacity-100 pointer-coarse:opacity-100'}`}
+                  />
+                  <span className="font-medium text-zinc-400 text-[0.6875rem] mr-1 shrink-0">{ligne.numero}</span>
                                 <span className="truncate text-[0.6875rem] flex-1">{ligne.designation}</span>
                                 {/* Repère de provenance : article issu de la
                                     bibliothèque d'ouvrages du cabinet. */}
@@ -771,9 +939,9 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         <div className="relative flex-1 min-w-0 flex flex-col">
         {selection && selData && (
           <SelectionBar
-            label={`${selData.label} ${selData.name.split(' — ')[0]}`}
+            label={multi ? t('pro_cctp_n_selected', { count: clesActives.length }) : `${selData.label} ${selData.name.split(' — ')[0]}`}
             actions={selectionActions}
-            onClear={() => setSelection(null)}
+            onClear={() => { setSelection(null); setMultiKeys(new Set()); }}
             isMobile={isMobile}
           />
         )}
@@ -783,6 +951,29 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
               <span className="text-5xl">📋</span>
               <p className="text-sm font-medium">Sélectionnez un élément dans l'arbre</p>
               <p className="text-xs">Lot, chapitre ou article pour saisir sa description CCTP</p>
+            </div>
+          ) : multi ? (
+            <div className="max-w-3xl mx-auto p-6 space-y-5">
+              <div>
+                <h3 className="text-lg font-semibold" style={{ color: 'var(--tblr-text)' }}>{t('pro_cctp_n_selected', { count: clesActives.length })}</h3>
+                <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('pro_cctp_multi_composition', resume)}</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className="btn btn-primary inline-flex items-center gap-2" onClick={() => setShowBulk(true)}>
+                  <IconAdjustmentsHorizontal size={16} aria-hidden />{t('pro_cctp_bulk_title')}
+                </button>
+                <button type="button" className="btn inline-flex items-center gap-2" onClick={copier}><IconCopy size={16} aria-hidden />{t('pro_copy')}</button>
+                <button type="button" className="btn inline-flex items-center gap-2" onClick={dupliquer}><IconCopyPlus size={16} aria-hidden />{t('pro_duplicate')}</button>
+                <button type="button" className="btn" onClick={() => { setSelection(null); setMultiKeys(new Set()); }}>{t('pro_cctp_deselect')}</button>
+              </div>
+              <ul className="rounded-lg border divide-y text-sm" style={{ borderColor: 'var(--tblr-border)' }}>
+                {selectionsActives.slice(0, 20).map(s => (
+                  <li key={hierarchyKey(s)} className="px-3 py-1.5 truncate" style={{ color: 'var(--tblr-text)', borderColor: 'var(--tblr-border)' }}>{libelleDe(s)}</li>
+                ))}
+                {selectionsActives.length > 20 && (
+                  <li className="px-3 py-1.5 text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('pro_cctp_multi_more', { count: selectionsActives.length - 20 })}</li>
+                )}
+              </ul>
             </div>
           ) : (
             <div className="max-w-3xl mx-auto p-6 space-y-6">
