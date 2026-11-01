@@ -30,6 +30,8 @@ jobs:
         run: node native/windows-drive/mapping-smoke.mjs
       - name: Reconnect the same project with the shipping broker
         run: node native/windows-drive/resume-smoke.mjs
+      - name: Open several projects through one A drive
+        run: node native/windows-drive/multi-smoke.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

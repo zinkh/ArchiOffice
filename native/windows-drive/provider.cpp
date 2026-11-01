@@ -178,6 +178,15 @@ int wmain(int argc,wchar_t** argv) {
     if(argc==3&&std::wstring(argv[1])==L"--unregister") {check(CfUnregisterSyncRoot(argv[2]));return 0;}
     std::string text;if(!line(text))return 1;
     auto init=JsonObject::Parse(winrt::to_hstring(text));
+    if(init.GetNamedString(L"type")==L"map") {
+      fs::path base(std::wstring(init.GetNamedString(L"root")));
+      if(!base.is_absolute()||!fs::is_directory(base))throw std::runtime_error("invalid namespace");
+      fs::path current=base.root_path();for(auto const& part:base.relative_path()){current/=part;DWORD a=GetFileAttributesW(current.c_str());if(a==INVALID_FILE_ATTRIBUTES||(a&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("unsafe namespace");}
+      drive.mount(base,std::wstring(init.GetNamedString(L"previousRoot",L"")));
+      emit("{\"type\":\"ready\"}");
+      while(line(text))if(JsonObject::Parse(winrt::to_hstring(text)).GetNamedString(L"type")==L"stop")break;
+      emit("{\"type\":\"stopped\"}");return 0;
+    }
     if(init.GetNamedString(L"type")!=L"init")throw std::runtime_error("init required");
     bool resume=init.GetNamedBoolean(L"resume",false),initializing=init.GetNamedBoolean(L"initializing",false);
     resuming=resume;

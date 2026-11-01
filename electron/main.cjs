@@ -1,4 +1,4 @@
-const { createPersistentWindowsDrive } = require('./windowsDrivePersistence.cjs');
+const { createWindowsMultiDrive } = require('./windowsDriveMulti.cjs');
 const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -405,15 +405,19 @@ function startDriveAgent() {
     && event.senderFrame === mainWindow?.webContents.mainFrame
     && new URL(event.senderFrame?.url || '').origin === `http://127.0.0.1:${PORT}`;
   const nativeExecutable=app.isPackaged?path.join(cwd,'drive-windows','archioffice-drive-cfapi.exe'):path.join(cwd,'native','windows-drive','build','Release','archioffice-drive-cfapi.exe');
-  windowsDrivePreview=createPersistentWindowsDrive({spawn,agent:driveAgent,vault:()=>requestVault(serverProcess),
+  windowsDrivePreview=createWindowsMultiDrive({spawn,agent:driveAgent,vault:()=>requestVault(serverProcess),
     root:path.join(app.getPath('userData'),'drive-windows-preview'),cacheRoot:path.join(app.getPath('userData'),'drive-transfers'),executable:nativeExecutable,shell,
     // Activé par défaut sur Windows dès que l'exécutable natif est livré ; la
     // variable à « 0 » le coupe (diagnostic). Le droit Drive (abonnement payant
     // vérifié en ligne) reste exigé en amont par l'écran Documents.
     stateFile:path.join(app.getPath('userData'),'drive-windows.json'),
+    namespaceRoot:path.join(app.getPath('userData'),'drive-windows-namespaces'),
     login:(enabled)=>{if(process.platform==='win32')app.setLoginItemSettings({openAtLogin:enabled});},
     enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   windowsDrivePreview.resume();
+  ipcMain.handle('desktop:drive-windows-remove',async(event,projectId)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.remove(projectId);
+  });
   ipcMain.handle('desktop:drive-windows-open',async(event)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.open();
   });

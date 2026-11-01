@@ -9,7 +9,7 @@ const same = (a,b) => a && b && ['userId','tenantId','deviceId'].every(k => type
 // always comes from the vault. No registry Run command, shell command or token.
 function createPersistentWindowsDrive(options) {
   const { stateFile, login, vault, root } = options;
-  const preview = createWindowsPreview({ ...options, mountA: true });
+  const preview = createWindowsPreview({ ...options, mountA: options.mountA!==false });
   let operation = false;
   let lastError = null;
   let retry = null;
@@ -63,7 +63,7 @@ function createPersistentWindowsDrive(options) {
     await atomicJson(stateFile,{...state,manifestVersion:1});
     configured = true;
   }
-  async function start(projectId, { restore=false } = {}) {
+  async function start(projectId, { restore=false, open=true } = {}) {
     if (operation || stopped) return {status:'error',code:'DRIVE_BUSY'};
     operation = true;
     let previous;
@@ -75,7 +75,7 @@ function createPersistentWindowsDrive(options) {
       if(!snapshot&&previous?.manifestVersion===1&&previous.projectId===projectId&&same(previous.identity,identity))
         throw Object.assign(new Error('Missing catalog for active directory'),{code:'DRIVE_SNAPSHOT_INVALID'});
       const result = await preview.start(projectId, {
-        open: !restore,
+        open: !restore&&open,
         previousRoot: previous?.directory || '',
         onPrepared: save,
         onReady: save,
@@ -134,7 +134,7 @@ function createPersistentWindowsDrive(options) {
       return {status:'opened'};
     } catch { return {status:'error'}; }
   }
-  return { start, open, disconnect, resume, shutdown,
+  return { start, open, disconnect, resume, shutdown, snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
     status:()=>({...preview.status(),letter:'A:',error:lastError,configured}) };
 }
 module.exports = { createPersistentWindowsDrive };
