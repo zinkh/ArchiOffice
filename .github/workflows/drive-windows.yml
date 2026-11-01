@@ -4,7 +4,7 @@ on:
     branches: [main]
     paths:
       - 'native/windows-drive/**'
-      - 'electron/windowsDrive.cjs'
+      - 'electron/windowsDrive*.cjs'
       - '.github/workflows/drive-windows.yml'
   workflow_dispatch:
 jobs:
@@ -26,6 +26,8 @@ jobs:
         run: node native/windows-drive/smoke.mjs
       - name: Exercise shipping broker with CFAPI
         run: node native/windows-drive/broker-smoke.mjs
+      - name: Exercise persistent A drive mapping
+        run: node native/windows-drive/mapping-smoke.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

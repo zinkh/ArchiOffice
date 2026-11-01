@@ -97,8 +97,56 @@ void CALLBACK denyRename(CF_CALLBACK_INFO const* info,CF_CALLBACK_PARAMETERS con
   CF_OPERATION_INFO op{};op.StructSize=sizeof(op);op.Type=CF_OPERATION_TYPE_ACK_RENAME;op.ConnectionKey=info->ConnectionKey;op.TransferKey=info->TransferKey;op.RequestKey=info->RequestKey;
   CF_OPERATION_PARAMETERS p{};p.ParamSize=static_cast<ULONG>(offsetof(CF_OPERATION_PARAMETERS,AckRename)+sizeof(p.AckRename));p.AckRename.CompletionStatus=CloudFailure;CfExecute(&op,&p);
 }
+// A: is a per-logon DOS device, never a formatted volume or a network share.
+// Only remove our exact target; never pop an unrelated device definition.
+struct DriveA {
+  std::wstring target;
+  bool labelled=false;
+  static constexpr wchar_t LabelKey[]=L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\DriveIcons\\A\\DefaultLabel";
+  static std::wstring query() {
+    wchar_t buffer[32768];
+    if(QueryDosDeviceW(L"A:",buffer,32768))return buffer;
+    if(GetLastError()!=ERROR_FILE_NOT_FOUND)throw std::runtime_error("drive query failed");
+    return L"";
+  }
+  static std::wstring raw(fs::path const& root) {
+    if(!root.is_absolute()||root.wstring().starts_with(L"\\\\"))throw std::runtime_error("local root required");
+    return L"\\??\\"+root.wstring();
+  }
+  void mount(fs::path const& root,std::wstring const& previous) {
+    auto existing=query();
+    if(!existing.empty()&&!previous.empty()&&existing==raw(fs::path(previous))) {
+      if(!DefineDosDeviceW(DDD_RAW_TARGET_PATH|DDD_REMOVE_DEFINITION|DDD_EXACT_MATCH_ON_REMOVE,L"A:",existing.c_str()))throw std::runtime_error("drive cleanup failed");
+      existing=query();
+    }
+    if(!existing.empty()||(GetLogicalDrives()&1))throw std::runtime_error("DRIVE_LETTER_IN_USE");
+    auto next=raw(root);
+    if(!DefineDosDeviceW(DDD_RAW_TARGET_PATH,L"A:",next.c_str()))throw std::runtime_error("drive mount failed");
+    target=next;
+    wchar_t label[256];DWORD bytes=sizeof(label);
+    // Never relabel an existing cabinet/user customization or the real volume.
+    auto labelResult=RegGetValueW(HKEY_CURRENT_USER,LabelKey,nullptr,RRF_RT_REG_SZ,nullptr,label,&bytes);
+    if(labelResult==ERROR_SUCCESS&&!previous.empty()&&std::wstring(label)==L"ArchiOffice Drive")labelled=true;
+    if(labelResult==ERROR_FILE_NOT_FOUND) {
+      constexpr wchar_t name[]=L"ArchiOffice Drive";
+      labelled=RegSetKeyValueW(HKEY_CURRENT_USER,LabelKey,nullptr,REG_SZ,name,sizeof(name))==ERROR_SUCCESS;
+    }
+  }
+  ~DriveA() {
+    if(!target.empty())DefineDosDeviceW(DDD_RAW_TARGET_PATH|DDD_REMOVE_DEFINITION|DDD_EXACT_MATCH_ON_REMOVE,L"A:",target.c_str());
+    if(labelled) {
+      wchar_t label[256];DWORD bytes=sizeof(label);
+      if(RegGetValueW(HKEY_CURRENT_USER,LabelKey,nullptr,RRF_RT_REG_SZ,nullptr,label,&bytes)==ERROR_SUCCESS&&std::wstring(label)==L"ArchiOffice Drive") {
+        HKEY key;
+        if(RegOpenKeyExW(HKEY_CURRENT_USER,LabelKey,0,KEY_SET_VALUE,&key)==ERROR_SUCCESS){RegDeleteValueW(key,nullptr);RegCloseKey(key);}
+      }
+    }
+  }
+};
+
 int wmain(int argc,wchar_t** argv) {
   bool connected=false;
+  DriveA drive;
   try {
     winrt::init_apartment();
     if(argc==3&&std::wstring(argv[1])==L"--unregister") {check(CfUnregisterSyncRoot(argv[2]));return 0;}
@@ -132,6 +180,13 @@ int wmain(int argc,wchar_t** argv) {
       GetSystemTimeAsFileTime(reinterpret_cast<FILETIME*>(&p.FsMetadata.BasicInfo.CreationTime));p.FsMetadata.BasicInfo.LastWriteTime=p.FsMetadata.BasicInfo.CreationTime;
       p.Flags=static_cast<CF_PLACEHOLDER_CREATE_FLAGS>(CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC|(e.folder?CF_PLACEHOLDER_CREATE_FLAG_DISABLE_ON_DEMAND_POPULATION:0));
       DWORD processed=0;check(CfCreatePlaceholders(base.c_str(),&p,1,CF_CREATE_FLAG_STOP_ON_ERROR,&processed));check(p.Result);
+    }
+    if(init.GetNamedBoolean(L"mountA",false)) {
+      try {drive.mount(root,std::wstring(init.GetNamedString(L"previousRoot",L"")));}
+      catch(std::runtime_error const& e) {
+        if(std::string(e.what())=="DRIVE_LETTER_IN_USE")emit("{\"type\":\"error\",\"code\":\"DRIVE_LETTER_IN_USE\"}");
+        throw;
+      }
     }
     emit("{\"type\":\"ready\"}");
     while(line(text)) {

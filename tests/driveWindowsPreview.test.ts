@@ -14,3 +14,15 @@ it('launches only the selected project and can disconnect without exposing paths
  await act(async()=>host.querySelector('button')!.click());expect(start).toHaveBeenCalledWith('project');expect(host.textContent).toContain('windows_drive_opened');
  await act(async()=>host.querySelectorAll('button')[1].click());expect(stop).toHaveBeenCalled();expect(host.textContent).toContain('windows_drive_stopped');
 });
+it('announces an occupied drive letter without reporting a successful activation',async()=>{
+ start.mockResolvedValue({status:'error',code:'DRIVE_LETTER_IN_USE'});
+ await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'project'})));
+ await act(async()=>host.querySelector('button')!.click());
+ expect(host.querySelector('[role="alert"]')?.textContent).toBe('windows_drive_letter_busy');expect(host.textContent).not.toContain('windows_drive_opened');
+});
+it('opens a restored A: drive from settings without needing a selected project',async()=>{
+ status.mockResolvedValue({enabled:true,active:true,configured:true});const open=vi.fn().mockResolvedValue({status:'opened'});(window as any).archiofficeDesktop.openWindowsDrive=open;
+ await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:null})));
+ expect(host.querySelector('button')!.disabled).toBe(false);
+ await act(async()=>host.querySelector('button')!.click());expect(open).toHaveBeenCalled();expect(start).not.toHaveBeenCalled();
+});

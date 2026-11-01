@@ -21,12 +21,14 @@ const preview=createWindowsPreview({
    requests++;assert.deepEqual(input.identity,identity);if(input.meta.nodeId==='doc:denied')throw new Error('Permission denied');return {file};
  }},
  vault:async()=>identity,root:path.join(temporary,'preview'),cacheRoot,executable,
+ mountA:true,
  shell:{openPath:async value=>{directory=value;return '';}},enabled:()=>true,environment:{...process.env,DRIVE_LICENSE_PRIVATE_KEY:'must-not-reach-native'},
 });
 try {
- assert.deepEqual(await preview.start('project'),{status:'opened'});assert.ok(directory);
- assert.deepEqual(await fs.readFile(path.join(directory,'_Project','_Example.txt')),bytes);assert.ok(requests>0);
- await assert.rejects(fs.readFile(path.join(directory,'_Project','_Denied.txt')));
+ assert.deepEqual(await preview.start('project'),{status:'opened'});assert.equal(directory,'A:\\');
+ directory=path.join(temporary,'preview',(await fs.readdir(path.join(temporary,'preview')))[0]);
+ assert.deepEqual(await fs.readFile(path.join('A:\\','_Project','_Example.txt')),bytes);assert.ok(requests>0);
+ await assert.rejects(fs.readFile(path.join('A:\\','_Project','_Denied.txt')));
  preview.stop();assert.equal(await exited,0);
  assert.deepEqual(await fs.readFile(path.join(directory,'_Project','_Example.txt')),bytes);
  console.log('Windows broker smoke passed: shipping broker, scoped cache, native hydration and refusal.');

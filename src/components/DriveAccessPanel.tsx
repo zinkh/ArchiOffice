@@ -1,3 +1,4 @@
+import { WindowsDrivePreview } from './WindowsDrivePreview';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -106,7 +107,10 @@ export function DriveAccessPanel() {
       {localError && <p role="alert">{t('drive_local_error')}</p>}
       {remotePending && <p role="status">{t('drive_local_revoke_pending')}</p>}
     </div>
-    <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('drive_access_native_pending')}</p>
+    {capability?.local && capability.enabled ? <div className="space-y-2">
+      <WindowsDrivePreview projectId={null} />
+      <Link className="btn btn-ghost" to="/documents">{t('windows_drive_select_project')}</Link>
+    </div> : <p className="text-sm" style={{ color: 'var(--tblr-muted)' }}>{t('drive_access_native_pending')}</p>}
     {capability?.local && capability.enabled && bridge?.enqueueDriveFile && <div className="space-y-2 text-sm">
       <button type="button" className="btn btn-primary" disabled={busy || uploading} onClick={() => void enqueueFile()}>{t(uploading ? 'drive_transfer_preparing' : 'drive_transfer_add')}</button>
       {transfers && transfers.blocked > 0 && bridge.retryDriveTransfers && <button type="button" className="btn btn-ghost" disabled={busy || uploading} onClick={() => void retryTransfers()}>{t('drive_transfer_retry')}</button>}
