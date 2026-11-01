@@ -6,6 +6,7 @@
 #include <winternl.h>
 #include <ntstatus.h>
 #include <cfapi.h>
+#include <shlobj.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
 #include <algorithm>
@@ -131,9 +132,11 @@ struct DriveA {
       constexpr wchar_t name[]=L"ArchiOffice Drive";
       labelled=RegSetKeyValueW(HKEY_CURRENT_USER,LabelKey,nullptr,REG_SZ,name,sizeof(name))==ERROR_SUCCESS;
     }
+    SHChangeNotify(SHCNE_DRIVEADD,SHCNF_PATHW|SHCNF_FLUSHNOWAIT,L"A:\\",nullptr);
   }
   ~DriveA() {
-    if(!target.empty())DefineDosDeviceW(DDD_RAW_TARGET_PATH|DDD_REMOVE_DEFINITION|DDD_EXACT_MATCH_ON_REMOVE,L"A:",target.c_str());
+    if(!target.empty()&&DefineDosDeviceW(DDD_RAW_TARGET_PATH|DDD_REMOVE_DEFINITION|DDD_EXACT_MATCH_ON_REMOVE,L"A:",target.c_str()))
+      SHChangeNotify(SHCNE_DRIVEREMOVED,SHCNF_PATHW|SHCNF_FLUSHNOWAIT,L"A:\\",nullptr);
     if(labelled) {
       wchar_t label[256];DWORD bytes=sizeof(label);
       if(RegGetValueW(HKEY_CURRENT_USER,LabelKey,nullptr,RRF_RT_REG_SZ,nullptr,label,&bytes)==ERROR_SUCCESS&&std::wstring(label)==L"ArchiOffice Drive") {

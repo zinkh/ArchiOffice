@@ -9,13 +9,14 @@ export type DriveCatalogCheck = DriveCatalogUpdate | {status:'up_to_date'} | {st
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
-  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean;letter?:string;error?:string|null;configured?:boolean;projectCount?:number;projectIds?:string[];previousProjectIds?:string[];editReports?:WindowsDriveEditReport[]}>;
+  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean;letter?:string;error?:string|null;configured?:boolean;projectCount?:number;projectIds?:string[];previousProjectIds?:string[];appVersion?:string;unavailableReason?:'platform'|'disabled'|'native_missing'|null;editReports?:WindowsDriveEditReport[]}>;
   enableWindowsDriveEditing?: (projectId:string) => Promise<{status:'editing'|'error';code?:string}>;
   checkWindowsDriveCatalog?: (projectId:string) => Promise<DriveCatalogCheck>;
   refreshWindowsDriveCatalog?: (projectId:string,token:string) => Promise<{status:'refreshed'|'error';code?:string}>;
   openPreviousWindowsDriveProject?: (projectId:string) => Promise<{status:'copies_shown'|'error';code?:string}>;
   removeWindowsDriveProject?: (projectId:string) => Promise<{status:'removed'|'error';code?:string}>;
   startWindowsDrivePreview?: (projectId:string) => Promise<{status:'opened'|'error';code?:string}>;
+  activateWindowsDrive?: () => Promise<{status:'opened'|'error';code?:string}>;
   openWindowsDrive?: () => Promise<{status:'opened'|'error';code?:string}>;
   stopWindowsDrivePreview?: () => Promise<{status:'stopped'}>;
   checkDriveRemoteVersion?: (nodeId: string) => Promise<DriveRemoteCheck>;

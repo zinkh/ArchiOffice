@@ -25,7 +25,7 @@ function createWindowsMultiDrive(options) {
    const saved=JSON.parse(await fs.readFile(stateFile,'utf8'));
    if(!same(saved.identity,saved.identity))throw failure('DRIVE_SNAPSHOT_INVALID');
    if(saved.version===2) {
-    if(!Array.isArray(saved.projectIds)||(!saved.projectIds.length&&saved.autoConnect!==false)||saved.projectIds.length>10||!saved.projectIds.every(validId)||new Set(saved.projectIds).size!==saved.projectIds.length
+    if((saved.driveEnabled!==undefined&&typeof saved.driveEnabled!=='boolean')||!Array.isArray(saved.projectIds)||(!saved.projectIds.length&&saved.autoConnect!==false&&saved.driveEnabled!==true)||saved.projectIds.length>10||!saved.projectIds.every(validId)||new Set(saved.projectIds).size!==saved.projectIds.length
       ||saved.directory!==namespace.directory(saved.identity))throw failure('DRIVE_SNAPSHOT_INVALID');
    } else {
     if(!validId(saved.projectId)||typeof saved.directory!=='string'||path.dirname(saved.directory)!==path.resolve(root))throw failure('DRIVE_SNAPSHOT_INVALID');
@@ -37,7 +37,7 @@ function createWindowsMultiDrive(options) {
  async function saveSelection(active,ids,base,autoConnect=true) {
   await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
   const temporary=stateFile+'.tmp';
-  await fs.writeFile(temporary,JSON.stringify({version:2,identity:active,projectIds:ids,directory:base,autoConnect}),{mode:0o600});
+  await fs.writeFile(temporary,JSON.stringify({version:2,identity:active,projectIds:ids,directory:base,autoConnect,driveEnabled:true}),{mode:0o600});
   await fs.rename(temporary,stateFile);configured=autoConnect;
  }
  function projectFor(id,active) {
@@ -47,7 +47,7 @@ function createWindowsMultiDrive(options) {
   }
   return projects.get(id);
  }
- async function connect(requested,{restore=false}={}) {
+ async function connect(requested,{restore=false,allowEmpty=false}={}) {
   if(busy||stopped||!enabled())return {status:'error',code:'DRIVE_BUSY'};
   busy=true;const generation=epoch;const previousIds=new Set(identity?projects.keys():[]);let published=false;
   try {
@@ -57,7 +57,7 @@ function createWindowsMultiDrive(options) {
    const ids=identity?[...projects.keys()]:(saved&&same(saved.identity,active)?[...saved.projectIds]:[]);
    if(requested&&!validId(requested))throw failure('DRIVE_UNAVAILABLE');
    if(requested&&!ids.includes(requested)){if(ids.length>=10)throw failure('DRIVE_PROJECT_LIMIT');ids.push(requested);}
-   if(!ids.length)throw failure('DRIVE_UNAVAILABLE');
+   if(!ids.length&&!allowEmpty&&saved?.driveEnabled!==true)throw failure('DRIVE_UNAVAILABLE');
    for(const id of ids) {
     if(epoch!==generation)throw failure('DRIVE_UNAVAILABLE');
     const recovered=await refresh.recover(id,active);if(recovered)projects.set(id,recovered);
@@ -138,8 +138,7 @@ function createWindowsMultiDrive(options) {
    if(!validId(projectId)||!identity||!same(await vault(),identity)||!projects.has(projectId))throw failure('DRIVE_UNAVAILABLE');
    const project=projects.get(projectId);const saved=await project.snapshot(projectId);if(!saved)throw failure('DRIVE_SNAPSHOT_INVALID');
    await namespace.remove(identity,saved);project.shutdown();projects.delete(projectId);previousProjects.delete(projectId);refresh.clear();
-   const ids=[...projects.keys()];await saveSelection(identity,ids,namespace.directory(identity),ids.length>0);
-   if(!ids.length){stopAll();await login(false);}
+   const ids=[...projects.keys()];await saveSelection(identity,ids,namespace.directory(identity),true);
    lastError=null;return {status:'removed'};
   }catch(error){lastError=codes.includes(error.code)?error.code:'DRIVE_UNAVAILABLE';if(error.code==='DRIVE_SNAPSHOT_INVALID')stopAll();return {status:'error',code:lastError};}
   finally{busy=false;}
@@ -162,7 +161,7 @@ function createWindowsMultiDrive(options) {
   if(!identity){try{const saved=await readSelection();const active=await vault();if(saved&&same(saved.identity,active))for(const id of saved.projectIds)if(await refresh.hasPrevious(id,active))result.previousProjectIds.push(id);}catch{}}
   return result;
  }
- return {start:connect,open,remove,disconnect,resume,shutdown,status,getStatus,
+ return {start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
   enableEditing:id=>refreshAction(async()=>{if(!validId(id)||!identity||!same(await vault(),identity)||!projects.has(id))throw failure('DRIVE_UNAVAILABLE');refresh.clear();return projects.get(id).enableEditing(id);}),
   checkCatalog:id=>refreshAction(()=>refresh.check(id)),refreshCatalog:(id,token)=>refreshAction(()=>refresh.apply(id,token)),
   openPrevious:id=>refreshAction(()=>refresh.previous(id))};

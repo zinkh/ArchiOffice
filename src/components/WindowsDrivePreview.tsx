@@ -13,7 +13,7 @@ const errors = new Set(['windows_drive_letter_busy', 'windows_drive_snapshot_inv
 /** Native main owns the paths, project selection, identities and signed grants. */
 export function WindowsDrivePreview({ projectId }: { projectId: string | null }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ enabled: boolean; active: boolean; configured?: boolean; projectCount?: number; projectIds?: string[]; previousProjectIds?:string[];editReports?:WindowsDriveEditReport[] }>({ enabled: false, active: false });
+  const [state, setState] = useState<{ enabled: boolean; active: boolean; configured?: boolean; projectCount?: number; projectIds?: string[]; previousProjectIds?:string[];appVersion?:string;unavailableReason?:'platform'|'disabled'|'native_missing'|null;editReports?:WindowsDriveEditReport[] }>({ enabled: false, active: false });
   const {confirm,dialog}=useConfirmDialog();
   const [plan,setPlan]=useState<(DriveCatalogUpdate & {projectId:string})|null>(null);
   const [busyLabel,setBusyLabel]=useState('windows_drive_preparing');
@@ -25,6 +25,7 @@ export function WindowsDrivePreview({ projectId }: { projectId: string | null })
   const live = useRef(true);
   const selectedProject=useRef(projectId);selectedProject.current=projectId;
   const added = !!projectId && !!state.projectIds?.includes(projectId);
+  const canActivate=!!desktopBridge()?.activateWindowsDrive;
   const editReport=state.editReports?.find(report=>report.projectId===projectId);
   const load = useCallback(async () => {
     try {
@@ -67,7 +68,7 @@ export function WindowsDrivePreview({ projectId }: { projectId: string | null })
         const result = await bridge?.removeWindowsDriveProject?.(projectId);
         await load(); setMessage(result?.status === 'removed' ? 'windows_drive_removed' : displayError(result?.code));
       } else {
-        const result = projectId && !added ? await bridge?.startWindowsDrivePreview?.(projectId) : await bridge?.openWindowsDrive?.();
+        const result = projectId && !added ? await bridge?.startWindowsDrivePreview?.(projectId) : !state.active&&!projectId ? await bridge?.activateWindowsDrive?.() : await bridge?.openWindowsDrive?.();
         if (result?.status === 'opened') { setState(previous => ({ ...previous, active: true, configured: true })); await load(); }
         setMessage(result?.status === 'opened' ? 'windows_drive_opened' : displayError(result?.code));
       }
@@ -76,13 +77,13 @@ export function WindowsDrivePreview({ projectId }: { projectId: string | null })
   };
   const summary=(update:DriveCatalogUpdate)=><dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm max-w-prose">{(['added','updated','removed','moved','folders'] as const).map(key=><div key={key} className="contents"><dt>{t('windows_drive_change_'+key)}</dt><dd className="tabular-nums text-right">{update[key]}</dd></div>)}</dl>;
   if (!checked) return <p className="text-sm" role="status">{t('windows_drive_loading')}</p>;
-  if (!state.enabled) return <p className="text-xs max-w-prose" role="status" style={{ color: 'var(--tblr-muted)' }}><strong style={{ color: 'var(--tblr-text)' }}>{t('windows_drive_unavailable_title')}</strong>{' : '}{t('windows_drive_unavailable_preview')}</p>;
+  if (!state.enabled) return <p className="text-xs max-w-prose" role="status" style={{ color: 'var(--tblr-muted)' }}><strong style={{ color: 'var(--tblr-text)' }}>{t('windows_drive_unavailable_title')}</strong>{' : '}{t(!desktopBridge()?.isDesktop||state.unavailableReason==='platform'?'windows_drive_desktop_required':state.unavailableReason==='disabled'?'windows_drive_disabled':'windows_drive_install_required')}{state.appVersion&&<> {t('windows_drive_client_version',{version:state.appVersion})}</>}</p>;
   return <div className="space-y-2" aria-busy={busy}>
     <h3 className="text-sm font-semibold">{t(state.active ? 'windows_drive_active' : 'windows_drive_title')}</h3>
     {state.active && <p className="text-sm" role="status">{t('windows_drive_project_count', { count: state.projectCount ?? 1 })}</p>}
     <p className="text-sm max-w-prose">{t('windows_drive_explanation')}</p>
     <div className="flex flex-wrap gap-2">
-      <button type="button" className="btn btn-ghost min-h-11" disabled={busy || (!projectId && !state.active)} onClick={() => void run()}>{t(busy ? busyLabel : state.active ? projectId && !added ? 'windows_drive_add' : 'windows_drive_open_active' : 'windows_drive_open')}</button>
+      <button type="button" className="btn btn-ghost min-h-11" disabled={busy || (!projectId && !state.active && !canActivate)} onClick={() => void run()}>{t(busy ? busyLabel : state.active ? projectId && !added ? 'windows_drive_add' : 'windows_drive_open_active' : !projectId&&canActivate ? 'windows_drive_activate' : 'windows_drive_open')}</button>
       {added&&!editReport && <button type="button" className="btn btn-primary min-h-11" disabled={busy} onClick={()=>void run('edit')}>{t('windows_drive_edit_enable')}</button>}
       {added && <button type="button" className="btn btn-ghost min-h-11" disabled={busy} onClick={()=>void run('check')}>{t('windows_drive_check_catalog')}</button>}
       {projectId&&state.previousProjectIds?.includes(projectId)&&<button type="button" className="btn btn-ghost min-h-11" disabled={busy} onClick={()=>void run('previous')}>{t('windows_drive_previous')}</button>}
@@ -98,7 +99,8 @@ export function WindowsDrivePreview({ projectId }: { projectId: string | null })
       {(editReport.blocked>0||editReport.conflicts>0)&&<p className="text-sm" role="alert">{t('windows_drive_edit_attention')}</p>}
     </div>}
     {dialog}
-    {!projectId && !state.active && <p className="text-xs">{t('windows_drive_choose_project')}</p>}
+    {(!projectId||state.active&&state.projectCount===0) && <p className="text-xs">{t(canActivate?'windows_drive_empty_help':'windows_drive_choose_project')}</p>}
+    {state.appVersion&&<p className="text-xs">{t('windows_drive_client_version',{version:state.appVersion})}</p>}
     {message && <p className="text-xs max-w-prose" role={errors.has(message) ? 'alert' : 'status'}>{t(message)}</p>}
   </div>;
 }

@@ -6,7 +6,7 @@ let host:HTMLDivElement;let root:Root;const status=vi.fn(),start=vi.fn(),stop=vi
 beforeEach(()=>{(globalThis as any).IS_REACT_ACT_ENVIRONMENT=true;status.mockReset().mockResolvedValue({enabled:true,active:false});start.mockReset().mockImplementation(async(projectId:string)=>{status.mockResolvedValue({enabled:true,active:true,configured:true,projectCount:1,projectIds:[projectId]});return {status:'opened'};});stop.mockReset().mockResolvedValue({status:'stopped'});(window as any).archiofficeDesktop={isDesktop:true,getWindowsDrivePreview:status,startWindowsDrivePreview:start,stopWindowsDrivePreview:stop};host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();delete (window as any).archiofficeDesktop;});
 it('explains why it is unavailable when disabled and requires a selected project when enabled',async()=>{
- status.mockResolvedValue({enabled:false,active:false});await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'p'})));expect(host.textContent).toContain('windows_drive_unavailable_preview');expect(host.querySelector('button')).toBeNull();
+ status.mockResolvedValue({enabled:false,active:false});await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'p'})));expect(host.textContent).toContain('windows_drive_install_required');expect(host.querySelector('button')).toBeNull();
  await act(async()=>root.unmount());root=createRoot(host);status.mockResolvedValue({enabled:true,active:false});await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:null})));expect(host.querySelector('button')!.disabled).toBe(true);expect(host.textContent).toContain('windows_drive_choose_project');
 });
 it('launches only the selected project and can disconnect without exposing paths',async()=>{
@@ -78,4 +78,13 @@ it('does not enable editing when the dialog is cancelled or the selected project
  await act(async()=>Array.from(host.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(b=>b.textContent==='cancel')!.click());expect(edit).not.toHaveBeenCalled();
  await open();await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:'other'})));
  await act(async()=>Array.from(host.querySelectorAll<HTMLButtonElement>('[role="alertdialog"] button')).find(b=>b.textContent==='windows_drive_edit_enable')!.click());expect(edit).not.toHaveBeenCalled();
+});
+
+it('activates A: directly from settings without selecting a project',async()=>{
+ const activate=vi.fn().mockImplementation(async()=>{status.mockResolvedValue({enabled:true,active:true,configured:true,projectCount:0,projectIds:[],appVersion:'1.0.20'});return {status:'opened'};});(window as any).archiofficeDesktop.activateWindowsDrive=activate;
+ await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:null})));expect(host.querySelector('button')!.textContent).toBe('windows_drive_activate');expect(host.querySelector('button')!.disabled).toBe(false);
+ await act(async()=>host.querySelector('button')!.click());expect(activate).toHaveBeenCalled();expect(start).not.toHaveBeenCalled();expect(host.textContent).toContain('windows_drive_empty_help');expect(host.textContent).toContain('windows_drive_client_version');expect(host.querySelector('button')!.textContent).toBe('windows_drive_open_active');
+});
+it.each([['platform','windows_drive_desktop_required'],['native_missing','windows_drive_install_required'],['disabled','windows_drive_disabled']])('explains unavailable component %s',async(reason,key)=>{
+ status.mockResolvedValue({enabled:false,active:false,unavailableReason:reason,appVersion:'1.0.19'});await act(async()=>root.render(React.createElement(WindowsDrivePreview,{projectId:null})));expect(host.textContent).toContain(key);expect(host.textContent).toContain('windows_drive_client_version');expect(host.querySelector('button')).toBeNull();
 });

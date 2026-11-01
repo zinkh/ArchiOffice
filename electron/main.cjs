@@ -415,6 +415,9 @@ function startDriveAgent() {
     login:(enabled)=>{if(process.platform==='win32')app.setLoginItemSettings({openAtLogin:enabled});},
     enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   windowsDrivePreview.resume();
+  ipcMain.handle('desktop:drive-windows-activate',async(event)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.activate();
+  });
   ipcMain.handle('desktop:drive-windows-enable-editing',async(event,projectId)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.enableEditing(projectId);
   });
@@ -433,8 +436,8 @@ function startDriveAgent() {
   ipcMain.handle('desktop:drive-windows-open',async(event)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.open();
   });
-  ipcMain.handle('desktop:drive-windows-status',(event)=> {
-    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.getStatus();
+  ipcMain.handle('desktop:drive-windows-status',async(event)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');const state=await windowsDrivePreview.getStatus();return {...state,appVersion:app.getVersion(),unavailableReason:process.platform!=='win32'?'platform':process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW==='0'?'disabled':!fs.existsSync(nativeExecutable)?'native_missing':null};
   });
   ipcMain.handle('desktop:drive-windows-start',async(event,projectId)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');

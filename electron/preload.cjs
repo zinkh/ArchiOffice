@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('archiofficeDesktop', {
   isDesktop: true,
   checkDriveRemoteVersion: (nodeId) => ipcRenderer.invoke('desktop:drive-check-remote',nodeId),
   refreshDriveDocument: (nodeId) => ipcRenderer.invoke('desktop:drive-refresh-working',nodeId),
+  activateWindowsDrive: () => ipcRenderer.invoke('desktop:drive-windows-activate'),
   openWindowsDrive: () => ipcRenderer.invoke('desktop:drive-windows-open'),
   enableWindowsDriveEditing: (projectId) => ipcRenderer.invoke('desktop:drive-windows-enable-editing',projectId),
   checkWindowsDriveCatalog: (projectId) => ipcRenderer.invoke('desktop:drive-windows-check-catalog',projectId),

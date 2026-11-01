@@ -48,9 +48,9 @@ it('removes only a selected junction and preserves all of that project’s files
  expect(await fs.readdir(namespace())).toEqual(['_q']);expect(await fs.readFile(path.join(source,'_p','local.txt'),'utf8')).toBe('keep');
  expect(await drive.start('p')).toEqual({status:'opened'});expect(await fs.readFile(path.join(namespace(),'_p','local.txt'),'utf8')).toBe('keep');
 });
-it('disconnects the last project and can add a different project afterwards',async()=>{
- const drive=make();await drive.start('p');expect(await drive.remove('p')).toEqual({status:'removed'});expect(drive.status()).toMatchObject({active:false,configured:false});
- expect(config.login).toHaveBeenLastCalledWith(false);expect(await drive.start('q')).toEqual({status:'opened'});expect(drive.status().projectIds).toEqual(['q']);
+it('keeps A: after removing the last project and can add a different project afterwards',async()=>{
+ const drive=make();await drive.start('p');expect(await drive.remove('p')).toEqual({status:'removed'});expect(drive.status()).toMatchObject({active:true,configured:true,projectCount:0});
+ expect(config.login).toHaveBeenLastCalledWith(true);expect(await drive.start('q')).toEqual({status:'opened'});expect(drive.status().projectIds).toEqual(['q']);
 });
 it('remembers the selected set when disconnected, but never reconnects it automatically',async()=>{
  const drive=make();await drive.start('p');await drive.start('q');await drive.disconnect();
@@ -101,4 +101,14 @@ it('enables editing only for a connected authorized project and keeps the A: map
  expect(await drive.enableEditing('p')).toEqual({status:'editing'});expect(frames.filter(f=>f.type==='map')).toHaveLength(count);expect(drive.status().projectIds).toEqual(['p','q']);
  expect(drive.status().editReports.map((r:any)=>r.projectId)).toEqual(['p']);expect(frames.filter(f=>f.type==='init').at(-1).editable).toBe(true);
  expect((await drive.enableEditing('not-connected')).status).toBe('error');config.vault.mockResolvedValue({...identity,tenantId:'other'});expect((await drive.enableEditing('q')).status).toBe('error');expect(drive.status().active).toBe(false);
+});
+
+it('activates an empty A: without catalogs, restores it, and honors explicit disconnect',async()=>{
+ const first=make();expect(await first.activate()).toEqual({status:'opened'});expect(first.status()).toMatchObject({active:true,configured:true,projectCount:0,projectIds:[]});expect(config.agent.windowsPreview).not.toHaveBeenCalled();expect(frames.map(f=>f.type)).toEqual(['map']);expect(config.login).toHaveBeenLastCalledWith(true);
+ const saved=JSON.parse(await fs.readFile(config.stateFile,'utf8'));expect(saved).toMatchObject({driveEnabled:true,projectIds:[],autoConnect:true});first.shutdown();await new Promise(resolve=>setImmediate(resolve));
+ const next=make();next.resume();await vi.waitFor(()=>expect(next.status().active).toBe(true));expect(next.status().projectCount).toBe(0);expect(await next.start('p')).toEqual({status:'opened'});expect(await next.remove('p')).toEqual({status:'removed'});expect(next.status().active).toBe(true);
+ await next.disconnect();next.shutdown();const last=make();config.spawn.mockClear();last.resume();await new Promise(resolve=>setTimeout(resolve,30));expect(config.spawn).not.toHaveBeenCalled();expect(last.status().active).toBe(false);
+});
+it('refuses empty-drive activation on vault refusal and restores only its own identity',async()=>{
+ config.vault.mockRejectedValueOnce(new Error('expired'));const drive=make();expect((await drive.activate()).status).toBe('error');expect(config.spawn).not.toHaveBeenCalled();expect(await drive.activate()).toEqual({status:'opened'});drive.shutdown();await new Promise(resolve=>setImmediate(resolve));config.spawn.mockClear();config.vault.mockResolvedValue({...identity,tenantId:'other'});const next=make();next.resume();await new Promise(resolve=>setTimeout(resolve,30));expect(config.spawn).not.toHaveBeenCalled();
 });
