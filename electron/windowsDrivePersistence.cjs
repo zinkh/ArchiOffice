@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs/promises');
 const path = require('path');
+const crypto = require('crypto');
 const { createWindowsPreview, noLinks } = require('./windowsDrive.cjs');
 const same = (a,b) => a && b && ['userId','tenantId','deviceId'].every(k => typeof a[k] === 'string' && a[k] === b[k]);
 
@@ -15,6 +16,31 @@ function createPersistentWindowsDrive(options) {
   let stopped = false;
   let configured = false;
   let preferenceEpoch = 0;
+  const snapshotPath=(identity,projectId)=>path.join(root,crypto.createHash('sha256').update(JSON.stringify([identity.userId,identity.tenantId,identity.deviceId,projectId])).digest('hex')+'.json');
+  async function readSnapshot(identity,projectId) {
+    try {
+      const file=snapshotPath(identity,projectId);const stat=await fs.lstat(file);
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size>512*1024)throw new Error('Invalid snapshot manifest');
+      const saved=JSON.parse(await fs.readFile(file,'utf8'));
+      if(!same(saved.identity,identity)||saved.projectId!==projectId||typeof saved.directory!=='string'
+        ||path.dirname(saved.directory)!==path.resolve(root)||!Array.isArray(saved.catalog)||saved.catalog.length>256
+        ||typeof saved.rootKey!=='string'||!/^[a-f0-9]{64}$/.test(saved.rootKey))throw new Error('Invalid snapshot manifest');
+      await noLinks(root,saved.directory);return saved;
+    } catch(error) {
+      if(error.code==='ENOENT') {
+        // Only a missing manifest is a first use. A manifest whose directory
+        // vanished must never silently create another path.
+        try { await fs.lstat(snapshotPath(identity,projectId)); } catch(e) { if(e.code==='ENOENT')return null; }
+      }
+      throw Object.assign(new Error('Stored project cannot be resumed'),{code:'DRIVE_SNAPSHOT_INVALID'});
+    }
+  }
+  async function atomicJson(file,data) {
+    const temporary=file+'.tmp';
+    await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});
+    await fs.writeFile(temporary,JSON.stringify(data),{mode:0o600});
+    await fs.rename(temporary,file);
+  }
   async function read() {
     try {
       const stat = await fs.lstat(stateFile);
@@ -27,10 +53,11 @@ function createPersistentWindowsDrive(options) {
     } catch { return null; }
   }
   async function save(data) {
-    const temporary = stateFile + '.tmp';
-    await fs.mkdir(path.dirname(stateFile),{recursive:true,mode:0o700});
-    await fs.writeFile(temporary,JSON.stringify(data),{mode:0o600});
-    await fs.rename(temporary,stateFile);
+    // Persist the project catalog separately so disconnecting A: only forgets
+    // automatic reconnection, not the stable directory or its file identities.
+    await atomicJson(snapshotPath(data.identity,data.projectId),data);
+    const {catalog,rootKey,...state}=data;
+    await atomicJson(stateFile,state);
     configured = true;
   }
   async function start(projectId, { restore=false } = {}) {
@@ -41,10 +68,13 @@ function createPersistentWindowsDrive(options) {
       previous = await read();
       const identity = await vault();
       if (restore && (!previous || !same(previous.identity,identity))) return {status:'error'};
+      const snapshot=await readSnapshot(identity,projectId);
       const result = await preview.start(projectId, {
         open: !restore,
         previousRoot: previous?.directory || '',
         onPrepared: save,
+        onReady: save,
+        snapshot,
       });
       if (stopped) { preview.stop(); return {status:'error'}; }
       // Enabling the persistent reader explicitly also enables the desktop app
@@ -54,7 +84,7 @@ function createPersistentWindowsDrive(options) {
       return result;
     } catch (error) {
       preview.stop();
-      lastError = error.code === 'DRIVE_LETTER_IN_USE' ? error.code : 'DRIVE_UNAVAILABLE';
+      lastError = ['DRIVE_LETTER_IN_USE','DRIVE_SNAPSHOT_INVALID'].includes(error.code) ? error.code : 'DRIVE_UNAVAILABLE';
       // Keep the latest prepared path for crash recovery; never delete snapshots.
       return {status:'error',code:lastError};
     } finally { operation = false; }

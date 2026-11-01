@@ -131,14 +131,35 @@ la reconnexion et le lancement automatique. Windows peut désactiver ce dernier
 dans ses réglages. L’installation et le lancement doivent utiliser la même
 session Windows que l’Explorateur, sans élévation manuelle.
 
-Chaque reconnexion prépare un **nouvel instantané** du projet. Les anciens
-instantanés et leurs octets téléchargés restent dans les données privées de
-l’application ; aucun fichier n’est supprimé ou réutilisé silencieusement.
-Les placeholders non téléchargés des anciens instantanés ne sont pas reconnectés.
-A: désigne le nouvel instantané, pas une racine durable pour des références CAO.
-Le test de la stabilité des références, l’édition depuis A:, le catalogue de tous
-les projets et le nettoyage explicite des archives restent à réaliser. Ce lot
-n’ajoute pas de raccourci épinglé au volet de navigation ni d’intégration Finder.
+Chaque projet possède désormais un **catalogue local et un dossier conservés**.
+Une reconnexion utilise le même dossier et les mêmes versions : elle ne relit pas
+le catalogue réseau et ne recrée pas les fichiers déjà hydratés. Les placeholders
+non hydratés restent téléchargeables par le nouveau processus. Le catalogue est
+figé ; les nouvelles versions et les nouveaux documents se consultent dans
+Documents. Son renouvellement contrôlé constitue un lot distinct.
+
+Le catalogue est conservé dans un manifeste local par utilisateur/cabinet/appareil
+et projet, sans identifiant de connexion. Déconnecter A: retire la préférence de
+reconnexion, mais conserve le manifeste ; choisir ce projet de nouveau retrouve
+son dossier. Plusieurs projets peuvent ainsi avoir un dossier mémorisé, avec un
+seul projet monté sous A: à la fois. Ce n’est pas encore une arborescence regroupant
+toutes les opérations.
+
+Le courtier valide le catalogue et son empreinte. La racine CFAPI enregistre cette
+identité ; avant de la reconnecter, le composant natif contrôle la racine, les
+identités des placeholders, leurs tailles et leur état. Un fichier remplacé,
+modifié ou manquant bloque la reconnexion : aucune réparation silencieuse et
+aucun écrasement. Les ajouts locaux hors catalogue sont conservés. Une population
+initiale interrompue peut compléter uniquement ses entrées manquantes dans le même
+dossier ; le manifeste marque son achèvement après le signal natif « ready ».
+
+Les anciens dossiers créés avant cette évolution restent conservés. Leur première
+activation prépare une seule nouvelle racine avec manifeste, sans tenter de
+réutiliser une racine ancienne dont le catalogue n’a jamais été enregistré. Les
+références CAO, l’édition depuis A:, l’affichage simultané de tous les projets et le
+nettoyage explicite des archives restent à réaliser. Aucun fichier de travail
+n’est supprimé. Ce lot n’ajoute pas de raccourci épinglé au volet de navigation ni
+d’intégration Finder.
 
 Le composant utilise `QueryDosDeviceW` avant `DefineDosDeviceW`, puis retire
 uniquement son chemin exact avec `DDD_EXACT_MATCH_ON_REMOVE`. Après arrêt brutal,
@@ -150,3 +171,20 @@ existant créé séparément. Un essai visuel sur Windows 10/11 reste nécessair
 Références : [DefineDosDeviceW](https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-definedosdevicew),
 [QueryDosDeviceW](https://learn.microsoft.com/windows/win32/api/fileapi/nf-fileapi-querydosdevicew),
 [Electron login items](https://www.electronjs.org/docs/latest/api/app#appsetloginitemsettingssettings-macos-windows).
+
+
+## Installateur de test automatique
+
+Les PR internes touchant le client, l’agent ou le composant natif lancent aussi le
+workflow **Build Windows installer**. L’installateur NSIS est disponible dans
+l’artefact `ArchiOffice-Windows-installer` du run, après réussite. Il reçoit une
+version distincte, par exemple `1.0.20-drive.49` si la dernière release stable
+est `1.0.19`. Ces runs utilisent `--publish never` : aucune release ni mise à jour
+automatique des postes n’est publiée. Les forks ne reçoivent pas les secrets du
+registre de paquets. Les versions publiques restent publiées par le workflow de
+tag existant.
+
+Le test Windows `resume-smoke.mjs` utilise le véritable courtier persistant et
+CFAPI. Il reconnecte le même chemin avec le catalogue réseau indisponible, vérifie
+qu’un fichier déjà hydraté ne se télécharge pas une seconde fois, hydrate un ancien
+placeholder, conserve un ajout local puis refuse un fichier remplacé localement.
