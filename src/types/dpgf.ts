@@ -91,7 +91,30 @@ export type NatureArticle = 'base' | 'pse' | 'variante' | 'option';
 export type NatureHorsBase = Exclude<NatureArticle, 'base'>;
 export const NATURES_HORS_BASE: NatureHorsBase[] = ['pse', 'option', 'variante'];
 
-export interface Ligne extends DecoupageNoeud {
+/**
+ * État de rédaction d'un lot, d'un chapitre ou d'un article du CCTP, visible par
+ * l'équipe et lu par les agents : `incomplet` (texte ou données à compléter) ou
+ * `en_cours` (quelqu'un, ou un agent, est en train de l'éditer : on n'y touche
+ * pas). Absent : rien à signaler. Jamais déduit, toujours posé par une personne
+ * ou un agent, avec son auteur et sa date.
+ */
+export type StatutRedaction = 'incomplet' | 'en_cours';
+
+export interface MarqueurRedaction {
+  statut: StatutRedaction;
+  /** Nom de la personne, ou « Agent IA » pour un agent. */
+  par?: string;
+  /** Date ISO de la pose. */
+  le?: string;
+  /** Précision libre : ce qui manque, ce qui est en cours. */
+  note?: string;
+}
+
+export interface MarquableNoeud {
+  marqueur?: MarqueurRedaction;
+}
+
+export interface Ligne extends DecoupageNoeud, MarquableNoeud {
   /** Quantités propres à chaque bâtiment ; une table vide signifie sans affectation. */
   quantitesBatiments?: Record<string, number>;
   id: string;
@@ -153,7 +176,7 @@ export interface Ligne extends DecoupageNoeud {
   cctpDescription?: string;
 }
 
-export interface Chapitre extends DecoupageNoeud {
+export interface Chapitre extends DecoupageNoeud, MarquableNoeud {
   id: string;
   numero: string;
   titre: string;
@@ -162,7 +185,7 @@ export interface Chapitre extends DecoupageNoeud {
   cctpDescription?: string;
 }
 
-export interface Lot extends DecoupageNoeud {
+export interface Lot extends DecoupageNoeud, MarquableNoeud {
   id: string;
   numero: string;
   titre: string;

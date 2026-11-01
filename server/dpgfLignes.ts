@@ -6,11 +6,17 @@
 //   - un chapitre `cctpOnly` n'est JAMAIS touché (ni ajout, ni remplacement), et
 //     aucune ligne portant un `cctpDescription` n'est supprimée ni écrasée :
 //     le texte technique du CCTP appartient à l'architecte ;
+//   - une ligne marquée « en cours d'édition » par quelqu'un d'autre n'est ni modifiée, ni
+//     supprimée, ni remplacée (409) : le marqueur est le signal que l'équipe a posé pour
+//     que personne, agent compris, ne marche sur son travail. `forcer: true` n'est à passer
+//     que sur demande EXPLICITE de l'utilisateur ;
 //   - `batimentId` / `phaseId` / `trancheId` sont laissés ABSENTS sur une
 //     nouvelle ligne : `batimentId: ''` signifie « aucun bâtiment, sans
 //     héritage » (types/dpgf.ts), absent veut dire « hérite du chapitre/lot » ;
 //   - seul le `prixTotal` des lignes touchées est recalculé ; les sous-totaux de
 //     lot, `totalHT` et `totalTTC` le sont pour tout le document.
+
+import { PAR_AGENT, creerMarqueur, enCoursParAutre, libelleMarqueur, normaliserMarqueur } from '../src/lib/marqueurRedaction';
 
 export class DpgfLignesError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -40,9 +46,22 @@ function nombre(valeur: unknown, champ: string, ou: string): number {
 export interface LigneSaisie { designation: string; unite?: string; quantite: number | string; prix_unitaire?: number | string; numero?: string }
 
 export type Operation =
-  | { action: 'add_lignes'; lot: string; chapitre?: string; lignes: LigneSaisie[]; replace_existing?: boolean }
-  | { action: 'update_ligne'; id?: string; numero?: string; lot?: string; designation?: string; unite?: string; quantite?: number | string; prix_unitaire?: number | string }
-  | { action: 'delete_ligne'; id?: string; numero?: string; lot?: string };
+  | { action: 'add_lignes'; lot: string; chapitre?: string; lignes: LigneSaisie[]; replace_existing?: boolean; forcer?: boolean; par?: string }
+  | { action: 'update_ligne'; id?: string; numero?: string; lot?: string; designation?: string; unite?: string; quantite?: number | string; prix_unitaire?: number | string; marqueur?: string; note_marqueur?: string; forcer?: boolean; par?: string }
+  | { action: 'delete_ligne'; id?: string; numero?: string; lot?: string; forcer?: boolean; par?: string };
+
+/** Auteur des marqueurs posés par l'outil : toujours un agent, jamais lu dans la requête d'un client. */
+const auteur = (op: { par?: unknown }): string => (typeof op.par === 'string' && op.par.trim() ? op.par.trim() : PAR_AGENT);
+
+/** Refuse de toucher une ligne que quelqu'un d'autre est en train d'éditer. */
+function verifierMain(l: Json, op: { par?: unknown; forcer?: boolean }): void {
+  const m = normaliserMarqueur(l.marqueur);
+  if (!enCoursParAutre(m, auteur(op)) || op.forcer === true) return;
+  throw new DpgfLignesError(
+    `La ligne ${l.numero} est ${libelleMarqueur(m!)}. Ne la modifie pas : demande à l'utilisateur de lever le marqueur, ou rappelle avec forcer: true seulement s'il le demande explicitement.`,
+    409,
+  );
+}
 
 export interface Rapport {
   action: Operation['action'];
@@ -183,6 +202,9 @@ function ajouterLignes(doc: Json, op: Extract<Operation, { action: 'add_lignes' 
     for (const l of chapitre.lignes as Json[]) {
       if (String(l.cctpDescription ?? '').trim()) { gardees.push(l); conservees.push({ numero: String(l.numero), raison: 'porte un texte CCTP' }); }
       else if (l.cctpOnly) { gardees.push(l); conservees.push({ numero: String(l.numero), raison: 'réservée au CCTP' }); }
+      else if (enCoursParAutre(normaliserMarqueur(l.marqueur), auteur(op)) && op.forcer !== true) {
+        gardees.push(l); conservees.push({ numero: String(l.numero), raison: libelleMarqueur(normaliserMarqueur(l.marqueur)!) });
+      }
       else remplacees++;
     }
     chapitre.lignes = gardees;
@@ -221,9 +243,14 @@ function ajouterLignes(doc: Json, op: Extract<Operation, { action: 'add_lignes' 
 function modifierLigne(doc: Json, op: Extract<Operation, { action: 'update_ligne' }>): Partial<Rapport> {
   const t = trouverLigne(doc, op);
   const l = t.ligne;
-  const touche = ['designation', 'unite', 'quantite', 'prix_unitaire'].some(k => (op as Json)[k] !== undefined);
-  if (!touche) throw new DpgfLignesError('Aucun champ à modifier : fournis designation, unite, quantite ou prix_unitaire.');
+  const touche = ['designation', 'unite', 'quantite', 'prix_unitaire', 'marqueur'].some(k => (op as Json)[k] !== undefined);
+  if (!touche) throw new DpgfLignesError('Aucun champ à modifier : fournis designation, unite, quantite, prix_unitaire ou marqueur.');
   const ou = `Ligne ${l.numero}`;
+  verifierMain(l, op);
+  const marqueur = op.marqueur === undefined ? undefined : String(op.marqueur).trim().toLowerCase();
+  if (marqueur !== undefined && !['incomplet', 'en_cours', 'aucun'].includes(marqueur)) {
+    throw new DpgfLignesError(`${ou} : marqueur doit valoir incomplet, en_cours ou aucun.`);
+  }
   if ((op.quantite !== undefined || op.prix_unitaire !== undefined) && Array.isArray(l.children) && l.children.length) {
     throw new DpgfLignesError(`${ou} : cette ligne a des sous-articles, son montant est la somme de ses enfants. Modifie plutôt un sous-article.`);
   }
@@ -233,6 +260,8 @@ function modifierLigne(doc: Json, op: Extract<Operation, { action: 'update_ligne
   const quantite = op.quantite !== undefined ? nombre(op.quantite, 'quantite', ou) : undefined;
   const prix = op.prix_unitaire !== undefined ? nombre(op.prix_unitaire, 'prix_unitaire', ou) : undefined;
 
+  if (marqueur === 'aucun') delete l.marqueur;
+  else if (marqueur) l.marqueur = creerMarqueur(marqueur as 'incomplet' | 'en_cours', auteur(op), op.note_marqueur === undefined ? undefined : String(op.note_marqueur));
   if (designation !== undefined) l.designation = designation;
   if (op.unite !== undefined) l.unite = String(op.unite).trim();
   if (quantite !== undefined) l.quantite = quantite;
@@ -243,6 +272,7 @@ function modifierLigne(doc: Json, op: Extract<Operation, { action: 'update_ligne
 
 function supprimerLigne(doc: Json, op: Extract<Operation, { action: 'delete_ligne' }>): Partial<Rapport> {
   const t = trouverLigne(doc, op);
+  verifierMain(t.ligne, op);
   if (String(t.ligne.cctpDescription ?? '').trim()) {
     throw new DpgfLignesError(`La ligne ${t.ligne.numero} porte un texte CCTP : elle n'est pas supprimée par cet outil.`);
   }
@@ -253,6 +283,7 @@ function supprimerLigne(doc: Json, op: Extract<Operation, { action: 'delete_lign
 const resume = (l: Json, t: Trouvee) => ({
   id: l.id, lot: String(t.lot.numero), chapitre: String(t.chapitre.numero), numero: l.numero, designation: l.designation,
   unite: l.unite, quantite: l.quantite, prix_unitaire: l.prixUnitaire, prix_total: l.prixTotal,
+  ...(normaliserMarqueur(l.marqueur) ? { marqueur: libelleMarqueur(normaliserMarqueur(l.marqueur)!) } : {}),
 });
 
 /**

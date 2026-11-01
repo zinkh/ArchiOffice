@@ -23,6 +23,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { remonterPrixOffre } from '../articlePrices';
 import { appliquerOperation, DpgfLignesError, type Operation } from '../dpgfLignes';
+import { PAR_AGENT } from '../../src/lib/marqueurRedaction';
 
 /**
  * Un seul écrivain à la fois par DPGF DANS CE PROCESSUS. Combiné à la relecture juste
@@ -119,7 +120,9 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const { dry_run: aBlanc, ...operation } = req.body ?? {};
+      // L'auteur d'un marqueur posé par cette route est toujours un agent : jamais lu dans la requête.
+      const { dry_run: aBlanc, par: _ignore, ...corps } = req.body ?? {};
+      const operation = { ...corps, par: PAR_AGENT };
       const rapport = await sousVerrou(`${tenantId}:${projectId}`, async () => {
         for (let essai = 0; essai < 3; essai++) {
           const row = await loadRow(supabaseAdmin, tenantId, projectId);
