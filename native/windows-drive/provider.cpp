@@ -241,6 +241,13 @@ int wmain(int argc,wchar_t** argv) {
     while(line(text)) {
       auto message=JsonObject::Parse(winrt::to_hstring(text));auto type=message.GetNamedString(L"type");
       if(type==L"stop")break;
+      if(type==L"verify") {
+        auto request=winrt::to_string(message.GetNamedString(L"requestId"));
+        if(request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid verification request");
+        bool valid=true;
+        try{validateRoot(root,rootKey);for(auto const& entry:entries)validateExisting(root/fs::path(entry.path),entry);}catch(...){valid=false;}
+        emit("{\"type\":\"verified\",\"requestId\":\""+request+"\",\"valid\":"+(valid?std::string("true"):std::string("false"))+"}");
+      }
       if(type==L"hydrated") {
         auto id=winrt::to_string(message.GetNamedString(L"requestId"));std::lock_guard lock(stateMutex);auto it=pending.find(id);
         if(it!=pending.end()){it->second->file=std::wstring(message.GetNamedString(L"file",L""));it->second->ready=true;it->second->cv.notify_one();}

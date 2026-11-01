@@ -134,9 +134,9 @@ session Windows que l’Explorateur, sans élévation manuelle.
 Chaque projet possède désormais un **catalogue local et un dossier conservés**.
 Une reconnexion utilise le même dossier et les mêmes versions : elle ne relit pas
 le catalogue réseau et ne recrée pas les fichiers déjà hydratés. Les placeholders
-non hydratés restent téléchargeables par le nouveau processus. Le catalogue est
-figé ; les nouvelles versions et les nouveaux documents se consultent dans
-Documents. Son renouvellement contrôlé constitue un lot distinct.
+non hydratés restent téléchargeables par le nouveau processus. Le catalogue peut être renouvelé volontairement après comparaison et confirmation,
+comme décrit dans la section Actualisation ci-dessous. Les versions distantes
+restent également consultables dans Documents.
 
 Le catalogue est conservé dans un manifeste local par utilisateur/cabinet/appareil
 et projet, sans identifiant de connexion. Déconnecter A: retire la préférence de
@@ -200,7 +200,7 @@ stable par utilisateur/cabinet/appareil. Ses entrées sont des jonctions Windows
 vers les dossiers de projet déjà validés ; aucune racine CFAPI n’est déplacée.
 L’entrée reprend le nom mémorisé du projet et pointe directement vers son premier
 niveau : les chemins A:\Projet\Phase\Fichier gardent la même forme que dans le
-prototype précédent. Les catalogues restent figés et les documents en consultation.
+prototype précédent. Les catalogues sont actualisés sur demande et les documents restent en consultation.
 
 La sélection complète est enregistrée dans `drive-windows.json` (version 2).
 L’ancien format contenant un seul projet est repris à la première activation.
@@ -231,3 +231,52 @@ n’est ajouté automatiquement depuis l’ensemble du cabinet.
 projets hydratés simultanément sous A:, retrait sans suppression, réajout au même
 chemin, reprise de la sélection au redémarrage et coupure après changement de
 cabinet. L’installateur de test est construit automatiquement pour la PR.
+
+
+## Actualisation volontaire des catalogues
+
+Dans Documents, « Vérifier le catalogue » compare le projet local au catalogue
+actuel du serveur et présente les ajouts, mises à jour, retraits de la vue A:,
+changements de chemin et changements de dossiers. La comparaison ne télécharge
+pas le contenu des documents. Un catalogue identique ne crée pas de nouvelle
+copie. La proposition est liée au projet, à l’identité, à la génération locale et
+au catalogue distant ; elle expire après cinq minutes et doit être revalidée si
+les données distantes ont changé.
+
+« Actualiser ce projet » demande une confirmation et la fermeture des fichiers.
+Une nouvelle génération est préparée dans un dossier séparé, sans écraser ni
+supprimer les fichiers de la génération précédente. Les noms locaux existants
+sont conservés par identifiant lorsque le type de fichier et le classement le
+permettent. Le premier niveau du projet garde toujours son nom dans A:. Les
+changements de dossier ou d’extension figurent dans la comparaison. Une baisse de
+version technique est refusée.
+
+Le fournisseur natif vérifie la racine et tous ses placeholders avant la
+préparation, puis de nouveau juste avant la bascule. Cette vérification lit les
+attributs et les identités, sans hydrater les fichiers. Une modification locale,
+un remplacement ou un fichier attendu manquant bloque l’actualisation. Les ajouts
+locaux hors catalogue restent dans l’ancienne génération. Aucun envoi vers le
+serveur n’est effectué par ce parcours.
+
+Un journal durable enregistre les deux générations et l’intention confirmée. La
+jonction du projet est déplacée vers une sauvegarde privée, puis remplacée par une
+jonction vers la nouvelle génération. Le projet peut être brièvement indisponible
+entre ces deux opérations ; les autres projets restent accessibles. Si le second
+renommage échoue, le courtier tente de restaurer immédiatement l’ancienne jonction.
+Le journal permet de reprendre une opération interrompue au prochain lancement ou
+à la réouverture de A:, en revérifiant les racines et les cibles. Une cible
+étrangère est refusée sans suppression automatique.
+
+La copie précédente est accessible avec « Voir la copie précédente », y compris
+après une interruption si l’autorisation locale reste valide. Les octets déjà
+téléchargés, les ajouts locaux et les retouches tardives enregistrées dans l’ancien
+fichier sont conservés. Les anciens placeholders non hydratés peuvent rester
+indisponibles : la conservation de l’arborescence ne signifie pas que tous ses
+fichiers avaient été téléchargés. Les générations plus anciennes sont également
+conservées dans les données privées ; ce lot expose seulement la copie précédente.
+
+`refresh-smoke.mjs` teste ces opérations avec CFAPI et les jonctions Windows réels :
+actualisation d’un projet pendant qu’un autre reste ouvert, téléchargement d’une
+nouvelle version et d’un ajout, conservation des anciennes données, interruption
+simulée du second renommage, reprise après redémarrage et refus après une retouche
+locale. L’interface attend une confirmation explicite avant toute application.

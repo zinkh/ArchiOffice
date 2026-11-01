@@ -3,19 +3,21 @@ const fs=require('fs/promises');const path=require('path');const crypto=require(
 const {createPersistentWindowsDrive}=require('./windowsDrivePersistence.cjs');
 const {createWindowsNamespace}=require('./windowsDriveNamespace.cjs');
 const {noLinks}=require('./windowsDrive.cjs');
+const {createWindowsRefresh}=require('./windowsDriveRefresh.cjs');
 const hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const same=(a,b)=>a&&b&&['userId','tenantId','deviceId'].every(k=>typeof a[k]==='string'&&a[k]===b[k]);
 const validId=id=>typeof id==='string'&&/^[a-zA-Z0-9_-]{1,200}$/.test(id);
 const failure=code=>Object.assign(new Error(code),{code});
 const identityOf=grant=>({userId:grant.userId,tenantId:grant.tenantId,deviceId:grant.deviceId});
-const codes=['DRIVE_LETTER_IN_USE','DRIVE_SNAPSHOT_INVALID','DRIVE_PROJECT_LIMIT'];
+const codes=['DRIVE_LETTER_IN_USE','DRIVE_SNAPSHOT_INVALID','DRIVE_PROJECT_LIMIT','DRIVE_LOCAL_CHANGES','DRIVE_REFRESH_STALE','DRIVE_REFRESH_INTERRUPTED','DRIVE_BUSY'];
 
 function createWindowsMultiDrive(options) {
  const {root,stateFile,vault,login,shell,enabled}=options;
  const namespace=createWindowsNamespace({...options,root:options.namespaceRoot||root+'-namespace',projectRoot:root});
- const projects=new Map();let identity=null;let configured=false;let lastError=null;
+ const projects=new Map();const previousProjects=new Set();let identity=null;let configured=false;let lastError=null;
  let busy=false;let stopped=false;let epoch=0;let timer=null;
- function stopAll() {epoch++;namespace.stop();for(const project of projects.values())project.shutdown();projects.clear();identity=null;}
+ function stopAll() {epoch++;refresh.clear();namespace.stop();for(const project of projects.values())project.shutdown();projects.clear();previousProjects.clear();identity=null;}
+ const refresh=createWindowsRefresh({options,namespace,getProject:id=>projects.get(id),setProject:(id,project)=>projects.set(id,project),getIdentity:()=>identity,onArchive:id=>previousProjects.add(id)});
  async function readSelection() {
   let present=false;
   try {
@@ -58,12 +60,14 @@ function createWindowsMultiDrive(options) {
    if(!ids.length)throw failure('DRIVE_UNAVAILABLE');
    for(const id of ids) {
     if(epoch!==generation)throw failure('DRIVE_UNAVAILABLE');
+    const recovered=await refresh.recover(id,active);if(recovered)projects.set(id,recovered);
     const project=projectFor(id,active);
     // A lost manifest from the previous single-project client is an error,
     // whereas an old pre-manifest client is migrated without moving its files.
     if(saved?.manifestVersion===1&&saved.projectId===id&&same(saved.identity,active)&&!await project.snapshot(id))throw failure('DRIVE_SNAPSHOT_INVALID');
     const result=await project.start(id,{open:false});
     if(result.status!=='opened')throw failure(codes.includes(result.code)?result.code:'DRIVE_UNAVAILABLE');
+    if(await refresh.hasPrevious(id,active))previousProjects.add(id);
    }
    if(epoch!==generation||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
    const snapshots=[];for(const id of ids){const snapshot=await projects.get(id).snapshot(id);if(!snapshot)throw failure('DRIVE_SNAPSHOT_INVALID');snapshots.push(snapshot);}
@@ -133,7 +137,7 @@ function createWindowsMultiDrive(options) {
   try {
    if(!validId(projectId)||!identity||!same(await vault(),identity)||!projects.has(projectId))throw failure('DRIVE_UNAVAILABLE');
    const project=projects.get(projectId);const saved=await project.snapshot(projectId);if(!saved)throw failure('DRIVE_SNAPSHOT_INVALID');
-   await namespace.remove(identity,saved);project.shutdown();projects.delete(projectId);
+   await namespace.remove(identity,saved);project.shutdown();projects.delete(projectId);previousProjects.delete(projectId);refresh.clear();
    const ids=[...projects.keys()];await saveSelection(identity,ids,namespace.directory(identity),ids.length>0);
    if(!ids.length){stopAll();await login(false);}
    lastError=null;return {status:'removed'};
@@ -142,13 +146,24 @@ function createWindowsMultiDrive(options) {
  }
  function resume(){if(timer)return;void restore();timer=setInterval(()=>void restore(),10000);timer.unref();}
  function shutdown(){stopped=true;clearInterval(timer);timer=null;stopAll();}
- const status=()=>({enabled:enabled(),active:namespace.status().active,configured,error:lastError,letter:'A:',projectCount:namespace.status().active?projects.size:0,projectIds:namespace.status().active?[...projects.keys()]:[]});
+ async function refreshAction(action) {
+  if(busy||stopped)return {status:'error',code:'DRIVE_BUSY'};busy=true;
+  try{const result=await action();lastError=null;return result;}
+  catch(error){lastError=codes.includes(error.code)?error.code:'DRIVE_UNAVAILABLE';let authorized=false;try{authorized=identity&&same(await vault(),identity);}catch{}
+   if(!authorized||['DRIVE_REFRESH_INTERRUPTED','DRIVE_SNAPSHOT_INVALID'].includes(lastError))stopAll();return {status:'error',code:lastError};}
+  finally{busy=false;}
+ }
+ const status=()=>({enabled:enabled(),active:namespace.status().active,configured,error:lastError,letter:'A:',projectCount:namespace.status().active?projects.size:0,projectIds:namespace.status().active?[...projects.keys()]:[],previousProjectIds:namespace.status().active?[...previousProjects]:[]});
  async function getStatus() {
   // The renderer may have switched cabinet since the previous lease check.
   // Validate before exposing the selected IDs, not only on the next timer tick.
   if(identity){try{if(!same(await vault(),identity))stopAll();}catch{stopAll();}}
-  return status();
+  const result=status();
+  if(!identity){try{const saved=await readSelection();const active=await vault();if(saved&&same(saved.identity,active))for(const id of saved.projectIds)if(await refresh.hasPrevious(id,active))result.previousProjectIds.push(id);}catch{}}
+  return result;
  }
- return {start:connect,open,remove,disconnect,resume,shutdown,status,getStatus};
+ return {start:connect,open,remove,disconnect,resume,shutdown,status,getStatus,
+  checkCatalog:id=>refreshAction(()=>refresh.check(id)),refreshCatalog:(id,token)=>refreshAction(()=>refresh.apply(id,token)),
+  openPrevious:id=>refreshAction(()=>refresh.previous(id))};
 }
 module.exports={createWindowsMultiDrive};

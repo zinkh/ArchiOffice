@@ -32,6 +32,8 @@ jobs:
         run: node native/windows-drive/resume-smoke.mjs
       - name: Open several projects through one A drive
         run: node native/windows-drive/multi-smoke.mjs
+      - name: Refresh catalogs and recover an interrupted switch
+        run: node native/windows-drive/refresh-smoke.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

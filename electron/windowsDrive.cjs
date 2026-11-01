@@ -8,12 +8,35 @@ async function noLinks(root,file) {
   let current=path.resolve(root);if((await fs.lstat(current)).isSymbolicLink())throw new Error('Link refused');
   for(const name of relative.split(path.sep).filter(Boolean)){current=path.join(current,name);if((await fs.lstat(current)).isSymbolicLink())throw new Error('Link refused');}
 }
+function catalogDetails(catalog,active) {
+  if(!same(catalog?.identity,active)||!Array.isArray(catalog.entries)||catalog.entries.length>256)throw new Error('Catalog refused');
+  const files=new Map();const paths=new Set();const savedEntries=[];
+  const entries=catalog.entries.map(e=> {
+    if(typeof e.path!=='string'||e.path.length>300||!/^_[^<>:"/|?*\x00-\x1f]+$/.test(e.path)||e.path.split('\\').some(p=>!p||p==='.'||p==='..'||/[. ]$/.test(p))
+      ||typeof e.key!=='string'||!/^[a-f0-9]{64}$/.test(e.key)||typeof e.folder!=='boolean'||!Number.isSafeInteger(e.size)||e.size<0||e.size>50*1024*1024)throw new Error('Invalid catalog');
+    const folded=e.path.toLowerCase();if(paths.has(folded))throw new Error('Path collision');paths.add(folded);
+    if(!e.folder) {
+          if(files.size>=100)throw new Error('Too many files');
+      const m=e.meta;
+      if(!m||m.size!==e.size||typeof m.nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!Number.isSafeInteger(m.version)||m.version<1
+    ||(m.sha256!==null&&!/^[a-f0-9]{64}$/.test(m.sha256))||!isSafeToOpen(e.path))throw new Error('Invalid file');
+      if(files.has(e.key))throw new Error('Duplicate identity');
+      if(typeof m.name!=='string'||m.name.length>512)throw new Error('Invalid name');
+      files.set(e.key,{nodeId:m.nodeId,version:m.version,size:m.size,sha256:m.sha256,name:m.name});
+    }
+    const entry={path:e.path,key:e.key,folder:e.folder,size:e.size};
+    savedEntries.push({...entry,...(!e.folder?{meta:files.get(e.key)}:{})});return entry;
+  });
+  return {files,entries,savedEntries};
+}
+
 function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell,enabled,environment=process.env,mountA=false}) {
   let mount=null;let busy=false;let epoch=0;let closing=Promise.resolve();
   const available=()=>enabled()===true;
   function stop() {
     epoch++;
     const old=mount;mount=null;if(!old)return;clearInterval(old.lease);old.stopped=true;
+    for(const request of old.verifications.values()){clearTimeout(request.timer);request.reject(new Error('Preview stopped'));}old.verifications.clear();
     closing=old.exited?Promise.resolve():new Promise(resolve=>{
       const timeout=setTimeout(resolve,6500);timeout.unref();old.child.once('exit',()=>{clearTimeout(timeout);resolve();});
     });
@@ -21,7 +44,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
     const timer=setTimeout(()=>old.child.kill(),6000);timer.unref();old.child.once('exit',()=>clearTimeout(timer));
     old.reject?.(new Error('Preview stopped'));
   }
-  async function start(projectId,{open=true,previousRoot='',onPrepared=async()=>{},onReady=async()=>{},snapshot=null}={}) {
+  async function start(projectId,{open=true,previousRoot='',onPrepared=async()=>{},onReady=async()=>{},snapshot=null,catalogOverride=null}={}) {
     if(!available()||busy||typeof projectId!=='string'||!/^[a-zA-Z0-9_-]{1,200}$/.test(projectId))throw new Error('Preview unavailable');
     busy=true;let created=false;
     const generation=epoch;
@@ -36,24 +59,9 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       }
       if(snapshot&&(!same(snapshot.identity,active)||snapshot.projectId!==projectId
         ||typeof snapshot.directory!=='string'||path.dirname(snapshot.directory)!==path.resolve(root)))throw new Error('Snapshot refused');
-      const catalog=snapshot?{identity:snapshot.identity,entries:snapshot.catalog}:await agent.windowsPreview('catalog',{projectId});
+      const catalog=snapshot?{identity:snapshot.identity,entries:snapshot.catalog}:catalogOverride||await agent.windowsPreview('catalog',{projectId});
       if(!same(catalog?.identity,active)||!same(await vault(),active)||!Array.isArray(catalog.entries)||catalog.entries.length>256)throw new Error('Catalog refused');
-      const files=new Map();const paths=new Set();const savedEntries=[];
-      const entries=catalog.entries.map(e=> {
-        if(typeof e.path!=='string'||e.path.length>300||!/^_[^<>:"/|?*\x00-\x1f]+$/.test(e.path)||e.path.split('\\').some(p=>!p||p==='.'||p==='..'||/[. ]$/.test(p))
-          ||typeof e.key!=='string'||!/^[a-f0-9]{64}$/.test(e.key)||typeof e.folder!=='boolean'||!Number.isSafeInteger(e.size)||e.size<0||e.size>50*1024*1024)throw new Error('Invalid catalog');
-        const folded=e.path.toLowerCase();if(paths.has(folded))throw new Error('Path collision');paths.add(folded);
-        if(!e.folder) {
-          const m=e.meta;
-          if(!m||m.size!==e.size||typeof m.nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!Number.isSafeInteger(m.version)||m.version<1
-            ||(m.sha256!==null&&!/^[a-f0-9]{64}$/.test(m.sha256))||!isSafeToOpen(e.path))throw new Error('Invalid file');
-          if(files.has(e.key))throw new Error('Duplicate identity');
-          if(typeof m.name!=='string'||m.name.length>512)throw new Error('Invalid name');
-          files.set(e.key,{nodeId:m.nodeId,version:m.version,size:m.size,sha256:m.sha256,name:m.name});
-        }
-        const entry={path:e.path,key:e.key,folder:e.folder,size:e.size};
-        savedEntries.push({...entry,...(!e.folder?{meta:files.get(e.key)}:{})});return entry;
-      });
+      const {files,entries,savedEntries}=catalogDetails(catalog,active);
       await fs.mkdir(root,{recursive:true,mode:0o700});await noLinks(root,root);
       if(generation!==epoch||!same(await vault(),active))throw new Error('Access refused');
       const rootKey=hash([active.userId,active.tenantId,active.deviceId,projectId,savedEntries]);
@@ -64,7 +72,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       await onPrepared(manifest);
       if(generation!==epoch)throw new Error('Preview stopped');
       const child=spawn(executable,[],{stdio:['pipe','pipe','ignore'],windowsHide:true,env:agentEnvironment(environment)});
-      const state={child,identity:active,projectId,root:directory,stopped:false,lease:null,reject:null};mount=state;created=true;
+      const state={child,identity:active,projectId,root:directory,stopped:false,lease:null,reject:null,verifications:new Map()};mount=state;created=true;
       child.once('exit',()=>{state.exited=true;});
       const send=value=>{if(!state.stopped&&!child.stdin.destroyed)child.stdin.write(JSON.stringify(value)+'\n');};
       const ready=new Promise((resolve,reject)=> {
@@ -77,6 +85,11 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
           while((newline=text.indexOf('\n'))>=0) {
             const frame=text.slice(0,newline);text=text.slice(newline+1);let msg;try{msg=JSON.parse(frame);}catch{fail();return;}
             if(msg.type==='ready'&&!ready){ready=true;clearTimeout(timeout);resolve();}
+            else if(msg.type==='verified') {
+              const request=state.verifications.get(msg.requestId);
+              if(!request||typeof msg.valid!=='boolean'){fail();return;}
+              clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.valid);
+            }
             else if(msg.type==='error'){
               if(['DRIVE_LETTER_IN_USE','DRIVE_SNAPSHOT_INVALID'].includes(msg.code)){clearTimeout(timeout);reject(Object.assign(new Error(msg.code),{code:msg.code}));if(mount===state)stop();}
               else fail();return;
@@ -113,6 +126,18 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
       if(open&&await shell.openPath(mountA?'A:\\':directory))throw new Error('Explorer unavailable');return {status:'opened'};
     }catch(e){if(created)stop();throw e;}finally{busy=false;}
   }
-  return {start,stop,status:()=>({enabled:available(),active:!!mount})};
+  async function verify() {
+    const state=mount;
+    if(!state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');
+    if(mount!==state||state.stopped||state.child.stdin.destroyed)throw new Error('Preview stopped');
+    const id=crypto.randomUUID();
+    const result=await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{state.verifications.delete(id);reject(new Error('Verification timeout'));},15000);
+      state.verifications.set(id,{resolve,reject,timer});
+      state.child.stdin.write(JSON.stringify({type:'verify',requestId:id})+'\n',error=>{if(error){clearTimeout(timer);state.verifications.delete(id);reject(error);}});
+    });
+    if(mount!==state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');return result;
+  }
+  return {start,stop,verify,status:()=>({enabled:available(),active:!!mount})};
 }
-module.exports={createWindowsPreview,noLinks};
+module.exports={createWindowsPreview,noLinks,catalogDetails};

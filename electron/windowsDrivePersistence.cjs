@@ -16,7 +16,7 @@ function createPersistentWindowsDrive(options) {
   let stopped = false;
   let configured = false;
   let preferenceEpoch = 0;
-  const snapshotPath=(identity,projectId)=>path.join(root,crypto.createHash('sha256').update(JSON.stringify([identity.userId,identity.tenantId,identity.deviceId,projectId])).digest('hex')+'.json');
+  const snapshotPath=(identity,projectId)=>options.manifestFile||path.join(root,crypto.createHash('sha256').update(JSON.stringify([identity.userId,identity.tenantId,identity.deviceId,projectId])).digest('hex')+'.json');
   async function readSnapshot(identity,projectId) {
     try {
       const file=snapshotPath(identity,projectId);const stat=await fs.lstat(file);
@@ -80,6 +80,7 @@ function createPersistentWindowsDrive(options) {
         onPrepared: save,
         onReady: save,
         snapshot,
+        catalogOverride:options.catalogOverride||null,
       });
       if (stopped) { preview.stop(); return {status:'error'}; }
       // Enabling the persistent reader explicitly also enables the desktop app
@@ -134,7 +135,7 @@ function createPersistentWindowsDrive(options) {
       return {status:'opened'};
     } catch { return {status:'error'}; }
   }
-  return { start, open, disconnect, resume, shutdown, snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
+  return { start, open, disconnect, resume, shutdown, verify:()=>preview.verify(), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
     status:()=>({...preview.status(),letter:'A:',error:lastError,configured}) };
 }
 module.exports = { createPersistentWindowsDrive };
