@@ -42,6 +42,9 @@ import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPT
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
 import { CctpBulkEditDialog } from './CctpBulkEditDialog';
+import { ChampMarqueur, PastilleMarqueur } from './MarqueurRedaction';
+import { creerMarqueur } from '../../lib/marqueurRedaction';
+import type { StatutRedaction } from '../../types/dpgf';
 
 interface CCTPEditorProps {
   /** Ouvre l'import d'un fichier qui remplit le CCTP (les lignes absentes deviennent des articles). */
@@ -59,6 +62,8 @@ interface CCTPEditorProps {
   /** Données de l'opération pour les textes automatiques ({{adresse}}...). */
   contexte?: ContexteCctp;
   notify?: ProNotify;
+  /** Nom de la personne connectée, porté par les marqueurs « en cours d'édition ». */
+  auteur?: string;
 }
 
 let _uid = 0;
@@ -73,7 +78,7 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget, auteur }) => {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
@@ -134,6 +139,21 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     const copy: DPGF = JSON.parse(JSON.stringify(dpgf));
     fn(copy);
     onChange(copy);
+  };
+
+  /** Pose, change ou lève le marqueur de l'élément sélectionné (statut vide = lever). */
+  const poserMarqueur = (statut: StatutRedaction | undefined, note?: string) => {
+    if (!selection) return;
+    mutateDPGF(d => {
+      const lot = d.lots[selection.lotIdx];
+      const chap = selection.kind !== 'lot' ? lot?.chapitres[selection.chapIdx] : undefined;
+      const cible = selection.kind === 'lot' ? lot
+        : selection.kind === 'chapitre' ? chap
+          : chap && ligneAtPath(chap.lignes, selection.lignePath);
+      if (!cible) return;
+      if (!statut) delete cible.marqueur;
+      else cible.marqueur = creerMarqueur(statut, auteur?.trim() || 'Équipe', note?.trim() || undefined);
+    });
   };
 
   const toggleLot = (id: string) => setExpandedLots(prev => {
@@ -409,7 +429,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       return {
         label: 'Lot', name: `${lot.numero} — ${lot.titre}`, cctpOnly: false,
         description: (lot as any).cctpDescription ?? '', ligne: null,
-        batimentId: lot.batimentId, phaseId: lot.phaseId,
+        batimentId: lot.batimentId, phaseId: lot.phaseId, marqueur: lot.marqueur,
       };
     }
     if (selection.kind === 'chapitre') {
@@ -418,7 +438,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       return {
         label: 'Chapitre', name: `${chap.numero} — ${chap.titre}`, cctpOnly: !!chap.cctpOnly,
         description: chap.cctpDescription ?? '', ligne: null,
-        batimentId: chap.batimentId, phaseId: chap.phaseId,
+        batimentId: chap.batimentId, phaseId: chap.phaseId, marqueur: chap.marqueur,
       };
     }
     const chap = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx];
@@ -427,7 +447,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     return {
       label: 'Article', name: `${ligne.numero} — ${ligne.designation}`, cctpOnly: !!ligne.cctpOnly,
       description: ligne.cctpDescription ?? '', ligne,
-      batimentId: ligne.batimentId, phaseId: ligne.phaseId,
+      batimentId: ligne.batimentId, phaseId: ligne.phaseId, marqueur: ligne.marqueur,
     };
   };
 
@@ -787,6 +807,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   </button>
                   <span className="font-bold text-zinc-500 text-xs mr-1">{lot.numero}</span>
                   <span className="truncate text-xs font-semibold flex-1">{lot.titre || 'Lot sans titre'}</span>
+                  <PastilleMarqueur marqueur={lot.marqueur} />
                 </div>
 
                 {expandedLots.has(lot.id) && (
@@ -821,6 +842,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                           </button>
                           <span className="font-medium text-zinc-400 text-xs mr-1">{chap.numero}</span>
                           <span className="truncate text-xs flex-1">{chap.titre || 'Sans titre'}</span>
+                          <PastilleMarqueur marqueur={chap.marqueur} />
                           {chap.cctpOnly && (
                             <span className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
                               CCTP
@@ -865,6 +887,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   />
                   <span className="font-medium text-zinc-400 text-[0.6875rem] mr-1 shrink-0">{ligne.numero}</span>
                                 <span className="truncate text-[0.6875rem] flex-1">{ligne.designation}</span>
+                                <PastilleMarqueur marqueur={ligne.marqueur} />
                                 {/* Repère de provenance : article issu de la
                                     bibliothèque d'ouvrages du cabinet. */}
                                 {ligne.articleTypeId && (
@@ -1017,6 +1040,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                     placeholder="Titre…"
                   />
                 ) : null}
+
+                <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
 
                 {/* DPGF article info badge */}
                 {selection.kind === 'ligne' && !isSelCctpOnly && (() => {
