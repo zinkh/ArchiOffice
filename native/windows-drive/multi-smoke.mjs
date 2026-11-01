@@ -24,7 +24,9 @@ const make=()=>{const drive=createWindowsMultiDrive(options);controllers.push(dr
 async function settle(){await Promise.all(children.map(item=>item.exited));}
 const file=id=>'A:\\_Project-'+id+'\\_Plan.txt';
 try {
- const first=make();assert.equal((await first.start('p')).status,'opened');const source=await fs.realpath('A:\\_Project-p');
+ const first=make();assert.equal((await first.activate()).status,'opened');assert.equal(first.status().projectCount,0);assert.deepEqual(await fs.readdir('A:\\'),[]);
+ execFileSync('powershell.exe',['-NoProfile','-Command',"if (@((New-Object -ComObject Shell.Application).NameSpace(17).Items() | ForEach-Object { $_.Path }) -notcontains 'A:\\') { throw 'A: missing from This PC' }"],{timeout:15000,stdio:'pipe'});
+ assert.equal((await first.start('p')).status,'opened');const source=await fs.realpath('A:\\_Project-p');
  assert.deepEqual(await fs.readFile(file('p')),bytes.get('p'));
  const added=await first.start('q');assert.equal(added.status,'opened',JSON.stringify(added));assert.equal(first.status().projectCount,2);assert.equal(children.length,3);
  assert.deepEqual(await fs.readFile(file('q')),bytes.get('q'));assert.deepEqual(await fs.readFile(file('p')),bytes.get('p'));assert.equal(hydrates,2);

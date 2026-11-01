@@ -347,3 +347,24 @@ ordinaire modifié, conflit conservé, suppression locale non recréée et refus
 après changement de cabinet. Les tests de capture et de file d’envoi s’exécutent
 aussi sur Windows avant fabrication de l’installateur. Des essais avec les
 logiciels CAO réellement utilisés sur le poste restent nécessaires.
+
+
+### Visibilité de A: et activation depuis Réglages
+
+L’autorisation locale du poste ne monte pas à elle seule le lecteur. Dans
+Réglages, « Afficher le lecteur A: » monte désormais l’espace du cabinet même
+sans projet. L’activation est mémorisée et reconnectée au lancement Windows.
+Les projets s’ajoutent ensuite depuis Documents. Retirer le dernier projet
+laisse A: disponible ; « Déconnecter A: » arrête explicitement le montage.
+Les fichiers déposés directement à la racine ne sont pas envoyés. Les entrées
+inattendues restent conservées et peuvent bloquer une reconnexion sûre.
+
+Le fournisseur prévient le Shell de l’ajout et du retrait de son propre lecteur.
+Le test `multi-smoke.mjs` monte un A: vide et vérifie sa présence dans le namespace
+« Ce PC » du Shell Windows avant d’y ajouter des projets. Le client remonte aussi
+sa version et un motif d’indisponibilité (plateforme, désactivation ou composant
+natif absent), sans exposer de chemin privé.
+
+Une fusion GitHub ne remplace pas le client installé : il faut installer une
+version Windows qui embarque ces changements. Les artefacts de PR sont des
+installateurs de test et ne publient pas de mise à jour automatique.
