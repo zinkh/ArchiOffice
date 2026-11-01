@@ -144,16 +144,55 @@ struct DriveA {
   }
 };
 
+void validateRoot(fs::path const& root,std::string const& key) {
+  alignas(CF_SYNC_ROOT_STANDARD_INFO) BYTE buffer[sizeof(CF_SYNC_ROOT_STANDARD_INFO)+128]{};DWORD returned=0;
+  check(CfGetSyncRootInfoByPath(root.c_str(),CF_SYNC_ROOT_INFO_STANDARD,buffer,sizeof(buffer),&returned));
+  auto info=reinterpret_cast<CF_SYNC_ROOT_STANDARD_INFO*>(buffer);
+  if(info->SyncRootIdentityLength!=key.size()||std::string(reinterpret_cast<char*>(info->SyncRootIdentity),info->SyncRootIdentityLength)!=key)
+    throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+}
+// Validate attributes and opaque identity without hydrating or rewriting bytes.
+void validateExisting(fs::path const& file,Entry const& entry) {
+  HANDLE handle=CreateFileW(file.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS,nullptr);
+  if(handle==INVALID_HANDLE_VALUE)throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+  try {
+    BY_HANDLE_FILE_INFORMATION attributes{};LARGE_INTEGER size{};
+    if(!GetFileInformationByHandle(handle,&attributes)||(!entry.folder&&!GetFileSizeEx(handle,&size)))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+    if(!!(attributes.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)!=entry.folder||attributes.nNumberOfLinks>1
+      ||(!entry.folder&&size.QuadPart!=entry.size))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+    alignas(CF_PLACEHOLDER_STANDARD_INFO) BYTE buffer[sizeof(CF_PLACEHOLDER_STANDARD_INFO)+128]{};DWORD returned=0;
+    check(CfGetPlaceholderInfo(handle,CF_PLACEHOLDER_INFO_STANDARD,buffer,sizeof(buffer),&returned));
+    auto info=reinterpret_cast<CF_PLACEHOLDER_STANDARD_INFO*>(buffer);
+    if(info->FileIdentityLength!=entry.key.size()||std::string(reinterpret_cast<char*>(info->FileIdentity),info->FileIdentityLength)!=entry.key
+      ||(!entry.folder&&(info->ModifiedDataSize.QuadPart!=0||info->InSyncState!=CF_IN_SYNC_STATE_IN_SYNC)))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+    CloseHandle(handle);
+  } catch(...) {CloseHandle(handle);throw;}
+}
+
 int wmain(int argc,wchar_t** argv) {
   bool connected=false;
+  bool resuming=false;
   DriveA drive;
   try {
     winrt::init_apartment();
     if(argc==3&&std::wstring(argv[1])==L"--unregister") {check(CfUnregisterSyncRoot(argv[2]));return 0;}
     std::string text;if(!line(text))return 1;
     auto init=JsonObject::Parse(winrt::to_hstring(text));
+    if(init.GetNamedString(L"type")==L"map") {
+      fs::path base(std::wstring(init.GetNamedString(L"root")));
+      if(!base.is_absolute()||!fs::is_directory(base))throw std::runtime_error("invalid namespace");
+      fs::path current=base.root_path();for(auto const& part:base.relative_path()){current/=part;DWORD a=GetFileAttributesW(current.c_str());if(a==INVALID_FILE_ATTRIBUTES||(a&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("unsafe namespace");}
+      drive.mount(base,std::wstring(init.GetNamedString(L"previousRoot",L"")));
+      emit("{\"type\":\"ready\"}");
+      while(line(text))if(JsonObject::Parse(winrt::to_hstring(text)).GetNamedString(L"type")==L"stop")break;
+      emit("{\"type\":\"stopped\"}");return 0;
+    }
     if(init.GetNamedString(L"type")!=L"init")throw std::runtime_error("init required");
-    fs::path root(std::wstring(init.GetNamedString(L"root")));if(!root.is_absolute()||!fs::is_directory(root)||!fs::is_empty(root))throw std::runtime_error("fresh root required");
+    bool resume=init.GetNamedBoolean(L"resume",false),initializing=init.GetNamedBoolean(L"initializing",false);
+    resuming=resume;
+    std::string rootKey=winrt::to_string(init.GetNamedString(L"rootKey",L""));
+    if(resume&&!hexKey(rootKey))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+    fs::path root(std::wstring(init.GetNamedString(L"root")));if(!root.is_absolute()||!fs::is_directory(root)||(!resume&&!fs::is_empty(root)))throw std::runtime_error("fresh root required");
     // Refuse reparse points anywhere from the volume root down.
     fs::path current=root.root_path();for(auto const& part:root.relative_path()){current/=part;DWORD a=GetFileAttributesW(current.c_str());if(a==INVALID_FILE_ATTRIBUTES||(a&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("unsafe root");}
     auto array=init.GetNamedArray(L"entries");if(array.Size()>256)throw std::runtime_error("too many entries");
@@ -169,12 +208,26 @@ int wmain(int argc,wchar_t** argv) {
       known.emplace(e.path,e.folder);entries.push_back(e);
     }
     CF_SYNC_REGISTRATION reg{};reg.StructSize=sizeof(reg);reg.ProviderName=L"ArchiOffice Drive Preview";reg.ProviderVersion=L"0.1";
+    if(!rootKey.empty()){reg.SyncRootIdentity=rootKey.data();reg.SyncRootIdentityLength=static_cast<DWORD>(rootKey.size());}
     CF_SYNC_POLICIES policies{};policies.StructSize=sizeof(policies);policies.Hydration.Primary=CF_HYDRATION_POLICY_FULL;policies.Population.Primary=CF_POPULATION_POLICY_ALWAYS_FULL;
-    check(CfRegisterSyncRoot(root.c_str(),&reg,&policies,CF_REGISTER_FLAG_NONE));
+    policies.InSync=CF_INSYNC_POLICY_TRACK_FILE_LAST_WRITE_TIME;
+    if(resume) {
+      try {validateRoot(root,rootKey);}
+      catch(...) {if(!initializing||!fs::is_empty(root))throw;check(CfRegisterSyncRoot(root.c_str(),&reg,&policies,CF_REGISTER_FLAG_NONE));validateRoot(root,rootKey);}
+      // A missing file, foreign placeholder or local edit blocks reconnection.
+      // An interrupted first population may create only its missing entries.
+      for(auto const& e:entries) {
+        auto file=root/fs::path(e.path);DWORD attributes=GetFileAttributesW(file.c_str());
+        if(attributes==INVALID_FILE_ATTRIBUTES) {
+          if(!initializing||(GetLastError()!=ERROR_FILE_NOT_FOUND&&GetLastError()!=ERROR_PATH_NOT_FOUND))throw std::runtime_error("DRIVE_SNAPSHOT_INVALID");
+        } else validateExisting(file,e);
+      }
+    } else check(CfRegisterSyncRoot(root.c_str(),&reg,&policies,CF_REGISTER_FLAG_NONE));
     CF_CALLBACK_REGISTRATION callbacks[]={{CF_CALLBACK_TYPE_FETCH_DATA,fetch},{CF_CALLBACK_TYPE_NOTIFY_DELETE,denyDelete},{CF_CALLBACK_TYPE_NOTIFY_RENAME,denyRename},CF_CALLBACK_REGISTRATION_END};
     check(CfConnectSyncRoot(root.c_str(),callbacks,nullptr,CF_CONNECT_FLAG_BLOCK_SELF_IMPLICIT_HYDRATION,&connection));connected=true;
     for(auto const& e:entries) {
       fs::path relative(e.path);auto base=root/relative.parent_path();auto name=relative.filename().wstring();
+      if(resume&&GetFileAttributesW((root/relative).c_str())!=INVALID_FILE_ATTRIBUTES)continue;
       CF_PLACEHOLDER_CREATE_INFO p{};p.RelativeFileName=name.c_str();p.FileIdentity=e.key.data();p.FileIdentityLength=static_cast<DWORD>(e.key.size());
       p.FsMetadata.FileSize.QuadPart=e.size;p.FsMetadata.BasicInfo.FileAttributes=e.folder?FILE_ATTRIBUTE_DIRECTORY:FILE_ATTRIBUTE_READONLY|FILE_ATTRIBUTE_ARCHIVE;
       GetSystemTimeAsFileTime(reinterpret_cast<FILETIME*>(&p.FsMetadata.BasicInfo.CreationTime));p.FsMetadata.BasicInfo.LastWriteTime=p.FsMetadata.BasicInfo.CreationTime;
@@ -182,11 +235,7 @@ int wmain(int argc,wchar_t** argv) {
       DWORD processed=0;check(CfCreatePlaceholders(base.c_str(),&p,1,CF_CREATE_FLAG_STOP_ON_ERROR,&processed));check(p.Result);
     }
     if(init.GetNamedBoolean(L"mountA",false)) {
-      try {drive.mount(root,std::wstring(init.GetNamedString(L"previousRoot",L"")));}
-      catch(std::runtime_error const& e) {
-        if(std::string(e.what())=="DRIVE_LETTER_IN_USE")emit("{\"type\":\"error\",\"code\":\"DRIVE_LETTER_IN_USE\"}");
-        throw;
-      }
+      drive.mount(root,std::wstring(init.GetNamedString(L"previousRoot",L"")));
     }
     emit("{\"type\":\"ready\"}");
     while(line(text)) {
@@ -202,6 +251,8 @@ int wmain(int argc,wchar_t** argv) {
   }catch(...) {
     stopping=true;{std::lock_guard lock(stateMutex);for(auto const& p:pending)p.second->cv.notify_one();}
     if(connected)CfDisconnectSyncRoot(connection);
-    auto hr=winrt::to_hresult();emit("{\"type\":\"error\",\"code\":\"NATIVE_FAILURE\",\"hresult\":"+std::to_string(static_cast<unsigned long>(hr))+"}");return 1;
+    auto hr=winrt::to_hresult();std::string code=resuming?"DRIVE_SNAPSHOT_INVALID":"NATIVE_FAILURE";
+    try {throw;}catch(std::runtime_error const& e){if(std::string(e.what())=="DRIVE_LETTER_IN_USE"||std::string(e.what())=="DRIVE_SNAPSHOT_INVALID")code=e.what();}catch(...){}
+    emit("{\"type\":\"error\",\"code\":\""+code+"\",\"hresult\":"+std::to_string(static_cast<unsigned long>(hr))+"}");return 1;
   }
 }

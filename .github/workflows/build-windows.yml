@@ -1,6 +1,14 @@
 name: Build Windows installer
 
 on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'electron/**'
+      - 'native/windows-drive/**'
+      - 'server/desktop/**'
+      - 'src/components/WindowsDrivePreview.tsx'
+      - '.github/workflows/build-windows.yml'
   workflow_dispatch:
     inputs:
       version:
@@ -14,6 +22,8 @@ on:
 jobs:
   build-electron-windows:
     name: Build Electron NSIS installer
+    # Only trusted same-repository PRs can access the private package registry.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
     # electron-builder publishes to GitHub Releases (electron-builder.yml's
     # `publish` block) using this job's own default GITHUB_TOKEN — the repo
@@ -66,11 +76,21 @@ jobs:
           else
             latest=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName || true)
             if [ -z "$latest" ]; then
-              echo "::warning::No published release found, keeping package.json version."
-              exit 0
+              echo "::warning::No published release found, using package.json as the version base."
+              latest="v$(node -p 'require("./package.json").version')"
             fi
             version="${latest#v}"
             source="latest release $latest"
+          fi
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            # A test installer must not impersonate an already released version.
+            # Bump the stable patch before adding the unique preview suffix.
+            if [[ "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))-drive.${GITHUB_RUN_NUMBER}"
+            else
+              echo "::error::Cannot derive a preview version from $version"
+              exit 1
+            fi
           fi
           npm version --no-git-tag-version --allow-same-version "$version"
           echo "Building version $version (from $source)"
@@ -147,7 +167,13 @@ jobs:
         # push or manual dispatch (dev/test builds) must never land there:
         # onTagOrDraft only publishes when the ref is a tag, else it's the
         # same "never" as before.
-        run: npx electron-builder --win --x64 --publish onTagOrDraft
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
+            npx electron-builder --win --x64 --publish never
+          else
+            npx electron-builder --win --x64 --publish onTagOrDraft
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

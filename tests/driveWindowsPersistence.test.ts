@@ -33,11 +33,11 @@ it('mounts A: on explicit activation and persists identifiers without credential
  const stored=await fs.readFile(config.stateFile,'utf8');expect(stored).not.toContain('never-persist');expect(JSON.parse(stored)).toMatchObject({identity,projectId:'project'});
  expect(drive.status()).toMatchObject({active:true,configured:true,letter:'A:'});
 });
-it('reconnects after a restart without opening Explorer and retains the previous snapshot',async()=>{
+it('reconnects the same directory after a restart without opening Explorer or fetching a catalog',async()=>{
  const first=make();await first.start('project');const saved=JSON.parse(await fs.readFile(config.stateFile,'utf8'));first.shutdown();
  await new Promise(resolve=>setImmediate(resolve));config.shell.openPath.mockClear();
  const second=make();second.resume();await vi.waitFor(()=>expect(second.status().active).toBe(true));
- expect(config.shell.openPath).not.toHaveBeenCalled();expect(frames.filter(f=>f.type==='init')[1].previousRoot).toBe(saved.directory);
+ expect(config.shell.openPath).not.toHaveBeenCalled();expect(frames.filter(f=>f.type==='init')[1]).toMatchObject({previousRoot:saved.directory,root:saved.directory,resume:true,initializing:false});expect(config.agent.windowsPreview).toHaveBeenCalledTimes(1);
  await expect(fs.stat(saved.directory)).resolves.toBeDefined();
 });
 it.each(['expired','tenant','device'])('does not restore a saved mount for %s authorization',async(mode)=>{
@@ -76,4 +76,34 @@ it('does not reconnect when the user disconnects while startup is waiting for th
  await next.disconnect();release(identity);await new Promise(resolve=>setTimeout(resolve,30));
  expect(config.spawn).not.toHaveBeenCalled();expect(next.status().active).toBe(false);
  await expect(fs.stat(config.stateFile)).rejects.toMatchObject({code:'ENOENT'});
+});
+it('reuses the project directory even after explicit disconnect and selecting it again',async()=>{
+ const drive=make();await drive.start('p');const saved=JSON.parse(await fs.readFile(config.stateFile,'utf8'));await drive.disconnect();
+ expect(await drive.start('p')).toEqual({status:'opened'});expect(JSON.parse(await fs.readFile(config.stateFile,'utf8')).directory).toBe(saved.directory);
+ expect(config.agent.windowsPreview).toHaveBeenCalledTimes(1);
+});
+it('persists separate stable directories for two projects without mounting them together',async()=>{
+ const drive=make();await drive.start('p');const first=JSON.parse(await fs.readFile(config.stateFile,'utf8'));await drive.disconnect();
+ await drive.start('second');const second=JSON.parse(await fs.readFile(config.stateFile,'utf8'));expect(first.directory).not.toBe(second.directory);await drive.disconnect();
+ await drive.start('p');expect(JSON.parse(await fs.readFile(config.stateFile,'utf8')).directory).toBe(first.directory);expect(config.agent.windowsPreview).toHaveBeenCalledTimes(2);
+});
+it.each(['corrupt','catalog','missing-directory'])('blocks a %s saved project without silently changing its path',async(mode)=>{
+ const drive=make();await drive.start('p');await drive.disconnect();config.spawn.mockClear();config.agent.windowsPreview.mockClear();
+ const manifests=(await fs.readdir(config.root)).filter((file:string)=>file.endsWith('.json'));const file=path.join(config.root,manifests[0]);const saved=JSON.parse(await fs.readFile(file,'utf8'));
+ if(mode==='corrupt')await fs.writeFile(file,'bad json');
+ if(mode==='catalog')await fs.writeFile(file,JSON.stringify({...saved,catalog:[{path:'_Tampered',key:'a'.repeat(64),folder:true,size:0}]}));
+ if(mode==='missing-directory')await fs.rm(saved.directory,{recursive:true});
+ expect((await drive.start('p')).status).toBe('error');expect(config.spawn).not.toHaveBeenCalled();expect(config.agent.windowsPreview).not.toHaveBeenCalled();
+});
+it('records native completion so interrupted initial populations can be resumed in place',async()=>{
+ const drive=make();await drive.start('p');await drive.disconnect();const file=path.join(config.root,(await fs.readdir(config.root)).find((name:string)=>name.endsWith('.json'))!);
+ const saved=JSON.parse(await fs.readFile(file,'utf8'));expect(saved.nativeReady).toBe(true);
+ await fs.writeFile(file,JSON.stringify({...saved,nativeReady:false}));await drive.start('p');
+ expect(frames.filter(f=>f.type==='init').at(-1)).toMatchObject({root:saved.directory,resume:true,initializing:true});
+});
+it('blocks a lost manifest for the last active project rather than allocating another directory',async()=>{
+ const first=make();await first.start('p');first.shutdown();await new Promise(resolve=>setImmediate(resolve));
+ const file=path.join(config.root,(await fs.readdir(config.root)).find((name:string)=>name.endsWith('.json'))!);await fs.rm(file);
+ config.spawn.mockClear();config.agent.windowsPreview.mockClear();const next=make();
+ expect(await next.start('p')).toMatchObject({status:'error',code:'DRIVE_SNAPSHOT_INVALID'});expect(config.spawn).not.toHaveBeenCalled();expect(config.agent.windowsPreview).not.toHaveBeenCalled();
 });

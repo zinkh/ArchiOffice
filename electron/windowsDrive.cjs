@@ -21,7 +21,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
     const timer=setTimeout(()=>old.child.kill(),6000);timer.unref();old.child.once('exit',()=>clearTimeout(timer));
     old.reject?.(new Error('Preview stopped'));
   }
-  async function start(projectId,{open=true,previousRoot='',onPrepared=async()=>{}}={}) {
+  async function start(projectId,{open=true,previousRoot='',onPrepared=async()=>{},onReady=async()=>{},snapshot=null}={}) {
     if(!available()||busy||typeof projectId!=='string'||!/^[a-zA-Z0-9_-]{1,200}$/.test(projectId))throw new Error('Preview unavailable');
     busy=true;let created=false;
     const generation=epoch;
@@ -34,9 +34,11 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
         if(mount.projectId!==projectId)throw new Error('Stop previous preview first');
         if(open&&await shell.openPath(mountA?'A:\\':mount.root))throw new Error('Explorer unavailable');return {status:'opened'};
       }
-      const catalog=await agent.windowsPreview('catalog',{projectId});
+      if(snapshot&&(!same(snapshot.identity,active)||snapshot.projectId!==projectId
+        ||typeof snapshot.directory!=='string'||path.dirname(snapshot.directory)!==path.resolve(root)))throw new Error('Snapshot refused');
+      const catalog=snapshot?{identity:snapshot.identity,entries:snapshot.catalog}:await agent.windowsPreview('catalog',{projectId});
       if(!same(catalog?.identity,active)||!same(await vault(),active)||!Array.isArray(catalog.entries)||catalog.entries.length>256)throw new Error('Catalog refused');
-      const files=new Map();const paths=new Set();
+      const files=new Map();const paths=new Set();const savedEntries=[];
       const entries=catalog.entries.map(e=> {
         if(typeof e.path!=='string'||e.path.length>300||!/^_[^<>:"/|?*\x00-\x1f]+$/.test(e.path)||e.path.split('\\').some(p=>!p||p==='.'||p==='..'||/[. ]$/.test(p))
           ||typeof e.key!=='string'||!/^[a-f0-9]{64}$/.test(e.key)||typeof e.folder!=='boolean'||!Number.isSafeInteger(e.size)||e.size<0||e.size>50*1024*1024)throw new Error('Invalid catalog');
@@ -45,14 +47,21 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
           const m=e.meta;
           if(!m||m.size!==e.size||typeof m.nodeId!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!Number.isSafeInteger(m.version)||m.version<1
             ||(m.sha256!==null&&!/^[a-f0-9]{64}$/.test(m.sha256))||!isSafeToOpen(e.path))throw new Error('Invalid file');
-          if(files.has(e.key))throw new Error('Duplicate identity');files.set(e.key,m);
+          if(files.has(e.key))throw new Error('Duplicate identity');
+          if(typeof m.name!=='string'||m.name.length>512)throw new Error('Invalid name');
+          files.set(e.key,{nodeId:m.nodeId,version:m.version,size:m.size,sha256:m.sha256,name:m.name});
         }
-        return {path:e.path,key:e.key,folder:e.folder,size:e.size};
+        const entry={path:e.path,key:e.key,folder:e.folder,size:e.size};
+        savedEntries.push({...entry,...(!e.folder?{meta:files.get(e.key)}:{})});return entry;
       });
       await fs.mkdir(root,{recursive:true,mode:0o700});await noLinks(root,root);
       if(generation!==epoch||!same(await vault(),active))throw new Error('Access refused');
-      const directory=await fs.mkdtemp(path.join(root,hash([active.userId,active.tenantId]).slice(0,12)+'-'));
-      await onPrepared({identity:active,projectId,directory});
+      const rootKey=hash([active.userId,active.tenantId,active.deviceId,projectId,savedEntries]);
+      if(snapshot&&snapshot.rootKey!==rootKey)throw new Error('Snapshot identity refused');
+      const directory=snapshot?snapshot.directory:await fs.mkdtemp(path.join(root,hash([active.userId,active.tenantId]).slice(0,12)+'-'));
+      await noLinks(root,directory);
+      const manifest={identity:active,projectId,directory,rootKey,catalog:savedEntries,nativeReady:snapshot?.nativeReady===true};
+      await onPrepared(manifest);
       if(generation!==epoch)throw new Error('Preview stopped');
       const child=spawn(executable,[],{stdio:['pipe','pipe','ignore'],windowsHide:true,env:agentEnvironment(environment)});
       const state={child,identity:active,projectId,root:directory,stopped:false,lease:null,reject:null};mount=state;created=true;
@@ -69,7 +78,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
             const frame=text.slice(0,newline);text=text.slice(newline+1);let msg;try{msg=JSON.parse(frame);}catch{fail();return;}
             if(msg.type==='ready'&&!ready){ready=true;clearTimeout(timeout);resolve();}
             else if(msg.type==='error'){
-              if(msg.code==='DRIVE_LETTER_IN_USE'){clearTimeout(timeout);reject(Object.assign(new Error('A: already in use'),{code:msg.code}));if(mount===state)stop();}
+              if(['DRIVE_LETTER_IN_USE','DRIVE_SNAPSHOT_INVALID'].includes(msg.code)){clearTimeout(timeout);reject(Object.assign(new Error(msg.code),{code:msg.code}));if(mount===state)stop();}
               else fail();return;
             }
             else if(msg.type==='hydrate') {
@@ -92,7 +101,9 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
         });
       });
       // Catalog excludes tokens; the native helper never receives credentials.
-      send({type:'init',root:directory,entries,...(mountA?{mountA:true,previousRoot}:{})});await ready;
+      send({type:'init',root:directory,entries,rootKey,resume:!!snapshot,initializing:!!snapshot&&!manifest.nativeReady,...(mountA?{mountA:true,previousRoot}:{})});await ready;
+      if(state.stopped||!same(await vault(),active))throw new Error('Access refused');
+      await onReady({...manifest,nativeReady:true});
       if(state.stopped||!same(await vault(),active))throw new Error('Access refused');
       let checking=false;
       state.lease=setInterval(async()=> {
