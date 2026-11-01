@@ -70,7 +70,10 @@ export const PROJECT_WORK_TOOLS: FunctionDeclarationLike[] = [
       "add_lignes : lot (numéro, ex. « 05 »), chapitre (numéro ou titre, défaut « DESCRIPTION DES OUVRAGES »), lignes = [{designation, unite, quantite, prix_unitaire?, numero?}] ; jusqu'à 300 lignes par appel, ce qui permet d'importer un DPGF entier lot par lot ; sans numero, les lignes sont numérotées « <chapitre>.<n> » à la suite. " +
       "Rejouer add_lignes AJOUTE de nouveau les lignes : pour refaire un import ou écraser une ligne vide « Nouvel article », passe replace_existing: true (remplace les lignes du chapitre, sauf celles qui portent un texte de CCTP). " +
       "update_ligne : id ou numero (+ lot si le numéro n'est pas unique), puis designation, unite, quantite et/ou prix_unitaire. " +
-      "delete_ligne : id ou numero, avec confirmation en deux temps. Les chapitres réservés au CCTP et les textes de CCTP ne sont jamais modifiés par cet outil.",
+      "delete_ligne : id ou numero, avec confirmation en deux temps. Les chapitres réservés au CCTP et les textes de CCTP ne sont jamais modifiés par cet outil. " +
+      "MARQUEUR DE RÉDACTION : une ligne peut porter un marqueur « incomplet » (à compléter) ou « en_cours » (quelqu'un est en train de l'éditer). " +
+      "Une ligne « en_cours » posée par une PERSONNE n'est ni modifiée, ni supprimée, ni remplacée : l'outil répond 409 ; dis-le à l'utilisateur, ne contourne pas. N'utilise forcer: true que sur sa demande explicite. " +
+      "update_ligne accepte marqueur: 'incomplet' | 'en_cours' | 'aucun' (+ note_marqueur : ce qui manque ou ce qui est en cours) pour signaler à l'équipe qu'une ligne reste à finir, ou lever ton propre marqueur.",
     parametersJsonSchema: {
       type: 'object',
       properties: {
@@ -82,7 +85,10 @@ export const PROJECT_WORK_TOOLS: FunctionDeclarationLike[] = [
           type: 'array', description: 'add_lignes : 300 lignes au plus',
           items: { type: 'object', properties: { designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number', description: 'HT, 0 par défaut' }, numero: { type: 'string', description: 'Facultatif : sinon numérotation automatique' } }, required: ['designation', 'quantite'] },
         },
-        replace_existing: { type: 'boolean', description: 'add_lignes : remplace les lignes existantes du chapitre (hors lignes portant un texte de CCTP)' },
+        replace_existing: { type: 'boolean', description: 'add_lignes : remplace les lignes existantes du chapitre (hors lignes portant un texte de CCTP ou en cours d\'édition par une personne)' },
+        marqueur: { type: 'string', enum: ['incomplet', 'en_cours', 'aucun'], description: "update_ligne : pose ('incomplet', 'en_cours') ou lève ('aucun') le marqueur de rédaction de la ligne" },
+        note_marqueur: { type: 'string', description: 'update_ligne : précision du marqueur (ce qui manque, ce qui est en cours), 300 caractères' },
+        forcer: { type: 'boolean', description: "Seulement sur demande explicite de l'utilisateur : passe outre un marqueur « en cours d'édition » posé par une personne" },
         id: { type: 'string', description: 'update_ligne / delete_ligne : identifiant de la ligne (read_dpgf)' },
         numero: { type: 'string', description: 'update_ligne / delete_ligne : numéro de la ligne' },
         designation: { type: 'string' }, unite: { type: 'string' }, quantite: { type: 'number' }, prix_unitaire: { type: 'number' },
@@ -587,10 +593,10 @@ async function manageDpgf(request: ToolRequest, projectId: string, args: Json): 
     const lignes = Array.isArray(args.lignes) ? args.lignes.filter((x: unknown) => x && typeof x === 'object') : [];
     if (!lignes.length) return failure('lignes est requis pour add_lignes.');
     if (lignes.length > MAX_DPGF_LIGNES) return failure(`${lignes.length} lignes en un appel : le maximum est ${MAX_DPGF_LIGNES}. Découpe l'import en plusieurs appels.`);
-    body = { action, lot: text(args.lot), chapitre: text(args.chapitre) || undefined, lignes, replace_existing: args.replace_existing === true };
+    body = { action, lot: text(args.lot), chapitre: text(args.chapitre) || undefined, lignes, replace_existing: args.replace_existing === true, forcer: args.forcer === true || undefined };
   } else {
-    body = { action, id: text(args.id) || undefined, numero: text(args.numero) || undefined, lot: text(args.lot) || undefined };
-    if (action === 'update_ligne') for (const k of ['designation', 'unite', 'quantite', 'prix_unitaire']) if (args[k] !== undefined) body[k] = args[k];
+    body = { action, id: text(args.id) || undefined, numero: text(args.numero) || undefined, lot: text(args.lot) || undefined, forcer: args.forcer === true || undefined };
+    if (action === 'update_ligne') for (const k of ['designation', 'unite', 'quantite', 'prix_unitaire', 'marqueur', 'note_marqueur']) if (args[k] !== undefined) body[k] = args[k];
   }
 
   if (action === 'delete_ligne' && args.confirm !== true) {

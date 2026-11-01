@@ -34,6 +34,7 @@ import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, typ
 import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
 import { apiFetch } from '../../lib/api';
+import { useUser } from '../../UserContext';
 import { validateProDocument } from '../../lib/proValidation';
 import { useConfirmDialog } from '../ui/ConfirmDialog';
 import { useToastWithUndo } from '../../hooks/useToastWithUndo';
@@ -97,6 +98,7 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 
 export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte, onLotsChanged }) => {
   const { t } = useTranslation();
+  const { currentUser } = useUser();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
   const [versions, setVersions] = useState<DpgfVersion[] | null>(null);
   const { confirm: confirmAction, dialog: confirmDialog } = useConfirmDialog();
@@ -802,7 +804,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
                 Chargement…
               </div>
             ) : dpgf ? (
-              <CCTPEditor searchTarget={cibleRecherche} onImportDocument={() => setImportDocCible('dpgf')} dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} />
+              <CCTPEditor searchTarget={cibleRecherche} onImportDocument={() => setImportDocCible('dpgf')} dpgf={dpgf} onChange={editDpgf} showTree={showTree} onToggleTree={toggleTree} onDropExternal={draggedLigne ? handleDropExternalCctp : undefined} projectName={projectName} contexte={contexte} notify={notify} auteur={currentUser?.name} />
             ) : null}
           </div>
           {splitView && (

@@ -34,13 +34,17 @@ import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { chargerEtatArbre, ouvertsSauf, repliesParmi, sauverEtatArbre } from '../../lib/cctpTreeState';
 import { appliquerCouleur, basculerBalise, contientMiseEnForme, type BaliseRiche, type EditionTexte } from '../../lib/cctpRichText';
 import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
-import { CctpExportLibraryDialog } from './CctpExportLibraryDialog';
+import { CctpExportLibraryDialog, type ResultatExport } from './CctpExportLibraryDialog';
+import { elementsAExporter } from './cctpExportOps';
 import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog';
-import { ajouterClause, estClause, type ExportBibliotheque } from '../../lib/bibliothequeClauses';
+import { ajouterClause, estClause } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey } from './treeOps';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
 import { CctpBulkEditDialog } from './CctpBulkEditDialog';
+import { ChampMarqueur, PastilleMarqueur } from './MarqueurRedaction';
+import { creerMarqueur } from '../../lib/marqueurRedaction';
+import type { StatutRedaction } from '../../types/dpgf';
 
 interface CCTPEditorProps {
   /** Ouvre l'import d'un fichier qui remplit le CCTP (les lignes absentes deviennent des articles). */
@@ -58,6 +62,8 @@ interface CCTPEditorProps {
   /** Données de l'opération pour les textes automatiques ({{adresse}}...). */
   contexte?: ContexteCctp;
   notify?: ProNotify;
+  /** Nom de la personne connectée, porté par les marqueurs « en cours d'édition ». */
+  auteur?: string;
 }
 
 let _uid = 0;
@@ -72,7 +78,7 @@ function flattenCctpLignes(lignes: Ligne[], prefix: number[] = [], depth = 0): A
 
 type Selection = HierarchySelection;
 
-export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget }) => {
+export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget, auteur }) => {
   const { t } = useTranslation();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
@@ -133,6 +139,21 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     const copy: DPGF = JSON.parse(JSON.stringify(dpgf));
     fn(copy);
     onChange(copy);
+  };
+
+  /** Pose, change ou lève le marqueur de l'élément sélectionné (statut vide = lever). */
+  const poserMarqueur = (statut: StatutRedaction | undefined, note?: string) => {
+    if (!selection) return;
+    mutateDPGF(d => {
+      const lot = d.lots[selection.lotIdx];
+      const chap = selection.kind !== 'lot' ? lot?.chapitres[selection.chapIdx] : undefined;
+      const cible = selection.kind === 'lot' ? lot
+        : selection.kind === 'chapitre' ? chap
+          : chap && ligneAtPath(chap.lignes, selection.lignePath);
+      if (!cible) return;
+      if (!statut) delete cible.marqueur;
+      else cible.marqueur = creerMarqueur(statut, auteur?.trim() || 'Équipe', note?.trim() || undefined);
+    });
   };
 
   const toggleLot = (id: string) => setExpandedLots(prev => {
@@ -344,16 +365,22 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   };
 
   // ── Export vers la bibliothèque ───────────────────────────────────────────
-  const exportInitial = (sel: Selection, data: NonNullable<ReturnType<typeof getSelectedData>>): ExportBibliotheque => {
-    if (sel.kind === 'ligne' && data.ligne) {
-      return {
-        type: 'ouvrage', designation: data.ligne.designation, unite: data.ligne.unite,
-        prix_unitaire: data.ligne.prixUnitaire, description: data.description,
-      };
+  // Les ouvrages exportés sont reliés à leur article (`articleTypeId`) : les prix
+  // d'offres pourront remonter vers eux, et un second export les écarte d'office.
+  const finirExportBibliotheque = (res: ResultatExport) => {
+    const liens = res.crees.filter(c => c.type === 'ouvrage');
+    if (liens.length) {
+      mutateDPGF(d => {
+        for (const c of liens) {
+          const k = parseRowKey(c.cle);
+          if (k?.kind !== 'ligne') continue;
+          const l = ligneAtPath(d.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
+          if (l && !l.articleTypeId) l.articleTypeId = c.id;
+        }
+      });
     }
-    const lot = dpgf.lots[sel.lotIdx];
-    const titre = sel.kind === 'chapitre' ? lot?.chapitres[sel.chapIdx]?.titre : lot?.titre;
-    return { type: 'clause', designation: titre ?? '', description: data.description };
+    notify?.(t('pro_cctp_export_library_done', { created: res.crees.length, existing: res.existants.length, errors: res.erreurs.length }),
+      { type: res.erreurs.length ? 'error' : 'success' });
   };
 
   // ── Rédaction IA d'un poste ───────────────────────────────────────────────
@@ -402,7 +429,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       return {
         label: 'Lot', name: `${lot.numero} — ${lot.titre}`, cctpOnly: false,
         description: (lot as any).cctpDescription ?? '', ligne: null,
-        batimentId: lot.batimentId, phaseId: lot.phaseId,
+        batimentId: lot.batimentId, phaseId: lot.phaseId, marqueur: lot.marqueur,
       };
     }
     if (selection.kind === 'chapitre') {
@@ -411,7 +438,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       return {
         label: 'Chapitre', name: `${chap.numero} — ${chap.titre}`, cctpOnly: !!chap.cctpOnly,
         description: chap.cctpDescription ?? '', ligne: null,
-        batimentId: chap.batimentId, phaseId: chap.phaseId,
+        batimentId: chap.batimentId, phaseId: chap.phaseId, marqueur: chap.marqueur,
       };
     }
     const chap = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx];
@@ -420,7 +447,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     return {
       label: 'Article', name: `${ligne.numero} — ${ligne.designation}`, cctpOnly: !!ligne.cctpOnly,
       description: ligne.cctpDescription ?? '', ligne,
-      batimentId: ligne.batimentId, phaseId: ligne.phaseId,
+      batimentId: ligne.batimentId, phaseId: ligne.phaseId, marqueur: ligne.marqueur,
     };
   };
 
@@ -681,7 +708,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     { id: 'bulk', label: t('pro_cctp_bulk_title'), icon: <IconAdjustmentsHorizontal size={16} />, mobile: true, groupStart: true, onClick: () => setShowBulk(true), disabled: !multi, hint: multi ? undefined : t('pro_cctp_bulk_hint_select') },
     { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, shortcut: 'Ctrl+C', onClick: copier, disabled: !selection, hint: t('pro_copy_articles_only') },
     { id: 'paste', label: t('pro_paste'), icon: <IconClipboard size={16} />, iconOnly: true, shortcut: 'Ctrl+V', onClick: coller, disabled: !peutColler },
-    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection || multi },
+    { id: 'export-library', label: t('pro_cctp_export_library'), icon: <IconDatabaseExport size={16} />, onClick: () => setShowExportLibrary(true), disabled: !selection },
     { id: 'duplicate', label: t('pro_duplicate'), icon: <IconCopyPlus size={16} />, shortcut: 'Ctrl+D', mobile: true, onClick: dupliquer, disabled: !selection },
     { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !canDeleteSelection, hint: canDeleteSelection ? undefined : t('pro_cctp_delete_hint') },
   ];
@@ -711,23 +738,11 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         />
       )}
 
-      {showExportLibrary && selection && selData && (
+      {showExportLibrary && selection && (
         <CctpExportLibraryDialog
-          peutEtreOuvrage={selection.kind === 'ligne'}
-          initial={exportInitial(selection, selData)}
+          construire={avecSous => elementsAExporter(dpgf.lots, clesActives, { avecSousElements: avecSous })}
           onClose={() => setShowExportLibrary(false)}
-          onDone={(article, type) => {
-            setShowExportLibrary(false);
-            // L'ouvrage exporté est lié à son article : les prix d'offres
-            // pourront remonter vers lui, comme pour un article inséré.
-            if (type === 'ouvrage' && selection.kind === 'ligne') {
-              mutateDPGF(d => {
-                const l = ligneAtPath(d.lots[selection.lotIdx].chapitres[selection.chapIdx].lignes, selection.lignePath);
-                if (l && !l.articleTypeId) l.articleTypeId = article.id;
-              });
-            }
-            notify?.(t(type === 'clause' ? 'pro_cctp_export_library_done_clause' : 'pro_cctp_export_library_done_ouvrage', { nom: article.designation }), { type: 'success' });
-          }}
+          onDone={finirExportBibliotheque}
         />
       )}
 
@@ -792,6 +807,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   </button>
                   <span className="font-bold text-zinc-500 text-xs mr-1">{lot.numero}</span>
                   <span className="truncate text-xs font-semibold flex-1">{lot.titre || 'Lot sans titre'}</span>
+                  <PastilleMarqueur marqueur={lot.marqueur} />
                 </div>
 
                 {expandedLots.has(lot.id) && (
@@ -826,6 +842,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                           </button>
                           <span className="font-medium text-zinc-400 text-xs mr-1">{chap.numero}</span>
                           <span className="truncate text-xs flex-1">{chap.titre || 'Sans titre'}</span>
+                          <PastilleMarqueur marqueur={chap.marqueur} />
                           {chap.cctpOnly && (
                             <span className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
                               CCTP
@@ -870,6 +887,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   />
                   <span className="font-medium text-zinc-400 text-[0.6875rem] mr-1 shrink-0">{ligne.numero}</span>
                                 <span className="truncate text-[0.6875rem] flex-1">{ligne.designation}</span>
+                                <PastilleMarqueur marqueur={ligne.marqueur} />
                                 {/* Repère de provenance : article issu de la
                                     bibliothèque d'ouvrages du cabinet. */}
                                 {ligne.articleTypeId && (
@@ -1022,6 +1040,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                     placeholder="Titre…"
                   />
                 ) : null}
+
+                <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
 
                 {/* DPGF article info badge */}
                 {selection.kind === 'ligne' && !isSelCctpOnly && (() => {

@@ -12,6 +12,22 @@ import type { FunctionDeclarationLike, ToolOutcome } from './toolTypes.js';
 import { internalHeaders, type InternalAuth } from './internalApi.js';
 
 const MAX_ARTICLE_CHARS = 1200;
+
+// Marqueur de rédaction (src/lib/marqueurRedaction.ts, que ce paquet n'importe pas) :
+// « incomplet » ou « en_cours » (quelqu'un édite : n'y touche pas), posé par une
+// personne ou un agent. Lecture sûre d'un JSON, rendue sous une forme que le modèle
+// ne peut pas confondre avec du contenu.
+function marqueurPourAgent(m: any): Record<string, unknown> | undefined {
+  if (!m || typeof m !== 'object' || (m.statut !== 'incomplet' && m.statut !== 'en_cours')) return undefined;
+  const t = (x: unknown, max: number) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, max) : undefined);
+  return {
+    statut: m.statut,
+    par: t(m.par, 80),
+    depuis: typeof m.le === 'string' && !Number.isNaN(Date.parse(m.le)) ? m.le.slice(0, 10) : undefined,
+    note: t(m.note, 300),
+    ...(m.statut === 'en_cours' ? { consigne: "Quelqu'un édite cet élément : ne le modifie pas sans l'accord explicite de l'utilisateur." } : {}),
+  };
+}
 const MAX_ARTICLES_PER_LOT = 60;
 const MAX_LIGNES_PER_LOT = 120;
 
@@ -62,11 +78,23 @@ function nbArticlesCctp(lignes: any[]): number {
   return n;
 }
 
+function compterMarques(lot: any): { incomplets: number; en_cours: number } {
+  let incomplets = 0;
+  let enCours = 0;
+  const noter = (m: any) => { const x = marqueurPourAgent(m); if (x?.statut === 'incomplet') incomplets++; else if (x) enCours++; };
+  const lignes = (liste: any[]) => { for (const l of liste ?? []) { noter(l?.marqueur); if (Array.isArray(l?.children)) lignes(l.children); } };
+  noter(lot?.marqueur);
+  for (const c of lot?.chapitres ?? []) { noter(c?.marqueur); lignes(c?.lignes ?? []); }
+  return { incomplets, en_cours: enCours };
+}
+
 function resumerArticlesCctp(lignes: any[], remaining: { n: number }): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   for (const l of lignes ?? []) {
     if (remaining.n <= 0) break;
     if (Array.isArray(l?.children) && l.children.length) {
+      const groupe = marqueurPourAgent(l?.marqueur);
+      if (groupe) out.push({ numero: l?.numero, designation: l?.designation, marqueur: groupe, note: "Article à sous-articles : son marqueur vaut pour l'ensemble." });
       out.push(...resumerArticlesCctp(l.children, remaining));
       continue;
     }
@@ -78,6 +106,7 @@ function resumerArticlesCctp(lignes: any[], remaining: { n: number }): Record<st
       unite: l?.unite,
       contenu: text ? text.slice(0, MAX_ARTICLE_CHARS) : undefined,
       tronque: text.length > MAX_ARTICLE_CHARS || undefined,
+      marqueur: marqueurPourAgent(l?.marqueur),
     });
   }
   return out;
@@ -100,8 +129,9 @@ export function summarizeCctp(dpgf: any, wantedLot?: string): Record<string, unk
         titre: l?.titre,
         nb_chapitres: Array.isArray(l?.chapitres) ? l.chapitres.length : 0,
         nb_articles: (l?.chapitres || []).reduce((n: number, c: any) => n + nbArticlesCctp(c?.lignes || []), 0),
+        ...(() => { const c = compterMarques(l); return c.incomplets || c.en_cours ? { nb_incomplets: c.incomplets, nb_en_cours_d_edition: c.en_cours } : {}; })(),
       })),
-      note: "Sommaire uniquement. Rappelle read_cctp avec le paramètre lot pour obtenir le détail d'un lot précis.",
+      note: "Sommaire uniquement. Rappelle read_cctp avec le paramètre lot pour obtenir le détail d'un lot précis. Les éléments marqués « incomplet » sont à finir ; ceux « en_cours » sont en cours d'édition par l'équipe : n'y touche pas.",
     };
   }
 
@@ -115,10 +145,11 @@ export function summarizeCctp(dpgf: any, wantedLot?: string): Record<string, unk
     numero: c?.numero,
     titre: c?.titre,
     description: c?.cctpDescription || undefined,
+    marqueur: marqueurPourAgent(c?.marqueur),
     articles: resumerArticlesCctp(c?.lignes || [], remaining),
   }));
 
-  return { ...header, lot: { numero: lot.numero, titre: lot.titre, description: lot.cctpDescription || undefined, chapitres } };
+  return { ...header, lot: { numero: lot.numero, titre: lot.titre, description: lot.cctpDescription || undefined, marqueur: marqueurPourAgent(lot.marqueur), chapitres } };
 }
 
 export function summarizeDpgf(dpgf: any, wantedLot?: string): Record<string, unknown> {
@@ -157,6 +188,7 @@ export function summarizeDpgf(dpgf: any, wantedLot?: string): Record<string, unk
         quantite: row?.quantite,
         prix_unitaire_ht: row?.prixUnitaire,
         prix_total_ht: row?.prixTotal,
+        marqueur: marqueurPourAgent(row?.marqueur),
       });
       if (Array.isArray(row?.children)) walk(row.children);
     }
@@ -264,7 +296,8 @@ export function buildProjectDocTools(): FunctionDeclarationLike[] {
       name: 'read_cctp',
       description:
         "Lit le CCTP d'un projet. Sans paramètre lot, renvoie le sommaire (liste des lots et nombre d'articles) ; avec un lot, renvoie le détail des articles de ce lot. " +
-        "Commence toujours par le sommaire avant de demander un lot précis.",
+        "Commence toujours par le sommaire avant de demander un lot précis. " +
+        "Chaque lot, chapitre ou article peut porter un MARQUEUR de rédaction : « incomplet » (à compléter, tu peux le faire si on te le demande) ou « en_cours » (une personne est en train de l'éditer : ne le modifie pas, signale-le à l'utilisateur).",
       parametersJsonSchema: params,
     },
     {

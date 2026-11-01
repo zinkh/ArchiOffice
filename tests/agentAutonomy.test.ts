@@ -1074,3 +1074,57 @@ describe('intervenants d\'une opération (manage_project_stakeholders)', () => {
     expect(result.response.intervenants).toEqual([{ id: 's-1', nom: 'BIOTOPE', role: 'Écologue', contact_id: 'c-bio' }]);
   });
 });
+
+// ── Marqueur de rédaction vu par les agents ──────────────────────────────────
+describe('marqueur de rédaction dans read_cctp et read_dpgf', () => {
+  const doc = {
+    titre: 'CCTP', version: '1', statut: 'draft',
+    lots: [{
+      numero: '01', titre: 'Gros œuvre', sousTotal: 0, marqueur: { statut: 'incomplet', par: 'Sophie', le: '2026-11-01T08:00:00Z', note: 'Lot à relire' },
+      chapitres: [{
+        numero: '1', titre: 'Fondations', marqueur: { statut: 'en_cours', par: 'Marc' },
+        lignes: [
+          { numero: '1.1', designation: 'Semelles', unite: 'm3', quantite: 1, prixUnitaire: 10, prixTotal: 10, cctpDescription: 'Béton NF', marqueur: { statut: 'en_cours', par: 'Sophie', le: '2026-11-01T09:00:00Z', note: 'Reprise du texte' } },
+          { numero: '1.2', designation: 'Dallage', unite: 'm2', quantite: 1, prixUnitaire: 10, prixTotal: 10, cctpDescription: 'Dallage BA' },
+          { numero: '1.3', designation: 'Groupe', unite: '', quantite: 0, prixUnitaire: 0, prixTotal: 0, marqueur: { statut: 'incomplet' },
+            children: [{ numero: '1.3.1', designation: 'Treillis', unite: 'm2', quantite: 1, prixUnitaire: 1, prixTotal: 1, marqueur: { statut: 'inconnu' } }] },
+        ],
+      }],
+    }],
+  };
+
+  it('le sommaire compte les éléments à finir et ceux en cours d’édition, par lot', () => {
+    const lot = (summarizeCctp(doc) as any).lots[0];
+    expect(lot).toMatchObject({ nb_incomplets: 2, nb_en_cours_d_edition: 2 });
+    expect((summarizeCctp(doc) as any).note).toMatch(/n'y touche pas/);
+  });
+
+  it('un lot sans marqueur n’ajoute aucun compteur', () => {
+    const propre = { ...doc, lots: [{ numero: '02', titre: 'Charpente', chapitres: [] }] };
+    expect((summarizeCctp(propre) as any).lots[0].nb_incomplets).toBeUndefined();
+  });
+
+  it('le détail d’un lot rapporte le marqueur de chaque niveau, avec la consigne pour « en_cours »', () => {
+    const lot = (summarizeCctp(doc, '01') as any).lot;
+    expect(lot.marqueur).toMatchObject({ statut: 'incomplet', par: 'Sophie', depuis: '2026-11-01', note: 'Lot à relire' });
+    expect(lot.marqueur.consigne).toBeUndefined();
+    expect(lot.chapitres[0].marqueur.consigne).toMatch(/ne le modifie pas/);
+    const articles = lot.chapitres[0].articles;
+    expect(articles[0].marqueur).toMatchObject({ statut: 'en_cours', par: 'Sophie', note: 'Reprise du texte' });
+    expect(articles[1].marqueur).toBeUndefined();
+  });
+
+  it('un article à sous-articles marqué est rapporté ; un marqueur illisible est ignoré', () => {
+    const articles = (summarizeCctp(doc, '01') as any).lot.chapitres[0].articles;
+    const groupe = articles.find((a: any) => a.designation === 'Groupe');
+    expect(groupe.marqueur.statut).toBe('incomplet');
+    const treillis = articles.find((a: any) => a.designation === 'Treillis');
+    expect(treillis.marqueur).toBeUndefined();
+  });
+
+  it('read_dpgf rapporte aussi le marqueur des lignes', () => {
+    const lignes = (summarizeDpgf(doc, '01') as any).lot.lignes;
+    expect(lignes.find((l: any) => l.numero === '1.1').marqueur.statut).toBe('en_cours');
+    expect(lignes.find((l: any) => l.numero === '1.2').marqueur).toBeUndefined();
+  });
+});

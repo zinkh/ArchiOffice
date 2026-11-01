@@ -212,3 +212,77 @@ describe('outil manage_dpgf', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+// ── Marqueur de rédaction (incomplet / en cours d'édition) ───────────────────
+describe('marqueur de rédaction', () => {
+  const avecMarqueur = (marqueur: any) => {
+    const d = doc();
+    (d.lots[1].chapitres[0].lignes[0] as any).marqueur = marqueur;
+    return d;
+  };
+  const maj = (over: any = {}) => ({ action: 'update_ligne' as const, id: 'p', ...over });
+
+  it('un agent pose un marqueur sous le nom « Agent IA », avec sa précision', () => {
+    const { doc: next, rapport } = appliquerOperation(doc(), maj({ marqueur: 'incomplet', note_marqueur: 'Prix à confirmer' }));
+    const m = (next.lots[1].chapitres[0].lignes[0] as any).marqueur;
+    expect(m).toMatchObject({ statut: 'incomplet', par: 'Agent IA', note: 'Prix à confirmer' });
+    expect(Date.parse(m.le)).not.toBeNaN();
+    expect(rapport.ligne?.marqueur).toContain('incomplet par Agent IA');
+  });
+
+  it('un marqueur seul est une modification valide et ne touche pas aux montants', () => {
+    const { doc: next } = appliquerOperation(doc(), maj({ marqueur: 'en_cours' }));
+    expect(next.lots[1].chapitres[0].lignes[0].prixTotal).toBe(50);
+  });
+
+  it('« aucun » lève le marqueur ; une valeur inconnue est refusée', () => {
+    const { doc: next } = appliquerOperation(avecMarqueur({ statut: 'incomplet', par: 'Agent IA' }), maj({ marqueur: 'aucun' }));
+    expect('marqueur' in next.lots[1].chapitres[0].lignes[0]).toBe(false);
+    expect(() => appliquerOperation(doc(), maj({ marqueur: 'termine' }))).toThrow(/incomplet, en_cours ou aucun/);
+  });
+
+  const enCours = { statut: 'en_cours', par: 'Sophie', le: '2026-11-01T08:00:00Z' };
+
+  it('refuse (409) de modifier, supprimer ou remplacer une ligne en cours d’édition par une personne', () => {
+    const src = avecMarqueur(enCours);
+    for (const op of [maj({ quantite: 9 }), maj({ marqueur: 'aucun' }), { action: 'delete_ligne' as const, id: 'p' }]) {
+      try { appliquerOperation(src, op); throw new Error('aurait dû refuser'); } catch (e: any) {
+        expect(e).toBeInstanceOf(DpgfLignesError);
+        expect(e.status).toBe(409);
+        expect(e.message).toMatch(/en cours d'édition par Sophie/);
+      }
+    }
+    const { rapport } = appliquerOperation(src, add({ lot: '6', replace_existing: true }));
+    expect(rapport.lignes_remplacees).toBe(0);
+    expect(rapport.lignes_conservees?.[0]).toMatchObject({ numero: '3.1' });
+    expect(rapport.lignes_conservees?.[0].raison).toMatch(/Sophie/);
+  });
+
+  it('« forcer » passe outre sur demande explicite', () => {
+    const { doc: next } = appliquerOperation(avecMarqueur(enCours), maj({ quantite: 9, forcer: true }));
+    expect(next.lots[1].chapitres[0].lignes[0].quantite).toBe(9);
+  });
+
+  it('ne bloque ni un simple « incomplet », ni un marqueur posé par un agent', () => {
+    expect(() => appliquerOperation(avecMarqueur({ statut: 'incomplet', par: 'Sophie' }), maj({ quantite: 9 }))).not.toThrow();
+    expect(() => appliquerOperation(avecMarqueur({ statut: 'en_cours', par: 'Agent IA' }), maj({ quantite: 9 }))).not.toThrow();
+  });
+
+  it('la route fixe l’auteur côté serveur : un « par » envoyé est ignoré', async () => {
+    const tenantId = makeTenant(); const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('dpgfs', [{ id: 'dpgf-pm', tenant_id: tenantId, project_id: 'pm', data: JSON.stringify(doc()), offres: [] }]);
+    const res = await request(app).post('/api/projects/pm/dpgf/lignes').set(authHeader(token))
+      .send({ action: 'update_ligne', id: 'p', marqueur: 'en_cours', par: 'Sophie' });
+    expect(res.status).toBe(200);
+    const stocke = JSON.parse(fakeSupabaseAdmin.getTable('dpgfs').find((r: any) => r.project_id === 'pm')!.data);
+    expect(stocke.lots[1].chapitres[0].lignes[0].marqueur.par).toBe('Agent IA');
+  });
+
+  it('la route répond 409 sur une ligne en cours d’édition par une personne', async () => {
+    const tenantId = makeTenant(); const { token } = makeUser(tenantId);
+    fakeSupabaseAdmin.seed('dpgfs', [{ id: 'dpgf-pn', tenant_id: tenantId, project_id: 'pn', data: JSON.stringify(avecMarqueur(enCours)), offres: [] }]);
+    const res = await request(app).post('/api/projects/pn/dpgf/lignes').set(authHeader(token)).send({ action: 'update_ligne', id: 'p', quantite: 3 });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/forcer: true seulement/);
+  });
+});
