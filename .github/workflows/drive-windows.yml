@@ -34,6 +34,8 @@ jobs:
         run: node native/windows-drive/multi-smoke.mjs
       - name: Refresh catalogs and recover an interrupted switch
         run: node native/windows-drive/refresh-smoke.mjs
+      - name: Edit existing documents and capture replace-saves
+        run: node native/windows-drive/edit-smoke.mjs
       - uses: actions/upload-artifact@v7
         if: always()
         with:

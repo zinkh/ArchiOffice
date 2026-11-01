@@ -19,6 +19,8 @@ beforeEach(async()=>{
    for(const line of bytes.toString().trim().split('\n')){
     const msg=JSON.parse(line);frames.push(msg);
     if(msg.type==='init')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'ready'})+'\n'));
+    if(msg.type==='verify')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'verified',requestId:msg.requestId,valid:true})+'\n'));
+    if(msg.type==='changes')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'changes',requestId:msg.requestId,keys:[]})+'\n'));
     if(msg.type==='stop')queueMicrotask(()=>child.emit('exit',0));
    }
   });children.push(child);return child;
@@ -106,4 +108,11 @@ it('blocks a lost manifest for the last active project rather than allocating an
  const file=path.join(config.root,(await fs.readdir(config.root)).find((name:string)=>name.endsWith('.json'))!);await fs.rm(file);
  config.spawn.mockClear();config.agent.windowsPreview.mockClear();const next=make();
  expect(await next.start('p')).toMatchObject({status:'error',code:'DRIVE_SNAPSHOT_INVALID'});expect(config.spawn).not.toHaveBeenCalled();expect(config.agent.windowsPreview).not.toHaveBeenCalled();
+});
+
+it('persists explicit editing before reopening the same generation and restores it after restart',async()=>{
+ const first=make();await first.start('p');const before=JSON.parse(await fs.readFile(config.stateFile,'utf8'));expect(frames[0].editable).toBe(false);
+ expect(await first.enableEditing('p')).toEqual({status:'editing'});expect(frames.filter(f=>f.type==='init').at(-1)).toMatchObject({editable:true,resume:true,root:before.directory});
+ const saved=JSON.parse(await fs.readFile(config.stateFile,'utf8'));expect(saved.editable).toBe(true);first.shutdown();await new Promise(resolve=>setImmediate(resolve));
+ const second=make();expect(await second.start('p')).toEqual({status:'opened'});expect(frames.filter(f=>f.type==='init').at(-1).editable).toBe(true);expect(second.status().edits.editing).toBe(true);
 });

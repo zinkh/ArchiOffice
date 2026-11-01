@@ -153,7 +153,7 @@ function createWindowsMultiDrive(options) {
    if(!authorized||['DRIVE_REFRESH_INTERRUPTED','DRIVE_SNAPSHOT_INVALID'].includes(lastError))stopAll();return {status:'error',code:lastError};}
   finally{busy=false;}
  }
- const status=()=>({enabled:enabled(),active:namespace.status().active,configured,error:lastError,letter:'A:',projectCount:namespace.status().active?projects.size:0,projectIds:namespace.status().active?[...projects.keys()]:[],previousProjectIds:namespace.status().active?[...previousProjects]:[]});
+ const status=()=>({enabled:enabled(),active:namespace.status().active,configured,error:lastError,letter:'A:',projectCount:namespace.status().active?projects.size:0,projectIds:namespace.status().active?[...projects.keys()]:[],editReports:namespace.status().active?[...projects].filter(([,p])=>p.status().edits).map(([projectId,p])=>({projectId,...p.status().edits})):[],previousProjectIds:namespace.status().active?[...previousProjects]:[]});
  async function getStatus() {
   // The renderer may have switched cabinet since the previous lease check.
   // Validate before exposing the selected IDs, not only on the next timer tick.
@@ -163,6 +163,7 @@ function createWindowsMultiDrive(options) {
   return result;
  }
  return {start:connect,open,remove,disconnect,resume,shutdown,status,getStatus,
+  enableEditing:id=>refreshAction(async()=>{if(!validId(id)||!identity||!same(await vault(),identity)||!projects.has(id))throw failure('DRIVE_UNAVAILABLE');refresh.clear();return projects.get(id).enableEditing(id);}),
   checkCatalog:id=>refreshAction(()=>refresh.check(id)),refreshCatalog:(id,token)=>refreshAction(()=>refresh.apply(id,token)),
   openPrevious:id=>refreshAction(()=>refresh.previous(id))};
 }

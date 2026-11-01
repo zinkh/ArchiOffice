@@ -1,3 +1,4 @@
+export interface WindowsDriveEditReport {projectId:string;editing:boolean;pending:number;blocked:number;conflicts:number;unavailable:number}
 import type { DriveDocumentStatus, DriveRemoteCheck } from '../../shared/driveDocumentStatus';
 export interface DriveCatalogUpdate {status:'update_available';token:string;added:number;updated:number;removed:number;moved:number;folders:number}
 export type DriveCatalogCheck = DriveCatalogUpdate | {status:'up_to_date'} | {status:'error';code?:string};
@@ -8,7 +9,8 @@ export type DriveCatalogCheck = DriveCatalogUpdate | {status:'up_to_date'} | {st
 // que de les dupliquer dans chaque fichier consommateur.
 export interface DesktopBridge {
   isDesktop: boolean;
-  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean;letter?:string;error?:string|null;configured?:boolean;projectCount?:number;projectIds?:string[];previousProjectIds?:string[]}>;
+  getWindowsDrivePreview?: () => Promise<{enabled:boolean;active:boolean;letter?:string;error?:string|null;configured?:boolean;projectCount?:number;projectIds?:string[];previousProjectIds?:string[];editReports?:WindowsDriveEditReport[]}>;
+  enableWindowsDriveEditing?: (projectId:string) => Promise<{status:'editing'|'error';code?:string}>;
   checkWindowsDriveCatalog?: (projectId:string) => Promise<DriveCatalogCheck>;
   refreshWindowsDriveCatalog?: (projectId:string,token:string) => Promise<{status:'refreshed'|'error';code?:string}>;
   openPreviousWindowsDriveProject?: (projectId:string) => Promise<{status:'copies_shown'|'error';code?:string}>;

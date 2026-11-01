@@ -415,6 +415,9 @@ function startDriveAgent() {
     login:(enabled)=>{if(process.platform==='win32')app.setLoginItemSettings({openAtLogin:enabled});},
     enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   windowsDrivePreview.resume();
+  ipcMain.handle('desktop:drive-windows-enable-editing',async(event,projectId)=> {
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.enableEditing(projectId);
+  });
   ipcMain.handle('desktop:drive-windows-check-catalog',async(event,projectId)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.checkCatalog(projectId);
   });

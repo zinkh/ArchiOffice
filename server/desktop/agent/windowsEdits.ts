@@ -50,7 +50,7 @@ export async function queueWindowsEdit(options:{
     await noLinks(root,manifest);const stat=await fs.lstat(manifest);
     if(!stat.isFile()||stat.size>512*1024)throw fail('WINDOWS_EDIT_REFUSED');
     const saved=JSON.parse(await fs.readFile(manifest,'utf8'));
-    if(!same(saved?.identity,identity)||saved.projectId!==input.projectId||saved.rootKey!==input.rootKey||saved.nativeReady!==true
+    if(!same(saved?.identity,identity)||saved.projectId!==input.projectId||saved.rootKey!==input.rootKey||saved.nativeReady!==true||saved.editable!==true
       ||!Array.isArray(saved.catalog)||saved.catalog.length>256||typeof saved.directory!=='string'||path.dirname(saved.directory)!==root
       ||!path.basename(saved.directory).startsWith(hash([identity.userId,identity.tenantId]).slice(0,12)+'-')
       ||hash([identity.userId,identity.tenantId,identity.deviceId,input.projectId,saved.catalog])!==input.rootKey)throw fail('WINDOWS_EDIT_REFUSED');

@@ -24,7 +24,7 @@ beforeEach(async()=>{
   const directory=path.join(root,hash(['u','t']).slice(0,12)+'-generation');await fs.mkdir(path.join(directory,'_Projet'),{recursive:true});
   file=path.join(directory,'_Projet','_Plan.dwg');await fs.writeFile(file,'edited');
   manifest=path.join(root,hash(['u','t','d','p'])+'.json');
-  saved={identity,projectId:'p',directory,nativeReady:true,catalog:[{path:'_Projet\\_Plan.dwg',key:'a'.repeat(64),folder:false,size:5,
+  saved={identity,projectId:'p',directory,nativeReady:true,editable:true,catalog:[{path:'_Projet\\_Plan.dwg',key:'a'.repeat(64),folder:false,size:5,
     meta:{nodeId:'doc:plan',version:1,name:'Plan original.dwg',size:5,sha256:sha('hello')}}]};
   input={identity,projectId:'p',rootKey:'',key:'a'.repeat(64)};await persist();
   queue=new TransferQueue(path.join(temp,'queue'),identity);authorize=vi.fn(async()=>{});cached=vi.fn<()=>Promise<{sha256:string}|null>>(async()=>null);
@@ -99,4 +99,8 @@ it('refuses a grant change while the worker prepares a native save',async()=>{
   let calls=0;const worker=createAgentWorker({root:path.join(temp,'drive-transfers'),origin:'https://www.archioffice.fr',session:async()=>({...identity,tenantId:++calls>2?'other':'t',token:'ds_at_test'}),status:()=>{}});
   await expect(worker.uploadWindowsEdit(input)).rejects.toMatchObject({code:'DRIVE_IDENTITY_MISMATCH'});
   await worker.stop();expect(await fs.readFile(file,'utf8')).toBe('edited');
+});
+
+it('requires explicit editing authorization in the persisted generation',async()=>{
+ saved.editable=false;await persist();await expect(run()).rejects.toMatchObject({code:'WINDOWS_EDIT_REFUSED'});expect(await queue.list()).toHaveLength(0);
 });

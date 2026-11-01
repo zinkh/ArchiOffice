@@ -14,6 +14,8 @@ beforeEach(async()=>{
    const child:any=new EventEmitter();child.stdin=new PassThrough();child.stdout=new PassThrough();child.kill=()=>child.emit('exit',0);
    child.stdin.on('data',(bytes:Buffer)=>{for(const line of bytes.toString().trim().split('\n')){const msg=JSON.parse(line);frames.push(msg);
     if(msg.type==='init'||msg.type==='map')void(async()=>{if(msg.type==='init')for(const e of msg.entries)if(e.folder)await fs.mkdir(path.join(msg.root,e.path),{recursive:true});child.stdout.write(JSON.stringify({type:'ready'})+'\n');})();
+    if(msg.type==='verify')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'verified',requestId:msg.requestId,valid:true})+'\n'));
+    if(msg.type==='changes')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'changes',requestId:msg.requestId,keys:[]})+'\n'));
     if(msg.type==='stop')queueMicrotask(()=>child.emit('exit',0));
    }});children.push(child);return child;
   })};
@@ -92,4 +94,11 @@ it('allows disconnecting even if the selection file was corrupted',async()=>{
 it('validates the current identity before returning project IDs to a new renderer context',async()=>{
  const drive=make();await drive.start('p');config.vault.mockResolvedValue({...identity,userId:'new-user'});
  expect(await drive.getStatus()).toMatchObject({active:false,projectCount:0,projectIds:[]});expect(frames.filter(f=>f.type==='stop')).toHaveLength(2);
+});
+
+it('enables editing only for a connected authorized project and keeps the A: mapping',async()=>{
+ const drive=make();await drive.start('p');await drive.start('q');const count=frames.filter(f=>f.type==='map').length;
+ expect(await drive.enableEditing('p')).toEqual({status:'editing'});expect(frames.filter(f=>f.type==='map')).toHaveLength(count);expect(drive.status().projectIds).toEqual(['p','q']);
+ expect(drive.status().editReports.map((r:any)=>r.projectId)).toEqual(['p']);expect(frames.filter(f=>f.type==='init').at(-1).editable).toBe(true);
+ expect((await drive.enableEditing('not-connected')).status).toBe('error');config.vault.mockResolvedValue({...identity,tenantId:'other'});expect((await drive.enableEditing('q')).status).toBe('error');expect(drive.status().active).toBe(false);
 });
