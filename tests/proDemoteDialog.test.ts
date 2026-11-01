@@ -8,6 +8,7 @@ import type { DPGF } from '../src/types/dpgf';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../src/components/pro/PriceLibraryPanel', () => ({ PriceLibraryPanel: () => null }));
 vi.mock('../src/components/pro/CctpGenerateDialog', () => ({ CctpGenerateDialog: () => null }));
+vi.mock('../src/components/pro/CctpExportLibraryDialog', () => ({ CctpExportLibraryDialog: () => null }));
 vi.mock('../src/components/SignedImage', () => ({ SignedImage: () => null }));
 vi.mock('../src/lib/cctpImagesUpload', () => ({ envoyerIllustration: async () => { throw new Error('non utilisé'); } }));
 vi.mock('../src/components/pro/DecoupagePanel', () => ({ DecoupagePanel: () => null, SelecteursDecoupage: () => null }));
