@@ -13,6 +13,8 @@ export interface UploadTransport {
   complete(id: string, sha256: string, signal?: AbortSignal): Promise<{ node: { id: string }; version: number }>;
 }
 export interface TransferJob extends UploadInput, TransferIdentity {
+  /** Native file generation; absent for the separate Documents working copy. */
+  sourceId?: string;
   formatVersion: 1; id: string; state: 'queued' | 'uploading' | 'retry' | 'conflict' | 'blocked' | 'done';
   createdAt: number; attempts: number; nextAttemptAt: number; errorCode: string | null;
   conflictSourceId?: string;
@@ -72,6 +74,7 @@ export class TransferQueue {
         || !['queued','uploading','retry','conflict','blocked','done'].includes(j.state)
         || (j.reconciledVersion !== undefined && (j.state !== 'conflict' || !Number.isSafeInteger(j.reconciledVersion) || j.reconciledVersion < 1))
         || (j.conflictSourceId !== undefined && !ID.test(j.conflictSourceId))
+        || (j.sourceId !== undefined && !/^[a-f0-9]{64}$/.test(j.sourceId))
         || !Number.isSafeInteger(j.size) || j.size < 0 || !/^[a-f0-9]{64}$/.test(j.sha256)
         || !Number.isFinite(j.createdAt) || !Number.isSafeInteger(j.attempts) || j.attempts < 0 || !Number.isFinite(j.nextAttemptAt)) throw error('QUEUE_CORRUPT');
       jobs.push(j);
@@ -82,8 +85,11 @@ export class TransferQueue {
   /** Read atomic, committed manifests without waiting behind a network upload.
    * Advisory snapshot only; callers must not use it to mutate the queue. */
   listPersisted() { return this.jobs(false); }
-  enqueue(file: string, target: TransferTarget, baseVersion: number | null, mimeType = 'application/octet-stream') {
+  enqueue(file: string, target: TransferTarget, baseVersion: number | null, mimeType = 'application/octet-stream', capture?: {
+    sourceId: string; sha256: string; name: string; authorize(): Promise<unknown>;
+  }) {
     return this.serial(async () => {
+      if(capture && (!/^[a-f0-9]{64}$/.test(capture.sourceId)||!/^[a-f0-9]{64}$/.test(capture.sha256)||typeof capture.name!=='string'||!capture.name||capture.name.length>512))throw error('INVALID_CAPTURE');
       if ('documentId' in target && (!target.documentId || !Number.isSafeInteger(baseVersion) || baseVersion! < 1)) throw error('BASE_VERSION_REQUIRED');
       if ('create' in target && !target.create?.parentId) throw error('INVALID_TARGET');
       const jobs = await this.jobs(); const id = crypto.randomUUID(); const snapshot = this.snapshot(id);
@@ -102,11 +108,21 @@ export class TransferQueue {
         const after = await source.stat();
         if (before.size !== after.size || size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw error('SOURCE_CHANGED');
         const sha256 = hash.digest('hex');
-        const duplicate = jobs.find(j => j.sha256 === sha256 && j.name === path.basename(file) && j.baseVersion === baseVersion
-          && JSON.stringify(j.target) === JSON.stringify(target) && j.mimeType === mimeType);
+        if(capture) {
+          if(sha256!==capture.sha256)throw error('SOURCE_CHANGED');
+          // A replace-save can change the path while the original descriptor
+          // remains stable. Do not silently capture that superseded inode.
+          const named=await fs.lstat(file);
+          if(!named.isFile()||named.dev!==after.dev||named.ino!==after.ino||named.size!==after.size||named.mtimeMs!==after.mtimeMs||named.ctimeMs!==after.ctimeMs)throw error('SOURCE_CHANGED');
+          await capture.authorize();
+        }
+        const name=capture?.name||path.basename(file);
+        const duplicate = jobs.find(j => j.sha256 === sha256 && j.name === name && j.baseVersion === baseVersion
+          && JSON.stringify(j.target) === JSON.stringify(target) && j.mimeType === mimeType && j.sourceId===capture?.sourceId);
         if (duplicate) { await output.close(); output = undefined; await fs.rm(snapshot); return duplicate; }
         const job: TransferJob = { ...this.identity, formatVersion: 1, id, target: structuredClone(target), baseVersion,
-          name: path.basename(file), mimeType, size, sha256, bumpIndice: false, state: 'queued', createdAt: jobs.reduce((latest,j) => Math.max(latest,j.createdAt + 1), this.now()), attempts: 0, nextAttemptAt: 0, errorCode: null };
+          name, mimeType, size, sha256, bumpIndice: false, state: 'queued', createdAt: jobs.reduce((latest,j) => Math.max(latest,j.createdAt + 1), this.now()), attempts: 0, nextAttemptAt: 0, errorCode: null,
+          ...(capture?{sourceId:capture.sourceId}:{}) };
         await this.save(job); return job;
       } catch (e) { await output?.close(); output = undefined; await fs.rm(snapshot, { force: true }); throw e; }
       finally { await output?.close(); await source.close(); }

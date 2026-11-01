@@ -150,7 +150,7 @@ export class WorkingCopies {
   /** A successful snapshot becomes the baseline, even if the app kept editing.
    * No file bytes are touched. Replay is safe after a process restart. */
   acknowledge(job: TransferJob) { return this.serial(async () => {
-    if (job.state !== 'done' || !('documentId' in job.target)) return;
+    if (job.sourceId || job.state !== 'done' || !('documentId' in job.target)) return;
     if (job.userId !== this.identity.userId || job.tenantId !== this.identity.tenantId) throw fail('WORKING_IDENTITY_MISMATCH');
     const r = await this.read(job.target.documentId);
     if (!r || r.state !== 'ready' || r.baseVersion !== job.baseVersion) return;

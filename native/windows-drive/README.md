@@ -280,3 +280,31 @@ actualisation d’un projet pendant qu’un autre reste ouvert, téléchargement
 nouvelle version et d’un ajout, conservation des anciennes données, interruption
 simulée du second renommage, reprise après redémarrage et refus après une retouche
 locale. L’interface attend une confirmation explicite avant toute application.
+
+
+### Préparation de l’envoi depuis A: (API privée, écriture non activée)
+
+L’agent accepte maintenant `windowsPreview('upload', {identity, projectId,
+rootKey, key})` uniquement par IPC privé. Il relit le manifeste courant pour
+retrouver le chemin physique, le nom original et la version du document. Aucun
+chemin ni version de départ ne vient de l’interface ou du fournisseur natif.
+L’identité du coffre, le catalogue et l’absence de liens sont revérifiés avant
+la publication du snapshot dans la file d’envoi existante. Une capture modifiée
+en cours de lecture ou pendant sa préparation est refusée.
+
+Chaque origine native est liée à la génération du catalogue et à la clé du
+fichier. Les acquittements de cette origine font avancer uniquement sa propre
+version de départ ; ils ne modifient pas le suivi de la copie de travail de
+Documents. Après redémarrage, les envois terminés permettent de reconstruire cette
+version. Une sauvegarde arrivée pendant un envoi reste dans le fichier local et
+devra être capturée après sa fin. Un conflit distant conserve le snapshot et
+bloque les nouveaux envois de ce document. Un envoi Documents en attente bloque
+également la capture native. La reprise Documents ne réconcilie pas un conflit
+natif ; celui-ci attendra le parcours de résolution natif.
+
+Ce lot ne retire aucun attribut de lecture seule, ne surveille pas les fichiers
+et n’ajoute pas de commande publique. Il prépare le transport pour le prochain
+lot : activation explicite de l’édition, détection des sauvegardes Windows (dont
+le remplacement atomique des fichiers CAO), états et résolution des conflits
+depuis A:. La vérification CFAPI actuelle continue de bloquer l’actualisation
+d’un catalogue retouché. L’écriture dans A: reste donc désactivée à ce stade.

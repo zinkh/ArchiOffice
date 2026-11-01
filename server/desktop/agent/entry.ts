@@ -52,8 +52,8 @@ process.on('message',async (msg:any)=> {
     try { const result=await worker.documentStatuses(msg.nodeIds);send({type:'drive:document-statuses-result',requestId:msg.requestId,result}); }
     catch {send({type:'drive:document-statuses-result',requestId:msg.requestId,error:{code:'DRIVE_STATUS_UNAVAILABLE'}});}
   }
-  if(msg?.type==='drive:windows-preview' && worker && ['catalog','hydrate'].includes(msg.action) && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
-    try {const result=await worker.windowsPreview(msg.action,msg.input);send({type:'drive:working-result',requestId:msg.requestId,result});}
+  if(msg?.type==='drive:windows-preview' && worker && ['catalog','hydrate','upload'].includes(msg.action) && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
+    try {const result=msg.action==='upload'?await worker.uploadWindowsEdit(msg.input):await worker.windowsPreview(msg.action,msg.input);send({type:'drive:working-result',requestId:msg.requestId,result});if(msg.action==='upload')void worker.tick();}
     catch {send({type:'drive:working-result',requestId:msg.requestId,error:{code:'WINDOWS_PREVIEW_REFUSED'}});}
   }
   if(msg?.type==='drive:stop')void stop();
