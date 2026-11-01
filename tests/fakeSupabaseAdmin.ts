@@ -548,6 +548,7 @@ class FakeQueryBuilder implements PromiseLike<{ data: any; error: any; count?: n
       // `col.eq.` (empty value) — the `zoho_invoice_id.is.null,zoho_invoice_id.eq.`
       // pattern this codebase's Zoho sync routes use to also match empty strings.
       if (op === 'eq') return row[col] === value;
+      if (op === 'neq') return row[col] !== value;
       return false;
     }));
     return this;

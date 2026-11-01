@@ -5,6 +5,7 @@
 // sont le même document (`dpgfs`) ; voir CLAUDE.md, « Le CCTP n'est pas un document séparé ».
 // Pur : ne lit rien en base, testé dans tests/planningSources.test.ts.
 import type { LotPlanifiable } from '../src/lib/planningChantier';
+import { texteBrut } from '../src/lib/cctpRichText';
 
 export interface SourceLot {
   lotId: string;
@@ -131,7 +132,7 @@ function postesDe(lignes: any[]): PosteChapitre[] {
 /** Prescriptions CCTP portées par les articles, chacune précédée de l'ouvrage qu'elle décrit. */
 function prescriptionsDes(lignes: any[], sortie: string[] = []): string[] {
   for (const l of lignes ?? []) {
-    const texte = propre(l?.cctpDescription);
+    const texte = propre(texteBrut(l?.cctpDescription));
     if (texte) sortie.push(l?.designation && !PLACEHOLDER.test(String(l.designation)) ? `${propre(l.designation)} : ${texte}` : texte);
     if (Array.isArray(l?.children)) prescriptionsDes(l.children, sortie);
   }
@@ -155,14 +156,14 @@ export function sourcesPourPlanning(dpgf: any, lots: LotPlanifiable[]): SourcesP
     // chapitres réservés au CCTP (objet du document, conditions contractuelles...) en dernier, où le plafond le coupe.
     const prescriptions: string[] = [];
     const generales: string[] = [];
-    const generalesLot: string[] = lotDoc?.cctpDescription ? [propre(lotDoc.cctpDescription)] : [];
+    const generalesLot: string[] = lotDoc?.cctpDescription ? [propre(texteBrut(lotDoc.cctpDescription))] : [];
     for (const chap of lotDoc?.chapitres ?? []) {
       if (chap?.cctpOnly) {
-        if (chap?.cctpDescription) generales.push(propre(chap.cctpDescription));
+        if (chap?.cctpDescription) generales.push(propre(texteBrut(chap.cctpDescription)));
         generales.push(...prescriptionsDes(chap?.lignes ?? []));
         continue;
       }
-      if (chap?.cctpDescription) generalesLot.push(propre(chap.cctpDescription));
+      if (chap?.cctpDescription) generalesLot.push(propre(texteBrut(chap.cctpDescription)));
       prescriptions.push(...prescriptionsDes(chap?.lignes ?? []));
       const postes = postesDe(chap?.lignes ?? []);
       if (!postes.length) continue;
