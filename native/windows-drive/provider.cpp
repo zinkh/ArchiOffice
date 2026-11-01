@@ -199,7 +199,7 @@ int wmain(int argc,wchar_t** argv) {
       known.emplace(e.path,e.folder);entries.push_back(e);
     }
     CF_SYNC_REGISTRATION reg{};reg.StructSize=sizeof(reg);reg.ProviderName=L"ArchiOffice Drive Preview";reg.ProviderVersion=L"0.1";
-    reg.SyncRootIdentity=rootKey.data();reg.SyncRootIdentityLength=static_cast<DWORD>(rootKey.size());
+    if(!rootKey.empty()){reg.SyncRootIdentity=rootKey.data();reg.SyncRootIdentityLength=static_cast<DWORD>(rootKey.size());}
     CF_SYNC_POLICIES policies{};policies.StructSize=sizeof(policies);policies.Hydration.Primary=CF_HYDRATION_POLICY_FULL;policies.Population.Primary=CF_POPULATION_POLICY_ALWAYS_FULL;
     policies.InSync=CF_INSYNC_POLICY_TRACK_FILE_LAST_WRITE_TIME;
     if(resume) {

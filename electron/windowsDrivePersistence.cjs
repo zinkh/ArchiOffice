@@ -44,20 +44,23 @@ function createPersistentWindowsDrive(options) {
   async function read() {
     try {
       const stat = await fs.lstat(stateFile);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8192) return null;
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 8192) throw new Error('Invalid reconnection state');
       const data = JSON.parse(await fs.readFile(stateFile, 'utf8'));
       if (!/^[a-zA-Z0-9_-]{1,200}$/.test(data.projectId) || !same(data.identity,data.identity)
-        || typeof data.directory !== 'string' || path.dirname(data.directory) !== path.resolve(root)) return null;
+        || typeof data.directory !== 'string' || path.dirname(data.directory) !== path.resolve(root)) throw new Error('Invalid reconnection state');
       await noLinks(root,data.directory);
       return data;
-    } catch { return null; }
+    } catch(error) {
+      if(error.code!=='ENOENT'){configured=true;lastError='DRIVE_SNAPSHOT_INVALID';}
+      return null;
+    }
   }
   async function save(data) {
     // Persist the project catalog separately so disconnecting A: only forgets
     // automatic reconnection, not the stable directory or its file identities.
     await atomicJson(snapshotPath(data.identity,data.projectId),data);
     const {catalog,rootKey,...state}=data;
-    await atomicJson(stateFile,state);
+    await atomicJson(stateFile,{...state,manifestVersion:1});
     configured = true;
   }
   async function start(projectId, { restore=false } = {}) {
@@ -69,6 +72,8 @@ function createPersistentWindowsDrive(options) {
       const identity = await vault();
       if (restore && (!previous || !same(previous.identity,identity))) return {status:'error'};
       const snapshot=await readSnapshot(identity,projectId);
+      if(!snapshot&&previous?.manifestVersion===1&&previous.projectId===projectId&&same(previous.identity,identity))
+        throw Object.assign(new Error('Missing catalog for active directory'),{code:'DRIVE_SNAPSHOT_INVALID'});
       const result = await preview.start(projectId, {
         open: !restore,
         previousRoot: previous?.directory || '',

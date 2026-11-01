@@ -101,3 +101,9 @@ it('records native completion so interrupted initial populations can be resumed 
  await fs.writeFile(file,JSON.stringify({...saved,nativeReady:false}));await drive.start('p');
  expect(frames.filter(f=>f.type==='init').at(-1)).toMatchObject({root:saved.directory,resume:true,initializing:true});
 });
+it('blocks a lost manifest for the last active project rather than allocating another directory',async()=>{
+ const first=make();await first.start('p');first.shutdown();await new Promise(resolve=>setImmediate(resolve));
+ const file=path.join(config.root,(await fs.readdir(config.root)).find((name:string)=>name.endsWith('.json'))!);await fs.rm(file);
+ config.spawn.mockClear();config.agent.windowsPreview.mockClear();const next=make();
+ expect(await next.start('p')).toMatchObject({status:'error',code:'DRIVE_SNAPSHOT_INVALID'});expect(config.spawn).not.toHaveBeenCalled();expect(config.agent.windowsPreview).not.toHaveBeenCalled();
+});
