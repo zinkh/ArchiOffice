@@ -45,6 +45,9 @@ jobs:
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Verify Drive edit snapshots on Windows
+        run: npx vitest run tests/driveWindowsEdits.test.ts tests/driveTransferQueue.test.ts tests/driveWorkingCopies.test.ts
+
       # electron-builder takes the version from package.json, never from the
       # git tag: with package.json left at 1.0.3, the v1.0.4 and v1.0.5 tag
       # builds both produced "ArchiOffice Setup 1.0.3.exe" and tried to
