@@ -31,6 +31,8 @@ import type { CibleRecherche } from '../../lib/proRecherche';
 import { legendeImage, localisationsConnues, nouvelleImage, retirerImage } from '../../lib/cctpImages';
 import { envoyerIllustration } from '../../lib/cctpImagesUpload';
 import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
+import { appliquerCouleur, basculerBalise, contientMiseEnForme, type BaliseRiche, type EditionTexte } from '../../lib/cctpRichText';
+import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
 interface CCTPEditorProps {
@@ -384,6 +386,25 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     updateDescription(actuel.slice(0, debut) + jeton(cle) + actuel.slice(fin));
     const pos = debut + jeton(cle).length;
     requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(pos, pos); });
+  };
+  // ── Mise en forme (gras, italique, souligné, couleur) ──────────────────────
+  // La sélection du champ est lue au moment du clic, puis rétablie après la
+  // mise à jour du texte : sans cela le curseur sauterait en fin de champ.
+  const editerSelection = (fn: (texte: string, debut: number, fin: number) => EditionTexte) => {
+    const el = descriptionRef.current;
+    if (!el) return;
+    const r = fn(selData?.description ?? '', el.selectionStart, el.selectionEnd);
+    updateDescription(r.texte);
+    requestAnimationFrame(() => { el.focus(); el.setSelectionRange(r.debut, r.fin); });
+  };
+  const formaterBalise = (code: BaliseRiche) => editerSelection((t0, d, f) => basculerBalise(t0, d, f, code));
+  const formaterCouleur = (hex: string | null) => editerSelection((t0, d, f) => appliquerCouleur(t0, d, f, hex));
+  const raccourciFormat = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+    const code = ({ b: 'b', i: 'i', u: 'u' } as const)[e.key.toLowerCase() as 'b' | 'i' | 'u'];
+    if (!code) return;
+    e.preventDefault();
+    formaterBalise(code);
   };
   const GROUPES_VARIABLES = [
     ['operation', 'pro_cctp_variables_operation'],
@@ -759,25 +780,35 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   <label htmlFor="cctp-description" className="block text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">
                     Description technique
                   </label>
-                  <ToolbarMenu
-                    entries={variableEntries}
-                    onSelect={entry => entry.onClick()}
-                    ariaLabel={t('pro_cctp_variables')}
-                    triggerClassName="inline-flex items-center gap-1 h-7 px-2 rounded border text-xs outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
-                    triggerStyle={{ borderColor: 'var(--tblr-border)' }}
-                    align="end"
-                    trigger={<><IconVariable size={14} aria-hidden />{t('pro_cctp_variables')}<IconChevronDownSmall size={12} aria-hidden /></>}
-                  />
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <CctpRichToolbar onBalise={formaterBalise} onCouleur={formaterCouleur} />
+                    <ToolbarMenu
+                      entries={variableEntries}
+                      onSelect={entry => entry.onClick()}
+                      ariaLabel={t('pro_cctp_variables')}
+                      triggerClassName="inline-flex items-center gap-1 h-7 px-2 rounded border text-xs outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                      triggerStyle={{ borderColor: 'var(--tblr-border)' }}
+                      align="end"
+                      trigger={<><IconVariable size={14} aria-hidden />{t('pro_cctp_variables')}<IconChevronDownSmall size={12} aria-hidden /></>}
+                    />
+                  </div>
                 </div>
                 <textarea
                   id="cctp-description"
                   ref={descriptionRef}
                   value={selData.description}
                   onChange={e => updateDescription(e.target.value)}
+                  onKeyDown={raccourciFormat}
                   rows={16}
                   placeholder={`Rédigez ici la description technique de ce ${selData.label.toLowerCase()}…\n\nEx : matériaux, mise en œuvre, prescriptions, normes applicables (NF EN…), conditions d'exécution, essais, réception…`}
                   className="w-full px-4 py-3 text-sm border border-zinc-200 dark:border-zinc-700 rounded-xl bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-y leading-relaxed font-sans"
                 />
+                {contientMiseEnForme(selData.description) && (
+                  <div className="rounded-xl border p-3 space-y-1" style={{ borderColor: 'var(--tblr-border)' }}>
+                    <span className="block text-[0.6875rem] font-bold uppercase tracking-widest" style={{ color: 'var(--tblr-muted)' }}>{t('pro_cctp_format_preview')}</span>
+                    <CctpRichPreview texte={selData.description} />
+                  </div>
+                )}
                 <p className="text-[0.6875rem] text-zinc-400">
                   Ce texte apparaît uniquement dans le document CCTP, pas dans le DPGF. Les variables {'{{…}}'} sont remplacées à l'export.
                 </p>

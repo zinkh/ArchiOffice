@@ -3516,6 +3516,15 @@ qu'on renseigne le document, sans migration (tout vit dans le jsonb du DPGF) :
   sous le texte de l'article, avec leur légende, y compris dans l'export par bâtiment ;
   `planRender` (pdf.js) n'est chargé que si une image existe.
 
+### Mise en forme du texte technique du CCTP (gras, italique, souligné, couleur)
+
+`cctpDescription` reste une chaîne, sans migration : la mise en forme y est portée par quatre balises, `[b]…[/b]`, `[i]…[/i]`, `[u]…[/u]` et `[c=#rrggbb]…[/c]` (`src/lib/cctpRichText.ts`, testé). Une balise inconnue, mal formée, sans ouverture, ou une couleur autre que `#rrggbb` reste du texte ordinaire : rien n'est perdu ni interprété en silence. Les variables `{{…}}` ne sont pas touchées.
+
+- **Édition** (`CctpRichText.tsx`, branchée dans `CCTPEditor`) : le champ reste un `<textarea>`. La barre (B, I, U, palette de six couleurs dont le noir et le gris, « Aucune ») et Ctrl/⌘ + B, I, U posent ou retirent les balises autour de la sélection (`basculerBalise`, `appliquerCouleur`), la sélection est rétablie ensuite. Un aperçu rendu n'apparaît que si le texte est mis en forme.
+- **Export** (`cctpExport.ts`) : PDF mis en lignes mot par mot (`mettreEnLignes`, car `splitTextToSize` ne change pas de police), gras/italique/gras italique en Helvetica, souligné tracé, couleur par segment ; Word par `TextRun` (`bold`, `italics`, `underline`, `color`). Les titres, mentions et légendes restent sans mise en forme. La couleur n'est pas imposée : un texte non coloré garde les gris de la charte.
+- **Les autres consommateurs lisent `texteBrut()`** : recherche du PRO (`proRecherche.ts`) et planning de chantier (`server/planningSources.ts`). Les agents (`packages/archioffice-agents`, qui n'importent rien de `src/`) voient les balises telles quelles. **Tout nouveau consommateur de `cctpDescription` qui affiche ou analyse le texte doit passer par `texteBrut()`.**
+- **Pas encore fait** : listes à puces mises en forme dans l'aperçu, mise en forme du texte généré par l'IA (il arrive sans balises), vérification dans un navigateur et sur un PDF réellement ouvert.
+
 ### Le CCTP n'est pas un document séparé
 
 Le codebase a longtemps porté trois chemins parallèles pour le CCTP, dont

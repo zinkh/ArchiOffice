@@ -15,6 +15,7 @@ import { docxSectionChrome } from './docxRunningHeader';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
+import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
 
 export interface CctpBloc {
   niveau: number;          // 1 lot, 2 chapitre, 3+ article et sous-articles
@@ -37,6 +38,12 @@ export interface CctpExportOptions {
   contexte?: ContexteCctp;
   /** Destination du fichier ; absente, il est téléchargé. */
   sortie?: Sortie;
+}
+
+/** #rrggbb vers [r, g, b] ; une couleur illisible rend le repli. */
+function hexVersRgb(hex: string | undefined, repli: [number, number, number]): [number, number, number] {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex ?? '');
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : repli;
 }
 
 const libelleBatiment = (b: Batiment) => (b.libelle ? `${b.code} ${b.libelle}` : b.code);
@@ -179,6 +186,40 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     y += apres;
   };
 
+  // Texte technique : gras, italique, souligné et couleur (voir cctpRichText).
+  // Mise en lignes mot par mot, car splitTextToSize ne sait pas changer de police.
+  const ecrireRiche = (valeur: string, taille: number, couleur: [number, number, number], retrait = 0, apres = 1.5) => {
+    const police = (s: StyleRiche) => (s.b && s.i ? 'bolditalic' : s.b ? 'bold' : s.i ? 'italic' : 'normal');
+    const mesurer = (t: string, s: StyleRiche) => {
+      pdf.setFont('helvetica', police(s));
+      pdf.setFontSize(taille);
+      return pdf.getTextWidth(t);
+    };
+    const hLigne = taille * 0.42;
+    for (const paragraphe of paragraphesRiches(valeur)) {
+      for (const ligne of mettreEnLignes(paragraphe, largeur - retrait, mesurer)) {
+        place(hLigne);
+        const base = y + hLigne * 0.8;
+        let x = margin + retrait;
+        for (const m of ligne) {
+          const rgb = hexVersRgb(m.color, couleur);
+          pdf.setFont('helvetica', police(m));
+          pdf.setFontSize(taille);
+          pdf.setTextColor(...rgb);
+          pdf.text(m.text, x, base);
+          if (m.u) {
+            pdf.setDrawColor(...rgb);
+            pdf.setLineWidth(0.2);
+            pdf.line(x, base + 0.6, x + mesurer(m.text.replace(/\s+$/, ''), m), base + 0.6);
+          }
+          x += m.largeur;
+        }
+        y += hLigne;
+      }
+    }
+    y += apres;
+  };
+
   const blocsPdf = cctpBlocs(doc, opts.batiment?.id, opts.contexte);
   const images = await chargerImages(blocsPdf);
   for (const b of blocsPdf) {
@@ -188,7 +229,7 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     else { place(10); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
     if (b.batiments) ecrire(`Bâtiments concernés : ${b.batiments.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
-    if (b.texte) ecrire(b.texte, 9.5, 'normal', GRIS_TEXTE, retrait, 2.5);
+    if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, 2.5);
     for (const illustration of b.images ?? []) {
       const img = images.get(illustration.fileUrl);
       if (!img) continue;
@@ -270,13 +311,19 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     }));
     if (b.batiments) mention(`Bâtiments concernés : ${b.batiments.join(', ')}`);
     if (b.localisation) mention(`Localisation : ${b.localisation}`);
-    for (const para of b.texte.split(/\n/)) {
-      if (!para.trim()) continue;
-      const puce = /^\s*[-•]\s+/.test(para);
+    for (const segments of paragraphesRiches(b.texte)) {
+      const brut = segments.map(x => x.text).join('');
+      if (!brut.trim()) continue;
+      const puce = /^\s*[-•]\s+/.test(brut);
+      // La puce est retirée du premier morceau, qui porte les premiers caractères.
+      const morceaux = puce ? segments.map((x, i) => (i === 0 ? { ...x, text: x.text.replace(/^\s*[-•]\s+/, '') } : x)) : segments;
       body.push(new Paragraph({
         indent: retrait(b.niveau), spacing: { after: 80 },
         ...(puce ? { bullet: { level: 0 } } : {}),
-        children: [new TextRun({ text: puce ? para.replace(/^\s*[-•]\s+/, '') : para, size: 19, color: '111827' })],
+        children: morceaux.filter(x => x.text).map(x => new TextRun({
+          text: x.text, size: 19, color: (x.color ?? '#111827').replace('#', '').toUpperCase(),
+          bold: x.b || undefined, italics: x.i || undefined, underline: x.u ? {} : undefined,
+        })),
       }));
     }
     for (const illustration of b.images ?? []) {

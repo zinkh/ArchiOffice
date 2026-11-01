@@ -3,6 +3,7 @@
 // arbre lots > chapitres > articles sert les cinq documents, la recherche
 // parcourt donc l'arbre tel quel et rend, pour chaque trouvaille, de quoi
 // l'atelier ouvert la déplier, la sélectionner et la montrer.
+import { texteBrut } from './cctpRichText';
 import type { Ligne } from '../types/dpgf';
 
 export type ChampTrouve = 'numero' | 'designation' | 'localisation' | 'cctp';
@@ -116,13 +117,13 @@ export function rechercherDansDocument(doc: DocumentRecherche | null | undefined
     const lotContexte = `${lot.numero} ${lot.titre}`.trim();
     const lotChamp = [
       contientTous(`${lot.numero} ${lot.titre}`, termes) ? 'designation' as const : null,
-      cctp && contientTous(lot.cctpDescription, termes) ? 'cctp' as const : null,
+      cctp && contientTous(texteBrut(lot.cctpDescription), termes) ? 'cctp' as const : null,
     ].find(Boolean);
     if (lotChamp) {
       trouvees.push({
         id: lot.id, kind: 'lot', lotIdx, lotId: lot.id, ancetresIds: [], numero: lot.numero, libelle: lot.titre,
         contexte: 'Lot', champ: lotChamp,
-        extrait: lotChamp === 'cctp' ? extraitAutour(lot.cctpDescription ?? '', termes) : undefined,
+        extrait: lotChamp === 'cctp' ? extraitAutour(texteBrut(lot.cctpDescription), termes) : undefined,
         score: classer(lot.numero, lot.titre, 0),
       });
     }
@@ -131,13 +132,13 @@ export function rechercherDansDocument(doc: DocumentRecherche | null | undefined
       const chapContexte = `${lotContexte} › ${chap.numero} ${chap.titre}`.trim();
       const chapChamp = [
         contientTous(`${chap.numero} ${chap.titre}`, termes) ? 'designation' as const : null,
-        cctp && contientTous(chap.cctpDescription, termes) ? 'cctp' as const : null,
+        cctp && contientTous(texteBrut(chap.cctpDescription), termes) ? 'cctp' as const : null,
       ].find(Boolean);
       if (chapChamp) {
         trouvees.push({
           id: chap.id, kind: 'chapitre', lotIdx, chapIdx, lotId: lot.id, chapId: chap.id, ancetresIds: [],
           numero: chap.numero, libelle: chap.titre, contexte: lotContexte, champ: chapChamp,
-          extrait: chapChamp === 'cctp' ? extraitAutour(chap.cctpDescription ?? '', termes) : undefined,
+          extrait: chapChamp === 'cctp' ? extraitAutour(texteBrut(chap.cctpDescription), termes) : undefined,
           score: classer(chap.numero, chap.titre, 10),
         });
       }
@@ -148,13 +149,13 @@ export function rechercherDansDocument(doc: DocumentRecherche | null | undefined
           const champ =
             contientTous(`${ligne.numero} ${ligne.designation}`, termes) ? (contientTous(ligne.numero, termes) ? 'numero' as const : 'designation' as const)
             : contientTous(ligne.localisation, termes) ? 'localisation' as const
-            : cctp && contientTous(ligne.cctpDescription, termes) ? 'cctp' as const
+            : cctp && contientTous(texteBrut(ligne.cctpDescription), termes) ? 'cctp' as const
             : null;
           if (champ) {
             trouvees.push({
               id: ligne.id, kind: 'ligne', lotIdx, chapIdx, lignePath: chemin, lotId: lot.id, chapId: chap.id,
               ancetresIds: ancetres, numero: ligne.numero, libelle: ligne.designation, contexte: chapContexte, champ,
-              extrait: champ === 'localisation' ? ligne.localisation : champ === 'cctp' ? extraitAutour(ligne.cctpDescription ?? '', termes) : undefined,
+              extrait: champ === 'localisation' ? ligne.localisation : champ === 'cctp' ? extraitAutour(texteBrut(ligne.cctpDescription), termes) : undefined,
               score: classer(ligne.numero, ligne.designation, champ === 'cctp' ? 25 : champ === 'localisation' ? 20 : 20),
             });
           }
