@@ -1,3 +1,4 @@
+import { queueWindowsEdit, type WindowsEditInput } from './windowsEdits';
 import { buildWindowsCatalog, catalogReader } from './windowsCatalog';
 import path from 'node:path';
 import type { DriveDocumentStatus, DriveRemoteCheck } from '../../../shared/driveDocumentStatus';
@@ -89,7 +90,7 @@ export function createAgentWorker(config: WorkerConfig) {
           return active.token;
         };
         const jobs=await ctx.queue.list();
-        const conflict=jobs.find(j=>'documentId' in j.target&&j.target.documentId===nodeId&&j.state==='conflict'&&j.reconciledVersion===undefined);
+        const conflict=jobs.find(j=>!j.sourceId&&'documentId' in j.target&&j.target.documentId===nodeId&&j.state==='conflict'&&j.reconciledVersion===undefined);
         if(!conflict||!jobs.some(j=>j.conflictSourceId===conflict.id&&j.state==='done'))throw Object.assign(new Error('Preserve conflict first'),{code:'CONFLICT_PRESERVATION_REQUIRED'});
         const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);
         const meta=await transport.metadata(nodeId,abort.signal);await ctx.cache.hydrate(meta,transport,abort.signal);
@@ -131,6 +132,18 @@ export function createAgentWorker(config: WorkerConfig) {
           if(JSON.stringify(relevant(await ctx.queue.listPersisted()))!==baseline)throw Object.assign(new Error('Queue changed'),{code:'WORKING_REFRESH_BUSY'});
         },true);
         await authorize();return {status:'refreshed',localVersion:next.baseVersion,remoteVersion:meta.version};
+      });
+      workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
+    uploadWindowsEdit(input: WindowsEditInput) {
+      const task=workingUploads.then(async()=>{
+        if(stopped)throw new Error('Agent stopped');
+        const ctx=await current();const expected={...ctx.session};
+        return queueWindowsEdit({root:path.join(path.dirname(config.root),'drive-windows-preview'),identity:expected,input,queue:ctx.queue,
+          cached:meta=>ctx.cache.lookup(meta),authorize:async()=>{
+            abort.signal.throwIfAborted();const active=await config.session();
+            if(['userId','tenantId','deviceId'].some(k=>active[k as keyof AgentSession]!==expected[k as keyof AgentSession]))throw Object.assign(new Error('Account changed'),{code:'DRIVE_IDENTITY_MISMATCH'});
+          }});
       });
       workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },

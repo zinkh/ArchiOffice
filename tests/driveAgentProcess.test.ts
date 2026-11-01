@@ -50,6 +50,12 @@ it('runs as a separate process, stays paused on vault refusal, then exits on sto
     });
     child.send({type:'drive:windows-preview',action:'catalog',input:{projectId:'p'},requestId:'windows-one'});
     expect(await nativeRefused).toMatchObject({error:{code:'WINDOWS_PREVIEW_REFUSED'}});
+    const uploadRefused=new Promise<any>((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('Native upload timeout')),10000);
+      child!.on('message',(msg:any)=>{if(msg.type==='drive:working-result'&&msg.requestId==='upload-native'){clearTimeout(timer);resolve(msg);}});
+    });
+    child.send({type:'drive:windows-preview',action:'upload',input:{projectId:'p'},requestId:'upload-native'});
+    expect(await uploadRefused).toMatchObject({error:{code:'WINDOWS_PREVIEW_REFUSED'}});
     const stateRefused=new Promise<any>((resolve,reject)=>{
       const timer=setTimeout(()=>reject(new Error('Status command timeout')),10000);
       child!.on('message',(msg:any)=>{if(msg.type==='drive:document-statuses-result'){clearTimeout(timer);resolve(msg);}});
