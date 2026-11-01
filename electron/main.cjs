@@ -422,7 +422,7 @@ function startDriveAgent() {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.open();
   });
   ipcMain.handle('desktop:drive-windows-status',(event)=> {
-    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.status();
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.getStatus();
   });
   ipcMain.handle('desktop:drive-windows-start',async(event,projectId)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');

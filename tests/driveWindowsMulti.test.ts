@@ -89,3 +89,7 @@ it('allows disconnecting even if the selection file was corrupted',async()=>{
  const drive=make();await drive.start('p');await fs.writeFile(config.stateFile,'corrupt');await drive.disconnect();
  expect(drive.status()).toMatchObject({active:false,configured:false});expect(config.login).toHaveBeenLastCalledWith(false);expect(frames.filter(f=>f.type==='stop')).toHaveLength(2);
 });
+it('validates the current identity before returning project IDs to a new renderer context',async()=>{
+ const drive=make();await drive.start('p');config.vault.mockResolvedValue({...identity,userId:'new-user'});
+ expect(await drive.getStatus()).toMatchObject({active:false,projectCount:0,projectIds:[]});expect(frames.filter(f=>f.type==='stop')).toHaveLength(2);
+});

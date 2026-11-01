@@ -142,6 +142,13 @@ function createWindowsMultiDrive(options) {
  }
  function resume(){if(timer)return;void restore();timer=setInterval(()=>void restore(),10000);timer.unref();}
  function shutdown(){stopped=true;clearInterval(timer);timer=null;stopAll();}
- return {start:connect,open,remove,disconnect,resume,shutdown,status:()=>({enabled:enabled(),active:namespace.status().active,configured,error:lastError,letter:'A:',projectCount:namespace.status().active?projects.size:0,projectIds:namespace.status().active?[...projects.keys()]:[]})};
+ const status=()=>({enabled:enabled(),active:namespace.status().active,configured,error:lastError,letter:'A:',projectCount:namespace.status().active?projects.size:0,projectIds:namespace.status().active?[...projects.keys()]:[]});
+ async function getStatus() {
+  // The renderer may have switched cabinet since the previous lease check.
+  // Validate before exposing the selected IDs, not only on the next timer tick.
+  if(identity){try{if(!same(await vault(),identity))stopAll();}catch{stopAll();}}
+  return status();
+ }
+ return {start:connect,open,remove,disconnect,resume,shutdown,status,getStatus};
 }
 module.exports={createWindowsMultiDrive};
