@@ -35,6 +35,7 @@ import { chargerEtatArbre, ouvertsSauf, repliesParmi, sauverEtatArbre } from '..
 import { appliquerCouleur, basculerBalise, contientMiseEnForme, type BaliseRiche, type EditionTexte } from '../../lib/cctpRichText';
 import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
 import { CctpExportLibraryDialog } from './CctpExportLibraryDialog';
+import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog';
 import { ajouterClause, estClause, type ExportBibliotheque } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath } from './treeOps';
 
@@ -117,6 +118,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showGenerate, setShowGenerate] = useState(false);
   const [showExportLibrary, setShowExportLibrary] = useState(false);
+  const [showDraft, setShowDraft] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
   const chapitreVise = selection && selection.kind !== 'lot'
@@ -351,6 +353,44 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     return { type: 'clause', designation: titre ?? '', description: data.description };
   };
 
+  // ── Rédaction IA d'un poste ───────────────────────────────────────────────
+  const posteARediger = (sel: Selection, data: NonNullable<ReturnType<typeof getSelectedData>>): PosteARediger => {
+    const lot = dpgf.lots[sel.lotIdx];
+    const base = { lotTitre: lot?.titre ?? '', chapitreTitre: '', unite: '', localisation: '', texteExistant: data.description };
+    if (sel.kind === 'lot') {
+      return { ...base, kind: 'lot', titre: lot.titre, numero: lot.numero, voisins: dpgf.lots.filter((_, i) => i !== sel.lotIdx).map(l => l.titre) };
+    }
+    const chap = lot.chapitres[sel.chapIdx];
+    if (sel.kind === 'chapitre') {
+      return { ...base, kind: 'chapitre', titre: chap.titre, numero: chap.numero, voisins: lot.chapitres.filter((_, i) => i !== sel.chapIdx).map(c => c.titre) };
+    }
+    const ligne = data.ligne!;
+    const parent = sel.lignePath.length > 1 ? ligneAtPath(chap.lignes, sel.lignePath.slice(0, -1)) : null;
+    const freres = (parent ? parent.children ?? [] : chap.lignes).filter(l => l.id !== ligne.id);
+    return {
+      ...base, kind: 'article', titre: ligne.designation, numero: ligne.numero, chapitreTitre: chap.titre,
+      unite: ligne.unite, localisation: ligne.localisation ?? '', voisins: freres.map(l => l.designation),
+    };
+  };
+  // Un seul enregistrement : deux mutateDPGF successifs partent chacun du même
+  // document et le second effacerait le premier.
+  const appliquerRedaction = (texte: string, mode: 'remplacer' | 'ajouter') => {
+    if (!selection || !selData) return;
+    const nouveau = mode === 'remplacer' ? texte : ajouterClause(selData.description, texte).texte;
+    mutateDPGF(d => {
+      const lot = d.lots[selection.lotIdx];
+      if (selection.kind === 'lot') (lot as any).cctpDescription = nouveau;
+      else if (selection.kind === 'chapitre') lot.chapitres[selection.chapIdx].cctpDescription = nouveau;
+      else {
+        const l = ligneAtPath(lot.chapitres[selection.chapIdx].lignes, selection.lignePath)!;
+        l.cctpDescription = nouveau;
+        // Repère « IA » de l'arbre : un texte rédigé par l'IA se relit avant d'être assumé.
+        l.genereParIa = l.genereParIa ?? 'llm';
+      }
+    });
+    setShowDraft(false);
+  };
+
   // ── Derive selected data ──────────────────────────────────────────────────
   const getSelectedData = () => {
     if (!selection) return null;
@@ -520,6 +560,15 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
           projectId={dpgf.projectId}
           onClose={() => setShowGenerate(false)}
           onGenerated={insererGeneration}
+        />
+      )}
+
+      {showDraft && selection && selData && (
+        <CctpDraftPosteDialog
+          projectId={dpgf.projectId}
+          poste={posteARediger(selection, selData)}
+          onClose={() => setShowDraft(false)}
+          onApply={appliquerRedaction}
         />
       )}
 
@@ -866,6 +915,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                     Description technique
                   </label>
                   <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <button
+                      type="button" onClick={() => setShowDraft(true)}
+                      className="inline-flex items-center gap-1 h-7 px-2 rounded border text-xs outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] pointer-coarse:h-11"
+                      style={{ borderColor: 'var(--tblr-border)' }}
+                    >
+                      <IconSparkles size={14} aria-hidden />{t('pro_cctp_draft_title')}
+                    </button>
                     <CctpRichToolbar onBalise={formaterBalise} onCouleur={formaterCouleur} />
                     <ToolbarMenu
                       entries={variableEntries}
