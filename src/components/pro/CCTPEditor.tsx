@@ -38,7 +38,9 @@ import { CctpExportLibraryDialog, type ResultatExport } from './CctpExportLibrar
 import { elementsAExporter } from './cctpExportOps';
 import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog';
 import { ajouterClause, estClause } from '../../lib/bibliothequeClauses';
-import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey } from './treeOps';
+import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey, recomputeLot } from './treeOps';
+import { CctpQuantiteUnite } from './CctpQuantiteUnite';
+import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
 import { CctpBulkEditDialog } from './CctpBulkEditDialog';
@@ -80,6 +82,7 @@ type Selection = HierarchySelection;
 
 export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget, auteur }) => {
   const { t } = useTranslation();
+  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
   const showTree = showTreeProp ?? localShowTree;
@@ -262,14 +265,37 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   };
 
   // ── Delete CCTP-only items ────────────────────────────────────────────────
-  const deleteCCTPChapitre = (lotIdx: number, chapIdx: number) => {
+  // Chaque suppression passe par une validation qui dit ce qui part avec l'élément.
+  const deleteCCTPChapitre = async (lotIdx: number, chapIdx: number) => {
+    if (!(await confirmerSuppression(dpgf.lots, [`chap-${lotIdx}-${chapIdx}`]))) return;
     mutateDPGF(d => d.lots[lotIdx].chapitres.splice(chapIdx, 1));
     setSelection(null);
   };
 
-  const deleteCCTPLigne = (lotIdx: number, chapIdx: number, path: number[]) => {
+  const deleteCCTPLigne = async (lotIdx: number, chapIdx: number, path: number[]) => {
+    if (!(await confirmerSuppression(dpgf.lots, [`ligne-${lotIdx}-${chapIdx}-${path.join('-')}`]))) return;
     mutateDPGF(d => { const chap = d.lots[lotIdx].chapitres[chapIdx]; chap.lignes = takeLigneAtPath(chap.lignes, path).lignes; });
     setSelection(null);
+  };
+
+  // ── Quantité et unité d'un article ────────────────────────────────────────
+  // Même règle que le DPGF : la quantité fixe le prix total (quantité x P.U.),
+  // sauf pour mémoire ; le sous-total du lot et les totaux sont recalculés.
+  const updateQuantiteUnite = (champ: 'quantite' | 'unite', valeur: number | string) => {
+    if (!selection || selection.kind !== 'ligne') return;
+    mutateDPGF(d => {
+      const lot = d.lots[selection.lotIdx];
+      const ligne = ligneAtPath(lot.chapitres[selection.chapIdx].lignes, selection.lignePath);
+      if (!ligne) return;
+      if (champ === 'unite') ligne.unite = String(valeur);
+      else {
+        ligne.quantite = Number(valeur);
+        ligne.prixTotal = ligne.pourMemoire ? 0 : ligne.quantite * ligne.prixUnitaire;
+      }
+      d.lots[selection.lotIdx] = recomputeLot(lot);
+      d.totalHT = d.lots.reduce((sum, l) => sum + l.sousTotal, 0);
+      d.totalTTC = d.totalHT * (1 + d.TVA / 100);
+    });
   };
 
   // ── Toggle DPGF visibility ────────────────────────────────────────────────
@@ -339,6 +365,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const [envoiImages, setEnvoiImages] = useState(false);
   const [erreurImages, setErreurImages] = useState<string | null>(null);
   const localisations = localisationsConnues(dpgf);
+  const unitesConnues = [...new Set(dpgf.lots.flatMap(lot => lot.chapitres.flatMap(c => flattenCctpLignes(c.lignes).map(x => x.ligne.unite?.trim()))).filter((u): u is string => !!u))];
 
   const mutateImages = (fn: (ligne: Ligne) => void) => {
     if (!selection || selection.kind !== 'ligne') return;
@@ -608,9 +635,10 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const canDeleteSelection = multi
     ? selectionsActives.every(s => s.kind !== 'lot' && !!noeudDe(s)?.cctpOnly)
     : !!selection && selection.kind !== 'lot' && isSelCctpOnly;
-  const deleteSelected = () => {
+  const deleteSelected = async () => {
     if (multi) {
       if (!canDeleteSelection) return;
+      if (!(await confirmerSuppression(dpgf.lots, clesActives))) return;
       onChange({ ...dpgf, lots: deleteSelection(dpgf.lots, clesActives), ...totauxDe(deleteSelection(dpgf.lots, clesActives)) });
       setSelection(null);
       return;
@@ -716,6 +744,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
+      {confirmDialog}
 
       {showGenerate && (
         <CctpGenerateDialog
@@ -1043,28 +1072,30 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
 
                 <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
 
-                {/* DPGF article info badge */}
-                {selection.kind === 'ligne' && !isSelCctpOnly && (() => {
+                {/* Quantité et unité modifiables ici ; le prix unitaire se règle dans le DPGF. */}
+                {selection.kind === 'ligne' && (() => {
                   const l = ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath);
                   if (!l) return null;
                   return (
-                    <div className="mt-3 flex flex-wrap gap-3">
-                      {l.unite && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs text-zinc-500">
-                          Unité : <strong>{l.unite}</strong>
-                        </span>
+                    <>
+                      <CctpQuantiteUnite
+                        key={l.id}
+                        quantite={l.quantite}
+                        unite={l.unite}
+                        parBatiment={l.quantitesBatiments !== undefined}
+                        aDesEnfants={!!l.children?.length}
+                        unitesConnues={unitesConnues}
+                        onQuantite={q => updateQuantiteUnite('quantite', q)}
+                        onUnite={u => updateQuantiteUnite('unite', u)}
+                      />
+                      {!isSelCctpOnly && l.prixUnitaire > 0 && (
+                        <div className="mt-2">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs text-zinc-500">
+                            P.U. HT : <strong>{l.prixUnitaire.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</strong>
+                          </span>
+                        </div>
                       )}
-                      {l.quantite > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs text-zinc-500">
-                          Qté : <strong>{l.quantite}</strong>
-                        </span>
-                      )}
-                      {l.prixUnitaire > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs text-zinc-500">
-                          P.U. HT : <strong>{l.prixUnitaire.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</strong>
-                        </span>
-                      )}
-                    </div>
+                    </>
                   );
                 })()}
                 {/* Bâtiment / phase / localisation */}

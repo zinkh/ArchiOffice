@@ -8,6 +8,7 @@ import {
 } from '@tabler/icons-react';
 import { DPGF, NATURES_HORS_BASE } from '../../types/dpgf';
 import { evalFormula, parsePrixSaisi, estHorsBase, mutateLigneAtPath, deleteLigneAtPath, takeLigneAtPath, insertLigneAtPath, renumeroterLignes, moveLigneSibling, recomputeLot } from './treeOps';
+import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { appliquerStatutLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
 import { useProToolbar, type ToolbarMenuEntry } from './toolbar/toolbarState';
@@ -68,6 +69,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
   showTree: showTreeProp, onToggleTree,
 }) => {
   const { t } = useTranslation();
+  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
@@ -302,6 +304,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
+      {confirmDialog}
       <div className="flex flex-1 overflow-hidden">
 
         {/* ── Left tree ──────────────────────────────────────────────────── */}
@@ -500,7 +503,9 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                             )}
                             <td className="px-1 py-0.5">
                               <button
-                                onClick={() => {
+                                aria-label={t('pro_delete')}
+                                onClick={async () => {
+                                  if (!(await confirmerSuppression(dpgf.lots, [`ligne-${li}-${ci}-${path.join('-')}`]))) return;
                                   const newDpgf = JSON.parse(JSON.stringify(dpgf)) as DPGF;
                                   newDpgf.lots[li].chapitres[ci].lignes = deleteLigneAtPath(chap.lignes, path);
                                   onChange(recomputeDPGF(newDpgf));

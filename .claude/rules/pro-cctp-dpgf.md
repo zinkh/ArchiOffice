@@ -72,6 +72,13 @@ impression).
   plus aucun bandeau bleu figé. L'encre atténuée claire passe à `#5f6d84`
   (contraste 4,5:1 sur blanc, cf. DESIGN.md).
 
+### PRO : description, quantité et validation avant suppression (issue #609)
+
+- **Quantité et unité dans le CCTP** (`CctpQuantiteUnite.tsx`, fiche d'un article) : champs modifiables, enregistrés en quittant le champ ou par Entrée (Échap annule), la quantité accepte un calcul (`=12*3,5`). Même règle que le DPGF : `prixTotal = quantité x P.U.` (0 pour mémoire), sous-total du lot et totaux recalculés (`updateQuantiteUnite`). Une quantité répartie par bâtiment (`quantitesBatiments`) reste en lecture seule (somme, à modifier dans le DPGF) ; un article qui porte des sous-articles n'a pas de quantité propre. Unités déjà utilisées dans le document proposées en tête.
+- **Description d'un ouvrage depuis le DPGF** (`LigneDescriptionDialog.tsx`) : icône à côté de la désignation (bleue si un texte existe) et entrée « Description de l'ouvrage » du menu « ⋯ ». C'est le même texte que le CCTP (`cctpDescription`), Ctrl+Entrée enregistre, fermer avec une saisie non enregistrée demande confirmation.
+- **Validation avant suppression** (`useConfirmerSuppression.tsx`, `resumeSuppression` dans `selectionOps.ts`, testé) : CCTP, DPGF, BPU/DQE, estimation et panneau Bâtiments et phases. La fenêtre dit ce que la suppression emporte (lots, chapitres, articles, sous-articles compris), le focus part sur « Annuler ». Le DPGF et le BPU gardent aussi « Annuler » dans le toast.
+- **Pas encore fait** : description depuis la liste mobile du DPGF (`DpgfMobileList`), mise en forme riche dans la fenêtre de description.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au

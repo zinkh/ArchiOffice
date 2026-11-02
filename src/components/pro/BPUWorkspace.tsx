@@ -14,6 +14,7 @@ import {
 } from '@tabler/icons-react';
 import { useProToolbar } from './toolbar/toolbarState';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
+import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import type { ProNotify } from './DPGFWorkspace';
@@ -133,6 +134,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   useEffect(() => { setColSet(mode); }, [mode]);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const { t } = useTranslation();
+  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(bpu.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
     new Set(bpu.lots.flatMap(l => l.chapitres.map(c => c.id))),
@@ -336,7 +338,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     setExpandedLignes(prev => new Set([...prev, parent.id]));
   };
 
-  const deleteLigne = (lotIdx: number, chapIdx: number, path: number[]) => {
+  const deleteLigne = async (lotIdx: number, chapIdx: number, path: number[]) => {
+    if (!(await confirmerSuppression(bpuRef.current.lots, [`ligne-${lotIdx}-${chapIdx}-${path.join('-')}`]))) return;
     mutateLots(lots => {
       const next = [...lots];
       const lot = { ...next[lotIdx] };
@@ -348,7 +351,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     });
   };
 
-  const deleteChapitre = (lotIdx: number, chapIdx: number) =>
+  const deleteChapitre = async (lotIdx: number, chapIdx: number) => {
+    if (!(await confirmerSuppression(bpuRef.current.lots, [`chap-${lotIdx}-${chapIdx}`]))) return;
     mutateLots(lots => {
       const next = [...lots];
       const lot = { ...next[lotIdx] };
@@ -356,8 +360,12 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       next[lotIdx] = recomputeLot(lot);
       return next;
     });
+  };
 
-  const deleteLot = (lotIdx: number) => mutateLots(lots => lots.filter((_, i) => i !== lotIdx));
+  const deleteLot = async (lotIdx: number) => {
+    if (!(await confirmerSuppression(bpuRef.current.lots, [`lot-${lotIdx}`]))) return;
+    mutateLots(lots => lots.filter((_, i) => i !== lotIdx));
+  };
 
   // ── Édition de cellule ──────────────────────────────────────────────────────
   const startEdit = (rKey: string, field: string, value: string | number) =>
@@ -514,12 +522,13 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     setSelectedRowKeys(new Set(result.pasted.map(hierarchyKey)));
   };
 
-  const deleteSelected = () => {
+  const deleteSelected = async () => {
     const keys = [...selectedRowKeys];
     if (!keys.length) return;
-    const before = bpu;
-    const lots = deleteSelection(bpu.lots, keys);
-    onChange(recomputeBPU({ ...bpu, lots }));
+    if (!(await confirmerSuppression(bpuRef.current.lots, keys))) return;
+    const before = bpuRef.current;
+    const lots = deleteSelection(before.lots, keys);
+    onChange(recomputeBPU({ ...before, lots }));
     setSelectedRowKeys(new Set());
     notify?.(t('pro_deleted', { count: keys.length }), {
       action: {
@@ -773,6 +782,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
+      {confirmDialog}
 
       {/* ── Cadre du marché ──────────────────────────────────────────────── */}
       {showMarche && (

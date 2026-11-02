@@ -58,6 +58,14 @@ rattachent), un doublon (même contact, même rôle) est ignoré, un contact se 
 `contact_id` ou par son nom exact (plusieurs fiches homonymes : refus et liste des candidats),
 un rôle est obligatoire. `remove` passe par la confirmation en deux temps de `delete_record`.
 
+### Fiche d'un nouveau contact entreprise (agents)
+
+`contactEnrichmentSection` (`systemPrompts.ts`) : tout agent qui écrit sur `contacts` (Sophie comprise) et qui peut chercher sur le web cherche, quand une entreprise est ajoutée, ses coordonnées publiques (adresse, téléphone, e-mail, site, SIRET) et ses spécialités, puis PROPOSE de compléter la fiche, jamais d'écriture sans accord. Spécialités : `corps_etat` pour une entreprise (Gros œuvre, Couverture, Bardage...), `specialite` pour un bureau d'études, ajoutées aux existantes. Homonymes : l'agent demande lequel.
+
+**Deux façons de chercher, selon les capacités réelles de l'agent** : la recherche web native (Gemini, Claude : `webSearchActive`) ou `fetch_url` seul, ce qui est le cas de **Mistral** (pas de recherche native sur Chat Completions). Avec `fetch_url` seul, l'agent interroge l'annuaire officiel `https://recherche-entreprises.api.gouv.fr/search?q=...&etat_administratif=A&per_page=5` (JSON sans clé, le même service que `/api/entreprises/search` ; il donne SIRET, adresse, code NAF, ni téléphone ni e-mail) puis le site de l'entreprise (champ `website`, ou adresse fournie par l'annuaire ou l'utilisateur, jamais inventée). **`fetch_url` n'y est autorisé que par exception** à la règle « URL fournie par l'utilisateur », sur ces deux sources seulement (la description de l'outil, `tools.ts`, le dit aussi). Un indice code NAF vers métier est donné (43.91B couverture, 43.91A charpente, 41.20 gros œuvre...), présenté comme « déduit du code NAF » ; un métier fin comme le bardage ne se déduit pas d'un code et vient du site.
+
+La règle dépend des capacités, pas du texte du prompt : elle survit à `system_prompt_override`, et aucune migration n'est nécessaire. Absente si l'agent n'écrit pas sur les contacts, ou n'a ni recherche web ni `fetch_url`. `corps_etat`, `specialite`, `siret` et `website` rejoignent les champs connus de la ressource `contacts`. Test : `tests/agentContactEnrichment.test.ts` (cas recherche native, `fetch_url` seul, les deux, aucun). Non vérifié contre un vrai modèle Mistral.
+
 ### Couverture des agents : outils d'opération, documents, Markdown
 
 Au-delà des ressources CRUD de `AGENT_RESOURCES`, des outils écrits à la main couvrent ce que la
