@@ -44,10 +44,42 @@ describe('fiche d\'un nouveau contact entreprise', () => {
     expect(prompt).toContain('FICHE D\'UN NOUVEAU CONTACT ENTREPRISE');
   });
 
-  it('est absente sans écriture sur les contacts ou sans recherche web', () => {
+  it('est absente sans écriture sur les contacts, ou sans recherche web ni fetch_url', () => {
     expect(contactEnrichmentSection(agent({ action_scopes: ['tasks'] }), true)).toBe('');
+    expect(contactEnrichmentSection(agent({ action_scopes: ['tasks'], web_fetch_enabled: true }), false)).toBe('');
     expect(contactEnrichmentSection(agent(), false)).toBe('');
     expect(buildAgentSystemPrompt(agent(), ctx, false)).not.toContain('NOUVEAU CONTACT ENTREPRISE');
+  });
+
+  // Mistral n'a pas de recherche web native sur Chat Completions : seul fetch_url
+  // est disponible. La règle doit fonctionner avec lui, sur l'annuaire officiel.
+  it('fonctionne avec fetch_url seul (Mistral) : annuaire officiel et exception à la règle d\'URL', () => {
+    const mistral = agent({ web_search_enabled: true, web_fetch_enabled: true });
+    const prompt = buildAgentSystemPrompt(mistral, ctx, false); // webSearchActive = false
+    expect(prompt).toContain('FICHE D\'UN NOUVEAU CONTACT ENTREPRISE');
+    expect(prompt).toContain('https://recherche-entreprises.api.gouv.fr/search?q=');
+    expect(prompt).toContain('Tu n\'as pas de moteur de recherche');
+    expect(prompt).toContain('Par EXCEPTION à la règle de l\'ACCÈS WEB');
+    expect(prompt).toContain('43.91B couverture');
+    expect(prompt).toContain('PROPOSE, n\'écris pas');
+  });
+
+  it('avec fetch_url seul, reste présente sous un prompt entièrement réécrit', () => {
+    const prompt = buildAgentSystemPrompt(agent({ web_fetch_enabled: true, system_prompt_override: 'Tu es Sophie.' }), ctx, false);
+    expect(prompt).toContain('recherche-entreprises.api.gouv.fr');
+  });
+
+  it('avec la recherche web native, ne présente pas la procédure par annuaire sans fetch_url', () => {
+    const section = contactEnrichmentSection(agent({ web_fetch_enabled: false }), true);
+    expect(section).toContain('Fais une recherche web');
+    expect(section).not.toContain('recherche-entreprises.api.gouv.fr');
+    expect(section).not.toContain('Par EXCEPTION');
+  });
+
+  it('avec les deux, cherche sur le web et autorise aussi l\'annuaire', () => {
+    const section = contactEnrichmentSection(agent({ web_fetch_enabled: true }), true);
+    expect(section).toContain('Fais une recherche web');
+    expect(section).toContain('Par EXCEPTION');
   });
 });
 
