@@ -1,6 +1,6 @@
 import { chapitresParDefaut, numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { useTranslation } from 'react-i18next';
-import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, type HierarchySelection } from './hierarchyOps';
+import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, ligneAtPath, type HierarchySelection } from './hierarchyOps';
 import React, { useState, useRef } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard,
@@ -8,7 +8,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
-  IconSubtask, IconTag,
+  IconSubtask, IconTag, IconFileText,
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
@@ -25,6 +25,8 @@ import { ToolbarMenu } from './toolbar/ToolbarMenu';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
+import { LigneDescriptionDialog } from './LigneDescriptionDialog';
+import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
 import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
@@ -81,6 +83,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 }) => {
   const { settings } = useSettings();
   const { t } = useTranslation();
+  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
+  // Ouvrage dont on saisit la description technique (clé positionnelle de la ligne).
+  const [descriptionKey, setDescriptionKey] = useState<string | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -508,10 +513,33 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     selectKeys(result.pasted.map(hierarchyKey));
   };
 
-  const removeSelection = (sel: HierarchySelection[]) => {
+  // ── Description technique d'un ouvrage (le texte du CCTP) ───────────────────
+  const descriptionCible = (() => {
+    const k = descriptionKey ? parseRowKey(descriptionKey) : null;
+    if (k?.kind !== 'ligne') return null;
+    const l = ligneAtPath(dpgf.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
+    return l ? { key: descriptionKey!, ligne: l as Ligne } : null;
+  })();
+  const enregistrerDescription = (key: string, texte: string) => {
+    const k = parseRowKey(key);
+    if (k?.kind !== 'ligne') return;
+    mutateLots(lots => {
+      const lot = { ...lots[k.lotIdx] };
+      const chap = { ...lot.chapitres[k.chapIdx] };
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, cctpDescription: texte }));
+      lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
+      const next = [...lots];
+      next[k.lotIdx] = lot;
+      return next;
+    });
+  };
+
+  const removeSelection = async (sel: HierarchySelection[]) => {
     if (!sel.length) return;
-    const before = dpgf;
-    const nextLots = deleteSelection(dpgf.lots, sel.map(hierarchyKey));
+    // Validation avant toute suppression : la fenêtre dit ce qui part avec la sélection.
+    if (!(await confirmerSuppression(dpgfRef.current.lots, sel.map(hierarchyKey)))) return;
+    const before = dpgfRef.current;
+    const nextLots = deleteSelection(before.lots, sel.map(hierarchyKey));
     commitLots(nextLots);
     clearSelection();
     setEditingCell(null);
@@ -624,7 +652,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const statut: ToolbarMenuEntry[] = s.kind === 'ligne'
       ? [{ id: 'sep-statut', separator: true }, { id: 'head-statut', heading: t('pro_status') }, ...statutEntries([rowKey(row)])]
       : [];
-    return [...add, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
+    const description: ToolbarMenuEntry[] = s.kind === 'ligne'
+      ? [{ id: 'description', label: t('pro_description_edit'), icon: <IconFileText size={16} />, onClick: () => setDescriptionKey(rowKey(row)) }]
+      : [];
+    return [...add, ...description, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
   };
 
   // ── Raccourcis clavier du tableau ───────────────────────────────────────────
@@ -804,6 +835,17 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}>
+      {confirmDialog}
+      {descriptionCible && (
+        <LigneDescriptionDialog
+          key={descriptionCible.key}
+          numero={descriptionCible.ligne.numero}
+          designation={descriptionCible.ligne.designation}
+          valeur={descriptionCible.ligne.cctpDescription ?? ''}
+          onSave={texte => enregistrerDescription(descriptionCible.key, texte)}
+          onClose={() => setDescriptionKey(null)}
+        />
+      )}
       {showDecoupage && (
         <DecoupagePanel
           doc={dpgf}
@@ -1118,6 +1160,17 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           <div className="flex-1 min-w-0">
                             <EditableCell rKey={rKey} field="designation" value={l.designation} {...cellProps} />
                           </div>
+                          {/* Description technique de l'ouvrage : même texte que le CCTP. */}
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setDescriptionKey(rKey); }}
+                            title={l.cctpDescription ? t('pro_description_has') : t('pro_description_none')}
+                            aria-label={`${t('pro_description_edit')} ${l.numero}`}
+                            className={`shrink-0 w-6 h-6 pointer-coarse:w-10 pointer-coarse:h-10 inline-flex items-center justify-center rounded outline-none hover:bg-[var(--tblr-surface-2)] focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] ${l.cctpDescription ? '' : 'opacity-0 group-hover:opacity-60 focus-visible:opacity-100 pointer-coarse:opacity-60'}`}
+                            style={{ color: l.cctpDescription ? 'var(--tblr-primary)' : 'var(--tblr-muted)' }}
+                          >
+                            <IconFileText size={14} aria-hidden />
+                          </button>
                           {/* Repère de provenance : cet article vient de la
                               bibliothèque du cabinet, c'est aussi lui qui permettra
                               au prix d'une offre d'y remonter. */}

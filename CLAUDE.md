@@ -926,6 +926,17 @@ impression).
   plus aucun bandeau bleu figé. L'encre atténuée claire passe à `#5f6d84`
   (contraste 4,5:1 sur blanc, cf. DESIGN.md).
 
+### PRO : description, quantité et validation avant suppression (issue #609)
+
+- **Quantité et unité dans le CCTP** (`CctpQuantiteUnite.tsx`, fiche d'un article) : champs modifiables, enregistrés en quittant le champ ou par Entrée (Échap annule), la quantité accepte un calcul (`=12*3,5`). Même règle que le DPGF : `prixTotal = quantité x P.U.` (0 pour mémoire), sous-total du lot et totaux recalculés (`updateQuantiteUnite`). Une quantité répartie par bâtiment (`quantitesBatiments`) reste en lecture seule (somme, à modifier dans le DPGF) ; un article qui porte des sous-articles n'a pas de quantité propre. Unités déjà utilisées dans le document proposées en tête.
+- **Description d'un ouvrage depuis le DPGF** (`LigneDescriptionDialog.tsx`) : icône à côté de la désignation (bleue si un texte existe) et entrée « Description de l'ouvrage » du menu « ⋯ ». C'est le même texte que le CCTP (`cctpDescription`), Ctrl+Entrée enregistre, fermer avec une saisie non enregistrée demande confirmation.
+- **Validation avant suppression** (`useConfirmerSuppression.tsx`, `resumeSuppression` dans `selectionOps.ts`, testé) : CCTP, DPGF, BPU/DQE, estimation et panneau Bâtiments et phases. La fenêtre dit ce que la suppression emporte (lots, chapitres, articles, sous-articles compris), le focus part sur « Annuler ». Le DPGF et le BPU gardent aussi « Annuler » dans le toast.
+- **Pas encore fait** : description depuis la liste mobile du DPGF (`DpgfMobileList`), mise en forme riche dans la fenêtre de description.
+
+### Fiche d'un nouveau contact entreprise (agents)
+
+`contactEnrichmentSection` (`systemPrompts.ts`) : tout agent qui écrit sur `contacts` ET dont la recherche web est active (Sophie comprise) cherche, quand une entreprise est ajoutée, ses coordonnées publiques (adresse, téléphone, e-mail, site, SIRET) et ses spécialités, puis PROPOSE de compléter la fiche, jamais d'écriture sans accord. Spécialités : `corps_etat` pour une entreprise (Gros œuvre, Couverture, Bardage...), `specialite` pour un bureau d'études, ajoutées aux existantes. Homonymes : l'agent demande lequel. La règle dépend des capacités, pas du texte du prompt : elle survit à `system_prompt_override`, et aucune migration n'est nécessaire. `corps_etat`, `specialite`, `siret` et `website` rejoignent les champs connus de la ressource `contacts`. Test : `tests/agentContactEnrichment.test.ts`.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
