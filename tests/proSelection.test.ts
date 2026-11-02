@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from '../src/components/pro/selectionOps';
+import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, resumeSuppression, totauxDocument } from '../src/components/pro/selectionOps';
 import { foldForMobile, invokeToolbarAction, toolbarSignature, type ToolbarItem } from '../src/components/pro/toolbar/toolbarState';
 import type { Ligne, Lot } from '../src/types/dpgf';
 
@@ -116,5 +116,23 @@ describe('barre d’outils PRO', () => {
     const changed = items();
     (changed[1] as Extract<ToolbarItem, { kind: 'button' }>).pressed = false;
     expect(toolbarSignature(changed)).not.toBe(a);
+  });
+});
+
+describe("résumé d'une suppression", () => {
+  it("compte les sous-articles d'un article supprimé", () => {
+    expect(resumeSuppression(makeLots(), ['ligne-0-0-1'])).toEqual({ lots: 0, chapitres: 0, articles: 3 });
+  });
+
+  it("compte ce qu'emporte un chapitre sans doubler les articles sélectionnés avec lui", () => {
+    expect(resumeSuppression(makeLots(), ['chap-0-0', 'ligne-0-0-0'])).toEqual({ lots: 0, chapitres: 1, articles: 5 });
+  });
+
+  it("compte le contenu d'un lot", () => {
+    expect(resumeSuppression(makeLots(), ['lot-0', 'chap-0-1'])).toEqual({ lots: 1, chapitres: 2, articles: 6 });
+  });
+
+  it('ignore une clé inconnue', () => {
+    expect(resumeSuppression(makeLots(), ['ligne-9-9-9', 'n'])).toEqual({ lots: 0, chapitres: 0, articles: 0 });
   });
 });

@@ -168,6 +168,16 @@ The alias domain is now set per tenant (`settings.mail_inbox_domain`, Réglages 
 - **When a provider ships one**: add `speak()` to that adapter (mirroring `gemini.ts`'s `pcmToWav()`-style handling of whatever raw format it returns) and change `resolveSpeechProvider()` to prefer the active chat provider when it implements `speak`, falling back to Gemini otherwise — the same fallback shape already used by `resolveTranscriptionProvider()` for audio input.
 - **Pricing**: a new entry in `llm/pricing.ts`'s `MODEL_CATALOG` for that provider's TTS model — the same invariant as everywhere else in the AI layer, a model absent from the catalog can't run because we can't bill it honestly.
 
+### Native web search on Mistral (Conversations API) — planned
+
+`mistral.ts` does not declare `supportsWebSearch`: Mistral's `web_search` / `web_search_premium` tools only work with the Conversations API (`/v1/conversations`) and the Agents API, not with Chat Completions (`/v1/chat/completions`), which the adapter calls, because Chat Completions responses carry none of the search-result references (docs.mistral.ai/studio/agents/agent-tools/websearch). A Mistral agent therefore has `fetch_url` only. The new-company contact sheet (CLAUDE.md, "Fiche d'un nouveau contact entreprise") works around it with the official company directory (`recherche-entreprises.api.gouv.fr`) and the company's own website, which gives SIRET, address, NAF code and what the site says, but no phone number or e-mail unless the site publishes them.
+
+- **Do it only if that proves too thin.** Real web search on Mistral means a second call path in the adapter, not a flag: Conversations are stateful and server-side, whereas the whole agent layer holds the conversation itself (stateless providers, replayed `raw` blocks), so tool calling, history and the reserve → execute → settle billing would each need their own handling for that path.
+- **Citations arrive as `tool_reference` chunks** interleaved with the text (title, URL, source), not as a separate field: the adapter would have to flatten them into the text the rest of the layer expects, so that "cite your sources" keeps working.
+- **Domain filtering is silent.** An organisation admin can set an allow-list or block-list on Mistral's side; filtered results are dropped without any sign, and `open_url` on a blocked domain returns 451. An allow-list can leave a search empty, and the agent must say "nothing found" rather than guess.
+- **Pricing**: web search and the premium news variant would need an entry in `llm/pricing.ts` before the capability can be turned on, like any model absent from `MODEL_CATALOG`. How Mistral bills them apart from tokens has not been checked.
+- **When it ships**: set `supportsWebSearch: true` on the Mistral adapter for that path only, and `contactEnrichmentSection` needs no change (it already keys on `webSearchActive`). Keep the directory procedure as the fallback for tenants whose allow-list empties the search.
+
 ## Platform
 
 | Area | Status | Notes |

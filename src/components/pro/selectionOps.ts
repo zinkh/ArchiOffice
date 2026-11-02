@@ -189,3 +189,39 @@ export function appliquerStatutLignes<L extends LotLike>(
   next = next.map((lot, i) => (touched.has(i) ? recomputeLot(lot) : lot));
   return next;
 }
+
+/** Ce qu'emporte une suppression : éléments retirés, sous-articles compris. */
+export interface ResumeSuppression { lots: number; chapitres: number; articles: number }
+
+const compterArticles = (lignes: Ligne[]): number =>
+  lignes.reduce((s, l) => s + 1 + compterArticles(l.children ?? []), 0);
+
+/**
+ * Compte ce que `deleteSelection` retirerait : un élément déjà emporté par un
+ * parent sélectionné (article d'un chapitre supprimé...) n'est pas compté deux fois.
+ */
+export function resumeSuppression(lots: LotLike[], keys: Iterable<string>): ResumeSuppression {
+  const sel = parseSelection(keys);
+  const resume: ResumeSuppression = { lots: 0, chapitres: 0, articles: 0 };
+  const prefixe = (a: number[], b: number[]) => a.length < b.length && a.every((n, i) => n === b[i]);
+  for (const s of sel) {
+    const t = tuple(s);
+    if (sel.some(o => o !== s && prefixe(tuple(o), t))) continue;
+    const lot: any = lots[s.lotIdx];
+    if (!lot) continue;
+    if (s.kind === 'lot') {
+      resume.lots += 1;
+      resume.chapitres += lot.chapitres.length;
+      resume.articles += lot.chapitres.reduce((n: number, c: any) => n + compterArticles(c.lignes), 0);
+    } else if (s.kind === 'chapitre') {
+      const chap = lot.chapitres[s.chapIdx];
+      if (!chap) continue;
+      resume.chapitres += 1;
+      resume.articles += compterArticles(chap.lignes);
+    } else {
+      const l = ligneAtPath(lot.chapitres[s.chapIdx]?.lignes ?? [], s.lignePath);
+      if (l) resume.articles += compterArticles([l as Ligne]);
+    }
+  }
+  return resume;
+}

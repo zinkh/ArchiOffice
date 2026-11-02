@@ -926,6 +926,21 @@ impression).
   plus aucun bandeau bleu figé. L'encre atténuée claire passe à `#5f6d84`
   (contraste 4,5:1 sur blanc, cf. DESIGN.md).
 
+### PRO : description, quantité et validation avant suppression (issue #609)
+
+- **Quantité et unité dans le CCTP** (`CctpQuantiteUnite.tsx`, fiche d'un article) : champs modifiables, enregistrés en quittant le champ ou par Entrée (Échap annule), la quantité accepte un calcul (`=12*3,5`). Même règle que le DPGF : `prixTotal = quantité x P.U.` (0 pour mémoire), sous-total du lot et totaux recalculés (`updateQuantiteUnite`). Une quantité répartie par bâtiment (`quantitesBatiments`) reste en lecture seule (somme, à modifier dans le DPGF) ; un article qui porte des sous-articles n'a pas de quantité propre. Unités déjà utilisées dans le document proposées en tête.
+- **Description d'un ouvrage depuis le DPGF** (`LigneDescriptionDialog.tsx`) : icône à côté de la désignation (bleue si un texte existe) et entrée « Description de l'ouvrage » du menu « ⋯ ». C'est le même texte que le CCTP (`cctpDescription`), Ctrl+Entrée enregistre, fermer avec une saisie non enregistrée demande confirmation.
+- **Validation avant suppression** (`useConfirmerSuppression.tsx`, `resumeSuppression` dans `selectionOps.ts`, testé) : CCTP, DPGF, BPU/DQE, estimation et panneau Bâtiments et phases. La fenêtre dit ce que la suppression emporte (lots, chapitres, articles, sous-articles compris), le focus part sur « Annuler ». Le DPGF et le BPU gardent aussi « Annuler » dans le toast.
+- **Pas encore fait** : description depuis la liste mobile du DPGF (`DpgfMobileList`), mise en forme riche dans la fenêtre de description.
+
+### Fiche d'un nouveau contact entreprise (agents)
+
+`contactEnrichmentSection` (`systemPrompts.ts`) : tout agent qui écrit sur `contacts` (Sophie comprise) et qui peut chercher sur le web cherche, quand une entreprise est ajoutée, ses coordonnées publiques (adresse, téléphone, e-mail, site, SIRET) et ses spécialités, puis PROPOSE de compléter la fiche, jamais d'écriture sans accord. Spécialités : `corps_etat` pour une entreprise (Gros œuvre, Couverture, Bardage...), `specialite` pour un bureau d'études, ajoutées aux existantes. Homonymes : l'agent demande lequel.
+
+**Deux façons de chercher, selon les capacités réelles de l'agent** : la recherche web native (Gemini, Claude : `webSearchActive`) ou `fetch_url` seul, ce qui est le cas de **Mistral** (pas de recherche native sur Chat Completions). Avec `fetch_url` seul, l'agent interroge l'annuaire officiel `https://recherche-entreprises.api.gouv.fr/search?q=...&etat_administratif=A&per_page=5` (JSON sans clé, le même service que `/api/entreprises/search` ; il donne SIRET, adresse, code NAF, ni téléphone ni e-mail) puis le site de l'entreprise (champ `website`, ou adresse fournie par l'annuaire ou l'utilisateur, jamais inventée). **`fetch_url` n'y est autorisé que par exception** à la règle « URL fournie par l'utilisateur », sur ces deux sources seulement (la description de l'outil, `tools.ts`, le dit aussi). Un indice code NAF vers métier est donné (43.91B couverture, 43.91A charpente, 41.20 gros œuvre...), présenté comme « déduit du code NAF » ; un métier fin comme le bardage ne se déduit pas d'un code et vient du site.
+
+La règle dépend des capacités, pas du texte du prompt : elle survit à `system_prompt_override`, et aucune migration n'est nécessaire. Absente si l'agent n'écrit pas sur les contacts, ou n'a ni recherche web ni `fetch_url`. `corps_etat`, `specialite`, `siret` et `website` rejoignent les champs connus de la ressource `contacts`. Test : `tests/agentContactEnrichment.test.ts` (cas recherche native, `fetch_url` seul, les deux, aucun). Non vérifié contre un vrai modèle Mistral.
+
 ### Ordre des lots : la liste des lots du projet fait foi
 
 `LotsManager.tsx` (onglet PRO > Lots) se réorganise par glisser-déposer au
