@@ -264,11 +264,11 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   const { settings } = opts;
 
   const headerChildren: InstanceType<typeof Paragraph>[] = [];
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92).catch(() => null) : null;
+  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png').catch(() => null) : null;
   if (logo) {
     const h = 40;
     headerChildren.push(new Paragraph({
-      children: [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
+      children: [new ImageRun({ type: 'png', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
     }));
   }
   headerChildren.push(
@@ -352,6 +352,16 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   }
 
   const document_ = new Document({
+    // Sans style par défaut, Word retombe sur Times New Roman : la charte est en Arial.
+    styles: {
+      default: {
+        document: { run: { font: 'Arial', size: 19, color: '111827' } },
+        heading1: { run: { font: 'Arial', bold: true, size: 26, color: '111827' } },
+        heading2: { run: { font: 'Arial', bold: true, size: 22, color: '111827' } },
+        heading3: { run: { font: 'Arial', bold: true, size: 20, color: '111827' } },
+        title: { run: { font: 'Arial', bold: true, size: 36, color: '111827' } },
+      },
+    },
     sections: [{
       ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP }),
       children: body,
