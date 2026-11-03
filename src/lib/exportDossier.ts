@@ -7,15 +7,16 @@
 import type { DPGF } from '../types/dpgf';
 import type { BPU } from '../types/bpu';
 import type { AgencySettings } from './proposalExport';
-import type { ContexteCctp } from './cctpVariables';
+import { libellesLots, type ContexteCctp } from './cctpVariables';
 import { articlesSansBatiment, batimentsParOrdre } from './batimentsArticles';
-import { exportCctpDocx, exportCctpPdf } from './cctpExport';
+import { cctpBlocs, exportCctpDocx, exportCctpPdf } from './cctpExport';
 import { exportBPUtoExcel, exportBPUtoPDF } from './bpuExport';
 import {
   exportDPGFtoExcel, exportDPGFtoPDF, exportEstimationtoExcel, exportEstimationtoPDF,
 } from './proExport';
 import { compterArticles, filtrerPourExport, type ExportSelection } from './exportPerimetre';
 import type { FichierExporte, Sortie } from './exportSortie';
+import { ORIENTATION_CCTP, ORIENTATION_DPGF, documentsParLot, suffixeLot, type Orientation } from './exportOrientation';
 
 export type DocumentDossier = 'cctp' | 'dpgf' | 'dqe' | 'bpu' | 'estimation';
 
@@ -36,6 +37,10 @@ export interface DemandeDossier {
   avecTva?: boolean;
   /** CCTP : un fichier par bâtiment, même sans sélection de bâtiments. */
   cctpParBatiment: boolean;
+  /** CCTP et DPGF : orientation de la page A4 ; absente, vertical pour le CCTP, horizontal pour le DPGF. */
+  orientations?: Partial<Record<'cctp' | 'dpgf', Orientation>>;
+  /** CCTP et DPGF : un fichier par lot du périmètre, au lieu d'un fichier pour tous les lots. */
+  parLot?: boolean;
   projectName?: string;
   /** Rappel du périmètre, imprimé sous le titre ; vide pour tout le document. */
   perimetre?: string;
@@ -57,13 +62,16 @@ const formats = (choix: FormatChoisi): Array<'pdf' | 'autre'> =>
 
 /** Nombre de fichiers que produira la demande (aperçu de la fenêtre). */
 export function compterFichiers(
-  d: Pick<DemandeDossier, 'documents' | 'selection' | 'cctpParBatiment' | 'dpgf'>,
+  d: Pick<DemandeDossier, 'documents' | 'selection' | 'cctpParBatiment' | 'dpgf' | 'parLot'>,
 ): number {
   let n = 0;
   for (const doc of DOCUMENTS_DOSSIER) {
     const choix = d.documents[doc];
     if (!choix) continue;
-    const versions = doc === 'cctp' ? Math.max(1, batimentsCctp(d).length) : 1;
+    const lots = d.parLot && (doc === 'cctp' || doc === 'dpgf')
+      ? Math.max(1, filtrerPourExport(d.dpgf, d.selection, { cctp: doc === 'cctp' }).lots.length)
+      : 1;
+    const versions = (doc === 'cctp' ? Math.max(1, batimentsCctp(d).length) : 1) * lots;
     n += versions * formats(choix).length;
   }
   return n;
@@ -99,9 +107,19 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
         const orphelins = articlesSansBatiment(source).length;
         if (orphelins) avertissements.push({ code: 'sans_batiment', count: orphelins });
       }
-      for (const batiment of batiments.length ? batiments : [undefined]) {
-        const opts = { projectName: etiquette, settings, batiment, contexte, sortie };
-        for (const f of fmts) await (f === 'pdf' ? exportCctpPdf(source, opts) : exportCctpDocx(source, opts));
+      const orientation = d.orientations?.cctp ?? ORIENTATION_CCTP;
+      // Un fichier par lot : chaque lot garde son contexte (bâtiments, textes automatiques).
+      const parties = d.parLot ? documentsParLot(source) : [{ lot: undefined, doc: source }];
+      for (const partie of parties) {
+        for (const batiment of batiments.length ? batiments : [undefined]) {
+          if (partie.lot && cctpBlocs(partie.doc, batiment?.id).length === 0) continue;
+          const opts = {
+            projectName: etiquette, settings, batiment, // Le CCTP d'un lot cite tous les lots de l'opération, pas seulement le sien.
+            contexte: partie.lot ? { ...contexte, lots: contexte.lots ?? libellesLots(source.lots) } : contexte,
+            sortie, orientation, lot: partie.lot,
+          };
+          for (const f of fmts) await (f === 'pdf' ? exportCctpPdf(partie.doc, opts) : exportCctpDocx(partie.doc, opts));
+        }
       }
       continue;
     }
@@ -109,12 +127,16 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
     if (doc === 'dpgf' || doc === 'estimation') {
       const source = filtrerPourExport(d.dpgf, d.selection);
       if (compterArticles(source) === 0) { avertissements.push({ code: 'vide', document: doc }); continue; }
-      for (const f of fmts) {
-        if (doc === 'dpgf') {
-          await (f === 'pdf' ? exportDPGFtoPDF : exportDPGFtoExcel)(source, etiquette, 'lot', settings, prix);
-        } else {
-          await (f === 'pdf' ? exportEstimationtoPDF : exportEstimationtoExcel)(source, etiquette, settings, sortie);
-        }
+      if (doc === 'estimation') {
+        for (const f of fmts) await (f === 'pdf' ? exportEstimationtoPDF : exportEstimationtoExcel)(source, etiquette, settings, sortie);
+        continue;
+      }
+      const orientation = d.orientations?.dpgf ?? ORIENTATION_DPGF;
+      const parties = d.parLot ? documentsParLot(source) : [{ lot: undefined, doc: source }];
+      for (const partie of parties) {
+        const options = { ...prix, orientation, suffixeNom: partie.lot ? suffixeLot(partie.lot) : undefined };
+        const intitule = partie.lot ? `${etiquette ?? d.dpgf.titre} - ${suffixeLot(partie.lot)}` : etiquette;
+        for (const f of fmts) await (f === 'pdf' ? exportDPGFtoPDF : exportDPGFtoExcel)(partie.doc, intitule, 'lot', settings, options);
       }
       continue;
     }

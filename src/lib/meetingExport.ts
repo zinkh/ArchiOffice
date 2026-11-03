@@ -8,7 +8,7 @@ import { resolveSignedUrl } from './signedStorageUrl';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
 import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
-import { docxSectionChrome } from './docxRunningHeader';
+import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -77,11 +77,12 @@ export async function exportMeetingToPDF(
   let logoW = 0;
 
   if (settings.logoUrl) {
-    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92);
+    // PNG : un JPEG n'a pas de transparence, le logo sortirait avec un fond noir.
+    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png');
     if (logo) {
       const lH = 18;
       logoW = Math.round((logo.w / logo.h) * lH);
-      pdf.addImage(logo.dataUrl, 'JPEG', margin, y, logoW, lH);
+      pdf.addImage(logo.dataUrl, 'PNG', margin, y, logoW, lH);
     }
   }
 
@@ -276,12 +277,12 @@ export async function exportMeetingToDocx(
   // ── Logo ─────────────────────────────────────────────────────────────────
   const logoChildren: (TextRun | ImageRun)[] = [];
   if (settings.logoUrl) {
-    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92);
+    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png');
     if (logo) {
       const targetH = 40; // px
       const targetW = Math.round((logo.w / logo.h) * targetH);
       logoChildren.push(new ImageRun({
-        type: 'jpg',
+        type: 'png',
         data: logo.buffer,
         transformation: { width: targetW, height: targetH },
       }));
@@ -433,6 +434,7 @@ export async function exportMeetingToDocx(
 
   // ── Assemble document ─────────────────────────────────────────────────────
   const doc = new Document({
+    styles: STYLES_WORD_ARIAL,
     sections: [{
       // L'en-tête du corps ne sert que la première page ; les suivantes portent une ligne.
       ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: meeting.title }),

@@ -15,6 +15,7 @@ import { docxSectionChrome } from './docxRunningHeader';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
+import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
 import { mettreEnLignes, paragraphesRiches, type StyleRiche } from './cctpRichText';
 
 export interface CctpBloc {
@@ -38,6 +39,10 @@ export interface CctpExportOptions {
   contexte?: ContexteCctp;
   /** Destination du fichier ; absente, il est téléchargé. */
   sortie?: Sortie;
+  /** Orientation de la page A4 ; absente, vertical. */
+  orientation?: Orientation;
+  /** Export d'un seul lot : il figure dans le titre et le nom du fichier. */
+  lot?: { numero: string; titre: string };
 }
 
 /** #rrggbb vers [r, g, b] ; une couleur illisible rend le repli. */
@@ -107,12 +112,12 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
   return blocs;
 }
 
-export function cctpTitre(opts: Pick<CctpExportOptions, 'batiment'>): string {
-  return opts.batiment ? `CCTP · ${libelleBatiment(opts.batiment)}` : 'CCTP';
+export function cctpTitre(opts: Pick<CctpExportOptions, 'batiment' | 'lot'>): string {
+  return ['CCTP', opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
 }
 
-export function cctpNomFichier(opts: Pick<CctpExportOptions, 'projectName' | 'batiment'>, ext: 'pdf' | 'docx'): string {
-  const morceaux = ['CCTP', opts.projectName, opts.batiment?.code].filter(Boolean) as string[];
+export function cctpNomFichier(opts: Pick<CctpExportOptions, 'projectName' | 'batiment' | 'lot'>, ext: 'pdf' | 'docx'): string {
+  const morceaux = ['CCTP', opts.projectName, opts.batiment?.code, opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean) as string[];
   const nom = morceaux.join('_').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9_-]+/g, '_').replace(/_+/g, '_');
   return `${nom}.${ext}`;
 }
@@ -147,7 +152,7 @@ function dimensionsImage(img: ImageChargee, largeurMax: number, hauteurMax: numb
 
 export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise<void> {
   const [{ default: JsPDF }, logo] = await Promise.all([import('jspdf'), loadLogoDataUrl(opts.settings.logoUrl)]);
-  const pdf = new JsPDF({ unit: 'mm', format: 'a4' });
+  const pdf = new JsPDF({ orientation: orientationPdf(opts.orientation ?? ORIENTATION_CCTP), unit: 'mm', format: 'a4' });
   const margin = 18;
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -164,11 +169,12 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   pdf.setTextColor(...GRIS_TEXTE);
   pdf.text(SOUS_TITRE, margin, y + 4);
   y += 10;
-  if (opts.batiment) {
+  const portee = [opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
+  if (portee) {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(11);
     pdf.setTextColor(...GRIS_DOUX);
-    pdf.text(libelleBatiment(opts.batiment), margin, y + 2);
+    pdf.text(portee, margin, y + 2);
     y += 8;
   }
 
@@ -258,11 +264,11 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   const { settings } = opts;
 
   const headerChildren: InstanceType<typeof Paragraph>[] = [];
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92).catch(() => null) : null;
+  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png').catch(() => null) : null;
   if (logo) {
     const h = 40;
     headerChildren.push(new Paragraph({
-      children: [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
+      children: [new ImageRun({ type: 'png', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * h), height: h } })],
     }));
   }
   headerChildren.push(
@@ -295,7 +301,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   const body: InstanceType<typeof Paragraph>[] = [
     new Paragraph({ heading: HeadingLevel.TITLE, spacing: { after: 120 }, children: [new TextRun({ text: SOUS_TITRE, bold: true, size: 36, color: '111827' })] }),
   ];
-  const sousTitre = [opts.projectName, opts.batiment ? libelleBatiment(opts.batiment) : ''].filter(Boolean).join(' · ');
+  const sousTitre = [opts.projectName, opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ');
   if (sousTitre) body.push(new Paragraph({ spacing: { after: 360 }, children: [new TextRun({ text: sousTitre, size: 24, color: '6B7280' })] }));
 
   const blocsWord = cctpBlocs(doc, opts.batiment?.id, opts.contexte);
@@ -346,8 +352,18 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
   }
 
   const document_ = new Document({
+    // Sans style par défaut, Word retombe sur Times New Roman : la charte est en Arial.
+    styles: {
+      default: {
+        document: { run: { font: 'Arial', size: 19, color: '111827' } },
+        heading1: { run: { font: 'Arial', bold: true, size: 26, color: '111827' } },
+        heading2: { run: { font: 'Arial', bold: true, size: 22, color: '111827' } },
+        heading3: { run: { font: 'Arial', bold: true, size: 20, color: '111827' } },
+        title: { run: { font: 'Arial', bold: true, size: 36, color: '111827' } },
+      },
+    },
     sections: [{
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren }),
+      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP }),
       children: body,
     }],
   });

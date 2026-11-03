@@ -1,7 +1,7 @@
 import type { Project } from '../types';
 import type { AgencySettings } from './proposalExport';
 import type { ProjectNotice } from './projectNotices';
-import { docxSectionChrome } from './docxRunningHeader';
+import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 import { projectNoticeTitle } from './projectNotices';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 
@@ -193,6 +193,7 @@ export async function exportProjectNoticeDocx(
   }
 
   const doc = new Document({
+    styles: STYLES_WORD_ARIAL,
     sections: [{
       ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: title, firstHeader, footer: footerChildren }),
       children: body,

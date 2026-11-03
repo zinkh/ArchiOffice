@@ -359,6 +359,15 @@ veut dire « aucun bâtiment », sans héritage.
   (`exportSortie.ts`) collectant les fichiers au lieu de les télécharger ; `livrer()` envoie un
   fichier tel quel, **plusieurs dans un ZIP** (jszip). Sans `sortie`, les exporteurs
   téléchargent comme avant.
+- **Orientation A4 et export par lot** (`src/lib/exportOrientation.ts`, testé dans
+  `exportDossier.test.ts`) : la fenêtre propose, pour le CCTP et le DPGF, vertical ou
+  horizontal, en PDF, Word et Excel (`orientations` de `DemandeDossier`). Par défaut : vertical
+  pour le CCTP, horizontal pour le DPGF, comme avant. Le Word passe par `docxSectionChrome`
+  (`orientation`, taille de page et tabulation de l'en-tête réduit). Le DPGF PDF en vertical
+  réduit colonnes et corps de texte (`w()`). L'option « Un fichier par lot » (`parLot`)
+  produit un fichier par lot du périmètre (`documentsParLot`), nommé d'après le lot
+  (`suffixeLot`), combinable avec « un CCTP par bâtiment » ; les fichiers partent dans le ZIP.
+  Le BPU, le DQE et l'estimation ne sont pas concernés.
 - **Périmètre commun** (`src/lib/exportPerimetre.ts`, testé) : lots désignés par leur
   NUMÉRO, bâtiments et phases par leur CODE, car le CCTP/DPGF et le bordereau ont chacun
   leur registre aux identifiants distincts. Un critère de bâtiment ou de phase est ignoré par
