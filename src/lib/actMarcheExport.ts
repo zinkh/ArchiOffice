@@ -4,7 +4,7 @@
 import type { AgencySettings } from './proposalExport';
 import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
 import { partnerLogosParagraph } from './docxPartnerLogos';
-import { docxSectionChrome } from './docxRunningHeader';
+import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 import type { Bloc, DocModele } from './actMarche';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 
@@ -193,7 +193,7 @@ export async function exporterMarcheDocx(docs: DocModele[], settings: AgencySett
     ],
   })));
 
-  const blob = await Packer.toBlob(new Document({ sections }));
+  const blob = await Packer.toBlob(new Document({ styles: STYLES_WORD_ARIAL, sections }));
   if (sortie) await sortie(`${nomFichier(nom)}.docx`, blob);
   else telecharger(blob, `${nomFichier(nom)}.docx`);
 }

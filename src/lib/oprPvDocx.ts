@@ -4,7 +4,7 @@
 // pagination « P1|2 ».
 import type { AgencySettings } from './proposalExport';
 import { agencyFooterLine, loadLogoDataUrl } from './pdfLetterhead';
-import { docxSectionChrome } from './docxRunningHeader';
+import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 import type { DocPv } from './oprPvDocument';
 
 const MM_EN_TWIPS = 56.7;
@@ -139,5 +139,5 @@ export async function construireDocxPv(doc: DocPv, settings: AgencySettings): Pr
     ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: doc.titre, firstHeader: entete, footer: pied }),
     children: enfants,
   };
-  return Packer.toBlob(new Document({ sections: [section] }));
+  return Packer.toBlob(new Document({ styles: STYLES_WORD_ARIAL, sections: [section] }));
 }

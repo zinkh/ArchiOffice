@@ -235,14 +235,14 @@ export async function exportFeasibilityDocx(p: ProposalForExport, sections: Feas
   // En-tête de la première page : logo à gauche, repère du document à droite, filet noir.
   // Les pages suivantes n'ont pas de logo : seul le repère, en gris, sous un filet.
   const { repere, fields } = documentMeta(p, options);
-  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 600, 400, 0.92) : null;
+  const logo = settings.logoUrl ? await compressImage(settings.logoUrl, 600, 400, 0.92, 'image/png') : null;
   const firstHeaderChildren: InstanceType<typeof Paragraph>[] = [
     new Paragraph({
       tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
       border: { bottom: { style: BorderStyle.SINGLE, size: 8, color: '111827', space: 6 } },
       spacing: { after: 240 },
       children: [
-        ...(logo ? [new ImageRun({ type: 'jpg', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * 48), height: 48 } })] : [
+        ...(logo ? [new ImageRun({ type: 'png', data: logo.buffer, transformation: { width: Math.round((logo.w / logo.h) * 48), height: 48 } })] : [
           new TextRun({ text: settings.agencyName || '', bold: true, size: 24, color: '111827' }),
         ]),
         new TextRun({ text: `\t${repere}`, size: 17, color: '6B7280' }),

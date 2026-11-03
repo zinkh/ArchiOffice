@@ -9,6 +9,24 @@ import { largeurUtileWord, type Orientation } from './exportOrientation';
 const A4_LARGEUR = 11906;
 const A4_HAUTEUR = 16838;
 
+/**
+ * Police de la charte pour les documents Word : sans style par défaut, Word
+ * retombe sur Times New Roman. Ne fixe que la police (tailles et couleurs
+ * restent à chaque document).
+ */
+export const STYLES_WORD_ARIAL = {
+  default: {
+    document: { run: { font: 'Arial' } },
+    title: { run: { font: 'Arial' } },
+    heading1: { run: { font: 'Arial' } },
+    heading2: { run: { font: 'Arial' } },
+    heading3: { run: { font: 'Arial' } },
+    heading4: { run: { font: 'Arial' } },
+    heading5: { run: { font: 'Arial' } },
+    heading6: { run: { font: 'Arial' } },
+  },
+};
+
 export interface SectionChrome {
   properties: { titlePage: true; page: { size: { width: number; height: number; orientation: any } } };
   headers: { first: Header; default: Header };

@@ -17,7 +17,7 @@ vi.mock('../proExport', () => ({
 }));
 vi.mock('../cctpExport', async importOriginal => ({
   cctpBlocs: (await importOriginal<typeof import('../cctpExport')>()).cctpBlocs,
-  exportCctpPdf: vi.fn(async (doc: any, opts: any) => { appels.push({ fn: `cctp-pdf-${opts.batiment?.code ?? 'all'}`, lots: doc.lots.map((l: any) => l.numero), args: [] }); await opts.sortie(`cctp-${opts.batiment?.code ?? 'all'}.pdf`, new Blob(['x'])); }),
+  exportCctpPdf: vi.fn(async (doc: any, opts: any) => { appels.push({ fn: `cctp-pdf-${opts.batiment?.code ?? 'all'}`, lots: doc.lots.map((l: any) => l.numero), args: [doc, opts] }); await opts.sortie(`cctp-${opts.batiment?.code ?? 'all'}.pdf`, new Blob(['x'])); }),
   exportCctpDocx: vi.fn(),
 }));
 vi.mock('../bpuExport', () => ({
@@ -111,6 +111,13 @@ describe('orientation et export par lot', () => {
       ...base, selection: { ...base.selection, lotNumeros: ['02'] }, documents: { cctp: 'pdf' }, parLot: true,
     });
     expect(appels.map(a => a.lots)).toEqual([['02']]);
+  });
+
+  it('cite tous les lots de l\'opération dans le CCTP de chaque lot', async () => {
+    const { produireDossier } = await import('../exportDossier');
+    await produireDossier({ ...base, documents: { cctp: 'pdf' }, parLot: true });
+    expect(appels.map(a => a.lots)).toEqual([['01'], ['02']]);
+    for (const a of appels) expect((a.args[1] as any).contexte.lots).toEqual(['Lot 01 · 01', 'Lot 02 · 02']);
   });
 
   it('compte un fichier par lot', async () => {

@@ -3,7 +3,7 @@
 import type { DocumentTemplateVariable } from '../types';
 import type { AgencySettings as BaseAgencySettings } from './proposalExport';
 import { drawAgencyFooters, drawPartnerLogos } from './pdfLetterhead';
-import { docxSectionChrome } from './docxRunningHeader';
+import { STYLES_WORD_ARIAL, docxSectionChrome } from './docxRunningHeader';
 
 export type AgencySettings = BaseAgencySettings;
 
@@ -165,6 +165,7 @@ export async function exportTemplateDocx(
   });
 
   const doc = new Document({
+    styles: STYLES_WORD_ARIAL,
     sections: [{
       ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: title }),
       children: [

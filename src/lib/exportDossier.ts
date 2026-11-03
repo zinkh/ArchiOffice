@@ -7,7 +7,7 @@
 import type { DPGF } from '../types/dpgf';
 import type { BPU } from '../types/bpu';
 import type { AgencySettings } from './proposalExport';
-import type { ContexteCctp } from './cctpVariables';
+import { libellesLots, type ContexteCctp } from './cctpVariables';
 import { articlesSansBatiment, batimentsParOrdre } from './batimentsArticles';
 import { cctpBlocs, exportCctpDocx, exportCctpPdf } from './cctpExport';
 import { exportBPUtoExcel, exportBPUtoPDF } from './bpuExport';
@@ -114,7 +114,8 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
         for (const batiment of batiments.length ? batiments : [undefined]) {
           if (partie.lot && cctpBlocs(partie.doc, batiment?.id).length === 0) continue;
           const opts = {
-            projectName: etiquette, settings, batiment, contexte: partie.lot ? { ...contexte, lots: undefined } : contexte,
+            projectName: etiquette, settings, batiment, // Le CCTP d'un lot cite tous les lots de l'opération, pas seulement le sien.
+            contexte: partie.lot ? { ...contexte, lots: contexte.lots ?? libellesLots(source.lots) } : contexte,
             sortie, orientation, lot: partie.lot,
           };
           for (const f of fmts) await (f === 'pdf' ? exportCctpPdf(partie.doc, opts) : exportCctpDocx(partie.doc, opts));
