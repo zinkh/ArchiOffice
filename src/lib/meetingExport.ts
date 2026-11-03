@@ -77,11 +77,12 @@ export async function exportMeetingToPDF(
   let logoW = 0;
 
   if (settings.logoUrl) {
-    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92);
+    // PNG : un JPEG n'a pas de transparence, le logo sortirait avec un fond noir.
+    const logo = await compressImage(settings.logoUrl, 400, 400, 0.92, 'image/png');
     if (logo) {
       const lH = 18;
       logoW = Math.round((logo.w / logo.h) * lH);
-      pdf.addImage(logo.dataUrl, 'JPEG', margin, y, logoW, lH);
+      pdf.addImage(logo.dataUrl, 'PNG', margin, y, logoW, lH);
     }
   }
 
