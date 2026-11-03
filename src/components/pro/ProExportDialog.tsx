@@ -12,6 +12,7 @@ import {
   DOCUMENTS_DOSSIER, compterFichiers, produireDossier, type DocumentDossier, type FormatChoisi,
 } from '../../lib/exportDossier';
 import { livrer, nomSur } from '../../lib/exportSortie';
+import { ORIENTATION_CCTP, ORIENTATION_DPGF, type Orientation } from '../../lib/exportOrientation';
 import { DialogShell, boutonPrincipal, boutonSecondaire } from '../projectDetail/situations/DialogShell';
 
 interface Props {
@@ -72,6 +73,10 @@ export const ProExportDialog: React.FC<Props> = ({
   const [avecPrix, setAvecPrix] = useState(false);
   const [avecTva, setAvecTva] = useState(false);
   const [cctpParBatiment, setCctpParBatiment] = useState(false);
+  const [parLot, setParLot] = useState(false);
+  const [orientations, setOrientations] = useState<Record<'cctp' | 'dpgf', Orientation>>({
+    cctp: ORIENTATION_CCTP, dpgf: ORIENTATION_DPGF,
+  });
   const [busy, setBusy] = useState(false);
   const [erreur, setErreur] = useState('');
 
@@ -119,7 +124,7 @@ export const ProExportDialog: React.FC<Props> = ({
     };
   }, [mode, lotIds, batIds, phaseIds, marcheIds, lots, batiments, phases, marches]);
 
-  const nbFichiers = compterFichiers({ documents, selection, cctpParBatiment, dpgf });
+  const nbFichiers = compterFichiers({ documents, selection, cctpParBatiment, dpgf, parLot });
   const nbDocuments = Object.keys(documents).length;
 
   const perimetre = (): string => {
@@ -139,7 +144,7 @@ export const ProExportDialog: React.FC<Props> = ({
     try {
       const bpuPret = documents.bpu || documents.dqe ? prepareBpu() : null;
       const res = await produireDossier({
-        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment,
+        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations,
         projectName, perimetre: perimetre(), settings, contexte,
       });
       for (const a of res.avertissements) {
@@ -180,6 +185,17 @@ export const ProExportDialog: React.FC<Props> = ({
             </span>
           </span>
         </label>
+        {(doc === 'cctp' || doc === 'dpgf') && (
+          <select
+            aria-label={t('pro_export_dialog_orientation_of', { doc: t(`pro_export_doc_${doc}`) })}
+            className="tblr-input w-auto text-sm" disabled={!choix}
+            value={orientations[doc]}
+            onChange={e => setOrientations(prev => ({ ...prev, [doc]: e.target.value as Orientation }))}
+          >
+            <option value="portrait">{t('pro_export_dialog_portrait')}</option>
+            <option value="paysage">{t('pro_export_dialog_landscape')}</option>
+          </select>
+        )}
         <select
           aria-label={t('pro_export_dialog_format_of', { doc: t(`pro_export_doc_${doc}`) })}
           className="tblr-input w-auto text-sm" disabled={!choix}
@@ -303,6 +319,15 @@ export const ProExportDialog: React.FC<Props> = ({
               <span>
                 <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_vat')}</span>
                 <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_vat_hint')}</span>
+              </span>
+            </label>
+          )}
+          {(documents.cctp || documents.dpgf) && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={parLot} onChange={e => setParLot(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_per_lot')}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_per_lot_hint')}</span>
               </span>
             </label>
           )}

@@ -4,6 +4,7 @@ import { formatQuantite } from './quantiteFormat';
 import { sousTotalNature } from '../components/pro/treeOps';
 import type { AgencySettings } from './proposalExport';
 import { enregistrerPdf, type Sortie } from './exportSortie';
+import { ORIENTATION_DPGF, orientationPdf, type Orientation } from './exportOrientation';
 import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE, FORMAT_QUANTITE,
@@ -210,19 +211,30 @@ export interface ExportDpgfOptions {
   avecTva?: boolean;
   /** Destination du fichier ; absente, il est téléchargé. */
   sortie?: Sortie;
+  /** Orientation de la page A4 ; absente, horizontal comme avant. */
+  orientation?: Orientation;
+  /** Export d'un seul lot : ajouté au nom du fichier (« Lot 01 Gros œuvre »). */
+  suffixeNom?: string;
 }
+
+/** `DPGF_<titre>[_<lot>].<ext>` : le suffixe d'un lot distingue les fichiers d'un export par lot. */
+const nomDpgf = (dpgf: DPGF, suffixe: string | undefined, ext: 'pdf' | 'xlsx') =>
+  `DPGF_${[dpgf.titre, suffixe].filter(Boolean).join(' ').replace(/\s+/g, '_')}.${ext}`;
 
 export async function exportDPGFtoPDF(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
-  { avecPrix = false, avecTva = false, sortie }: ExportDpgfOptions = {},
+  { avecPrix = false, avecTva = false, sortie, orientation = ORIENTATION_DPGF, suffixeNom }: ExportDpgfOptions = {},
 ) {
   const colTva = avecPrix && avecTva;
+  // En vertical, le tableau tient sur 182 mm au lieu de 269 : colonnes et corps de texte réduits.
+  const etroit = orientation === 'portrait';
+  const w = (mm: number) => (etroit ? Math.round(mm * 0.78) : mm);
   const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
     loadLogoDataUrl(settings.logoUrl),
   ]);
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ orientation: orientationPdf(orientation), unit: 'mm', format: 'a4' });
   const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
   const letterhead = {
     title: 'DPGF — Décomposition du Prix Global et Forfaitaire',
@@ -236,6 +248,7 @@ export async function exportDPGFtoPDF(
     const rows = flattenDPGF(dpgf.lots);
     autoTable(doc, {
       ...tableauGris(),
+      ...(etroit ? { styles: { ...tableauGris().styles, fontSize: 7.5, cellPadding: 1.5 } } : {}),
       startY,
       head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]],
       body: rows.map(r => {
@@ -245,13 +258,13 @@ export async function exportDPGFtoPDF(
           ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])];
       }),
       columnStyles: {
-        0: { cellWidth: 20 },
+        0: { cellWidth: w(20) },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 18, halign: 'center' },
-        3: { cellWidth: 22, halign: 'right' },
-        4: { cellWidth: 28, halign: 'right' },
-        5: { cellWidth: 28, halign: 'right' },
-        ...(colTva ? { 6: { cellWidth: 36, halign: 'right' } } : {}),
+        2: { cellWidth: w(18), halign: 'center' },
+        3: { cellWidth: w(22), halign: 'right' },
+        4: { cellWidth: w(28), halign: 'right' },
+        5: { cellWidth: w(28), halign: 'right' },
+        ...(colTva ? { 6: { cellWidth: w(36), halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -276,6 +289,7 @@ export async function exportDPGFtoPDF(
     const rows = flattenDPGFGroupe(dpgf, groupement);
     autoTable(doc, {
       ...tableauGris(),
+      ...(etroit ? { styles: { ...tableauGris().styles, fontSize: 7.5, cellPadding: 1.5 } } : {}),
       startY,
       head: [['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]],
       body: rows.map(r => {
@@ -284,15 +298,15 @@ export async function exportDPGFtoPDF(
           ...(colTva ? [celluleTva(r.tvaTaux, r.tvaMontant)] : [])];
       }),
       columnStyles: {
-        0: { cellWidth: 18 },
+        0: { cellWidth: w(18) },
         1: { cellWidth: 'auto' },
-        2: { cellWidth: 32 },
-        3: { cellWidth: 26 },
-        4: { cellWidth: 16, halign: 'center' },
-        5: { cellWidth: 20, halign: 'right' },
-        6: { cellWidth: 26, halign: 'right' },
-        7: { cellWidth: 28, halign: 'right' },
-        ...(colTva ? { 8: { cellWidth: 36, halign: 'right' } } : {}),
+        2: { cellWidth: w(32) },
+        3: { cellWidth: w(26) },
+        4: { cellWidth: w(16), halign: 'center' },
+        5: { cellWidth: w(20), halign: 'right' },
+        6: { cellWidth: w(26), halign: 'right' },
+        7: { cellWidth: w(28), halign: 'right' },
+        ...(colTva ? { 8: { cellWidth: w(36), halign: 'right' } } : {}),
       },
       didParseCell: (data: any) => {
         const row = rows[data.row.index];
@@ -310,7 +324,7 @@ export async function exportDPGFtoPDF(
   }
 
   drawAgencyFooters(doc, settings, letterhead);
-  await enregistrerPdf(doc, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.pdf`, sortie);
+  await enregistrerPdf(doc, nomDpgf(dpgf, suffixeNom, 'pdf'), sortie);
 }
 
 // ── Estimation PDF ────────────────────────────────────────────────────────────
@@ -365,7 +379,7 @@ export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, se
 
 export async function exportDPGFtoExcel(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
-  { avecPrix = false, avecTva = false, sortie }: ExportDpgfOptions = {},
+  { avecPrix = false, avecTva = false, sortie, orientation = ORIENTATION_DPGF, suffixeNom }: ExportDpgfOptions = {},
 ) {
   const colTva = avecPrix && avecTva;
   // Colonnes TVA : le taux dédié du poste, puis son montant (un nombre dans la cellule).
@@ -376,7 +390,7 @@ export async function exportDPGFtoExcel(
   const [wb, logo] = await Promise.all([nouveauClasseur(), chargerLogo(settings)]);
   const classement = groupement !== 'lot' ? ` — Classement : ${LIBELLES_GROUPEMENT[groupement]}` : '';
   const commun = {
-    nom: 'DPGF', settings, logo,
+    nom: 'DPGF', settings, logo, paysage: orientation === 'paysage',
     title: 'DPGF — Décomposition du Prix Global et Forfaitaire',
     subtitle: projectName || dpgf.titre,
     reference: `v${dpgf.version}${classement}`,
@@ -443,7 +457,7 @@ export async function exportDPGFtoExcel(
     if (avecPrix) ajouterHorsBase(f, dpgf, 8, colTva ? 2 : 0);
     if (colTva) ajouterPiedTvaExcel(f, articles, 8);
   }
-  await enregistrerClasseur(wb, `DPGF_${dpgf.titre.replace(/\s+/g, '_')}.xlsx`, sortie);
+  await enregistrerClasseur(wb, nomDpgf(dpgf, suffixeNom, 'xlsx'), sortie);
 }
 
 // ── Estimation Excel ──────────────────────────────────────────────────────────

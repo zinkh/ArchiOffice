@@ -15,7 +15,8 @@ vi.mock('../proExport', () => ({
   exportEstimationtoPDF: vi.fn(async (doc: any, _n: any, _s: any, sortie: any) => { appels.push({ fn: 'est-pdf', lots: doc.lots.map((l: any) => l.numero), args: [] }); await sortie('est.pdf', new Blob(['x'])); }),
   exportEstimationtoExcel: vi.fn(),
 }));
-vi.mock('../cctpExport', () => ({
+vi.mock('../cctpExport', async importOriginal => ({
+  cctpBlocs: (await importOriginal<typeof import('../cctpExport')>()).cctpBlocs,
   exportCctpPdf: vi.fn(async (doc: any, opts: any) => { appels.push({ fn: `cctp-pdf-${opts.batiment?.code ?? 'all'}`, lots: doc.lots.map((l: any) => l.numero), args: [] }); await opts.sortie(`cctp-${opts.batiment?.code ?? 'all'}.pdf`, new Blob(['x'])); }),
   exportCctpDocx: vi.fn(),
 }));
@@ -79,6 +80,42 @@ describe('produireDossier', () => {
   it('compte les fichiers de la demande', async () => {
     const { compterFichiers } = await import('../exportDossier');
     expect(compterFichiers({ dpgf, selection: base.selection, cctpParBatiment: true, documents: { cctp: 'both', dpgf: 'pdf' } })).toBe(5);
+  });
+});
+
+describe('orientation et export par lot', () => {
+  it('garde vertical pour le CCTP et horizontal pour le DPGF par défaut', async () => {
+    const { produireDossier } = await import('../exportDossier');
+    await produireDossier({ ...base, documents: { cctp: 'pdf', dpgf: 'pdf' } });
+    const dpgfOpts = appels.find(a => a.fn === 'dpgf-pdf')!.args[4] as any;
+    expect(dpgfOpts.orientation).toBe('paysage');
+  });
+
+  it('transmet l\'orientation choisie au DPGF', async () => {
+    const { produireDossier } = await import('../exportDossier');
+    await produireDossier({ ...base, documents: { dpgf: 'both' }, orientations: { dpgf: 'portrait' } });
+    for (const a of appels) expect((a.args[4] as any).orientation).toBe('portrait');
+  });
+
+  it('produit un fichier DPGF par lot, nommé d\'après le lot', async () => {
+    const { produireDossier } = await import('../exportDossier');
+    const r = await produireDossier({ ...base, documents: { dpgf: 'pdf' }, parLot: true });
+    expect(appels.map(a => a.lots)).toEqual([['01'], ['02']]);
+    expect(appels.map(a => (a.args[4] as any).suffixeNom)).toEqual(['Lot 01 01', 'Lot 02 02']);
+    expect(r.fichiers).toHaveLength(2);
+  });
+
+  it('produit un CCTP par lot, et respecte le périmètre de lots', async () => {
+    const { produireDossier } = await import('../exportDossier');
+    await produireDossier({
+      ...base, selection: { ...base.selection, lotNumeros: ['02'] }, documents: { cctp: 'pdf' }, parLot: true,
+    });
+    expect(appels.map(a => a.lots)).toEqual([['02']]);
+  });
+
+  it('compte un fichier par lot', async () => {
+    const { compterFichiers } = await import('../exportDossier');
+    expect(compterFichiers({ dpgf, selection: base.selection, cctpParBatiment: false, parLot: true, documents: { cctp: 'pdf', dpgf: 'both' } })).toBe(6);
   });
 });
 
