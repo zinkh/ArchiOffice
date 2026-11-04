@@ -1,6 +1,7 @@
 import React, { Fragment, useState, useEffect, useMemo, ChangeEvent, useRef, useId, type Dispatch, type SetStateAction } from 'react';
 import { MISSION_PHASES, MISSION_ID_TO_PHASE } from '../lib/profitability';
 import ProjectProfitability from '../components/projectDetail/ProjectProfitability';
+import ProjectSharesPanel from '../components/ProjectSharesPanel';
 import CreatableSelect from 'react-select/creatable';
 import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { 
@@ -4225,6 +4226,9 @@ export default function ProjectDetail() {
                     )}
                   </div>
                 </div>
+
+                {/* Partage avec un confrère : réservé aux administrateurs et managers (le panneau se masque sinon) */}
+                {id && <ProjectSharesPanel projectId={id} />}
 
                 {/* Permits Section */}
                 <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>

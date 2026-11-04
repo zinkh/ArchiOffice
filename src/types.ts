@@ -696,7 +696,8 @@ export interface TeamMember {
   role: string;
   email: string;
   avatar?: string;
-  system_role: 'admin' | 'manager' | 'pm' | 'user';
+  // `guest` : confrère invité sur une affaire, sans cabinet à lui (server/guestAccessGuard.ts).
+  system_role: 'admin' | 'manager' | 'pm' | 'user' | 'guest';
   manager_id?: string | null;
   senderOption?: 'agency' | 'personal';
   defaultEmailTemplate?: string;

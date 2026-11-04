@@ -97,9 +97,15 @@ Goal: starting a "Nouvelle discussion" with an agent should keep the previous on
 - **Retention and GDPR.** Define a retention period (and an owner-controlled "supprimer définitivement" per discussion). Archived conversations must be included in the tenant export and in the purge on tenant closure (`server/tenantExport.ts`, `server/tenantPurge.ts`).
 - **To check before building.** How `agent_conversations` and `agent_messages` are keyed today (one row per person and agent, which this would replace by many), and how the offline cache and the draft saved in `localStorage` per agent behave across several conversations.
 
-### Project sharing with a co-contractor — planned
+### Project sharing with a co-contractor (first slice shipped)
 
-Goal: share a project with a co-contractor (*cotraitant*) so they can work on it, and let the architect decide, item by item, what they may edit and what stays read-only. Nothing is built.
+Goal: share a project with a co-contractor (*cotraitant*) so they can work on it, and let the architect decide, item by item, what they may edit and what stays read-only.
+
+**Commercial rule: free for the guest, within limits.** 3 guests per project and 10 per cabinet (`SHARE_LIMITS`, `server/projectShares/access.ts`), no AI, no invoicing, no project creation, and guests are not counted in the user quota. A guest who wants a cabinet of their own subscribes like anyone else.
+
+**Shipped.** Tables `project_shares` and `project_share_grants` (`supabase/migrate_project_shares.sql`); invitation by email, grant editing and removal (`/api/projects/:id/shares`, administrators and managers only); a deny-by-default guard for guests without a cabinet (`server/guestAccessGuard.ts`); the guest space `/api/shared` and `/partages` (project, lots read, tasks read or write, every write logged); the panel in the project sheet (`ProjectSharesPanel.tsx`). Grants cover `lots` (read) and `tasks` (read or write).
+
+**Still to do.** Documents (download is not wired), CCTP/DPGF, meetings and observations, per-lot grants, the change-proposal mode, the privacy policy and subcontractor list update, and what happens to an access when the co-contractor leaves the contract or the project is archived. The bullets below remain the design reference.
 
 - **Model.** An external collaborator is not a member of the tenant: reuse the `tenant_memberships` identity split rather than adding a second account system, with a dedicated restricted role, and scope the access to specific projects the way `project_members` already does for `pm`. An invitation by email follows the existing `POST /api/team` flow (single-use link, the person chooses their own password).
 - **Per-item permissions.** A `project_shares` table (project, collaborator, status) plus `project_share_grants` (share, resource kind such as `lots`, `cctp`, `dpgf`, `tasks`, `documents`, `meetings`, `observations`, and optionally a lot or a chapter, with `read` or `write`). Default is no access: the architect grants explicitly, and anything not granted is invisible, not just read-only.
