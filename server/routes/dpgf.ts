@@ -78,7 +78,10 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       const { data: dpgf, error } = await supabaseAdmin.from('dpgfs').select('*').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (error && error.code !== 'PGRST116') throw error;
       if (dpgf) {
-        res.json(await withProjectLotTitles(supabaseAdmin, tenantId, projectId, typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data));
+        const document = await withProjectLotTitles(supabaseAdmin, tenantId, projectId, typeof (dpgf as any).data === 'string' ? JSON.parse((dpgf as any).data) : (dpgf as any).data);
+        // `_rev` : la révision lue, à renvoyer avec la sauvegarde (POST ?baseRev=) pour que l'éditeur
+        // sache qu'un autre écrivain a changé le document. Jamais écrite dans le document.
+        res.json({ ...document, _rev: Number((dpgf as any).revision ?? 0) });
       } else {
         res.status(404).json({ error: "DPGF not found" });
       }
@@ -92,12 +95,30 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
     try {
       const tenantId = await getTenantId(req.user.id);
       const { projectId } = req.params;
-      const data = req.body;
+      const { _rev: _ignoree, ...data } = req.body ?? {};
       const id = data.id === 'new' ? crypto.randomUUID() : (data.id || crypto.randomUUID());
       data.id = id;
+      // Sauvegarde de l'éditeur PRO : `baseRev` est la révision qu'il a lue. Si le document stocké a
+      // changé depuis (approbation d'une proposition, agent IA, autre onglet), on n'écrase rien : 409.
+      // Sans `baseRev` (autres appelants), l'écriture reste celle d'avant.
+      const baseRevRaw = req.query?.baseRev;
+      const baseRev = baseRevRaw === undefined ? undefined : Number(baseRevRaw);
+      if (baseRev !== undefined && (!Number.isInteger(baseRev) || baseRev < 0)) {
+        return res.status(400).json({ error: 'Révision du document illisible.' });
+      }
       const { data: existing } = await supabaseAdmin.from('dpgfs').select('id').eq('project_id', projectId).eq('tenant_id', tenantId).single();
       if (existing) {
-        await supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
+        let update = supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(data) }).eq('project_id', projectId).eq('tenant_id', tenantId);
+        if (baseRev !== undefined) update = update.eq('revision', baseRev);
+        const { data: written, error: writeError } = await update.select('revision');
+        if (writeError) throw writeError;
+        if (!written?.length) {
+          return res.status(409).json({
+            error: 'Le document a été modifié ailleurs depuis sa lecture : rien n\'a été enregistré.',
+            code: 'DOC_STALE',
+          });
+        }
+        return res.json({ ...data, _rev: Number(written[0].revision ?? 0) });
       } else {
         await supabaseAdmin.from('dpgfs').insert({ id, tenant_id: tenantId, project_id: projectId, data: JSON.stringify(data) });
         const { data: project } = await supabaseAdmin.from('projects').select('name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
@@ -105,7 +126,7 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
         const userName = await getUserName(tenantId, req.user.id, req.user.email);
         logActivity(tenantId, req.user.id, userName, `Création du DPGF du projet "${projectName}"`, projectName, id, 'dpgf', 'Situations/DPGF');
       }
-      res.json(data);
+      res.json({ ...data, _rev: 0 });
     } catch (error) {
       console.error("[POST /api/projects/:projectId/dpgf]", error);
       res.status(500).json({ error: "Failed to save DPGF" });
@@ -171,9 +192,19 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       const tenantId = await getTenantId(req.user.id);
       const row = await loadRow(supabaseAdmin, tenantId, req.params.projectId);
       if (!row) return res.status(404).json({ error: "Ce projet n'a pas de DPGF" });
-      const document = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+      let document = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
       const label = String(req.body?.label || '').trim();
       if (!label) return res.status(400).json({ error: 'Le libellé est obligatoire' });
+      // L'éditeur peut figer SA version (modifications non enregistrées d'un conflit) au lieu du
+      // document stocké : elle reste restaurable depuis l'historique, rien n'est perdu.
+      if (req.body?.document !== undefined) {
+        const local = req.body.document;
+        if (!local || typeof local !== 'object' || Array.isArray(local) || !Array.isArray(local.lots)) {
+          return res.status(400).json({ error: 'Le document à figer est invalide.' });
+        }
+        const { _rev: _ignoree, ...propre } = local;
+        document = propre;
+      }
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'dpgf_versions').insert({
         id: crypto.randomUUID(),
         project_id: req.params.projectId, dpgf_id: row.id, label,

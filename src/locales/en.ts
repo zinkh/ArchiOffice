@@ -448,6 +448,15 @@ export default {
   "pro_dossier_compare": "Compare with another project",
   "pro_dossier_show_structure": "Show structure",
   "pro_dossier_print": "Print",
+  // Save conflict (the document was changed elsewhere since it was read)
+  "pro_conflict_title": "This file was changed elsewhere: your latest edits are not saved.",
+  "pro_conflict_body": "A colleague's proposal may have been approved, or an AI agent or another tab saved the specifications or the BoQ since you opened it. Nothing was overwritten. Choose which version to keep.",
+  "pro_conflict_reload": "Load the up-to-date version",
+  "pro_conflict_overwrite": "Save my version",
+  "pro_conflict_safe": "Either way, the other version is kept in the file history (menu ⋯, History) and can be restored.",
+  "pro_conflict_error": "The version could not be set aside: nothing was replaced. Try again.",
+  "pro_conflict_backup_mine": "My unsaved changes",
+  "pro_conflict_backup_stored": "Saved version before replacement",
   // snapForm (version freeze form)
   "pro_snap_title": "Freeze a version",
   "pro_snap_label": "Label",

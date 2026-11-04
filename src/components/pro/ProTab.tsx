@@ -26,6 +26,8 @@ import {
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { AutosaveIndicator } from '../projectDetail/AutosaveIndicator';
+import { ProConflictBanner } from './ProConflictBanner';
+import { loadDPGF, saveDPGF, figerVersion } from '../../lib/dpgfDocument';
 import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
 import { ProToolbar } from './toolbar/ProToolbar';
 import { ProSearch } from './toolbar/ProSearch';
@@ -77,11 +79,7 @@ const EMPTY_DPGF = (projectId: string): DPGF => ({
 
 const dpgfLsKey = (projectId: string) => `archioffice_dpgf_${projectId}`;
 
-const loadDPGF = (projectId: string) => loadProDoc<DPGF>(`/api/projects/${projectId}/dpgf`);
-
-const saveDPGF = async (projectId: string, data: DPGF): Promise<void> => {
-  await apiFetch(`/api/projects/${projectId}/dpgf`, { method: 'POST', body: JSON.stringify(data) });
-};
+// Lecture et enregistrement du document avec sa révision : src/lib/dpgfDocument.ts.
 
 // ── Accès au document BPU ─────────────────────────────────────────────────────
 // La route rend la ligne entière (document + offres reçues), pas seulement le
@@ -120,10 +118,13 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   const [snapForm, setSnapForm] = useState<{ label: string; phase: string } | null>(null);
 
   // Document DPGF partagé par les onglets CCTP, DPGF et ESTIMATION.
+  // Conflit d'enregistrement : la version qui perd est mise de côté dans l'historique avant tout remplacement.
+  const backupLocal = useCallback((key: string, mine: DPGF) => figerVersion(key, t('pro_conflict_backup_mine'), mine), [t]);
+  const backupRemote = useCallback((key: string) => figerVersion(key, t('pro_conflict_backup_stored')), [t]);
   const dpgfDoc = useAutosavedDoc<DPGF>({
-    key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey,
+    key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey, backupLocal, backupRemote,
   });
-  const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave } = dpgfDoc;
+  const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave, resolveConflict } = dpgfDoc;
 
   // ── État du rapport de contrôle (remplace window.alert) ──────────────────
   const [controleReport, setControleReport] = useState<{ errors: number; warnings: number; lines: string[] } | null>(null);
@@ -568,7 +569,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   const activeSaveStatus = isBpuTab ? bpuSaveStatus : saveStatus;
   const activeLoaded = isBpuTab ? !bpuLoading && !!bpu : !dpgfLoading && !!dpgf;
   const indicatorStatus: AutosaveStatus = activeSubTab === 'LOTS' || !activeLoaded ? 'idle'
-    : activeSaveStatus === 'idle' ? 'saved' : activeSaveStatus;
+    : activeSaveStatus === 'idle' ? 'saved' : activeSaveStatus === 'conflict' ? 'error' : activeSaveStatus;
   const saveActive = isBpuTab ? handleBpuSave : handleSave;
 
   // Ctrl+S (⌘+S) enregistre tout de suite le document à l'écran.
@@ -661,6 +662,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
           />
         </div>
       </div>
+      {!isBpuTab && activeSubTab !== 'LOTS' && saveStatus === 'conflict' && <ProConflictBanner onResolve={resolveConflict} />}
       {showExport && dpgf && (
         <ProExportDialog
           dpgf={dpgf}
@@ -684,8 +686,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
         onClose={() => setVersions(null)}
         confirmAction={confirmAction}
         onRestore={async (v) => {
-          const restored = await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' });
-          setDpgf(restored);
+          await apiFetch<DPGF>(`/api/projects/${projectId}/dpgf/versions/${v.id}/restore`, { method: 'POST' });
+          // La restauration fait avancer la révision côté serveur : on relit (document ET révision), sinon
+          // la sauvegarde suivante serait refusée comme un faux conflit.
+          await dpgfDoc.reload();
           setVersions(null);
           showToast(t('pro_versions_toast_restored', { label: v.label }), 'success');
         }}

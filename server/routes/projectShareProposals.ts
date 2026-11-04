@@ -123,11 +123,11 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
 
   /** La ligne `dpgfs` brute (identifiant et texte JSON tel qu'enregistré), pour lire ET écrire sans réinterpréter. */
   async function loadRow(tenantId: string, projectId: string) {
-    const { data, error } = await supabaseAdmin.from('dpgfs').select('id, data')
+    const { data, error } = await supabaseAdmin.from('dpgfs').select('id, data, revision')
       .eq('project_id', projectId).eq('tenant_id', tenantId).maybeSingle();
     if (error || !data) return null;
     const doc = parseDocument(data.data);
-    return doc ? { id: data.id as string, raw: data.data, doc } : null;
+    return doc ? { id: data.id as string, raw: data.data, revision: Number(data.revision ?? 0), doc } : null;
   }
 
   /** Le titre d'un lot vient de `project_lots`, jamais du document (qui le reçoit de là à chaque lecture). */
@@ -397,10 +397,12 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
         // en cas d'échec : on ne supprime rien.
         leftPourMemoire = applyFieldToNode(node, proposal.field, proposal.proposed_value).leftPourMemoire;
         if (NUMERIC_FIELDS.includes(proposal.field)) recomputeAfterNumericChange(row.doc, proposal.project_lot_id);
-        let update = supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(row.doc) })
-          .eq('id', row.id).eq('tenant_id', tenantId);
-        if (typeof row.raw === 'string') update = update.eq('data', row.raw);
-        const { data: written, error: writeError } = await update.select('id');
+        // Conditionnelle à la RÉVISION lue (dpgfs.revision, incrémentée par un déclencheur SQL à chaque
+        // changement du document), pas au texte du document : il pèse plusieurs centaines de Ko et un
+        // filtre PostgREST passe dans l'URL.
+        const { data: written, error: writeError } = await supabaseAdmin.from('dpgfs')
+          .update({ data: JSON.stringify(row.doc) })
+          .eq('id', row.id).eq('tenant_id', tenantId).eq('revision', row.revision).select('id');
         if (writeError) throw writeError;
         if (!written?.length) return res.status(409).json(CONFLICT);
         summary = `Proposition de ${email} appliquée (${proposal.field})${leftPourMemoire ? ' : l\'article quitte « pour mémoire » et entre dans le total' : ''}`;

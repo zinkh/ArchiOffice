@@ -43,30 +43,44 @@ export function parseDocument(raw: unknown): Rec | null {
   }
 }
 
-function viewLigne(ligne: unknown, mode: DocumentMode): Rec | null {
+/**
+ * Ce que la vue CCTP ajoute à un article quand le confrère a AUSSI le droit DPGF sur son lot : la
+ * quantité (l'unité y est déjà) et le repère « pour mémoire », pour qu'il la propose depuis le CCTP.
+ * JAMAIS un prix : la vue CCTP n'en porte aucun.
+ */
+const CCTP_QUANTITE_FIELDS = ['quantite', 'pourMemoire'] as const;
+
+/**
+ * `withQuantite` n'a d'effet que dans la vue CCTP. Il ne vaut jamais pour ce que le DPGF ne contient pas :
+ * un article réservé au CCTP (`cctpOnly`), ni ce qui se trouve dessous, n'expose aucune quantité.
+ */
+function viewLigne(ligne: unknown, mode: DocumentMode, withQuantite = false): Rec | null {
   if (!isRec(ligne)) return null;
   // `cctpOnly` : texte du CCTP sans ligne de prix, absent du DPGF.
   if (mode === 'dpgf' && ligne.cctpOnly) return null;
+  const quantite = withQuantite && !ligne.cctpOnly;
   const out = pick(ligne, LIGNE_FIELDS[mode]);
+  if (mode === 'cctp' && quantite) Object.assign(out, pick(ligne, CCTP_QUANTITE_FIELDS));
   if (Array.isArray(ligne.children)) {
-    out.children = ligne.children.map(c => viewLigne(c, mode)).filter((c): c is Rec => !!c);
+    out.children = ligne.children.map(c => viewLigne(c, mode, quantite)).filter((c): c is Rec => !!c);
   }
   return out;
 }
 
-function viewChapitre(chapitre: unknown, mode: DocumentMode): Rec | null {
+function viewChapitre(chapitre: unknown, mode: DocumentMode, withQuantite = false): Rec | null {
   if (!isRec(chapitre)) return null;
   if (mode === 'dpgf' && chapitre.cctpOnly) return null;
+  const quantite = withQuantite && !chapitre.cctpOnly;
   return {
     ...pick(chapitre, CHAPITRE_FIELDS[mode]),
-    lignes: (Array.isArray(chapitre.lignes) ? chapitre.lignes : []).map(l => viewLigne(l, mode)).filter((l): l is Rec => !!l),
+    lignes: (Array.isArray(chapitre.lignes) ? chapitre.lignes : []).map(l => viewLigne(l, mode, quantite)).filter((l): l is Rec => !!l),
   };
 }
 
-function viewLot(lot: Rec, mode: DocumentMode): Rec {
+function viewLot(lot: Rec, mode: DocumentMode, withQuantite = false): Rec {
   return {
     ...pick(lot, LOT_FIELDS),
-    chapitres: (Array.isArray(lot.chapitres) ? lot.chapitres : []).map(c => viewChapitre(c, mode)).filter((c): c is Rec => !!c),
+    chapitres: (Array.isArray(lot.chapitres) ? lot.chapitres : []).map(c => viewChapitre(c, mode, withQuantite)).filter((c): c is Rec => !!c),
   };
 }
 
@@ -74,11 +88,16 @@ function viewLot(lot: Rec, mode: DocumentMode): Rec {
  * La vue du document pour un invité : en-tête sans les totaux (ils additionnent TOUS
  * les lots, donc les prix des autres) et seulement les lots dont `projectLotId` est
  * accordé. Un lot du document sans `projectLotId` ne peut jamais être accordé.
+ *
+ * `quantityLotIds` (vue CCTP seulement) : les lots où le confrère a aussi le droit DPGF. Leurs articles
+ * portent alors la quantité, jamais un prix. Sans lui, la vue CCTP n'a aucune quantité.
  */
-export function guestDocumentView(doc: Rec, mode: DocumentMode, lotIds: ReadonlySet<string>): Rec {
+export function guestDocumentView(
+  doc: Rec, mode: DocumentMode, lotIds: ReadonlySet<string>, quantityLotIds: ReadonlySet<string> = new Set(),
+): Rec {
   const lots = (Array.isArray(doc.lots) ? doc.lots : [])
     .filter((l): l is Rec => isRec(l) && typeof l.projectLotId === 'string' && lotIds.has(l.projectLotId))
-    .map(l => viewLot(l, mode));
+    .map(l => viewLot(l, mode, quantityLotIds.has(l.projectLotId)));
   return {
     titre: doc.titre ?? null,
     version: doc.version ?? null,

@@ -14,8 +14,10 @@ export interface SharedGrant { kind: string; access: 'read' | 'comment' | 'write
 
 interface Ligne {
   id: string; numero: string | null; designation: string | null; unite: string | null; localisation: string | null;
-  cctpDescription: string | null; quantite: number | null; prixUnitaire: number | null; prixTotal: number | null;
-  pourMemoire: boolean | null; children?: Ligne[];
+  cctpDescription: string | null; prixUnitaire: number | null; prixTotal: number | null;
+  /** Absente de la vue CCTP, sauf sur un lot où le confrère a aussi le droit DPGF. */
+  quantite?: number | null;
+  pourMemoire?: boolean | null; children?: Ligne[];
 }
 interface Chapitre { id: string; numero: string | null; titre: string | null; cctpDescription: string | null; lignes: Ligne[] }
 interface LotView { id: string; numero: string | null; titre: string | null; projectLotId: string; chapitres: Chapitre[] }
@@ -210,7 +212,7 @@ function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; lign
           <span className="text-xs whitespace-nowrap text-right text-[var(--tblr-muted)]">
             {ligne.pourMemoire
               ? t('shared_pm')
-              : ligne.quantite !== null && ligne.prixUnitaire !== null
+              : ligne.quantite != null && ligne.prixUnitaire !== null
                 ? `${num.format(ligne.quantite)} ${ligne.unite ?? ''} × ${eur.format(ligne.prixUnitaire)} = ${eur.format(ligne.prixTotal ?? 0)}`
                 : ''}
           </span>
@@ -218,6 +220,12 @@ function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; lign
       </div>
       {!dpgf && ligne.cctpDescription && (
         <p className="text-xs text-[var(--tblr-muted)] whitespace-pre-wrap mt-0.5">{texteBrut(ligne.cctpDescription)}</p>
+      )}
+      {/* CCTP : la quantité n'arrive que sur un lot où le confrère a aussi le droit DPGF (jamais un prix). */}
+      {!dpgf && ligne.quantite !== undefined && !ligne.children?.length && (
+        <p className="text-xs text-[var(--tblr-muted)] mt-0.5">
+          {t('shared_field_quantite')} : {ligne.pourMemoire ? t('shared_pm') : `${num.format(ligne.quantite ?? 0)} ${ligne.unite ?? ''}`.trim()}
+        </p>
       )}
       {dpgf ? (
         // Chiffres : seulement sur une feuille chiffrée, comme l'éditeur (un parent porte la somme de ses enfants).
@@ -234,6 +242,14 @@ function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; lign
         <>
           <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="designation" current={ligne.designation ?? ''} />
           <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="cctpDescription" current={ligne.cctpDescription ?? ''} />
+          {/* Quantité et unité depuis le CCTP : même droit (écriture DPGF du lot) et mêmes règles que dans le DPGF. */}
+          {ligne.quantite !== undefined && !ligne.children?.length && (
+            <>
+              {ligne.pourMemoire && ctx.canProposeKind(lot, 'dpgf') && <p className="mt-1 text-xs text-[var(--tblr-muted)]">{t('shared_pm_hint')}</p>}
+              <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="quantite" current={ligne.quantite === null ? '' : String(ligne.quantite)} />
+              <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="unite" current={ligne.unite ?? ''} />
+            </>
+          )}
         </>
       )}
       <NodeComments ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} />

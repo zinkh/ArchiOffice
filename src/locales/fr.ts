@@ -447,6 +447,15 @@ export default {
   "pro_dossier_compare": "Comparer avec une autre affaire",
   "pro_dossier_show_structure": "Afficher la structure",
   "pro_dossier_print": "Imprimer",
+  // Conflit d'enregistrement (le document a été modifié ailleurs depuis sa lecture)
+  "pro_conflict_title": "Ce dossier a été modifié ailleurs : vos dernières modifications ne sont pas enregistrées.",
+  "pro_conflict_body": "Une proposition d'un confrère a peut-être été approuvée, un agent IA ou un autre onglet a enregistré le CCTP ou le DPGF depuis que vous l'avez ouvert. Rien n'a été écrasé. Choisissez la version à garder.",
+  "pro_conflict_reload": "Charger la version à jour",
+  "pro_conflict_overwrite": "Enregistrer ma version",
+  "pro_conflict_safe": "Dans les deux cas, l'autre version est conservée dans l'historique du dossier (menu ⋯, Historique) et reste restaurable.",
+  "pro_conflict_error": "La version n'a pas pu être mise de côté : rien n'a été remplacé. Réessayez.",
+  "pro_conflict_backup_mine": "Mes modifications non enregistrées",
+  "pro_conflict_backup_stored": "Version enregistrée avant remplacement",
   // snapForm (formulaire de création d'instantané)
   "pro_snap_title": "Figer une version",
   "pro_snap_label": "Libellé",
