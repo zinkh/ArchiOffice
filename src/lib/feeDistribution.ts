@@ -41,6 +41,52 @@ export function defaultFeeDistribution(): FeeDistributionData {
 }
 
 /**
+ * Parts par défaut (en %) de l'architecte et du premier cotraitant sur chaque
+ * mission, d'après le tableau de répartition type du cabinet (architecte 70 %
+ * et BET 30 % sur le diagnostic, 80/20 sur l'APS, 60/40 sur l'APD, 50/50 sur
+ * le projet, 70/30 sur l'ACT, 75/25 sur la DET, 70/30 sur l'AOR, OPC 100 % BET).
+ * Le VISA suit la DET, l'esquisse suit le diagnostic. Ajustable ensuite.
+ */
+export const DEFAULT_COTRAITANT_SHARES: Record<string, { architect: number; cotraitant: number }> = {
+  esquisse: { architect: 70, cotraitant: 30 },
+  aps: { architect: 80, cotraitant: 20 },
+  apd: { architect: 60, cotraitant: 40 },
+  projet: { architect: 50, cotraitant: 50 },
+  act: { architect: 70, cotraitant: 30 },
+  visa: { architect: 75, cotraitant: 25 },
+  det: { architect: 75, cotraitant: 25 },
+  aor: { architect: 70, cotraitant: 30 },
+  opc: { architect: 0, cotraitant: 100 },
+};
+
+/**
+ * Renseigne les parts encore vides (jamais saisies) quand un cotraitant est
+ * présent : le premier reçoit sa part par défaut, l'architecte la sienne, les
+ * suivants 0. Une part déjà saisie, même à 0, n'est jamais touchée. Renvoie
+ * null quand il n'y a rien à compléter, pour ne pas déclencher de sauvegarde.
+ */
+export function applyDefaultCotraitantShares(
+  missions: FeeDistributionMission[],
+  contactIds: string[],
+): FeeDistributionMission[] | null {
+  if (contactIds.length === 0) return null;
+  let changed = false;
+  const next = missions.map(m => {
+    const shares = DEFAULT_COTRAITANT_SHARES[m.id];
+    const pct = { ...(m.percentages || {}) };
+    let touched = false;
+    if (pct.architect === undefined && shares) { pct.architect = shares.architect; touched = true; }
+    contactIds.forEach((id, i) => {
+      if (pct[id] === undefined) { pct[id] = i === 0 && shares ? shares.cotraitant : 0; touched = true; }
+    });
+    if (!touched) return m;
+    changed = true;
+    return { ...m, percentages: pct };
+  });
+  return changed ? next : null;
+}
+
+/**
  * Ratios (mission de base+exécution / mission de base seule, et
  * total / base seule) déduits de la répartition par mission — utilisés pour
  * afficher, à côté du % d'honoraires de base saisi, le % équivalent
@@ -90,6 +136,7 @@ export async function exportFeeDistributionToXlsx(
   vatRate: number | undefined,
   filenameLabel: string,
   settings: AgencySettings = {},
+  montantBase?: number,
 ): Promise<void> {
   if (!feeDistribution) return;
   try {
@@ -198,7 +245,9 @@ export async function exportFeeDistributionToXlsx(
 
     for (const row of lignesRelatives) {
       const cell = f.ws.getRow(row).getCell(3);
-      cell.value = { formula: `B${row}/$B$${baseSubtotalRow}*100` };
+      // Même référence que la grille : le montant des honoraires de base quand il est
+      // connu, sinon le sous-total de base (le total relatif peut alors s'écarter de 100).
+      cell.value = { formula: montantBase && montantBase > 0 ? `B${row}/${montantBase}*100` : `B${row}/$B$${baseSubtotalRow}*100` };
       cell.numFmt = pct;
     }
 
