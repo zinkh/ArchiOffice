@@ -25,6 +25,17 @@ interface SharedComment {
   body: string; authorKind: 'guest' | 'cabinet'; authorName: string | null; createdAt: string | null; resolvedAt: string | null;
 }
 
+interface Proposal {
+  id: string; lotId: string; targetType: TargetType; targetId: string; field: string; baseValue: string; proposedValue: string;
+  status: 'pending' | 'applied' | 'rejected' | 'withdrawn' | 'outdated'; decisionNote: string | null; createdAt: string | null;
+  pending: number; limit: number;
+}
+
+/** Quel droit chaque champ demande : le même que côté serveur (FIELD_KIND, documentView.ts). */
+const FIELD_KIND: Record<string, Mode> = {
+  cctpDescription: 'cctp', titre: 'cctp', designation: 'cctp', quantite: 'dpgf', prixUnitaire: 'dpgf', unite: 'dpgf',
+};
+
 const eur = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
 const num = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 });
 const fieldClass = 'w-full px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
@@ -32,6 +43,102 @@ const fieldClass = 'w-full px-3 py-1.5 text-xs border border-[var(--tblr-border)
 interface NodeCtx {
   mode: Mode; comments: SharedComment[]; canCommentLot: (lot: LotView) => boolean;
   post: (target: { lotId: string; targetType: TargetType; targetId: string; parentId?: string }, body: string) => Promise<void>;
+  proposals: Proposal[];
+  /** Droit « écriture » (proposer) sur ce lot pour ce type de document, affaire non archivée. */
+  canProposeKind: (lot: LotView, kind: Mode) => boolean;
+  propose: (target: { lotId: string; targetType: TargetType; targetId: string; field: string }, value: string) => Promise<void>;
+  withdraw: (proposalId: string) => Promise<void>;
+}
+
+const MULTILINE_FIELDS = new Set(['cctpDescription']);
+const NUMERIC_FIELDS = new Set(['quantite', 'prixUnitaire']);
+
+/**
+ * Proposer de modifier UN champ d'un lot, d'un chapitre ou d'un article, et suivre le sort de sa
+ * proposition. Le confrère n'écrit jamais dans le document : le cabinet valide. Ce qu'il a saisi
+ * reste dans le formulaire tant que la proposition n'est pas enregistrée (refus, limite atteinte).
+ */
+function ProposeEdit({ ctx, lot, targetType, targetId, field, current }: {
+  ctx: NodeCtx; lot: LotView; targetType: TargetType; targetId: string; field: string; current: string;
+}) {
+  const { t } = useTranslation();
+  const own = ctx.proposals
+    .filter(p => p.lotId === lot.projectLotId && p.targetType === targetType && p.targetId === targetId && p.field === field && p.status !== 'withdrawn')
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const last = own[own.length - 1];
+  const canPropose = ctx.canProposeKind(lot, FIELD_KIND[field]);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<{ message: string; limit: boolean } | null>(null);
+  if (!canPropose && !last) return null;
+
+  const label = t(`shared_field_${field}`);
+  const short = (value: string) => (value.length > 80 ? `${value.slice(0, 80)}…` : value || '—');
+  const startEditing = () => { setText(last?.status === 'pending' ? last.proposedValue : current); setError(null); setOpen(true); };
+
+  const send = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      await ctx.propose({ lotId: lot.projectLotId, targetType, targetId, field }, text);
+      setOpen(false);
+    } catch (e: any) {
+      // Rien n'est effacé : le texte saisi reste dans le champ, y compris à la limite de propositions.
+      setError({ message: e?.message || t('share_error'), limit: e?.code === 'PROPOSAL_LIMIT' });
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-1 space-y-1">
+      {last && (
+        <div className="text-xs rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2" style={{ background: 'var(--tblr-surface-2)' }}>
+          <span className="text-[var(--tblr-text)]">
+            <span className="font-semibold">{label} : </span>
+            {last.status === 'pending' && t('shared_proposal_pending', { value: short(last.proposedValue) })}
+            {last.status === 'applied' && t('shared_proposal_applied', { value: short(last.proposedValue) })}
+            {last.status === 'rejected' && t('shared_proposal_rejected')}
+            {last.status === 'outdated' && t('shared_proposal_outdated')}
+            {last.status === 'rejected' && last.decisionNote ? ` · ${t('shared_proposal_note', { note: last.decisionNote })}` : ''}
+          </span>
+          {last.status === 'pending' && canPropose && (
+            <button type="button" onClick={() => ctx.withdraw(last.id)} className="underline text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]">
+              {t('shared_proposal_withdraw')}
+            </button>
+          )}
+        </div>
+      )}
+      {canPropose && !open && (
+        <button type="button" onClick={startEditing} className="text-xs font-medium text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] underline">
+          {t('shared_propose', { field: label })}
+        </button>
+      )}
+      {canPropose && open && (
+        <form onSubmit={send} className="space-y-1">
+          {MULTILINE_FIELDS.has(field) ? (
+            <textarea rows={4} maxLength={20000} value={text} onChange={e => setText(e.target.value)} aria-label={label} className={fieldClass} />
+          ) : (
+            <input value={text} onChange={e => setText(e.target.value)} aria-label={label} className={fieldClass}
+              inputMode={NUMERIC_FIELDS.has(field) ? 'decimal' : undefined} maxLength={300} />
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" disabled={busy} className="px-3 py-1 text-xs font-bold rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50">
+              {t('shared_proposal_send')}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} className="px-3 py-1 text-xs font-medium text-[var(--tblr-muted)] underline">
+              {t('shared_proposal_cancel')}
+            </button>
+          </div>
+          {error && (
+            <p role="alert" className={`text-xs ${error.limit ? 'px-3 py-2 rounded-lg font-semibold text-red-700 dark:text-red-400' : 'text-red-600'}`}
+              style={error.limit ? { border: '1px solid currentColor' } : undefined}>
+              {error.message}
+            </p>
+          )}
+        </form>
+      )}
+    </div>
+  );
 }
 
 function NodeComments({ ctx, lot, targetType, targetId }: { ctx: NodeCtx; lot: LotView; targetType: TargetType; targetId: string }) {
@@ -112,6 +219,21 @@ function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; lign
       {!dpgf && ligne.cctpDescription && (
         <p className="text-xs text-[var(--tblr-muted)] whitespace-pre-wrap mt-0.5">{texteBrut(ligne.cctpDescription)}</p>
       )}
+      {dpgf ? (
+        // Chiffres : seulement sur une feuille chiffrée, comme l'éditeur (un parent porte la somme de ses enfants).
+        !ligne.children?.length && (
+          <>
+            {!ligne.pourMemoire && <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="quantite" current={ligne.quantite === null ? '' : String(ligne.quantite)} />}
+            {!ligne.pourMemoire && <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="prixUnitaire" current={ligne.prixUnitaire === null ? '' : String(ligne.prixUnitaire)} />}
+            <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="unite" current={ligne.unite ?? ''} />
+          </>
+        )
+      ) : (
+        <>
+          <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="designation" current={ligne.designation ?? ''} />
+          <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="cctpDescription" current={ligne.cctpDescription ?? ''} />
+        </>
+      )}
       <NodeComments ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} />
       {ligne.children && ligne.children.length > 0 && (
         <ul>{ligne.children.map(c => <LigneRow key={c.id} ctx={ctx} lot={lot} ligne={c} depth={depth + 1} />)}</ul>
@@ -126,22 +248,40 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
   const { t } = useTranslation();
   const [doc, setDoc] = useState<DocView | null>(null);
   const [comments, setComments] = useState<SharedComment[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const loadComments = useCallback(
     () => apiFetch<SharedComment[]>(`/api/shared/projects/${projectId}/comments`).then(setComments),
     [projectId],
   );
+  const loadProposals = useCallback(
+    () => apiFetch<Proposal[]>(`/api/shared/projects/${projectId}/proposals`).then(setProposals),
+    [projectId],
+  );
 
   useEffect(() => {
     setDoc(null); setError(null);
-    Promise.all([apiFetch<DocView>(`/api/shared/projects/${projectId}/${mode}`), loadComments()])
+    Promise.all([apiFetch<DocView>(`/api/shared/projects/${projectId}/${mode}`), loadComments(), loadProposals()])
       .then(([d]) => setDoc(d))
       .catch(e => setError(e?.message || t('share_error')));
-  }, [projectId, mode, loadComments, t]);
+  }, [projectId, mode, loadComments, loadProposals, t]);
+
+  const pendingCount = proposals.filter(p => p.status === 'pending').length;
+  const pendingLimit = proposals[0]?.limit ?? 50;
+  const canProposeAny = !archived && grants.some(g => g.kind === mode && g.access === 'write');
 
   const ctx: NodeCtx = {
-    mode, comments,
+    mode, comments, proposals,
+    canProposeKind: (lot, kind) => !archived && grants.some(g => g.kind === kind && g.lotId === lot.projectLotId && g.access === 'write'),
+    propose: async (target, value) => {
+      await apiFetch(`/api/shared/projects/${projectId}/proposals`, { method: 'POST', body: JSON.stringify({ ...target, value }) });
+      await loadProposals();
+    },
+    withdraw: async proposalId => {
+      await apiFetch(`/api/shared/projects/${projectId}/proposals/${proposalId}`, { method: 'DELETE' });
+      await loadProposals();
+    },
     canCommentLot: lot => !archived && grants.some(g => g.kind === mode && g.lotId === lot.projectLotId && (g.access === 'comment' || g.access === 'write')),
     post: async (target, body) => {
       await apiFetch(`/api/shared/projects/${projectId}/comments`, { method: 'POST', body: JSON.stringify({ resourceKind: mode, ...target, body }) });
@@ -159,16 +299,39 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
         </h2>
         {mode === 'dpgf' && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_prices_note')}</p>}
       </div>
+      {canProposeAny && (
+        <div className="space-y-1">
+          <p className="text-xs text-[var(--tblr-muted)]">{t('shared_proposals_note')}</p>
+          {pendingCount > 0 && (
+            <p className={`text-xs ${pendingCount >= pendingLimit * 0.8 ? 'font-semibold text-[var(--tblr-text)]' : 'text-[var(--tblr-muted)]'}`}>
+              {t('shared_proposals_counter', { count: pendingCount, max: pendingLimit })}
+            </p>
+          )}
+          {pendingCount >= pendingLimit && (
+            <p role="alert" className="px-3 py-2 text-xs rounded-lg text-red-700 dark:text-red-400" style={{ border: '1px solid currentColor' }}>
+              <span className="block font-semibold">{t('shared_proposals_limit_title')}</span>
+              <span>{t('shared_proposals_limit_body', { count: pendingCount, max: pendingLimit })}</span>
+            </p>
+          )}
+        </div>
+      )}
       {doc.lots.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_doc_empty')}</p>}
       {doc.lots.map(lot => (
         <div key={lot.id} className="space-y-2">
           <h3 className="text-sm font-bold text-[var(--tblr-text)]">{lot.numero} {lot.titre}</h3>
+          {mode === 'cctp' && <ProposeEdit ctx={ctx} lot={lot} targetType="lot" targetId={lot.id} field="titre" current={lot.titre ?? ''} />}
           <NodeComments ctx={ctx} lot={lot} targetType="lot" targetId={lot.id} />
           {lot.chapitres.map(chap => (
             <div key={chap.id} className="pl-2" style={{ borderLeft: '2px solid var(--tblr-border)' }}>
               <h4 className="text-sm font-semibold text-[var(--tblr-text)]">{chap.numero} {chap.titre}</h4>
               {mode === 'cctp' && chap.cctpDescription && (
                 <p className="text-xs text-[var(--tblr-muted)] whitespace-pre-wrap">{texteBrut(chap.cctpDescription)}</p>
+              )}
+              {mode === 'cctp' && (
+                <>
+                  <ProposeEdit ctx={ctx} lot={lot} targetType="chapitre" targetId={chap.id} field="titre" current={chap.titre ?? ''} />
+                  <ProposeEdit ctx={ctx} lot={lot} targetType="chapitre" targetId={chap.id} field="cctpDescription" current={chap.cctpDescription ?? ''} />
+                </>
               )}
               <NodeComments ctx={ctx} lot={lot} targetType="chapitre" targetId={chap.id} />
               <ul>{chap.lignes.map(l => <LigneRow key={l.id} ctx={ctx} lot={lot} ligne={l} depth={0} />)}</ul>
