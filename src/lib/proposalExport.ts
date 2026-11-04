@@ -354,9 +354,10 @@ export function buildDefaultTemplate(detailLevel: 'court' | 'detaille' = 'detail
       lineHeight: 1.5,
     },
     layout: {
-      // Les sauts de page entre sections sont la mise en page historique : on ne
-      // les retire que sur demande. Les tableaux, eux, sortent compacts d'office.
-      sectionBreaks: true,
+      // Les sections s'enchaînent sans saut de page forcé (seule la première s'ouvre sur une
+      // page neuve) ; le saut avant chaque section reste un réglage à cocher. Les tableaux,
+      // eux, sortent compacts d'office.
+      sectionBreaks: false,
       tableDensity: 'compact',
       cotraitantIdentity: true,
     },

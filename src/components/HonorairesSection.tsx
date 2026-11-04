@@ -135,7 +135,10 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
 
   // Répercute un changement du montant global sur les missions de base de
   // la grille de répartition, au prorata de leur poids actuel.
+  const premierPassage = React.useRef(true);
   React.useEffect(() => {
+    const auChargement = premierPassage.current;
+    premierPassage.current = false;
     if (!doc.fee_distribution) return;
     try {
       const data = JSON.parse(doc.fee_distribution);
@@ -145,6 +148,9 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
 
       const currentBaseTotal = baseMissions.reduce((acc: number, m: any) => acc + (m.amount || 0), 0);
       const targetBaseTotal = doc.amount || 0;
+      // Au chargement, des montants déjà posés (et un total de base volontairement
+      // différent de 100 %) ne sont pas ramenés au montant global.
+      if (auChargement && currentBaseTotal !== 0) return;
 
       if (Math.abs(currentBaseTotal - targetBaseTotal) > 0.01) {
         const updatedMissions = missions.map((m: any) => {
@@ -304,7 +310,7 @@ export function HonorairesSection({ doc, onChange, contacts, onContactCreated, m
             </div>
             <button
               type="button"
-              onClick={() => exportFeeDistributionToXlsx(doc.fee_distribution, doc.specialties_list, contacts, doc.vat_rate, filenameLabel, settings ?? {})}
+              onClick={() => exportFeeDistributionToXlsx(doc.fee_distribution, doc.specialties_list, contacts, doc.vat_rate, filenameLabel, settings ?? {}, doc.amount)}
               className="text-[0.6875rem] flex items-center gap-1 text-green-700 hover:text-green-800 font-bold uppercase tracking-wider bg-green-100 dark:bg-green-900/30 px-2 py-1 rounded"
             >
               <IconFileSpreadsheet size={12} /> {t('proposals_export_xlsx')}

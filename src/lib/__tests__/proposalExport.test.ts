@@ -44,9 +44,9 @@ describe('modèle : réglages de mise en page', () => {
   beforeEach(() => { vi.stubGlobal('localStorage', fakeLocalStorage()); });
   afterEach(() => { vi.unstubAllGlobals(); });
 
-  it("garde les sauts de page d'origine et compacte les tableaux par défaut", () => {
+  it('enchaîne les sections sans saut de page et compacte les tableaux par défaut', () => {
     const { layout } = buildDefaultTemplate();
-    expect(layout).toEqual({ sectionBreaks: true, tableDensity: 'compact', cotraitantIdentity: true });
+    expect(layout).toEqual({ sectionBreaks: false, tableDensity: 'compact', cotraitantIdentity: true });
   });
 
   it('complète un modèle déjà enregistré qui ne connaît pas encore les réglages', () => {
@@ -60,9 +60,9 @@ describe('modèle : réglages de mise en page', () => {
 
   it('respecte les réglages enregistrés et complète seulement ceux qui manquent', () => {
     vi.stubGlobal('localStorage', fakeLocalStorage({
-      proposalTemplate: JSON.stringify({ layout: { sectionBreaks: false } }),
+      proposalTemplate: JSON.stringify({ layout: { sectionBreaks: true } }),
     }));
-    expect(loadStoredTemplate().layout).toEqual({ sectionBreaks: false, tableDensity: 'compact', cotraitantIdentity: true });
+    expect(loadStoredTemplate().layout).toEqual({ sectionBreaks: true, tableDensity: 'compact', cotraitantIdentity: true });
   });
 
   it('rend un modèle par défaut si le stockage est illisible', () => {
