@@ -14,7 +14,11 @@ interface Props {
   ligne: Ligne;
   onClose: () => void;
   /** Reçoit ce que le métré change sur l'article (quantité, prix total, lignes) ; à fusionner dans la ligne. */
-  onSave: (patch: Partial<Ligne>) => void;
+  onSave: (patch: Partial<Ligne>) => void | Promise<void>;
+  /** Libellé du bouton de validation (« Envoyer la proposition » pour un confrère). */
+  applyLabel?: string;
+  /** Message d'un refus de l'appelant (envoi échoué) : la saisie reste dans la fenêtre. */
+  erreur?: string | null;
 }
 
 const nouvelleLigne = (surcharge: Partial<QuantiteDetail> = {}): QuantiteDetail => ({
@@ -34,7 +38,7 @@ function lignesInitiales(ligne: Ligne): QuantiteDetail[] {
 
 const CHAMP = 'w-full px-2.5 py-1.5 text-sm border rounded-md bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]';
 
-export function MetreDialog({ ligne, onClose, onSave }: Props) {
+export function MetreDialog({ ligne, onClose, onSave, applyLabel, erreur }: Props) {
   const { t } = useTranslation();
   const [lignes, setLignes] = useState<QuantiteDetail[]>(() => lignesInitiales(ligne));
   const [focusId, setFocusId] = useState<string | null>(null);
@@ -143,6 +147,7 @@ export function MetreDialog({ ligne, onClose, onSave }: Props) {
           <p>{t('pro_metre_help')}</p>
           {gardees.length === 0 && <p>{t('pro_metre_empty_note')}</p>}
           {message && <p role="alert" className="font-bold text-red-700 dark:text-red-400">{message}</p>}
+          {erreur && <p role="alert" className="font-bold text-red-700 dark:text-red-400">{erreur}</p>}
         </div>
 
         <div className="flex justify-end gap-2 px-5 py-4 border-t" style={{ borderColor: 'var(--tblr-border)' }}>
@@ -153,7 +158,7 @@ export function MetreDialog({ ligne, onClose, onSave }: Props) {
             type="button" onClick={appliquer} disabled={!validation.ok}
             className="px-4 py-2 text-sm font-bold rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50"
           >
-            {t('pro_metre_apply')}
+            {applyLabel ?? t('pro_metre_apply')}
           </button>
         </div>
       </div>

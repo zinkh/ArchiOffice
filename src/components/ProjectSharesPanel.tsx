@@ -23,31 +23,35 @@ interface SharesPayload {
   lots: InboxLot[];
 }
 
-/** Droits en cours d'édition : les types simples, et un niveau par lot pour le CCTP et le DPGF. */
-interface GrantState { simple: Record<SimpleKind, Access>; lot: Record<LotKind, Record<string, Access>> }
+/** Droits en cours d'édition : les types simples, et UN niveau par lot, qui vaut pour le CCTP et le DPGF. */
+interface GrantState { simple: Record<SimpleKind, Access>; lot: Record<string, Access> }
 
 const SIMPLE_KINDS: SimpleKind[] = ['lots', 'tasks', 'documents'];
+/** Le CCTP et le DPGF sont un seul document : un lot accordé l'est pour les deux, au même niveau. */
 const LOT_KINDS: LotKind[] = ['cctp', 'dpgf'];
+const ACCESS_RANK: Record<Access, number> = { none: -1, read: 0, comment: 1, write: 2 };
 
 const emptyState = (): GrantState => ({
   simple: { lots: 'read', tasks: 'read', documents: 'none' },
-  lot: { cctp: {}, dpgf: {} },
+  lot: {},
 });
 
 function stateOf(grants: Grant[]): GrantState {
-  const state: GrantState = { simple: { lots: 'none', tasks: 'none', documents: 'none' }, lot: { cctp: {}, dpgf: {} } };
+  const state: GrantState = { simple: { lots: 'none', tasks: 'none', documents: 'none' }, lot: {} };
   for (const g of grants) {
-    if (g.kind === 'cctp' || g.kind === 'dpgf') { if (g.lotId) state.lot[g.kind][g.lotId] = g.access; }
-    else state.simple[g.kind] = g.access;
+    if (g.kind === 'cctp' || g.kind === 'dpgf') {
+      // Un droit enregistré d'un seul côté se lit unifié : le plus haut niveau des deux.
+      if (g.lotId && ACCESS_RANK[g.access] > ACCESS_RANK[state.lot[g.lotId] ?? 'none']) state.lot[g.lotId] = g.access;
+    } else state.simple[g.kind] = g.access;
   }
   return state;
 }
 
 function grantsOf(state: GrantState): Grant[] {
   const simple = SIMPLE_KINDS.flatMap(kind => (state.simple[kind] === 'none' ? [] : [{ kind, access: state.simple[kind] as Grant['access'] }]));
-  const lots = LOT_KINDS.flatMap(kind => Object.entries(state.lot[kind])
+  const lots = Object.entries(state.lot)
     .filter(([, access]) => access !== 'none')
-    .map(([lotId, access]) => ({ kind, access: access as Grant['access'], lotId })));
+    .flatMap(([lotId, access]) => LOT_KINDS.map(kind => ({ kind, access: access as Grant['access'], lotId })));
   return [...simple, ...lots];
 }
 
@@ -86,20 +90,18 @@ function GrantsEditor({ state, onChange, writableKinds, lots }: {
           />
         ))}
       </div>
-      {LOT_KINDS.map(kind => (
-        <div key={kind} className="space-y-1.5">
-          <div className="text-xs font-bold text-[var(--tblr-text)]">{t(`share_kind_${kind}`)}</div>
-          {lots.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('share_no_lots')}</p>}
-          {lots.map(lot => (
-            <AccessSelect
-              key={lot.id} label={[lot.lot_number, lot.lot_title].filter(Boolean).join(' ') || lot.id}
-              value={state.lot[kind][lot.id] ?? 'none'} writeKey="share_access_propose"
-              options={writableKinds.includes(kind) ? ['none', 'read', 'comment', 'write'] : ['none', 'read', 'comment']}
-              onChange={v => onChange({ ...state, lot: { ...state.lot, [kind]: { ...state.lot[kind], [lot.id]: v } } })}
-            />
-          ))}
-        </div>
-      ))}
+      <div className="space-y-1.5">
+        <div className="text-xs font-bold text-[var(--tblr-text)]">{t('share_kind_cctp_dpgf')}</div>
+        {lots.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('share_no_lots')}</p>}
+        {lots.map(lot => (
+          <AccessSelect
+            key={lot.id} label={[lot.lot_number, lot.lot_title].filter(Boolean).join(' ') || lot.id}
+            value={state.lot[lot.id] ?? 'none'} writeKey="share_access_propose"
+            options={LOT_KINDS.every(kind => writableKinds.includes(kind)) ? ['none', 'read', 'comment', 'write'] : ['none', 'read', 'comment']}
+            onChange={v => onChange({ ...state, lot: { ...state.lot, [lot.id]: v } })}
+          />
+        ))}
+      </div>
       <p className="text-xs text-[var(--tblr-muted)]">{t('share_lots_hint')}</p>
     </div>
   );

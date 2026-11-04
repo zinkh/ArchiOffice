@@ -83,7 +83,7 @@ describe('proposition : fonctions pures', () => {
   it('n\'accepte que les champs de la liste fermée, jamais un montant calculé ni un champ interne', () => {
     expect([...PROPOSABLE_FIELDS.lot]).toEqual(['titre']);
     expect([...PROPOSABLE_FIELDS.chapitre]).toEqual(['cctpDescription', 'titre']);
-    expect([...PROPOSABLE_FIELDS.ligne]).toEqual(['cctpDescription', 'designation', 'quantite', 'prixUnitaire', 'unite']);
+    expect([...PROPOSABLE_FIELDS.ligne]).toEqual(['cctpDescription', 'designation', 'quantite', 'prixUnitaire', 'unite', 'metre']);
     for (const field of ['prixTotal', 'marqueur', 'children', 'type', 'nature', 'pourMemoire', 'articleTypeId', 'cctpOnly']) {
       expect('error' in readProposalInput({ lotId: 'l', targetType: 'ligne', targetId: 'x', field, value: '1' }), field).toBe(true);
     }

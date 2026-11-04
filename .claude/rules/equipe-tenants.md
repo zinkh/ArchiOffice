@@ -242,7 +242,8 @@ précédents (`allows(grants, kind, access, lotId)`).
 `GET /api/shared/projects/:id/cctp` et `/dpgf` rendent les seuls lots accordés,
 **construits champ par champ** (`guestDocumentView`,
 `server/projectShares/documentView.ts`, pur et testé) : la vue CCTP n'a aucune
-quantité ni aucun prix ; la vue DPGF a quantités et prix mais ni textes, ni
+quantité ni prix SAUF sur un lot accordé (voir « Chiffres dans la vue CCTP » plus bas : un
+seul droit par lot) ; la vue DPGF a quantités et prix mais ni textes, ni
 lignes ou chapitres `cctpOnly`. Jamais : totaux du document (ils additionnent
 tous les lots), `marqueur`, `images.fileUrl`, `articleTypeId`, `genereParIa`.
 Un lot du document sans `projectLotId` ne peut jamais être accordé. Les titres
@@ -278,15 +279,16 @@ de l'éditeur PRO réécrit en entier : une écriture directe d'un invité pourr
 travail du cabinet. Champs proposables, **liste fermée** (`PROPOSABLE_FIELDS`,
 `documentView.ts`) : texte, désignation, quantité, prix unitaire et unité d'un article ;
 texte et titre d'un chapitre ; titre d'un lot (qui vit dans `project_lots`, pas dans le
-document). Le droit se donne par lot et par type (`FIELD_KIND`) : `cctp` pour les textes et
-les titres, `dpgf` pour la quantité, le prix et l'unité. Un champ ajouté demain n'est jamais
-proposable tant qu'il n'est pas ajouté à cette liste.
+document). Le droit se donne par lot et vaut pour le CCTP ET le DPGF (voir « Un seul droit par
+lot ») ; `FIELD_KIND` ne dit plus que dans quelle vue l'élément doit être visible (une ligne
+`cctpOnly` n'existe pas dans la vue DPGF). Un champ ajouté demain n'est jamais proposable tant
+qu'il n'est pas ajouté à cette liste. Le métré (`metre`) en fait partie.
 
 - **On ne propose que sur ce qu'on voit**, dans la vue du type de droit : une ligne `cctpOnly`
   n'a ni quantité ni prix, elle n'existe pas dans la vue DPGF (404).
 - **Refusés comme dans l'éditeur** (`blockedEdit`) : un article à sous-articles (il porte la
-  somme de ses enfants), à quantité répartie par bâtiment (`quantitesBatiments`) ou ventilée
-  par local (`quantiteDetails`), ou qui n'est pas un ouvrage ; un nombre négatif, non numérique,
+  somme de ses enfants), à quantité répartie par bâtiment (`quantitesBatiments`), ou qui n'est pas
+  un ouvrage ; une quantité seule sur un article qui a un métré (`quantiteDetails`) ; un nombre négatif, non numérique,
   à plus de 4 décimales ou au-delà de 1e9 (`parseNumberValue`, virgule admise).
 - **Article « pour mémoire »** : il PEUT recevoir une quantité, une unité et un prix. La
   quantité et l'unité le laissent « pour mémoire » (montant à 0, comme dans l'éditeur). Un
@@ -336,12 +338,36 @@ proposable tant qu'il n'est pas ajouté à cette liste.
   La restauration d'un instantané relit le document ET la révision (`reload`). `drifted` reste
   pour les approbations écrasées avant cette protection. Limite : un document chargé depuis la
   copie locale (API indisponible) n'a pas de révision et s'enregistre sans condition.
-- **Quantité depuis le CCTP** : la vue CCTP d'un confrère ajoute `quantite` et `pourMemoire`
-  (jamais un prix) aux articles des seuls lots où il a AUSSI le droit DPGF
-  (`guestDocumentView(..., quantityLotIds)`, `CCTP_QUANTITE_FIELDS`) ; rien pour un article ou
-  un chapitre réservé au CCTP, ni sous lui. Proposer quantité ou unité depuis le CCTP demande
-  toujours l'écriture DPGF du lot (`FIELD_KIND`) ; le seul droit CCTP donne 403. Test :
-  `tests/projectShareCctpQuantities.test.ts`.
+- **Un seul droit par lot pour le CCTP et le DPGF** (décision de l'architecte) : un lot accordé
+  l'est pour les DEUX documents, au niveau le plus haut des deux droits (`symmetrizeGrants`,
+  `access.ts`). Appliqué à l'écriture (`normalizeGrants` enregistre les deux types) ET à la
+  lecture (`loadGrants`) : un droit enregistré d'un seul côté avant cette règle se lit unifié,
+  sans migration de données (il ouvre donc aussi l'autre moitié du lot). Le panneau de partage
+  (`ProjectSharesPanel`) n'a plus qu'un sélecteur par lot ; `SharedDocument` traite les deux
+  types comme une famille. `allows`/`grantedLotIds` ne changent pas.
+- **Chiffres dans la vue CCTP** : sur un lot accordé, la vue CCTP porte `quantite`, `pourMemoire`,
+  `prixUnitaire`, `prixTotal` et le métré (`quantiteDetails` en liste blanche : `id`, `libelle`,
+  `expression`, `quantite`, `niveau`, `local`, jamais la note interne ni le bâtiment ou la phase)
+  (`guestDocumentView(..., chiffresLotIds)`, `CCTP_CHIFFRES_FIELDS`, `METRE_FIELDS`) ; la vue
+  DPGF porte aussi le métré. Rien pour un article ou un chapitre réservé au CCTP, ni sous lui ;
+  jamais les totaux du document ni les prix d'un autre lot. Tests :
+  `tests/projectShareCctpChiffres.test.ts`.
+- **Proposer un métré** (champ `metre`, migration `migrate_project_share_proposals_metre.sql`,
+  appliquée) : UNE proposition remplace la liste de lignes de l'article. Valeur = liste JSON de
+  `{ libelle, expression }` (`parseMetreValue` : 200 lignes, 200 caractères, chaque calcul valide
+  et total positif ou nul par `validerMetre`, la fonction de l'éditeur ; lignes vides retirées ;
+  forme canonique, la même que `readField`, pour que la comparaison avec le métré actuel soit
+  exacte). Valeur de départ : le métré tel que le confrère le voit (`[]` sans métré). À
+  l'approbation, `applyFieldToNode` reprend une ligne de même libellé avec son `id` et ses champs
+  d'une ventilation d'avant (rien n'est perdu), puis `appliquerMetre` fixe quantité et montant
+  comme l'éditeur ; une liste vide retire le métré et garde la quantité ; un article « pour
+  mémoire » garde un montant à 0. Refusé : article à sous-articles, quantité par bâtiment. Une
+  quantité proposée seule sur un article qui a un métré est refusée (`blockedEdit` : elle se
+  modifie par le métré) ; son PRIX et son unité se proposent, quelle que soit la composition de
+  la quantité. Côté écran : `ProposeMetre` rouvre la fenêtre de l'éditeur (`MetreDialog`) ; ce
+  que le confrère a saisi reste dans la fenêtre si l'envoi est refusé ; le cabinet lit le métré en
+  lignes (`metreEnTexte`). Tests : `tests/projectShareMetre.test.ts`,
+  `tests/sharedDocumentMetre.test.ts`.
 
 Écrans : `ProposeEdit` dans `SharedDocument.tsx` (invité), `ShareProposalsInbox.tsx`
 (cabinet : actuel face à proposé, approuver, refuser avec motif, alerte de limite, historique)

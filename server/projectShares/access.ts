@@ -90,7 +90,33 @@ export function normalizeGrants(input: unknown): { grants: ShareGrant[] } | { er
     const grant: ShareGrant = scoped ? { kind, access, lotId: lotId.trim() } : { kind, access };
     byKey.set(`${kind}|${grant.lotId ?? ''}`, grant);
   }
-  return { grants: [...byKey.values()] };
+  return { grants: symmetrizeGrants([...byKey.values()]) };
+}
+
+/** Le CCTP et le DPGF : un seul document, un seul droit par lot. */
+export const DOCUMENT_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
+
+/**
+ * Un lot accordé l'est pour le CCTP ET le DPGF, au niveau le plus haut des deux droits (lecture <
+ * commentaire < écriture). Le CCTP et le DPGF sont UN document dont chaque lot porte textes, quantités et
+ * prix : un droit qui ne couvrirait qu'une moitié n'aurait pas de sens. Appliqué à l'écriture
+ * (`normalizeGrants`) et à la LECTURE (`loadGrants`), pour que les droits enregistrés avant cette règle
+ * (un type sans l'autre) se lisent comme leur équivalent unifié, sans migration de données.
+ */
+export function symmetrizeGrants(grants: readonly ShareGrant[]): ShareGrant[] {
+  const best = new Map<string, ShareAccess>();
+  const others: ShareGrant[] = [];
+  for (const g of grants) {
+    if (DOCUMENT_KINDS.includes(g.kind)) {
+      if (!g.lotId) continue; // un droit par lot sans lot n'ouvre rien
+      const current = best.get(g.lotId);
+      if (!current || ACCESS_RANK[g.access] > ACCESS_RANK[current]) best.set(g.lotId, g.access);
+    } else {
+      others.push(g);
+    }
+  }
+  const lots = [...best].flatMap(([lotId, access]) => DOCUMENT_KINDS.map(kind => ({ kind, access, lotId })));
+  return [...others, ...lots];
 }
 
 /**
@@ -134,6 +160,8 @@ export async function loadGrants(supabaseAdmin: any, shareIds: string[]): Promis
     list.push(scoped ? { kind: row.resource_kind, access, lotId: row.project_lot_id } : { kind: row.resource_kind, access });
     byShare.set(row.share_id, list);
   }
+  // Un lot du CCTP vaut pour le DPGF et inversement : les droits enregistrés d'un seul côté se lisent unifiés.
+  for (const [shareId, list] of byShare) byShare.set(shareId, symmetrizeGrants(list));
   return byShare;
 }
 

@@ -113,7 +113,14 @@ describe('chiffres : fonctions pures', () => {
     expect(blockedEdit(node('lig-a3'), 'unite')).toBeNull();
     expect(blockedEdit(node('lig-a4'), 'quantite')).toContain('bâtiment');
     expect(blockedEdit(node('lig-a5'), 'quantite')).toContain('article chiffré');
-    expect(blockedEdit({ type: 'ouvrage', quantiteDetails: [{ id: 'q', quantite: 1 }] }, 'quantite')).toContain('local');
+    // Un article qui a un métré : sa quantité se modifie par le métré ; son prix et son métré, eux, se proposent.
+    const avecMetre = { type: 'ouvrage', quantiteDetails: [{ id: 'q', quantite: 1 }] };
+    expect(blockedEdit(avecMetre, 'quantite')).toContain('métré');
+    expect(blockedEdit(avecMetre, 'prixUnitaire')).toBeNull();
+    expect(blockedEdit(avecMetre, 'metre')).toBeNull();
+    // Le prix ne dépend pas de la composition de la quantité (bâtiments), le métré si.
+    expect(blockedEdit(node('lig-a4'), 'prixUnitaire')).toBeNull();
+    expect(blockedEdit(node('lig-a4'), 'metre')).toContain('bâtiment');
     expect(blockedEdit(node('lig-a5'), 'cctpDescription')).toBeNull(); // les textes n'ont pas ces restrictions
   });
 
@@ -154,19 +161,28 @@ describe('proposer des chiffres', () => {
     expect(row.tenant_id).toBe(tenantId);
   });
 
-  it('le droit sur le CCTP ne permet pas de toucher aux chiffres, ni l\'inverse', async () => {
+  it('le droit sur un lot vaut pour le CCTP et le DPGF : textes et chiffres, d\'un côté comme de l\'autre', async () => {
     const { admin, projectId, lotA } = setup();
-    const cctpOnly = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
-    const dpgfOnly = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
-    for (const field of ['quantite', 'prixUnitaire', 'unite']) {
-      const res = await propose(cctpOnly.token, projectId, num(lotA, field, field === 'unite' ? 'ml' : '9'));
+    const cctpSide = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const dpgfSide = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    for (const guest of [cctpSide, dpgfSide]) {
+      for (const [field, value] of [['quantite', '9'], ['prixUnitaire', '52'], ['unite', 'ml']]) {
+        const res = await propose(guest.token, projectId, num(lotA, field, value));
+        expect(res.status, `${field} ${JSON.stringify(res.body)}`).toBe(201);
+      }
+      const text = await propose(guest.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-a2', field: 'designation', value: `Béton de propreté ${guest.token.slice(-4)}` });
+      expect(text.status, JSON.stringify(text.body)).toBe(201);
+    }
+  });
+
+  it('un droit en lecture ou en commentaire ne permet jamais de proposer, quelle que soit la moitié', async () => {
+    const { admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'comment', lotId: lotA }]);
+    for (const field of ['quantite', 'prixUnitaire']) {
+      const res = await propose(guest.token, projectId, num(lotA, field, '9'));
       expect(res.status, field).toBe(403);
       expect(res.body.code, field).toBe('SHARE_FORBIDDEN');
     }
-    const text = await propose(dpgfOnly.token, projectId, { lotId: lotA, targetType: 'ligne', targetId: 'lig-a2', field: 'designation', value: 'Béton de propreté dosé à 150' });
-    expect(text.status).toBe(403);
-    const title = await propose(dpgfOnly.token, projectId, { lotId: lotA, targetType: 'lot', targetId: 'lot-a', field: 'titre', value: 'Gros œuvre et VRD' });
-    expect(title.status).toBe(403);
   });
 
   it('refuse les articles non modifiables et ceux que le confrère ne voit pas', async () => {

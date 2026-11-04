@@ -905,7 +905,7 @@ CREATE TABLE IF NOT EXISTS project_share_proposals (
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT project_share_proposals_status_check CHECK (status IN ('pending', 'applied', 'rejected', 'withdrawn', 'outdated')),
   CONSTRAINT project_share_proposals_target_check CHECK (target_type IN ('lot', 'chapitre', 'ligne')),
-  CONSTRAINT project_share_proposals_field_check  CHECK (field IN ('cctpDescription', 'titre', 'designation', 'quantite', 'prixUnitaire', 'unite')),
+  CONSTRAINT project_share_proposals_field_check  CHECK (field IN ('cctpDescription', 'titre', 'designation', 'quantite', 'prixUnitaire', 'unite', 'metre')),
   CONSTRAINT project_share_proposals_size_check   CHECK (
     char_length(proposed_value) <= 20000 AND char_length(base_value) <= 20000
     AND (decision_note IS NULL OR char_length(decision_note) <= 1000)

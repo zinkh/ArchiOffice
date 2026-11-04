@@ -104,10 +104,10 @@ export function registerProjectShareDocumentRoutes(app: Express, { supabaseAdmin
         }
         const doc = await loadDocument(found.share.tenant_id, found.share.project_id);
         if (!doc) return res.status(404).json({ error: 'Document introuvable.' });
-        // CCTP : la quantité n'est ajoutée que sur les lots où il a AUSSI le droit DPGF (il y voit déjà
-        // cette quantité), pour la proposer depuis le CCTP. Jamais un prix.
-        const quantityLotIds = mode === 'cctp' ? grantedLotIds(found.grants, 'dpgf', 'read') : new Set<string>();
-        res.json(guestDocumentView(doc, mode, lotIds, quantityLotIds));
+        // CCTP : quantité, prix, montant et métré sur les lots accordés (le droit vaut pour le CCTP et le
+        // DPGF, où il les voit déjà), pour les consulter et les proposer depuis le CCTP.
+        const chiffresLotIds = mode === 'cctp' ? grantedLotIds(found.grants, 'dpgf', 'read') : new Set<string>();
+        res.json(guestDocumentView(doc, mode, lotIds, chiffresLotIds));
       } catch (e: any) { fail(res, `[GET /api/shared/projects/:id/${mode}]`, e); }
     });
   }

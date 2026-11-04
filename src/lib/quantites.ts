@@ -4,6 +4,7 @@
 // (components/pro/treeOps.ts), conservée pour le reste du code : un calcul invalide est SIGNALÉ ici
 // (`{ ok: false }`) au lieu de valoir 0, qui est une quantité (ou un prix) comme une autre.
 import { parsePrixSaisi } from '../components/pro/treeOps';
+import { formatQuantite } from './quantiteFormat';
 import type { Ligne, QuantiteDetail } from '../types/dpgf';
 
 export type Calcul = { ok: true; valeur: number } | { ok: false };
@@ -161,6 +162,32 @@ export function appliquerMetre(ligne: Ligne, lignes: readonly QuantiteDetail[]):
     prixTotal: ligne.pourMemoire ? 0 : propre(validation.total * ligne.prixUnitaire),
     quantiteFormule: undefined,
   };
+}
+
+/**
+ * La valeur qu'un confrère envoie pour proposer un métré : la liste JSON de ses lignes, libellé et calcul
+ * seulement (le serveur la valide et la met en forme canonique). Les lignes entièrement vides sont ignorées.
+ */
+export function serialiserMetre(lignes: readonly QuantiteDetail[]): string {
+  return JSON.stringify(lignes.filter(d => !estLigneVide(d)).map(d => ({
+    libelle: libelleDetail(d),
+    expression: (d.expression ?? (d.quantite ? String(d.quantite).replace('.', ',') : '')).trim(),
+  })));
+}
+
+/**
+ * Un métré proposé (liste JSON de { libelle, expression }) en lignes lisibles et son total, pour la boîte
+ * des propositions du cabinet. Vide pour « aucun métré » ; une valeur illisible est rendue telle quelle.
+ */
+export function metreEnTexte(json: string, unite = ''): string {
+  let data: unknown;
+  try { data = JSON.parse(json); } catch { return json; }
+  if (!Array.isArray(data) || data.length === 0) return '';
+  const lignes = data.filter((d): d is { libelle?: unknown; expression?: unknown } => !!d && typeof d === 'object');
+  const lisibles = lignes.map(d => ({ libelle: String(d.libelle ?? ''), expression: String(d.expression ?? '') }));
+  const corps = lisibles.map(d => `${d.libelle || '·'} : ${d.expression || '0'}`);
+  const total = totalMetre(lisibles.map((d, i) => ({ id: String(i), libelle: d.libelle, expression: d.expression, quantite: 0 })));
+  return [...corps, `Total : ${formatQuantite(total)}${unite ? ` ${unite}` : ''}`].join('\n');
 }
 
 // ── Case quantité et case prix ───────────────────────────────────────────────
