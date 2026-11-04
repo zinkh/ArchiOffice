@@ -20,7 +20,7 @@ import {
   COMMENTABLE_KINDS, activeShareFor, allows, grantedLotIds,
   type ShareGrant, type ShareKind, type ShareRow,
 } from '../projectShares/access';
-import { guestDocumentView, parseDocument, visibleNodes, type DocumentMode, type NodeType } from '../projectShares/documentView';
+import { guestDocumentView, nodeLabels, parseDocument, visibleNodes, type DocumentMode, type NodeType } from '../projectShares/documentView';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -34,7 +34,7 @@ const NODE_TYPES: readonly NodeType[] = ['lot', 'chapitre', 'ligne'];
 const MAX_BODY = 2000;
 
 /** Un commentaire tel que le rend l'API : jamais les identifiants internes de stockage ni d'autres partages. */
-export function commentView(row: any, names: Map<string, string>, shareEmails?: Map<string, string>) {
+export function commentView(row: any, names: Map<string, string>, shareEmails?: Map<string, string>, labels?: Map<string, string>) {
   return {
     id: row.id,
     parentId: row.parent_id ?? null,
@@ -48,6 +48,7 @@ export function commentView(row: any, names: Map<string, string>, shareEmails?: 
     createdAt: row.created_at ?? null,
     resolvedAt: row.resolved_at ?? null,
     ...(shareEmails ? { shareId: row.share_id, guestEmail: shareEmails.get(row.share_id) ?? null } : {}),
+    ...(labels ? { targetLabel: labels.get(row.target_id) ?? null } : {}),
   };
 }
 
@@ -194,9 +195,12 @@ export function registerProjectShareDocumentRoutes(app: Express, { supabaseAdmin
         .eq('project_id', req.params.id).eq('tenant_id', tenantId);
       const emails = new Map<string, string>((shares || []).map((s: any) => [s.id, s.email]));
       const names = await namesOf(rows.map((c: any) => c.author_id));
+      // Le cabinet voit tout le document : le commentaire dit sur quoi il porte (numéro et désignation).
+      const doc = rows.length ? await loadDocument(tenantId, req.params.id) : null;
+      const labels = doc ? nodeLabels(doc) : new Map<string, string>();
       res.json(rows
         .sort((a: any, b: any) => String(a.created_at).localeCompare(String(b.created_at)))
-        .map((c: any) => commentView(c, names, emails)));
+        .map((c: any) => commentView(c, names, emails, labels)));
     } catch (e: any) { fail(res, '[GET /api/projects/:id/share-comments]', e); }
   });
 

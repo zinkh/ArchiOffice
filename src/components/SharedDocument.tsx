@@ -1,0 +1,181 @@
+// CCTP ou DPGF d'une affaire partagée, côté confrère : les lots qui lui sont
+// accordés, en lecture, avec des commentaires sur un lot, un chapitre ou un article
+// quand le droit « commentaire » est accordé. Le serveur ne construit que ces lots
+// (server/projectShares/documentView.ts) : cet écran n'a rien à masquer.
+import { useCallback, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { apiFetch } from '../lib/api';
+import { texteBrut } from '../lib/cctpRichText';
+
+type Mode = 'cctp' | 'dpgf';
+type TargetType = 'lot' | 'chapitre' | 'ligne';
+
+export interface SharedGrant { kind: string; access: 'read' | 'comment' | 'write'; lotId?: string }
+
+interface Ligne {
+  id: string; numero: string | null; designation: string | null; unite: string | null; localisation: string | null;
+  cctpDescription: string | null; quantite: number | null; prixUnitaire: number | null; prixTotal: number | null;
+  pourMemoire: boolean | null; children?: Ligne[];
+}
+interface Chapitre { id: string; numero: string | null; titre: string | null; cctpDescription: string | null; lignes: Ligne[] }
+interface LotView { id: string; numero: string | null; titre: string | null; projectLotId: string; chapitres: Chapitre[] }
+interface DocView { titre: string | null; version: string | null; lots: LotView[] }
+interface SharedComment {
+  id: string; resourceKind: Mode; lotId: string; targetType: TargetType; targetId: string;
+  body: string; authorKind: 'guest' | 'cabinet'; authorName: string | null; createdAt: string | null; resolvedAt: string | null;
+}
+
+const eur = new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' });
+const num = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 3 });
+const fieldClass = 'w-full px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500';
+
+interface NodeCtx {
+  mode: Mode; comments: SharedComment[]; canCommentLot: (lot: LotView) => boolean;
+  post: (target: { lotId: string; targetType: TargetType; targetId: string; parentId?: string }, body: string) => Promise<void>;
+}
+
+function NodeComments({ ctx, lot, targetType, targetId }: { ctx: NodeCtx; lot: LotView; targetType: TargetType; targetId: string }) {
+  const { t } = useTranslation();
+  const thread = ctx.comments
+    .filter(c => c.resourceKind === ctx.mode && c.lotId === lot.projectLotId && c.targetType === targetType && c.targetId === targetId)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const canComment = ctx.canCommentLot(lot);
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!thread.length && !canComment) return null;
+
+  const send = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy(true); setError(null);
+    try {
+      await ctx.post({ lotId: lot.projectLotId, targetType, targetId, parentId: thread[0]?.id }, text);
+      setText(''); setOpen(false);
+    } catch (e: any) { setError(e?.message || t('share_error')); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="mt-1 space-y-1">
+      {thread.map(c => (
+        <div key={c.id} className="text-xs rounded-lg px-3 py-2" style={{ background: 'var(--tblr-surface-2)' }}>
+          <div className="text-[var(--tblr-muted)]">
+            {c.authorKind === 'cabinet' ? t('shared_comment_cabinet') : t('shared_comment_you')}
+            {c.createdAt ? ` · ${new Date(c.createdAt).toLocaleDateString('fr-FR')}` : ''}
+            {c.resolvedAt ? ` · ${t('shared_comment_resolved')}` : ''}
+          </div>
+          <div className="text-[var(--tblr-text)] whitespace-pre-wrap">{c.body}</div>
+        </div>
+      ))}
+      {canComment && !open && (
+        <button type="button" onClick={() => setOpen(true)} className="text-xs font-medium text-[var(--tblr-muted)] hover:text-[var(--tblr-text)] underline">
+          {t('shared_comment_add')}
+        </button>
+      )}
+      {canComment && open && (
+        <form onSubmit={send} className="space-y-1">
+          <textarea
+            required rows={2} maxLength={2000} value={text} onChange={e => setText(e.target.value)}
+            placeholder={t('shared_comment_placeholder')} aria-label={t('shared_comment_placeholder')} className={fieldClass}
+          />
+          <button type="submit" disabled={busy || !text.trim()} className="px-3 py-1 text-xs font-bold rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50">
+            {t('shared_comment_send')}
+          </button>
+          {error && <p role="alert" className="text-xs text-red-600">{error}</p>}
+        </form>
+      )}
+    </div>
+  );
+}
+
+function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; ligne: Ligne; depth: number }) {
+  const { t } = useTranslation();
+  const dpgf = ctx.mode === 'dpgf';
+  return (
+    <li style={{ marginLeft: depth * 12 }} className="py-1.5">
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="text-[var(--tblr-text)]">
+          <span className="text-[var(--tblr-muted)]">{ligne.numero} </span>{ligne.designation}
+          {ligne.localisation ? <span className="text-xs text-[var(--tblr-muted)]"> · {ligne.localisation}</span> : null}
+        </span>
+        {dpgf && (
+          <span className="text-xs whitespace-nowrap text-right text-[var(--tblr-muted)]">
+            {ligne.pourMemoire
+              ? t('shared_pm')
+              : ligne.quantite !== null && ligne.prixUnitaire !== null
+                ? `${num.format(ligne.quantite)} ${ligne.unite ?? ''} × ${eur.format(ligne.prixUnitaire)} = ${eur.format(ligne.prixTotal ?? 0)}`
+                : ''}
+          </span>
+        )}
+      </div>
+      {!dpgf && ligne.cctpDescription && (
+        <p className="text-xs text-[var(--tblr-muted)] whitespace-pre-wrap mt-0.5">{texteBrut(ligne.cctpDescription)}</p>
+      )}
+      <NodeComments ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} />
+      {ligne.children && ligne.children.length > 0 && (
+        <ul>{ligne.children.map(c => <LigneRow key={c.id} ctx={ctx} lot={lot} ligne={c} depth={depth + 1} />)}</ul>
+      )}
+    </li>
+  );
+}
+
+export default function SharedDocument({ projectId, mode, grants, archived }: {
+  projectId: string; mode: Mode; grants: SharedGrant[]; archived: boolean;
+}) {
+  const { t } = useTranslation();
+  const [doc, setDoc] = useState<DocView | null>(null);
+  const [comments, setComments] = useState<SharedComment[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadComments = useCallback(
+    () => apiFetch<SharedComment[]>(`/api/shared/projects/${projectId}/comments`).then(setComments),
+    [projectId],
+  );
+
+  useEffect(() => {
+    setDoc(null); setError(null);
+    Promise.all([apiFetch<DocView>(`/api/shared/projects/${projectId}/${mode}`), loadComments()])
+      .then(([d]) => setDoc(d))
+      .catch(e => setError(e?.message || t('share_error')));
+  }, [projectId, mode, loadComments, t]);
+
+  const ctx: NodeCtx = {
+    mode, comments,
+    canCommentLot: lot => !archived && grants.some(g => g.kind === mode && g.lotId === lot.projectLotId && (g.access === 'comment' || g.access === 'write')),
+    post: async (target, body) => {
+      await apiFetch(`/api/shared/projects/${projectId}/comments`, { method: 'POST', body: JSON.stringify({ resourceKind: mode, ...target, body }) });
+      await loadComments();
+    },
+  };
+
+  if (error) return <p role="alert" className="text-sm text-red-600">{error}</p>;
+  if (!doc) return null;
+  return (
+    <section className="rounded-lg p-4 space-y-4" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
+      <div>
+        <h2 className="text-sm font-bold text-[var(--tblr-text)]">
+          {t(mode === 'cctp' ? 'shared_cctp_title' : 'shared_dpgf_title')}{doc.version ? ` · ${doc.version}` : ''}
+        </h2>
+        {mode === 'dpgf' && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_prices_note')}</p>}
+      </div>
+      {doc.lots.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_doc_empty')}</p>}
+      {doc.lots.map(lot => (
+        <div key={lot.id} className="space-y-2">
+          <h3 className="text-sm font-bold text-[var(--tblr-text)]">{lot.numero} {lot.titre}</h3>
+          <NodeComments ctx={ctx} lot={lot} targetType="lot" targetId={lot.id} />
+          {lot.chapitres.map(chap => (
+            <div key={chap.id} className="pl-2" style={{ borderLeft: '2px solid var(--tblr-border)' }}>
+              <h4 className="text-sm font-semibold text-[var(--tblr-text)]">{chap.numero} {chap.titre}</h4>
+              {mode === 'cctp' && chap.cctpDescription && (
+                <p className="text-xs text-[var(--tblr-muted)] whitespace-pre-wrap">{texteBrut(chap.cctpDescription)}</p>
+              )}
+              <NodeComments ctx={ctx} lot={lot} targetType="chapitre" targetId={chap.id} />
+              <ul>{chap.lignes.map(l => <LigneRow key={l.id} ctx={ctx} lot={lot} ligne={l} depth={0} />)}</ul>
+            </div>
+          ))}
+        </div>
+      ))}
+    </section>
+  );
+}

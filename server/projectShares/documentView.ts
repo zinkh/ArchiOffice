@@ -88,6 +88,33 @@ export function guestDocumentView(doc: Rec, mode: DocumentMode, lotIds: Readonly
 
 export type NodeType = 'lot' | 'chapitre' | 'ligne';
 
+/**
+ * Libellé lisible de chaque nœud du document (« 01.1.1 Semelles filantes »), pour la boîte de
+ * commentaires du CABINET : un commentaire doit dire sur quoi il porte sans exposer d'identifiant.
+ * Réservé au cabinet, qui voit tout le document ; jamais rendu à un invité.
+ */
+export function nodeLabels(doc: Rec): Map<string, string> {
+  const labels = new Map<string, string>();
+  const text = (...parts: unknown[]) => parts.filter(p => typeof p === 'string' && p.trim()).join(' ').trim();
+  const walk = (lignes: unknown) => {
+    for (const l of Array.isArray(lignes) ? lignes : []) {
+      if (!isRec(l)) continue;
+      if (typeof l.id === 'string') labels.set(l.id, text(l.numero, l.designation));
+      walk(l.children);
+    }
+  };
+  for (const lot of Array.isArray(doc.lots) ? doc.lots : []) {
+    if (!isRec(lot)) continue;
+    if (typeof lot.id === 'string') labels.set(lot.id, text('Lot', lot.numero, lot.titre));
+    for (const c of Array.isArray(lot.chapitres) ? lot.chapitres : []) {
+      if (!isRec(c)) continue;
+      if (typeof c.id === 'string') labels.set(c.id, text(c.numero, c.titre));
+      walk(c.lignes);
+    }
+  }
+  return labels;
+}
+
 /** Les nœuds d'un lot tels que l'invité les VOIT : un commentaire ne peut viser que ceux-là. */
 export function visibleNodes(viewLotRec: Rec): Record<NodeType, Set<string>> {
   const nodes: Record<NodeType, Set<string>> = { lot: new Set(), chapitre: new Set(), ligne: new Set() };

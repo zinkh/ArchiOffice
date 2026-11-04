@@ -382,6 +382,17 @@ describe('commentaires côté cabinet', () => {
     expect(seen[1].body).toBe('Voir le plan de fondations.');
   });
 
+  it('dit au cabinet sur quoi porte chaque commentaire, sans rien exposer à l\'invité', async () => {
+    const { admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
+    await comment(guest.token, projectId, target(lotA));
+    await comment(guest.token, projectId, { ...target(lotA), targetType: 'lot', targetId: 'lot-a' });
+    const list = (await request(app).get(`/api/projects/${projectId}/share-comments`).set(authHeader(admin.token))).body;
+    expect(list.map((c: any) => c.targetLabel)).toEqual(['01.1.1 Semelles filantes', 'Lot 01 Gros œuvre']);
+    const seen = (await request(app).get(`/api/shared/projects/${projectId}/comments`).set(authHeader(guest.token))).body;
+    expect(JSON.stringify(seen)).not.toContain('targetLabel');
+  });
+
   it('marque un commentaire comme traité, puis le rouvre', async () => {
     const { admin, projectId, lotA } = setup();
     const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'comment', lotId: lotA }]);
