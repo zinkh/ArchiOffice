@@ -40,6 +40,8 @@ import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog
 import { ajouterClause, estClause } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey, recomputeLot } from './treeOps';
 import { CctpQuantiteUnite } from './CctpQuantiteUnite';
+import { MetreDialog } from './MetreDialog';
+import { formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
@@ -131,6 +133,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const [showGenerate, setShowGenerate] = useState(false);
   const [showExportLibrary, setShowExportLibrary] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
+  const [showMetre, setShowMetre] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
   const chapitreVise = selection && selection.kind !== 'lot'
@@ -278,24 +281,30 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     setSelection(null);
   };
 
-  // ── Quantité et unité d'un article ────────────────────────────────────────
-  // Même règle que le DPGF : la quantité fixe le prix total (quantité x P.U.),
-  // sauf pour mémoire ; le sous-total du lot et les totaux sont recalculés.
-  const updateQuantiteUnite = (champ: 'quantite' | 'unite', valeur: number | string) => {
-    if (!selection || selection.kind !== 'ligne') return;
+  // ── Quantité, unité, prix et métré d'un article ───────────────────────────
+  // Mêmes règles que le DPGF (src/lib/quantites.ts) : la quantité fixe le prix total (quantité x P.U.),
+  // sauf pour mémoire ; le sous-total du lot et les totaux sont recalculés. Un correctif `null` (saisie
+  // invalide, quantité qui ne se saisit pas ici) ne change rien et rend faux : la saisie reste à l'écran.
+  const ligneSelectionnee = (): Ligne | null => selection && selection.kind === 'ligne'
+    ? ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath) ?? null
+    : null;
+
+  const appliquerALigne = (patch: Partial<Ligne> | null): boolean => {
+    if (!patch || !selection || selection.kind !== 'ligne') return false;
     mutateDPGF(d => {
       const lot = d.lots[selection.lotIdx];
       const ligne = ligneAtPath(lot.chapitres[selection.chapIdx].lignes, selection.lignePath);
       if (!ligne) return;
-      if (champ === 'unite') ligne.unite = String(valeur);
-      else {
-        ligne.quantite = Number(valeur);
-        ligne.prixTotal = ligne.pourMemoire ? 0 : ligne.quantite * ligne.prixUnitaire;
+      // Une valeur `undefined` retire le champ (formule mémorisée, métré, « pour mémoire »).
+      for (const [cle, valeur] of Object.entries(patch)) {
+        if (valeur === undefined) delete (ligne as unknown as Record<string, unknown>)[cle];
+        else (ligne as unknown as Record<string, unknown>)[cle] = valeur;
       }
       d.lots[selection.lotIdx] = recomputeLot(lot);
       d.totalHT = d.lots.reduce((sum, l) => sum + l.sousTotal, 0);
       d.totalTTC = d.totalHT * (1 + d.TVA / 100);
     });
+    return true;
   };
 
   // ── Toggle DPGF visibility ────────────────────────────────────────────────
@@ -758,6 +767,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         <CctpBulkEditDialog doc={dpgf} resume={resume} onClose={() => setShowBulk(false)} onApply={appliquerMasse} />
       )}
 
+      {showMetre && (() => {
+        const l = ligneSelectionnee();
+        return l ? (
+          <MetreDialog key={l.id} ligne={l} onClose={() => setShowMetre(false)} onSave={patch => { appliquerALigne(patch); setShowMetre(false); }} />
+        ) : null;
+      })()}
+
       {showDraft && selection && selData && (
         <CctpDraftPosteDialog
           projectId={dpgf.projectId}
@@ -1072,9 +1088,9 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
 
                 <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
 
-                {/* Quantité et unité modifiables ici ; le prix unitaire se règle dans le DPGF. */}
+                {/* Quantité, unité et prix modifiables ici comme dans le DPGF ; le métré détaille la quantité. */}
                 {selection.kind === 'ligne' && (() => {
-                  const l = ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath);
+                  const l = ligneSelectionnee();
                   if (!l) return null;
                   return (
                     <>
@@ -1082,19 +1098,20 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                         key={l.id}
                         quantite={l.quantite}
                         unite={l.unite}
+                        prixUnitaire={l.prixUnitaire}
+                        montant={l.prixTotal}
+                        pourMemoire={l.pourMemoire}
+                        prixVisible={!isSelCctpOnly}
+                        formule={formuleCourante(l)}
+                        lignesMetre={l.quantiteDetails?.length}
                         parBatiment={l.quantitesBatiments !== undefined}
                         aDesEnfants={!!l.children?.length}
                         unitesConnues={unitesConnues}
-                        onQuantite={q => updateQuantiteUnite('quantite', q)}
-                        onUnite={u => updateQuantiteUnite('unite', u)}
+                        onQuantite={saisie => appliquerALigne(quantitePatch(l, saisie))}
+                        onUnite={u => appliquerALigne({ unite: u })}
+                        onPrix={saisie => appliquerALigne(prixPatch(l, saisie))}
+                        onDetailler={() => setShowMetre(true)}
                       />
-                      {!isSelCctpOnly && l.prixUnitaire > 0 && (
-                        <div className="mt-2">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded text-xs text-zinc-500">
-                            P.U. HT : <strong>{l.prixUnitaire.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</strong>
-                          </span>
-                        </div>
-                      )}
                     </>
                   );
                 })()}

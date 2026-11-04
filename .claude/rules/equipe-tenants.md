@@ -300,8 +300,10 @@ proposable tant qu'il n'est pas ajouté à cette liste.
   valeur actuelle doit être celle que l'invité a vue (`base_value`), sinon la proposition passe
   à `outdated` et rien n'est écrit ; (2) un instantané du document est pris avant
   (`dpgf_versions`, restaurable depuis l'historique du DPGF) ; (3) l'écriture est conditionnelle
-  à l'état exact lu (`.eq('data', raw)`, et `.eq('lot_title', base_value)` pour un titre de
-  lot) : un enregistrement concurrent donne 409 `PROPOSAL_CONFLICT`, jamais un écrasement.
+  à la RÉVISION lue (`.eq('revision', row.revision)`, et `.eq('lot_title', base_value)` pour un
+  titre de lot) : un enregistrement concurrent donne 409 `PROPOSAL_CONFLICT`, jamais un
+  écrasement. **Ne jamais filtrer sur `data`** : le document pèse plusieurs centaines de Ko et un
+  filtre PostgREST passe dans l'URL (testé : `tests/projectShareProposals.test.ts`).
 - **Une quantité ou un prix recalcule** l'article, le sous-total du lot et les totaux avec
   `recomputeLot` (`recomputeAfterNumericChange`), la fonction même de
   `CCTPEditor.updateQuantiteUnite` : `prixTotal = pourMemoire ? 0 : quantité x P.U.`, sans
@@ -318,15 +320,36 @@ proposable tant qu'il n'est pas ajouté à cette liste.
   ligne dans le journal d'activité, au plus une fois par heure et par partage (mémoire du
   processus, au mieux), alerte `limitReached` dans le panneau du cabinet. Remplacer une
   proposition sur le même champ libère sa propre place.
-- **Limite connue** : un onglet PRO ouvert avant l'approbation garde l'ancien contenu en
-  mémoire, et sa prochaine frappe le réenregistrerait. Le serveur ne peut pas l'empêcher ;
-  l'écran invite à recharger l'onglet PRO et `drifted` le signale. Une vraie solution demande
-  que l'éditeur détecte une version stockée plus récente avant d'enregistrer.
+- **Révision du document, et l'onglet PRO périmé** (ancienne « limite connue », résolue) :
+  `dpgfs.revision` (`supabase/migrate_dpgfs_revision.sql`) est un compteur incrémenté par un
+  DÉCLENCHEUR SQL (`dpgfs_bump_revision`) à chaque changement réel de `data`, quel que soit
+  l'écrivain (éditeur, agents, approbation, restauration) : aucun chemin d'écriture ne peut
+  l'oublier, et seules les offres (`dpgfs.offres`) ne la font pas avancer. `GET
+  /api/projects/:id/dpgf` rend `_rev` avec le document ; `POST ...?baseRev=<rév>` n'écrit que si la
+  révision stockée est celle lue (sinon 409 `DOC_STALE`, rien n'est écrit) ; sans `baseRev`
+  (`useDPGF.ts`, outils), l'écriture est inchangée. `_rev` n'est jamais enregistré dans le
+  document. Côté éditeur (`src/lib/dpgfDocument.ts`, `useAutosavedDoc`) : un 409 met le hook en
+  `conflict` (plus d'enregistrement automatique, copie locale conservée) et `ProConflictBanner`
+  propose deux sorties qui mettent TOUJOURS la version perdante de côté dans l'historique
+  (`POST .../dpgf/versions` accepte un `document` pour figer la version locale) : « charger la
+  version à jour » ou « enregistrer ma version ». Si la mise de côté échoue, rien n'est remplacé.
+  La restauration d'un instantané relit le document ET la révision (`reload`). `drifted` reste
+  pour les approbations écrasées avant cette protection. Limite : un document chargé depuis la
+  copie locale (API indisponible) n'a pas de révision et s'enregistre sans condition.
+- **Quantité depuis le CCTP** : la vue CCTP d'un confrère ajoute `quantite` et `pourMemoire`
+  (jamais un prix) aux articles des seuls lots où il a AUSSI le droit DPGF
+  (`guestDocumentView(..., quantityLotIds)`, `CCTP_QUANTITE_FIELDS`) ; rien pour un article ou
+  un chapitre réservé au CCTP, ni sous lui. Proposer quantité ou unité depuis le CCTP demande
+  toujours l'écriture DPGF du lot (`FIELD_KIND`) ; le seul droit CCTP donne 403. Test :
+  `tests/projectShareCctpQuantities.test.ts`.
 
 Écrans : `ProposeEdit` dans `SharedDocument.tsx` (invité), `ShareProposalsInbox.tsx`
 (cabinet : actuel face à proposé, approuver, refuser avec motif, alerte de limite, historique)
 et niveau « propositions » du choix des droits par lot dans `ProjectSharesPanel.tsx`. Tests :
-`tests/projectShareProposals.test.ts`, `tests/projectShareProposalsPrices.test.ts`.
+`tests/projectShareProposals.test.ts`, `tests/projectShareProposalsPrices.test.ts`,
+`tests/dpgfRevision.test.ts`, `tests/useAutosavedDocConflict.test.ts`,
+`src/lib/__tests__/dpgfDocument.test.ts`. Pas encore vérifié dans un navigateur : le bandeau de
+conflit, la saisie d'une quantité depuis le CCTP côté confrère.
 
 ### Fusion de contacts et vue détaillée de `/contacts`
 

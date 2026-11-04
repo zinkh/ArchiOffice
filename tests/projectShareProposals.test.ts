@@ -356,6 +356,32 @@ describe('décision du cabinet', () => {
     expect(after.body[0].status).toBe('outdated');
   });
 
+  it('l\'écriture conditionnelle porte sur la révision, jamais sur le document entier (limite d\'URL de PostgREST)', async () => {
+    const { admin, projectId, dpgfId, proposal } = await pendingProposal();
+    const row = fakeSupabaseAdmin.getTable('dpgfs').find((d: any) => d.id === dpgfId)!;
+    const revisionAvant = row.revision;
+    const original = fakeSupabaseAdmin.from.bind(fakeSupabaseAdmin);
+    const filtres: string[] = [];
+    (fakeSupabaseAdmin as any).from = (table: string) => {
+      const query = original(table);
+      if (table === 'dpgfs') {
+        const eq = query.eq.bind(query);
+        query.eq = (col: string, value: unknown) => { filtres.push(col); return eq(col, value); };
+      }
+      return query;
+    };
+    try {
+      const res = await approve(admin.token, projectId, proposal.id);
+      expect(res.status).toBe(200);
+    } finally {
+      delete (fakeSupabaseAdmin as any).from;
+    }
+    // Un document de plusieurs centaines de Ko ne tient pas dans une URL : seul un petit compteur filtre.
+    expect(filtres).not.toContain('data');
+    expect(filtres).toContain('revision');
+    expect(row.revision).toBe(revisionAvant + 1);
+  });
+
   it('refuse d\'écraser un enregistrement concurrent : écriture conditionnelle, instantané conservé', async () => {
     const { tenantId, admin, projectId, dpgfId, proposal } = await pendingProposal();
     const row = fakeSupabaseAdmin.getTable('dpgfs').find((d: any) => d.id === dpgfId)!;
@@ -370,6 +396,8 @@ describe('décision du cabinet', () => {
           concurrent = JSON.parse(row.data);
           concurrent.lots[1].chapitres[0].lignes[0].designation = 'Fermettes (modifiées pendant l\'approbation)';
           row.data = JSON.stringify(concurrent);
+          // En base, le déclencheur dpgfs_bump_revision fait avancer la révision à chaque écriture.
+          row.revision += 1;
           return update(patch);
         };
       }

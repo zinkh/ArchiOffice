@@ -705,8 +705,30 @@ CREATE TABLE IF NOT EXISTS cctps (
 CREATE TABLE IF NOT EXISTS dpgfs (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  project_id TEXT, cctp_id TEXT, data TEXT
+  project_id TEXT, cctp_id TEXT, data TEXT,
+  -- Compteur incrémenté par le déclencheur dpgfs_bump_revision à chaque changement de `data`
+  -- (voir migrate_dpgfs_revision.sql) : sert aux écritures conditionnelles.
+  revision BIGINT NOT NULL DEFAULT 0
 );
+
+CREATE OR REPLACE FUNCTION dpgfs_bump_revision() RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.data IS DISTINCT FROM OLD.data THEN
+    NEW.revision := OLD.revision + 1;
+  ELSE
+    NEW.revision := OLD.revision;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS dpgfs_bump_revision ON dpgfs;
+CREATE TRIGGER dpgfs_bump_revision
+  BEFORE UPDATE ON dpgfs
+  FOR EACH ROW EXECUTE FUNCTION dpgfs_bump_revision();
 
 CREATE TABLE IF NOT EXISTS dpgf_versions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
