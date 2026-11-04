@@ -4,7 +4,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import type { Express } from 'express';
-import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader } from './testServer';
+import { getTestApp, fakeSupabaseAdmin, makeTenant, makeUser, authHeader, connectExternalStorage } from './testServer';
+import { buildExternalRef } from '../server/externalStorage/externalRef';
 import { allows, checkShareLimits, normalizeGrants, SHARE_LIMITS } from '../server/projectShares/access';
 import { readTaskFields } from '../server/routes/projectShares';
 
@@ -329,5 +330,98 @@ describe('confrère qui a déjà son propre cabinet', () => {
     // Et ses routes ordinaires ne lui montrent pas l'affaire de l'autre cabinet.
     const own = await request(app).get('/api/projects').set(authHeader(architect.token));
     expect(JSON.stringify(own.body)).not.toContain(projectId);
+  });
+});
+
+describe('documents partagés', () => {
+  const READ_DOCS = [{ kind: 'documents', access: 'read' }];
+  const publicUrl = (path: string) => `https://fake.supabase.test/storage/v1/object/public/documents/${path}`;
+
+  function seedDocuments() {
+    const base = setup();
+    const { tenantId, projectId, otherProjectId } = base;
+    const own = `${tenantId}/${projectId}/plan.pdf`;
+    const foreign = `${makeTenant()}/volé.pdf`;
+    fakeSupabaseAdmin.putObject('documents', own, 'contenu');
+    fakeSupabaseAdmin.putObject('documents', foreign, 'autre cabinet');
+    fakeSupabaseAdmin.seed('documents', [
+      { id: `${tenantId}-d1`, tenant_id: tenantId, project_id: projectId, resource_type: 'projects', name: 'Plan RDC', category: 'Plans', phase: 'APS', version: 2, uploaded_at: '2026-10-20', description: 'Indice B', uploaded_by: 'interne-1', contact_id: 'secret-contact', file_url: publicUrl(own) },
+      { id: `${tenantId}-d2`, tenant_id: tenantId, project_id: projectId, resource_type: 'proposals', name: 'Devis client', category: 'Devis', uploaded_at: '2026-10-21', file_url: publicUrl(own) },
+      { id: `${tenantId}-d3`, tenant_id: tenantId, project_id: otherProjectId, resource_type: 'projects', name: 'Autre affaire', category: 'Plans', uploaded_at: '2026-10-22', file_url: publicUrl(own) },
+      { id: `${tenantId}-d4`, tenant_id: tenantId, project_id: projectId, resource_type: 'projects', name: 'Chemin étranger', category: 'Plans', uploaded_at: '2026-10-23', file_url: publicUrl(foreign) },
+    ]);
+    return base;
+  }
+
+  it('liste les documents de l\'affaire, sans référence de stockage ni donnée interne', async () => {
+    const { tenantId, admin, projectId } = seedDocuments();
+    const guest = await inviteGuest(admin.token, projectId, READ_DOCS);
+    const res = await request(app).get(`/api/shared/projects/${projectId}/documents`).set(authHeader(guest.token));
+    expect(res.status).toBe(200);
+    // Ni le devis (autre type de rattachement), ni le document d'une autre affaire.
+    expect(res.body.map((d: any) => d.id).sort()).toEqual([`${tenantId}-d1`, `${tenantId}-d4`]);
+    const doc = res.body.find((d: any) => d.id === `${tenantId}-d1`);
+    expect(doc).toMatchObject({ name: 'Plan RDC', category: 'Plans', phase: 'APS', version: 2 });
+    const raw = JSON.stringify(res.body);
+    for (const secret of ['file_url', 'uploaded_by', 'secret-contact', 'contact_id', '/storage/v1/']) expect(raw).not.toContain(secret);
+  });
+
+  it('refuse la liste et le téléchargement sans le droit « documents »', async () => {
+    const { tenantId, admin, projectId } = seedDocuments();
+    const guest = await inviteGuest(admin.token, projectId, READ_LOTS_AND_TASKS);
+    expect((await request(app).get(`/api/shared/projects/${projectId}/documents`).set(authHeader(guest.token))).status).toBe(403);
+    expect((await request(app).get(`/api/shared/projects/${projectId}/documents/${tenantId}-d1/download`).set(authHeader(guest.token))).status).toBe(403);
+  });
+
+  it('donne un lien signé pour un document de l\'affaire et le trace dans le journal d\'activité', async () => {
+    const { tenantId, admin, projectId } = seedDocuments();
+    const guest = await inviteGuest(admin.token, projectId, READ_DOCS);
+    const res = await request(app).get(`/api/shared/projects/${projectId}/documents/${tenantId}-d1/download`).set(authHeader(guest.token));
+    expect(res.status).toBe(200);
+    expect(res.body.url).toContain('/object/sign/documents/');
+    await new Promise(r => setTimeout(r, 30));
+    const logged = fakeSupabaseAdmin.getTable('activities').filter((a: any) => a.tenant_id === tenantId && a.user_id === guest.userId);
+    expect(logged.some((a: any) => String(a.action).includes('Téléchargement') && String(a.action).includes('confrère externe'))).toBe(true);
+  });
+
+  it('un document d\'une autre affaire ou d\'un autre type de rattachement est introuvable', async () => {
+    const { tenantId, admin, projectId } = seedDocuments();
+    const guest = await inviteGuest(admin.token, projectId, READ_DOCS);
+    const get = (docId: string) => request(app).get(`/api/shared/projects/${projectId}/documents/${docId}/download`).set(authHeader(guest.token));
+    expect((await get(`${tenantId}-d2`)).status).toBe(404);
+    expect((await get(`${tenantId}-d3`)).status).toBe(404);
+    expect((await get('inexistant')).status).toBe(404);
+  });
+
+  it('refuse un fichier dont le chemin appartient à un autre cabinet', async () => {
+    const { tenantId, admin, projectId } = seedDocuments();
+    const guest = await inviteGuest(admin.token, projectId, READ_DOCS);
+    const res = await request(app).get(`/api/shared/projects/${projectId}/documents/${tenantId}-d4/download`).set(authHeader(guest.token));
+    expect(res.status).toBe(403);
+    expect(JSON.stringify(res.body)).not.toContain('fake-token');
+  });
+
+  it('sert un fichier de l\'espace de stockage du cabinet par ticket, et refuse une connexion d\'un autre cabinet', async () => {
+    const { tenantId, admin, projectId } = setup();
+    const guest = await inviteGuest(admin.token, projectId, READ_DOCS);
+    const mine = connectExternalStorage(tenantId);
+    const theirs = connectExternalStorage(makeTenant());
+    const ref = (connectionId: string) => buildExternalRef({ provider: 'webdav', connectionId, externalId: '/ArchiOffice/plan.pdf', fileName: 'plan.pdf' });
+    fakeSupabaseAdmin.seed('documents', [
+      { id: `${tenantId}-e1`, tenant_id: tenantId, project_id: projectId, resource_type: 'projects', name: 'Plan externe', category: 'Plans', uploaded_at: '2026-10-24', file_url: ref(mine) },
+      { id: `${tenantId}-e2`, tenant_id: tenantId, project_id: projectId, resource_type: 'projects', name: 'Connexion étrangère', category: 'Plans', uploaded_at: '2026-10-25', file_url: ref(theirs) },
+    ]);
+    const get = (docId: string) => request(app).get(`/api/shared/projects/${projectId}/documents/${docId}/download`).set(authHeader(guest.token));
+    const ok = await get(`${tenantId}-e1`);
+    expect(ok.status).toBe(200);
+    expect(ok.body.url).toContain('/api/storage/external/');
+    expect((await get(`${tenantId}-e2`)).status).toBe(403);
+  });
+
+  it('un invité sans le droit ne peut pas inscrire « documents » en écriture', async () => {
+    const { admin, projectId } = setup();
+    const res = await request(app).post(`/api/projects/${projectId}/shares`).set(authHeader(admin.token))
+      .send({ email: newEmail(), grants: [{ kind: 'documents', access: 'write' }] });
+    expect(res.status).toBe(400);
   });
 });

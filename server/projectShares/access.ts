@@ -13,7 +13,7 @@ export const GUEST_SYSTEM_ROLE = 'guest';
 export const GUEST_ROLE_LABEL = 'Collaborateur externe';
 
 /** Types de ressources partageables aujourd'hui (les autres suivront, voir ROADMAP.md). */
-export const SHARE_KINDS = ['lots', 'tasks'] as const;
+export const SHARE_KINDS = ['lots', 'tasks', 'documents'] as const;
 export type ShareKind = (typeof SHARE_KINDS)[number];
 export type ShareAccess = 'read' | 'write';
 

@@ -17,6 +17,7 @@ import { assertTenantEntity } from '../assertTenantEntity';
 import { sendPlatformMail } from '../mailer';
 import { invalidateGuestRoleCache } from '../guestAccessGuard';
 import { isProjectArchived } from './projectArchive';
+import { linkForTenantFile } from '../projectShares/fileAccess';
 import {
   addMembership, getMemberRole, listMemberships, removeMembership,
 } from '../tenantMemberships';
@@ -46,6 +47,10 @@ const PROJECT_FIELDS = ['id', 'name', 'project_code', 'address'] as const;
 const LOT_FIELDS = ['id', 'lot_number', 'lot_title'] as const;
 const TASK_FIELDS = ['id', 'title', 'start_date', 'end_date', 'progress', 'status', 'due_date', 'description', 'priority'] as const;
 const TASK_SELECT = TASK_FIELDS.join(', ');
+// Jamais `file_url` (référence interne de stockage), `uploaded_by` ni les contacts : le fichier
+// ne s'obtient que par la route de téléchargement, qui revérifie le droit et l'affaire.
+const DOCUMENT_FIELDS = ['id', 'name', 'category', 'phase', 'version', 'uploaded_at', 'description'] as const;
+const DOCUMENT_SELECT = DOCUMENT_FIELDS.join(', ');
 
 function pick(row: any, keys: readonly string[]): Record<string, any> {
   return Object.fromEntries(keys.map(k => [k, row?.[k] ?? null]));
@@ -342,6 +347,44 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         ...(lots ? { lots: lots.map(l => pick(l, LOT_FIELDS)) } : {}),
       });
     } catch (e: any) { fail(res, '[GET /api/shared/projects/:id]', e); }
+  });
+
+  // Documents de l'affaire seulement : `resource_type = 'projects'` écarte les pièces rattachées à un
+  // devis, un appel d'offres ou la bibliothèque d'un agent, qui vivent dans la même table.
+  app.get('/api/shared/projects/:id/documents', async (req: any, res: any) => {
+    try {
+      const found = await guestShare(req, res);
+      if (!found) return;
+      if (!allows(found.grants, 'documents', 'read')) {
+        return res.status(403).json({ error: 'Les documents ne sont pas partagés avec vous.', code: 'SHARE_FORBIDDEN' });
+      }
+      const { data } = await supabaseAdmin.from('documents').select(DOCUMENT_SELECT)
+        .eq('project_id', found.share.project_id).eq('tenant_id', found.share.tenant_id).eq('resource_type', 'projects');
+      res.json((data || [])
+        .map((d: any) => pick(d, DOCUMENT_FIELDS))
+        .sort((a: any, b: any) => String(b.uploaded_at).localeCompare(String(a.uploaded_at))));
+    } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/documents]', e); }
+  });
+
+  app.get('/api/shared/projects/:id/documents/:docId/download', async (req: any, res: any) => {
+    try {
+      const found = await guestShare(req, res);
+      if (!found) return;
+      if (!allows(found.grants, 'documents', 'read')) {
+        return res.status(403).json({ error: 'Les documents ne sont pas partagés avec vous.', code: 'SHARE_FORBIDDEN' });
+      }
+      const { share } = found;
+      // Le document doit appartenir à CETTE affaire partagée : celui d'une autre affaire du cabinet,
+      // ou une pièce de devis, est introuvable, pas interdit.
+      const { data: doc } = await supabaseAdmin.from('documents').select('id, name, file_url')
+        .eq('id', req.params.docId).eq('project_id', share.project_id).eq('tenant_id', share.tenant_id).eq('resource_type', 'projects').maybeSingle();
+      if (!doc?.file_url) return res.status(404).json({ error: 'Document introuvable.' });
+      const link = await linkForTenantFile(supabaseAdmin, share.tenant_id, doc.file_url);
+      if (!link.ok) return res.status(link.status).json({ error: link.error });
+      const userName = await getUserName(share.tenant_id, req.user.id, req.user.email);
+      logActivity(share.tenant_id, req.user.id, userName, `Téléchargement du document "${doc.name}" (confrère externe)`, doc.name, doc.id, 'document', 'Documents');
+      res.json({ url: link.url, expiresIn: link.expiresIn });
+    } catch (e: any) { fail(res, '[GET /api/shared/projects/:id/documents/:docId/download]', e); }
   });
 
   app.get('/api/shared/projects/:id/tasks', async (req: any, res: any) => {

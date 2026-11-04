@@ -5164,4 +5164,8 @@ export default {
   "shared_archived": "Affaire archivée : lecture seule.",
   "shared_readonly": "Lecture seule",
   "shared_tasks_not_shared": "Les tâches ne sont pas partagées avec vous.",
+  "share_kind_documents": "Documents de l'affaire (tout l'onglet Documents)",
+  "shared_documents_title": "Documents",
+  "shared_documents_empty": "Aucun document.",
+  "shared_download": "Télécharger",
 };

@@ -5014,4 +5014,8 @@ export default {
   "shared_archived": "Archived project: read only.",
   "shared_readonly": "Read only",
   "shared_tasks_not_shared": "Tasks are not shared with you.",
+  "share_kind_documents": "Project documents (the whole Documents tab)",
+  "shared_documents_title": "Documents",
+  "shared_documents_empty": "No documents.",
+  "shared_download": "Download",
 };

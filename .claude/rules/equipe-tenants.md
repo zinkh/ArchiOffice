@@ -205,8 +205,23 @@ d'abord (un échec laisse un partage fermé), puis supprime l'adhésion `guest`
 devenue inutile ; l'adhésion d'un vrai membre n'est jamais touchée.
 
 **Droits branchés aujourd'hui** : `lots` (lecture, sans le contact de
-l'entreprise) et `tasks` (lecture ou écriture). Autres types, droits par lot et
-mode « proposition de modification » : voir ROADMAP.md.
+l'entreprise), `tasks` (lecture ou écriture) et `documents` (lecture seule).
+Autres types, droits par lot et mode « proposition de modification » : voir
+ROADMAP.md.
+
+**Documents** : le droit couvre les documents de l'affaire (`resource_type =
+'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque
+d'agent qui vivent dans la même table. La liste ne rend jamais `file_url`,
+`uploaded_by` ni les contacts. Le fichier ne s'obtient que par
+`GET /api/shared/projects/:id/documents/:docId/download`, qui revérifie le
+partage, le droit et le rattachement à l'affaire, puis délègue à
+`linkForTenantFile` (`server/projectShares/fileAccess.ts`) : même mécanisme que
+`/api/storage/signed-url`, mais l'appartenance du fichier se vérifie contre le
+cabinet DU PARTAGE (préfixe `${tenantId}/` ou connexion de stockage du cabinet),
+jamais contre un cabinet désigné par la requête. Chaque téléchargement est tracé.
+Le panneau laisse ce droit désactivé par défaut : l'onglet Documents peut
+contenir des contrats ou des pièces d'honoraires, et c'est au cabinet de le
+décider. Pas de dépôt par l'invité (pas de droit `write` pour ce type).
 
 Écrans : `ProjectSharesPanel.tsx` (fiche affaire, masqué pour qui n'est pas
 administrateur ou manager), `SharedProjects.tsx` (`/partages`), entrée de menu

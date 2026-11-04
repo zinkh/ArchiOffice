@@ -9,7 +9,7 @@ import { IconTrash, IconUsersGroup } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 
 type Access = 'none' | 'read' | 'write';
-interface Grant { kind: 'lots' | 'tasks'; access: 'read' | 'write' }
+interface Grant { kind: 'lots' | 'tasks' | 'documents'; access: 'read' | 'write' }
 interface Share { id: string; email: string; name: string | null; grants: Grant[] }
 interface SharesPayload {
   shares: Share[];
@@ -18,7 +18,7 @@ interface SharesPayload {
   writableKinds: string[];
 }
 
-const KINDS: Array<'lots' | 'tasks'> = ['lots', 'tasks'];
+const KINDS: Array<Grant['kind']> = ['lots', 'tasks', 'documents'];
 
 function accessOf(grants: Grant[], kind: Grant['kind']): Access {
   return grants.find(g => g.kind === kind)?.access ?? 'none';
@@ -54,7 +54,7 @@ function ShareRow({ projectId, share, writableKinds, onChanged, onMessage }: {
 }) {
   const { t } = useTranslation();
   const [values, setValues] = useState<Record<Grant['kind'], Access>>({
-    lots: accessOf(share.grants, 'lots'), tasks: accessOf(share.grants, 'tasks'),
+    lots: accessOf(share.grants, 'lots'), tasks: accessOf(share.grants, 'tasks'), documents: accessOf(share.grants, 'documents'),
   });
   const [busy, setBusy] = useState(false);
   const label = share.name || share.email;
@@ -120,7 +120,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [invite, setInvite] = useState<Record<Grant['kind'], Access>>({ lots: 'read', tasks: 'read' });
+  const [invite, setInvite] = useState<Record<Grant['kind'], Access>>({ lots: 'read', tasks: 'read', documents: 'none' });
   const [busy, setBusy] = useState(false);
 
   const say = useCallback((text: string, isError = false) => setMessage({ text, isError }), []);

@@ -7,7 +7,8 @@ import { useTranslation } from 'react-i18next';
 import { IconArrowLeft } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 
-interface Grant { kind: 'lots' | 'tasks'; access: 'read' | 'write' }
+interface Grant { kind: 'lots' | 'tasks' | 'documents'; access: 'read' | 'write' }
+interface Doc { id: string; name: string; category: string | null; phase: string | null; version: number | null; uploaded_at: string | null; description: string | null }
 interface Summary { shareId: string; projectId: string; projectName: string; projectCode: string | null; address: string | null; tenantName: string | null; grants: Grant[] }
 interface View {
   project: { id: string; name: string; project_code: string | null; address: string | null };
@@ -96,6 +97,7 @@ function SharedDetail({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const [view, setView] = useState<View | null>(null);
   const [tasks, setTasks] = useState<Task[] | null>(null);
+  const [docs, setDocs] = useState<Doc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [start, setStart] = useState('');
@@ -113,11 +115,24 @@ function SharedDetail({ projectId }: { projectId: string }) {
       .catch(e => setError(e?.message || t('share_error')));
   }, [projectId, loadTasks, t]);
 
+  useEffect(() => {
+    if (!view || !view.grants.some(g => g.kind === 'documents')) { setDocs(null); return; }
+    apiFetch<Doc[]>(`/api/shared/projects/${projectId}/documents`).then(setDocs).catch(e => setError(e?.message || t('share_error')));
+  }, [view, projectId, t]);
+
   if (error && !view) return <p role="alert" className="text-sm text-red-600">{error}</p>;
   if (!view) return null;
   const tasksGrant = view.grants.find(g => g.kind === 'tasks');
   const canWrite = tasksGrant?.access === 'write' && !view.archived;
   const reload = () => loadTasks(view.grants).catch(e => setError(e?.message || t('share_error')));
+  // Le lien est demandé au serveur à chaque ouverture (il expire) : le fichier n'est jamais
+  // une adresse stockée côté page.
+  const download = async (docId: string) => {
+    try {
+      const { url } = await apiFetch<{ url: string }>(`/api/shared/projects/${projectId}/documents/${docId}/download`);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (e: any) { setError(e?.message || t('share_error')); }
+  };
 
   const addTask = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -148,6 +163,31 @@ function SharedDetail({ projectId }: { projectId: string }) {
           <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_lots_title')}</h2>
           <ul className="text-sm space-y-1">
             {view.lots.map(lot => <li key={lot.id}><span className="font-medium">{lot.lot_number}</span> {lot.lot_title}</li>)}
+          </ul>
+        </section>
+      )}
+
+      {docs && (
+        <section className="rounded-lg p-4" style={cardStyle}>
+          <h2 className="text-sm font-bold mb-2 text-[var(--tblr-text)]">{t('shared_documents_title')}</h2>
+          {docs.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('shared_documents_empty')}</p>}
+          <ul className="space-y-2">
+            {docs.map(doc => (
+              <li key={doc.id} className="flex items-center justify-between gap-3" style={{ borderTop: '1px solid var(--tblr-border)', paddingTop: '0.5rem' }}>
+                <div className="min-w-0">
+                  <div className="text-sm text-[var(--tblr-text)] truncate">{doc.name}</div>
+                  <div className="text-xs text-[var(--tblr-muted)] truncate">
+                    {[doc.category, doc.phase, doc.version ? `v${doc.version}` : null, doc.uploaded_at].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
+                <button
+                  type="button" onClick={() => download(doc.id)} aria-label={`${t('shared_download')} ${doc.name}`}
+                  className="shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)]"
+                >
+                  {t('shared_download')}
+                </button>
+              </li>
+            ))}
           </ul>
         </section>
       )}
