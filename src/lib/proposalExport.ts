@@ -212,8 +212,20 @@ export interface ProposalPdfData {
   agenceLogo?: string;
   /** Logos des cotraitants (data URLs), chargés à part depuis leurs fiches contact. */
   cotraitantLogos?: string[];
+  /** Extraits de plan et photos de la proposition, déjà réduits en data URLs (chargés à part). */
+  illustrations?: IllustrationPdf[];
   architecteNom: string;
   oaNumber: string;
+}
+
+/** Une image du plan et des photos telle que le PDF l'imprime : data URL réduite, légende, format. */
+export interface IllustrationPdf {
+  dataUrl: string;
+  caption: string;
+  /** Photo (vs extrait de plan) : sert à regrouper les images sous « Plan » puis « Photos ». */
+  isPhoto: boolean;
+  width: number;
+  height: number;
 }
 
 /** Identité d'un cotraitant telle que le PDF l'imprime : le logo est une data URL déjà réduite. */
@@ -225,7 +237,7 @@ export type TableDensity = 'normal' | 'compact' | 'dense';
 
 export type ProposalSectionId =
   | 'garde' | 'objet' | 'surfaces' | 'honoraires' | 'repartition'
-  | 'cotraitants' | 'calendrier' | 'mafCost' | 'signatures';
+  | 'cotraitants' | 'calendrier' | 'mafCost' | 'illustrations' | 'signatures';
 
 export interface ProposalTemplate {
   detailLevel: 'court' | 'detaille';
@@ -305,19 +317,20 @@ export const PROPOSAL_SECTION_DEFS: { id: ProposalSectionId; label: string }[] =
   { id: 'cotraitants', label: 'Cotraitants & spécialités' },
   { id: 'calendrier', label: 'Calendrier prévisionnel' },
   { id: 'mafCost', label: 'Coût assurance MAF' },
+  { id: 'illustrations', label: 'Plan et photos' },
   { id: 'signatures', label: 'Conditions générales & signatures' },
 ];
 
 export const PRESET_COURT: ProposalTemplate['pages'] = {
   garde: false, objet: true, surfaces: false, honoraires: true,
   repartition: false, cotraitants: false, calendrier: true,
-  mafCost: false, signatures: true,
+  mafCost: false, illustrations: false, signatures: true,
 };
 
 export const PRESET_DETAILLE: ProposalTemplate['pages'] = {
   garde: true, objet: true, surfaces: true, honoraires: true,
   repartition: true, cotraitants: true, calendrier: true,
-  mafCost: false, signatures: true,
+  mafCost: false, illustrations: true, signatures: true,
 };
 
 const DEFAULT_MISSIONS_TEXT = [

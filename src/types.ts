@@ -1162,6 +1162,8 @@ export interface Proposal {
   surface_parcelle?: string;
   /** JSON (`StoredParcel[]`, voir lib/terrainParcelles) des parcelles cochées sur la carte. */
   parcelles_selection?: string | null;
+  /** Plan et photos insérés dans le document exporté : JSON de `ProposalIllustration[]` (src/lib/proposalIllustrations.ts). */
+  illustrations?: string | null;
   /** L'opération est un ERP. Absent : déduit des champs ERP déjà saisis (`isErpOperation`). */
   is_erp?: boolean | null;
   /** `neuf` ou `rehabilitation` ; absent : déduit (voir lib/proposalSurfaces). */

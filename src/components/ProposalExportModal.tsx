@@ -10,8 +10,11 @@ import { MafCostBadge } from './MafCostBadge';
 import { SendProposalMail } from './proposal/SendProposalMail';
 import { loadCotraitantIdentities } from '../lib/pdfLetterhead';
 import { paginateFlow, PAGE_HEIGHT_MM, CONTENT_TOP_MM, CONTENT_BOTTOM_MM } from '../lib/pdfPagination';
+import { resolveSignedUrl } from '../lib/signedStorageUrl';
+import { compressImage } from '../lib/imageCompression';
+import { orderIllustrations, parseProposalIllustrations } from '../lib/proposalIllustrations';
 import {
-  ProposalPdfData, ProposalTemplate, ProposalSectionId, CotraitantIdentityPdf, DensityTokens, TableDensity,
+  ProposalPdfData, ProposalTemplate, ProposalSectionId, CotraitantIdentityPdf, DensityTokens, TableDensity, IllustrationPdf,
   PROPOSAL_SECTION_DEFS, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS, mapProposalToPdfData, getPdfStyles,
   loadStoredTemplate, saveStoredTemplate, applyPreset,
   exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent,
@@ -741,6 +744,44 @@ const renderSignatures: SectionRenderer = (d, t, _ctx, newPage) => {
   );
 };
 
+/** Une image (extrait de plan ou photo) avec sa légende : jamais coupée entre deux pages. */
+function IllustrationFigure({ image, maxHeightMm }: { image: IllustrationPdf; maxHeightMm: number }) {
+  return (
+    <figure data-pdf-keep="true" style={{ margin: 0, marginBottom: '5mm', textAlign: 'center' }}>
+      <img
+        src={image.dataUrl}
+        alt={image.caption}
+        style={{ display: 'block', margin: '0 auto', maxWidth: '100%', maxHeight: `${maxHeightMm}mm`, objectFit: 'contain', border: '0.5px solid #cbd5e1' }}
+      />
+      {image.caption && (
+        <figcaption style={{ fontSize: '8pt', fontStyle: 'italic', color: '#475569', marginTop: '1.5mm' }}>{image.caption}</figcaption>
+      )}
+    </figure>
+  );
+}
+
+/** Extraits de plan puis photos : les plans pleine largeur, les photos deux par ligne. */
+const renderIllustrations: SectionRenderer = (d, t, _ctx, newPage) => {
+  const images = d.illustrations ?? [];
+  const plans = images.filter(i => !i.isPhoto);
+  const photos = images.filter(i => i.isPhoto);
+  const rows: IllustrationPdf[][] = [];
+  for (let i = 0; i < photos.length; i += 2) rows.push(photos.slice(i, i + 2));
+  return (
+    <Section key="illustrations">
+      <H2 template={t} newPage={newPage}>Plan et photos</H2>
+      {plans.length > 0 && photos.length > 0 && <H3>Plan</H3>}
+      {plans.map((image, i) => <IllustrationFigure key={`plan-${i}`} image={image} maxHeightMm={120} />)}
+      {photos.length > 0 && plans.length > 0 && <H3>Photos</H3>}
+      {rows.map((row, i) => (
+        <div key={`photos-${i}`} data-pdf-keep="true" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6mm', alignItems: 'start' }}>
+          {row.map((image, j) => <IllustrationFigure key={j} image={image} maxHeightMm={70} />)}
+        </div>
+      ))}
+    </Section>
+  );
+};
+
 /** Sections du corps du document (la page de garde est à part). */
 type BodySectionId = Exclude<ProposalSectionId, 'garde'>;
 
@@ -752,6 +793,7 @@ const SECTION_RENDERERS: Record<BodySectionId, SectionRenderer> = {
   cotraitants: renderCotraitants,
   calendrier: renderCalendrier,
   mafCost: renderMafCost,
+  illustrations: renderIllustrations,
   signatures: renderSignatures,
 };
 
@@ -764,14 +806,15 @@ const SECTION_AVAILABLE: Record<BodySectionId, (d: ProposalPdfData, ctx: Section
   cotraitants: d => d.cotraitants.length > 0,
   calendrier: d => d.calendrier.length > 0,
   mafCost: (_d, ctx) => !!ctx.mafCost,
+  illustrations: d => (d.illustrations?.length ?? 0) > 0,
   signatures: () => true,
 };
 
 // ─── Sidebar: section toggles + preset + visual + clauses ──────────────────
 
 function TemplateEditorPanel({
-  template, onChange, mafAvailable, open, onCloseMobile,
-}: { template: ProposalTemplate; onChange: (t: ProposalTemplate) => void; mafAvailable: boolean; open: boolean; onCloseMobile: () => void }) {
+  template, onChange, mafAvailable, illustrationsCount, open, onCloseMobile,
+}: { template: ProposalTemplate; onChange: (t: ProposalTemplate) => void; mafAvailable: boolean; illustrationsCount: number; open: boolean; onCloseMobile: () => void }) {
   const visibleSections = PROPOSAL_SECTION_DEFS.filter(s => s.id !== 'mafCost' || mafAvailable);
 
   return (
@@ -823,7 +866,14 @@ function TemplateEditorPanel({
           <div className="space-y-2">
             {visibleSections.map(({ id, label }) => (
               <label key={id} className="flex items-center justify-between p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-lg cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                <span className="text-xs text-zinc-600 dark:text-zinc-400">{label}</span>
+                <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                  {label}
+                  {id === 'illustrations' && (
+                    <span className="block text-[0.625rem] text-zinc-400">
+                      {illustrationsCount > 0 ? `${illustrationsCount} image${illustrationsCount > 1 ? 's' : ''}` : 'Aucune image : à ajouter dans la proposition'}
+                    </span>
+                  )}
+                </span>
                 <input
                   type="checkbox"
                   checked={template.pages[id]}
@@ -1017,6 +1067,25 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     return () => { alive = false; };
   }, [proposal.specialties_list]);
 
+  // Plan et photos : chargés (URL signée) et réduits seulement si la section est cochée.
+  // Une image illisible est ignorée, jamais bloquante pour l'export.
+  const [illustrations, setIllustrations] = useState<IllustrationPdf[]>([]);
+  const illustrationsOn = template.pages.illustrations;
+  useEffect(() => {
+    let alive = true;
+    if (!illustrationsOn) { setIllustrations([]); return () => { alive = false; }; }
+    const list = orderIllustrations(parseProposalIllustrations(proposal.illustrations));
+    Promise.all(list.map(async (ill): Promise<IllustrationPdf | null> => {
+      try {
+        const img = await compressImage(await resolveSignedUrl(ill.file_url), 1600, 1100, 0.85);
+        return img ? { dataUrl: img.dataUrl, caption: ill.caption, isPhoto: ill.layer === 'photo', width: img.w, height: img.h } : null;
+      } catch {
+        return null;
+      }
+    })).then(images => { if (alive) setIllustrations(images.filter((i): i is IllustrationPdf => !!i)); });
+    return () => { alive = false; };
+  }, [proposal.illustrations, illustrationsOn]);
+
   const data = useMemo<ProposalPdfData>(() => {
     // Logos de la page de garde : ceux des cotraitants, dans l'ordre du groupement, sans doublon.
     const cotraitantLogos = [...new Set(
@@ -1029,8 +1098,9 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
       ...(compressedLogo ? { agenceLogo: compressedLogo } : {}),
       cotraitantIdentites: identities,
       cotraitantLogos,
+      illustrations,
     };
-  }, [rawData, compressedLogo, identities]);
+  }, [rawData, compressedLogo, identities, illustrations]);
 
   const handleExport = async () => {
     if (!previewRef.current) return;
@@ -1138,6 +1208,7 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
             template={template}
             onChange={setTemplate}
             mafAvailable={!!settings?.maf_enabled}
+            illustrationsCount={parseProposalIllustrations(proposal.illustrations).length}
             open={sidebarOpen}
             onCloseMobile={() => setSidebarOpen(false)}
           />
