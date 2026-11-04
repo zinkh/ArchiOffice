@@ -170,8 +170,10 @@ export function parseNumberValue(value: unknown, label: string): { number: numbe
 /**
  * Pourquoi une modification de chiffres ou d'unité ne peut PAS se proposer sur cet article, ou null.
  * Mêmes règles que l'éditeur du DPGF : un parent porte la somme de ses sous-articles et n'a pas de
- * quantité propre ; un article pour mémoire n'est pas compté ; une quantité répartie par bâtiment
- * ou ventilée par local est la somme de ses parts et se modifie chez le cabinet.
+ * quantité propre ; une quantité répartie par bâtiment ou ventilée par local est la somme de ses
+ * parts et se modifie chez le cabinet. Un article « pour mémoire » PEUT recevoir une quantité, une
+ * unité et un prix : la quantité et l'unité le laissent « pour mémoire » (montant à 0), un prix
+ * supérieur à 0 le chiffre (voir `applyFieldToNode`) et le cabinet en est averti avant d'approuver.
  */
 export function blockedEdit(node: Rec, field: string): string | null {
   if (!NUMERIC_FIELDS.includes(field) && field !== 'unite') return null;
@@ -180,7 +182,6 @@ export function blockedEdit(node: Rec, field: string): string | null {
     return 'Cet article porte des sous-articles : proposez la modification sur chacun d\'eux.';
   }
   if (field === 'unite') return null;
-  if (node.pourMemoire) return 'Article pour mémoire : sa quantité et son prix ne se modifient pas.';
   if (isRec(node.quantitesBatiments) && Object.keys(node.quantitesBatiments).length > 0) {
     return 'Quantité répartie par bâtiment : elle se modifie dans le DPGF du cabinet.';
   }
@@ -209,14 +210,26 @@ export function readField(node: Rec, field: string): string {
  * Écrit une valeur dans un nœud. Une quantité ou un prix recalcule le montant de l'article comme
  * l'éditeur (`prixTotal = quantité x P.U.`, 0 pour mémoire), sans arrondi, pour que le document
  * reste identique à ce que l'éditeur aurait produit.
+ *
+ * « Pour mémoire » veut dire : décrit mais non compté, prix à 0. Un prix unitaire supérieur à 0 le
+ * chiffre : l'article QUITTE « pour mémoire » et entre dans le total. Une quantité ou une unité le
+ * laissent « pour mémoire » (montant à 0). Les deux états ne se contredisent donc jamais, et le
+ * résultat final ne dépend pas de l'ordre dans lequel le cabinet approuve quantité, unité et prix.
+ * Rend `leftPourMemoire` quand l'article vient de quitter cet état.
  */
-export function applyFieldToNode(node: Rec, field: string, value: string): void {
+export function applyFieldToNode(node: Rec, field: string, value: string): { leftPourMemoire: boolean } {
+  let leftPourMemoire = false;
   if (NUMERIC_FIELDS.includes(field)) {
     node[field] = Number(value);
+    if (field === 'prixUnitaire' && node.pourMemoire && Number(value) > 0) {
+      delete node.pourMemoire;
+      leftPourMemoire = true;
+    }
     node.prixTotal = node.pourMemoire ? 0 : Number(node.quantite) * Number(node.prixUnitaire);
   } else {
     node[field] = value;
   }
+  return { leftPourMemoire };
 }
 
 /**

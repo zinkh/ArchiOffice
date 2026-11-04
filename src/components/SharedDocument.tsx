@@ -223,8 +223,10 @@ function LigneRow({ ctx, lot, ligne, depth }: { ctx: NodeCtx; lot: LotView; lign
         // Chiffres : seulement sur une feuille chiffrée, comme l'éditeur (un parent porte la somme de ses enfants).
         !ligne.children?.length && (
           <>
-            {!ligne.pourMemoire && <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="quantite" current={ligne.quantite === null ? '' : String(ligne.quantite)} />}
-            {!ligne.pourMemoire && <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="prixUnitaire" current={ligne.prixUnitaire === null ? '' : String(ligne.prixUnitaire)} />}
+            {/* Un article « pour mémoire » accepte quantité, unité et prix ; un prix le fait entrer dans le total. */}
+            {ligne.pourMemoire && ctx.canProposeKind(lot, 'dpgf') && <p className="mt-1 text-xs text-[var(--tblr-muted)]">{t('shared_pm_hint')}</p>}
+            <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="quantite" current={ligne.quantite === null ? '' : String(ligne.quantite)} />
+            <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="prixUnitaire" current={ligne.prixUnitaire === null ? '' : String(ligne.prixUnitaire)} />
             <ProposeEdit ctx={ctx} lot={lot} targetType="ligne" targetId={ligne.id} field="unite" current={ligne.unite ?? ''} />
           </>
         )

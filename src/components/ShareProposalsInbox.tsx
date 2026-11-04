@@ -12,6 +12,8 @@ interface Proposal {
   targetLabel: string | null; field: string; baseValue: string; proposedValue: string; currentValue: string | null;
   status: 'pending' | 'applied' | 'rejected' | 'withdrawn' | 'outdated'; decisionNote: string | null;
   createdAt: string | null; outdated: boolean; drifted: boolean; limitReached: boolean; maxPending: number;
+  /** Ce prix chiffrera un article « pour mémoire » : il entrera dans le total du lot. */
+  leavesPourMemoire?: boolean;
 }
 
 function ValueBox({ label, value, tone }: { label: string; value: string | null; tone?: 'proposed' }) {
@@ -45,8 +47,10 @@ function PendingCard({ projectId, proposal, lots, onDone }: {
   const call = async (path: string, body?: unknown) => {
     setBusy(true); setError(null);
     try {
-      await apiFetch(`/api/projects/${projectId}/share-proposals/${proposal.id}/${path}`, { method: 'POST', body: JSON.stringify(body ?? {}) });
-      onDone(path === 'approve' ? t('share_proposal_applied_reload') : undefined);
+      const res = await apiFetch<{ leftPourMemoire?: boolean }>(`/api/projects/${projectId}/share-proposals/${proposal.id}/${path}`, { method: 'POST', body: JSON.stringify(body ?? {}) });
+      onDone(path === 'approve'
+        ? `${res?.leftPourMemoire ? `${t('share_proposal_applied_pm')} ` : ''}${t('share_proposal_applied_reload')}`
+        : undefined);
     } catch (e: any) {
       // Périmée ou conflit : le serveur n'a rien écrit ; on affiche pourquoi et on rafraîchit la liste.
       setError(e?.message || t('share_error'));
@@ -61,6 +65,11 @@ function PendingCard({ projectId, proposal, lots, onDone }: {
         <ValueBox label={t('share_proposal_current')} value={proposal.currentValue} />
         <ValueBox label={t('share_proposal_proposed')} value={proposal.proposedValue} tone="proposed" />
       </div>
+      {proposal.leavesPourMemoire && (
+        <p role="status" className="px-3 py-2 text-xs rounded-lg text-[var(--tblr-text)]" style={{ border: '1px solid var(--tblr-border)' }}>
+          {t('share_proposal_leaves_pm')}
+        </p>
+      )}
       {proposal.outdated && (
         <div className="space-y-2">
           <p role="alert" className="text-xs text-red-600">{t('share_proposal_outdated_badge')}</p>

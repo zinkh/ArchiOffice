@@ -107,8 +107,10 @@ describe('chiffres : fonctions pures', () => {
     expect(blockedEdit(node('lig-a2'), 'unite')).toBeNull();
     expect(blockedEdit(node('lig-a1'), 'quantite')).toContain('sous-articles'); // un parent porte la somme de ses enfants
     expect(blockedEdit(node('lig-a1'), 'unite')).toContain('sous-articles');
-    expect(blockedEdit(node('lig-a3'), 'prixUnitaire')).toContain('pour mémoire');
-    expect(blockedEdit(node('lig-a3'), 'unite')).toBeNull(); // l'unité d'un article pour mémoire se corrige
+    // Un article « pour mémoire » peut recevoir une quantité, une unité et un prix.
+    expect(blockedEdit(node('lig-a3'), 'prixUnitaire')).toBeNull();
+    expect(blockedEdit(node('lig-a3'), 'quantite')).toBeNull();
+    expect(blockedEdit(node('lig-a3'), 'unite')).toBeNull();
     expect(blockedEdit(node('lig-a4'), 'quantite')).toContain('bâtiment');
     expect(blockedEdit(node('lig-a5'), 'quantite')).toContain('article chiffré');
     expect(blockedEdit({ type: 'ouvrage', quantiteDetails: [{ id: 'q', quantite: 1 }] }, 'quantite')).toContain('local');
@@ -125,10 +127,17 @@ describe('chiffres : fonctions pures', () => {
     expect(doc.lots[1].sousTotal).toBe(15000); // l'autre lot n'est pas touché
     expect(doc.totalHT).toBe(15210);
     expect(doc.totalTTC).toBeCloseTo(18252, 6);
-    // Un article pour mémoire reste à zéro, quoi qu'on y écrive.
+    // Pour mémoire : une quantité ou une unité le laissent à zéro et « pour mémoire »...
     const pm = findRawNode(doc, 'A', 'ligne', 'lig-a3')!;
-    applyFieldToNode(pm, 'quantite', '9');
-    expect(pm.prixTotal).toBe(0);
+    expect(applyFieldToNode(pm, 'quantite', '9')).toEqual({ leftPourMemoire: false });
+    expect(applyFieldToNode(pm, 'unite', 'm')).toEqual({ leftPourMemoire: false });
+    expect(pm).toMatchObject({ pourMemoire: true, prixTotal: 0, quantite: 9, unite: 'm' });
+    // ... un prix de 0 aussi, mais un prix supérieur à 0 le chiffre : il quitte « pour mémoire ».
+    expect(applyFieldToNode(pm, 'prixUnitaire', '0')).toEqual({ leftPourMemoire: false });
+    expect(pm.pourMemoire).toBe(true);
+    expect(applyFieldToNode(pm, 'prixUnitaire', '45')).toEqual({ leftPourMemoire: true });
+    expect(pm.pourMemoire).toBeUndefined();
+    expect(pm.prixTotal).toBe(405); // 9 x 45
     expect(readField(pm, 'quantite')).toBe('9');
     expect(readField({}, 'quantite')).toBe('');
   });
@@ -166,7 +175,6 @@ describe('proposer des chiffres', () => {
     const parent = await propose(guest.token, projectId, num(lotA, 'prixUnitaire', '10', 'lig-a1'));
     expect(parent.status).toBe(400);
     expect(parent.body.code).toBe('PROPOSAL_NOT_ALLOWED');
-    expect((await propose(guest.token, projectId, num(lotA, 'prixUnitaire', '10', 'lig-a3'))).body.code).toBe('PROPOSAL_NOT_ALLOWED');
     expect((await propose(guest.token, projectId, num(lotA, 'quantite', '10', 'lig-a4'))).body.code).toBe('PROPOSAL_NOT_ALLOWED');
     // Une ligne réservée au CCTP n'existe pas dans la vue DPGF, et un article d'un autre lot non plus.
     expect((await propose(guest.token, projectId, num(lotA, 'quantite', '10', 'lig-a5'))).status).toBe(404);
@@ -371,5 +379,93 @@ describe('aucune perte de donnée', () => {
     // Chacune garde sa valeur de départ et sa valeur proposée.
     expect(rows.find((p: any) => p.id === replaced.id)).toMatchObject({ base_value: '3', proposed_value: '4' });
     expect(rows.find((p: any) => p.id === rejected.id)).toMatchObject({ base_value: '50', proposed_value: '70' });
+  });
+});
+
+describe('article « pour mémoire »', () => {
+  // lig-a3 : pour mémoire, quantité 1, unité ml, prix 0, montant 0. Lot A : sous-total 180, document 15 180 HT.
+  async function pmProposals() {
+    const ctx = setup();
+    const guest = await inviteGuest(ctx.admin.token, ctx.projectId, [{ kind: 'dpgf', access: 'write', lotId: ctx.lotA }]);
+    const make = async (field: string, value: string) => {
+      const res = await propose(guest.token, ctx.projectId, num(ctx.lotA, field, value, 'lig-a3'));
+      expect(res.status, `${field} ${JSON.stringify(res.body)}`).toBe(201);
+      return res.body;
+    };
+    return { ...ctx, guest, quantite: await make('quantite', '12'), unite: await make('unite', 'm'), prix: await make('prixUnitaire', '45') };
+  }
+  const pmLine = (dpgfId: string) => storedDoc(dpgfId).lots[0].chapitres[0].lignes[2];
+
+  it('accepte une quantité, une unité et un prix, et prévient le cabinet que le prix chiffrera l\'article', async () => {
+    const { admin, projectId, quantite, unite, prix } = await pmProposals();
+    const list = (await request(app).get(`/api/projects/${projectId}/share-proposals`).set(authHeader(admin.token))).body;
+    const flag = (id: string) => list.find((p: any) => p.id === id).leavesPourMemoire;
+    expect(flag(prix.id)).toBe(true); // ce prix fera quitter « pour mémoire »
+    expect(flag(quantite.id)).toBe(false);
+    expect(flag(unite.id)).toBe(false);
+  });
+
+  it('une quantité et une unité laissent l\'article « pour mémoire », montant et totaux inchangés', async () => {
+    const { admin, projectId, dpgfId, quantite, unite } = await pmProposals();
+    const first = await approve(admin.token, projectId, quantite.id);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.leftPourMemoire).toBe(false);
+    expect((await approve(admin.token, projectId, unite.id)).body.leftPourMemoire).toBe(false);
+    expect(pmLine(dpgfId)).toMatchObject({ pourMemoire: true, quantite: 12, unite: 'm', prixUnitaire: 0, prixTotal: 0 });
+    const after = storedDoc(dpgfId);
+    expect(after.lots[0].sousTotal).toBe(180);
+    expect(after.totalHT).toBe(15180);
+  });
+
+  it('un prix chiffre l\'article : il quitte « pour mémoire » et entre dans le total, instantané à l\'appui', async () => {
+    const { tenantId, admin, projectId, dpgfId, doc, quantite, unite, prix } = await pmProposals();
+    await approve(admin.token, projectId, quantite.id);
+    await approve(admin.token, projectId, unite.id);
+    const res = await approve(admin.token, projectId, prix.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ status: 'applied', leftPourMemoire: true });
+
+    const line = pmLine(dpgfId);
+    expect(line.pourMemoire).toBeUndefined();
+    expect(line).toMatchObject({ quantite: 12, unite: 'm', prixUnitaire: 45, prixTotal: 540 });
+    const after = storedDoc(dpgfId);
+    expect(after.lots[0].sousTotal).toBe(720); // 180 + 540
+    expect(after.totalHT).toBe(15720);
+    expect(after.totalTTC).toBeCloseTo(18864, 6);
+
+    // Rien n'est perdu : l'instantané d'avant garde l'article « pour mémoire », et le journal le dit.
+    const snapshots = fakeSupabaseAdmin.getTable('dpgf_versions').filter((v: any) => v.tenant_id === tenantId);
+    const lastSnapshot = snapshots[snapshots.length - 1];
+    expect(lastSnapshot.document.lots[0].chapitres[0].lignes[2]).toMatchObject({ pourMemoire: true, prixTotal: 0 });
+    expect(doc.lots[0].chapitres[0].lignes[2]).toMatchObject({ pourMemoire: true });
+    await new Promise(r => setTimeout(r, 30));
+    const logged = fakeSupabaseAdmin.getTable('activities').filter((a: any) => a.tenant_id === tenantId && String(a.action).includes('quitte « pour mémoire »'));
+    expect(logged.length).toBeGreaterThan(0);
+  });
+
+  it('donne le même résultat quel que soit l\'ordre d\'approbation', async () => {
+    const forward = await pmProposals();
+    await approve(forward.admin.token, forward.projectId, forward.quantite.id);
+    await approve(forward.admin.token, forward.projectId, forward.prix.id);
+
+    const reverse = await pmProposals();
+    await approve(reverse.admin.token, reverse.projectId, reverse.prix.id); // prix d'abord, avec la quantité de départ
+    expect(storedDoc(reverse.dpgfId).lots[0].sousTotal).toBe(225); // 180 + 1 x 45
+    await approve(reverse.admin.token, reverse.projectId, reverse.quantite.id);
+
+    for (const run of [forward, reverse]) {
+      expect(pmLine(run.dpgfId)).toMatchObject({ quantite: 12, prixUnitaire: 45, prixTotal: 540 });
+      expect(pmLine(run.dpgfId).pourMemoire).toBeUndefined();
+      expect(storedDoc(run.dpgfId).lots[0].sousTotal).toBe(720);
+      expect(storedDoc(run.dpgfId).totalHT).toBe(15720);
+    }
+  });
+
+  it('un prix à 0 ne change rien : « pour mémoire » reste, la proposition est refusée comme inchangée', async () => {
+    const { admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'dpgf', access: 'write', lotId: lotA }]);
+    const res = await propose(guest.token, projectId, num(lotA, 'prixUnitaire', '0', 'lig-a3'));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('Aucun changement');
   });
 });

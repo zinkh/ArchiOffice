@@ -5083,4 +5083,7 @@ export default {
   "share_status_rejected": "Declined",
   "share_status_withdrawn": "Withdrawn",
   "share_status_outdated": "Outdated",
+  "shared_pm_hint": "Item entered \"for the record\" (PM): a proposed price, if approved, will include it in the total.",
+  "share_proposal_leaves_pm": "This item is entered \"for the record\" (PM): approving this price takes it out of that state and adds it to the lot total.",
+  "share_proposal_applied_pm": "Proposal applied: the item is no longer \"for the record\" and is now part of the lot total.",
 };

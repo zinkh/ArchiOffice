@@ -300,7 +300,12 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
             currentValue = node ? readField(node, p.field) : null;
           }
           const pendingOfShare = pendingByShare.get(p.share_id) ?? 0;
+          // Un prix proposé sur un article « pour mémoire » le chiffre : il quittera « pour mémoire » et
+          // entrera dans le total du lot. Le cabinet doit le voir AVANT d'approuver, pas après.
+          const node = p.target_type === 'ligne' && doc ? findRawNode(doc, p.project_lot_id, p.target_type, p.target_id) : null;
+          const leavesPourMemoire = p.status === 'pending' && p.field === 'prixUnitaire' && !!node?.pourMemoire && Number(p.proposed_value) > 0;
           return proposalView(p, {
+            leavesPourMemoire,
             guestEmail: emails.get(p.share_id) ?? null,
             targetLabel: labels.get(p.target_id) ?? null,
             currentValue,
@@ -351,6 +356,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
       const { data: shareRow } = await supabaseAdmin.from('project_shares').select('email').eq('id', proposal.share_id).maybeSingle();
       const email = shareRow?.email ?? 'un confrère';
       let summary: string;
+      let leftPourMemoire = false;
 
       if (proposal.target_type === 'lot') {
         // Le titre d'un lot est dans `project_lots` : écriture conditionnelle à l'ancien titre, que la
@@ -389,7 +395,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
 
         // Garde-fou 3 : écriture conditionnelle à l'état exact du document lu. L'instantané reste, même
         // en cas d'échec : on ne supprime rien.
-        applyFieldToNode(node, proposal.field, proposal.proposed_value);
+        leftPourMemoire = applyFieldToNode(node, proposal.field, proposal.proposed_value).leftPourMemoire;
         if (NUMERIC_FIELDS.includes(proposal.field)) recomputeAfterNumericChange(row.doc, proposal.project_lot_id);
         let update = supabaseAdmin.from('dpgfs').update({ data: JSON.stringify(row.doc) })
           .eq('id', row.id).eq('tenant_id', tenantId);
@@ -397,7 +403,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
         const { data: written, error: writeError } = await update.select('id');
         if (writeError) throw writeError;
         if (!written?.length) return res.status(409).json(CONFLICT);
-        summary = `Proposition de ${email} appliquée (${proposal.field})`;
+        summary = `Proposition de ${email} appliquée (${proposal.field})${leftPourMemoire ? ' : l\'article quitte « pour mémoire » et entre dans le total' : ''}`;
       }
 
       const { data: updated, error } = await supabaseAdmin.from('project_share_proposals')
@@ -406,7 +412,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
       if (error) throw error;
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       logActivity(tenantId, req.user.id, userName, `${summary} (proposition de ${email}, appliquée)`, email, proposal.id, 'project', 'Affaires');
-      res.json(proposalView(updated, { applied: true }));
+      res.json(proposalView(updated, { applied: true, leftPourMemoire }));
     } catch (e: any) { fail(res, '[POST /api/projects/:id/share-proposals/:proposalId/approve]', e); }
   });
 

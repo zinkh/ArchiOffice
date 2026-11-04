@@ -5233,4 +5233,7 @@ export default {
   "share_status_rejected": "Refusée",
   "share_status_withdrawn": "Retirée",
   "share_status_outdated": "Périmée",
+  "shared_pm_hint": "Article pour mémoire : un prix proposé, s'il est approuvé, le fera entrer dans le total.",
+  "share_proposal_leaves_pm": "Cet article est « pour mémoire » : en approuvant ce prix, il quitte « pour mémoire » et entre dans le total du lot.",
+  "share_proposal_applied_pm": "Proposition appliquée : l'article n'est plus « pour mémoire » et entre dans le total du lot.",
 };

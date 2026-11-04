@@ -285,9 +285,17 @@ proposable tant qu'il n'est pas ajouté à cette liste.
 - **On ne propose que sur ce qu'on voit**, dans la vue du type de droit : une ligne `cctpOnly`
   n'a ni quantité ni prix, elle n'existe pas dans la vue DPGF (404).
 - **Refusés comme dans l'éditeur** (`blockedEdit`) : un article à sous-articles (il porte la
-  somme de ses enfants), pour mémoire, à quantité répartie par bâtiment (`quantitesBatiments`)
-  ou ventilée par local (`quantiteDetails`), ou qui n'est pas un ouvrage ; un nombre négatif,
-  non numérique, à plus de 4 décimales ou au-delà de 1e9 (`parseNumberValue`, virgule admise).
+  somme de ses enfants), à quantité répartie par bâtiment (`quantitesBatiments`) ou ventilée
+  par local (`quantiteDetails`), ou qui n'est pas un ouvrage ; un nombre négatif, non numérique,
+  à plus de 4 décimales ou au-delà de 1e9 (`parseNumberValue`, virgule admise).
+- **Article « pour mémoire »** : il PEUT recevoir une quantité, une unité et un prix. La
+  quantité et l'unité le laissent « pour mémoire » (montant à 0, comme dans l'éditeur). Un
+  prix unitaire supérieur à 0 le CHIFFRE : `applyFieldToNode` retire `pourMemoire` et l'article
+  entre dans le total du lot (`leftPourMemoire`). Un prix à 0 ne change rien (refusé comme
+  inchangé). Le résultat ne dépend pas de l'ordre d'approbation de la quantité, de l'unité et
+  du prix. Le cabinet le voit AVANT d'approuver (`leavesPourMemoire`, avertissement dans
+  `ShareProposalsInbox`), le journal d'activité le dit, et l'instantané d'avant garde l'article
+  « pour mémoire » : rien n'est perdu.
 - **Approuver est le seul moment où le document est écrit**, avec trois garde-fous : (1) la
   valeur actuelle doit être celle que l'invité a vue (`base_value`), sinon la proposition passe
   à `outdated` et rien n'est écrit ; (2) un instantané du document est pris avant
