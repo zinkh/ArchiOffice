@@ -8,6 +8,7 @@ import { proposalToXml, xmlToProposal } from '../../src/lib/xmlHelper';
 import { validateBody } from '../../src/lib/validateRequest';
 import { proposalSchema } from '../../src/schemas/proposal.schema';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { serializeProposalIllustrations } from '../../src/lib/proposalIllustrations';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 
 export interface RouteDeps {
@@ -191,6 +192,22 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       captureWithContext(error, { route: 'PUT /api/proposals/:id', tenantId, userId: req.user?.id });
       res.status(500).json({ error: "Failed to update proposal: " + error.message });
     }
+  });
+
+  // Plan et photos de la proposition : enregistrés à part du formulaire, car les images sont
+  // déjà déposées comme documents au moment où l'architecte les ajoute.
+  app.put("/api/proposals/:id/illustrations", async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      if (!Array.isArray(req.body?.illustrations)) return res.status(400).json({ error: "Liste d'illustrations invalide." });
+      if (!(await assertTenantEntity(supabaseAdmin, 'proposals', req.params.id, tenantId))) {
+        return res.status(404).json({ error: "Proposition introuvable." });
+      }
+      const illustrations = serializeProposalIllustrations(req.body.illustrations);
+      const { error } = await supabaseAdmin.from('proposals').update({ illustrations }).eq('id', req.params.id).eq('tenant_id', tenantId);
+      if (error) throw error;
+      res.json({ illustrations });
+    } catch (e: any) { console.error(e); res.status(500).json({ error: "Échec de l'enregistrement du plan et des photos." }); }
   });
 
   app.delete("/api/proposals/:id", async (req: any, res: any) => {

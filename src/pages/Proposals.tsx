@@ -33,6 +33,8 @@ import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedMeetings from '../components/LinkedMeetings';
 import { FeasibilityStudy } from '../components/proposal/FeasibilityStudy';
+import { ProposalIllustrations } from '../components/proposal/ProposalIllustrations';
+import { parseProposalIllustrations, serializeProposalIllustrations, type ProposalIllustration } from '../lib/proposalIllustrations';
 import { Pagination } from '../components/ui/Pagination';
 import { usePagination } from '../hooks/usePagination';
 import { ProposalExportModal } from '../components/ProposalExportModal';
@@ -163,6 +165,7 @@ export default function Proposals() {
     try { return localStorage.getItem('proposals.feasibilityOpen') === '1'; } catch { return false; }
   });
   const [feasibilityCount, setFeasibilityCount] = useState(0);
+  const [illustrationsOpen, setIllustrationsOpen] = useState(false);
   const toggleFeasibility = () => {
     setFeasibilityOpen(prev => {
       const next = !prev;
@@ -422,6 +425,16 @@ export default function Proposals() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Plan et photos : la liste est déjà enregistrée par ProposalIllustrations ; on garde ici le
+  // formulaire et la liste des propositions à jour, pour que l'export en tienne compte tout de
+  // suite et que l'enregistrement du formulaire ne remette pas une ancienne liste.
+  const illustrationsList = useMemo(() => parseProposalIllustrations(newProposal.illustrations), [newProposal.illustrations]);
+  const handleIllustrationsChange = (list: ProposalIllustration[]) => {
+    const serialized = serializeProposalIllustrations(list);
+    setNewProposal(prev => ({ ...prev, illustrations: serialized }));
+    setProposals(prev => prev.map(p => (p.id === editingProposal?.id ? { ...p, illustrations: serialized } : p)));
   };
 
   const handleEditClick = (proposal: Proposal) => {
@@ -1535,6 +1548,30 @@ export default function Proposals() {
                   </div>
                 )}
               </form>
+
+              {editingProposal && (
+                <div className={`px-4 sm:px-6 ${illustrationsOpen ? 'pb-4' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setIllustrationsOpen(open => !open)}
+                    aria-expanded={illustrationsOpen}
+                    className="w-full flex items-center justify-between py-3 text-sm font-bold uppercase tracking-widest"
+                    style={{ color: 'var(--tblr-text)' }}
+                  >
+                    {t('prop_illus_title')}{illustrationsList.length ? ` (${illustrationsList.length})` : ''}
+                    <IconChevronDown size={18} className={`transition-transform ${illustrationsOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--tblr-muted)' }} />
+                  </button>
+                  {illustrationsOpen && (
+                    <ProposalIllustrations
+                      key={editingProposal.id}
+                      proposalId={editingProposal.id}
+                      value={illustrationsList}
+                      parcelGeometry={selectedParcelGeometry}
+                      onChange={handleIllustrationsChange}
+                    />
+                  )}
+                </div>
+              )}
 
               {editingProposal && (
                 <div className={`px-4 sm:px-6 ${feasibilityOpen ? 'pb-4' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
