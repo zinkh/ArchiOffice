@@ -216,6 +216,8 @@ function fmt(n?: number) {
 interface ACTModuleProps {
   projectId: string;
   projectName: string;
+  /** Photo du projet, imprimée sur la page de garde du CCTP et du DPGF des marchés. */
+  projectImageUrl?: string;
   lots: ProjectLot[];
   contacts: Contact[];
   /** Données de l'affaire reprises dans les documents du marché. */
@@ -224,7 +226,7 @@ interface ACTModuleProps {
   isPublicClient?: boolean;
 }
 
-export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, contacts, operation, isPublicClient }: ACTModuleProps) {
+export default function ACTModule({ projectId, projectName, projectImageUrl, lots: lotsDuProjet, contacts, operation, isPublicClient }: ACTModuleProps) {
   const { t } = useTranslation();
   // Les lots s'affichent toujours par numéro (01, 02, 10...), quel que soit l'ordre de la liste reçue.
   const lots = useMemo(
@@ -1785,6 +1787,7 @@ export default function ACTModule({ projectId, projectName, lots: lotsDuProjet, 
         <MarchesPhase
           projectId={projectId}
           projectName={projectName}
+          projectImageUrl={projectImageUrl}
           lots={lots}
           contacts={allContacts}
           consultation={consultationCourante as any}

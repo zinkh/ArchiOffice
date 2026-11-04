@@ -12,7 +12,8 @@ import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
 import { docxSectionChrome } from './docxRunningHeader';
-import { agencyFooterLine, drawAgencyFooters, drawAgencyHeader, loadLogoDataUrl } from './pdfLetterhead';
+import { agencyFooterLine, drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl } from './pdfLetterhead';
+import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, pageDeGardeDocx, type CouvertureOptions } from './pageDeGarde';
 import { batimentsDeLigne, batimentsDuNoeud, batimentsParOrdre, cctpPourBatiment } from './batimentsArticles';
 import { libellesLots, resoudreVariables, type ContexteCctp, type NoeudCctp } from './cctpVariables';
 import { ORIENTATION_CCTP, orientationPdf, suffixeLot, type Orientation } from './exportOrientation';
@@ -43,6 +44,18 @@ export interface CctpExportOptions {
   orientation?: Orientation;
   /** Export d'un seul lot : il figure dans le titre et le nom du fichier. */
   lot?: { numero: string; titre: string };
+  /** Page de garde : photo du projet, adresse, maître d'ouvrage, numéro d'affaire. */
+  couverture?: CouvertureOptions;
+}
+
+/** Données de la page de garde du CCTP exporté. */
+async function pageDeGardeCctp(doc: DPGF, opts: CctpExportOptions) {
+  const photo = await chargerPhotoCouverture(opts.couverture?.imageUrl);
+  return donneesPageDeGarde({
+    operation: opts.projectName, titreDocument: doc.titre, intitule: SOUS_TITRE,
+    precision: [opts.batiment ? libelleBatiment(opts.batiment) : '', opts.lot ? suffixeLot(opts.lot) : ''].filter(Boolean).join(' · ') || undefined,
+    version: doc.version, dateCreation: doc.dateCreation, couverture: opts.couverture, photo,
+  });
 }
 
 /** #rrggbb vers [r, g, b] ; une couleur illisible rend le repli. */
@@ -160,9 +173,12 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const letterhead = {
     title: cctpTitre(opts), subtitle: opts.projectName, reference: `v${doc.version}`, margin, logo,
   };
-  let y = drawAgencyHeader(pdf, opts.settings, letterhead) + 4;
+  // Page de garde, puis le texte à la page suivante sous l'en-tête réduit (agence | document).
+  drawPageDeGardePdf(pdf, opts.settings, logo, await pageDeGardeCctp(doc, opts), margin);
+  pdf.addPage();
+  let y = Math.max(ENTETE_REDUIT_BAS, margin) + 2;
   const basDePage = pageH - 18;
-  const place = (h: number) => { if (y + h > basDePage) { pdf.addPage(); y = margin; } };
+  const place = (h: number) => { if (y + h > basDePage) { pdf.addPage(); y = Math.max(ENTETE_REDUIT_BAS, margin) + 2; } };
 
   pdf.setFont('helvetica', 'bold');
   pdf.setFontSize(16);
@@ -232,9 +248,9 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
   const images = await chargerImages(blocsPdf);
   for (const b of blocsPdf) {
     const retrait = Math.max(0, b.niveau - 3) * 4;
-    if (b.niveau === 1) { place(16); y += 4; ecrire(`${b.numero}  ${b.titre}`, 13, 'bold', GRIS_TEXTE, 0, 2); }
-    else if (b.niveau === 2) { place(12); y += 2; ecrire(`${b.numero}  ${b.titre}`, 11, 'bold', GRIS_TEXTE, 0, 1.5); }
-    else { place(10); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
+    if (b.niveau === 1) { place(34); y += 4; ecrire(`${b.numero}  ${b.titre}`, 13, 'bold', GRIS_TEXTE, 0, 2); }
+    else if (b.niveau === 2) { place(26); y += 2; ecrire(`${b.numero}  ${b.titre}`, 11, 'bold', GRIS_TEXTE, 0, 1.5); }
+    else { place(18); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
     if (b.batiments) ecrire(`Bâtiments concernés : ${b.batiments.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, 2.5);
@@ -310,7 +326,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     const heading = b.niveau === 1 ? HeadingLevel.HEADING_1 : b.niveau === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
     const taille = b.niveau === 1 ? 26 : b.niveau === 2 ? 22 : 20;
     body.push(new Paragraph({
-      heading, indent: retrait(b.niveau), spacing: { before: b.niveau <= 2 ? 240 : 140, after: 80 },
+      heading, keepNext: true, indent: retrait(b.niveau), spacing: { before: b.niveau <= 2 ? 240 : 140, after: 80 },
       children: [new TextRun({ text: `${b.numero}  ${b.titre}`, bold: true, size: taille, color: '111827' })],
     }));
     const mention = (texte: string) => body.push(new Paragraph({
@@ -351,6 +367,8 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     }
   }
 
+  const paysage = (opts.orientation ?? ORIENTATION_CCTP) === 'paysage';
+  const chrome = await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP });
   const document_ = new Document({
     // Sans style par défaut, Word retombe sur Times New Roman : la charte est en Arial.
     styles: {
@@ -362,8 +380,14 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
         title: { run: { font: 'Arial', bold: true, size: 36, color: '111827' } },
       },
     },
+    // Section 1 : la page de garde (logo en en-tête de première page). Section 2 : le texte,
+    // sous l'en-tête réduit dès sa première page ; la pagination continue d'une section à l'autre.
     sections: [{
-      ...await docxSectionChrome({ agencyName: settings.agencyName, documentTitle: cctpTitre(opts), firstHeader: headerChildren, footer: footerChildren, orientation: opts.orientation ?? ORIENTATION_CCTP }),
+      ...chrome,
+      children: await pageDeGardeDocx(await pageDeGardeCctp(doc, opts), paysage ? { largeurMax: 620, hauteurMax: 250 } : { largeurMax: 600, hauteurMax: 380 }),
+    }, {
+      ...chrome,
+      properties: { ...chrome.properties, titlePage: false as any },
       children: body,
     }],
   });

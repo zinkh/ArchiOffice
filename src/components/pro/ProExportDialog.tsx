@@ -23,6 +23,8 @@ interface Props {
   /** Document ouvert à l'écran : il est coché d'office. */
   ongletActif: string;
   projectName?: string;
+  /** Photo du projet, imprimée sur la page de garde du CCTP et du DPGF. */
+  projectImageUrl?: string;
   contexte?: ContexteCctp;
   settings: AgencySettings;
   /** Attribue les références du bordereau et les enregistre, avant tout export. */
@@ -63,7 +65,7 @@ function reunir<T>(sources: T[][], cle: (x: T) => string, label: (x: T) => strin
  * ne la monte qu'à l'ouverture : l'état repart de zéro à chaque fois.
  */
 export const ProExportDialog: React.FC<Props> = ({
-  dpgf, bpu, bpuLoading, ongletActif, projectName, contexte, settings, prepareBpu, notify, onClose,
+  dpgf, bpu, bpuLoading, ongletActif, projectName, projectImageUrl, contexte, settings, prepareBpu, notify, onClose,
 }) => {
   const { t } = useTranslation();
   const groupId = useId();
@@ -146,6 +148,7 @@ export const ProExportDialog: React.FC<Props> = ({
       const res = await produireDossier({
         dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations,
         projectName, perimetre: perimetre(), settings, contexte,
+        couverture: { imageUrl: projectImageUrl, adresse: contexte?.adresse, maitreOuvrage: contexte?.maitreOuvrage, reference: contexte?.reference },
       });
       for (const a of res.avertissements) {
         notify?.(

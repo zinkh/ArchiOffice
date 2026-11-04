@@ -3411,7 +3411,7 @@ export default function ProjectDetail() {
             {activeTab === 'DIAG' && project && <StudyRequestTab kind="geotechnique" project={project} />}
             {activeTab === 'CT' && project && <StudyRequestTab kind="controle_technique" project={project} />}
             {activeTab === 'CSPS' && project && <StudyRequestTab kind="csps" project={project} />}
-            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} contexte={project ? {
+            {activeTab === 'PRO' && <div className="mt-4"><ProTab projectId={id!} projectName={project?.name} projectImageUrl={project?.image_url} contexte={project ? {
               operation: project.name,
               reference: project.project_code,
               adresse: [project.adresse_terrain || project.address, project.cp_ville_terrain].filter(Boolean).join(', ') || undefined,
@@ -4809,6 +4809,7 @@ export default function ProjectDetail() {
                 <ACTModule
                   projectId={id!}
                   projectName={project.name}
+                  projectImageUrl={project.image_url}
                   lots={project.lots_list || []}
                   contacts={contacts}
                   isPublicClient={!!project.is_public_client}

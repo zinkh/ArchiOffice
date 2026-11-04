@@ -202,10 +202,24 @@ export function drawAgencyHeader(
   if (contact) { pdf.text(contact, textX, infoY); infoY += 3.5; }
 
   // Titre du document, à droite.
+  // Le titre ne doit jamais passer sur le bloc de gauche : il est réduit (12 à 8 pt)
+  // puis coupé à la place restante.
   pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(12);
   pdf.setTextColor(...GRIS_TEXTE);
-  pdf.text(opts.title, pageW - margin, y + 4.5, { align: 'right' });
+  pdf.setFontSize(12);
+  let titre = opts.title;
+  if (typeof pdf.getTextWidth === 'function') {
+    const infos = [settings.address, [settings.phone ? `Tél : ${settings.phone}` : '', settings.email].filter(Boolean).join('  ·  ')];
+    pdf.setFontSize(11);
+    const largeurAgence = pdf.getTextWidth(settings.agencyName || '');
+    const largeurInfos = Math.max(0, ...infos.map(l => (l ? pdf.getTextWidth(l) * (7.5 / 11) : 0)));
+    const placeTitre = Math.max(pageW - margin - (textX + Math.max(largeurAgence, largeurInfos)) - 8, 30);
+    let tailleTitre = 12;
+    pdf.setFontSize(tailleTitre);
+    while (tailleTitre > 8 && pdf.getTextWidth(opts.title) > placeTitre) { tailleTitre -= 0.5; pdf.setFontSize(tailleTitre); }
+    titre = (pdf.splitTextToSize(opts.title, placeTitre) as string[])[0] ?? '';
+  }
+  pdf.text(titre, pageW - margin, y + 4.5, { align: 'right' });
   if (opts.subtitle) {
     pdf.setFont('helvetica', 'normal');
     pdf.setFontSize(8.5);

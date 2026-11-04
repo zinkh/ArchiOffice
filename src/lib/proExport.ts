@@ -5,7 +5,8 @@ import { sousTotalNature } from '../components/pro/treeOps';
 import type { AgencySettings } from './proposalExport';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import { ORIENTATION_DPGF, orientationPdf, type Orientation } from './exportOrientation';
-import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
+import { drawAgencyHeader, drawAgencyFooters, ENTETE_REDUIT_BAS, loadLogoDataUrl, tableauGris, TABLEAU_GRIS } from './pdfLetterhead';
+import { chargerPhotoCouverture, donneesPageDeGarde, drawPageDeGardePdf, type CouvertureOptions } from './pageDeGarde';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO, FORMAT_NOMBRE, FORMAT_QUANTITE,
 } from './xlsxLetterhead';
@@ -215,6 +216,8 @@ export interface ExportDpgfOptions {
   orientation?: Orientation;
   /** Export d'un seul lot : ajouté au nom du fichier (« Lot 01 Gros œuvre »). */
   suffixeNom?: string;
+  /** Page de garde du PDF : photo du projet, adresse, maître d'ouvrage, numéro d'affaire. */
+  couverture?: CouvertureOptions;
 }
 
 /** `DPGF_<titre>[_<lot>].<ext>` : le suffixe d'un lot distingue les fichiers d'un export par lot. */
@@ -223,7 +226,7 @@ const nomDpgf = (dpgf: DPGF, suffixe: string | undefined, ext: 'pdf' | 'xlsx') =
 
 export async function exportDPGFtoPDF(
   dpgf: DPGF, projectName?: string, groupement: GroupementDpgf = 'lot', settings: AgencySettings = {},
-  { avecPrix = false, avecTva = false, sortie, orientation = ORIENTATION_DPGF, suffixeNom }: ExportDpgfOptions = {},
+  { avecPrix = false, avecTva = false, sortie, orientation = ORIENTATION_DPGF, suffixeNom, couverture }: ExportDpgfOptions = {},
 ) {
   const colTva = avecPrix && avecTva;
   // En vertical, le tableau tient sur 182 mm au lieu de 269 : colonnes et corps de texte réduits.
@@ -242,7 +245,14 @@ export async function exportDPGFtoPDF(
     reference: `v${dpgf.version}${classement}`,
     margin: 14, logo,
   };
-  const startY = drawAgencyHeader(doc, settings, letterhead);
+  // Page de garde, puis le tableau à la page suivante sous l'en-tête réduit (agence | document).
+  drawPageDeGardePdf(doc, settings, logo, donneesPageDeGarde({
+    operation: projectName, titreDocument: dpgf.titre, intitule: 'Décomposition du Prix Global et Forfaitaire (DPGF)',
+    precision: [suffixeNom, groupement !== 'lot' ? `Classement : ${LIBELLES_GROUPEMENT[groupement]}` : ''].filter(Boolean).join(' · ') || undefined,
+    version: dpgf.version, dateCreation: dpgf.dateCreation, couverture, photo: await chargerPhotoCouverture(couverture?.imageUrl),
+  }), letterhead.margin);
+  doc.addPage();
+  const startY = ENTETE_REDUIT_BAS + 4;
 
   if (groupement === 'lot') {
     const rows = flattenDPGF(dpgf.lots);
