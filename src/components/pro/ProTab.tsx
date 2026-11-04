@@ -52,6 +52,8 @@ interface ProTabProps {
   contexte?: import('../../lib/cctpVariables').ContexteCctp;
   projectId: string;
   projectName?: string;
+  /** Photo du projet, pour la page de garde des exports. */
+  projectImageUrl?: string;
   /** Rappelé après création/suppression d'un lot, pour que la fiche projet (qui en garde une copie dans `lots_list`) se resynchronise. */
   onLotsChanged?: () => void;
 }
@@ -96,7 +98,7 @@ const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
 
 // ── component ─────────────────────────────────────────────────────────────────
 
-export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte, onLotsChanged }) => {
+export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectImageUrl, contexte, onLotsChanged }) => {
   const { t } = useTranslation();
   const { currentUser } = useUser();
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('CCTP');
@@ -666,6 +668,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, contexte
           bpuLoading={bpuLoading || !bpuTouched}
           ongletActif={activeSubTab}
           projectName={projectName}
+          projectImageUrl={projectImageUrl}
           contexte={contexte}
           settings={settings ?? {}}
           prepareBpu={preparerBpuPourExport}

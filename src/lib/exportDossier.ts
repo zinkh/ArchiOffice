@@ -16,6 +16,7 @@ import {
 } from './proExport';
 import { compterArticles, filtrerPourExport, type ExportSelection } from './exportPerimetre';
 import type { FichierExporte, Sortie } from './exportSortie';
+import type { CouvertureOptions } from './pageDeGarde';
 import { ORIENTATION_CCTP, ORIENTATION_DPGF, documentsParLot, suffixeLot, type Orientation } from './exportOrientation';
 
 export type DocumentDossier = 'cctp' | 'dpgf' | 'dqe' | 'bpu' | 'estimation';
@@ -46,6 +47,8 @@ export interface DemandeDossier {
   perimetre?: string;
   settings: AgencySettings;
   contexte?: ContexteCctp;
+  /** Page de garde du CCTP et du DPGF (PDF, et Word pour le CCTP). */
+  couverture?: CouvertureOptions;
 }
 
 export type Avertissement =
@@ -116,7 +119,7 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
           const opts = {
             projectName: etiquette, settings, batiment, // Le CCTP d'un lot cite tous les lots de l'opération, pas seulement le sien.
             contexte: partie.lot ? { ...contexte, lots: contexte.lots ?? libellesLots(source.lots) } : contexte,
-            sortie, orientation, lot: partie.lot,
+            sortie, orientation, lot: partie.lot, couverture: d.couverture,
           };
           for (const f of fmts) await (f === 'pdf' ? exportCctpPdf(partie.doc, opts) : exportCctpDocx(partie.doc, opts));
         }
@@ -134,7 +137,7 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
       const orientation = d.orientations?.dpgf ?? ORIENTATION_DPGF;
       const parties = d.parLot ? documentsParLot(source) : [{ lot: undefined, doc: source }];
       for (const partie of parties) {
-        const options = { ...prix, orientation, suffixeNom: partie.lot ? suffixeLot(partie.lot) : undefined };
+        const options = { ...prix, orientation, couverture: d.couverture, suffixeNom: partie.lot ? suffixeLot(partie.lot) : undefined };
         const intitule = partie.lot ? `${etiquette ?? d.dpgf.titre} - ${suffixeLot(partie.lot)}` : etiquette;
         for (const f of fmts) await (f === 'pdf' ? exportDPGFtoPDF : exportDPGFtoExcel)(partie.doc, intitule, 'lot', settings, options);
       }
