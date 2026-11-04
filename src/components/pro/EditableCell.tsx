@@ -137,7 +137,7 @@ export const CellInput = ({
 };
 
 export const EditableCell = ({
-  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false, suggestions, maxDecimals = 2,
+  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false, suggestions, maxDecimals = 2, editValue, titleHint,
 }: {
   rKey: string; field: string; value: string | number; editingCell: EditingCell | null;
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
@@ -154,6 +154,10 @@ export const EditableCell = ({
   suggestions?: string[];
   /** Décimales affichées au plus (2 par défaut ; une quantité n'est jamais arrondie à l'écran). */
   maxDecimals?: number;
+  /** Texte de départ de la modification, à la place de la valeur affichée (la formule mémorisée d'une quantité). */
+  editValue?: string;
+  /** Infobulle de la cellule au repos, à la place de « Double-clic pour éditer ». */
+  titleHint?: string;
 }) => {
   const isEditing = editingCell?.rowKey === rKey && editingCell?.field === field;
   const display = pm
@@ -167,10 +171,10 @@ export const EditableCell = ({
   }
   return (
     <div
-      onDoubleClick={() => onStartEdit(rKey, field, pm ? 'PM' : value)}
-      onClick={editOnClick ? e => { e.stopPropagation(); onStartEdit(rKey, field, pm ? 'PM' : value); } : undefined}
+      onDoubleClick={() => onStartEdit(rKey, field, pm ? 'PM' : editValue ?? value)}
+      onClick={editOnClick ? e => { e.stopPropagation(); onStartEdit(rKey, field, pm ? 'PM' : editValue ?? value); } : undefined}
       className={`px-1 py-0.5 cursor-text rounded min-h-[22px] hover:bg-[var(--tblr-surface-2)] ${numeric ? 'text-right font-mono tabular-nums' : ''} ${className}`}
-      title={editOnClick ? undefined : 'Double-clic pour éditer'}
+      title={titleHint ?? (editOnClick ? undefined : 'Double-clic pour éditer')}
     >
       {display}
     </div>

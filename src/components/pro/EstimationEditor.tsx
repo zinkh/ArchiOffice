@@ -19,7 +19,9 @@ import { sansGlisserPendantSaisie } from './EditableCell';
 import { formatQuantite } from '../../lib/quantiteFormat';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import type { CibleRecherche } from '../../lib/proRecherche';
-import { QuantityBreakdownDialog } from './QuantityBreakdownDialog';
+import { MetreDialog } from './MetreDialog';
+import { quantitePatch } from '../../lib/quantites';
+import { ligneAtPath } from './hierarchyOps';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -127,6 +129,12 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
         const saisi = parsePrixSaisi(rawValue);
         if (saisi.pourMemoire) mutateLigne(li, ci, path, { pourMemoire: true, prixUnitaire: 0, prixTotal: 0 });
         else mutateLigne(li, ci, path, { [field]: saisi.valeur, pourMemoire: undefined });
+      } else if (field === 'quantite') {
+        // Comme dans le DPGF : un calcul est mémorisé, une saisie invalide ou une quantité qui vient d'un
+        // métré, de bâtiments ou de sous-articles ne change rien (au lieu de mettre 0 ou d'écraser le métré).
+        const courante = ligneAtPath(dpgf.lots[li]?.chapitres[ci]?.lignes ?? [], path);
+        const patch = courante ? quantitePatch(courante, rawValue) : null;
+        if (patch) mutateLigne(li, ci, path, patch);
       } else {
         mutateLigne(li, ci, path, { [field]: evalFormula(rawValue) });
       }
@@ -481,7 +489,7 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
                               <td className="px-1 py-0.5">
                                 {ligne.quantitesBatiments !== undefined ? <span title="Modifier les quantités dans Articles et bâtiments">{formatQuantite(ligne.quantite)}</span> : (<div className="flex items-center gap-1">
                                   <div className="flex-1"><EditNum rowId={rowId} field="quantite" value={ligne.quantite} /></div>
-                                  <button title="Ventiler par local" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
+                                  <button title="Détailler le métré" aria-label="Détailler le métré" className={ligne.quantiteDetails?.length ? 'text-blue-600' : 'text-zinc-300 hover:text-blue-500'} onClick={() => setBreakdown({ lotIdx: li, chapIdx: ci, ligneIdx: path[0] })}><IconMapPin size={13} /></button>
                                 </div>)}
                               </td>
                             )}
@@ -554,9 +562,8 @@ export const EstimationEditor: React.FC<EstimationEditorProps> = ({
       </div>
       {breakdown && (() => {
         const ligne = dpgf.lots[breakdown.lotIdx].chapitres[breakdown.chapIdx].lignes[breakdown.ligneIdx];
-        return <QuantityBreakdownDialog document={dpgf} ligne={ligne} onClose={() => setBreakdown(null)} onSave={details => {
-          const quantite = details.reduce((s, d) => s + Number(d.quantite || 0), 0);
-          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, [breakdown.ligneIdx], { quantiteDetails: details, quantite });
+        return <MetreDialog key={ligne.id} ligne={ligne} onClose={() => setBreakdown(null)} onSave={patch => {
+          mutateLigne(breakdown.lotIdx, breakdown.chapIdx, [breakdown.ligneIdx], patch);
           setBreakdown(null);
         }} />;
       })()}

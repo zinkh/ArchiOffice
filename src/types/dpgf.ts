@@ -55,9 +55,19 @@ export interface DecoupageNoeud {
   phaseId?: string;
 }
 
-/** Ventilation contrôlable de la quantité d'un article par zone ou local. */
+/**
+ * Une ligne du métré d'un article (« Façade Est », « Déduction baie vitrée »). La quantité de l'article
+ * en est la somme. `expression` garde ce qui a été saisi (« 10 », « =4*5 ») pour que le calcul reste
+ * visible ; `quantite` en est la valeur. Une ligne d'une ventilation d'avant n'a pas d'`expression` :
+ * sa `quantite` fait foi. `batimentId`, `phaseId`, `niveau`, `local` et `note` viennent de cette
+ * ventilation (par zone ou local) et ne sont jamais effacés.
+ */
 export interface QuantiteDetail {
   id: string;
+  /** Libellé libre ; à défaut, niveau et local d'une ventilation d'avant. */
+  libelle?: string;
+  /** Valeur ou calcul saisi (« 10 », « =4*5 », « -2,4 ») ; la déduction est une valeur négative. */
+  expression?: string;
   batimentId?: string;
   phaseId?: string;
   niveau?: string;
@@ -149,8 +159,13 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud {
    * par une IA reste signalé tant que personne ne l'a relu et assumé.
    */
   genereParIa?: 'llm' | 'nomic';
-  /** Quand elle existe, la quantité de la ligne est la somme de ces postes. */
+  /** Quand elle existe, la quantité de la ligne est la somme de ces postes (le métré). */
   quantiteDetails?: QuantiteDetail[];
+  /**
+   * Formule tapée dans la case quantité (« =10+20 »), gardée pour la réafficher à la modification.
+   * Elle ne vaut que tant qu'elle donne encore `quantite` (voir `formuleCourante`, src/lib/quantites.ts).
+   */
+  quantiteFormule?: string;
   /**
    * « PM » (pour mémoire) : l'article est décrit mais son prix n'est pas
    * compté. Se saisit en tapant « PM » dans le prix ; prix unitaire et total

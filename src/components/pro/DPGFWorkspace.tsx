@@ -8,7 +8,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
-  IconSubtask, IconTag, IconFileText,
+  IconSubtask, IconTag, IconFileText, IconListDetails,
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
@@ -26,6 +26,8 @@ import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { StatutBadges } from './StatutBadges';
 import { LigneDescriptionDialog } from './LigneDescriptionDialog';
+import { MetreDialog } from './MetreDialog';
+import { formuleCourante, prixPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
@@ -86,6 +88,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
   // Ouvrage dont on saisit la description technique (clé positionnelle de la ligne).
   const [descriptionKey, setDescriptionKey] = useState<string | null>(null);
+  // Article dont on détaille le métré (clé de ligne), pour la fenêtre « Détailler le métré ».
+  const [metreKey, setMetreKey] = useState<string | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -388,17 +392,21 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           if (field === 'unite') return { ...ligne, unite: value };
           if (field === 'numero') return { ...ligne, numero: value };
           if (field === 'quantite') {
-            const q = evalFormula(value);
-            return { ...ligne, quantite: q, prixTotal: q * ligne.prixUnitaire };
+            // Un calcul (« =10+20 ») est mémorisé ; une saisie invalide, ou une quantité qui vient d'un
+            // métré, de bâtiments ou de sous-articles, ne change rien (au lieu de mettre 0).
+            const patch = quantitePatch(ligne, value);
+            return patch ? { ...ligne, ...patch } : ligne;
           }
-          if (field === 'prixUnitaire' || field === 'prixTotal') {
+          if (field === 'prixUnitaire') {
             // « PM » : l'article est décrit mais son prix n'est pas compté.
+            const patch = prixPatch(ligne, value);
+            return patch ? { ...ligne, ...patch } : ligne;
+          }
+          if (field === 'prixTotal') {
             const saisi = parsePrixSaisi(value);
             if (saisi.pourMemoire) return { ...ligne, pourMemoire: true, prixUnitaire: 0, prixTotal: 0 };
             const { pourMemoire: _pm, ...sansPm } = ligne;
-            return field === 'prixUnitaire'
-              ? { ...sansPm, prixUnitaire: saisi.valeur, prixTotal: ligne.quantite * saisi.valeur }
-              : { ...sansPm, prixTotal: saisi.valeur };
+            return { ...sansPm, prixTotal: saisi.valeur };
           }
           if (field === 'tva') {
             // Vide : le poste suit le taux général du document. 0 reste un taux (exonéré).
@@ -520,6 +528,26 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const l = ligneAtPath(dpgf.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
     return l ? { key: descriptionKey!, ligne: l as Ligne } : null;
   })();
+  const metreCible = (() => {
+    const k = metreKey ? parseRowKey(metreKey) : null;
+    if (k?.kind !== 'ligne') return null;
+    const l = ligneAtPath(dpgf.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
+    return l ? { key: metreKey!, ligne: l as Ligne } : null;
+  })();
+  /** Applique à un article ce que le métré change (quantité, prix total, lignes) ; le lot et les totaux suivent. */
+  const appliquerMetre = (key: string, patch: Partial<Ligne>) => {
+    const k = parseRowKey(key);
+    if (k?.kind !== 'ligne') return;
+    mutateLots(lots => {
+      const lot = { ...lots[k.lotIdx] };
+      const chap = { ...lot.chapitres[k.chapIdx] };
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, ...patch }));
+      lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
+      const next = [...lots];
+      next[k.lotIdx] = recomputeLot(lot);
+      return next;
+    });
+  };
   const enregistrerDescription = (key: string, texte: string) => {
     const k = parseRowKey(key);
     if (k?.kind !== 'ligne') return;
@@ -844,6 +872,14 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           valeur={descriptionCible.ligne.cctpDescription ?? ''}
           onSave={texte => enregistrerDescription(descriptionCible.key, texte)}
           onClose={() => setDescriptionKey(null)}
+        />
+      )}
+      {metreCible && (
+        <MetreDialog
+          key={metreCible.key}
+          ligne={metreCible.ligne}
+          onSave={patch => { appliquerMetre(metreCible.key, patch); setMetreKey(null); }}
+          onClose={() => setMetreKey(null)}
         />
       )}
       {showDecoupage && (
@@ -1209,7 +1245,32 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         );
                       })}
                       <td className="px-2 py-0.5">
-                        {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{formatQuantite(l.quantite)}</span> : (<EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric maxDecimals={DECIMALES_QUANTITE} {...cellProps} />)}
+                        {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{formatQuantite(l.quantite)}</span> : (
+                          <div className="flex items-center gap-1">
+                            <div className="flex-1 min-w-0">
+                              {l.quantiteDetails?.length
+                                // Un métré : la quantité en est la somme, elle se modifie dans la fenêtre du métré.
+                                ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_metre_sum_of', { count: l.quantiteDetails.length })}>{formatQuantite(l.quantite)}</span>
+                                : <EditableCell
+                                    rKey={rKey} field="quantite" value={l.quantite} numeric maxDecimals={DECIMALES_QUANTITE}
+                                    editValue={texteSaisieQuantite(l)}
+                                    titleHint={formuleCourante(l) ? t('pro_metre_formula_hint', { formule: formuleCourante(l) }) : undefined}
+                                    {...cellProps}
+                                  />}
+                            </div>
+                            {!hasChildren && (
+                              <button
+                                type="button"
+                                onClick={e => { e.stopPropagation(); setMetreKey(rKey); }}
+                                aria-label={t('pro_metre_detail')} title={t('pro_metre_detail')}
+                                className="shrink-0 w-6 h-6 pointer-coarse:w-10 pointer-coarse:h-10 inline-flex items-center justify-center rounded hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                                style={{ color: l.quantiteDetails?.length ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}
+                              >
+                                <IconListDetails size={14} aria-hidden />
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                       <td className="px-2 py-0.5">
                         <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric pm={!!l.pourMemoire && !hasChildren} {...cellProps} />
