@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
+import { metreEnTexte } from '../lib/quantites';
 import type { InboxLot } from './ShareCommentsInbox';
 
 interface Proposal {
@@ -24,6 +25,10 @@ function ValueBox({ label, value, tone }: { label: string; value: string | null;
     </div>
   );
 }
+
+/** Une valeur proposée telle que le cabinet la lit : un métré (liste JSON) devient des lignes lisibles et un total. */
+const lisible = (p: Proposal, value: string | null): string | null =>
+  p.field === 'metre' && value !== null ? metreEnTexte(value) : value;
 
 function describe(p: Proposal, lots: InboxLot[], t: (k: string, o?: any) => string): string {
   const lot = lots.find(l => l.id === p.lotId);
@@ -62,8 +67,8 @@ function PendingCard({ projectId, proposal, lots, onDone }: {
     <li className="px-4 py-3 space-y-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
       <div className="text-xs text-[var(--tblr-muted)]">{describe(proposal, lots, t)}</div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <ValueBox label={t('share_proposal_current')} value={proposal.currentValue} />
-        <ValueBox label={t('share_proposal_proposed')} value={proposal.proposedValue} tone="proposed" />
+        <ValueBox label={t('share_proposal_current')} value={lisible(proposal, proposal.currentValue)} />
+        <ValueBox label={t('share_proposal_proposed')} value={lisible(proposal, proposal.proposedValue)} tone="proposed" />
       </div>
       {proposal.leavesPourMemoire && (
         <p role="status" className="px-3 py-2 text-xs rounded-lg text-[var(--tblr-text)]" style={{ border: '1px solid var(--tblr-border)' }}>
@@ -73,7 +78,7 @@ function PendingCard({ projectId, proposal, lots, onDone }: {
       {proposal.outdated && (
         <div className="space-y-2">
           <p role="alert" className="text-xs text-red-600">{t('share_proposal_outdated_badge')}</p>
-          <ValueBox label={t('share_proposal_base')} value={proposal.baseValue} />
+          <ValueBox label={t('share_proposal_base')} value={lisible(proposal, proposal.baseValue)} />
         </div>
       )}
       {!rejecting ? (
@@ -149,7 +154,7 @@ export default function ShareProposalsInbox({ projectId, lots }: { projectId: st
             {history.map(p => (
               <li key={p.id} className="text-xs space-y-0.5">
                 <div className="text-[var(--tblr-muted)]">{describe(p, lots, t)} · {t(`share_status_${p.status}`)}</div>
-                <div className="text-[var(--tblr-text)] break-words">« {p.baseValue || '—'} » → « {p.proposedValue || '—'} »</div>
+                <div className="text-[var(--tblr-text)] break-words whitespace-pre-wrap">« {lisible(p, p.baseValue) || '—'} » → « {lisible(p, p.proposedValue) || '—'} »</div>
                 {p.decisionNote && <div className="text-[var(--tblr-muted)]">{t('shared_proposal_note', { note: p.decisionNote })}</div>}
                 {p.drifted && <div role="alert" className="text-red-600">{t('share_proposal_drifted', { value: p.proposedValue })}</div>}
               </li>

@@ -2,8 +2,8 @@
 // la formule saisie est mémorisée, un métré est une liste de lignes dont la somme est la quantité.
 import { describe, expect, it } from 'vitest';
 import {
-  appliquerMetre, calculerSaisie, formuleCourante, libelleDetail, MAX_LIGNES_METRE, prixPatch, quantitePatch,
-  totalMetre, validerMetre,
+  appliquerMetre, calculerSaisie, formuleCourante, libelleDetail, MAX_LIGNES_METRE, metreEnTexte, prixPatch, quantitePatch,
+  serialiserMetre, totalMetre, validerMetre,
 } from '../quantites';
 import type { Ligne, QuantiteDetail } from '../../types/dpgf';
 
@@ -177,6 +177,36 @@ describe('formuleCourante', () => {
     expect(formuleCourante(ligne({ quantite: 31, quantiteFormule: '=10+20' }))).toBeUndefined();
     expect(formuleCourante(ligne({ quantite: 30 }))).toBeUndefined();
     expect(formuleCourante(ligne({ quantite: 30, quantiteFormule: '=4*' }))).toBeUndefined();
+  });
+});
+
+describe('serialiserMetre et metreEnTexte : le métré proposé par un confrère', () => {
+  it('prépare la valeur envoyée : libellé et calcul de chaque ligne, lignes vides ignorées', () => {
+    const json = serialiserMetre([
+      detail('1', { libelle: ' Façade Est ', expression: '10', quantite: 10 }),
+      detail('2', { niveau: 'R+1', local: 'Chambre 2', quantite: 20.5 }),
+      detail('3', { libelle: '', expression: '', quantite: 0 }),
+    ]);
+    expect(JSON.parse(json)).toEqual([
+      { libelle: 'Façade Est', expression: '10' },
+      { libelle: 'R+1 · Chambre 2', expression: '20,5' },
+    ]);
+  });
+
+  it('un métré vide se sérialise en liste vide', () => {
+    expect(serialiserMetre([])).toBe('[]');
+    expect(serialiserMetre([detail('1')])).toBe('[]');
+  });
+
+  it('affiche un métré en lignes lisibles, avec le total', () => {
+    const texte = metreEnTexte(JSON.stringify([{ libelle: 'Façade Est', expression: '10' }, { libelle: 'Façade Ouest', expression: '=4*5' }, { libelle: 'Baie', expression: '-2,4' }]), 'm²');
+    expect(texte).toBe('Façade Est : 10\nFaçade Ouest : =4*5\nBaie : -2,4\nTotal : 27,60 m²');
+  });
+
+  it('un métré vide ou illisible ne casse pas l\'affichage', () => {
+    expect(metreEnTexte('[]')).toBe('');
+    expect(metreEnTexte('')).toBe('');
+    expect(metreEnTexte('pas du json')).toBe('pas du json');
   });
 });
 

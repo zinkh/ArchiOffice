@@ -38,8 +38,8 @@ import { activeShareFor, allows, type ShareGrant, type ShareRow } from '../proje
 import { tenantMembershipsByUser } from '../tenantMemberships';
 import { notifyUsers } from '../push';
 import {
-  FIELD_KIND, NUMERIC_FIELDS, PROPOSABLE_FIELDS, REQUIRED_TEXT_FIELDS, applyFieldToNode, blockedEdit, findRawNode,
-  guestDocumentView, nodeLabels, parseDocument, parseNumberValue, readField, recomputeAfterNumericChange,
+  FIELD_KIND, NUMERIC_FIELDS, PROPOSABLE_FIELDS, RECOMPUTE_FIELDS, REQUIRED_TEXT_FIELDS, applyFieldToNode, blockedEdit, findRawNode,
+  guestDocumentView, nodeLabels, parseDocument, parseMetreValue, parseNumberValue, readField, recomputeAfterNumericChange,
   sameFieldValue, visibleNodes, type ProposableField, type ProposableTarget,
 } from '../projectShares/documentView';
 
@@ -74,6 +74,13 @@ export function readProposalInput(body: any): { input: ProposalInput } | { error
     const parsed = parseNumberValue(value, field === 'quantite' ? 'Quantité' : 'Prix unitaire');
     if ('error' in parsed) return { error: parsed.error };
     return { input: { ...base, value: String(parsed.number) } };
+  }
+  if (field === 'metre') {
+    // Une liste de lignes { libelle, expression } : chaque calcul valide, total positif ou nul, forme canonique.
+    const parsed = parseMetreValue(value);
+    if ('error' in parsed) return { error: parsed.error };
+    if (parsed.value.length > MAX_PROPOSAL_VALUE) return { error: 'Métré trop long.' };
+    return { input: { ...base, value: parsed.value } };
   }
   if (typeof value !== 'string') return { error: 'La valeur proposée doit être un texte.' };
   if (REQUIRED_TEXT_FIELDS.includes(field)) {
@@ -396,7 +403,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
         // Garde-fou 3 : écriture conditionnelle à l'état exact du document lu. L'instantané reste, même
         // en cas d'échec : on ne supprime rien.
         leftPourMemoire = applyFieldToNode(node, proposal.field, proposal.proposed_value).leftPourMemoire;
-        if (NUMERIC_FIELDS.includes(proposal.field)) recomputeAfterNumericChange(row.doc, proposal.project_lot_id);
+        if (RECOMPUTE_FIELDS.includes(proposal.field)) recomputeAfterNumericChange(row.doc, proposal.project_lot_id);
         // Conditionnelle à la RÉVISION lue (dpgfs.revision, incrémentée par un déclencheur SQL à chaque
         // changement du document), pas au texte du document : il pèse plusieurs centaines de Ko et un
         // filtre PostgREST passe dans l'URL.
