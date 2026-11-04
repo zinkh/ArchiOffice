@@ -15,6 +15,11 @@ paths:
   - "src/pages/PhoneCalls.tsx"
   - "src/components/Contact*.tsx"
   - "src/components/TenantSwitcher.tsx"
+  - "server/guestAccessGuard.ts"
+  - "server/projectShares/**"
+  - "server/routes/projectShares.ts"
+  - "src/components/ProjectSharesPanel.tsx"
+  - "src/pages/SharedProjects.tsx"
 ---
 
 # Équipe, cabinets, contacts, archivage, sécurité
@@ -151,6 +156,77 @@ et l'adresse courante vise souvent une affaire qui n'existe pas dans l'autre.
 Le sélecteur (`src/components/TenantSwitcher.tsx`) n'apparaît qu'à partir de
 deux cabinets ; un compte à cabinet unique ne voit rien changer, hormis
 l'entrée « Rejoindre ou créer un cabinet » qui mène à `/agency-setup?add=1`.
+
+### Partage d'une affaire avec un confrère (collaborateur externe)
+
+Un confrère est invité sur UNE affaire sans devenir membre du cabinet. Le
+partage (`project_shares`, une ligne par affaire × personne, statut `active` ou
+`revoked`) porte des droits par type de ressource (`project_share_grants`,
+`read` ou `write`). **Aucun droit par défaut** : ce qui n'est pas accordé est
+invisible. `supabase/migrate_project_shares.sql`, idempotente, RLS posée.
+
+**Gratuité avec limites** (`SHARE_LIMITS`, `server/projectShares/access.ts`) : 3
+invités actifs par affaire, 10 personnes distinctes par cabinet, refus en 402
+(`SHARE_LIMIT_PROJECT`, `SHARE_LIMIT_TENANT`) **avant** toute création de compte.
+Pas d'IA (coût au cabinet), pas de facturation, pas de création d'affaire. Un
+invité n'est ni de l'équipe, ni mentionnable, ni compté dans le quota
+d'utilisateurs : `listTenantMemberIds` exclut le rôle `guest`. À ne pas défaire,
+la gratuité tient à ce filtre.
+
+**Deux cas, un seul modèle.**
+
+- Une personne SANS cabinet reçoit une adhésion `system_role = 'guest'` au
+  cabinet qui l'invite (sinon elle serait « sans agence » et ne pourrait pas
+  entrer). Compte créé par le même lien d'invitation que `POST /api/team`.
+- Une personne qui a DÉJÀ un cabinet ne reçoit aucune adhésion : elle reste dans
+  son cabinet et ouvre l'affaire par `/partages`. Son sélecteur de cabinet n'est
+  pas pollué, et ses droits chez elle ne bougent pas.
+
+**Le serveur fait barrière, en refusant par défaut.** `guestAccessGuard`
+(`server/guestAccessGuard.ts`, monté avant toutes les routes) ne laisse passer
+un invité `guest` que sur `/api/shared`, `/api/me` et `/api/health` ; tout le
+reste répond 403 `GUEST_FORBIDDEN`. Refuser par défaut plutôt qu'énumérer les
+routes interdites : une route ajoutée demain ne s'ouvre pas à un invité par
+oubli. Le garde FERME l'accès s'il tombe (503), il ne l'ouvre pas. Le rôle est
+mis en cache 10 s ; `invalidateGuestRoleCache` à chaque invitation ou retrait.
+
+**Routes `/api/shared` (invité)** : indépendantes du cabinet actif, le cabinet
+vient du partage. Une affaire non partagée répond 404, jamais 403. Chaque
+réponse est construite champ par champ (`PROJECT_FIELDS`, `LOT_FIELDS`,
+`TASK_FIELDS`) : une colonne ajoutée demain (`assignee_id`, `contact_id`) ne
+fuit pas. Écrire une tâche exige le droit `write`, une affaire non archivée, et
+laisse une trace dans le journal d'activité (« confrère externe »). Le corps de
+la requête ne choisit jamais `tenant_id` ni `project_id`.
+
+**Routes `/api/projects/:id/shares` (cabinet)** : inviter, régler les droits,
+retirer. Réservé aux administrateurs et managers (`requireSharer`), contrôle
+d'appartenance de l'affaire par `assertTenantEntity`. Retirer vide les droits
+d'abord (un échec laisse un partage fermé), puis supprime l'adhésion `guest`
+devenue inutile ; l'adhésion d'un vrai membre n'est jamais touchée.
+
+**Droits branchés aujourd'hui** : `lots` (lecture, sans le contact de
+l'entreprise), `tasks` (lecture ou écriture) et `documents` (lecture seule).
+Autres types, droits par lot et mode « proposition de modification » : voir
+ROADMAP.md.
+
+**Documents** : le droit couvre les documents de l'affaire (`resource_type =
+'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque
+d'agent qui vivent dans la même table. La liste ne rend jamais `file_url`,
+`uploaded_by` ni les contacts. Le fichier ne s'obtient que par
+`GET /api/shared/projects/:id/documents/:docId/download`, qui revérifie le
+partage, le droit et le rattachement à l'affaire, puis délègue à
+`linkForTenantFile` (`server/projectShares/fileAccess.ts`) : même mécanisme que
+`/api/storage/signed-url`, mais l'appartenance du fichier se vérifie contre le
+cabinet DU PARTAGE (préfixe `${tenantId}/` ou connexion de stockage du cabinet),
+jamais contre un cabinet désigné par la requête. Chaque téléchargement est tracé.
+Le panneau laisse ce droit désactivé par défaut : l'onglet Documents peut
+contenir des contrats ou des pièces d'honoraires, et c'est au cabinet de le
+décider. Pas de dépôt par l'invité (pas de droit `write` pour ce type).
+
+Écrans : `ProjectSharesPanel.tsx` (fiche affaire, masqué pour qui n'est pas
+administrateur ou manager), `SharedProjects.tsx` (`/partages`), entrée de menu
+« Affaires partagées ». `ProtectedLayout` ramène un `guest` sur `/partages`.
+Tests : `tests/projectShares.test.ts`.
 
 ### Fusion de contacts et vue détaillée de `/contacts`
 

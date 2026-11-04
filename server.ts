@@ -25,6 +25,8 @@ import { registerCustomReferenceRoutes } from "./server/routes/customReferences"
 import { registerReferencesDossierRoutes } from "./server/routes/referencesDossier";
 import { registerPanneauxRoutes } from "./server/routes/panneaux";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
+import { registerProjectShareRoutes } from "./server/routes/projectShares";
+import { guestAccessGuard } from "./server/guestAccessGuard";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
 import { registerProjectArchiveRoutes } from "./server/routes/projectArchive";
@@ -972,6 +974,9 @@ export async function createApp() {
 
   // Affaire archivée : lecture seule pour tout ce qui s'y rattache. Monté ici,
   // après l'authentification et avant toute route (server/archivedProjectGuard.ts).
+  // Collaborateur externe (confrère invité sur une affaire) : refus par défaut,
+  // seul /api/shared lui est ouvert (server/guestAccessGuard.ts). Avant toute route.
+  app.use("/api", guestAccessGuard({ supabaseAdmin, getTenantId }));
   app.use("/api", archivedProjectGuard({ supabaseAdmin, getTenantId }));
 
   app.get("/api/health", (req, res) => {
@@ -1109,6 +1114,7 @@ export async function createApp() {
   registerReferencesDossierRoutes(app, { supabaseAdmin, getTenantId });
   registerPanneauxRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
+  registerProjectShareRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerProjectArchiveRoutes(app, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota });

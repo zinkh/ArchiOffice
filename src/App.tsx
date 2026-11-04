@@ -51,6 +51,7 @@ const Team = lazy(() => import('./pages/Team'));
 const Gantt = lazy(() => import('./pages/Gantt'));
 const CalendarPage = lazy(() => import('./pages/Calendar'));
 const Kanban = lazy(() => import('./pages/Kanban'));
+const SharedProjects = lazy(() => import('./pages/SharedProjects'));
 const Contacts = lazy(() => import('./pages/Contacts'));
 const Mailbox = lazy(() => import('./pages/Mailbox'));
 const ProjectTemplates = lazy(() => import('./pages/ProjectTemplates'));
@@ -581,6 +582,14 @@ function ProtectedLayout() {
     return <Navigate to="/agency-setup" replace />;
   }
 
+  // Confrère invité sur une affaire, sans cabinet à lui : son espace se limite
+  // aux affaires partagées (le serveur refuse tout le reste, voir
+  // server/guestAccessGuard.ts) ; on l'y ramène plutôt que de lui montrer des
+  // écrans qui répondraient tous 403.
+  if (currentUser.system_role === 'guest' && !location.pathname.startsWith('/partages') && !location.pathname.startsWith('/profile')) {
+    return <Navigate to="/partages" replace />;
+  }
+
   // First login for a freshly-created cabinet: send its admin through the
   // Onboarding wizard (company profile, numbering, default templates, team
   // invites) until they finish or skip it — `settings` is null while still
@@ -696,6 +705,7 @@ export default function App() {
               <Route path="/gantt" element={<Gantt />} />
               <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/kanban" element={<Kanban />} />
+              <Route path="/partages" element={<SharedProjects />} />
               <Route path="/contacts" element={<Contacts />} />
               <Route path="/mailbox" element={<Mailbox />} />
               <Route path="/templates" element={<ProjectTemplates />} />
