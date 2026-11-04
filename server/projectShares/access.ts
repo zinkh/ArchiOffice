@@ -18,8 +18,14 @@ export type ShareKind = (typeof SHARE_KINDS)[number];
 /** Du plus faible au plus fort : lire < commenter < écrire. Chaque niveau comprend les précédents. */
 export type ShareAccess = 'read' | 'comment' | 'write';
 
-/** Types sur lesquels une écriture a un sens et est branchée côté serveur. */
-export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks'];
+/**
+ * Types sur lesquels une écriture a un sens et est branchée côté serveur.
+ * Pour `tasks`, « écrire » modifie la tâche. Pour `cctp`, « écrire » signifie PROPOSER :
+ * l'invité n'écrit jamais dans le document, il dépose une proposition que le cabinet
+ * valide (server/routes/projectShareProposals.ts). Le DPGF n'est pas encore concerné :
+ * ses quantités et ses prix demandent une autre validation.
+ */
+export const WRITABLE_KINDS: readonly ShareKind[] = ['tasks', 'cctp'];
 /** Types qu'un invité peut commenter (sans rien modifier). */
 export const COMMENTABLE_KINDS: readonly ShareKind[] = ['cctp', 'dpgf'];
 /**

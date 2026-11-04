@@ -115,6 +115,51 @@ export function nodeLabels(doc: Rec): Map<string, string> {
   return labels;
 }
 
+/**
+ * Les champs TEXTE qu'un confrère peut proposer de modifier, par type d'élément. Liste fermée :
+ * pas de quantité, de prix, d'unité ni de titre de lot (celui-ci appartient à `project_lots`,
+ * `withProjectLotTitles` le réapplique à chaque lecture). Un champ ajouté demain au document
+ * n'est jamais proposable tant qu'il n'est pas ajouté ici.
+ */
+export const PROPOSABLE_FIELDS = {
+  chapitre: ['cctpDescription', 'titre'],
+  ligne: ['cctpDescription', 'designation'],
+} as const;
+export type ProposableTarget = keyof typeof PROPOSABLE_FIELDS;
+
+/** Champs dont la valeur ne peut pas être vide (un chapitre ou un article sans intitulé n'existe pas). */
+export const REQUIRED_TEXT_FIELDS: readonly string[] = ['titre', 'designation'];
+
+/** Le nœud RÉEL (par référence) d'un lot du document, ou null. Sert à lire et à appliquer une proposition. */
+export function findRawNode(doc: Rec, projectLotId: string, targetType: ProposableTarget, targetId: string): Rec | null {
+  const lot = (Array.isArray(doc.lots) ? doc.lots : []).find((l): l is Rec => isRec(l) && l.projectLotId === projectLotId);
+  if (!lot) return null;
+  const walk = (lignes: unknown): Rec | null => {
+    for (const l of Array.isArray(lignes) ? lignes : []) {
+      if (!isRec(l)) continue;
+      if (targetType === 'ligne' && l.id === targetId) return l;
+      const inChildren = walk(l.children);
+      if (inChildren) return inChildren;
+    }
+    return null;
+  };
+  for (const c of Array.isArray(lot.chapitres) ? lot.chapitres : []) {
+    if (!isRec(c)) continue;
+    if (targetType === 'chapitre' && c.id === targetId) return c;
+    if (targetType === 'ligne') {
+      const found = walk(c.lignes);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/** La valeur texte d'un champ (une chaîne vide quand il est absent), pour comparer sans ambiguïté. */
+export function textField(node: Rec, field: string): string {
+  const value = node[field];
+  return typeof value === 'string' ? value : '';
+}
+
 /** Les nœuds d'un lot tels que l'invité les VOIT : un commentaire ne peut viser que ceux-là. */
 export function visibleNodes(viewLotRec: Rec): Record<NodeType, Set<string>> {
   const nodes: Record<NodeType, Set<string>> = { lot: new Set(), chapitre: new Set(), ligne: new Set() };

@@ -862,6 +862,36 @@ CREATE TABLE IF NOT EXISTS project_share_comments (
 CREATE INDEX IF NOT EXISTS idx_project_share_comments_project ON project_share_comments(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_project_share_comments_share   ON project_share_comments(share_id);
 
+-- Propositions de modification des textes du CCTP par un confrère, validées par le cabinet
+-- (supabase/migrate_project_share_proposals.sql, server/routes/projectShareProposals.ts).
+CREATE TABLE IF NOT EXISTS project_share_proposals (
+  id             TEXT PRIMARY KEY,
+  tenant_id      UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  share_id       TEXT NOT NULL REFERENCES project_shares(id) ON DELETE CASCADE,
+  author_id      TEXT NOT NULL,
+  project_lot_id TEXT NOT NULL,
+  target_type    TEXT NOT NULL,
+  target_id      TEXT NOT NULL,
+  field          TEXT NOT NULL,
+  base_value     TEXT NOT NULL DEFAULT '',
+  proposed_value TEXT NOT NULL DEFAULT '',
+  status         TEXT NOT NULL DEFAULT 'pending',
+  decided_by     TEXT,
+  decided_at     TIMESTAMPTZ,
+  decision_note  TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT project_share_proposals_status_check CHECK (status IN ('pending', 'applied', 'rejected', 'withdrawn', 'outdated')),
+  CONSTRAINT project_share_proposals_target_check CHECK (target_type IN ('chapitre', 'ligne')),
+  CONSTRAINT project_share_proposals_field_check  CHECK (field IN ('cctpDescription', 'titre', 'designation')),
+  CONSTRAINT project_share_proposals_size_check   CHECK (
+    char_length(proposed_value) <= 20000 AND char_length(base_value) <= 20000
+    AND (decision_note IS NULL OR char_length(decision_note) <= 1000)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_project_share_proposals_project ON project_share_proposals(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_proposals_share   ON project_share_proposals(share_id, status);
+
 CREATE TABLE IF NOT EXISTS custom_references (
   id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   tenant_id         UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
@@ -1122,6 +1152,9 @@ CREATE POLICY "tenant_isolation" ON project_share_grants
   USING (tenant_id::text = my_tenant_id()::text);
 ALTER TABLE project_share_comments ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON project_share_comments
+  USING (tenant_id::text = my_tenant_id()::text);
+ALTER TABLE project_share_proposals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON project_share_proposals
   USING (tenant_id::text = my_tenant_id()::text);
 
 -- Activity Feed tables
