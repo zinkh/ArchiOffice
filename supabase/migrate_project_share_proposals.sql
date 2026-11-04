@@ -1,10 +1,13 @@
--- Partage d'affaire, tranche 3 : propositions de modification des TEXTES du CCTP.
+-- Partage d'affaire, tranche 3 : propositions de modification du CCTP et du DPGF.
 --
 -- Un confrère n'écrit jamais dans le document (dpgfs.data est un seul bloc JSON que
 -- l'autosauvegarde de l'éditeur réécrit en entier) : il dépose une proposition, que le
 -- cabinet valide. `base_value` est la valeur que le confrère a VUE ; à l'application, si
 -- le champ a changé depuis, la proposition est refusée (« périmée ») plutôt que d'écraser
--- le travail fait entre-temps. Granularité : un champ d'un chapitre ou d'un article.
+-- le travail fait entre-temps. Granularité : un champ d'un lot (titre), d'un chapitre
+-- (texte, titre) ou d'un article (texte, désignation, quantité, prix unitaire, unité).
+-- Aucune ligne n'est jamais supprimée : une proposition remplacée, retirée, refusée ou
+-- périmée garde sa valeur de départ et sa valeur proposée.
 --
 -- Additive et rejouable : aucune donnée existante n'est modifiée.
 
@@ -26,8 +29,8 @@ CREATE TABLE IF NOT EXISTS project_share_proposals (
   decision_note  TEXT,
   created_at     TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT project_share_proposals_status_check CHECK (status IN ('pending', 'applied', 'rejected', 'withdrawn', 'outdated')),
-  CONSTRAINT project_share_proposals_target_check CHECK (target_type IN ('chapitre', 'ligne')),
-  CONSTRAINT project_share_proposals_field_check  CHECK (field IN ('cctpDescription', 'titre', 'designation')),
+  CONSTRAINT project_share_proposals_target_check CHECK (target_type IN ('lot', 'chapitre', 'ligne')),
+  CONSTRAINT project_share_proposals_field_check  CHECK (field IN ('cctpDescription', 'titre', 'designation', 'quantite', 'prixUnitaire', 'unite')),
   CONSTRAINT project_share_proposals_size_check   CHECK (
     char_length(proposed_value) <= 20000 AND char_length(base_value) <= 20000
     AND (decision_note IS NULL OR char_length(decision_note) <= 1000)

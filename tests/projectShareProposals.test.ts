@@ -17,21 +17,24 @@ const LIGNE_TEXT = 'Coulées en pleine fouille.';
 function makeDocument(lotA: string, lotB: string) {
   return {
     id: 'doc-1', projectId: 'p', titre: 'DPGF Villa', version: 'V2', dateCreation: '2026-10-01', statut: 'draft',
-    totalHT: 1234, TVA: 20, totalTTC: 1480.8,
+    totalHT: 15010, TVA: 20, totalTTC: 18012,
     lots: [
       {
-        id: 'lot-a', numero: '01', titre: 'Gros œuvre (titre du document)', projectLotId: lotA, marqueur: { statut: 'incomplet' },
+        id: 'lot-a', numero: '01', titre: 'Gros œuvre (titre du document)', projectLotId: lotA, sousTotal: 10, marqueur: { statut: 'incomplet' },
         chapitres: [{
           id: 'chap-a1', numero: '1', titre: 'Fondations', cctpDescription: CHAP_TEXT,
           lignes: [{
             id: 'lig-a1', numero: '1.1', designation: 'Semelles filantes', unite: 'm3', quantite: 12, prixUnitaire: 100, prixTotal: 1200,
             type: 'ouvrage', cctpDescription: LIGNE_TEXT, articleTypeId: 'bib-secrete',
             children: [{ id: 'lig-a1b', numero: '1.1.1', designation: 'Armatures', unite: 'kg', quantite: 5, prixUnitaire: 2, prixTotal: 10, type: 'ouvrage' }],
+          }, {
+            id: 'lig-a2', numero: '1.2', designation: 'Prescription générale', unite: '', quantite: 0, prixUnitaire: 0, prixTotal: 0,
+            type: 'commentaire', cctpOnly: true, cctpDescription: 'Texte seul du CCTP',
           }],
         }],
       },
       {
-        id: 'lot-b', numero: '02', titre: 'Charpente', projectLotId: lotB,
+        id: 'lot-b', numero: '02', titre: 'Charpente', projectLotId: lotB, sousTotal: 15000,
         chapitres: [{ id: 'chap-b1', numero: '1', titre: 'Fermes', lignes: [{ id: 'lig-b1', numero: '1.1', designation: 'Fermettes', unite: 'u', quantite: 30, prixUnitaire: 500, prixTotal: 15000, type: 'ouvrage', cctpDescription: 'Texte du lot B' }] }],
       },
     ],
@@ -77,15 +80,18 @@ const ligneText = (lotId: string, value: string, over: Record<string, any> = {})
 });
 
 describe('proposition : fonctions pures', () => {
-  it('n\'accepte que les champs texte de la liste fermée, jamais un prix, une quantité ni un titre de lot', () => {
-    expect([...PROPOSABLE_FIELDS.ligne]).toEqual(['cctpDescription', 'designation']);
+  it('n\'accepte que les champs de la liste fermée, jamais un montant calculé ni un champ interne', () => {
+    expect([...PROPOSABLE_FIELDS.lot]).toEqual(['titre']);
     expect([...PROPOSABLE_FIELDS.chapitre]).toEqual(['cctpDescription', 'titre']);
-    for (const field of ['prixUnitaire', 'quantite', 'prixTotal', 'unite', 'marqueur', 'children']) {
+    expect([...PROPOSABLE_FIELDS.ligne]).toEqual(['cctpDescription', 'designation', 'quantite', 'prixUnitaire', 'unite']);
+    for (const field of ['prixTotal', 'marqueur', 'children', 'type', 'nature', 'pourMemoire', 'articleTypeId', 'cctpOnly']) {
       expect('error' in readProposalInput({ lotId: 'l', targetType: 'ligne', targetId: 'x', field, value: '1' }), field).toBe(true);
     }
-    expect('error' in readProposalInput({ lotId: 'l', targetType: 'lot', targetId: 'x', field: 'titre', value: 'Nouveau' })).toBe(true);
+    expect('error' in readProposalInput({ lotId: 'l', targetType: 'lot', targetId: 'x', field: 'cctpDescription', value: 'x' })).toBe(true);
     expect('error' in readProposalInput({ lotId: 'l', targetType: 'chapitre', targetId: 'x', field: 'designation', value: 'x' })).toBe(true);
+    expect('error' in readProposalInput({ lotId: 'l', targetType: 'chapitre', targetId: 'x', field: 'prixUnitaire', value: '1' })).toBe(true);
     expect('error' in readProposalInput({ lotId: 'l', targetType: 'ligne', targetId: 'x', field: 'titre', value: 'x' })).toBe(true);
+    expect('error' in readProposalInput({ lotId: 'l', targetType: 'lot', targetId: 'x', field: 'titre', value: 'Nouveau' })).toBe(false);
   });
 
   it('valide, borne et nettoie la valeur', () => {
@@ -168,7 +174,7 @@ describe('déposer une proposition', () => {
   it('refuse un champ hors liste, un intitulé vide, un texte inchangé et une affaire archivée', async () => {
     const { admin, projectId, lotA } = setup();
     const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
-    expect((await propose(guest.token, projectId, ligneText(lotA, '9999', { field: 'prixUnitaire' }))).status).toBe(400);
+    expect((await propose(guest.token, projectId, ligneText(lotA, '9999', { field: 'marqueur' }))).status).toBe(400);
     expect((await propose(guest.token, projectId, ligneText(lotA, '   ', { field: 'designation' }))).status).toBe(400);
     const same = await propose(guest.token, projectId, ligneText(lotA, LIGNE_TEXT));
     expect(same.status).toBe(400);
@@ -192,7 +198,7 @@ describe('déposer une proposition', () => {
     expect(status(other.id)).toBe('pending');
   });
 
-  it('borne les propositions en attente', async () => {
+  it('la limite de propositions en attente refuse la demande et alerte, sans rien perdre', async () => {
     const { tenantId, admin, projectId, lotA } = setup();
     const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
     fakeSupabaseAdmin.seed('project_share_proposals', Array.from({ length: MAX_PENDING_PER_SHARE }, (_, i) => ({
@@ -200,9 +206,53 @@ describe('déposer une proposition', () => {
       project_lot_id: lotA, target_type: 'ligne', target_id: `autre-${i}`, field: 'cctpDescription',
       base_value: '', proposed_value: 'x', status: 'pending', created_at: '2026-11-01T00:00:00Z',
     })));
+    const ofTenant = () => fakeSupabaseAdmin.getTable('project_share_proposals').filter((p: any) => p.tenant_id === tenantId);
+    const rowsBefore = ofTenant().length;
+
     const res = await propose(guest.token, projectId, ligneText(lotA, 'Une de trop'));
     expect(res.status).toBe(409);
-    expect(res.body.code).toBe('PROPOSAL_LIMIT');
+    expect(res.body).toMatchObject({ code: 'PROPOSAL_LIMIT', pending: MAX_PENDING_PER_SHARE, limit: MAX_PENDING_PER_SHARE });
+    expect(res.body.error).toContain('Le cabinet en a été informé');
+    expect(res.body.error).toContain('Votre texte n\'est pas perdu');
+
+    // Aucune ligne n'a disparu ni changé d'état, et aucune n'a été ajoutée.
+    const rows = ofTenant();
+    expect(rows).toHaveLength(rowsBefore);
+    expect(rows.every((p: any) => p.status === 'pending')).toBe(true);
+
+    // Le cabinet est alerté : notification système aux administrateurs, et trace dans le journal.
+    await new Promise(r => setTimeout(r, 30));
+    const outbox = fakeSupabaseAdmin.getTable('notification_outbox').filter((n: any) => n.tenant_id === tenantId && n.title === 'Limite de propositions atteinte');
+    expect(outbox.map((n: any) => n.user_id)).toEqual([admin.userId]);
+    expect(outbox[0].body).toContain(guest.email);
+    expect(outbox[0].tag).toBe(`share-limit:${guest.shareId}`);
+    const logged = fakeSupabaseAdmin.getTable('activities').filter((a: any) => a.tenant_id === tenantId && String(a.action).includes('Limite de 50'));
+    expect(logged).toHaveLength(1);
+
+    // Insister n'inonde pas le cabinet : une seule alerte par heure et par partage.
+    await propose(guest.token, projectId, ligneText(lotA, 'Encore une'));
+    await new Promise(r => setTimeout(r, 30));
+    expect(fakeSupabaseAdmin.getTable('notification_outbox').filter((n: any) => n.tenant_id === tenantId && n.title === 'Limite de propositions atteinte')).toHaveLength(1);
+
+    // Le cabinet voit l'alerte dans sa liste ; l'invité voit son compteur.
+    const list = await request(app).get(`/api/projects/${projectId}/share-proposals`).set(authHeader(admin.token));
+    expect(list.body.every((p: any) => p.limitReached === true && p.pendingOfShare === MAX_PENDING_PER_SHARE && p.maxPending === MAX_PENDING_PER_SHARE)).toBe(true);
+    const mine = await request(app).get(`/api/shared/projects/${projectId}/proposals`).set(authHeader(guest.token));
+    expect(mine.body[0]).toMatchObject({ pending: MAX_PENDING_PER_SHARE, limit: MAX_PENDING_PER_SHARE });
+  });
+
+  it('remplacer une proposition au niveau de la limite reste possible : elle libère sa propre place', async () => {
+    const { tenantId, admin, projectId, lotA } = setup();
+    const guest = await inviteGuest(admin.token, projectId, [{ kind: 'cctp', access: 'write', lotId: lotA }]);
+    const first = (await propose(guest.token, projectId, ligneText(lotA, 'Première version'))).body;
+    fakeSupabaseAdmin.seed('project_share_proposals', Array.from({ length: MAX_PENDING_PER_SHARE - 1 }, (_, i) => ({
+      id: `${tenantId}-fill-${i}`, tenant_id: tenantId, project_id: projectId, share_id: guest.shareId, author_id: guest.userId,
+      project_lot_id: lotA, target_type: 'ligne', target_id: `autre-${i}`, field: 'cctpDescription',
+      base_value: '', proposed_value: 'x', status: 'pending', created_at: '2026-11-01T00:00:00Z',
+    })));
+    const replaced = await propose(guest.token, projectId, ligneText(lotA, 'Seconde version'));
+    expect(replaced.status).toBe(201);
+    expect(fakeSupabaseAdmin.getTable('project_share_proposals').find((p: any) => p.id === first.id)!.status).toBe('withdrawn');
   });
 
   it('chaque confrère ne lit que ses propres propositions, et ne retire que les siennes', async () => {
@@ -300,12 +350,13 @@ describe('décision du cabinet', () => {
     expect(res.status).toBe(409);
     expect(res.body.code).toBe('PROPOSAL_OUTDATED');
     expect(storedDoc(dpgfId)).toEqual(edited);
+    // Périmée avant toute écriture : pas même d'instantané à prendre.
     expect(fakeSupabaseAdmin.getTable('dpgf_versions').filter((v: any) => v.tenant_id === tenantId)).toHaveLength(0);
     const after = await request(app).get(`/api/projects/${projectId}/share-proposals`).set(authHeader(admin.token));
     expect(after.body[0].status).toBe('outdated');
   });
 
-  it('refuse d\'écraser un enregistrement concurrent : écriture conditionnelle, instantané retiré', async () => {
+  it('refuse d\'écraser un enregistrement concurrent : écriture conditionnelle, instantané conservé', async () => {
     const { tenantId, admin, projectId, dpgfId, proposal } = await pendingProposal();
     const row = fakeSupabaseAdmin.getTable('dpgfs').find((d: any) => d.id === dpgfId)!;
     const original = fakeSupabaseAdmin.from.bind(fakeSupabaseAdmin);
@@ -332,7 +383,8 @@ describe('décision du cabinet', () => {
       delete (fakeSupabaseAdmin as any).from;
     }
     expect(storedDoc(dpgfId)).toEqual(concurrent); // l'enregistrement concurrent est intact
-    expect(fakeSupabaseAdmin.getTable('dpgf_versions').filter((v: any) => v.tenant_id === tenantId)).toHaveLength(0);
+    // Aucune suppression, même ici : l'instantané pris avant la tentative est conservé.
+    expect(fakeSupabaseAdmin.getTable('dpgf_versions').filter((v: any) => v.tenant_id === tenantId)).toHaveLength(1);
     const list = await request(app).get(`/api/projects/${projectId}/share-proposals`).set(authHeader(admin.token));
     expect(list.body[0].status).toBe('pending'); // rien n'est perdu : on peut réessayer
   });

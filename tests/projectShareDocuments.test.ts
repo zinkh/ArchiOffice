@@ -86,11 +86,13 @@ describe('droits par lot : fonctions pures', () => {
     expect('error' in normalizeGrants([{ kind: 'cctp', access: 'read', lotId: 'l1' }])).toBe(false);
   });
 
-  it('accorde « commentaire » au CCTP et au DPGF seulement, et « écriture » (proposer) au CCTP seul', () => {
+  it('accorde « commentaire » au CCTP et au DPGF seulement, et « écriture » (proposer) au CCTP et au DPGF', () => {
     expect('error' in normalizeGrants([{ kind: 'tasks', access: 'comment' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'documents', access: 'comment' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'documents', access: 'write' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'lots', access: 'write' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'cctp', access: 'write', lotId: 'l1' }])).toBe(false);
-    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'write', lotId: 'l1' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'write', lotId: 'l1' }])).toBe(false);
     expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'comment', lotId: 'l1' }])).toBe(false);
   });
 
