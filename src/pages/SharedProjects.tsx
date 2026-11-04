@@ -6,8 +6,9 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { IconArrowLeft } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import SharedDocument from '../components/SharedDocument';
 
-interface Grant { kind: 'lots' | 'tasks' | 'documents'; access: 'read' | 'write' }
+interface Grant { kind: 'lots' | 'tasks' | 'documents' | 'cctp' | 'dpgf'; access: 'read' | 'comment' | 'write'; lotId?: string }
 interface Doc { id: string; name: string; category: string | null; phase: string | null; version: number | null; uploaded_at: string | null; description: string | null }
 interface Summary { shareId: string; projectId: string; projectName: string; projectCode: string | null; address: string | null; tenantName: string | null; grants: Grant[] }
 interface View {
@@ -166,6 +167,10 @@ function SharedDetail({ projectId }: { projectId: string }) {
           </ul>
         </section>
       )}
+
+      {(['cctp', 'dpgf'] as const).filter(mode => view.grants.some(g => g.kind === mode)).map(mode => (
+        <SharedDocument key={mode} projectId={projectId} mode={mode} grants={view.grants} archived={view.archived} />
+      ))}
 
       {docs && (
         <section className="rounded-lg p-4" style={cardStyle}>

@@ -18,7 +18,10 @@ paths:
   - "server/guestAccessGuard.ts"
   - "server/projectShares/**"
   - "server/routes/projectShares.ts"
+  - "server/routes/projectShareDocuments.ts"
   - "src/components/ProjectSharesPanel.tsx"
+  - "src/components/SharedDocument.tsx"
+  - "src/components/ShareCommentsInbox.tsx"
   - "src/pages/SharedProjects.tsx"
 ---
 
@@ -205,9 +208,9 @@ d'abord (un échec laisse un partage fermé), puis supprime l'adhésion `guest`
 devenue inutile ; l'adhésion d'un vrai membre n'est jamais touchée.
 
 **Droits branchés aujourd'hui** : `lots` (lecture, sans le contact de
-l'entreprise), `tasks` (lecture ou écriture) et `documents` (lecture seule).
-Autres types, droits par lot et mode « proposition de modification » : voir
-ROADMAP.md.
+l'entreprise), `tasks` (lecture ou écriture), `documents` (lecture seule), `cctp`
+et `dpgf` (par lot, lecture ou commentaire). Écriture sur le CCTP et le DPGF par
+proposition de modification, autres types : voir ROADMAP.md.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =
 'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque
@@ -222,6 +225,43 @@ jamais contre un cabinet désigné par la requête. Chaque téléchargement est 
 Le panneau laisse ce droit désactivé par défaut : l'onglet Documents peut
 contenir des contrats ou des pièces d'honoraires, et c'est au cabinet de le
 décider. Pas de dépôt par l'invité (pas de droit `write` pour ce type).
+
+**CCTP et DPGF, lot par lot** (`supabase/migrate_project_share_lots_comments.sql`).
+Le CCTP et le DPGF sont UN document (`dpgfs.data`, arbre lots > chapitres >
+lignes) dont chaque lot porte le texte du CCTP (`cctpDescription`) ET les prix.
+Le droit sur `cctp` ou `dpgf` se donne donc **par lot** (`project_share_grants
+.project_lot_id`, clé `project_lots.id`, rattachement `Lot.projectLotId`) : un
+droit de ce type sans lot n'existe pas (`normalizeGrants` le refuse,
+`loadGrants` l'ignore), pour qu'un lot n'ouvre jamais les prix des autres. Les
+lots désignés doivent appartenir à l'affaire (`lotsBelong`, à l'invitation et à
+la modification). Niveaux : lire < commenter < écrire, chacun comprenant les
+précédents (`allows(grants, kind, access, lotId)`).
+
+`GET /api/shared/projects/:id/cctp` et `/dpgf` rendent les seuls lots accordés,
+**construits champ par champ** (`guestDocumentView`,
+`server/projectShares/documentView.ts`, pur et testé) : la vue CCTP n'a aucune
+quantité ni aucun prix ; la vue DPGF a quantités et prix mais ni textes, ni
+lignes ou chapitres `cctpOnly`. Jamais : totaux du document (ils additionnent
+tous les lots), `marqueur`, `images.fileUrl`, `articleTypeId`, `genereParIa`.
+Un lot du document sans `projectLotId` ne peut jamais être accordé. Les titres
+de lot passent par `withProjectLotTitles`, comme la route du cabinet.
+
+**Commentaires** (`project_share_comments`, `server/routes/projectShareDocuments.ts`).
+Un confrère commente un lot, un chapitre ou un article qu'il VOIT : l'élément doit
+exister dans la vue de CE lot pour CE type de document (`visibleNodes`), sinon 404,
+si bien qu'un identifiant deviné ne sert pas à sonder le document. Un fil
+appartient à UN partage, un confrère ne lit jamais ceux d'un autre ; retirer le
+droit de lecture d'un lot masque aussi ses commentaires. Une réponse reste dans le
+fil du même partage, sur le même élément. Le cabinet (administrateurs et
+managers) lit tous les fils avec le libellé de l'élément visé (`nodeLabels`,
+jamais rendu à un invité), répond et marque « traité ». Pas de suppression en
+v1. Écrans : `SharedDocument.tsx` (invité), `ShareCommentsInbox.tsx` et éditeur
+de droits par lot dans `ProjectSharesPanel.tsx` (cabinet).
+
+**À ne pas défaire** : la vue d'un invité se construit TOUJOURS à partir des
+listes blanches de `documentView.ts`, jamais en copiant le document ni en
+retirant des champs d'une copie. Une colonne ou un champ ajouté demain doit être
+ajouté à la liste pour apparaître, jamais l'inverse.
 
 Écrans : `ProjectSharesPanel.tsx` (fiche affaire, masqué pour qui n'est pas
 administrateur ou manager), `SharedProjects.tsx` (`/partages`), entrée de menu

@@ -1,66 +1,117 @@
 // Partage d'une affaire avec un confrère, côté cabinet : inviter, régler les
-// droits, retirer l'accès. Les droits sont vérifiés par le serveur à chaque
-// requête de l'invité (server/projectShares/access.ts) ; cet écran ne fait que
-// les régler. Réservé aux administrateurs et managers : pour les autres, le
-// serveur répond 403 et le panneau ne s'affiche pas.
+// droits, retirer l'accès, lire les commentaires. Les droits sont vérifiés par le
+// serveur à chaque requête de l'invité (server/projectShares/access.ts) ; cet écran
+// ne fait que les régler. Réservé aux administrateurs et managers : pour les
+// autres, le serveur répond 403 et le panneau ne s'affiche pas.
 import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { IconTrash, IconUsersGroup } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
+import ShareCommentsInbox, { type InboxLot } from './ShareCommentsInbox';
 
-type Access = 'none' | 'read' | 'write';
-interface Grant { kind: 'lots' | 'tasks' | 'documents'; access: 'read' | 'write' }
+type Access = 'none' | 'read' | 'comment' | 'write';
+type SimpleKind = 'lots' | 'tasks' | 'documents';
+type LotKind = 'cctp' | 'dpgf';
+interface Grant { kind: SimpleKind | LotKind; access: 'read' | 'comment' | 'write'; lotId?: string }
 interface Share { id: string; email: string; name: string | null; grants: Grant[] }
 interface SharesPayload {
   shares: Share[];
   limits: { guestsPerProject: number; guestsPerTenant: number };
   usage: { project: number; tenant: number };
   writableKinds: string[];
+  lots: InboxLot[];
 }
 
-const KINDS: Array<Grant['kind']> = ['lots', 'tasks', 'documents'];
+/** Droits en cours d'édition : les types simples, et un niveau par lot pour le CCTP et le DPGF. */
+interface GrantState { simple: Record<SimpleKind, Access>; lot: Record<LotKind, Record<string, Access>> }
 
-function accessOf(grants: Grant[], kind: Grant['kind']): Access {
-  return grants.find(g => g.kind === kind)?.access ?? 'none';
+const SIMPLE_KINDS: SimpleKind[] = ['lots', 'tasks', 'documents'];
+const LOT_KINDS: LotKind[] = ['cctp', 'dpgf'];
+
+const emptyState = (): GrantState => ({
+  simple: { lots: 'read', tasks: 'read', documents: 'none' },
+  lot: { cctp: {}, dpgf: {} },
+});
+
+function stateOf(grants: Grant[]): GrantState {
+  const state: GrantState = { simple: { lots: 'none', tasks: 'none', documents: 'none' }, lot: { cctp: {}, dpgf: {} } };
+  for (const g of grants) {
+    if (g.kind === 'cctp' || g.kind === 'dpgf') { if (g.lotId) state.lot[g.kind][g.lotId] = g.access; }
+    else state.simple[g.kind] = g.access;
+  }
+  return state;
 }
 
-function toGrants(values: Record<Grant['kind'], Access>): Grant[] {
-  return KINDS.flatMap(kind => (values[kind] === 'none' ? [] : [{ kind, access: values[kind] as 'read' | 'write' }]));
+function grantsOf(state: GrantState): Grant[] {
+  const simple = SIMPLE_KINDS.flatMap(kind => (state.simple[kind] === 'none' ? [] : [{ kind, access: state.simple[kind] as Grant['access'] }]));
+  const lots = LOT_KINDS.flatMap(kind => Object.entries(state.lot[kind])
+    .filter(([, access]) => access !== 'none')
+    .map(([lotId, access]) => ({ kind, access: access as Grant['access'], lotId })));
+  return [...simple, ...lots];
 }
 
-function AccessSelect({ kind, value, writable, onChange }: {
-  kind: Grant['kind']; value: Access; writable: boolean; onChange: (v: Access) => void;
+function AccessSelect({ label, value, options, onChange }: {
+  label: string; value: Access; options: Access[]; onChange: (v: Access) => void;
 }) {
   const { t } = useTranslation();
   return (
     <label className="flex items-center justify-between gap-3 text-xs">
-      <span className="font-medium text-[var(--tblr-text)]">{t(`share_kind_${kind}`)}</span>
+      <span className="font-medium text-[var(--tblr-text)]">{label}</span>
       <select
         value={value}
         onChange={e => onChange(e.target.value as Access)}
         className="px-2 py-1 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
-        <option value="none">{t('share_access_none')}</option>
-        <option value="read">{t('share_access_read')}</option>
-        {writable && <option value="write">{t('share_access_write')}</option>}
+        {options.map(o => <option key={o} value={o}>{t(`share_access_${o}`)}</option>)}
       </select>
     </label>
   );
 }
 
-function ShareRow({ projectId, share, writableKinds, onChanged, onMessage }: {
-  projectId: string; share: Share; writableKinds: string[];
+function GrantsEditor({ state, onChange, writableKinds, lots }: {
+  state: GrantState; onChange: (next: GrantState) => void; writableKinds: string[]; lots: InboxLot[];
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        {SIMPLE_KINDS.map(kind => (
+          <AccessSelect
+            key={kind} label={t(`share_kind_${kind}`)} value={state.simple[kind]}
+            options={writableKinds.includes(kind) ? ['none', 'read', 'write'] : ['none', 'read']}
+            onChange={v => onChange({ ...state, simple: { ...state.simple, [kind]: v } })}
+          />
+        ))}
+      </div>
+      {LOT_KINDS.map(kind => (
+        <div key={kind} className="space-y-1.5">
+          <div className="text-xs font-bold text-[var(--tblr-text)]">{t(`share_kind_${kind}`)}</div>
+          {lots.length === 0 && <p className="text-xs text-[var(--tblr-muted)]">{t('share_no_lots')}</p>}
+          {lots.map(lot => (
+            <AccessSelect
+              key={lot.id} label={[lot.lot_number, lot.lot_title].filter(Boolean).join(' ') || lot.id}
+              value={state.lot[kind][lot.id] ?? 'none'} options={['none', 'read', 'comment']}
+              onChange={v => onChange({ ...state, lot: { ...state.lot, [kind]: { ...state.lot[kind], [lot.id]: v } } })}
+            />
+          ))}
+        </div>
+      ))}
+      <p className="text-xs text-[var(--tblr-muted)]">{t('share_lots_hint')}</p>
+    </div>
+  );
+}
+
+function ShareRow({ projectId, share, writableKinds, lots, onChanged, onMessage }: {
+  projectId: string; share: Share; writableKinds: string[]; lots: InboxLot[];
   onChanged: () => void; onMessage: (text: string, isError?: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const [values, setValues] = useState<Record<Grant['kind'], Access>>({
-    lots: accessOf(share.grants, 'lots'), tasks: accessOf(share.grants, 'tasks'), documents: accessOf(share.grants, 'documents'),
-  });
+  const [state, setState] = useState<GrantState>(() => stateOf(share.grants));
   const [busy, setBusy] = useState(false);
   const label = share.name || share.email;
 
   const save = async () => {
-    const grants = toGrants(values);
+    const grants = grantsOf(state);
     if (!grants.length) { onMessage(t('share_pick_one'), true); return; }
     setBusy(true);
     try {
@@ -95,14 +146,7 @@ function ShareRow({ projectId, share, writableKinds, onChanged, onMessage }: {
           <IconTrash size={16} />
         </button>
       </div>
-      <div className="space-y-1.5">
-        {KINDS.map(kind => (
-          <AccessSelect
-            key={kind} kind={kind} value={values[kind]} writable={writableKinds.includes(kind)}
-            onChange={v => setValues(prev => ({ ...prev, [kind]: v }))}
-          />
-        ))}
-      </div>
+      <GrantsEditor state={state} onChange={setState} writableKinds={writableKinds} lots={lots} />
       <button
         type="button" onClick={save} disabled={busy}
         className="px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-[var(--tblr-text)] disabled:opacity-50"
@@ -120,7 +164,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
   const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [invite, setInvite] = useState<Record<Grant['kind'], Access>>({ lots: 'read', tasks: 'read', documents: 'none' });
+  const [invite, setInvite] = useState<GrantState>(emptyState);
   const [busy, setBusy] = useState(false);
 
   const say = useCallback((text: string, isError = false) => setMessage({ text, isError }), []);
@@ -139,7 +183,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const grants = toGrants(invite);
+    const grants = grantsOf(invite);
     if (!grants.length) { say(t('share_pick_one'), true); return; }
     setBusy(true);
     setMessage(null);
@@ -157,6 +201,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
 
   if (hidden) return null;
   const writableKinds = data?.writableKinds ?? [];
+  const lots = data?.lots ?? [];
 
   return (
     <div className="rounded-lg overflow-hidden" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)', boxShadow: 'var(--tblr-shadow)' }}>
@@ -180,13 +225,15 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
         <ul>
           {data.shares.map(share => (
             <ShareRow
-              key={`${share.id}-${share.grants.map(g => `${g.kind}${g.access}`).join('')}`}
-              projectId={projectId} share={share} writableKinds={writableKinds}
+              key={`${share.id}-${share.grants.map(g => `${g.kind}${g.lotId ?? ''}${g.access}`).join('')}`}
+              projectId={projectId} share={share} writableKinds={writableKinds} lots={lots}
               onChanged={load} onMessage={say}
             />
           ))}
         </ul>
       )}
+
+      <ShareCommentsInbox projectId={projectId} lots={lots} />
 
       <form onSubmit={submit} className="px-4 py-3 space-y-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
         <input
@@ -199,14 +246,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
           placeholder={t('share_name_label')} aria-label={t('share_name_label')}
           className="w-full px-3 py-1.5 text-xs border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
         />
-        <div className="space-y-1.5">
-          {KINDS.map(kind => (
-            <AccessSelect
-              key={kind} kind={kind} value={invite[kind]} writable={writableKinds.includes(kind)}
-              onChange={v => setInvite(prev => ({ ...prev, [kind]: v }))}
-            />
-          ))}
-        </div>
+        <GrantsEditor state={invite} onChange={setInvite} writableKinds={writableKinds} lots={lots} />
         <button
           type="submit" disabled={busy || !email}
           className="px-3 py-1.5 text-xs font-bold rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 disabled:opacity-50"

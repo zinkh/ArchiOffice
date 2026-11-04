@@ -26,6 +26,7 @@ import { registerReferencesDossierRoutes } from "./server/routes/referencesDossi
 import { registerPanneauxRoutes } from "./server/routes/panneaux";
 import { registerProjectMemberRoutes } from "./server/routes/projectMembers";
 import { registerProjectShareRoutes } from "./server/routes/projectShares";
+import { registerProjectShareDocumentRoutes } from "./server/routes/projectShareDocuments";
 import { guestAccessGuard } from "./server/guestAccessGuard";
 import { registerProjectPhaseHistoryRoutes } from "./server/routes/projectPhaseHistory";
 import { registerProjectPhaseNotesRoutes } from "./server/routes/projectPhaseNotes";
@@ -1115,6 +1116,7 @@ export async function createApp() {
   registerPanneauxRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectMemberRoutes(app, { supabaseAdmin, getTenantId });
   registerProjectShareRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
+  registerProjectShareDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseHistoryRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity });
   registerProjectPhaseNotesRoutes(app, { supabaseAdmin, getTenantId, getUserName });
   registerProjectArchiveRoutes(app, { supabaseAdmin, getTenantId, getUserName, requireRole, storeBusinessFile, checkQuota });

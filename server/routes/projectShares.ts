@@ -18,11 +18,12 @@ import { sendPlatformMail } from '../mailer';
 import { invalidateGuestRoleCache } from '../guestAccessGuard';
 import { isProjectArchived } from './projectArchive';
 import { linkForTenantFile } from '../projectShares/fileAccess';
+import { makeRequireSharer } from '../projectShares/requireSharer';
 import {
   addMembership, getMemberRole, listMemberships, removeMembership,
 } from '../tenantMemberships';
 import {
-  GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
+  COMMENTABLE_KINDS, GUEST_ROLE_LABEL, GUEST_SYSTEM_ROLE, LOT_SCOPED_KINDS, SHARE_KINDS, SHARE_LIMITS, WRITABLE_KINDS,
   activeShareFor, activeSharesOfTenant, allows, checkShareLimits, loadGrants,
   normalizeGrants, replaceGrants,
   type ShareGrant, type ShareRow,
@@ -103,16 +104,15 @@ export function readTaskFields(body: any, mode: 'create' | 'update'): { fields: 
 }
 
 export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  /** Cabinet de l'appelant, à condition qu'il y soit administrateur ou manager : on n'ouvre pas ses données à un tiers sans en avoir le pouvoir. */
-  async function requireSharer(userId: string): Promise<string> {
-    const tenantId = await getTenantId(userId);
-    const membership = await getMemberRole(supabaseAdmin, tenantId, userId);
-    if (!membership || !['admin', 'manager'].includes(membership.systemRole ?? '')) {
-      const err: any = new Error('Réservé aux administrateurs et managers du cabinet.');
-      err.status = 403;
-      throw err;
-    }
-    return tenantId;
+  const requireSharer = makeRequireSharer(supabaseAdmin, getTenantId);
+
+  /** Les lots désignés dans les droits doivent être ceux de CETTE affaire : l'identifiant d'un lot d'un autre cabinet n'ouvre rien. */
+  async function lotsBelong(tenantId: string, projectId: string, grants: ShareGrant[]): Promise<boolean> {
+    const lotIds = [...new Set(grants.flatMap(g => (g.lotId ? [g.lotId] : [])))];
+    if (!lotIds.length) return true;
+    const { data } = await supabaseAdmin.from('project_lots').select('id')
+      .eq('project_id', projectId).eq('tenant_id', tenantId).in('id', lotIds);
+    return (data || []).length === lotIds.length;
   }
 
   const fail = (res: any, label: string, e: any) => {
@@ -145,12 +145,18 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
       }
       const active = await activeSharesOfTenant(supabaseAdmin, tenantId);
       const onProject = active.filter(s => s.project_id === req.params.id);
+      // Les lots de l'affaire : c'est parmi eux que se choisissent les droits par lot (CCTP, DPGF).
+      const { data: lots } = await supabaseAdmin.from('project_lots').select('id, lot_number, lot_title')
+        .eq('project_id', req.params.id).eq('tenant_id', tenantId);
       res.json({
         shares: await shareView(onProject),
         limits: SHARE_LIMITS,
         usage: { project: onProject.length, tenant: new Set(active.map(s => s.user_id)).size },
         kinds: SHARE_KINDS,
         writableKinds: WRITABLE_KINDS,
+        commentableKinds: COMMENTABLE_KINDS,
+        lotScopedKinds: LOT_SCOPED_KINDS,
+        lots: (lots || []).map((l: any) => pick(l, LOT_FIELDS)),
       });
     } catch (e: any) { fail(res, '[GET /api/projects/:id/shares]', e); }
   });
@@ -166,6 +172,9 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
 
       const { data: project } = await supabaseAdmin.from('projects').select('id, name').eq('id', projectId).eq('tenant_id', tenantId).maybeSingle();
       if (!project) return res.status(404).json({ error: 'Affaire introuvable.' });
+      if (!(await lotsBelong(tenantId, projectId, parsed.grants))) {
+        return res.status(400).json({ error: 'Un lot désigné n\'appartient pas à cette affaire.' });
+      }
 
       const { data: existingProfile } = await supabaseAdmin.from('profiles').select('id, name').eq('email', email).maybeSingle();
       if (existingProfile?.id === req.user.id) return res.status(400).json({ error: 'Vous ne pouvez pas vous inviter vous-même.' });
@@ -260,6 +269,9 @@ export function registerProjectShareRoutes(app: Express, { supabaseAdmin, getTen
         .eq('id', req.params.shareId).eq('tenant_id', tenantId).eq('project_id', req.params.id).maybeSingle();
       if (!share) return res.status(404).json({ error: 'Partage introuvable.' });
       if (share.status !== 'active') return res.status(409).json({ error: 'Ce partage a été retiré : invitez de nouveau la personne.' });
+      if (!(await lotsBelong(tenantId, req.params.id, parsed.grants))) {
+        return res.status(400).json({ error: 'Un lot désigné n\'appartient pas à cette affaire.' });
+      }
       await replaceGrants(supabaseAdmin, share, parsed.grants);
       res.json((await shareView([share as ShareRow]))[0]);
     } catch (e: any) { fail(res, '[PUT /api/projects/:id/shares/:shareId]', e); }
