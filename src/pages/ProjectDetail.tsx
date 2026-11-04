@@ -4809,6 +4809,7 @@ export default function ProjectDetail() {
                 <ACTModule
                   projectId={id!}
                   projectName={project.name}
+                  projectImageUrl={project.image_url}
                   lots={project.lots_list || []}
                   contacts={contacts}
                   isPublicClient={!!project.is_public_client}
