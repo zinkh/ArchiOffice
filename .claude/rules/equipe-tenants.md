@@ -22,6 +22,8 @@ paths:
   - "src/components/ProjectSharesPanel.tsx"
   - "src/components/SharedDocument.tsx"
   - "src/components/ShareCommentsInbox.tsx"
+  - "server/routes/projectShareProposals.ts"
+  - "src/components/ShareProposalsInbox.tsx"
   - "src/pages/SharedProjects.tsx"
 ---
 
@@ -209,8 +211,8 @@ devenue inutile ; l'adhésion d'un vrai membre n'est jamais touchée.
 
 **Droits branchés aujourd'hui** : `lots` (lecture, sans le contact de
 l'entreprise), `tasks` (lecture ou écriture), `documents` (lecture seule), `cctp`
-et `dpgf` (par lot, lecture ou commentaire). Écriture sur le CCTP et le DPGF par
-proposition de modification, autres types : voir ROADMAP.md.
+et `dpgf` (par lot : lecture, commentaire, ou « écriture » qui signifie PROPOSER,
+voir « Écriture par proposition » plus bas). Autres types : voir ROADMAP.md.
 
 **Documents** : le droit couvre les documents de l'affaire (`resource_type =
 'projects'`), pas les pièces de devis, d'appel d'offres ou de bibliothèque
@@ -267,6 +269,64 @@ ajouté à la liste pour apparaître, jamais l'inverse.
 administrateur ou manager), `SharedProjects.tsx` (`/partages`), entrée de menu
 « Affaires partagées ». `ProtectedLayout` ramène un `guest` sur `/partages`.
 Tests : `tests/projectShares.test.ts`.
+
+**Écriture par proposition** (`project_share_proposals`,
+`supabase/migrate_project_share_proposals.sql`, `server/routes/projectShareProposals.ts`).
+Un confrère n'écrit JAMAIS dans le document : le droit `write` sur le CCTP ou le DPGF,
+lot par lot, signifie « proposer ». Le document est un seul bloc JSON que l'autosauvegarde
+de l'éditeur PRO réécrit en entier : une écriture directe d'un invité pourrait effacer le
+travail du cabinet. Champs proposables, **liste fermée** (`PROPOSABLE_FIELDS`,
+`documentView.ts`) : texte, désignation, quantité, prix unitaire et unité d'un article ;
+texte et titre d'un chapitre ; titre d'un lot (qui vit dans `project_lots`, pas dans le
+document). Le droit se donne par lot et par type (`FIELD_KIND`) : `cctp` pour les textes et
+les titres, `dpgf` pour la quantité, le prix et l'unité. Un champ ajouté demain n'est jamais
+proposable tant qu'il n'est pas ajouté à cette liste.
+
+- **On ne propose que sur ce qu'on voit**, dans la vue du type de droit : une ligne `cctpOnly`
+  n'a ni quantité ni prix, elle n'existe pas dans la vue DPGF (404).
+- **Refusés comme dans l'éditeur** (`blockedEdit`) : un article à sous-articles (il porte la
+  somme de ses enfants), à quantité répartie par bâtiment (`quantitesBatiments`) ou ventilée
+  par local (`quantiteDetails`), ou qui n'est pas un ouvrage ; un nombre négatif, non numérique,
+  à plus de 4 décimales ou au-delà de 1e9 (`parseNumberValue`, virgule admise).
+- **Article « pour mémoire »** : il PEUT recevoir une quantité, une unité et un prix. La
+  quantité et l'unité le laissent « pour mémoire » (montant à 0, comme dans l'éditeur). Un
+  prix unitaire supérieur à 0 le CHIFFRE : `applyFieldToNode` retire `pourMemoire` et l'article
+  entre dans le total du lot (`leftPourMemoire`). Un prix à 0 ne change rien (refusé comme
+  inchangé). Le résultat ne dépend pas de l'ordre d'approbation de la quantité, de l'unité et
+  du prix. Le cabinet le voit AVANT d'approuver (`leavesPourMemoire`, avertissement dans
+  `ShareProposalsInbox`), le journal d'activité le dit, et l'instantané d'avant garde l'article
+  « pour mémoire » : rien n'est perdu.
+- **Approuver est le seul moment où le document est écrit**, avec trois garde-fous : (1) la
+  valeur actuelle doit être celle que l'invité a vue (`base_value`), sinon la proposition passe
+  à `outdated` et rien n'est écrit ; (2) un instantané du document est pris avant
+  (`dpgf_versions`, restaurable depuis l'historique du DPGF) ; (3) l'écriture est conditionnelle
+  à l'état exact lu (`.eq('data', raw)`, et `.eq('lot_title', base_value)` pour un titre de
+  lot) : un enregistrement concurrent donne 409 `PROPOSAL_CONFLICT`, jamais un écrasement.
+- **Une quantité ou un prix recalcule** l'article, le sous-total du lot et les totaux avec
+  `recomputeLot` (`recomputeAfterNumericChange`), la fonction même de
+  `CCTPEditor.updateQuantiteUnite` : `prixTotal = pourMemoire ? 0 : quantité x P.U.`, sans
+  arrondi. Aucun total enregistré ne doit contredire ses lignes.
+- **Aucune perte de donnée, par construction** : une ligne de proposition n'est JAMAIS
+  supprimée (remplacée, retirée, refusée ou périmée, elle garde `base_value` et
+  `proposed_value`) ; l'instantané est CONSERVÉ même quand l'écriture échoue (ne pas le
+  supprimer) ; une proposition appliquée dont le champ ne vaut plus la valeur proposée est
+  signalée au cabinet (`drifted`).
+- **La limite de 50 propositions en attente par confrère déclenche une alerte**
+  (`MAX_PENDING_PER_SHARE`, `alertLimitReached`) : refus 409 `PROPOSAL_LIMIT` explicite à
+  l'invité (sa saisie reste dans le formulaire), notification système aux administrateurs et
+  managers (`notifyUsers`, étiquette `share-limit:<partage>`, qui remplace au lieu d'empiler),
+  ligne dans le journal d'activité, au plus une fois par heure et par partage (mémoire du
+  processus, au mieux), alerte `limitReached` dans le panneau du cabinet. Remplacer une
+  proposition sur le même champ libère sa propre place.
+- **Limite connue** : un onglet PRO ouvert avant l'approbation garde l'ancien contenu en
+  mémoire, et sa prochaine frappe le réenregistrerait. Le serveur ne peut pas l'empêcher ;
+  l'écran invite à recharger l'onglet PRO et `drifted` le signale. Une vraie solution demande
+  que l'éditeur détecte une version stockée plus récente avant d'enregistrer.
+
+Écrans : `ProposeEdit` dans `SharedDocument.tsx` (invité), `ShareProposalsInbox.tsx`
+(cabinet : actuel face à proposé, approuver, refuser avec motif, alerte de limite, historique)
+et niveau « propositions » du choix des droits par lot dans `ProjectSharesPanel.tsx`. Tests :
+`tests/projectShareProposals.test.ts`, `tests/projectShareProposalsPrices.test.ts`.
 
 ### Fusion de contacts et vue détaillée de `/contacts`
 

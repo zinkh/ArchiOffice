@@ -86,10 +86,13 @@ describe('droits par lot : fonctions pures', () => {
     expect('error' in normalizeGrants([{ kind: 'cctp', access: 'read', lotId: 'l1' }])).toBe(false);
   });
 
-  it('accorde « commentaire » au CCTP et au DPGF seulement, jamais « écriture » pour l\'instant', () => {
+  it('accorde « commentaire » au CCTP et au DPGF seulement, et « écriture » (proposer) au CCTP et au DPGF', () => {
     expect('error' in normalizeGrants([{ kind: 'tasks', access: 'comment' }])).toBe(true);
     expect('error' in normalizeGrants([{ kind: 'documents', access: 'comment' }])).toBe(true);
-    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'write', lotId: 'l1' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'documents', access: 'write' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'lots', access: 'write' }])).toBe(true);
+    expect('error' in normalizeGrants([{ kind: 'cctp', access: 'write', lotId: 'l1' }])).toBe(false);
+    expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'write', lotId: 'l1' }])).toBe(false);
     expect('error' in normalizeGrants([{ kind: 'dpgf', access: 'comment', lotId: 'l1' }])).toBe(false);
   });
 
@@ -107,7 +110,7 @@ describe('droits par lot : fonctions pures', () => {
     const grants = (normalizeGrants([{ kind: 'cctp', access: 'comment', lotId: 'l1' }, { kind: 'tasks', access: 'write' }]) as any).grants;
     expect(allows(grants, 'cctp', 'read', 'l1')).toBe(true);
     expect(allows(grants, 'cctp', 'comment', 'l1')).toBe(true);
-    expect(allows(grants, 'cctp', 'write', 'l1')).toBe(false);
+    expect(allows(grants, 'cctp', 'write', 'l1')).toBe(false); // commenter ne permet pas de proposer
     expect(allows(grants, 'cctp', 'read', 'l2')).toBe(false);
     expect(allows(grants, 'cctp', 'read')).toBe(false);
     expect(allows(grants, 'dpgf', 'read', 'l1')).toBe(false);

@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { IconTrash, IconUsersGroup } from '@tabler/icons-react';
 import { apiFetch } from '../lib/api';
 import ShareCommentsInbox, { type InboxLot } from './ShareCommentsInbox';
+import ShareProposalsInbox from './ShareProposalsInbox';
 
 type Access = 'none' | 'read' | 'comment' | 'write';
 type SimpleKind = 'lots' | 'tasks' | 'documents';
@@ -50,8 +51,10 @@ function grantsOf(state: GrantState): Grant[] {
   return [...simple, ...lots];
 }
 
-function AccessSelect({ label, value, options, onChange }: {
+function AccessSelect({ label, value, options, onChange, writeKey = 'share_access_write' }: {
   label: string; value: Access; options: Access[]; onChange: (v: Access) => void;
+  /** Libellé du niveau « écriture » : pour le CCTP et le DPGF, c'est « proposer », jamais écrire. */
+  writeKey?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -62,7 +65,7 @@ function AccessSelect({ label, value, options, onChange }: {
         onChange={e => onChange(e.target.value as Access)}
         className="px-2 py-1 border border-[var(--tblr-border)] rounded-lg bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
       >
-        {options.map(o => <option key={o} value={o}>{t(`share_access_${o}`)}</option>)}
+        {options.map(o => <option key={o} value={o}>{t(o === 'write' ? writeKey : `share_access_${o}`)}</option>)}
       </select>
     </label>
   );
@@ -90,7 +93,8 @@ function GrantsEditor({ state, onChange, writableKinds, lots }: {
           {lots.map(lot => (
             <AccessSelect
               key={lot.id} label={[lot.lot_number, lot.lot_title].filter(Boolean).join(' ') || lot.id}
-              value={state.lot[kind][lot.id] ?? 'none'} options={['none', 'read', 'comment']}
+              value={state.lot[kind][lot.id] ?? 'none'} writeKey="share_access_propose"
+              options={writableKinds.includes(kind) ? ['none', 'read', 'comment', 'write'] : ['none', 'read', 'comment']}
               onChange={v => onChange({ ...state, lot: { ...state.lot, [kind]: { ...state.lot[kind], [lot.id]: v } } })}
             />
           ))}
@@ -233,6 +237,7 @@ export default function ProjectSharesPanel({ projectId }: { projectId: string })
         </ul>
       )}
 
+      <ShareProposalsInbox projectId={projectId} lots={lots} />
       <ShareCommentsInbox projectId={projectId} lots={lots} />
 
       <form onSubmit={submit} className="px-4 py-3 space-y-2" style={{ borderTop: '1px solid var(--tblr-border)' }}>
