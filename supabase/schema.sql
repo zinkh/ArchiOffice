@@ -830,10 +830,37 @@ CREATE TABLE IF NOT EXISTS project_share_grants (
   tenant_id     UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
   resource_kind TEXT NOT NULL,
   access        TEXT NOT NULL DEFAULT 'read',
-  CONSTRAINT project_share_grants_access_check CHECK (access IN ('read', 'write')),
-  UNIQUE (share_id, resource_kind)
+  -- project_lots.id pour les droits par lot (CCTP, DPGF), supabase/migrate_project_share_lots_comments.sql.
+  project_lot_id TEXT,
+  CONSTRAINT project_share_grants_access_check CHECK (access IN ('read', 'comment', 'write'))
 );
 CREATE INDEX IF NOT EXISTS idx_project_share_grants_share ON project_share_grants(share_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_project_share_grants_share_kind_lot
+  ON project_share_grants (share_id, resource_kind, COALESCE(project_lot_id, ''));
+
+CREATE TABLE IF NOT EXISTS project_share_comments (
+  id             TEXT PRIMARY KEY,
+  tenant_id      UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
+  project_id     TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  share_id       TEXT NOT NULL REFERENCES project_shares(id) ON DELETE CASCADE,
+  parent_id      TEXT REFERENCES project_share_comments(id) ON DELETE CASCADE,
+  author_id      TEXT NOT NULL,
+  author_kind    TEXT NOT NULL,
+  resource_kind  TEXT NOT NULL,
+  project_lot_id TEXT NOT NULL,
+  target_type    TEXT NOT NULL,
+  target_id      TEXT NOT NULL,
+  body           TEXT NOT NULL,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  resolved_at    TIMESTAMPTZ,
+  resolved_by    TEXT,
+  CONSTRAINT project_share_comments_author_kind_check CHECK (author_kind IN ('guest', 'cabinet')),
+  CONSTRAINT project_share_comments_resource_check CHECK (resource_kind IN ('cctp', 'dpgf')),
+  CONSTRAINT project_share_comments_target_check CHECK (target_type IN ('lot', 'chapitre', 'ligne')),
+  CONSTRAINT project_share_comments_body_check CHECK (char_length(body) BETWEEN 1 AND 2000)
+);
+CREATE INDEX IF NOT EXISTS idx_project_share_comments_project ON project_share_comments(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_project_share_comments_share   ON project_share_comments(share_id);
 
 CREATE TABLE IF NOT EXISTS custom_references (
   id                UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -1092,6 +1119,9 @@ ALTER TABLE project_share_grants ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "tenant_isolation" ON project_shares
   USING (tenant_id::text = my_tenant_id()::text);
 CREATE POLICY "tenant_isolation" ON project_share_grants
+  USING (tenant_id::text = my_tenant_id()::text);
+ALTER TABLE project_share_comments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "tenant_isolation" ON project_share_comments
   USING (tenant_id::text = my_tenant_id()::text);
 
 -- Activity Feed tables
