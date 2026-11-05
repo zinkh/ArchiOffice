@@ -495,6 +495,14 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
       )}
 
       <div data-pdf-keep="true" style={{ marginTop: density.blockGap, marginLeft: 'auto', width: '60mm' }}>
+        {d.remiseHonoraires > 0 && (<>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>Honoraires HT{d.partPcSeul !== null ? ` (PC seul, ${d.partPcSeul} %)` : ''}</span><span>{formatCurrency(d.montantHonorairesBrut)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+          </div>
+        </>)}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
           <span>Total Honoraires HT</span>
           <span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
@@ -526,6 +534,14 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
       <Section key="repartition">
         <H2 template={t} newPage={newPage}>04. Répartition des Honoraires</H2>
         <div data-pdf-keep="true" style={{ marginTop: '6mm', width: '80mm' }}>
+          {d.remiseHonoraires > 0 && (<>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+              <span>Honoraires HT{d.partPcSeul !== null ? ` (PC seul, ${d.partPcSeul} %)` : ''}</span><span>{formatCurrency(d.montantHonorairesBrut)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+              <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+            </div>
+          </>)}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
             <span>Total Honoraires HT</span><span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
           </div>

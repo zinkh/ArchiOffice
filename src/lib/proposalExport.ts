@@ -9,6 +9,8 @@
 //
 // This file is intentionally React-free — JSX section rendering lives in
 // src/components/ProposalExportModal.tsx, which is the only place that needs it.
+import { scopeShare } from './proposalFees';
+import { parsePlanning, type PlanningOverride } from './proposalPlanning';
 import type { Proposal, ProposalSpecialty } from '../types';
 import { isErpOperation } from './erp';
 import { operationNature, surfaceExistante, surfaceRehabilitee, surfaceDePlancher, toSurface } from './proposalSurfaces';
@@ -104,13 +106,14 @@ export const DUREE_MISSION_PAR_DEFAUT_JOURS = 15;
 export function planifierCalendrier(
   missions: Array<{ id: string; designation: string }>,
   duree = DUREE_MISSION_PAR_DEFAUT_JOURS,
+  reglages: Record<string, PlanningOverride> = {},
 ): CalendrierItem[] {
   const phases = missions.map(m => phaseOf(m.id, m.designation));
   const detIndex = phases.indexOf('det');
   const parallele = (phase: PhaseMop | null) => detIndex !== -1 && (phase === 'visa' || phase === 'exe' || phase === 'opc');
 
   const items: CalendrierItem[] = missions.map(m => ({
-    id: 'c_' + m.id, mission: m.designation, dureeJours: duree, debutJours: 0, apres: '', avec: [],
+    id: 'c_' + m.id, mission: m.designation, dureeJours: reglages[m.id]?.duree ?? duree, debutJours: 0, apres: '', avec: [],
   }));
 
   // La chaîne : toutes les missions qui ne sont pas menées en parallèle, dans l'ordre de la liste.
@@ -118,9 +121,11 @@ export function planifierCalendrier(
   let precedent = '';
   items.forEach((item, i) => {
     if (parallele(phases[i])) return;
-    item.debutJours = fin;
-    item.apres = precedent;
-    fin += item.dureeJours;
+    const decale = reglages[missions[i].id]?.debut;
+    item.debutJours = decale ?? fin;
+    // Une mission décalée à la main ne dépend plus de la précédente.
+    item.apres = decale !== undefined ? '' : precedent;
+    fin = item.debutJours + item.dureeJours;
     precedent = item.id;
   });
 
@@ -130,9 +135,9 @@ export function planifierCalendrier(
     const aorIndex = phases.indexOf('aor');
     items.forEach((item, i) => {
       if (!parallele(phases[i])) return;
-      item.debutJours = det.debutJours;
+      item.debutJours = reglages[missions[i].id]?.debut ?? det.debutJours;
       item.avec = [det.id];
-      if (phases[i] === 'opc') {
+      if (phases[i] === 'opc' && reglages[missions[i].id]?.duree === undefined) {
         const aor = aorIndex !== -1 ? items[aorIndex] : null;
         item.dureeJours = Math.max(det.dureeJours, (aor ? aor.debutJours + aor.dureeJours : det.debutJours + det.dureeJours) - det.debutJours);
         if (aor) item.avec = [det.id, aor.id];
@@ -196,6 +201,11 @@ export interface ProposalPdfData {
   pctAvecExe: number;
   pctMissionsComp: number;
   montantHonorairesHT: number;
+  /** Honoraires avant remise ; égal au net quand il n'y a pas de remise. */
+  montantHonorairesBrut: number;
+  remiseHonoraires: number;
+  /** Part des honoraires de la mission complète retenue pour un PC seul (null pour une mission complète). */
+  partPcSeul: number | null;
   tauxTVA: number;
   montantTVA: number;
   montantTTC: number;
@@ -489,6 +499,7 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
 
   const amount = p.amount || 0;
   const vatRate = p.vat_rate ?? 20;
+  const remise = Math.max(0, Math.round(((p.fee_gross ?? amount) - amount) * 100) / 100);
 
   return {
     reference: p.reference || p.project_code || 'N/A',
@@ -544,9 +555,12 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
     pctAvecExe: p.exe_fee_percent || 0,
     pctMissionsComp: p.comp_fee_percent || 0,
     montantHonorairesHT: amount,
+    montantHonorairesBrut: remise > 0 ? amount + remise : amount,
+    remiseHonoraires: remise,
+    partPcSeul: p.mission_scope === 'pc' ? scopeShare('pc', p.scope_share_pct) : null,
     tauxTVA: vatRate,
-    montantTVA: amount * (vatRate / 100),
-    montantTTC: amount * (1 + vatRate / 100),
+    montantTVA: Math.round(amount * vatRate) / 100,
+    montantTTC: Math.round(amount * (100 + vatRate)) / 100,
 
     cotraitants: (p.specialties_list || []).map(s => ({
       specialite: s.specialty_name,
@@ -555,7 +569,7 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
       contactId: s.contact_id || undefined,
     })),
     missions,
-    calendrier: planifierCalendrier(missions),
+    calendrier: planifierCalendrier(missions, DUREE_MISSION_PAR_DEFAUT_JOURS, parsePlanning(p.planning).items),
     notes: p.notes || '',
 
     agenceNom: settings.agencyName || '',

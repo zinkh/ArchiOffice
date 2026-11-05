@@ -358,7 +358,9 @@ CREATE TABLE IF NOT EXISTS proposals (
   complexity_rate NUMERIC, base_fee_percent NUMERIC, exe_fee_percent NUMERIC,
   comp_fee_percent NUMERIC, vat_rate NUMERIC, decimal_precision INTEGER,
   miqcp_assessment TEXT, parcelles_selection TEXT, is_erp BOOLEAN, illustrations TEXT,
-  operation_nature TEXT, surface_existante TEXT, surface_rehabilitee TEXT
+  operation_nature TEXT, surface_existante TEXT, surface_rehabilitee TEXT,
+  fee_gross NUMERIC, fee_rounding TEXT, discount_mode TEXT, discount_value NUMERIC,
+  mission_scope TEXT, scope_share_pct NUMERIC, planning TEXT
 );
 
 CREATE TABLE IF NOT EXISTS proposal_specialties (

@@ -28,7 +28,7 @@ import { CadastreDownload } from '../components/CadastreDownload';
 import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
-import MilestoneGantt from '../components/MilestoneGantt';
+import ProposalGantt from '../components/ProposalGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedMeetings from '../components/LinkedMeetings';
@@ -47,6 +47,7 @@ import { MiqcpComplexityWizardModal } from '../components/MiqcpComplexityWizardM
 import { MIQCP_PHASE_REPARTITION_GUIDE } from '../lib/miqcpGuide';
 import { DEFAULT_MISSIONS, calculateFeeRatios, defaultFeeDistribution, exportFeeDistributionToXlsx } from '../lib/feeDistribution';
 import { FeeDistributionGrid } from '../components/FeeDistributionGrid';
+import { computeFees, applyDiscountAndVat, scopeShare, roundFee, FEE_ROUNDING_OPTIONS, PC_SCOPE_DEFAULT_SHARE_PCT, PC_SCOPE_MISSION_IDS, type FeeRounding, type MissionScope } from '../lib/proposalFees';
 
 const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var(--tblr-border)', color: 'var(--tblr-text)' };
 
@@ -245,7 +246,12 @@ export default function Proposals() {
     complexity_rate: 1,
     base_fee_percent: 0,
     vat_rate: 20,
-    decimal_precision: 2
+    decimal_precision: 2,
+    fee_rounding: 'none',
+    discount_mode: null,
+    discount_value: 0,
+    mission_scope: 'complete',
+    scope_share_pct: PC_SCOPE_DEFAULT_SHARE_PCT
   };
   const [newProposal, setNewProposal] = useState<Partial<Proposal>>(initialProposalState);
   const [costMode, setCostMode] = useState<'manual' | 'ratio'>('manual');
@@ -609,8 +615,54 @@ export default function Proposals() {
     setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify({ ...currentData, missions }) }));
   };
 
-  const vatAmount = (newProposal.amount || 0) * ((newProposal.vat_rate || 0) / 100);
-  const totalTTC = (newProposal.amount || 0) + vatAmount;
+  const feeInputs = React.useMemo(() => ({
+    constructionCost: newProposal.construction_cost,
+    baseFeePercent: newProposal.base_fee_percent,
+    complexityRate: newProposal.complexity_rate,
+    scope: newProposal.mission_scope as MissionScope | null | undefined,
+    scopeSharePct: newProposal.scope_share_pct,
+    rounding: newProposal.fee_rounding as FeeRounding | null | undefined,
+    discountMode: newProposal.discount_mode,
+    discountValue: newProposal.discount_value,
+    vatRate: newProposal.vat_rate,
+  }), [newProposal.construction_cost, newProposal.base_fee_percent, newProposal.complexity_rate, newProposal.mission_scope, newProposal.scope_share_pct, newProposal.fee_rounding, newProposal.discount_mode, newProposal.discount_value, newProposal.vat_rate]);
+  // Décomposition affichée : calculée depuis les facteurs ; à défaut (montant saisi à la main), depuis le montant.
+  const ganttMissions = React.useMemo(() => {
+    try { return (JSON.parse(newProposal.fee_distribution || '{}').missions || []).map((m: any) => ({ id: m.id, name: m.name, category: m.category })); } catch { return []; }
+  }, [newProposal.fee_distribution]);
+  const feeBreakdown = React.useMemo(
+    () => computeFees(feeInputs) ?? applyDiscountAndVat(newProposal.fee_gross ?? newProposal.amount ?? 0, feeInputs),
+    [feeInputs, newProposal.fee_gross, newProposal.amount],
+  );
+  const vatAmount = roundFee((newProposal.amount || 0) * ((newProposal.vat_rate || 0) / 100), 'none');
+  const totalTTC = roundFee((newProposal.amount || 0) + vatAmount, 'none');
+
+  // Passage mission complète <-> PC seul : la répartition ne garde que les missions du PC
+  // (parts ramenées à 100 %), ou retrouve toutes les missions de base.
+  const handleMissionScopeChange = (scope: MissionScope) => {
+    setNewProposal(prev => {
+      let data: any;
+      try { data = prev.fee_distribution ? JSON.parse(prev.fee_distribution) : defaultFeeDistribution(); } catch { data = defaultFeeDistribution(); }
+      const current: any[] = data.missions || [];
+      let missions: any[];
+      if (scope === 'pc') {
+        const kept = DEFAULT_MISSIONS.filter(m => PC_SCOPE_MISSION_IDS.includes(m.id));
+        const total = kept.reduce((a, m) => a + (m.default_pct || 0), 0) || 1;
+        const pcMissions = kept.map(m => {
+          const existing = current.find(c => c.id === m.id);
+          return { ...(existing || m), percentages: existing?.percentages || {}, default_pct: Number((((m.default_pct || 0) / total) * 100).toFixed(2)), amount: 0 };
+        });
+        missions = [...pcMissions, ...current.filter(m => m.category === 'Missions complémentaires')];
+      } else {
+        const base = DEFAULT_MISSIONS.filter(m => m.category !== 'Missions complémentaires').map(m => {
+          const existing = current.find(c => c.id === m.id);
+          return { ...(existing || m), percentages: existing?.percentages || {}, default_pct: m.default_pct, amount: 0 };
+        });
+        missions = [...base, ...current.filter(m => m.category === 'Missions complémentaires')];
+      }
+      return { ...prev, mission_scope: scope, fee_distribution: JSON.stringify({ ...data, missions }) };
+    });
+  };
 
   // Auto-calculate construction_cost from ratio fields when in ratio mode
   useEffect(() => {
@@ -621,15 +673,14 @@ export default function Proposals() {
     }
   }, [costMode, newProposal.operation_nature, newProposal.type_projet, newProposal.surface_plancher, newProposal.surface_plancher_ext, newProposal.surface_existante, newProposal.surface_rehabilitee, newProposal.ratio_rehab, newProposal.ratio_extension]);
 
-  // Auto-calculate amount if factors change
+  // Auto-calculate amount (net HT) if factors change : brut, périmètre, arrondi puis remise.
   useEffect(() => {
-    if (newProposal.construction_cost && newProposal.complexity_rate && newProposal.base_fee_percent) {
-      const calculatedAmount = newProposal.construction_cost * (newProposal.base_fee_percent / 100) * newProposal.complexity_rate;
-      if (Math.abs(calculatedAmount - (newProposal.amount || 0)) > 0.01) {
-        setNewProposal(prev => ({ ...prev, amount: Number(calculatedAmount.toFixed(2)) }));
-      }
+    const fees = computeFees(feeInputs);
+    if (!fees) return;
+    if (Math.abs(fees.netHT - (newProposal.amount || 0)) > 0.001 || Math.abs(fees.brut - (newProposal.fee_gross || 0)) > 0.001) {
+      setNewProposal(prev => ({ ...prev, amount: fees.netHT, fee_gross: fees.brut }));
     }
-  }, [newProposal.construction_cost, newProposal.complexity_rate, newProposal.base_fee_percent]);
+  }, [feeInputs]);
 
   // Sync base missions with global amount
   const premierPassageRepartition = useRef(true);
@@ -1323,8 +1374,61 @@ export default function Proposals() {
                       </div>
                     </div>
                   )}
+                  <div className="space-y-3 p-3 rounded-lg border border-[var(--tblr-border)] bg-[var(--tblr-surface)]">
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                      <FormField
+                        label={t('proposals_fee_scope')}
+                        type="select"
+                        options={[{ id: 'complete', name: t('proposals_fee_scope_complete') }, { id: 'pc', name: t('proposals_fee_scope_pc') }]}
+                        value={newProposal.mission_scope || 'complete'}
+                        onChange={(v: any) => handleMissionScopeChange(v === 'pc' ? 'pc' : 'complete')}
+                      />
+                      {newProposal.mission_scope === 'pc' && (
+                        <FormField
+                          label={t('proposals_fee_scope_share')}
+                          type="number"
+                          value={newProposal.scope_share_pct ?? PC_SCOPE_DEFAULT_SHARE_PCT}
+                          onChange={(v: any) => setNewProposal(prev => ({ ...prev, scope_share_pct: Number(v) }))}
+                        />
+                      )}
+                      <FormField
+                        label={t('proposals_fee_rounding')}
+                        type="select"
+                        options={FEE_ROUNDING_OPTIONS.map(o => ({ id: o.value, name: t('proposals_fee_rounding_' + o.value) }))}
+                        value={newProposal.fee_rounding || 'none'}
+                        onChange={(v: any) => setNewProposal(prev => ({ ...prev, fee_rounding: (v || 'none') as FeeRounding }))}
+                      />
+                      <FormField
+                        label={t('proposals_discount_mode')}
+                        type="select"
+                        options={[{ id: 'percent', name: t('proposals_discount_percent') }, { id: 'amount', name: t('proposals_discount_amount') }]}
+                        value={newProposal.discount_mode || ''}
+                        onChange={(v: any) => setNewProposal(prev => ({ ...prev, discount_mode: v === 'percent' || v === 'amount' ? v : null, discount_value: v ? prev.discount_value || 0 : 0 }))}
+                      />
+                      {newProposal.discount_mode && (
+                        <FormField
+                          label={newProposal.discount_mode === 'percent' ? t('proposals_discount_value_pct') : t('proposals_discount_value_eur')}
+                          type="number"
+                          value={newProposal.discount_value ?? 0}
+                          onChange={(v: any) => setNewProposal(prev => ({ ...prev, discount_value: Math.max(0, Number(v)) }))}
+                        />
+                      )}
+                    </div>
+                    {computeFees(feeInputs) && (
+                      <dl className="text-xs text-[var(--tblr-text)] grid grid-cols-[1fr_auto] gap-x-6 gap-y-1 max-w-xl" aria-label={t('proposals_fee_detail')}>
+                        <dt className="font-bold uppercase tracking-wider text-[var(--tblr-muted)] col-span-2">{t('proposals_fee_detail')}</dt>
+                        {newProposal.mission_scope === 'pc' && (<>
+                          <dt>{t('proposals_fee_full_mission')}</dt><dd className="text-right tabular-nums">{formatCurrency(feeBreakdown.missionComplete)}</dd>
+                          <dt>{t('proposals_fee_scope_applied', { pct: scopeShare('pc', newProposal.scope_share_pct) })}</dt><dd className="text-right tabular-nums">{formatCurrency(feeBreakdown.brut)}</dd>
+                        </>)}
+                        {newProposal.mission_scope !== 'pc' && (<><dt>{t('proposals_fee_gross')}</dt><dd className="text-right tabular-nums">{formatCurrency(feeBreakdown.brut)}</dd></>)}
+                        {feeBreakdown.remise > 0 && (<><dt>{t('proposals_fee_discount')}</dt><dd className="text-right tabular-nums">- {formatCurrency(feeBreakdown.remise)}</dd></>)}
+                        <dt className="font-bold">{t('proposals_fee_net_ht')}</dt><dd className="text-right font-bold tabular-nums">{formatCurrency(feeBreakdown.netHT)}</dd>
+                      </dl>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <FormField label="Montant Honoraires HT (€)" type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v)}))} />
+                    <FormField label={t('proposals_fee_net_ht')} type="number" value={newProposal.amount} onChange={(v: any) => setNewProposal(prev => ({...prev, amount: Number(v), fee_gross: Number(v) + (feeBreakdown.remise || 0)}))} />
                     <div className="space-y-1.5">
                       <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('proposals_pct_with_execution')}</label>
                       <div className="px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm font-medium text-[var(--tblr-text)]">
@@ -1532,18 +1636,10 @@ export default function Proposals() {
                       <span className="w-6 h-6 rounded-full bg-[var(--tblr-primary-lt)] flex items-center justify-center text-[0.6875rem]">09</span>
                       {t('proposals_section_schedule')}
                     </h3>
-                    <MilestoneGantt 
-                      milestones={milestones.filter(m => m.proposal_id === editingProposal.id)} 
-                      startDate={new Date(editingProposal.created_at)} 
-                      endDate={new Date(new Date(editingProposal.created_at).getTime() + 365 * 24 * 60 * 60 * 1000)} 
-                      onUpdate={(updatedMilestones) => {
-                        // In a real app, we would call an API to update milestones
-                        // For now, we update the local state
-                        setMilestones(prev => {
-                          const other = prev.filter(m => m.proposal_id !== editingProposal.id);
-                          return [...other, ...updatedMilestones];
-                        });
-                      }}
+                    <ProposalGantt
+                      missions={ganttMissions}
+                      planning={newProposal.planning}
+                      onChange={(planning) => setNewProposal(prev => ({ ...prev, planning }))}
                     />
                   </div>
                 )}
