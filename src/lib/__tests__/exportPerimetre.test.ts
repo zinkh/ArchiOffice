@@ -30,6 +30,18 @@ const doc = {
 const sel = (p: Partial<typeof SELECTION_COMPLETE>) => ({ ...SELECTION_COMPLETE, ...p });
 
 describe('filtrerPourExport', () => {
+  it("ne compte pas les options, PSE, variantes et articles pour mémoire dans les totaux de l'export", () => {
+    const d = {
+      ...doc, multiBatiments: false, multiPhases: false,
+      lots: [{ id: 'l', numero: '01', titre: 'Lot', sousTotal: 0, chapitres: [{ id: 'c', numero: '1', titre: 'C', lignes: [
+        ligne('base'), ligne('opt', { nature: 'option' }), ligne('pse', { nature: 'pse' }), ligne('pm', { pourMemoire: true }),
+      ] }] }],
+    } as unknown as DPGF;
+    const r = filtrerPourExport(d, SELECTION_COMPLETE);
+    expect(r.lots[0].sousTotal).toBe(20);
+    expect(r.totalHT).toBe(20);
+  });
+
   it('renvoie le document tel quel pour le CCTP avec la sélection complète', () => {
     expect(filtrerPourExport(doc, SELECTION_COMPLETE, { cctp: true })).toBe(doc);
   });

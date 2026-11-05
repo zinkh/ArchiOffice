@@ -1,7 +1,7 @@
 import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT, NATURES_HORS_BASE, type NatureArticle, type NatureHorsBase } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
 import { formatQuantite } from './quantiteFormat';
-import { estHorsBase, sousTotalNature } from '../components/pro/treeOps';
+import { estHorsBase, sousTotalNature, sumLigne, sumLigneNature } from '../components/pro/treeOps';
 import type { AgencySettings } from './proposalExport';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import { ORIENTATION_DPGF, orientationPdf, type Orientation } from './exportOrientation';
@@ -37,14 +37,72 @@ const totauxHorsBase = (dpgf: DPGF): { libelle: string; total: number }[] =>
     .map(n => ({ libelle: LIBELLE_TOTAL_NATURE[n], total: dpgf.lots.reduce((s, l) => s + sousTotalNature(l, n), 0) }))
     .filter(t => t.total);
 
-/** Lignes de pied « Options (PSE) » et « Variantes », seulement s'il y en a. */
-function piedHorsBase(dpgf: DPGF, colonnes: number, format: (n: number) => string, extra = 0): string[][] {
-  return totauxHorsBase(dpgf).map(t => ['', t.libelle, ...Array(colonnes - 3).fill(''), format(t.total) + ' €', ...Array(extra).fill('')]);
+/**
+ * Corps d'un tableau d'options, PSE ou variantes : mêmes colonnes que le tableau de base (N°, désignation,
+ * unité, quantité, P.U., total). Sans prix (cadre de réponse des entreprises), P.U. et total restent vides.
+ */
+const corpsNature = (items: { ligne: Ligne }[], avecPrix = true): string[][] =>
+  items.map(({ ligne: l }) => [
+    l.numero,
+    l.designation,
+    l.unite,
+    l.quantite > 0 ? formatQuantite(l.quantite) : '',
+    avecPrix ? (l.pourMemoire ? 'PM' : l.prixUnitaire > 0 ? fmt(l.prixUnitaire) : '') : '',
+    avecPrix ? (l.pourMemoire ? 'PM' : l.prixTotal > 0 ? fmt(l.prixTotal) : '') : '',
+  ]);
+
+/**
+ * Options, PSE et variantes, à la suite du tableau de base : un tableau par nature avec son propre total.
+ * Elles ne figurent jamais dans le tableau de base ni dans son total.
+ */
+function ecrireOptionsPdf(
+  doc: any, autoTable: any, dpgf: DPGF,
+  { avecPrix, styles, columnStyles }: { avecPrix: boolean; styles: Record<string, unknown>; columnStyles: Record<number, unknown> },
+) {
+  const marge = 14;
+  let y = (doc as any).lastAutoTable.finalY + 8;
+  for (const nature of NATURES_HORS_BASE) {
+    const items = lignesDeNature(dpgf, nature);
+    if (!items.length) continue;
+    if (y + 30 > doc.internal.pageSize.getHeight() - 20) { doc.addPage(); y = ENTETE_REDUIT_BAS + 4; }
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...TABLEAU_GRIS.texte);
+    doc.text(TITRE_DETAIL_NATURE[nature], marge, y);
+    const total = dpgf.lots.reduce((s, l) => s + sousTotalNature(l, nature), 0);
+    autoTable(doc, {
+      ...tableauGris(), showFoot: 'lastPage',
+      startY: y + 3,
+      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
+      body: corpsNature(items, avecPrix),
+      styles, columnStyles,
+      ...(avecPrix ? { foot: [['', LIBELLE_TOTAL_NATURE[nature], '', '', '', fmt(total) + ' €']] } : {}),
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  }
 }
 
-/** Pied Excel des options et variantes, en nombres (pas de texte formaté). */
-function ajouterHorsBase(f: { ligne: (valeurs: (string | number | undefined)[], style?: { gras?: boolean }) => void }, dpgf: DPGF, colonnes: number, extra = 0) {
-  for (const t of totauxHorsBase(dpgf)) f.ligne(['', t.libelle, ...Array(colonnes - 3).fill(''), t.total, ...Array(extra).fill('')], { gras: true });
+/** Même suite pour l'Excel : une section par nature, après le total de base, montants en nombres. */
+function ecrireOptionsExcel(
+  f: {
+    ligne: (valeurs: (string | number | undefined)[], style?: { gras?: boolean; fond?: 'groupe' | 'doux'; italique?: boolean }) => void;
+    total: (valeurs: (string | number | undefined)[]) => void;
+  },
+  dpgf: DPGF, avecPrix: boolean,
+  cellules: (l: Ligne, lot: Lot, prix: boolean) => (string | number | undefined)[],
+  colonnes: number,
+) {
+  for (const nature of NATURES_HORS_BASE) {
+    const items = lignesDeNature(dpgf, nature);
+    if (!items.length) continue;
+    f.ligne([]);
+    f.ligne(['', TITRE_DETAIL_NATURE[nature]], { gras: true, fond: 'groupe' });
+    for (const { ligne, lot } of items) f.ligne(cellules(ligne, lot, avecPrix));
+    if (avecPrix) {
+      const total = dpgf.lots.reduce((s, l) => s + sousTotalNature(l, nature), 0);
+      f.total(['', LIBELLE_TOTAL_NATURE[nature], ...Array(colonnes - 3).fill(''), total]);
+    }
+  }
 }
 
 /** Taux affiché sans décimale inutile : « 10 », « 5,5 ». */
@@ -93,10 +151,21 @@ function ajouterPiedTvaExcel(
 }
 
 /** Taux dédié et TVA correspondante d'une ligne, à étaler dans la ligne aplatie. */
-const tvaDeLigne = (l: Ligne): { tvaTaux?: number; tvaMontant?: number } => {
-  const tvaMontant = tvaDuPoste(l.tva, l.prixTotal, !!l.pourMemoire);
+const tvaDeLigne = (l: Ligne, total = l.prixTotal): { tvaTaux?: number; tvaMontant?: number } => {
+  const tvaMontant = tvaDuPoste(l.tva, total, !!l.pourMemoire);
   return tvaMontant === undefined ? {} : { tvaTaux: l.tva, tvaMontant };
 };
+
+/**
+ * Montant d'un article qui porte des sous-articles : la SOMME de ses enfants, comme à l'écran, jamais un prix
+ * saisi sur le parent (il est périmé dès qu'un enfant change). Pour mémoire : rien ; option, PSE ou variante :
+ * la somme de ses enfants de cette nature.
+ */
+const sommeDesEnfants = (l: Ligne): number =>
+  l.pourMemoire ? 0 : estHorsBase(l.nature) ? sumLigneNature(l, l.nature, true) : sumLigne(l);
+
+/** Mention qui signale, dans le tableau, qu'un article n'est qu'un sous-total de ses sous-articles. */
+const MENTION_SOUS_TOTAL = ' (sous-total)';
 
 /** Cellule PDF :« 23,40 (10 %) », vide pour un poste sans taux dédié. */
 const celluleTva = (taux?: number, montant?: number) =>
@@ -130,8 +199,11 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
 }> {
   const rows: ReturnType<typeof flattenDPGFGroupe> = [];
   for (const [, g] of grouperDpgf(dpgf, groupement)) {
+    // Options, PSE et variantes ne figurent pas dans le tableau de base : elles suivent dans leurs propres tableaux.
+    const articlesBase = g.articles.filter(a => !estHorsBase(a.nature));
+    if (!articlesBase.length) continue;
     rows.push({ type: 'groupe', numero: '', designation: g.libelle, lot: '', localisation: '', unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(g.total), q: 0, pu: 0, total: g.total, pm: false });
-    for (const a of g.articles) {
+    for (const a of articlesBase) {
       rows.push({
         type: 'article',
         numero: a.ligne.numero,
@@ -159,6 +231,8 @@ function flattenDPGF(lots: Lot[], sansHorsBase = false): Array<{
   prixUnitaire: string;
   prixTotal: string;
   type: string;
+  /** Article qui porte des sous-articles : montant = somme de ses enfants, ni unité, ni quantité, ni P.U. */
+  parent: boolean;
   q: number;
   pu: number;
   total: number;
@@ -168,9 +242,9 @@ function flattenDPGF(lots: Lot[], sansHorsBase = false): Array<{
 }> {
   const rows: ReturnType<typeof flattenDPGF> = [];
   for (const lot of lots) {
-    rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot', q: 0, pu: 0, total: lot.sousTotal, pm: false });
+    rows.push({ depth: 0, numero: lot.numero, designation: lot.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: fmt(lot.sousTotal), type: 'lot', parent: false, q: 0, pu: 0, total: lot.sousTotal, pm: false });
     for (const chap of lot.chapitres) {
-      rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre', q: 0, pu: 0, total: 0, pm: false });
+      rows.push({ depth: 1, numero: chap.numero, designation: chap.titre, unite: '', quantite: '', prixUnitaire: '', prixTotal: '', type: 'chapitre', parent: false, q: 0, pu: 0, total: 0, pm: false });
       // Descend dans les sous-articles : la version précédente s'arrêtait au
       // premier niveau et faisait disparaître silencieusement tout ce qui se
       // trouvait en dessous de chaque export PDF ou Excel.
@@ -178,20 +252,23 @@ function flattenDPGF(lots: Lot[], sansHorsBase = false): Array<{
         for (const ligne of lignes) {
           // Estimation poste par poste : options, PSE et variantes ont leur propre tableau, hors du total de base.
           if (sansHorsBase && estHorsBase(ligne.nature)) continue;
-          // Un article qui porte des sous-articles n'a ni unité ni quantité à chiffrer : l'afficher
-          // (« forf », « 1,00 ») laisserait croire aux entreprises qu'elles doivent le chiffrer.
+          // Un article qui porte des sous-articles n'a ni unité, ni quantité, ni prix unitaire à chiffrer :
+          // « forf » et « 1,00 » laisseraient croire aux entreprises qu'elles doivent le chiffrer. Il
+          // n'affiche que la somme de ses enfants, signalée comme sous-total.
           const parent = !!ligne.children?.length;
+          const total = parent ? sommeDesEnfants(ligne) : ligne.prixTotal;
           rows.push({
             depth,
             numero: ligne.numero,
-            designation: ligne.designation + repereStatut(ligne.pourMemoire, ligne.nature),
+            designation: ligne.designation + repereStatut(ligne.pourMemoire, ligne.nature) + (parent ? MENTION_SOUS_TOTAL : ''),
             unite: parent ? '' : ligne.unite,
             quantite: !parent && ligne.quantite > 0 ? formatQuantite(ligne.quantite) : '',
-            prixUnitaire: ligne.pourMemoire ? 'PM' : ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
-            prixTotal: ligne.pourMemoire ? 'PM' : ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
+            prixUnitaire: parent ? '' : ligne.pourMemoire ? 'PM' : ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
+            prixTotal: ligne.pourMemoire ? 'PM' : total > 0 ? fmt(total) : '',
             type: ligne.type,
-            q: parent ? 0 : ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal, pm: !!ligne.pourMemoire,
-            ...tvaDeLigne(ligne),
+            parent,
+            q: parent ? 0 : ligne.quantite, pu: parent ? 0 : ligne.prixUnitaire, total, pm: !!ligne.pourMemoire,
+            ...tvaDeLigne(ligne, total),
           });
           if (ligne.children?.length) walk(ligne.children, depth + 1);
         }
@@ -263,9 +340,9 @@ export async function exportDPGFtoPDF(
   const startY = ENTETE_REDUIT_BAS + 4;
 
   if (groupement === 'lot') {
-    const rows = flattenDPGF(dpgf.lots);
+    const rows = flattenDPGF(dpgf.lots, true);
     autoTable(doc, {
-      ...tableauGris(),
+      ...tableauGris(), showFoot: 'lastPage',
       ...(etroit ? { styles: { ...tableauGris().styles, fontSize: 7.5, cellPadding: 1.5 } } : {}),
       startY,
       head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]],
@@ -295,18 +372,20 @@ export async function exportDPGFtoPDF(
           data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
         } else if (row.type === 'titre') {
           data.cell.styles.fontStyle = 'italic';
+        } else if (row.parent) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
         }
       },
       ...(avecPrix ? { foot: [
         ['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €', ...(colTva ? [''] : [])],
-        ...piedHorsBase(dpgf, 6, fmt, colTva ? 1 : 0),
         ...(colTva ? piedTvaPdf(rows, 6) : []),
       ] } : {}),
     });
   } else {
     const rows = flattenDPGFGroupe(dpgf, groupement);
     autoTable(doc, {
-      ...tableauGris(),
+      ...tableauGris(), showFoot: 'lastPage',
       ...(etroit ? { styles: { ...tableauGris().styles, fontSize: 7.5, cellPadding: 1.5 } } : {}),
       startY,
       head: [['N°', 'Désignation', 'Lot', 'Localisation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)', ...(colTva ? ['TVA dédiée (€)'] : [])]],
@@ -335,12 +414,19 @@ export async function exportDPGFtoPDF(
       },
       ...(avecPrix ? { foot: [
         ['', 'TOTAL HT', '', '', '', '', '', fmt(dpgf.totalHT) + ' €', ...(colTva ? [''] : [])],
-        ...piedHorsBase(dpgf, 8, fmt, colTva ? 1 : 0),
         ...(colTva ? piedTvaPdf(rows, 8) : []),
       ] } : {}),
     });
   }
 
+  ecrireOptionsPdf(doc, autoTable, dpgf, {
+    avecPrix,
+    styles: { fontSize: etroit ? 7.5 : 8, textColor: TABLEAU_GRIS.texte, cellPadding: etroit ? 1.5 : 2 },
+    columnStyles: {
+      0: { cellWidth: w(20) }, 1: { cellWidth: 'auto' }, 2: { cellWidth: w(18), halign: 'center' },
+      3: { cellWidth: w(22), halign: 'right' }, 4: { cellWidth: w(28), halign: 'right' }, 5: { cellWidth: w(28), halign: 'right' },
+    },
+  });
   drawAgencyFooters(doc, settings, letterhead);
   await enregistrerPdf(doc, nomDpgf(dpgf, suffixeNom, 'pdf'), sortie);
 }
@@ -401,7 +487,7 @@ export async function exportEstimationtoPDF(
   if (detaille) {
     const rows = flattenDPGF(dpgf.lots, true);
     autoTable(doc, {
-      ...tableauGris(),
+      ...tableauGris(), showFoot: 'lastPage',
       startY,
       head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
       body: rows.map(r => [r.numero, '  '.repeat(Math.max(0, r.depth - 1)) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
@@ -425,13 +511,16 @@ export async function exportEstimationtoPDF(
           data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
         } else if (row.type === 'titre') {
           data.cell.styles.fontStyle = 'italic';
+        } else if (row.parent) {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
         }
       },
       foot: [['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €']],
     });
   } else {
     autoTable(doc, {
-      ...tableauGris(),
+      ...tableauGris(), showFoot: 'lastPage',
       startY,
       head: [['N°', 'Lot', 'Montant HT', 'Montant TTC']],
       body: dpgf.lots.map(lot => [
@@ -475,40 +564,14 @@ export async function exportEstimationtoPDF(
   y += 14 + horsBase.length * 6 + 4;
 
   // Détail des options, PSE et variantes : un tableau par nature, hors du total de base.
-  for (const nature of NATURES_HORS_BASE) {
-    const items = lignesDeNature(dpgf, nature);
-    if (!items.length) continue;
-    const total = dpgf.lots.reduce((s, l) => s + sousTotalNature(l, nature), 0);
-    reserver(30);
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...TABLEAU_GRIS.texte);
-    doc.text(TITRE_DETAIL_NATURE[nature], marge, y);
-    autoTable(doc, {
-      ...tableauGris(),
-      startY: y + 3,
-      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
-      body: items.map(({ ligne: l }) => [
-        l.numero,
-        l.designation,
-        l.unite,
-        l.quantite > 0 ? formatQuantite(l.quantite) : '',
-        l.pourMemoire ? 'PM' : l.prixUnitaire > 0 ? fmt(l.prixUnitaire) : '',
-        l.pourMemoire ? 'PM' : l.prixTotal > 0 ? fmt(l.prixTotal) : '',
-      ]),
-      styles: { fontSize: 8, textColor: TABLEAU_GRIS.texte, cellPadding: 2 },
-      columnStyles: {
-        0: { cellWidth: 20 },
-        1: { cellWidth: 'auto' },
-        2: { cellWidth: 14, halign: 'center' },
-        3: { cellWidth: 18, halign: 'right' },
-        4: { cellWidth: 26, halign: 'right' },
-        5: { cellWidth: 28, halign: 'right' },
-      },
-      foot: [['', LIBELLE_TOTAL_NATURE[nature], '', '', '', fmt(total) + ' €']],
-    });
-    y = (doc as any).lastAutoTable.finalY + 8;
-  }
+  ecrireOptionsPdf(doc, autoTable, dpgf, {
+    avecPrix: true,
+    styles: { fontSize: 8, textColor: TABLEAU_GRIS.texte, cellPadding: 2 },
+    columnStyles: {
+      0: { cellWidth: 20 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 14, halign: 'center' },
+      3: { cellWidth: 18, halign: 'right' }, 4: { cellWidth: 26, halign: 'right' }, 5: { cellWidth: 28, halign: 'right' },
+    },
+  });
 
   drawAgencyFooters(doc, settings, letterhead);
   await enregistrerPdf(doc, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}${detaille ? '_detaillee' : ''}.pdf`, sortie);
@@ -550,7 +613,7 @@ export async function exportDPGFtoExcel(
         ...entetesTva,
       ],
     });
-    const lignes = flattenDPGF(dpgf.lots);
+    const lignes = flattenDPGF(dpgf.lots, true);
     for (const r of lignes) {
       const debut = [r.numero, '  '.repeat(r.depth) + r.designation, r.unite, nombre(r.q)];
       const valeurs = [
@@ -560,12 +623,16 @@ export async function exportDPGFtoExcel(
         ...(colTva ? [r.tvaTaux, r.tvaMontant] : []),
       ];
       if (r.type === 'lot') f.ligne(valeurs, { gras: true, fond: 'groupe' });
-      else if (r.type === 'chapitre') f.ligne(valeurs, { gras: true, fond: 'doux' });
+      else if (r.type === 'chapitre' || r.parent) f.ligne(valeurs, { gras: true, fond: 'doux' });
       else f.ligne(valeurs, r.type === 'titre' ? { italique: true } : {});
     }
     if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', dpgf.totalHT]);
-    if (avecPrix) ajouterHorsBase(f, dpgf, 6, colTva ? 2 : 0);
     if (colTva) ajouterPiedTvaExcel(f, lignes, 6);
+    ecrireOptionsExcel(f, dpgf, avecPrix, (l, _lot, prix) => [
+      l.numero, l.designation, l.unite, nombre(l.quantite),
+      prix ? (l.pourMemoire ? 'PM' : nombre(l.prixUnitaire)) : undefined,
+      prix ? (l.pourMemoire ? 'PM' : nombre(l.prixTotal)) : undefined,
+    ], 6);
   } else {
     const f = ajouterFeuille(wb, {
       ...commun,
@@ -593,8 +660,12 @@ export async function exportDPGFtoExcel(
       f.ligne(valeurs, r.type === 'groupe' ? { gras: true, fond: 'groupe' } : {});
     }
     if (avecPrix) f.total(['', 'TOTAL HT', '', '', '', '', '', dpgf.totalHT]);
-    if (avecPrix) ajouterHorsBase(f, dpgf, 8, colTva ? 2 : 0);
     if (colTva) ajouterPiedTvaExcel(f, articles, 8);
+    ecrireOptionsExcel(f, dpgf, avecPrix, (l, lot, prix) => [
+      l.numero, l.designation, `${lot.numero} ${lot.titre}`, l.localisation || '', l.unite, nombre(l.quantite),
+      prix ? (l.pourMemoire ? 'PM' : nombre(l.prixUnitaire)) : undefined,
+      prix ? (l.pourMemoire ? 'PM' : nombre(l.prixTotal)) : undefined,
+    ], 8);
   }
   await enregistrerClasseur(wb, nomDpgf(dpgf, suffixeNom, 'xlsx'), sortie);
 }
@@ -620,24 +691,58 @@ export async function exportEstimationtoExcel(dpgf: DPGF, projectName?: string, 
       { header: 'Total TTC', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
     ],
   });
-  for (const lot of dpgf.lots) {
-    detail.ligne(
-      [lot.numero, lot.titre, '', '', '', lot.sousTotal, lot.sousTotal * dpgf.TVA / 100, lot.sousTotal * (1 + dpgf.TVA / 100)],
-      { gras: true, fond: 'groupe' },
-    );
-    for (const chap of lot.chapitres) {
-      detail.ligne(['', `${chap.numero} ${chap.titre}`], { gras: true, fond: 'doux' });
-      for (const ligne of chap.lignes) {
-        detail.ligne([
-          ligne.numero, `  ${ligne.designation}${repereStatut(ligne.pourMemoire, ligne.nature)}`, ligne.unite,
-          nombre(ligne.quantite), ligne.pourMemoire ? 'PM' : nombre(ligne.prixUnitaire), ligne.pourMemoire ? 'PM' : nombre(ligne.prixTotal),
-        ]);
-      }
+  // Postes de base seulement : la feuille se somme au total de base. Options, PSE et variantes ont leur feuille.
+  // Les sous-articles sont listés, un article parent n'affiche que la somme de ses enfants.
+  for (const r of flattenDPGF(dpgf.lots, true)) {
+    if (r.type === 'lot') {
+      detail.ligne([r.numero, r.designation, '', '', '', r.total, r.total * dpgf.TVA / 100, r.total * (1 + dpgf.TVA / 100)], { gras: true, fond: 'groupe' });
+    } else if (r.type === 'chapitre') {
+      detail.ligne(['', `${r.numero} ${r.designation}`], { gras: true, fond: 'doux' });
+    } else {
+      detail.ligne([
+        r.numero, `${'  '.repeat(Math.max(1, r.depth - 1))}${r.designation}`, r.unite,
+        nombre(r.q), r.pm ? 'PM' : nombre(r.pu), r.pm ? 'PM' : nombre(r.total),
+      ], r.parent ? { gras: true, fond: 'doux' } : {});
     }
   }
   detail.total(['', 'TOTAL', '', '', '', dpgf.totalHT, dpgf.totalTTC - dpgf.totalHT, dpgf.totalTTC]);
   for (const t of totauxHorsBase(dpgf)) {
     detail.ligne(['', t.libelle, '', '', '', t.total, t.total * dpgf.TVA / 100, t.total * (1 + dpgf.TVA / 100)], { gras: true });
+  }
+
+  // Détail des options, PSE et variantes : une section par nature, comme dans le PDF, hors du total de base.
+  const natures = NATURES_HORS_BASE
+    .map(nature => ({ nature, items: lignesDeNature(dpgf, nature) }))
+    .filter(n => n.items.length);
+  if (natures.length) {
+    const options = ajouterFeuille(wb, {
+      nom: 'Options et variantes', settings, logo,
+      title: 'ESTIMATION — Options, PSE et variantes (non comprises dans le total)',
+      subtitle: projectName || dpgf.titre,
+      colonnes: [
+        { header: 'N°', width: 10 },
+        { header: 'Désignation', width: 50 },
+        { header: 'Unité', width: 10, align: 'center' },
+        { header: 'Quantité', width: 12, align: 'right', numFmt: FORMAT_QUANTITE },
+        { header: 'P.U. HT', width: 14, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Total HT', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: `TVA ${dpgf.TVA}%`, width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+        { header: 'Total TTC', width: 16, align: 'right', numFmt: FORMAT_NOMBRE },
+      ],
+    });
+    for (const { nature, items } of natures) {
+      options.ligne(['', TITRE_DETAIL_NATURE[nature]], { gras: true, fond: 'groupe' });
+      for (const { ligne: l } of items) {
+        const ht = l.pourMemoire ? undefined : nombre(l.prixTotal);
+        options.ligne([
+          l.numero, `  ${l.designation}`, l.unite, nombre(l.quantite),
+          l.pourMemoire ? 'PM' : nombre(l.prixUnitaire), l.pourMemoire ? 'PM' : ht,
+          ht === undefined ? undefined : ht * dpgf.TVA / 100, ht === undefined ? undefined : ht * (1 + dpgf.TVA / 100),
+        ]);
+      }
+      const total = dpgf.lots.reduce((somme, lot) => somme + sousTotalNature(lot, nature), 0);
+      options.ligne(['', LIBELLE_TOTAL_NATURE[nature], '', '', '', total, total * dpgf.TVA / 100, total * (1 + dpgf.TVA / 100)], { gras: true, fond: 'doux' });
+    }
   }
 
   const recap = ajouterFeuille(wb, {
