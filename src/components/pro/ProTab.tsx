@@ -311,6 +311,27 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
     appliquerDpgf(cible);
     showToast(t('pro_redo_done'), 'success');
   };
+  // Même principe pour le BPU et le DQE (un seul document, `bpu_data`) : un historique alimenté par `editBpu`.
+  const historiqueBpu = useDocHistory<BPU>(projectId);
+  const bpuCourant = useRef<BPU | null>(null);
+  bpuCourant.current = bpu;
+  const appliquerBpu = (next: BPU) => {
+    const changes = bpu ? titresModifies(bpu, next) : [];
+    setBpu(next);
+    for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+  };
+  const annulerBpu = () => {
+    const cible = historiqueBpu.annuler(bpuCourant.current);
+    if (!cible) return;
+    appliquerBpu(cible);
+    showToast(t('pro_undo_done'), 'success');
+  };
+  const retablirBpu = () => {
+    const cible = historiqueBpu.retablir(bpuCourant.current);
+    if (!cible) return;
+    appliquerBpu(cible);
+    showToast(t('pro_redo_done'), 'success');
+  };
   const editBpu = (next: BPU) => {
     const beforeIds = new Set<string>();
     collectLigneIds(bpu, beforeIds);
@@ -319,10 +340,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
       method: 'POST',
       body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
     }).catch(() => {});
-    const changes = bpu ? titresModifies(bpu, next) : [];
-    setBpu(next);
-    if (!changes.length) return;
-    for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+    historiqueBpu.enregistrer(bpu, next);
+    appliquerBpu(next);
   };
 
   const displayedRightDpgf = rightProjectId === projectId ? dpgf : rightDpgf;
@@ -611,11 +630,15 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Ctrl+Z annule, Ctrl+Maj+Z ou Ctrl+Y rétablit, sur les ateliers qui partagent le document (CCTP, DPGF,
-  // estimation). Dans un champ de saisie, c'est l'annulation du champ lui-même qui joue : on n'y touche pas.
-  const documentAnnulable = activeSubTab === 'CCTP' || activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
-  const annulationRef = useRef<{ actif: boolean; annuler: () => void; retablir: () => void }>({ actif: false, annuler: annulerDpgf, retablir: retablirDpgf });
-  annulationRef.current = { actif: documentAnnulable, annuler: annulerDpgf, retablir: retablirDpgf };
+  // Ctrl+Z annule, Ctrl+Maj+Z ou Ctrl+Y rétablit, sur le document à l'écran : celui du CCTP, du DPGF et de
+  // l'estimation, ou celui du BPU et du DQE. Dans un champ de saisie, c'est l'annulation du champ lui-même qui
+  // joue : on n'y touche pas.
+  const documentAnnulable = activeSubTab !== 'LOTS';
+  const historiqueActif = isBpuTab ? historiqueBpu : historiqueDpgf;
+  const annulerActif = isBpuTab ? annulerBpu : annulerDpgf;
+  const retablirActif = isBpuTab ? retablirBpu : retablirDpgf;
+  const annulationRef = useRef<{ actif: boolean; annuler: () => void; retablir: () => void }>({ actif: false, annuler: annulerActif, retablir: retablirActif });
+  annulationRef.current = { actif: documentAnnulable, annuler: annulerActif, retablir: retablirActif };
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey || !annulationRef.current.actif) return;
@@ -691,8 +714,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
         {documentAnnulable && (
           <div className="inline-flex items-center gap-0.5" role="group" aria-label={t('pro_undo_group')}>
             {[
-              { id: 'undo', label: t('pro_undo'), icon: <IconArrowBackUp size={16} aria-hidden />, onClick: annulerDpgf, disabled: !historiqueDpgf.peutAnnuler },
-              { id: 'redo', label: t('pro_redo'), icon: <IconArrowForwardUp size={16} aria-hidden />, onClick: retablirDpgf, disabled: !historiqueDpgf.peutRetablir },
+              { id: 'undo', label: t('pro_undo'), icon: <IconArrowBackUp size={16} aria-hidden />, onClick: annulerActif, disabled: !historiqueActif.peutAnnuler },
+              { id: 'redo', label: t('pro_redo'), icon: <IconArrowForwardUp size={16} aria-hidden />, onClick: retablirActif, disabled: !historiqueActif.peutRetablir },
             ].map(b => (
               <button
                 key={b.id} type="button" onClick={b.onClick} disabled={b.disabled}
