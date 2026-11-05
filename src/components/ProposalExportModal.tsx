@@ -18,7 +18,7 @@ import {
   ProposalPdfData, ProposalTemplate, ProposalSectionId, CotraitantIdentityPdf, DensityTokens, TableDensity, IllustrationPdf,
   PROPOSAL_SECTION_DEFS, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS, mapProposalToPdfData, getPdfStyles,
   loadStoredTemplate, saveStoredTemplate, applyPreset,
-  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent,
+  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent, proposalStatusLabel,
 } from '../lib/proposalExport';
 
 // ─── PDF primitives ─────────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ const renderGarde = (d: ProposalPdfData, t: ProposalTemplate): React.ReactNode =
         <div style={{ marginTop: '3mm', fontSize: '10pt', fontWeight: 500 }}>Architecte: {d.architecteNom}{d.oaNumber ? `, Ordre des Architectes n° ${d.oaNumber}` : ''}</div>
       </div>
       <div style={{ width: '100%', textAlign: 'center', marginTop: '10mm' }}>
-        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{d.status.toUpperCase()}</div>
+        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{proposalStatusLabel(d.status).toUpperCase()}</div>
         <div style={{ marginTop: '3mm', fontSize: '9pt', color: '#94a3b8' }}>Émis le {d.dateEmission}</div>
       </div>
     </Cover>

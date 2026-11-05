@@ -147,6 +147,18 @@ export function planifierCalendrier(
   return items;
 }
 
+const PROPOSAL_STATUS_LABELS_FR: Record<string, string> = {
+  draft: 'Brouillon',
+  sent: 'Envoyée',
+  accepted: 'Acceptée',
+  rejected: 'Refusée',
+};
+
+/** Libellé français du statut, pour le badge de la page de garde ; un statut inconnu reste tel quel. */
+export function proposalStatusLabel(status: string): string {
+  return PROPOSAL_STATUS_LABELS_FR[status.toLowerCase()] ?? status;
+}
+
 export interface ProposalPdfData {
   reference: string;
   titre: string;
