@@ -1,4 +1,4 @@
-const {createShellProjection,createShellPipe}=require('./windowsShell.cjs');
+const {createShellProjection,createShellPipe,createShellDocumentOpener}=require('./windowsShell.cjs');
 const { createWindowsMultiDrive } = require('./windowsDriveMulti.cjs');
 const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
 const path = require('path');
@@ -420,7 +420,7 @@ function startDriveAgent() {
   const runShell=(args)=>new Promise((resolve,reject)=>{const child=spawn(shellControl,args,{windowsHide:true,stdio:'ignore'});const timer=setTimeout(()=>{child.kill();reject(new Error('Shell control timeout'));},10000);child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',code=>{clearTimeout(timer);code===0?resolve():reject(new Error('Shell control failed'));});});
   if(process.platform==='win32'&&fs.existsSync(shellControl)) {
     const projection=createShellProjection({drive:windowsDrivePreview,agent:driveAgent,vault:()=>requestVault(serverProcess),root:path.join(app.getPath('userData'),'drive-windows-preview'),shell,
-      openDocument:async({projectId,documentId})=>{await showMainWindow();if(!mainWindow||mainWindow.isDestroyed())throw new Error('Window unavailable');mainWindow.show();mainWindow.focus();await mainWindow.loadURL(`http://127.0.0.1:${PORT}/documents?project=${encodeURIComponent(projectId)}&document=${encodeURIComponent(documentId)}`);}});
+      openDocument:createShellDocumentOpener({getWindow:()=>mainWindow,showWindow:showMainWindow,origin:`http://127.0.0.1:${PORT}`})});
     const pipe=createShellPipe({projection});const holder={pipe,address:null,control:runShell,ready:false};driveShell=holder;
     void pipe.start().then(async endpoint=>{holder.address=endpoint.address;await runShell(['--runtime',endpoint.address,endpoint.token]);if(driveShell===holder)holder.ready=true;else {pipe.stop();await runShell(['--clear-runtime',endpoint.address]);}}).catch(()=>{pipe.stop();if(driveShell===holder)driveShell=null;log('[drive] Extension Explorer indisponible.');});
   }

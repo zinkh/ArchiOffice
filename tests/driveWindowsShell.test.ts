@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';import fs from 'node:fs/promises';import path from 'node:path';import os from 'node:os';import net from 'node:net';import {createRequire} from 'node:module';import {beforeEach,afterEach,it,expect,vi} from 'vitest';
 import {windowsShellMetadata} from '../server/desktop/agent/windowsShellMetadata';
-const {createShellProjection,createShellPipe}=createRequire(import.meta.url)('../electron/windowsShell.cjs');
+const {createShellProjection,createShellPipe,createShellDocumentOpener}=createRequire(import.meta.url)('../electron/windowsShell.cjs');
 const identity={userId:'u',tenantId:'t',deviceId:'d'};let temp:string,file:string,saved:any,options:any,projection:any,pipe:any;
 beforeEach(async()=>{temp=await fs.mkdtemp(path.join(os.tmpdir(),'drive-shell-'));const folder=path.join(temp,'project');await fs.mkdir(folder);file=path.join(folder,'_Plan.pdf');await fs.writeFile(file,'hello');saved={identity,projectId:'p',rootKey:'c'.repeat(64),directory:folder,catalog:[{path:'_VIP-TC-123456789abc',key:'d'.repeat(64),folder:true},{path:'_Plan.pdf',key:'a'.repeat(64),folder:false,meta:{nodeId:'doc:p',name:'Plan.pdf',version:2}}]};options={root:temp,vault:vi.fn().mockResolvedValue(identity),drive:{shellSnapshot:vi.fn(async()=>({identity,projects:[saved]}))},agent:{windowsPreview:vi.fn().mockResolvedValue({identity,projectName:'VIP-TC',files:[{nodeId:'doc:p',version:2,phase:'PRO',indice:'C',status:'approuve'}]})},shell:{openPath:vi.fn().mockResolvedValue('')},openDocument:vi.fn()};projection=createShellProjection(options);});
 afterEach(async()=>{pipe?.stop();pipe=null;await fs.rm(temp,{recursive:true,force:true});});
@@ -19,4 +19,28 @@ it('protects the local pipe with a bounded authenticated protocol',async(context
 it('reads business metadata through a bounded project tree without file downloads',async()=>{
  const read=vi.fn(async(route:string):Promise<any>=>route==='/nodes/prj%3Ap'?{id:'prj:p',kind:'folder',name:'VIP-TC'}:route.includes('phase%3Ap%3APRO')?{nodes:[{id:'doc:p',parentId:'phase:p:PRO',kind:'file',version:2,indice:'C',status:'approuve'}],nextCursor:null}:{nodes:[{id:'phase:p:PRO',parentId:'prj:p',kind:'folder',name:'PRO'}],nextCursor:null});
  expect(await windowsShellMetadata('p',read)).toMatchObject({projectName:'VIP-TC',files:[{nodeId:'doc:p',phase:'PRO',version:2,indice:'C',status:'approuve'}]});expect(read).toHaveBeenCalledTimes(3);await expect(windowsShellMetadata('../escape',read)).rejects.toThrow();
+});
+
+it('never attaches business properties from a different file version',async()=>{
+ options.agent.windowsPreview.mockResolvedValue({identity,projectName:'VIP-TC',files:[{nodeId:'doc:p',version:3,phase:'APD',indice:'Z',status:'perime'}]});
+ await catalog();await new Promise(resolve=>setImmediate(resolve));expect((await catalog()).projects[0].rows[0]).toMatchObject({version:2,indice:'',status:''});
+});
+it('refuses executable files even when their opaque reference belongs to the mounted catalogue',async()=>{
+ saved.catalog[1].path='_Script.exe';await fs.writeFile(path.join(saved.directory,'_Script.exe'),'bytes');
+ const ref=await reference();await expect(projection.command('open',ref)).rejects.toThrow();expect(options.shell.openPath).not.toHaveBeenCalled();
+});
+it('rejects a foreign parent in a metadata response',async()=>{
+ const read=vi.fn(async(route:string)=>route.includes('/children')?{nodes:[{id:'doc:x',parentId:'prj:other',kind:'file',version:1}],nextCursor:null}:{id:'prj:p',kind:'folder',name:'VIP-TC'});
+ await expect(windowsShellMetadata('p',read)).rejects.toThrow('Shell metadata refused');
+});
+
+it('reuses the existing desktop window and restores it for a document link',async()=>{
+ const target={isDestroyed:()=>false,isMinimized:()=>true,restore:vi.fn(),show:vi.fn(),focus:vi.fn(),loadURL:vi.fn()};const showWindow=vi.fn();
+ const open=createShellDocumentOpener({getWindow:()=>target,showWindow,origin:'http://127.0.0.1:3130'});await open({projectId:'p',documentId:'d'});
+ expect(showWindow).not.toHaveBeenCalled();expect(target.restore).toHaveBeenCalledOnce();expect(target.loadURL).toHaveBeenCalledWith('http://127.0.0.1:3130/documents?project=p&document=d');
+});
+it('coalesces creation of a missing desktop window',async()=>{
+ let target:any=null;const window={isDestroyed:()=>false,isMinimized:()=>false,show:vi.fn(),focus:vi.fn(),loadURL:vi.fn()};
+ const showWindow=vi.fn(async()=>{await new Promise(resolve=>setImmediate(resolve));target=window;});
+ const open=createShellDocumentOpener({getWindow:()=>target,showWindow,origin:'http://127.0.0.1:3130'});await Promise.all([open({projectId:'p',documentId:'d'}),open({projectId:'p',documentId:'e'})]);expect(showWindow).toHaveBeenCalledOnce();expect(window.loadURL).toHaveBeenCalledTimes(2);
 });

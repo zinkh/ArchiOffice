@@ -6,11 +6,11 @@ Vue native Windows x64 enregistrée dans **Ce PC → ArchiOffice Drive**, sépar
 
 - Arbre des projets et des phases, liste des documents et propriétés en lecture seule.
 - Colonnes Document, Phase, Type de fichier, Indice, Version et Statut. Les champs absents restent indiqués par un tiret.
-- Sélection par souris/clavier, ouverture par double-clic/Entrée, F5 ou bouton Actualiser. Les séparateurs sont déplaçables ; le volet de propriétés se masque sous 850 px.
+- Sélection par souris/clavier, ouverture par double-clic/Entrée, F5 ou bouton Actualiser. Les séparateurs sont déplaçables ; sous 850 unités logiques, le bouton Propriétés permet d’alterner avec la liste des documents. La géométrie, les colonnes et les polices suivent le DPI Windows.
 - « Ouvrir » résout un identifiant opaque dans le manifeste actif et ouvre le fichier physique canonique utilisé par A:, sans créer une seconde copie de travail.
 - « Ouvrir dans ArchiOffice » ouvre Documents sur le projet et met le document en évidence après vérification de sa présence dans les données chargées.
 
-Le catalogue local est relu toutes les cinq secondes. L’enrichissement métier utilise les API VFS existantes, sans télécharger les fichiers, et se renouvelle au plus une fois par minute. Il ne s’applique qu’à une version identique à celle du manifeste monté. Cette vue ne rafraîchit pas automatiquement les fichiers de A: : la commande existante de mise à jour du catalogue conserve ce rôle.
+Le catalogue local est relu toutes les cinq secondes. Une réponse identique ne reconstruit pas la vue ; un changement conserve la sélection, les branches repliées et les positions de défilement. L’enrichissement métier utilise les API VFS existantes, sans télécharger les fichiers, et se renouvelle au plus une fois par minute. Il ne s’applique qu’à une version identique à celle du manifeste monté. Cette vue ne rafraîchit pas automatiquement les fichiers de A: : la commande existante de mise à jour du catalogue conserve ce rôle.
 
 ## Séparation des responsabilités
 
@@ -35,7 +35,7 @@ L’installateur enregistre le CLSID sous HKLM après installation du runtime VC
 
 `tests/driveWindowsShell.test.ts` vérifie les références, l’enrichissement, le refus d’identité/génération, le fichier canonique et le protocole. `tests/driveWindowsMulti.test.ts` vérifie les snapshots du véritable contrôleur de montage.
 
-Sur Windows, `node native/windows-shell/smoke.mjs` instancie la vraie classe COM dans un hôte IShellBrowser, exerce les contrôles Win32 et le broker livré avec des fichiers synthétiques, capture `build/shell-prototype.png`, ouvre le fichier canonique, appelle le lien applicatif, invalide l’identité et vérifie la libération COM. L’enregistrement est répété puis retiré. Le workflow Windows conserve DLL, outil et capture ; le workflow installateur produit le NSIS de test. Le test d’hôte ne remplace pas une recette dans explorer.exe sur un poste réel.
+Sur Windows, `node native/windows-shell/smoke.mjs` instancie la vraie classe COM dans un hôte IShellBrowser, exerce les contrôles Win32 et le broker livré avec des fichiers synthétiques, capture `build/shell-prototype.png`, ouvre le fichier canonique, appelle le lien applicatif, invalide l’identité et vérifie la libération COM. Les contrôles reçoivent des noms accessibles MSAA ; le test vérifie ces noms et le parcours Tab/Maj+Tab. Il capture aussi une fenêtre étroite et simule un changement à 150 % pour vérifier les dimensions. Le maintien d’une branche repliée après un catalogue inchangé est vérifié. L’enregistrement est répété puis retiré. Le workflow Windows conserve DLL, outil et capture ; le workflow installateur produit le NSIS de test. Le test d’hôte ne remplace pas une recette dans explorer.exe sur un poste réel.
 
 ## Limites de cette étape
 

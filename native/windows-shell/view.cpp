@@ -6,6 +6,7 @@
 #include <optional>
 #include <set>
 #include <algorithm>
+#include <oleacc.h>
 namespace {
 std::atomic<UINT> serial{1};
 struct Async {std::atomic<bool> stopped{false};std::mutex mutex;std::optional<Reply> reply;HWND window=nullptr;UINT serial=0;};
@@ -20,32 +21,57 @@ std::wstring status(std::wstring const& value){if(value==L"approuve")return L"Ap
 }
 class View final:public IShellView,public IFolderView {
  std::atomic<ULONG> refs{1};IShellFolder* folder;IShellBrowser* browser=nullptr;
- HWND window=nullptr,tree=nullptr,list=nullptr,details=nullptr,heading=nullptr,note=nullptr,refresh=nullptr,open=nullptr,document=nullptr;
- HFONT font=nullptr,titleFont=nullptr;int left=230,right=290,drag=0;bool busy=false,building=false;std::wstring action=L"catalog",selectedKey;Filter filter;
+ HWND window=nullptr,tree=nullptr,list=nullptr,details=nullptr,heading=nullptr,note=nullptr,refresh=nullptr,open=nullptr,document=nullptr,properties=nullptr;
+ HFONT font=nullptr,titleFont=nullptr;UINT dpi=96;int left=230,right=290,drag=0,splitLeft=230,splitRight=0;bool catalogLoaded=false,busy=false,building=false,propertiesMode=false,rootCollapsed=false;std::set<std::wstring> collapsedProjects;std::wstring action=L"catalog",selectedKey;Filter filter;
  std::vector<Project> projects;std::vector<Filter> filters;std::vector<std::pair<int,int>> visible;std::shared_ptr<Async> async;
  static LRESULT CALLBACK procedure(HWND hwnd,UINT msg,WPARAM w,LPARAM l){auto self=reinterpret_cast<View*>(GetWindowLongPtrW(hwnd,GWLP_USERDATA));if(msg==WM_NCCREATE){self=static_cast<View*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self));self->window=hwnd;}if(self)return self->message(msg,w,l);return DefWindowProcW(hwnd,msg,w,l);}
  HWND control(wchar_t const* cls,wchar_t const* label,DWORD style,int id=0){auto child=CreateWindowExW(0,cls,label,WS_CHILD|WS_VISIBLE|style,0,0,10,10,window,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),moduleInstance,nullptr);SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);return child;}
- void layout(){RECT r;GetClientRect(window,&r);int width=r.right,height=r.bottom;int treeWidth=std::min(left,std::max(140,width/3)),detailWidth=width>=850?std::min(right,width/3):0;int center=std::max(120,width-treeWidth-detailWidth-32);
-  MoveWindow(heading,18,10,std::max(100,width-36),28,TRUE);MoveWindow(refresh,16,46,110,30,TRUE);MoveWindow(open,136,46,100,30,TRUE);MoveWindow(document,246,46,190,30,TRUE);
-  MoveWindow(tree,12,88,treeWidth-12,std::max(30,height-130),TRUE);MoveWindow(list,treeWidth+10,88,center,std::max(30,height-130),TRUE);
-  ShowWindow(details,detailWidth?SW_SHOW:SW_HIDE);if(detailWidth)MoveWindow(details,width-detailWidth+4,88,detailWidth-18,std::max(30,height-130),TRUE);
-  MoveWindow(note,16,std::max(110,height-32),std::max(100,width-32),24,TRUE);InvalidateRect(window,nullptr,TRUE);
+ int px(int value)const{return MulDiv(value,dpi,96);}
+ int dip(int value)const{return MulDiv(value,96,dpi);}
+ void place(HWND child,int x,int y,int width,int height){MoveWindow(child,px(x),px(y),px(width),px(height),TRUE);}
+ void scale(UINT supplied=0){
+  dpi=supplied?supplied:GetDpiForWindow(window);if(!dpi)dpi=96;
+  auto previous=font,previousTitle=titleFont;
+  font=CreateFontW(-MulDiv(10,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+  titleFont=CreateFontW(-MulDiv(16,dpi,72),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
+  for(auto child:{tree,list,details,note,refresh,open,document,properties})SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
+  SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),TRUE);
+  if(previous)DeleteObject(previous);if(previousTitle)DeleteObject(previousTitle);
+  int widths[]={260,85,65,55,65,100};for(int col=0;col<6;col++)ListView_SetColumnWidth(list,col,px(widths[col]));TreeView_SetItemHeight(tree,px(25));
+ }
+ void name(HWND child,wchar_t const* label){
+  winrt::com_ptr<IAccPropServices> service;
+  if(SUCCEEDED(CoCreateInstance(CLSID_AccPropServices,nullptr,CLSCTX_INPROC_SERVER,IID_IAccPropServices,service.put_void())))service->SetHwndPropStr(child,OBJID_CLIENT,CHILDID_SELF,PROPID_ACC_NAME,label);
+ }
+ void layout(){RECT r;GetClientRect(window,&r);int width=dip(r.right),height=dip(r.bottom);
+  int treeWidth=std::min(left,std::max(100,width/3)),detailWidth=width>=850?std::min(right,width/3):0;
+  splitLeft=treeWidth;splitRight=detailWidth?width-detailWidth:0;
+  place(heading,18,10,std::max(100,width-36),28);
+  ShowWindow(properties,detailWidth?SW_HIDE:SW_SHOW);SetWindowTextW(properties,propertiesMode?L"Documents":L"Propriétés");
+  int x=16,y=46;struct Button{HWND window;int width;};
+  for(auto button:{Button{refresh,110},Button{open,100},Button{document,190},Button{properties,125}}){if(button.window==properties&&detailWidth)continue;if(x+button.width>width-16&&x>16){x=16;y+=36;}place(button.window,x,y,button.width,30);x+=button.width+10;}
+  int top=y+42,body=std::max(30,height-top-42),center=std::max(100,width-treeWidth-detailWidth-32);
+  place(tree,12,top,treeWidth-12,body);
+  bool alternate=!detailWidth&&propertiesMode;ShowWindow(list,alternate?SW_HIDE:SW_SHOW);ShowWindow(details,detailWidth||alternate?SW_SHOW:SW_HIDE);
+  place(list,treeWidth+10,top,center,body);
+  if(detailWidth)place(details,width-detailWidth+4,top,detailWidth-18,body);else if(alternate)place(details,treeWidth+10,top,center,body);
+  place(note,16,std::max(110,height-32),std::max(100,width-32),24);InvalidateRect(window,nullptr,TRUE);
  }
  void buttons(){bool valid=!busy&&ListView_GetNextItem(list,-1,LVNI_SELECTED)>=0;EnableWindow(refresh,!busy);EnableWindow(open,valid);EnableWindow(document,valid);}
  void selection(){int selected=ListView_GetNextItem(list,-1,LVNI_SELECTED);if(selected<0||selected>=static_cast<int>(visible.size())){SetWindowTextW(details,L"Sélectionnez un document pour afficher ses propriétés.");buttons();return;}auto [p,d]=visible[selected];auto const& project=projects[p];auto const& doc=project.rows[d];selectedKey=doc.key;
   auto content=doc.name+L"\r\n\r\nPROPRIÉTÉS\r\n\r\nProjet\r\n"+project.name+L"\r\n\r\nPhase\r\n"+(doc.phase.empty()?L"—":doc.phase)+L"\r\n\r\nType de fichier\r\n"+doc.type+L"\r\n\r\nIndice\r\n"+(doc.indice.empty()?L"—":doc.indice)+L"\r\n\r\nVersion\r\n"+std::to_wstring(doc.version)+L"\r\n\r\nStatut documentaire\r\n"+status(doc.status);
   SetWindowTextW(details,content.c_str());buttons();
  }
- void fill(){building=true;ListView_DeleteAllItems(list);visible.clear();int restore=-1;
+ void fill(bool preserveScroll=false){int top=preserveScroll?ListView_GetTopIndex(list):0;building=true;ListView_DeleteAllItems(list);visible.clear();int restore=-1;
   for(int p=0;p<static_cast<int>(projects.size());p++){if(filter.project>=0&&filter.project!=p)continue;for(int d=0;d<static_cast<int>(projects[p].rows.size());d++){auto const& doc=projects[p].rows[d];if(!filter.phase.empty()&&filter.phase!=doc.phase)continue;int index=static_cast<int>(visible.size());visible.emplace_back(p,d);LVITEMW item{};item.mask=LVIF_TEXT;item.iItem=index;item.pszText=const_cast<wchar_t*>(doc.name.c_str());ListView_InsertItem(list,&item);
    std::wstring fields[]={doc.phase.empty()?L"—":doc.phase,doc.type,doc.indice.empty()?L"—":doc.indice,std::to_wstring(doc.version),status(doc.status)};
    for(int col=0;col<5;col++)ListView_SetItemText(list,index,col+1,fields[col].data());if(doc.key==selectedKey)restore=index;
-  }}building=false;if(restore<0&&!visible.empty())restore=0;if(restore>=0){ListView_SetItemState(list,restore,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);ListView_EnsureVisible(list,restore,FALSE);}selection();
+  }}building=false;if(restore<0&&!visible.empty())restore=0;if(restore>=0){ListView_SetItemState(list,restore,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);if(!preserveScroll)ListView_EnsureVisible(list,restore,FALSE);}if(preserveScroll&&top>0&&!visible.empty()){RECT item{};if(ListView_GetItemRect(list,0,&item,LVIR_BOUNDS))ListView_Scroll(list,0,std::min(top,static_cast<int>(visible.size())-1)*(item.bottom-item.top));}selection();
  }
  HTREEITEM node(std::wstring const& label,HTREEITEM parent,Filter value){filters.push_back(value);TVINSERTSTRUCTW item{};item.hParent=parent;item.hInsertAfter=TVI_LAST;item.item.mask=TVIF_TEXT|TVIF_PARAM;item.item.pszText=const_cast<wchar_t*>(label.c_str());item.item.lParam=static_cast<LPARAM>(filters.size()-1);return TreeView_InsertItem(tree,&item);}
- void rebuild(){building=true;TreeView_DeleteAllItems(tree);filters.clear();auto root=node(L"Projets dans A:",TVI_ROOT,{});HTREEITEM target=root;
-  for(int p=0;p<static_cast<int>(projects.size());p++){auto project=node(projects[p].name,root,{p,L""});if(filter.project==p&&filter.phase.empty())target=project;std::set<std::wstring> phases;for(auto const& doc:projects[p].rows)if(!doc.phase.empty())phases.insert(doc.phase);for(auto const& phase:phases){auto item=node(phase,project,{p,phase});if(filter.project==p&&filter.phase==phase)target=item;}TreeView_Expand(tree,project,TVE_EXPAND);}
-  TreeView_Expand(tree,root,TVE_EXPAND);TreeView_SelectItem(tree,target);building=false;if(filter.project>=static_cast<int>(projects.size()))filter={};fill();
+ void rebuild(bool preserveScroll=false){int treeTop=preserveScroll?GetScrollPos(tree,SB_VERT):0;building=true;TreeView_DeleteAllItems(tree);filters.clear();auto root=node(L"Projets dans A:",TVI_ROOT,{});HTREEITEM target=root;
+  for(int p=0;p<static_cast<int>(projects.size());p++){auto project=node(projects[p].name,root,{p,L""});if(filter.project==p&&filter.phase.empty())target=project;std::set<std::wstring> phases;for(auto const& doc:projects[p].rows)if(!doc.phase.empty())phases.insert(doc.phase);for(auto const& phase:phases){auto item=node(phase,project,{p,phase});if(filter.project==p&&filter.phase==phase)target=item;}if(!collapsedProjects.contains(projects[p].id))TreeView_Expand(tree,project,TVE_EXPAND);}
+  if(!rootCollapsed)TreeView_Expand(tree,root,TVE_EXPAND);TreeView_SelectItem(tree,target);if(treeTop)SendMessageW(tree,WM_VSCROLL,MAKEWPARAM(SB_THUMBPOSITION,treeTop),0);building=false;if(filter.project>=static_cast<int>(projects.size()))filter={};fill(preserveScroll);
  }
  void launch(std::wstring requested){if(busy||!window)return;auto job=std::make_unique<Job>();job->state=async;job->action=requested;
   if(requested!=L"catalog"){int selected=ListView_GetNextItem(list,-1,LVNI_SELECTED);if(selected<0||selected>=static_cast<int>(visible.size()))return;auto [p,d]=visible[selected];job->project=projects[p].id;job->key=projects[p].rows[d].key;job->revision=projects[p].revision;}
@@ -54,20 +80,24 @@ class View final:public IShellView,public IFolderView {
   if(thread){job.release();CloseHandle(thread);}else{objectCount--;FreeLibrary(module);busy=false;buttons();}
  }
  LRESULT message(UINT msg,WPARAM w,LPARAM l){switch(msg){
-  case WM_CREATE:{INITCOMMONCONTROLSEX init{sizeof(init),ICC_TREEVIEW_CLASSES|ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&init);HDC dc=GetDC(window);auto dpi=GetDeviceCaps(dc,LOGPIXELSY);ReleaseDC(window,dc);font=CreateFontW(-MulDiv(10,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");titleFont=CreateFontW(-MulDiv(16,dpi,72),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
-   heading=control(L"STATIC",L"ArchiOffice Drive",SS_LEFT);SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),TRUE);refresh=control(L"BUTTON",L"Actualiser",WS_TABSTOP,100);open=control(L"BUTTON",L"Ouvrir",WS_TABSTOP,101);document=control(L"BUTTON",L"Ouvrir dans ArchiOffice",WS_TABSTOP,102);
+  case WM_CREATE:{INITCOMMONCONTROLSEX init{sizeof(init),ICC_TREEVIEW_CLASSES|ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&init);
+   heading=control(L"STATIC",L"ArchiOffice Drive",SS_LEFT);refresh=control(L"BUTTON",L"Actualiser",WS_TABSTOP,100);open=control(L"BUTTON",L"Ouvrir",WS_TABSTOP,101);document=control(L"BUTTON",L"Ouvrir dans ArchiOffice",WS_TABSTOP,102);properties=control(L"BUTTON",L"Propriétés",WS_TABSTOP,103);
    tree=control(WC_TREEVIEWW,L"",WS_TABSTOP|TVS_HASBUTTONS|TVS_HASLINES|TVS_LINESATROOT|TVS_SHOWSELALWAYS,201);list=control(WC_LISTVIEWW,L"",WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,202);ListView_SetExtendedListViewStyle(list,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP);
    wchar_t const* columns[]={L"Document",L"Phase",L"Type",L"Indice",L"Version",L"Statut"};int sizes[]={260,85,65,55,65,100};for(int i=0;i<6;i++){LVCOLUMNW c{};c.mask=LVCF_TEXT|LVCF_WIDTH;c.pszText=const_cast<wchar_t*>(columns[i]);c.cx=sizes[i];ListView_InsertColumn(list,i,&c);}
-   details=control(L"EDIT",L"Sélectionnez un document pour afficher ses propriétés.",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,203);note=control(L"STATIC",L"",SS_LEFT);SetWindowTheme(tree,L"Explorer",nullptr);SetWindowTheme(list,L"Explorer",nullptr);
+   details=control(L"EDIT",L"Sélectionnez un document pour afficher ses propriétés.",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,203);note=control(L"STATIC",L"",SS_LEFT);scale();name(tree,L"Projets et phases");name(list,L"Documents du projet");name(details,L"Propriétés du document, lecture seule");SetWindowTheme(tree,L"Explorer",nullptr);SetWindowTheme(list,L"Explorer",nullptr);
    async=std::make_shared<Async>();async->window=window;async->serial=serial++;SetTimer(window,1,5000,nullptr);layout();launch(L"catalog");return 0;}
   case WM_SIZE:layout();return 0;
-  case WM_COMMAND:if(LOWORD(w)==100)launch(L"catalog");if(LOWORD(w)==101)launch(L"open");if(LOWORD(w)==102)launch(L"document");return 0;
-  case WM_NOTIFY:{auto info=reinterpret_cast<NMHDR*>(l);if(info->hwndFrom==tree&&info->code==TVN_SELCHANGEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){filter=filters[index];selectedKey.clear();fill();}}if(info->hwndFrom==list&&!building){if(info->code==LVN_ITEMCHANGED)selection();if(info->code==NM_DBLCLK)launch(L"open");if(info->code==LVN_KEYDOWN&&reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey==VK_RETURN)launch(L"open");}return 0;}
+  case WM_DPICHANGED:scale(HIWORD(w));layout();return 0;
+  case WM_DPICHANGED_AFTERPARENT:scale();layout();return 0;
+  case WM_PAINT:{PAINTSTRUCT paint;HDC dc=BeginPaint(window,&paint);RECT r;GetClientRect(window,&r);auto pen=CreatePen(PS_SOLID,1,GetSysColor(COLOR_3DSHADOW));auto old=SelectObject(dc,pen);for(int divider:{splitLeft,splitRight})if(divider){MoveToEx(dc,px(divider+4),px(88),nullptr);LineTo(dc,px(divider+4),r.bottom-px(42));}SelectObject(dc,old);DeleteObject(pen);EndPaint(window,&paint);return 0;}
+  case WM_SETCURSOR:if(LOWORD(l)==HTCLIENT){POINT point;GetCursorPos(&point);ScreenToClient(window,&point);int x=dip(point.x);if(abs(x-splitLeft-4)<6||(splitRight&&abs(x-splitRight-4)<6)){SetCursor(LoadCursorW(nullptr,IDC_SIZEWE));return TRUE;}}break;
+  case WM_COMMAND:if(LOWORD(w)==100)launch(L"catalog");if(LOWORD(w)==101)launch(L"open");if(LOWORD(w)==102)launch(L"document");if(LOWORD(w)==103){propertiesMode=!propertiesMode;layout();SetFocus(propertiesMode?details:list);}return 0;
+  case WM_NOTIFY:{auto info=reinterpret_cast<NMHDR*>(l);if(info->hwndFrom==tree&&info->code==TVN_ITEMEXPANDEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){auto f=filters[index];bool collapsed=(n->itemNew.state&TVIS_EXPANDED)==0;if(f.project<0)rootCollapsed=collapsed;else if(f.phase.empty()&&f.project<static_cast<int>(projects.size())){if(collapsed)collapsedProjects.insert(projects[f.project].id);else collapsedProjects.erase(projects[f.project].id);}}}if(info->hwndFrom==tree&&info->code==TVN_SELCHANGEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){filter=filters[index];selectedKey.clear();fill();}}if(info->hwndFrom==list&&!building){if(info->code==LVN_ITEMCHANGED)selection();if(info->code==NM_DBLCLK)launch(L"open");if(info->code==LVN_KEYDOWN&&reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey==VK_RETURN)launch(L"open");}return 0;}
   case WM_TIMER:if(w==1)launch(L"catalog");return 0;
-  case ResultMessage:{if(!async||w!=async->serial)return 0;std::optional<Reply> reply;{std::lock_guard lock(async->mutex);reply=std::move(async->reply);async->reply.reset();}busy=false;if(reply){SetWindowTextW(note,reply->message.c_str());if(action==L"catalog"){projects=std::move(reply->projects);if(!reply->ok){filter={};selectedKey.clear();}rebuild();}}buttons();return 0;}
+  case ResultMessage:{if(!async||w!=async->serial)return 0;std::optional<Reply> reply;{std::lock_guard lock(async->mutex);reply=std::move(async->reply);async->reply.reset();}busy=false;if(reply){SetWindowTextW(note,reply->message.c_str());if(action==L"catalog"&&(!catalogLoaded||projects!=reply->projects)){catalogLoaded=true;auto projectId=filter.project>=0&&filter.project<static_cast<int>(projects.size())?projects[filter.project].id:L"";projects=std::move(reply->projects);if(!projectId.empty()){auto found=std::find_if(projects.begin(),projects.end(),[&](auto const& p){return p.id==projectId;});if(found==projects.end())filter={};else filter.project=static_cast<int>(found-projects.begin());}if(!reply->ok){filter={};selectedKey.clear();}rebuild(true);}}buttons();return 0;}
   case WM_SETFOCUS:if(browser)browser->OnViewWindowActive(this);SetFocus(list);return 0;
-  case WM_LBUTTONDOWN:{int x=GET_X_LPARAM(l);RECT r;GetClientRect(window,&r);if(abs(x-left)<10)drag=1;else if(abs(x-(r.right-right))<10)drag=2;if(drag)SetCapture(window);return 0;}
-  case WM_MOUSEMOVE:if(drag){RECT r;GetClientRect(window,&r);int x=GET_X_LPARAM(l),width=static_cast<int>(r.right);if(drag==1)left=std::clamp(x,160,std::max(160,width/3));else right=std::clamp(width-x,220,std::max(220,width/3));layout();}return 0;
+  case WM_LBUTTONDOWN:{int x=dip(GET_X_LPARAM(l));if(abs(x-splitLeft-4)<6)drag=1;else if(splitRight&&abs(x-splitRight-4)<6)drag=2;if(drag)SetCapture(window);return 0;}
+  case WM_MOUSEMOVE:if(drag){RECT r;GetClientRect(window,&r);int x=dip(GET_X_LPARAM(l)),width=dip(r.right);if(drag==1)left=std::clamp(x,160,std::max(160,width/3));else right=std::clamp(width-x,220,std::max(220,width/3));layout();}return 0;
   case WM_LBUTTONUP:drag=0;if(GetCapture()==window)ReleaseCapture();return 0;
   case WM_DESTROY:KillTimer(window,1);if(async)async->stopped=true;return 0;
   case WM_NCDESTROY:SetWindowLongPtrW(window,GWLP_USERDATA,0);window=nullptr;return 0;

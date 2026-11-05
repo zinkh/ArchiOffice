@@ -42,6 +42,22 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,now=Da
  }
  return {command};
 }
+/** Reuse the desktop window; opening a document must not create a second client. */
+function createShellDocumentOpener({getWindow,showWindow,origin}) {
+ let creating=null;
+ return async({projectId,documentId})=>{
+  if(creating)await creating;
+  let target=getWindow();
+  if(!target||target.isDestroyed()){
+   creating=Promise.resolve().then(showWindow);
+   try{await creating;}finally{creating=null;}
+   target=getWindow();
+  }
+  if(!target||target.isDestroyed())throw new Error('Window unavailable');
+  if(target.isMinimized())target.restore();target.show();target.focus();
+  await target.loadURL(origin+'/documents?'+new URLSearchParams({project:projectId,document:documentId}));
+ };
+}
 function createShellPipe({projection,address='\\\\.\\pipe\\ArchiOffice.DriveShell.'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex')}) {
  let server=null;const clients=new Set();let stopped=false;
  async function start(){if(server)return {address,token};server=net.createServer(socket=>{
@@ -56,4 +72,4 @@ function createShellPipe({projection,address='\\\\.\\pipe\\ArchiOffice.DriveShel
  function stop(){stopped=true;for(const socket of clients)socket.destroy();server?.close();server=null;}
  return {start,stop};
 }
-module.exports={createShellProjection,createShellPipe};
+module.exports={createShellProjection,createShellPipe,createShellDocumentOpener};
