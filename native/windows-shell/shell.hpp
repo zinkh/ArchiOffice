@@ -1,12 +1,12 @@
 #pragma once
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
 #include <windows.h>
+#include <shellapi.h>
 #include <shlobj.h>
 #include <shobjidl.h>
 #include <shlguid.h>
 #include <commctrl.h>
 #include <winrt/base.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
 #include <atomic>
 #include <string>

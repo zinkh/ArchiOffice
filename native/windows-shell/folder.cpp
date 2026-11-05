@@ -11,10 +11,10 @@ public:
  HRESULT STDMETHODCALLTYPE Skip(ULONG)override{return S_FALSE;}HRESULT STDMETHODCALLTYPE Reset()override{return S_OK;}
  HRESULT STDMETHODCALLTYPE Clone(IEnumIDList** out)override{if(!out)return E_POINTER;*out=new(std::nothrow)EmptyEnumerator();return *out?S_OK:E_OUTOFMEMORY;}
 };
-class Folder final:public IShellFolder,public IPersistFolder2,public IExplorerPaneVisibility {
+class DriveFolder final:public IShellFolder,public IPersistFolder2,public IExplorerPaneVisibility {
  std::atomic<ULONG> refs{1};PIDLIST_ABSOLUTE location=nullptr;
 public:
- Folder(){objectCount++;}~Folder(){CoTaskMemFree(location);objectCount--;}
+ DriveFolder(){objectCount++;}~DriveFolder(){CoTaskMemFree(location);objectCount--;}
  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out)override{if(!out)return E_POINTER;*out=nullptr;if(id==IID_IUnknown||id==IID_IShellFolder)*out=static_cast<IShellFolder*>(this);else if(id==IID_IPersist||id==IID_IPersistFolder||id==IID_IPersistFolder2)*out=static_cast<IPersistFolder2*>(this);else if(id==IID_IExplorerPaneVisibility)*out=static_cast<IExplorerPaneVisibility*>(this);else return E_NOINTERFACE;AddRef();return S_OK;}
  ULONG STDMETHODCALLTYPE AddRef()override{return ++refs;}ULONG STDMETHODCALLTYPE Release()override{auto n=--refs;if(!n)delete this;return n;}
  HRESULT STDMETHODCALLTYPE GetClassID(CLSID* id)override{if(!id)return E_POINTER;*id=ShellClsid;return S_OK;}
@@ -32,4 +32,4 @@ public:
  HRESULT STDMETHODCALLTYPE SetNameOf(HWND,PCUITEMID_CHILD,LPCWSTR,SHGDNF,PITEMID_CHILD* out)override{if(out)*out=nullptr;return E_ACCESSDENIED;}
  HRESULT STDMETHODCALLTYPE GetPaneState(REFEXPLORERPANE pane,EXPLORERPANESTATE* state)override{if(!state)return E_POINTER;*state=pane==EP_NavPane?static_cast<EXPLORERPANESTATE>(EPS_DEFAULT_OFF|EPS_FORCE):EPS_DONTCARE;return S_OK;}
 };
-HRESULT createFolder(REFIID iid,void** out){if(!out)return E_POINTER;auto folder=new(std::nothrow)Folder();if(!folder){*out=nullptr;return E_OUTOFMEMORY;}auto hr=folder->QueryInterface(iid,out);folder->Release();return hr;}
+HRESULT createFolder(REFIID iid,void** out){if(!out)return E_POINTER;auto folder=new(std::nothrow)DriveFolder();if(!folder){*out=nullptr;return E_OUTOFMEMORY;}auto hr=folder->QueryInterface(iid,out);folder->Release();return hr;}

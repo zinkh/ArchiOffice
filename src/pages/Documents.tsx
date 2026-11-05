@@ -259,7 +259,7 @@ export default function Documents() {
 
   const linkedDocument=new URLSearchParams(location.search).get('document');
   useEffect(()=>{const params=new URLSearchParams(location.search);const id=params.get('project'),doc=params.get('document');if(!id||!doc||!projects.some(p=>p.id===id)||!documents.some(d=>d.id===doc&&d.project_id===id))return;setActiveProject(id);setActivePhase(null);setFilterStatut('all');setExpandedProjects(previous=>new Set([...previous,id]));},[location.search,projects,documents]);
-  useEffect(()=>{if(linkedDocument&&visibleDocs.some(d=>d.id===linkedDocument))document.getElementById('document-row-'+linkedDocument)?.scrollIntoView({block:'center'});},[linkedDocument,activeProject,documents]);
+  useEffect(()=>{if(linkedDocument&&visibleDocs.some(d=>d.id===linkedDocument))document.getElementById('document-row-'+linkedDocument)?.scrollIntoView?.({block:'center'});},[linkedDocument,activeProject,documents]);
 
   // Upload
   // Les fichiers partent un par un : un échec s'affiche sur sa ligne et n'arrête pas les suivants.
