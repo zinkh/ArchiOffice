@@ -173,16 +173,19 @@ function flattenDPGF(lots: Lot[]): Array<{
       // trouvait en dessous de chaque export PDF ou Excel.
       const walk = (lignes: Ligne[], depth: number) => {
         for (const ligne of lignes) {
+          // Un article qui porte des sous-articles n'a ni unité ni quantité à chiffrer : l'afficher
+          // (« forf », « 1,00 ») laisserait croire aux entreprises qu'elles doivent le chiffrer.
+          const parent = !!ligne.children?.length;
           rows.push({
             depth,
             numero: ligne.numero,
             designation: ligne.designation + repereStatut(ligne.pourMemoire, ligne.nature),
-            unite: ligne.unite,
-            quantite: ligne.quantite > 0 ? formatQuantite(ligne.quantite) : '',
+            unite: parent ? '' : ligne.unite,
+            quantite: !parent && ligne.quantite > 0 ? formatQuantite(ligne.quantite) : '',
             prixUnitaire: ligne.pourMemoire ? 'PM' : ligne.prixUnitaire > 0 ? fmt(ligne.prixUnitaire) : '',
             prixTotal: ligne.pourMemoire ? 'PM' : ligne.prixTotal > 0 ? fmt(ligne.prixTotal) : '',
             type: ligne.type,
-            q: ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal, pm: !!ligne.pourMemoire,
+            q: parent ? 0 : ligne.quantite, pu: ligne.prixUnitaire, total: ligne.prixTotal, pm: !!ligne.pourMemoire,
             ...tvaDeLigne(ligne),
           });
           if (ligne.children?.length) walk(ligne.children, depth + 1);
