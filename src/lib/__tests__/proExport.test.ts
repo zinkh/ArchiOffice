@@ -134,6 +134,37 @@ describe('article à sous-articles dans l\'export du DPGF', () => {
     expect(enfant[2]).toBe('u');
     expect(enfant[3]).toBe(2);
   });
+
+  it('montre la somme de ses enfants, signalée comme sous-total, sans prix unitaire (Excel)', async () => {
+    const { exportDPGFtoExcel } = await import('../proExport');
+    await exportDPGFtoExcel(avecEnfants, 'Projet', 'lot', {}, { avecPrix: true });
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const lignes: unknown[][] = [];
+    wb.worksheets[0].eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+    const parent = lignes.find(l => l[0] === '01.1.1')!;
+    expect(String(parent[1])).toContain('(sous-total)');
+    expect(parent[4] == null || parent[4] === '').toBe(true);
+    expect(parent[5]).toBe(base.prixTotal);
+  });
+
+  it("n'écrit pas le prix saisi sur le parent : seule la somme de ses enfants compte", async () => {
+    const { exportDPGFtoExcel } = await import('../proExport');
+    const perime: DPGF = {
+      ...avecEnfants,
+      lots: [{ ...avecEnfants.lots[0], chapitres: [{ ...avecEnfants.lots[0].chapitres[0], lignes: [
+        { ...avecEnfants.lots[0].chapitres[0].lignes[0], prixUnitaire: 6200, prixTotal: 6200 },
+      ] }] }],
+    };
+    await exportDPGFtoExcel(perime, 'Projet', 'lot', {}, { avecPrix: true });
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const lignes: unknown[][] = [];
+    wb.worksheets[0].eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+    expect(lignes.find(l => l[0] === '01.1.1')![5]).toBe(base.prixTotal);
+  });
 });
 
 describe('colonne TVA dédiée du DPGF', () => {
@@ -238,6 +269,67 @@ describe("export PDF de l'estimation", () => {
     expect(flux).toContain('pose cloisons');
     expect(flux).toContain('samiantage ext');
     expect(flux).toContain('poste par poste');
+  });
+});
+
+describe("export Excel de l'estimation : options détaillées", () => {
+  const l = (id: string, numero: string, designation: string, quantite: number, prixUnitaire: number, extra: Record<string, unknown> = {}) => ({
+    id, numero, designation, unite: 'm2', quantite, prixUnitaire, prixTotal: quantite * prixUnitaire, type: 'ouvrage' as const, ...extra,
+  });
+  const estimation: DPGF = {
+    ...sampleDPGF, TVA: 20, totalHT: 1500, totalTTC: 1800,
+    lots: [{
+      id: 'lot', numero: '01', titre: 'Démolition', sousTotal: 1500,
+      chapitres: [{
+        id: 'chap', numero: '1', titre: 'Dépose', lignes: [
+          l('a', '1.1', 'Dépose cloisons', 10, 100),
+          l('p', '1.2', 'Cuisine', 1, 0, { prixTotal: 0, children: [l('p1', '1.2.1', 'Plonge', 1, 500)] }),
+          l('b', '1.3', 'Désamiantage extérieur', 1, 4350, { nature: 'option' }),
+        ],
+      }],
+    }],
+  };
+  const lireFeuilles = async () => {
+    const { exportEstimationtoExcel } = await import('../proExport');
+    await exportEstimationtoExcel(estimation, 'Projet');
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const feuille = (nom: string) => {
+      const lignes: unknown[][] = [];
+      wb.getWorksheet(nom)?.eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+      return lignes;
+    };
+    return { noms: wb.worksheets.map(w => w.name), feuille };
+  };
+
+  it("ajoute une feuille qui détaille les options, avec leur total", async () => {
+    const { noms, feuille } = await lireFeuilles();
+    expect(noms).toContain('Options et variantes');
+    const options = feuille('Options et variantes');
+    const poste = options.find(r => r[0] === '1.3')!;
+    expect(poste[5]).toBe(4350);
+    const total = options.find(r => String(r[1]).startsWith('Options HT'))!;
+    expect(total[5]).toBe(4350);
+  });
+
+  it('le détail ne compte que les postes de base, sous-articles compris, parent en somme de ses enfants', async () => {
+    const { feuille } = await lireFeuilles();
+    const detail = feuille('Détail');
+    expect(detail.some(r => r[0] === '1.3')).toBe(false);
+    expect(detail.find(r => r[0] === '1.2.1')![5]).toBe(500);
+    const parent = detail.find(r => r[0] === '1.2')!;
+    expect(parent[5]).toBe(500);
+    expect(String(parent[1])).toContain('(sous-total)');
+  });
+
+  it("n'ajoute pas de feuille d'options quand il n'y en a pas", async () => {
+    const { exportEstimationtoExcel } = await import('../proExport');
+    await exportEstimationtoExcel({ ...estimation, lots: [{ ...estimation.lots[0], chapitres: [{ ...estimation.lots[0].chapitres[0], lignes: [estimation.lots[0].chapitres[0].lignes[0]] }] }] }, 'Projet');
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    expect(wb.worksheets.map(w => w.name)).not.toContain('Options et variantes');
   });
 });
 
