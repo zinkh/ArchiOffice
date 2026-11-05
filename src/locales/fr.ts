@@ -550,6 +550,8 @@ export default {
   "pro_export_dialog_orientation_of": "Orientation de la page de {{doc}}",
   "pro_export_dialog_portrait": "Vertical (portrait)",
   "pro_export_dialog_landscape": "Horizontal (paysage)",
+  "pro_export_dialog_estimation_detail": "Estimation poste par poste",
+  "pro_export_dialog_estimation_detail_hint": "Estimation en PDF : chaque article avec sa quantité, son prix unitaire et son total, au lieu du seul récapitulatif par lot. Les options, PSE et variantes sont toujours détaillées à la suite.",
   "pro_export_dialog_per_lot": "Un fichier par lot",
   "pro_export_dialog_per_lot_hint": "CCTP et DPGF : chaque lot du périmètre donne son propre fichier, dans le ZIP.",
   "pro_export_dialog_cctp_per_building": "CCTP : un fichier par bâtiment",

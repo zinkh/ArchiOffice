@@ -551,6 +551,8 @@ export default {
   "pro_export_dialog_orientation_of": "Page orientation of {{doc}}",
   "pro_export_dialog_portrait": "Portrait",
   "pro_export_dialog_landscape": "Landscape",
+  "pro_export_dialog_estimation_detail": "Line-by-line estimate",
+  "pro_export_dialog_estimation_detail_hint": "PDF estimate: each item with its quantity, unit price and total, instead of the per-lot summary only. Options, PSE and variants are always itemised afterwards.",
   "pro_export_dialog_per_lot": "One file per lot",
   "pro_export_dialog_per_lot_hint": "Specifications and DPGF: each lot in scope gets its own file, in the ZIP.",
   "pro_export_dialog_cctp_per_building": "Specifications: one file per building",

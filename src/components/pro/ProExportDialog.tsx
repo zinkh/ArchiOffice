@@ -41,6 +41,9 @@ const toggle = (set: Set<string>, id: string): Set<string> => {
   return next;
 };
 
+/** Mémorise le choix « estimation poste par poste » (préférence de l'utilisateur, jamais enregistrée en base). */
+const CLE_ESTIMATION_DETAILLEE = 'pro:export:estimation-detaillee';
+
 const DEPART: Record<string, DocumentDossier> = {
   CCTP: 'cctp', DPGF: 'dpgf', DQE: 'dqe', BPU: 'bpu', ESTIMATION: 'estimation',
 };
@@ -76,6 +79,14 @@ export const ProExportDialog: React.FC<Props> = ({
   const [avecTva, setAvecTva] = useState(false);
   const [cctpParBatiment, setCctpParBatiment] = useState(false);
   const [parLot, setParLot] = useState(false);
+  // Poste par poste ou récapitulatif par lot : le dernier choix est gardé d'une ouverture à l'autre.
+  const [estimationDetaillee, setEstimationDetaillee] = useState(() => {
+    try { return localStorage.getItem(CLE_ESTIMATION_DETAILLEE) === '1'; } catch { return false; }
+  });
+  const choisirEstimationDetaillee = (valeur: boolean) => {
+    setEstimationDetaillee(valeur);
+    try { localStorage.setItem(CLE_ESTIMATION_DETAILLEE, valeur ? '1' : '0'); } catch { /* stockage indisponible : le choix vaut pour cette ouverture */ }
+  };
   const [orientations, setOrientations] = useState<Record<'cctp' | 'dpgf', Orientation>>({
     cctp: ORIENTATION_CCTP, dpgf: ORIENTATION_DPGF,
   });
@@ -146,7 +157,7 @@ export const ProExportDialog: React.FC<Props> = ({
     try {
       const bpuPret = documents.bpu || documents.dqe ? prepareBpu() : null;
       const res = await produireDossier({
-        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations,
+        dpgf, bpu: bpuPret, documents, selection, avecPrix, avecTva: avecPrix && avecTva, cctpParBatiment, parLot, orientations, estimationDetaillee,
         projectName, perimetre: perimetre(), settings, contexte,
         couverture: { imageUrl: projectImageUrl, adresse: contexte?.adresse, maitreOuvrage: contexte?.maitreOuvrage, reference: contexte?.reference },
       });
@@ -331,6 +342,15 @@ export const ProExportDialog: React.FC<Props> = ({
               <span>
                 <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_per_lot')}</span>
                 <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_per_lot_hint')}</span>
+              </span>
+            </label>
+          )}
+          {documents.estimation && documents.estimation !== 'autre' && (
+            <label className="flex items-start gap-2.5 text-sm cursor-pointer min-h-[2.75rem] sm:min-h-0">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-[var(--tblr-primary)]" checked={estimationDetaillee} onChange={e => choisirEstimationDetaillee(e.target.checked)} />
+              <span>
+                <span className="font-medium text-[var(--tblr-text)]">{t('pro_export_dialog_estimation_detail')}</span>
+                <span className="block text-xs text-[var(--tblr-muted)]">{t('pro_export_dialog_estimation_detail_hint')}</span>
               </span>
             </label>
           )}
