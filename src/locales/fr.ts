@@ -5119,6 +5119,8 @@ export default {
   "windows_drive_disabled": "Le composant Drive est désactivé dans cette application. Réactivez-le dans la configuration du client Windows, puis relancez ArchiOffice.",
   "windows_drive_install_required": "Cette installation ne fournit pas de composant Drive utilisable. Installez la version Windows contenant Drive, puis relancez ArchiOffice. Une fusion GitHub ne met pas à jour l’application installée.",
   "windows_drive_client_version": "Version du client : {{version}}",
+  "windows_drive_shell_open": "Ouvrir l’espace documentaire",
+  "windows_drive_shell_opened": "Espace documentaire ouvert dans l’Explorateur Windows.",
   "windows_drive_explanation": "Retrouvez vos projets ajoutés dans Ce PC sous A:, avec téléchargement à la demande. Vérifiez leur catalogue pour voir les nouveautés. Vous pouvez activer l’édition des documents existants, projet par projet. La sélection est reconnectée à l’ouverture de session Windows si votre autorisation est valide.",
   "windows_drive_open": "Activer A: avec ce projet",
   "windows_drive_preparing": "Connexion du lecteur A:…",

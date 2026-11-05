@@ -17,6 +17,16 @@
 ; perMachine: true, so the whole installer already runs elevated by the time
 ; this macro executes — plain ExecWait inherits that, no special-casing needed.
 !macro customInstall
-  DetailPrint "Installation du runtime Microsoft Visual C++ (requis par PostgREST)..."
+  DetailPrint "Installation du runtime Microsoft Visual C++ (requis par PostgREST et Drive)..."
   ExecWait '"$INSTDIR\resources\vc_redist.x64.exe" /install /quiet /norestart'
+  DetailPrint "Enregistrement de l’espace documentaire ArchiOffice..."
+  ExecWait '"$INSTDIR\resources\drive-shell\archioffice-shell-control.exe" --register-machine' $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "Impossible d’enregistrer l’espace documentaire ArchiOffice."
+    Abort
+  ${EndIf}
+!macroend
+
+!macro customUnInstall
+  ExecWait '"$INSTDIR\resources\drive-shell\archioffice-shell-control.exe" --unregister-machine'
 !macroend
