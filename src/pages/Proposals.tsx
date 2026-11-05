@@ -53,13 +53,14 @@ const fieldStyle = { background: 'var(--tblr-surface-2)', border: '1px solid var
 
 /** Barre collante des sections : un formulaire de plusieurs écrans se parcourt d'un clic. */
 function SectionNav({ items }: { items: { id: string; label: string }[] }) {
+  const { t } = useTranslation();
   const go = (id: string) => {
     const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
     document.getElementById(id)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
   };
   return (
     <nav
-      aria-label="Sections du formulaire"
+      aria-label={t('prop_form_sections')}
       className="sticky top-0 z-10 -mx-4 sm:-mx-6 -mt-4 sm:-mt-6 px-4 sm:px-6 py-2 flex gap-1 overflow-x-auto"
       style={{ background: 'var(--tblr-surface)', borderBottom: '1px solid var(--tblr-border)' }}
     >
@@ -427,7 +428,7 @@ export default function Proposals() {
       }
     } catch (err: any) {
       console.error(err);
-      setSubmitError(err.message || 'Erreur réseau');
+      setSubmitError(err.message || t('prop_err_network'));
     } finally {
       setIsSubmitting(false);
     }
@@ -796,7 +797,7 @@ export default function Proposals() {
               <div className="flex gap-2">
                 <button onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
                 <button onClick={() => openExport(p, 'send')} title={t('proposals_send_to_client')} aria-label={t('proposals_send_to_client')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconSend size={15} /></button>
-                <button onClick={() => openExport(p, 'export')} title="Export PDF" className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
+                <button onClick={() => openExport(p, 'export')} title={t('prop_a_export_pdf')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
                 {p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
@@ -858,7 +859,7 @@ export default function Proposals() {
                         style={{ color: 'var(--tblr-muted)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}
-                        title="Edit Proposal"
+                        title={t('prop_a_edit')}
                       >
                         <IconEdit size={20} />
                       </button>
@@ -868,7 +869,7 @@ export default function Proposals() {
                         style={{ color: 'var(--tblr-muted)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}
-                        title="Export XML"
+                        title={t('prop_a_export_xml')}
                       >
                         <IconFileText size={20} />
                       </button>
@@ -890,7 +891,7 @@ export default function Proposals() {
                       <button
                         onClick={() => navigate('/contrats', { state: { fromProposal: proposal } })}
                         className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                        title="Convertir en contrat MOE"
+                        title={t('prop_a_convert_contract')}
                       >
                         <IconContract size={20} />
                       </button>
@@ -899,14 +900,14 @@ export default function Proposals() {
                           <button 
                             onClick={() => handleUpdateStatus(proposal, 'Accepted')}
                             className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
-                            title="Accept & Create Project"
+                            title={t('prop_a_accept_create')}
                           >
                             <IconCircleCheck size={20} />
                           </button>
                           <button
                             onClick={() => handleCrossClick(proposal)}
                             className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                            title={proposal.status === 'Draft' ? 'Supprimer le brouillon' : 'Rejeter'}
+                            title={proposal.status === 'Draft' ? t('prop_a_delete_draft') : t('prop_a_reject')}
                           >
                             <IconX size={20} />
                           </button>
@@ -977,7 +978,7 @@ export default function Proposals() {
                     { id: 'prop-sec-04', label: t('proposals_section_terrain') },
                     { id: 'prop-sec-05', label: t('proposals_section_surfaces') },
                     ...(riskAddress ? [{ id: 'prop-sec-06', label: t('proposals_section_urban_risks') }] : []),
-                    { id: 'prop-sec-07', label: 'Honoraires' },
+                    { id: 'prop-sec-07', label: t('prop_sec_fees') },
                     { id: 'prop-sec-08', label: t('proposals_section_cotraitants') },
                   ]}
                 />
@@ -991,7 +992,7 @@ export default function Proposals() {
                     {!editingProposal && templates.length > 0 && (
                       <div className="md:col-span-3">
                         <FormField
-                          label="Modèle de projet"
+                          label={t('prop_f_template')}
                           type="select"
                           options={templates.map(tpl => ({ id: tpl.id, name: tpl.name }))}
                           value={templateId}
@@ -1001,18 +1002,18 @@ export default function Proposals() {
                           const summary = summarizeTemplate({ default_missions: templates.find(tpl => tpl.id === templateId)?.default_missions });
                           return summary ? (
                             <p className="text-xs mt-1" style={{ color: 'var(--tblr-muted)' }}>
-                              Type d'opération et répartition des honoraires par mission repris du modèle ({summary}).
+                              {t('prop_template_applied', { summary })}
                             </p>
                           ) : null;
                         })()}
                       </div>
                     )}
-                    <FormField label="Référence" value={newProposal.reference} onChange={(v: any) => setNewProposal(prev => ({...prev, reference: v}))} />
+                    <FormField label={t('prop_f_reference')} value={newProposal.reference} onChange={(v: any) => setNewProposal(prev => ({...prev, reference: v}))} />
                     <div className="md:col-span-2">
-                      <FormField label="Projet (Titre)" required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />
+                      <FormField label={t('prop_f_title')} required value={newProposal.title} onChange={(v: any) => setNewProposal(prev => ({...prev, title: v}))} />
                     </div>
-                    <FormField label="Statut" type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected'].map(s => ({ id: s, name: statusLabel(s) }))} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
-                    <FormField label="Indice" value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
+                    <FormField label={t('prop_f_status')} type="select" options={['Draft', 'Sent', 'Accepted', 'Rejected'].map(s => ({ id: s, name: statusLabel(s) }))} value={newProposal.status} onChange={(v: any) => setNewProposal(prev => ({...prev, status: v}))} />
+                    <FormField label={t('prop_f_index')} value={newProposal.ind} onChange={(v: any) => setNewProposal(prev => ({...prev, ind: v}))} />
                   </div>
                 </div>
 
@@ -1051,11 +1052,11 @@ export default function Proposals() {
                         addNewLabel={t('proposals_add_client')}
                       />
                     </div>
-                    <FormField label="Entreprise?" type="checkbox" value={newProposal.is_entreprise} onChange={(v: any) => setNewProposal(prev => ({...prev, is_entreprise: v}))} />
+                    <FormField label={t('prop_f_is_company')} type="checkbox" value={newProposal.is_entreprise} onChange={(v: any) => setNewProposal(prev => ({...prev, is_entreprise: v}))} />
                     {(newProposal.is_entreprise || newProposal.nom_societe || newProposal.rcs || newProposal.representant) && (
                       <>
                     <CompanyAutocomplete 
-                      label="Nom de la société" 
+                      label={t('prop_f_company_name')} 
                       value={newProposal.nom_societe || ''} 
                       onChange={(val, details) => {
                         if (details) {
@@ -1073,9 +1074,9 @@ export default function Proposals() {
                         }
                       }} 
                     />
-                    <FormField label="RCS / SIRET" value={newProposal.rcs} onChange={(v: any) => setNewProposal(prev => ({...prev, rcs: v}))} />
-                    <FormField label="Représentant" value={newProposal.representant} onChange={(v: any) => setNewProposal(prev => ({...prev, representant: v}))} />
-                    <FormField label="Qualité" value={newProposal.qualite} onChange={(v: any) => setNewProposal(prev => ({...prev, qualite: v}))} />
+                    <FormField label={t('prop_f_rcs')} value={newProposal.rcs} onChange={(v: any) => setNewProposal(prev => ({...prev, rcs: v}))} />
+                    <FormField label={t('prop_f_representative')} value={newProposal.representant} onChange={(v: any) => setNewProposal(prev => ({...prev, representant: v}))} />
+                    <FormField label={t('prop_f_capacity')} value={newProposal.qualite} onChange={(v: any) => setNewProposal(prev => ({...prev, qualite: v}))} />
                       </>
                     )}
                   </div>
@@ -1083,24 +1084,24 @@ export default function Proposals() {
                     <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
                       <FormField 
                         id="client-address"
-                        label="Adresse Client" 
+                        label={t('prop_f_client_address')} 
                         value={newProposal.adresse_client || ''} 
                         onChange={(v: any) => setNewProposal(prev => ({...prev, adresse_client: v}))} 
                       />
                       <FormField 
-                        label="Code Postal Client" 
+                        label={t('prop_f_client_zip')} 
                         value={newProposal.cp_client || ''} 
                         onChange={(v: any) => setNewProposal(prev => ({...prev, cp_client: v}))} 
                       />
                       <FormField 
-                        label="Ville Client" 
+                        label={t('prop_f_client_city')} 
                         value={newProposal.ville_client || ''} 
                         onChange={(v: any) => setNewProposal(prev => ({...prev, ville_client: v}))} 
                       />
                     </div>
-                    <FormField label="Téléphone" value={newProposal.telephone} onChange={(v: any) => setNewProposal(prev => ({...prev, telephone: v}))} />
-                    <FormField label="Portable" value={newProposal.portable} onChange={(v: any) => setNewProposal(prev => ({...prev, portable: v}))} />
-                    <FormField label="Adresse Mail" type="email" value={newProposal.email_client} onChange={(v: any) => setNewProposal(prev => ({...prev, email_client: v}))} />
+                    <FormField label={t('prop_f_phone')} value={newProposal.telephone} onChange={(v: any) => setNewProposal(prev => ({...prev, telephone: v}))} />
+                    <FormField label={t('prop_f_mobile')} value={newProposal.portable} onChange={(v: any) => setNewProposal(prev => ({...prev, portable: v}))} />
+                    <FormField label={t('prop_f_email')} type="email" value={newProposal.email_client} onChange={(v: any) => setNewProposal(prev => ({...prev, email_client: v}))} />
                   </div>
                 </div>
 
@@ -1111,8 +1112,8 @@ export default function Proposals() {
                     {t('proposals_section_project')}
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField label="Détail du Projet" type="textarea" value={newProposal.projet_detail} onChange={(v: any) => setNewProposal(prev => ({...prev, projet_detail: v}))} />
-                    <FormField label="Description Générale" type="textarea" value={newProposal.description} onChange={(v: any) => setNewProposal(prev => ({...prev, description: v}))} />
+                    <FormField label={t('prop_f_project_detail')} type="textarea" value={newProposal.projet_detail} onChange={(v: any) => setNewProposal(prev => ({...prev, projet_detail: v}))} />
+                    <FormField label={t('prop_f_general_description')} type="textarea" value={newProposal.description} onChange={(v: any) => setNewProposal(prev => ({...prev, description: v}))} />
                   </div>
                 </div>
 
@@ -1126,7 +1127,7 @@ export default function Proposals() {
                     <div className="md:col-span-3 space-y-4">
                       <AddressAutocomplete 
                         id="terrain-address"
-                        label="Adresse complète du terrain" 
+                        label={t('prop_f_site_address')} 
                         value={newProposal.adresse_terrain || ''} 
                         onChange={(val: string) => {
                           setNewProposal(prev => {
@@ -1159,8 +1160,8 @@ export default function Proposals() {
                         }}
                       />
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <FormField label="Code Postal Terrain" value={newProposal.site_postcode} onChange={(v: any) => setNewProposal(prev => ({...prev, site_postcode: v}))} />
-                        <FormField label="Ville Terrain" value={newProposal.site_city} onChange={(v: any) => setNewProposal(prev => ({...prev, site_city: v}))} />
+                        <FormField label={t('prop_f_site_zip')} value={newProposal.site_postcode} onChange={(v: any) => setNewProposal(prev => ({...prev, site_postcode: v}))} />
+                        <FormField label={t('prop_f_site_city')} value={newProposal.site_city} onChange={(v: any) => setNewProposal(prev => ({...prev, site_city: v}))} />
                       </div>
                       <TerrainParcelles
                         currentAddress={newProposal.adresse_terrain || ''}
@@ -1171,22 +1172,22 @@ export default function Proposals() {
                         onAddressAccepted={handleParcelAddressAccepted}
                       />
                     </div>
-                    <FormField label="Référence Cadastrale" value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal(prev => ({...prev, ref_cadastrale: v}))} />
-                    <FormField label="Zone PLU" value={newProposal.zone_plu} onChange={(v: any) => setNewProposal(prev => ({...prev, zone_plu: v}))} />
-                    <FormField label="Surface Parcelle" value={newProposal.surface_parcelle} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_parcelle: v}))} />
-                    <FormField label="Opération classée ERP (établissement recevant du public)" type="checkbox" value={isErp} onChange={(v: any) => setNewProposal(prev => ({...prev, is_erp: !!v}))} />
+                    <FormField label={t('prop_f_cadastral_ref')} value={newProposal.ref_cadastrale} onChange={(v: any) => setNewProposal(prev => ({...prev, ref_cadastrale: v}))} />
+                    <FormField label={t('prop_f_plu_zone')} value={newProposal.zone_plu} onChange={(v: any) => setNewProposal(prev => ({...prev, zone_plu: v}))} />
+                    <FormField label={t('prop_f_plot_area')} value={newProposal.surface_parcelle} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_parcelle: v}))} />
+                    <FormField label={t('prop_f_is_erp')} type="checkbox" value={isErp} onChange={(v: any) => setNewProposal(prev => ({...prev, is_erp: !!v}))} />
                     {isErp && (
                       <>
-                        <FormField label="Nom de l’établissement" value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
-                        <FormField label="Avant travaux" value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
-                        <FormField label="Après travaux" value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
-                        <FormField label="Type et catégorie ERP" value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
+                        <FormField label={t('prop_f_erp_name')} value={newProposal.nom_etablissement} onChange={(v: any) => setNewProposal(prev => ({...prev, nom_etablissement: v}))} />
+                        <FormField label={t('prop_f_before_works')} value={newProposal.avant_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, avant_trav: v}))} />
+                        <FormField label={t('prop_f_after_works')} value={newProposal.apres_trav} onChange={(v: any) => setNewProposal(prev => ({...prev, apres_trav: v}))} />
+                        <FormField label={t('prop_f_erp_type')} value={newProposal.type_et_cat} onChange={(v: any) => setNewProposal(prev => ({...prev, type_et_cat: v}))} />
                       </>
                     )}
-                    <FormField label="Type de projet" value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
-                    <FormField label="Catégorie de projet" value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
+                    <FormField label={t('prop_f_project_type')} value={newProposal.type_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, type_projet: v}))} />
+                    <FormField label={t('prop_f_project_category')} value={newProposal.categorie_projet} onChange={(v: any) => setNewProposal(prev => ({...prev, categorie_projet: v}))} />
                     <FormField
-                      label="Type de mission (circulaire MAF)"
+                      label={t('prop_f_maf_mission')}
                       type="select"
                       options={MAF_INTERCALAIRE_OPTIONS}
                       value={newProposal.maf_intercalaire}
@@ -1194,7 +1195,7 @@ export default function Proposals() {
                     />
                     {newProposal.maf_intercalaire === 'jaune' && (
                       <FormField
-                        label="Taux de la mission (T)"
+                        label={t('prop_f_mission_rate')}
                         type="select"
                         options={TAUX_MISSION_OPTIONS.map(o => ({ id: o.value, name: o.label }))}
                         value={newProposal.taux_mission}
@@ -1212,9 +1213,9 @@ export default function Proposals() {
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <FormField
-                      label="Nature de l’opération"
+                      label={t('prop_f_operation_nature')}
                       type="select"
-                      options={[{ id: 'neuf', name: 'Construction neuve' }, { id: 'rehabilitation', name: 'Réhabilitation (avec ou sans extension)' }]}
+                      options={[{ id: 'neuf', name: t('prop_nature_new') }, { id: 'rehabilitation', name: t('prop_nature_reno') }]}
                       value={nature}
                       onChange={(v: any) => setNewProposal(prev => {
                         const next = { ...prev, operation_nature: v === 'rehabilitation' ? 'rehabilitation' : 'neuf' } as Partial<Proposal>;
@@ -1225,21 +1226,21 @@ export default function Proposals() {
                       })}
                     />
                     {nature === 'neuf' ? (
-                      <FormField label="Surface de plancher (m²)" value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
+                      <FormField label={t('prop_f_floor_area')} value={newProposal.surface_plancher} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_plancher: v}))} />
                     ) : (
                       <>
-                        <FormField label="Surface existante (m²)" value={newProposal.surface_existante} onChange={(v: any) => setNewProposal(prev => { const n = { ...prev, surface_existante: v }; return { ...n, ...surfacesApresSaisieRehabilitation(n) }; })} />
-                        <FormField label="Surface réhabilitée (m²)" value={newProposal.surface_rehabilitee} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_rehabilitee: v}))} />
-                        <FormField label="Surface d’extension (m²)" value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => { const n = { ...prev, surface_plancher_ext: v }; return { ...n, ...surfacesApresSaisieRehabilitation(n) }; })} />
-                        <div className="text-xs text-[var(--tblr-secondary)] self-end pb-2">Surface de plancher après travaux : {newProposal.surface_plancher || '0'} m²</div>
+                        <FormField label={t('prop_f_existing_area')} value={newProposal.surface_existante} onChange={(v: any) => setNewProposal(prev => { const n = { ...prev, surface_existante: v }; return { ...n, ...surfacesApresSaisieRehabilitation(n) }; })} />
+                        <FormField label={t('prop_f_renovated_area')} value={newProposal.surface_rehabilitee} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_rehabilitee: v}))} />
+                        <FormField label={t('prop_f_extension_area')} value={newProposal.surface_plancher_ext} onChange={(v: any) => setNewProposal(prev => { const n = { ...prev, surface_plancher_ext: v }; return { ...n, ...surfacesApresSaisieRehabilitation(n) }; })} />
+                        <div className="text-xs text-[var(--tblr-secondary)] self-end pb-2">{t('prop_f_floor_area_after', { area: newProposal.surface_plancher || '0' })}</div>
                       </>
                     )}
                     {isErp && (
                       <>
-                        <FormField label="Surf. ERP" value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
-                        <FormField label="Surf. ERT" value={newProposal.surface_ert} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_ert: v}))} />
-                        <FormField label="Effectif Public" value={newProposal.effectif_public} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_public: v}))} />
-                        <FormField label="Effectif Personnel" value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
+                        <FormField label={t('prop_f_erp_area')} value={newProposal.surface_erp} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_erp: v}))} />
+                        <FormField label={t('prop_f_ert_area')} value={newProposal.surface_ert} onChange={(v: any) => setNewProposal(prev => ({...prev, surface_ert: v}))} />
+                        <FormField label={t('prop_f_public_capacity')} value={newProposal.effectif_public} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_public: v}))} />
+                        <FormField label={t('prop_f_staff_capacity')} value={newProposal.effectif_personnel} onChange={(v: any) => setNewProposal(prev => ({...prev, effectif_personnel: v}))} />
                       </>
                     )}
                   </div>
@@ -1261,10 +1262,10 @@ export default function Proposals() {
                           cityCode={newProposal.city_code_terrain}
                         />
                       </InfoPanelBoundary>
-                      <InfoPanelBoundary label="Cadastre"><CadastreDownload address={riskAddress} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Urbanisme"><UrbanPlanningInfo address={riskAddress} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Géorisques"><GeorisquesInfo address={riskAddress} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
-                      <InfoPanelBoundary label="Monuments historiques"><HistoricalMonuments address={riskAddress} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label={t('prop_tab_cadastre')}><CadastreDownload address={riskAddress} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label={t('prop_tab_planning')}><UrbanPlanningInfo address={riskAddress} geometry={selectedParcelGeometry} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label={t('prop_tab_risks')}><GeorisquesInfo address={riskAddress} banId={newProposal.ban_id_terrain} /></InfoPanelBoundary>
+                      <InfoPanelBoundary label={t('prop_tab_monuments')}><HistoricalMonuments address={riskAddress} /></InfoPanelBoundary>
                     </div>
                   </div>
                 )}
@@ -1277,20 +1278,20 @@ export default function Proposals() {
                   </h3>
                   {/* Mode selector for Montant des travaux */}
                   <div className="flex items-center gap-2 mb-2">
-                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant des travaux :</span>
+                    <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{t('prop_f_works_amount_colon')}</span>
                     <button
                       type="button"
                       onClick={() => setCostMode('manual')}
                       className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'manual' ? 'bg-[var(--tblr-primary)] text-white' : 'bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'}`}
                     >
-                      Saisie manuelle
+                      {t('prop_f_manual_entry')}
                     </button>
                     <button
                       type="button"
                       onClick={() => setCostMode('ratio')}
                       className={`px-3 py-1 rounded text-[0.6875rem] font-bold uppercase tracking-wider transition-colors ${costMode === 'ratio' ? 'bg-[var(--tblr-primary)] text-white' : 'bg-[var(--tblr-surface-2)] text-[var(--tblr-muted)] hover:text-[var(--tblr-text)]'}`}
                     >
-                      Calcul par ratio
+                      {t('prop_f_ratio_calc')}
                     </button>
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
@@ -1312,46 +1313,46 @@ export default function Proposals() {
                   </div>
                   {costMode === 'manual' ? (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <FormField label="Montant des travaux (€)" type="number" value={newProposal.construction_cost} onChange={(v: any) => setNewProposal(prev => ({...prev, construction_cost: Number(v)}))} />
-                      <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
-                      <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
+                      <FormField label={t('prop_f_works_amount')} type="number" value={newProposal.construction_cost} onChange={(v: any) => setNewProposal(prev => ({...prev, construction_cost: Number(v)}))} />
+                      <FormField label={t('prop_f_complexity')} type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
+                      <FormField label={t('prop_f_base_fee_pct')} type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
                     </div>
                   ) : (
                     <div className="space-y-3 p-3 bg-[var(--tblr-primary-lt)] rounded-lg border border-[var(--tblr-border)]">
                       <p className="text-[0.6875rem] text-[var(--tblr-primary)] font-medium">
                         {nature === 'neuf'
-                          ? 'Montant des travaux = Surface de plancher × Ratio construction neuve'
-                          : 'Montant des travaux = Surface réhabilitée × Ratio réhabilitation + Surface d’extension × Ratio extension'}
+                          ? t('prop_f_formula_new')
+                          : t('prop_f_formula_reno')}
                       </p>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {nature === 'rehabilitation' && (<>
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface réhabilitée (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{t('prop_f_renovated_area')}</label>
                           <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
                             {surfaceRehabilitee(newProposal)} m²
-                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">{t('prop_f_see_section_05')}</span>
                           </div>
                         </div>
                         <FormField
-                          label="Ratio réhab (€/m²)"
+                          label={t('prop_f_ratio_reno')}
                           type="number"
                           value={newProposal.ratio_rehab}
                           onChange={(v: any) => setNewProposal(prev => ({...prev, ratio_rehab: Number(v)}))}
                         />
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface d’extension (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{t('prop_f_extension_area')}</label>
                           <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
                             {newProposal.surface_plancher_ext || '0'} m²
-                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">{t('prop_f_see_section_05')}</span>
                           </div>
                         </div>
                         </>)}
                         {nature === 'neuf' && (
                         <div className="space-y-1">
-                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Surface de plancher (m²)</label>
+                          <label className="block text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{t('prop_f_floor_area')}</label>
                           <div className="px-2 py-1.5 bg-[var(--tblr-surface-2)] rounded text-xs font-mono text-[var(--tblr-text)]">
                             {newProposal.surface_plancher || '0'} m²
-                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">(section 05)</span>
+                            <span className="text-[0.6875rem] text-[var(--tblr-muted)] ml-1">{t('prop_f_see_section_05')}</span>
                           </div>
                         </div>
                         )}
@@ -1363,14 +1364,14 @@ export default function Proposals() {
                         />
                       </div>
                       <div className="flex items-center gap-3 mt-1">
-                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">Montant des travaux calculé :</span>
+                        <span className="text-[0.6875rem] font-bold uppercase tracking-wider text-[var(--tblr-muted)]">{t('prop_f_works_amount_computed')}</span>
                         <span className="text-sm font-bold text-[var(--tblr-primary)]">
                           {(newProposal.construction_cost || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €
                         </span>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1 border-t border-[var(--tblr-border)]">
-                        <FormField label="Taux de complexité" type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
-                        <FormField label="% Honoraires Base" type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
+                        <FormField label={t('prop_f_complexity')} type="number" value={newProposal.complexity_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, complexity_rate: Number(v)}))} />
+                        <FormField label={t('prop_f_base_fee_pct')} type="number" value={newProposal.base_fee_percent} onChange={(v: any) => setNewProposal(prev => ({...prev, base_fee_percent: Number(v)}))} />
                       </div>
                     </div>
                   )}
@@ -1443,15 +1444,15 @@ export default function Proposals() {
                     </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <FormField label="Taux de TVA (%)" type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
+                    <FormField label={t('prop_f_vat_rate')} type="number" value={newProposal.vat_rate} onChange={(v: any) => setNewProposal(prev => ({...prev, vat_rate: Number(v)}))} />
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Montant TVA (€)</label>
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('prop_f_vat_amount')}</label>
                       <div className="px-3 py-2 bg-[var(--tblr-surface-2)] border border-[var(--tblr-border)] rounded-lg text-sm font-medium text-[var(--tblr-text)]">
                         {formatCurrency(vatAmount)}
                       </div>
                     </div>
                     <div className="space-y-1.5">
-                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Montant TTC (€)</label>
+                      <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('prop_f_total_ttc')}</label>
                       <div className="px-3 py-2 bg-[var(--tblr-primary-lt)] border border-[var(--tblr-border)] rounded-lg text-sm font-bold text-[var(--tblr-primary)]">
                         {formatCurrency(totalTTC)}
                       </div>
@@ -1463,8 +1464,8 @@ export default function Proposals() {
                     ) : (
                       <p className="text-xs text-[var(--tblr-muted)]">
                         {settings?.maf_enabled
-                          ? 'Choisissez le type de mission (circulaire MAF) en section 04 pour afficher le calcul de l’assurance MAF.'
-                          : 'Le calcul de l’assurance MAF est désactivé dans les réglages du cabinet.'}
+                          ? t('prop_maf_choose')
+                          : t('prop_maf_disabled')}
                       </p>
                     )}
                   </div>
@@ -1501,7 +1502,7 @@ export default function Proposals() {
                           <tr key={spec.id || idx}>
                             <td className="px-4 py-3">
                               <input 
-                                placeholder="Ex: BET Structure"
+                                placeholder={t('prop_f_specialty_placeholder')}
                                 className="w-full bg-transparent outline-none focus:ring-2 focus:ring-[var(--tblr-primary)] rounded-lg px-2 py-1 text-[var(--tblr-text)]"
                                 value={spec.specialty_name || ''}
                                 onChange={e => updateSpecialty(idx, 'specialty_name', e.target.value)}
@@ -1548,7 +1549,7 @@ export default function Proposals() {
                     </h3>
                     <div className="flex items-center gap-4">
                       <div className="flex items-center gap-2 bg-[var(--tblr-surface-2)] px-2 py-1 rounded-lg border border-[var(--tblr-border)]">
-                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">Décimales</label>
+                        <label className="text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercase tracking-wider">{t('prop_f_decimals')}</label>
                         <input 
                           type="number" 
                           min="0" 
@@ -1576,7 +1577,7 @@ export default function Proposals() {
                         type="button"
                         onClick={() => {
                           const currentData = JSON.parse(newProposal.fee_distribution || '{}');
-                          const newMission = { id: `mission-${Date.now()}`, name: 'Nouvelle Mission Base', category: 'Mission base', percentages: { architect: 100 } };
+                          const newMission = { id: `mission-${Date.now()}`, name: t('prop_new_mission_base'), category: 'Mission base', percentages: { architect: 100 } };
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
@@ -1588,7 +1589,7 @@ export default function Proposals() {
                         type="button"
                         onClick={() => {
                           const currentData = JSON.parse(newProposal.fee_distribution || '{}');
-                          const newMission = { id: `mission-${Date.now()}`, name: 'Nouvelle Mission Exé', category: 'Mission Exécution', percentages: { architect: 100 } };
+                          const newMission = { id: `mission-${Date.now()}`, name: t('prop_new_mission_exe'), category: 'Mission Exécution', percentages: { architect: 100 } };
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}
@@ -1600,7 +1601,7 @@ export default function Proposals() {
                         type="button"
                         onClick={() => {
                           const currentData = JSON.parse(newProposal.fee_distribution || '{}');
-                          const newMission = { id: `mission-${Date.now()}`, name: 'Nouvelle Mission Comp', category: 'Missions complémentaires', percentages: { architect: 100 } };
+                          const newMission = { id: `mission-${Date.now()}`, name: t('prop_new_mission_comp'), category: 'Missions complémentaires', percentages: { architect: 100 } };
                           const newData = { ...currentData, missions: [...(currentData.missions || []), newMission] };
                           setNewProposal(prev => ({ ...prev, fee_distribution: JSON.stringify(newData) }));
                         }}

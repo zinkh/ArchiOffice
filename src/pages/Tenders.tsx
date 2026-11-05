@@ -33,7 +33,11 @@ export default function Tenders() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [editingTender, setEditingTender] = useState<Tender | null>(null);
   const [formSpecialties, setFormSpecialties] = useState<{id?: string, specialty_name: string, contact_id?: string}[]>([]);
-  const [formMilestones, setFormMilestones] = useState<{id?: string, title: string, due_date: string, completed: boolean}[]>([]);
+  const [formMilestones, setFormMilestones] = useState<{id?: string, title: string, due_date: string, completed: boolean, duration_days?: number, dependencies?: string[]}[]>([]);
+  // Le diagramme n'affiche que les dates renseignées ; il édite la liste du formulaire, enregistrée avec l'appel d'offres.
+  const ganttMilestones: Milestone[] = formMilestones
+    .filter((m): m is typeof m & { id: string } => !!m.id && !!m.due_date && !!m.title.trim())
+    .map(m => ({ id: m.id, tender_id: editingTender?.id, title: m.title, due_date: m.due_date, completed: !!m.completed, duration_days: m.duration_days, dependencies: m.dependencies }));
   const initialTenderState: Partial<Tender> = {
     title: '',
     client: '',
@@ -132,7 +136,7 @@ export default function Tenders() {
   };
 
   const addMilestoneRow = () => {
-    setFormMilestones([...formMilestones, { title: '', due_date: '', completed: false }]);
+    setFormMilestones([...formMilestones, { id: crypto.randomUUID(), title: '', due_date: '', completed: false }]);
   };
 
   const removeMilestoneRow = (index: number) => {
@@ -197,7 +201,7 @@ export default function Tenders() {
     setEditingTender(tender);
     setNewTender(tender);
     setFormSpecialties(tender.specialties_list || []);
-    setFormMilestones(milestones.filter(m => m.tender_id === tender.id));
+    setFormMilestones(milestones.filter(m => m.tender_id === tender.id).map(m => ({ id: m.id, title: m.title, due_date: m.due_date, completed: m.completed, duration_days: m.duration_days, dependencies: m.dependencies })));
     setIsModalOpen(true);
   };
 
@@ -969,13 +973,15 @@ export default function Tenders() {
                         )}
                       </div>
 
-                      {editingTender && milestones.filter(m => m.tender_id === editingTender.id).length > 0 && (
+                      {ganttMilestones.length > 0 && (
                         <div className="space-y-4 mb-4">
                           <h3 className="text-sm font-bold" style={{ color: 'var(--tblr-primary)' }}>{t('tenders_timeline_preview')}</h3>
                           <MilestoneGantt
-                            milestones={milestones.filter(m => m.tender_id === editingTender.id)}
-                            startDate={new Date(editingTender.submission_deadline)}
-                            endDate={new Date()}
+                            milestones={ganttMilestones}
+                            onUpdate={updated => setFormMilestones(prev => prev.map(m => {
+                              const u = updated.find(x => x.id === m.id);
+                              return u ? { ...m, due_date: u.due_date, duration_days: u.duration_days, dependencies: u.dependencies } : m;
+                            }))}
                           />
                         </div>
                       )}

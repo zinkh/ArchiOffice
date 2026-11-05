@@ -234,3 +234,14 @@ manuels de `proposals.planning` (`src/lib/proposalPlanning.ts`, migration `migra
 mission, option des flèches de dépendance). Les anciens jalons de proposition (`MilestoneGantt`, tous à 30 jours, sans enchaînement,
 jamais enregistrés) ne pilotent plus le planning. Barres déplaçables (début) et étirables (durée) ; une mission décalée à la main ne
 dépend plus de la précédente. Les flèches ne figurent pas dans le PDF (les SVG y sont masqués).
+
+### Jalons datés (fiches affaires, appels d'offres) : même diagramme, mêmes réglages
+
+`MilestoneGantt.tsx` s'appuie sur `src/lib/milestoneSchedule.ts` (pur, testé) : un jalon part de sa `due_date`, ou de la fin du jalon dont
+il dépend (`dependencies[0]`), au plus tôt à sa propre date ; durée `duration_days` (1 jour à défaut). L'ancien calcul ignorait `due_date`
+et faisait partir tous les jalons sans dépendance à la même date. Barres déplaçables (la date change, la dépendance est détachée, l'heure
+éventuelle est conservée) et étirables (durée), flèches de dépendance activables (préférence `localStorage['ganttShowDependencies']`),
+lecture seule sans `onUpdate`. Fiche affaire : chaque jalon modifié est réenregistré (`PUT /api/milestones/:id`, `changedMilestones` +
+`persistMilestones`). Appel d'offres : le diagramme édite la liste du formulaire, enregistrée avec l'appel d'offres ; le serveur
+(`milestonesForInsert`, `server/routes/tenders.ts`) garde désormais durée et dépendances, reprend l'identifiant d'un jalon seulement s'il
+appartenait déjà à l'appel d'offres et réécrit les dépendances vers les identifiants enregistrés.
