@@ -173,6 +173,13 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud {
    */
   pourMemoire?: boolean;
   /**
+   * Taux de marge de l'article, en % du prix de base (`prixUnitaire`, `prixTotal`) : le prix final est
+   * `prix x (1 + taux / 100)`. Les prix enregistrés restent toujours HORS marge ; la marge n'existe que
+   * dans l'affichage et les exports, par `appliquerMarge` (src/lib/marge.ts). Absent : pas de marge.
+   * Jamais partagé avec les confrères (absent de la liste blanche de `documentView.ts`).
+   */
+  tauxMarge?: number;
+  /**
    * Nature de la prestation. Absent ou 'base' : comptée au total. `pse`,
    * `option` et `variante` sont chiffrées mais comptées à part, jamais dans le
    * total de base. Portée par un article à sous-articles, elle vaut pour tout
@@ -228,6 +235,10 @@ export interface DPGF extends DecoupageDocument {
   totalHT: number;
   TVA: number;
   totalTTC: number;
+  /** L'estimation affiche (et exporte) les prix finaux, marge comprise. Absent : prix de base. */
+  estimationAvecMarge?: boolean;
+  /** Idem pour le DPGF avec prix. Choix distinct : l'estimation est interne, le DPGF peut partir chez le client. */
+  dpgfAvecMarge?: boolean;
 }
 
 // ── Helpers de découpage ─────────────────────────────────────────────────────
