@@ -103,6 +103,39 @@ describe('DPGF sans prix : cadre de réponse pour les entreprises', () => {
   });
 });
 
+describe('article à sous-articles dans l\'export du DPGF', () => {
+  const base = sampleDPGF.lots[0].chapitres[0].lignes[0];
+  const avecEnfants: DPGF = {
+    ...sampleDPGF,
+    lots: [{
+      ...sampleDPGF.lots[0],
+      chapitres: [{
+        ...sampleDPGF.lots[0].chapitres[0],
+        lignes: [{
+          ...base, id: 'p', numero: '01.1.1', designation: 'Cuisine', unite: 'forf', quantite: 1,
+          children: [{ ...base, id: 'e1', numero: '01.1.1.1', unite: 'u', quantite: 2 }],
+        }],
+      }],
+    }],
+  };
+
+  it("n'affiche ni unité ni quantité sur le parent, et les garde sur ses enfants (Excel)", async () => {
+    const { exportDPGFtoExcel } = await import('../proExport');
+    await exportDPGFtoExcel(avecEnfants, 'Projet', 'lot', {}, { avecPrix: true });
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await saveAsMock.mock.calls[0][0].arrayBuffer());
+    const lignes: unknown[][] = [];
+    wb.worksheets[0].eachRow(r => lignes.push((r.values as unknown[]).slice(1)));
+    const parent = lignes.find(l => l[0] === '01.1.1')!;
+    const enfant = lignes.find(l => l[0] === '01.1.1.1')!;
+    expect(parent[2] == null || parent[2] === '').toBe(true);
+    expect(parent[3] == null || parent[3] === '').toBe(true);
+    expect(enfant[2]).toBe('u');
+    expect(enfant[3]).toBe(2);
+  });
+});
+
 describe('colonne TVA dédiée du DPGF', () => {
   const avecTauxDedie: DPGF = {
     ...sampleDPGF,
