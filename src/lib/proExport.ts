@@ -1,7 +1,7 @@
-import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT, NATURES_HORS_BASE, type NatureArticle } from '../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, GroupementDpgf, LIBELLES_GROUPEMENT, NATURES_HORS_BASE, type NatureArticle, type NatureHorsBase } from '../types/dpgf';
 import { grouperDpgf } from './dpgfGrouping';
 import { formatQuantite } from './quantiteFormat';
-import { sousTotalNature } from '../components/pro/treeOps';
+import { estHorsBase, sousTotalNature } from '../components/pro/treeOps';
 import type { AgencySettings } from './proposalExport';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import { ORIENTATION_DPGF, orientationPdf, type Orientation } from './exportOrientation';
@@ -13,8 +13,11 @@ import {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
+// `Intl` sépare les milliers par une espace fine insécable (U+202F) que les polices standard de jsPDF ne
+// connaissent pas : elle s'y affiche « / » avec un interlettrage cassé, et le montant est tronqué dans sa
+// colonne. L'espace insécable ordinaire (U+00A0) y existe et ne laisse pas couper le montant en deux lignes.
 const fmt = (n: number) =>
-  new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n).replace(/\u202F/g, '\u00A0');
 
 const LIBELLE_NATURE = { pse: 'PSE', option: 'Option', variante: 'Variante' } as const;
 const LIBELLE_TOTAL_NATURE = {
@@ -147,7 +150,7 @@ function flattenDPGFGroupe(dpgf: DPGF, groupement: Exclude<GroupementDpgf, 'lot'
   return rows;
 }
 
-function flattenDPGF(lots: Lot[]): Array<{
+function flattenDPGF(lots: Lot[], sansHorsBase = false): Array<{
   depth: number;
   numero: string;
   designation: string;
@@ -173,6 +176,8 @@ function flattenDPGF(lots: Lot[]): Array<{
       // trouvait en dessous de chaque export PDF ou Excel.
       const walk = (lignes: Ligne[], depth: number) => {
         for (const ligne of lignes) {
+          // Estimation poste par poste : options, PSE et variantes ont leur propre tableau, hors du total de base.
+          if (sansHorsBase && estHorsBase(ligne.nature)) continue;
           // Un article qui porte des sous-articles n'a ni unité ni quantité à chiffrer : l'afficher
           // (« forf », « 1,00 ») laisserait croire aux entreprises qu'elles doivent le chiffrer.
           const parent = !!ligne.children?.length;
@@ -342,50 +347,171 @@ export async function exportDPGFtoPDF(
 
 // ── Estimation PDF ────────────────────────────────────────────────────────────
 
-export async function exportEstimationtoPDF(dpgf: DPGF, projectName?: string, settings: AgencySettings = {}, sortie?: Sortie) {
+export interface ExportEstimationOptions {
+  /**
+   * Poste par poste : chaque article avec sa quantité, son prix unitaire et son total, au lieu du seul
+   * récapitulatif par lot. Les options, PSE et variantes sont toujours détaillées à la suite.
+   */
+  detaille?: boolean;
+}
+
+const TITRE_DETAIL_NATURE: Record<NatureHorsBase, string> = {
+  pse: 'Prestations supplémentaires éventuelles (PSE)',
+  option: 'Options',
+  variante: 'Variantes',
+};
+
+/**
+ * Articles d'une nature hors base (PSE, option, variante), dans l'ordre du document. Même parcours que
+ * `sumLigneNature` : la nature d'un parent vaut pour ses sous-articles, un article d'une autre nature hors
+ * base n'en est pas, et un parent « pour mémoire » rend pour mémoire tout ce qu'il contient.
+ */
+function lignesDeNature(dpgf: DPGF, nature: NatureHorsBase): { ligne: Ligne; lot: Lot }[] {
+  const out: { ligne: Ligne; lot: Lot }[] = [];
+  const dans = (lignes: Ligne[], lot: Lot, actif: boolean, pm: boolean) => {
+    for (const l of lignes) {
+      if (l.cctpOnly || (estHorsBase(l.nature) && l.nature !== nature)) continue;
+      const ici = actif || l.nature === nature;
+      const pmIci = pm || !!l.pourMemoire;
+      if (l.children?.length) dans(l.children, lot, ici, pmIci);
+      else if (ici) out.push({ ligne: pmIci && !l.pourMemoire ? { ...l, pourMemoire: true } : l, lot });
+    }
+  };
+  for (const lot of dpgf.lots) for (const chap of lot.chapitres) if (!chap.cctpOnly) dans(chap.lignes, lot, false, false);
+  return out;
+}
+
+export async function exportEstimationtoPDF(
+  dpgf: DPGF, projectName?: string, settings: AgencySettings = {}, sortie?: Sortie,
+  { detaille = false }: ExportEstimationOptions = {},
+) {
   const [{ default: jsPDF }, { default: autoTable }, logo] = await Promise.all([
     import('jspdf'),
     import('jspdf-autotable'),
     loadLogoDataUrl(settings.logoUrl),
   ]);
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const letterhead = { title: 'ESTIMATION — Récapitulatif par lot', subtitle: projectName, margin: 14, logo };
+  const letterhead = {
+    title: detaille ? 'ESTIMATION — Détail poste par poste' : 'ESTIMATION — Récapitulatif par lot',
+    subtitle: projectName, margin: 14, logo,
+  };
   const startY = drawAgencyHeader(doc, settings, letterhead);
+  const ttc = (ht: number) => ht * (1 + dpgf.TVA / 100);
 
-  autoTable(doc, {
-    ...tableauGris(),
-    startY,
-    head: [['N°', 'Lot', 'Montant HT', 'Montant TTC']],
-    body: dpgf.lots.map(lot => [
-      lot.numero,
-      lot.titre,
-      fmt(lot.sousTotal) + ' €',
-      fmt(lot.sousTotal * (1 + dpgf.TVA / 100)) + ' €',
-    ]),
-    styles: { fontSize: 9, textColor: TABLEAU_GRIS.texte, cellPadding: 2.5 },
-    columnStyles: {
-      0: { cellWidth: 15 },
-      1: { cellWidth: 'auto' },
-      2: { cellWidth: 35, halign: 'right' },
-      3: { cellWidth: 35, halign: 'right' },
-    },
-    foot: [['', 'TOTAL', fmt(dpgf.totalHT) + ' €', fmt(dpgf.totalTTC) + ' €']],
-  });
+  if (detaille) {
+    const rows = flattenDPGF(dpgf.lots, true);
+    autoTable(doc, {
+      ...tableauGris(),
+      startY,
+      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
+      body: rows.map(r => [r.numero, '  '.repeat(Math.max(0, r.depth - 1)) + r.designation, r.unite, r.quantite, r.prixUnitaire, r.prixTotal]),
+      styles: { fontSize: 8, textColor: TABLEAU_GRIS.texte, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 18, halign: 'right' },
+        4: { cellWidth: 26, halign: 'right' },
+        5: { cellWidth: 28, halign: 'right' },
+      },
+      didParseCell: (data: any) => {
+        const row = rows[data.row.index];
+        if (!row || data.section !== 'body') return;
+        if (row.type === 'lot') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = TABLEAU_GRIS.groupe;
+        } else if (row.type === 'chapitre') {
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fillColor = TABLEAU_GRIS.sousGroupe;
+        } else if (row.type === 'titre') {
+          data.cell.styles.fontStyle = 'italic';
+        }
+      },
+      foot: [['', 'TOTAL HT', '', '', '', fmt(dpgf.totalHT) + ' €']],
+    });
+  } else {
+    autoTable(doc, {
+      ...tableauGris(),
+      startY,
+      head: [['N°', 'Lot', 'Montant HT', 'Montant TTC']],
+      body: dpgf.lots.map(lot => [
+        lot.numero,
+        lot.titre,
+        fmt(lot.sousTotal) + ' €',
+        fmt(ttc(lot.sousTotal)) + ' €',
+      ]),
+      styles: { fontSize: 9, textColor: TABLEAU_GRIS.texte, cellPadding: 2.5 },
+      columnStyles: {
+        0: { cellWidth: 15 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 35, halign: 'right' },
+        3: { cellWidth: 35, halign: 'right' },
+      },
+      foot: [['', 'TOTAL', fmt(dpgf.totalHT) + ' €', fmt(dpgf.totalTTC) + ' €']],
+    });
+  }
 
-  const finalY = (doc as any).lastAutoTable.finalY + 8;
+  // Ce qui suit le tableau (totaux, options) passe à la page suivante plutôt que de sortir de la feuille.
+  const marge = 14;
+  let y = (doc as any).lastAutoTable.finalY + 8;
+  const reserver = (hauteur: number) => {
+    if (y + hauteur <= doc.internal.pageSize.getHeight() - 20) return;
+    doc.addPage();
+    y = ENTETE_REDUIT_BAS + 4;
+  };
+  const horsBase = totauxHorsBase(dpgf);
+
+  reserver(14 + horsBase.length * 6);
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(...TABLEAU_GRIS.texte);
-  doc.text(`TVA ${dpgf.TVA}% : ${fmt(dpgf.totalTTC - dpgf.totalHT)} €`, 14, finalY);
+  doc.text(`TVA ${dpgf.TVA}% : ${fmt(dpgf.totalTTC - dpgf.totalHT)} €`, marge, y);
   doc.setFont('helvetica', 'bold');
-  doc.text(`Total TTC : ${fmt(dpgf.totalTTC)} €`, 14, finalY + 6);
+  doc.text(`Total TTC : ${fmt(dpgf.totalTTC)} €`, marge, y + 6);
   doc.setFont('helvetica', 'normal');
-  totauxHorsBase(dpgf).forEach((t, i) => {
-    doc.text(`${t.libelle} : ${fmt(t.total)} € (TTC ${fmt(t.total * (1 + dpgf.TVA / 100))} €)`, 14, finalY + 14 + i * 6);
+  horsBase.forEach((t, i) => {
+    doc.text(`${t.libelle} : ${fmt(t.total)} € (TTC ${fmt(ttc(t.total))} €)`, marge, y + 14 + i * 6);
   });
+  y += 14 + horsBase.length * 6 + 4;
+
+  // Détail des options, PSE et variantes : un tableau par nature, hors du total de base.
+  for (const nature of NATURES_HORS_BASE) {
+    const items = lignesDeNature(dpgf, nature);
+    if (!items.length) continue;
+    const total = dpgf.lots.reduce((s, l) => s + sousTotalNature(l, nature), 0);
+    reserver(30);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...TABLEAU_GRIS.texte);
+    doc.text(TITRE_DETAIL_NATURE[nature], marge, y);
+    autoTable(doc, {
+      ...tableauGris(),
+      startY: y + 3,
+      head: [['N°', 'Désignation', 'Unité', 'Quantité', 'P.U. HT (€)', 'Total HT (€)']],
+      body: items.map(({ ligne: l }) => [
+        l.numero,
+        l.designation,
+        l.unite,
+        l.quantite > 0 ? formatQuantite(l.quantite) : '',
+        l.pourMemoire ? 'PM' : l.prixUnitaire > 0 ? fmt(l.prixUnitaire) : '',
+        l.pourMemoire ? 'PM' : l.prixTotal > 0 ? fmt(l.prixTotal) : '',
+      ]),
+      styles: { fontSize: 8, textColor: TABLEAU_GRIS.texte, cellPadding: 2 },
+      columnStyles: {
+        0: { cellWidth: 20 },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 14, halign: 'center' },
+        3: { cellWidth: 18, halign: 'right' },
+        4: { cellWidth: 26, halign: 'right' },
+        5: { cellWidth: 28, halign: 'right' },
+      },
+      foot: [['', LIBELLE_TOTAL_NATURE[nature], '', '', '', fmt(total) + ' €']],
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  }
 
   drawAgencyFooters(doc, settings, letterhead);
-  await enregistrerPdf(doc, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}.pdf`, sortie);
+  await enregistrerPdf(doc, `Estimation_${dpgf.titre.replace(/\s+/g, '_')}${detaille ? '_detaillee' : ''}.pdf`, sortie);
 }
 
 // ── DPGF Excel ────────────────────────────────────────────────────────────────

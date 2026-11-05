@@ -196,6 +196,51 @@ describe('colonne TVA dédiée du DPGF', () => {
   });
 });
 
+describe("export PDF de l'estimation", () => {
+  const l = (id: string, numero: string, designation: string, quantite: number, prixUnitaire: number, extra: Record<string, unknown> = {}) => ({
+    id, numero, designation, unite: 'm2', quantite, prixUnitaire, prixTotal: quantite * prixUnitaire, type: 'ouvrage' as const, ...extra,
+  });
+  const estimation: DPGF = {
+    ...sampleDPGF, TVA: 20, totalHT: 12043.17, totalTTC: 14451.8,
+    lots: [{
+      id: 'lot', numero: '01', titre: 'Démolition', sousTotal: 12043.17,
+      chapitres: [{
+        id: 'chap', numero: '1', titre: 'Dépose', lignes: [
+          l('a', '1.1', 'Dépose cloisons', 1, 12043.17),
+          l('b', '1.2', 'Désamiantage extérieur', 1, 4350, { nature: 'option' }),
+        ],
+      }],
+    }],
+  };
+
+  /** Le flux du PDF (texte non compressé), lu octet par octet comme latin1 : un U+202F y apparaîtrait en UTF-8. */
+  const lirePdf = async (detaille: boolean) => {
+    const { exportEstimationtoPDF } = await import('../proExport');
+    let fichier: Blob | undefined;
+    await exportEstimationtoPDF(estimation, 'Projet', {}, (_nom, blob) => { fichier = blob; }, { detaille });
+    return Buffer.from(await fichier!.arrayBuffer()).toString('latin1');
+  };
+
+  it('écrit les milliers avec une espace insécable que le PDF sait afficher, jamais une espace fine', async () => {
+    const flux = await lirePdf(false);
+    expect(flux).toContain('12\u00a0043,17');
+    expect(flux).not.toContain('\u00e2\u0080\u00af');
+  });
+
+  it("détaille les options à la suite du récapitulatif, sans lister les postes de base", async () => {
+    const flux = await lirePdf(false);
+    expect(flux).toContain('samiantage ext');
+    expect(flux).not.toContain('pose cloisons');
+  });
+
+  it('exporte poste par poste quand le réglage est actif : postes de base, puis options détaillées', async () => {
+    const flux = await lirePdf(true);
+    expect(flux).toContain('pose cloisons');
+    expect(flux).toContain('samiantage ext');
+    expect(flux).toContain('poste par poste');
+  });
+});
+
 describe('exportEstimationtoExcel', () => {
   it('writes a non-empty xlsx blob with a Détail and Récapitulatif sheet', async () => {
     const { exportEstimationtoExcel } = await import('../proExport');

@@ -43,6 +43,8 @@ export interface DemandeDossier {
   orientations?: Partial<Record<'cctp' | 'dpgf', Orientation>>;
   /** CCTP et DPGF : un fichier par lot du périmètre, au lieu d'un fichier pour tous les lots. */
   parLot?: boolean;
+  /** Estimation en PDF : poste par poste (quantités, prix unitaires, totaux) au lieu du récapitulatif par lot. */
+  estimationDetaillee?: boolean;
   projectName?: string;
   /** Rappel du périmètre, imprimé sous le titre ; vide pour tout le document. */
   perimetre?: string;
@@ -137,7 +139,10 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
       );
       if (compterArticles(source) === 0) { avertissements.push({ code: 'vide', document: doc }); continue; }
       if (doc === 'estimation') {
-        for (const f of fmts) await (f === 'pdf' ? exportEstimationtoPDF : exportEstimationtoExcel)(source, etiquette, settings, sortie);
+        for (const f of fmts) {
+          if (f === 'pdf') await exportEstimationtoPDF(source, etiquette, settings, sortie, { detaille: d.estimationDetaillee });
+          else await exportEstimationtoExcel(source, etiquette, settings, sortie);
+        }
         continue;
       }
       const orientation = d.orientations?.dpgf ?? ORIENTATION_DPGF;
