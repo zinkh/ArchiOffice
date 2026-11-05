@@ -1,3 +1,4 @@
+#include <initguid.h>
 #include "shell.hpp"
 #include <uxtheme.h>
 #include <windowsx.h>
@@ -41,7 +42,7 @@ class View final:public IShellView,public IFolderView {
  }
  void name(HWND child,wchar_t const* label){
   winrt::com_ptr<IAccPropServices> service;
-  if(SUCCEEDED(CoCreateInstance(CLSID_AccPropServices,nullptr,CLSCTX_INPROC_SERVER,IID_IAccPropServices,service.put_void())))service->SetHwndPropStr(child,OBJID_CLIENT,CHILDID_SELF,PROPID_ACC_NAME,label);
+  if(SUCCEEDED(CoCreateInstance(CLSID_AccPropServices,nullptr,CLSCTX_INPROC_SERVER,IID_IAccPropServices,service.put_void()))){if(label)service->SetHwndPropStr(child,static_cast<DWORD>(OBJID_CLIENT),CHILDID_SELF,PROPID_ACC_NAME,label);else{MSAAPROPID property=PROPID_ACC_NAME;service->ClearHwndProps(child,static_cast<DWORD>(OBJID_CLIENT),CHILDID_SELF,&property,1);}}
  }
  void layout(){RECT r;GetClientRect(window,&r);int width=dip(r.right),height=dip(r.bottom);
   int treeWidth=std::min(left,std::max(100,width/3)),detailWidth=width>=850?std::min(right,width/3):0;
@@ -95,11 +96,11 @@ class View final:public IShellView,public IFolderView {
   case WM_NOTIFY:{auto info=reinterpret_cast<NMHDR*>(l);if(info->hwndFrom==tree&&info->code==TVN_ITEMEXPANDEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){auto f=filters[index];bool collapsed=(n->itemNew.state&TVIS_EXPANDED)==0;if(f.project<0)rootCollapsed=collapsed;else if(f.phase.empty()&&f.project<static_cast<int>(projects.size())){if(collapsed)collapsedProjects.insert(projects[f.project].id);else collapsedProjects.erase(projects[f.project].id);}}}if(info->hwndFrom==tree&&info->code==TVN_SELCHANGEDW&&!building){auto n=reinterpret_cast<NMTREEVIEWW*>(l);auto index=static_cast<size_t>(n->itemNew.lParam);if(index<filters.size()){filter=filters[index];selectedKey.clear();fill();}}if(info->hwndFrom==list&&!building){if(info->code==LVN_ITEMCHANGED)selection();if(info->code==NM_DBLCLK)launch(L"open");if(info->code==LVN_KEYDOWN&&reinterpret_cast<NMLVKEYDOWN*>(l)->wVKey==VK_RETURN)launch(L"open");}return 0;}
   case WM_TIMER:if(w==1)launch(L"catalog");return 0;
   case ResultMessage:{if(!async||w!=async->serial)return 0;std::optional<Reply> reply;{std::lock_guard lock(async->mutex);reply=std::move(async->reply);async->reply.reset();}busy=false;if(reply){SetWindowTextW(note,reply->message.c_str());if(action==L"catalog"&&(!catalogLoaded||projects!=reply->projects)){catalogLoaded=true;auto projectId=filter.project>=0&&filter.project<static_cast<int>(projects.size())?projects[filter.project].id:L"";projects=std::move(reply->projects);if(!projectId.empty()){auto found=std::find_if(projects.begin(),projects.end(),[&](auto const& p){return p.id==projectId;});if(found==projects.end())filter={};else filter.project=static_cast<int>(found-projects.begin());}if(!reply->ok){filter={};selectedKey.clear();}rebuild(true);}}buttons();return 0;}
-  case WM_SETFOCUS:if(browser)browser->OnViewWindowActive(this);SetFocus(list);return 0;
+  case WM_SETFOCUS:if(browser)browser->OnViewWindowActive(this);SetFocus(IsWindowVisible(list)?list:details);return 0;
   case WM_LBUTTONDOWN:{int x=dip(GET_X_LPARAM(l));if(abs(x-splitLeft-4)<6)drag=1;else if(splitRight&&abs(x-splitRight-4)<6)drag=2;if(drag)SetCapture(window);return 0;}
   case WM_MOUSEMOVE:if(drag){RECT r;GetClientRect(window,&r);int x=dip(GET_X_LPARAM(l)),width=dip(r.right);if(drag==1)left=std::clamp(x,160,std::max(160,width/3));else right=std::clamp(width-x,220,std::max(220,width/3));layout();}return 0;
   case WM_LBUTTONUP:drag=0;if(GetCapture()==window)ReleaseCapture();return 0;
-  case WM_DESTROY:KillTimer(window,1);if(async)async->stopped=true;return 0;
+  case WM_DESTROY:for(auto child:{tree,list,details})name(child,nullptr);KillTimer(window,1);if(async)async->stopped=true;return 0;
   case WM_NCDESTROY:SetWindowLongPtrW(window,GWLP_USERDATA,0);window=nullptr;return 0;
  }return DefWindowProcW(window,msg,w,l);}
 public:

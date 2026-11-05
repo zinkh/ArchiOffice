@@ -150,6 +150,12 @@ Le thème sombre est le thème par défaut (`theme-provider.tsx`) et le thème c
 - Inter partout, JetBrains Mono pour les codes et références.
 - Thème sombre par défaut, clair à parité.
 
+### Adaptation native Windows, étape 1
+
+Les jetons du frontmatter, les règles web ci-dessous et `.impeccable/design.json` restent la référence de l'application React, PWA et Electron. Le prototype `native/windows-shell` est une adaptation locale aux conventions de Windows, pas une nouvelle identité globale. Il conserve la précision et la densité de « L'Agence bien tenue » par une arborescence, un tableau et des propriétés natives. Les règles CSS, `rem`, rayons et bleu Tabler ne se transposent pas aux contrôles Win32.
+
+La référence de cette adaptation est le code livré (`native/windows-shell/view.cpp`, manifeste Common Controls v6), complété par son README et les captures du workflow Windows. La maquette conceptuelle exprime le périmètre visuel à long terme. La validation automatisée utilise un hôte `IShellBrowser`, avec une fenêtre normale, une fenêtre étroite et un changement de DPI simulé à 150 %. Elle ne remplace pas une recette dans `explorer.exe` sur un poste de travail ni une session manuelle Narrateur.
+
 ## Colors
 
 Une palette de neutres ardoise légèrement bleutés, un seul accent bleu franc, et trois couleurs d'état qui ne servent qu'à signaler.
@@ -176,6 +182,10 @@ Une palette de neutres ardoise légèrement bleutés, un seul accent bleu franc,
 
 **The Status Is Not Decoration Rule.** Vert, orange et rouge ne portent que de l'état (payé, en retard, erreur). Les tuiles colorées de `StatTile` et les couleurs de données (graphiques, catégories de recherche) sont la seule exception admise.
 
+### Adaptation native Windows
+
+Le fond utilise la couleur système `COLOR_WINDOW` et les séparateurs `COLOR_3DSHADOW`. Arbre et tableau demandent le thème `Explorer` ; les contrôles communs v6 fournissent les états natifs de sélection, focus, survol et désactivation. Aucune palette Tabler ni promesse de parité avec le thème sombre web n'est imposée à cette vue.
+
 ## Typography
 
 **Display Font:** Inter (repli ui-sans-serif, system-ui)
@@ -199,11 +209,21 @@ Une palette de neutres ardoise légèrement bleutés, un seul accent bleu franc,
 
 **The Small Caps Rule.** Les majuscules espacées sont réservées aux libellés de 11 px (en-têtes, badges, sous-titres). Un titre ou un bouton ne passe jamais en majuscules.
 
+### Adaptation native Windows
+
+Segoe UI remplace Inter dans cette seule vue : corps et contrôles à 10 pt, titre à 16 pt semi-gras. Les polices sont recréées à partir du DPI de la fenêtre ; ces points Windows ne sont pas des pixels CSS. La règle web des tailles en `rem` ne s'applique pas à ce code natif.
+
 ## Layout
 
 Coquille fixe d'application : sidebar de 224 px (`--tblr-sidebar-w`) à gauche, cachée sous 768 px et remplacée par un tiroir (`MobileNavDrawer`) ; en-tête collant de 56 px (`--tblr-navbar-h`) plus l'encart de sécurité du haut ; contenu sur le fond d'agence. Les cartes se rembourrent de 20 à 24 px, les cellules de tableau de 10 × 12 px, les éléments de navigation de 6 × 12 px. Le rythme suit l'échelle de Tailwind (pas de 4 px).
 
 Sur téléphone, le contenu passe en colonne unique et en cartes (`md:hidden`) là où le bureau montre un tableau ; un tableau trop large défile horizontalement (`overflow-x-auto`, `min-w-full`) plutôt que de tasser ses colonnes. Hauteurs d'écran en `dvh` (ou `svh` sur les pages de connexion), jamais `100vh`. Les encarts de sécurité (`env(safe-area-inset-*)`) rembourrent l'en-tête, les côtés et la barre de raccourcis.
+
+### Adaptation native Windows
+
+Trois volets : arbre projets/phases, tableau documentaire, propriétés en lecture seule. Les largeurs initiales de l'arbre et des propriétés sont respectivement de 230 et 290 unités logiques, réduites selon l'espace disponible ; les séparateurs se déplacent à la souris. Sous 850 unités logiques de largeur, les propriétés quittent le volet latéral et le bouton « Propriétés » alterne avec le tableau dans la zone centrale. Les boutons reviennent à la ligne si nécessaire.
+
+Géométrie, hauteur des lignes, polices et colonnes sont recalculées au DPI Windows. La relecture du catalogue toutes les cinq secondes ne reconstruit pas une vue inchangée ; un changement réutilise les identifiants stables pour restaurer sélection et branches repliées, ainsi que les positions de défilement. Cette continuité ne constitue pas une sauvegarde de disposition entre sessions.
 
 ## Elevation & Depth
 
@@ -217,6 +237,10 @@ Système presque plat. La profondeur vient de l'empilement de surfaces (fond d'a
 ### Named Rules
 **The Hairline First Rule.** On sépare par un trait de 1 px avant de penser à une ombre. `shadow-lg`/`shadow-xl` sont réservés à ce qui flotte réellement (modale, menu), jamais à une carte posée dans la page.
 
+### Adaptation native Windows
+
+La vue n'ajoute pas d'ombre décorative. Les séparateurs système et les états des contrôles communs définissent les limites et la profondeur ; les jetons d'ombre web restent réservés aux surfaces web.
+
 ## Shapes
 
 Des angles à peine adoucis : l'outil est précis, pas moelleux.
@@ -226,6 +250,10 @@ Des angles à peine adoucis : l'outil est précis, pas moelleux.
 - **Pastille** (cercle) : avatars, compteurs, points de statut.
 
 **The Two Radii Rule.** Deux rayons seulement : 4 px pour ce qu'on actionne, 8 px pour ce qui contient. `rounded-xl` et `rounded-2xl` sortent du système.
+
+### Adaptation native Windows
+
+Boutons, arbre, tableau et champ de propriétés gardent les formes fournies par Windows. Les rayons web ne sont pas redessinés sur ces contrôles.
 
 ## Components
 
@@ -266,6 +294,13 @@ Sobres et précis : chaque composant se reconnaît à son trait, pas à sa coule
 ### Badges
 - Libellé 11 px en petites capitales, rayon de contrôle, 3 × 8 px ; couleur d'état en fond pâle et texte soutenu.
 
+### Vue Shell Windows
+
+- **Navigation :** arbre natif des projets et phases ; tableau à sélection unique et ligne sélectionnée entière. Colonnes « Document », « Phase », « Type », « Indice », « Version » et « Statut ». Les propriétés présentent les valeurs en texte sélectionnable, dans un champ natif en lecture seule.
+- **Actions :** « Actualiser » ou F5 relit le catalogue ; double-clic, Entrée ou « Ouvrir » ouvre le fichier canonique de A:. « Ouvrir dans ArchiOffice » rejoint la ligne Documents existante. Les actions documentaires sont désactivées sans sélection valide ou pendant une requête.
+- **Accessibilité :** noms MSAA « Projets et phases », « Documents du projet » et « Propriétés du document, lecture seule » ; contrôles accessibles par Tab/Maj+Tab via le traitement de dialogue Windows. Le bouton d'alternance étroit place le focus dans le volet affiché. Le test de l'hôte vérifie les noms MSAA et le parcours clavier ; il ne constitue pas une validation manuelle Narrateur.
+- **États :** une note native indique la vérification, l'ouverture ou l'indisponibilité du client. Les métadonnées absentes restent visibles comme valeurs manquantes, sans valeur métier inventée.
+
 ## Do's and Don'ts
 
 ### Do:
@@ -283,3 +318,9 @@ Sobres et précis : chaque composant se reconnaît à son trait, pas à sa coule
 - **Don't** écrire un texte sous 11 px ni une taille en `px`.
 - **Don't** employer vert, orange ou rouge pour décorer ; ils signalent un état.
 - **Don't** faire apparaître en cascade le contenu des pages de travail consultées plusieurs fois par jour.
+
+### Adaptation native Windows
+- **Do** conserver les contrôles communs, couleurs système, noms accessibles et dimensions adaptées au DPI dans `native/windows-shell`.
+- **Do** distinguer un résultat dans l'hôte `IShellBrowser` d'une recette dans `explorer.exe` et d'une validation manuelle Narrateur.
+- **Don't** étendre l'exception Segoe UI/Win32 aux surfaces React, PWA ou Electron.
+- **Don't** présenter la maquette conceptuelle, l'aperçu PDF ou les fonctions de recherche, d'édition, de classement et de conflits comme livrés à cette étape.
