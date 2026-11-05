@@ -216,3 +216,32 @@ Section 04 de la modale (`Proposals.tsx`, composant `src/components/proposal/Ter
 - **Indice** : démarre à `A` et se change à la main ; « Date de modification » n'est plus saisie.
 - **MAF** : le calcul est affiché sous le calcul des honoraires (TVA/TTC), selon le type de mission choisi en section 04.
 - **Envoyer au client** (action de la liste) : `ProposalExportModal` (`intent: 'send'`) génère le PDF sans le télécharger (`exportProposalPdf(..., { download: false })`) et ouvre `SendProposalMail` (`MailComposeModal` avec `initialFiles`) ; une proposition en brouillon passe à « Envoyée » une fois le message parti.
+
+### Honoraires d'une proposition : arrondi, remise, PC seul
+
+Logique pure dans `src/lib/proposalFees.ts` (testée, `__tests__/proposalFees.test.ts`), migration `supabase/migrate_proposal_fees_discount.sql`.
+`proposals.amount` reste le **net HT** (lu par la MAF, les factures et les exports) ; `fee_gross` porte le brut avant remise.
+Ordre fixe : brut = coût x % de base x complexité x part du périmètre, arrondi du brut (`fee_rounding` : centime, euro, dizaine,
+centaine), remise (`discount_mode` pourcentage ou montant, plafonnée au brut), arrondi du net, remise affichée = brut - net (les lignes
+s'additionnent toujours), TVA au centime. **PC seul** (`mission_scope = 'pc'`) : les honoraires sont la part `scope_share_pct`
+(36 % par défaut, corrigeable) de ceux d'une mission complète ; la répartition ne garde alors esquisse, APS et APD (parts ramenées à
+100 %). L'écran détaille le calcul ligne à ligne ; l'export PDF imprime brut et remise quand il y en a une.
+
+### Planning d'une proposition : un seul modèle pour l'écran et l'export
+
+L'écran (`ProposalGantt.tsx`) et l'export PDF lisent le même calcul, `planifierCalendrier` (`proposalExport.ts`), avec les réglages
+manuels de `proposals.planning` (`src/lib/proposalPlanning.ts`, migration `migrate_proposal_planning.sql` : durée et jour de début par
+mission, option des flèches de dépendance). Les anciens jalons de proposition (`MilestoneGantt`, tous à 30 jours, sans enchaînement,
+jamais enregistrés) ne pilotent plus le planning. Barres déplaçables (début) et étirables (durée) ; une mission décalée à la main ne
+dépend plus de la précédente. Les flèches ne figurent pas dans le PDF (les SVG y sont masqués).
+
+### Jalons datés (fiches affaires, appels d'offres) : même diagramme, mêmes réglages
+
+`MilestoneGantt.tsx` s'appuie sur `src/lib/milestoneSchedule.ts` (pur, testé) : un jalon part de sa `due_date`, ou de la fin du jalon dont
+il dépend (`dependencies[0]`), au plus tôt à sa propre date ; durée `duration_days` (1 jour à défaut). L'ancien calcul ignorait `due_date`
+et faisait partir tous les jalons sans dépendance à la même date. Barres déplaçables (la date change, la dépendance est détachée, l'heure
+éventuelle est conservée) et étirables (durée), flèches de dépendance activables (préférence `localStorage['ganttShowDependencies']`),
+lecture seule sans `onUpdate`. Fiche affaire : chaque jalon modifié est réenregistré (`PUT /api/milestones/:id`, `changedMilestones` +
+`persistMilestones`). Appel d'offres : le diagramme édite la liste du formulaire, enregistrée avec l'appel d'offres ; le serveur
+(`milestonesForInsert`, `server/routes/tenders.ts`) garde désormais durée et dépendances, reprend l'identifiant d'un jalon seulement s'il
+appartenait déjà à l'appel d'offres et réécrit les dépendances vers les identifiants enregistrés.

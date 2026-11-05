@@ -6,6 +6,7 @@
 // d'offres portent chacun leurs jalons sous une clé étrangère différente
 // (Milestone.proposal_id / Milestone.tender_id), le reste est identique.
 import * as React from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Contact, Milestone } from '../types';
 import { DEFAULT_MISSIONS, applyDefaultCotraitantShares } from '../lib/feeDistribution';
 
@@ -51,6 +52,14 @@ export interface FeeDistributionGridProps {
 }
 
 export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMilestonesChange, milestoneEntityField }: FeeDistributionGridProps) {
+  const { t } = useTranslation();
+  const totalLabels: Record<string, string> = {
+    'Sous-total Base': t('fee_grid_subtotal_base'),
+    'Sous-total Exécution': t('fee_grid_subtotal_exe'),
+    'Total Base + Exé': t('fee_grid_total_base_exe'),
+    'Sous-total Complémentaire': t('fee_grid_subtotal_comp'),
+    'TOTAL GENERAL HT': t('fee_grid_total_ht'),
+  };
   const data = React.useMemo(() => {
     if (doc.fee_distribution) {
       try {
@@ -221,11 +230,11 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages['architect'] || 0) / 100), 0);
     return (
       <tr key={label}>
-        <td style={totalStyle}>{label}</td>
+        <td style={totalStyle}>{totalLabels[label] ?? label}</td>
         <td style={totalStyle}>{safeNum(totalAmt).toLocaleString('fr-FR')}</td>
         <td
           style={relEcart ? { ...totalStyle, color: '#b91c1c' } : totalStyle}
-          title={relEcart ? 'Le total des missions de base ne fait pas 100 % des honoraires de base' : undefined}
+          title={relEcart ? t('fee_grid_base_not_100') : undefined}
         >{safeNum(relPct).toLocaleString('fr-FR')}</td>
         <td style={totalStyle}>{safeNum(totalSolde).toLocaleString('fr-FR')}</td>
         <td style={totalStyle}>—</td>
@@ -259,11 +268,11 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
       <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
         <thead>
           <tr>
-            <th style={thStyle} rowSpan={2}>Désignation</th>
-            <th style={thStyle} rowSpan={2}>Montant HT</th>
-            <th style={thStyle} rowSpan={2}>Rel %</th>
-            <th style={thStyle} rowSpan={2}>Solde</th>
-            <th style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>Architecte</th>
+            <th style={thStyle} rowSpan={2}>{t('fee_grid_designation')}</th>
+            <th style={thStyle} rowSpan={2}>{t('fee_grid_amount_ht')}</th>
+            <th style={thStyle} rowSpan={2}>{t('fee_grid_rel_pct')}</th>
+            <th style={thStyle} rowSpan={2}>{t('fee_grid_balance')}</th>
+            <th style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>{t('fee_grid_architect')}</th>
             {selectedContacts.map((c: any) => (
               <th key={c.id} style={{ ...thStyle, textAlign: 'center' }} colSpan={2}>{c.name}</th>
             ))}
@@ -281,27 +290,27 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
           </tr>
         </thead>
         <tbody>
-          <tr><td style={catStyle} colSpan={colCount}>Mission base</td></tr>
+          <tr><td style={catStyle} colSpan={colCount}>{t('fee_grid_cat_base')}</td></tr>
           {baseMissions.map(renderMissionRow)}
           {renderTotalRow('Sous-total Base', baseMissions)}
 
-          <tr><td style={catStyle} colSpan={colCount}>Mission Exécution</td></tr>
+          <tr><td style={catStyle} colSpan={colCount}>{t('fee_grid_cat_exe')}</td></tr>
           {exeMissions.map(renderMissionRow)}
           {renderTotalRow('Sous-total Exécution', exeMissions)}
           {renderTotalRow('Total Base + Exé', [...baseMissions, ...exeMissions])}
 
-          <tr><td style={catStyle} colSpan={colCount}>Missions complémentaires</td></tr>
+          <tr><td style={catStyle} colSpan={colCount}>{t('fee_grid_cat_comp')}</td></tr>
           {compMissions.map(renderMissionRow)}
           {renderTotalRow('Sous-total Complémentaire', compMissions)}
           {renderTotalRow('TOTAL GENERAL HT', allMissions)}
 
           <tr>
-            <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b' }}>TVA ({vatRate}%)</td>
+            <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b' }}>{t('fee_grid_vat', { rate: vatRate })}</td>
             <td style={{ ...tdStyle, fontStyle: 'italic', color: '#64748b', textAlign: 'right' }}>{safeNum(vatAmt).toLocaleString('fr-FR')}</td>
             {Array.from({ length: colCount - 2 }).map((_, i) => <td key={i} style={tdStyle} />)}
           </tr>
           <tr>
-            <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af' }}>TOTAL TTC</td>
+            <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af' }}>{t('fee_grid_total_ttc')}</td>
             <td style={{ ...tdStyle, fontWeight: 700, color: '#1e40af', textAlign: 'right' }}>{safeNum(totalTTC).toLocaleString('fr-FR')}</td>
             {Array.from({ length: colCount - 2 }).map((_, i) => <td key={i} style={tdStyle} />)}
           </tr>

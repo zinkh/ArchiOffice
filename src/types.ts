@@ -1285,6 +1285,16 @@ export interface Proposal {
   comp_fee_percent?: number;
   vat_rate?: number;
   decimal_precision?: number;
+  /** Honoraires bruts avant remise (après périmètre et arrondi) ; `amount` reste le net HT. */
+  fee_gross?: number | null;
+  fee_rounding?: 'none' | 'euro' | 'ten' | 'hundred' | null;
+  discount_mode?: 'percent' | 'amount' | null;
+  discount_value?: number | null;
+  /** Mission complète ou PC seul (part `scope_share_pct` des honoraires de la mission complète). */
+  mission_scope?: 'complete' | 'pc' | null;
+  scope_share_pct?: number | null;
+  /** Planning réglé à la main (JSON, voir src/lib/proposalPlanning.ts). */
+  planning?: string | null;
   /** Créé hors ligne, pas encore parvenu au serveur (voir src/lib/offlineQueue.ts). */
   pendingSync?: boolean;
 }
