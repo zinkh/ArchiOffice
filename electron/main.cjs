@@ -382,7 +382,7 @@ function startDriveAgent() {
       driveStatus = { ...driveStatus, ...status };
       const { state } = status;
       driveInBackground = driveInBackground || (state === 'running' && !!driveTray);
-      if (driveTray) driveTray.setToolTip(state === 'running' ? 'ArchiOffice Drive : actif' : 'ArchiOffice Drive : en pause');
+      if (driveTray && !driveTray.isDestroyed()) driveTray.setToolTip(state === 'running' ? 'ArchiOffice Drive : actif' : 'ArchiOffice Drive : en pause');
     },
   });
   // Le contrôle Quitter reste disponible quand aucune fenêtre n'est ouverte.
@@ -634,7 +634,8 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   windowsDrivePreview?.shutdown();
   driveAgent?.stop();
-  driveTray?.destroy();
+  if (driveTray && !driveTray.isDestroyed()) driveTray.destroy();
+  driveTray = null;
   if (serverProcess) serverProcess.kill();
   if (offlineStack) offlineStack.stop().catch(() => {});
 });
