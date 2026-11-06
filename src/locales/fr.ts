@@ -909,6 +909,8 @@ export default {
       "linked_meetings_error": "Impossible de charger les réunions.",
       "linked_meetings_open": "Ouvrir la réunion",
       "feas_title": "Étude de faisabilité",
+      "prop_attachments_title": "Pièces jointes",
+      "prop_attachments_hint": "Programme, relevés, plans, courriers du client : ces pièces restent consultables ici et sont lues par l'IA pour rédiger l'étude de faisabilité (avec les notes des réunions liées). Les images ne sont pas lues.",
       "prop_illus_title": "Plan et photos",
       "prop_illus_hint": "Extraits de plan et photos insérés dans l'export PDF de la proposition (section « Plan et photos » de l'éditeur de modèle).",
       "prop_illus_limit": "Une proposition accepte au plus {{max}} images.",

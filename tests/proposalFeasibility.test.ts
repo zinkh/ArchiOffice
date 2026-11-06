@@ -175,6 +175,43 @@ describe('POST /api/proposals/:id/feasibility/:sectionId/draft-ai', () => {
     expect(saved?.status).toBe('redige');
   });
 
+  it('reads the notes of the meetings linked to the proposal, never those of another proposal or cabinet', async () => {
+    const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 10000 });
+    const otherTenant = makeTenant();
+    const { token } = makeUser(tenantId);
+    const proposalId = seedProposal(tenantId);
+    const otherProposal = seedProposal(tenantId);
+    const foreignProposal = seedProposal(otherTenant);
+    fakeSupabaseAdmin.seed('meetings', [
+      { id: `m-${seq}-a`, tenant_id: tenantId, proposal_id: proposalId, title: 'Visite du terrain', date: '2026-10-12T09:00:00Z', notes: '<p>Le client veut conserver le <b>noyer</b> du jardin.</p>' },
+      { id: `m-${seq}-b`, tenant_id: tenantId, proposal_id: otherProposal, title: 'Autre visite', date: '2026-10-13T09:00:00Z', notes: 'NOTE_AUTRE_PROPOSITION' },
+      { id: `m-${seq}-c`, tenant_id: otherTenant, proposal_id: foreignProposal, title: 'Visite étrangère', date: '2026-10-14T09:00:00Z', notes: 'NOTE_AUTRE_CABINET' },
+    ]);
+    const section = (await request(app).post(`/api/proposals/${proposalId}/feasibility`).set(authHeader(token)).send({ title: 'Programme' })).body;
+    generateContent.mockResolvedValue({ text: 'Le noyer sera conservé.', usageMetadata: { promptTokenCount: 40, candidatesTokenCount: 20 } });
+
+    const res = await request(app).post(`/api/proposals/${proposalId}/feasibility/${section.id}/draft-ai`).set(authHeader(token));
+    expect(res.status).toBe(200);
+    const prompt = JSON.stringify(generateContent.mock.calls[0][0]);
+    expect(prompt).toContain('Visite du terrain');
+    expect(prompt).toContain('conserver le noyer du jardin');
+    expect(prompt).not.toContain('<b>');
+    expect(prompt).not.toContain('NOTE_AUTRE_PROPOSITION');
+    expect(prompt).not.toContain('NOTE_AUTRE_CABINET');
+  });
+
+  it('drafts normally when the proposal has no linked meeting', async () => {
+    const tenantId = makeTenant({ plan: 'enterprise', ai_credit_balance_eur_cents: 10000 });
+    const { token } = makeUser(tenantId);
+    const proposalId = seedProposal(tenantId);
+    const section = (await request(app).post(`/api/proposals/${proposalId}/feasibility`).set(authHeader(token)).send({ title: 'Programme' })).body;
+    generateContent.mockResolvedValue({ text: 'Texte.', usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } });
+
+    const res = await request(app).post(`/api/proposals/${proposalId}/feasibility/${section.id}/draft-ai`).set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(JSON.stringify(generateContent.mock.calls[0][0])).not.toContain('Comptes rendus et notes des réunions');
+  });
+
   it('refuses a tenant not on the Enterprise plan', async () => {
     const tenantId = makeTenant({ plan: 'pro', ai_credit_balance_eur_cents: 10000 });
     const { token } = makeUser(tenantId);

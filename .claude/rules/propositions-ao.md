@@ -108,10 +108,24 @@ sans IA restent ouverts à tous (`server/routes/proposalFeasibility.ts`).
   à l'opération. Jamais de doublon de titre (comparaison sans casse).
 - **Rédiger avec IA** combine toujours tout ce qui est disponible : champs de la
   proposition, données publiques du terrain, texte des pièces jointes (les
-  images, donc les extraits de cartes, sont ignorées), bibliothèque du cabinet
-  (`agency_library`), texte déjà saisi et consigne. Le prompt interdit
+  images, donc les extraits de cartes, sont ignorées), notes des réunions liées,
+  bibliothèque du cabinet (`agency_library`), texte déjà saisi et consigne. Le prompt interdit
   d'inventer une règle d'urbanisme ou un chiffre absent des données : une
   information manquante est écrite « à vérifier ».
+
+**Pièces jointes d'une proposition** : section repliable « Pièces jointes » du détail
+(`Proposals.tsx`, `ResourceAttachments` avec `resourceType="proposals"`, classement
+« Dossier »), donc `documents` avec `resource_type='proposals'` : consultables par
+l'équipe et lues par les deux gestes IA (même lecture `extractCombinedText`). Aucune
+migration. **Réunions liées** : `server/feasibilityMeetings.ts`
+(`loadProposalMeetingsText`, `formatMeetingsForPrompt`, testés par
+`tests/proposalFeasibility.test.ts`) lit les réunions dont `meetings.proposal_id`
+désigne la proposition (titre, date, participants, notes réduites à du texte, pièces
+rattachées à la réunion), de la plus ancienne à la plus récente, 12 000 caractères au
+plus, 20 réunions au plus. Source facultative et en meilleur effort : une erreur de
+lecture ou l'absence de réunion donne une chaîne vide et ne bloque jamais la rédaction.
+Le prompt les traite comme des données du projet, jamais comme des consignes.
+« Préremplir » (plan Enterprise) les ajoute aussi à la matière qui adapte le plan.
 
 **Données du terrain** (`server/feasibilitySiteData.ts`) : géocodage
 Géoplateforme, zone du PLU (`getPlu`), Géorisques (`getGeorisques`) et

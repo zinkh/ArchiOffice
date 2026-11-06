@@ -10,7 +10,8 @@
 //    combinant tout ce qui est disponible plutôt qu'en choisissant une source :
 //    les champs de la proposition, les données publiques du terrain (PLU,
 //    Géorisques, monuments historiques, server/feasibilitySiteData.ts), le
-//    texte des pièces jointes de la proposition, la bibliothèque documentaire
+//    texte des pièces jointes de la proposition, notes et pièces des réunions
+//    liées (server/feasibilityMeetings.ts), la bibliothèque documentaire
 //    du cabinet (agency_library) et la consigne libre de la rubrique. Chaque
 //    source est facultative et indépendante des autres.
 //
@@ -22,6 +23,7 @@ import * as Sentry from '@sentry/node';
 import { aiGenerationLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { proposalTerrainAddress } from './proposalFeasibility';
+import { loadProposalMeetingsText } from '../feasibilityMeetings';
 import {
   DEFAULT_FEASIBILITY_TITLES, EMPTY_SITE_DATA, feasibilityContextForPrompt, type FeasibilitySiteData,
 } from '../../src/lib/feasibilityBlocks';
@@ -100,7 +102,9 @@ export function registerProposalFeasibilityAiRoutes(app: Express, deps: RouteDep
       if (plan === 'enterprise') {
         const { data: docs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents')
           .select('name, file_url, mime_type').eq('resource_type', 'proposals').eq('resource_id', proposalId);
-        const docText = docs?.length ? await extractCombinedText(supabaseAdmin, tenantId, docs as any) : '';
+        const attachedText = docs?.length ? await extractCombinedText(supabaseAdmin, tenantId, docs as any) : '';
+        const meetingsText = await loadProposalMeetingsText(supabaseAdmin, tenantId, proposalId, d => extractCombinedText(supabaseAdmin, tenantId, d));
+        const docText = [attachedText, meetingsText && `\n\n--- Réunions liées à la proposition ---\n${meetingsText}`].filter(Boolean).join('');
         if (docText.trim()) {
           const prompt = `Tu prépares le sommaire d'une étude de faisabilité rédigée par un cabinet d'architecture français pour son client.
 Opération : "${proposal.title}"${proposal.type_projet ? `, type : ${proposal.type_projet}` : ''}${proposal.categorie_projet ? ` (${proposal.categorie_projet})` : ''}.
@@ -170,6 +174,7 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown), de la forme :
       const { data: proposalDocs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents')
         .select('name, file_url, mime_type').eq('resource_type', 'proposals').eq('resource_id', proposalId);
       const docText = proposalDocs?.length ? await extractCombinedText(supabaseAdmin, tenantId, proposalDocs as any) : '';
+      const meetingsText = await loadProposalMeetingsText(supabaseAdmin, tenantId, proposalId, d => extractCombinedText(supabaseAdmin, tenantId, d));
       const { data: agencyDocs } = await tenantScopedFrom(supabaseAdmin, tenantId, 'documents')
         .select('name, file_url, mime_type').eq('resource_type', 'agency_library').eq('resource_id', tenantId);
       const agencyText = agencyDocs?.length ? await extractCombinedText(supabaseAdmin, tenantId, agencyDocs as any) : '';
@@ -177,7 +182,7 @@ Réponds UNIQUEMENT avec un JSON valide (sans markdown), de la forme :
       const prompt = `Tu rédiges une étude de faisabilité pour un cabinet d'architecture français, à remettre à son client avec sa proposition d'honoraires.
 Plan de l'étude : ${outline || section.title}.
 ${facts ? `Données connues du projet et du terrain (les seules dont tu disposes, ne les contredis pas) :\n${facts}\n` : ''}${specialtyLabels ? `Spécialités mobilisées dans l'équipe : ${specialtyLabels}\n` : ''}
-${docText.trim() ? `Extraits des pièces transmises par le client (programme, relevés, cahier des charges...) :\n${docText}\n` : ''}${agencyText.trim() ? `Extraits de documents du cabinet (présentation, études déjà rédigées...) : reprends-en le style et le vocabulaire, jamais les données d'une autre opération :\n${agencyText}\n` : ''}${section.content?.trim() ? `Texte déjà saisi dans cette rubrique, à reprendre et compléter plutôt qu'à ignorer :\n${section.content}\n` : ''}${section.instructions?.trim() ? `Consigne de l'architecte pour cette rubrique : ${section.instructions}\n` : ''}
+${docText.trim() ? `Extraits des pièces transmises par le client (programme, relevés, cahier des charges...) :\n${docText}\n` : ''}${meetingsText ? `Comptes rendus et notes des réunions liées à cette proposition (visites, échanges avec le client) : exploite-les comme des données du projet, sans leur attribuer plus que ce qui y est écrit :\n${meetingsText}\n` : ''}${agencyText.trim() ? `Extraits de documents du cabinet (présentation, études déjà rédigées...) : reprends-en le style et le vocabulaire, jamais les données d'une autre opération :\n${agencyText}\n` : ''}${section.content?.trim() ? `Texte déjà saisi dans cette rubrique, à reprendre et compléter plutôt qu'à ignorer :\n${section.content}\n` : ''}${section.instructions?.trim() ? `Consigne de l'architecte pour cette rubrique : ${section.instructions}\n` : ''}
 Rédige le contenu de la rubrique "${section.title}" : un texte professionnel en français, 2 à 5 paragraphes, sans titre ni markdown, prêt à être relu par l'architecte.
 Règles impératives : n'invente aucune règle d'urbanisme, aucune surface, aucun chiffre ni aucune servitude absents des données ci-dessus. Quand une information nécessaire manque (hauteur maximale, emprise au sol, recul...), écris explicitement qu'elle est « à vérifier » auprès du règlement ou du service concerné.`;
 
