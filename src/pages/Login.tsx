@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { IconCloud, IconDeviceDesktop } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
@@ -8,6 +8,10 @@ import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
 import { checkCloudLinkStatus, cloudLink } from '../lib/cloudSync';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { useUser } from '../UserContext';
+
+// Chargé en différé : le build hors-ligne (LocalLogin) ne le télécharge jamais.
+const TurnstileWidget = lazy(() => import('../components/TurnstileWidget'));
+const TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined) || '';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;
@@ -393,6 +397,11 @@ function CloudLogin() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  // Captcha actif seulement si une clé de site est configurée. Sans elle (ou en
+  // build hors-ligne, qui n'utilise pas CloudLogin), aucun widget n'est chargé.
+  const captchaEnabled = TURNSTILE_SITE_KEY !== '';
+  const [captchaToken, setCaptchaToken] = useState<string | undefined>();
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [tenantBranding, setTenantBranding] = useState<{ name: string; logoUrl: string | null } | null>(null);
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -422,13 +431,24 @@ function CloudLogin() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (captchaEnabled && !captchaToken) {
+      setError('Veuillez valider la vérification de sécurité avant de vous connecter.');
+      return;
+    }
     setLoading(true);
 
-    const { error: authError } = await supabase.auth.signInWithPassword({ email, password });
+    const { error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+      options: captchaToken ? { captchaToken } : undefined,
+    });
 
     if (authError) {
       setError(authError.message);
       setLoading(false);
+      // Un jeton Turnstile n'est utilisable qu'une fois : on force un nouveau défi.
+      setCaptchaToken(undefined);
+      setCaptchaResetKey(k => k + 1);
       return;
     }
     setLoading(false);
@@ -533,12 +553,17 @@ function CloudLogin() {
               required
             />
           </div>
+          {captchaEnabled && (
+            <Suspense fallback={null}>
+              <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
+            </Suspense>
+          )}
           {error && (
             <p className="text-sm text-red-500 text-center">{error}</p>
           )}
           <button
             type="submit"
-            disabled={loading || googleLoading}
+            disabled={loading || googleLoading || (captchaEnabled && !captchaToken)}
             className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
           >
             {loading ? 'Connexion...' : t('login_enter')}
