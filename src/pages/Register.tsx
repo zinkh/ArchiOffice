@@ -81,6 +81,9 @@ export default function Register() {
       return;
     }
 
+    // Le jeton de l'inscription est consommé : l'écran de confirmation affiche
+    // son propre widget pour le renvoi de l'email.
+    setCaptchaToken(undefined);
     // Le compte est créé mais l'email n'est pas encore confirmé — on ne
     // connecte plus automatiquement, il faut d'abord cliquer le lien reçu.
     setConfirmationSent({ email: form.email, emailSent: !!data.emailSent });
@@ -89,17 +92,32 @@ export default function Register() {
 
   const handleResend = async () => {
     if (!confirmationSent) return;
+    if (captchaEnabled && !captchaToken) {
+      setError('Veuillez valider la vérification de sécurité.');
+      return;
+    }
+    setError(null);
     setResending(true);
     setResent(false);
     try {
-      await fetch('/api/public/resend-confirmation', {
+      const res = await fetch('/api/public/resend-confirmation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: confirmationSent.email }),
+        body: JSON.stringify({ email: confirmationSent.email, captchaToken }),
       });
-      setResent(true);
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error || 'Erreur lors du renvoi de l\'email.');
+      } else {
+        setResent(true);
+      }
+    } catch {
+      setError('Erreur lors du renvoi de l\'email.');
     } finally {
       setResending(false);
+      // Un jeton Turnstile n'est utilisable qu'une fois : nouveau défi pour un éventuel nouveau renvoi.
+      setCaptchaToken(undefined);
+      setCaptchaResetKey(k => k + 1);
     }
   };
 
@@ -125,10 +143,18 @@ export default function Register() {
               L'envoi automatique a rencontré un problème — utilisez le bouton ci-dessous pour renvoyer l'email.
             </p>
           )}
+          {captchaEnabled && (
+            <div className="mb-3">
+              <Suspense fallback={null}>
+                <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
+              </Suspense>
+            </div>
+          )}
+          {error && <p className="text-sm text-red-500 mb-3">{error}</p>}
           <button
             type="button"
             onClick={handleResend}
-            disabled={resending}
+            disabled={resending || (captchaEnabled && !captchaToken)}
             className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors mb-3"
           >
             {resending ? 'Envoi en cours...' : 'Renvoyer l\'email de confirmation'}

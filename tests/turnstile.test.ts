@@ -66,6 +66,30 @@ describe('Turnstile sur /api/public/forgot-password', () => {
   });
 });
 
+describe('Turnstile sur /api/public/resend-confirmation', () => {
+  it('ne vérifie rien quand TURNSTILE_SECRET_KEY est absente', async () => {
+    delete process.env.TURNSTILE_SECRET_KEY;
+    const siteverify = mockSiteverify(false);
+    const res = await request(app).post('/api/public/resend-confirmation').send({ email: 'a@example.test' });
+    expect(res.status).toBe(200);
+    expect(siteverify).not.toHaveBeenCalled();
+  });
+
+  it('refuse une requête sans jeton quand la clé secrète est définie', async () => {
+    process.env.TURNSTILE_SECRET_KEY = 'secret';
+    mockSiteverify(true);
+    const res = await request(app).post('/api/public/resend-confirmation').send({ email: 'a@example.test' });
+    expect(res.status).toBe(400);
+  });
+
+  it('accepte un jeton validé par Cloudflare', async () => {
+    process.env.TURNSTILE_SECRET_KEY = 'secret';
+    mockSiteverify(true);
+    const res = await request(app).post('/api/public/resend-confirmation').send({ email: 'a@example.test', captchaToken: 'good' });
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('Turnstile sur /api/public/register', () => {
   it('refuse une inscription sans jeton quand la clé secrète est définie', async () => {
     process.env.TURNSTILE_SECRET_KEY = 'secret';
