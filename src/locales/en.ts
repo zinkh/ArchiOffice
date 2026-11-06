@@ -860,6 +860,8 @@ export default {
       "linked_meetings_error": "Unable to load meetings.",
       "linked_meetings_open": "Open meeting",
       "feas_title": "Feasibility study",
+      "prop_attachments_title": "Attachments",
+      "prop_attachments_hint": "Brief, surveys, plans, client letters: these files stay available here and are read by the AI when drafting the feasibility study (along with the notes of linked meetings). Images are not read.",
       "prop_illus_title": "Plan and photos",
       "prop_illus_hint": "Plan extracts and photos inserted in the proposal PDF export (\"Plan et photos\" section of the template editor).",
       "prop_illus_limit": "A proposal accepts at most {{max}} images.",

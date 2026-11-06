@@ -32,6 +32,7 @@ import ProposalGantt from '../components/ProposalGantt';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedMeetings from '../components/LinkedMeetings';
+import { ResourceAttachments } from '../components/ResourceAttachments';
 import { FeasibilityStudy } from '../components/proposal/FeasibilityStudy';
 import { ProposalIllustrations } from '../components/proposal/ProposalIllustrations';
 import { parseProposalIllustrations, serializeProposalIllustrations, type ProposalIllustration } from '../lib/proposalIllustrations';
@@ -151,6 +152,7 @@ export default function Proposals() {
   // Réunions liées à la proposition ouverte (visites, rendez-vous client).
   const [meetingsOpen, setMeetingsOpen] = useState(true);
   const [meetingsCount, setMeetingsCount] = useState(0);
+  const [attachmentsOpen, setAttachmentsOpen] = useState(true);
   const [correspondenceOpen, setCorrespondenceOpen] = useState<boolean>(() => {
     try { return localStorage.getItem('proposals.correspondenceOpen') === '1'; } catch { return false; }
   });
@@ -1711,6 +1713,25 @@ export default function Proposals() {
                   {/* Monté même replié pour afficher le nombre de réunions dans l'en-tête. */}
                   <div className={meetingsOpen ? '' : 'hidden'}>
                     <LinkedMeetings kind="proposal" parentId={editingProposal.id} title={null} onCount={setMeetingsCount} />
+                  </div>
+                </div>
+              )}
+
+              {editingProposal && (
+                <div className={`px-4 sm:px-6 ${attachmentsOpen ? 'pb-4' : ''}`} style={{ borderTop: '1px solid var(--tblr-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setAttachmentsOpen(open => !open)}
+                    aria-expanded={attachmentsOpen}
+                    className="w-full flex items-center justify-between py-3 text-sm font-bold uppercase tracking-widest"
+                    style={{ color: 'var(--tblr-text)' }}
+                  >
+                    {t('prop_attachments_title')}
+                    <IconChevronDown size={18} className={`transition-transform ${attachmentsOpen ? 'rotate-180' : ''}`} style={{ color: 'var(--tblr-muted)' }} />
+                  </button>
+                  <div className={attachmentsOpen ? '' : 'hidden'}>
+                    <p className="text-xs mb-3" style={{ color: 'var(--tblr-muted)' }}>{t('prop_attachments_hint')}</p>
+                    <ResourceAttachments resourceType="proposals" resourceId={editingProposal.id} category="Dossier" />
                   </div>
                 </div>
               )}
