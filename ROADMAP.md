@@ -253,3 +253,25 @@ Don't see something you expected here, or know of a gap this page is missing? Op
 - **To decide**: either one shared sequence per lot (the lot's `cle` instead of company + lot, simple but the number no longer says whose it is), or a company marker in the number (`FTM-04A-01` / `FTM-04B-01`, or the company's initials), the lot prefix staying the same.
 - **To build**: model the co-contracting group on the lot (mandatary and co-contractors, joint or several liability), so an OS or FTM can address the whole group with a single number, as `marche_ids` already does for several companies; adapt the `key` (`cleEntrepriseLot`), the number formats (`formatNumeroOs`, `formatNumeroFtm`) and the unique index together, with a test on two companies sharing a lot.
 - **Related**: the DOE workshop and the construction site panel also read one company per lot; they will need the same group notion.
+
+### Document management (GED): general view, per-project view and folders under phases
+
+⏳ Planned. The `/documents` screen is a simple list. It currently mixes two jobs and carries settings that do not belong to it. Mock-up: a three-pane GED inspired by ArchiOffice Drive and M-Files (published as a private artifact during design; nothing is coded yet).
+
+- **Move settings to the global settings** (`/settings`): the "Mémoire technique collective" block (anonymous sharing consent, automatic sharing, analysed and shared documents, manual sharing, Mistral link check) and the "Lecteur A:" block (connection, projects added to the drive, open and disconnect). `/documents` keeps neither.
+- **Per-project view**: today's simple documents view moves into each project file (project sheet), where it already fits the project context.
+- **General view `/documents` as a real GED**:
+  - Command bar: New, Open, Classify, Versions, Available offline, sync status, global search.
+  - Left navigation: Home, Recent, Favourites, tree by project and phase (with folders), by phase, by type, To classify, Offline, Conflicts (with a count).
+  - Central list: Phase, Type and Status filters; three display modes (list, details, thumbnails); columns Document, Project, Phase, Type, Index, State (synced, offline, conflict).
+  - Right panel: preview; Properties, Versions and Activity tabs; "Open in ArchiOffice" and "View versions".
+  - M-Files-inspired search: full-text with highlighted terms, faceted filters (metadata or file contents, class, extension, user, year), editable metadata, permissions and workflow.
+  - Builds on the desktop-sync groundwork already on the server (`/api/desktop/v1`: versions, index, locks, conflicts, change journal).
+- **Folders under phases**: not possible today, the project and phase folders are derived from the documents themselves and none can be created. Needs:
+  - a folders table (tenant, project, phase, parent folder, name), with `tenant_id` scoping and `assertTenantEntity` on `project_id`; add it to `TABLES_RATTACHEES` so archived projects stay read-only;
+  - a folder column on `documents` (and on `plans`/visas if they follow), moving a document between folders from the GED and from `PUT /api/documents/:id`;
+  - creating the same folder at the external storage provider (Nextcloud, kDrive, Drive, Dropbox) under `<root>/<code> - <project>/<phase>/<folder>`, with the folder cache `external_storage_folders` and the "renamed on the drive" recovery already in place;
+  - server-computed paths for desktop sync (`server/desktop/nodes.ts`), which only knows project and phase today, plus unique sibling names and Windows/macOS-safe names;
+  - the readable local tree of the Electron client (`localTreePath.ts`) and its migration, which would need the folder segment too;
+  - the CAD rule (no CAD, BIM or 3D bytes in Supabase Storage) still applies whatever the folder.
+- **Open decisions**: free-form folders versus a per-tenant template of default folders per phase (Plans, Written documents, Structure...); whether a folder can exist across several phases; rights per folder.
