@@ -5,6 +5,7 @@
 import type { Express } from 'express';
 import { publicAuthLimiter } from '../rateLimit';
 import { sendPlatformMail } from '../mailer';
+import { verifyTurnstile } from '../turnstile';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -14,6 +15,8 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
   // ---- Inscription SaaS (route publique) ----
   app.post("/api/public/register", publicAuthLimiter, async (req, res) => {
     try {
+      const captcha = await verifyTurnstile(req.body?.captchaToken, req.ip);
+      if (!captcha.ok) return res.status(captcha.status).json({ error: captcha.error });
       const { cabinet_name, slug, admin_name, email, password, consent } = req.body;
       if (!cabinet_name || !slug || !admin_name || !email || !password) {
         return res.status(400).json({ error: "Tous les champs sont requis." });
@@ -119,6 +122,8 @@ export function registerRegistrationRoutes(app: Express, { supabaseAdmin }: Rout
   // Envoyer un email de réinitialisation de mot de passe (ne révèle jamais si le compte existe).
   app.post("/api/public/forgot-password", publicAuthLimiter, async (req, res) => {
     try {
+      const captcha = await verifyTurnstile(req.body?.captchaToken, req.ip);
+      if (!captcha.ok) return res.status(captcha.status).json({ error: captcha.error });
       const email = String(req.body?.email || '').trim();
       if (!email) return res.status(400).json({ error: "Email requis" });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { IconCloud, IconDeviceDesktop } from '@tabler/icons-react';
 import { supabase } from '../lib/supabase';
@@ -8,10 +8,7 @@ import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
 import { checkCloudLinkStatus, cloudLink } from '../lib/cloudSync';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { useUser } from '../UserContext';
-
-// Chargé en différé : le build hors-ligne (LocalLogin) ne le télécharge jamais.
-const TurnstileWidget = lazy(() => import('../components/TurnstileWidget'));
-const TURNSTILE_SITE_KEY = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined) || '';
+import { TURNSTILE_SITE_KEY, TurnstileWidget } from '../lib/turnstile';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;

@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { IconMailCheck } from '@tabler/icons-react';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
+import { TURNSTILE_SITE_KEY, TurnstileWidget } from '../lib/turnstile';
 
 export default function Register() {
+  const captchaEnabled = TURNSTILE_SITE_KEY !== '';
+  const [captchaToken, setCaptchaToken] = useState<string | undefined>();
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [form, setForm] = useState({
     cabinet_name: '',
     slug: '',
@@ -45,6 +49,10 @@ export default function Register() {
       setError('Vous devez accepter la politique de confidentialité et les CGU pour créer un compte.');
       return;
     }
+    if (captchaEnabled && !captchaToken) {
+      setError('Veuillez valider la vérification de sécurité.');
+      return;
+    }
 
     setLoading(true);
 
@@ -58,6 +66,7 @@ export default function Register() {
         email: form.email,
         password: form.password,
         consent: true,
+        captchaToken,
       }),
     });
 
@@ -66,6 +75,9 @@ export default function Register() {
     if (!res.ok) {
       setError(data.error || 'Erreur lors de l\'inscription.');
       setLoading(false);
+      // Un jeton Turnstile n'est utilisable qu'une fois : on force un nouveau défi.
+      setCaptchaToken(undefined);
+      setCaptchaResetKey(k => k + 1);
       return;
     }
 
@@ -258,13 +270,19 @@ export default function Register() {
             </span>
           </label>
 
+          {captchaEnabled && (
+            <Suspense fallback={null}>
+              <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
+            </Suspense>
+          )}
+
           {error && (
             <p className="text-sm text-red-500 text-center">{error}</p>
           )}
 
           <button
             type="submit"
-            disabled={loading || !consent}
+            disabled={loading || !consent || (captchaEnabled && !captchaToken)}
             className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors mt-2"
           >
             {loading ? 'Création en cours...' : 'Créer mon cabinet'}
