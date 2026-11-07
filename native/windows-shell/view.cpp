@@ -212,7 +212,7 @@ class View final:public IShellView,public IFolderView {
   case WM_PAINT:{PAINTSTRUCT paint;HDC dc=BeginPaint(window,&paint);RECT r;GetClientRect(window,&r);auto pen=CreatePen(PS_SOLID,1,GetSysColor(COLOR_3DSHADOW));auto old=SelectObject(dc,pen);for(int divider:{splitLeft,splitRight})if(divider){MoveToEx(dc,px(divider+4),px(88),nullptr);LineTo(dc,px(divider+4),r.bottom-px(42));}SelectObject(dc,old);DeleteObject(pen);EndPaint(window,&paint);return 0;}
   case WM_SETCURSOR:if(LOWORD(l)==HTCLIENT){POINT point;GetCursorPos(&point);ScreenToClient(window,&point);int x=dip(point.x);if(abs(x-splitLeft-4)<6||(splitRight&&abs(x-splitRight-4)<6)){SetCursor(LoadCursorW(nullptr,IDC_SIZEWE));return TRUE;}}break;
   case WM_COMMAND:
-   if(LOWORD(w)>=232&&LOWORD(w)<=237){auto commandControl=GetDlgItem(actionsPane,LOWORD(w));if(!IsWindowEnabled(commandControl)||HIWORD(w)==BN_SETFOCUS||HIWORD(w)==EN_SETFOCUS)return 0;
+   if(LOWORD(w)>=232&&LOWORD(w)<=237){auto commandControl=GetDlgItem(actionsPane,LOWORD(w));if(!IsWindowEnabled(commandControl)||HIWORD(w)!=BN_CLICKED)return 0;
     if(LOWORD(w)==235&&MessageBoxW(window,L"La version distante remplacera la génération de travail du projet. La copie en conflit est conservée dans ArchiOffice et l’ancien dossier reste accessible dans les copies précédentes. Fermez les fichiers du projet avant de continuer.",L"Reprendre la version distante",MB_OKCANCEL|MB_ICONQUESTION)!=IDOK)return 0;
     std::wstring commands[]={L"classify",L"offline",L"preserve",L"restart",L"retry",L"recovery"};launch(commands[LOWORD(w)-232]);return 0;}
    if(building)return 0;
