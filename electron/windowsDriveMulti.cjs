@@ -161,7 +161,32 @@ function createWindowsMultiDrive(options) {
   if(!identity){try{const saved=await readSelection();const active=await vault();if(saved&&same(saved.identity,active))for(const id of saved.projectIds)if(await refresh.hasPrevious(id,active))result.previousProjectIds.push(id);}catch{}}
   return result;
  }
- return {start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
+ async function shellSnapshots() {
+  const active=identity;const generation=epoch;
+  if(!active||!namespace.status().active||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
+  const snapshots=[];
+  for(const [id,project] of projects) {
+   if(!project.status().active)throw failure('DRIVE_UNAVAILABLE');
+   const snapshot=await project.snapshot(id);if(!snapshot||!same(snapshot.identity,active))throw failure('DRIVE_UNAVAILABLE');snapshots.push(snapshot);
+  }
+  if(generation!==epoch||!namespace.status().active||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
+
+ return {identity:active,directory:namespace.directory(active),snapshots};
+ }
+  async function shellSnapshot() {
+  const generation=epoch;await getStatus();if(!identity||!namespace.status().active)throw failure('DRIVE_UNAVAILABLE');const active={...identity};const snapshots=[];
+  for(const [id,project] of projects){if(!project.status().active)throw failure('DRIVE_UNAVAILABLE');const saved=await project.snapshot(id);if(!saved)throw failure('DRIVE_SNAPSHOT_INVALID');snapshots.push(saved);}
+  if(generation!==epoch||!same(await vault(),active)||!namespace.status().active)throw failure('DRIVE_UNAVAILABLE');return {identity:active,projects:snapshots};
+ }
+ async function shellAvailability(projectId) {
+  const generation=epoch,active=identity,project=projects.get(projectId);
+  if(!active||!project||!namespace.status().active||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
+  const before=await project.snapshot(projectId);const files=await project.availability();const after=await project.snapshot(projectId);
+  if(generation!==epoch||!before||!after||before.rootKey!==after.rootKey||!namespace.status().active||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
+  return {identity:active,rootKey:before.rootKey,files};
+ }
+ return {shellPin:async(id,key)=>{const active=identity,project=projects.get(id),generation=epoch;if(!active||!project||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');if(!await project.pin(key)||generation!==epoch||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');},
+  resolveConflict:(id,key,rootKey)=>refreshAction(async()=>{const saved=await projects.get(id)?.snapshot(id);if(!saved||saved.rootKey!==rootKey)throw failure('DRIVE_REFRESH_STALE');const plan=await refresh.check(id,key);if(plan.status!=='update_available')throw failure('DRIVE_REFRESH_STALE');return refresh.apply(id,plan.token);}),shellAvailability,shellSnapshot,shellSnapshots,start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
   enableEditing:id=>refreshAction(async()=>{if(!validId(id)||!identity||!same(await vault(),identity)||!projects.has(id))throw failure('DRIVE_UNAVAILABLE');refresh.clear();return projects.get(id).enableEditing(id);}),
   checkCatalog:id=>refreshAction(()=>refresh.check(id)),refreshCatalog:(id,token)=>refreshAction(()=>refresh.apply(id,token)),
   openPrevious:id=>refreshAction(()=>refresh.previous(id))};

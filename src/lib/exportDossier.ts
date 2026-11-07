@@ -5,6 +5,7 @@
 // une sortie qui collecte les fichiers au lieu de les télécharger, puis
 // `livrer()` les remet en un fichier ou en un ZIP.
 import type { DPGF } from '../types/dpgf';
+import { vueMarge } from './marge';
 import type { BPU } from '../types/bpu';
 import type { AgencySettings } from './proposalExport';
 import { libellesLots, type ContexteCctp } from './cctpVariables';
@@ -42,6 +43,8 @@ export interface DemandeDossier {
   orientations?: Partial<Record<'cctp' | 'dpgf', Orientation>>;
   /** CCTP et DPGF : un fichier par lot du périmètre, au lieu d'un fichier pour tous les lots. */
   parLot?: boolean;
+  /** Estimation en PDF : poste par poste (quantités, prix unitaires, totaux) au lieu du récapitulatif par lot. */
+  estimationDetaillee?: boolean;
   projectName?: string;
   /** Rappel du périmètre, imprimé sous le titre ; vide pour tout le document. */
   perimetre?: string;
@@ -128,10 +131,18 @@ export async function produireDossier(d: DemandeDossier): Promise<ResultatDossie
     }
 
     if (doc === 'dpgf' || doc === 'estimation') {
-      const source = filtrerPourExport(d.dpgf, d.selection);
+      // Prix finaux, marge comprise, quand le document est réglé ainsi à l'écran. Les prix enregistrés restent
+      // hors marge ; un DPGF sans prix n'en montre pas, donc sans marge non plus.
+      const source = vueMarge(
+        filtrerPourExport(d.dpgf, d.selection),
+        doc === 'estimation' ? d.dpgf.estimationAvecMarge : d.avecPrix && d.dpgf.dpgfAvecMarge,
+      );
       if (compterArticles(source) === 0) { avertissements.push({ code: 'vide', document: doc }); continue; }
       if (doc === 'estimation') {
-        for (const f of fmts) await (f === 'pdf' ? exportEstimationtoPDF : exportEstimationtoExcel)(source, etiquette, settings, sortie);
+        for (const f of fmts) {
+          if (f === 'pdf') await exportEstimationtoPDF(source, etiquette, settings, sortie, { detaille: d.estimationDetaillee });
+          else await exportEstimationtoExcel(source, etiquette, settings, sortie);
+        }
         continue;
       }
       const orientation = d.orientations?.dpgf ?? ORIENTATION_DPGF;

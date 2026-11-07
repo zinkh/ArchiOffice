@@ -1,0 +1,61 @@
+name: Windows Shell prototype
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/windows-shell-lab/**'
+      - 'electron/windowsShellCatalog.cjs'
+      - 'server/desktop/agent/shellMetadata.ts'
+      - 'tests/driveShell*.test.ts'
+      - '.github/workflows/drive-shell-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  shell:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Configure x64 Shell extension
+        run: cmake -S native/windows-shell-lab -B native/windows-shell-lab/build -A x64
+      - name: Compile extension and native host test
+        run: cmake --build native/windows-shell-lab/build --config Release
+      - name: Exercise IShellView contract without changing A
+        shell: pwsh
+        run: |
+          $root = node native/windows-shell-lab/catalog-fixture.mjs "$env:RUNNER_TEMP/shell-catalog"
+          native/windows-shell-lab/build/Release/archioffice-shell-smoke.exe native/windows-shell-lab/build/Release/archioffice-drive-shell.dll "$root"
+      - name: Verify per-user installation, COM activation and removal
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $stage = Join-Path $env:RUNNER_TEMP 'drive-shell-package'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item native/windows-shell-lab/build/Release/archioffice-drive-shell.dll $stage
+          Copy-Item native/windows-shell-lab/install.ps1 $stage
+          & "$stage/install.ps1"
+          try {
+            $clsid = '{67B0F7BE-5F65-4AEF-9D4B-B133A991D911}'
+            $type = [Type]::GetTypeFromCLSID([Guid]$clsid, $true)
+            $folder = [Activator]::CreateInstance($type)
+            [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($folder)
+            if (-not (Test-Path "HKCU:/Software/Microsoft/Windows/CurrentVersion/Explorer/Desktop/NameSpace/$clsid")) { throw 'Entrée absente' }
+          } finally {
+            & "$stage/install.ps1" -Uninstall
+          }
+          if (Test-Path "HKCU:/Software/Classes/CLSID/$clsid") { throw 'CLSID restant' }
+          if (Test-Path "HKCU:/Software/Microsoft/Windows/CurrentVersion/Explorer/Desktop/NameSpace/$clsid") { throw 'Entrée restante' }
+      - name: Assemble opt-in prototype
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path native/windows-shell-lab/package -Force | Out-Null
+          Copy-Item native/windows-shell-lab/build/Release/archioffice-drive-shell.dll native/windows-shell-lab/package/
+          Copy-Item native/windows-shell-lab/install.ps1,native/windows-shell-lab/README.md native/windows-shell-lab/package/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ArchiOffice-Drive-Shell-prototype-x64
+          path: native/windows-shell-lab/package/

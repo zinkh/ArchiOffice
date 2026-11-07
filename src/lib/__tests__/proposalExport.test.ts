@@ -173,3 +173,22 @@ describe('mapProposalToPdfData : cotraitants', () => {
     expect(cotraitants[1].contact).toBe('');
   });
 });
+
+describe('planifierCalendrier : réglages manuels', () => {
+  const missions = [
+    { id: 'esquisse', designation: 'Esquisse' },
+    { id: 'aps', designation: 'A.P.S.' },
+    { id: 'apd', designation: 'A.P.D.' },
+  ];
+  it('une durée modifiée décale les missions suivantes', () => {
+    const items = planifierCalendrier(missions, 15, { esquisse: { duree: 30 } });
+    expect(items.map(i => [i.debutJours, i.dureeJours])).toEqual([[0, 30], [30, 15], [45, 15]]);
+  });
+  it('un début imposé détache la mission et la suite repart de sa fin', () => {
+    const items = planifierCalendrier(missions, 15, { aps: { debut: 40 } });
+    expect(items[1].debutJours).toBe(40);
+    expect(items[1].apres).toBe('');
+    expect(items[2].debutJours).toBe(55);
+    expect(items[2].apres).toBe('c_aps');
+  });
+});

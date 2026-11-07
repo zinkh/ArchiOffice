@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { useTranslation } from 'react-i18next';
 import {
   IconX, IconDownload, IconSend, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
+  IconZoomIn, IconZoomOut,
 } from '@tabler/icons-react';
 import type { Proposal, MafCostResult } from '../types';
 import { useSettings } from '../hooks/useSettings';
@@ -17,7 +18,7 @@ import {
   ProposalPdfData, ProposalTemplate, ProposalSectionId, CotraitantIdentityPdf, DensityTokens, TableDensity, IllustrationPdf,
   PROPOSAL_SECTION_DEFS, DENSITY_TOKENS, TABLE_DENSITY_OPTIONS, mapProposalToPdfData, getPdfStyles,
   loadStoredTemplate, saveStoredTemplate, applyPreset,
-  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent,
+  exportProposalPdf, compressProposalLogo, formatCurrency, formatPercent, proposalStatusLabel,
 } from '../lib/proposalExport';
 
 // ─── PDF primitives ─────────────────────────────────────────────────────────
@@ -323,7 +324,7 @@ const renderGarde = (d: ProposalPdfData, t: ProposalTemplate): React.ReactNode =
         <div style={{ marginTop: '3mm', fontSize: '10pt', fontWeight: 500 }}>Architecte: {d.architecteNom}{d.oaNumber ? `, Ordre des Architectes n° ${d.oaNumber}` : ''}</div>
       </div>
       <div style={{ width: '100%', textAlign: 'center', marginTop: '10mm' }}>
-        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{d.status.toUpperCase()}</div>
+        <div style={{ display: 'inline-block', padding: '1mm 3mm', borderRadius: '1mm', fontSize: '8pt', fontWeight: 'bold', textTransform: 'uppercase', background: badgeColor.bg, color: badgeColor.fg }}>{proposalStatusLabel(d.status).toUpperCase()}</div>
         <div style={{ marginTop: '3mm', fontSize: '9pt', color: '#94a3b8' }}>Émis le {d.dateEmission}</div>
       </div>
     </Cover>
@@ -495,6 +496,14 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
       )}
 
       <div data-pdf-keep="true" style={{ marginTop: density.blockGap, marginLeft: 'auto', width: '60mm' }}>
+        {d.remiseHonoraires > 0 && (<>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>Honoraires HT{d.partPcSeul !== null ? ` (PC seul, ${d.partPcSeul} %)` : ''}</span><span>{formatCurrency(d.montantHonorairesBrut)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+          </div>
+        </>)}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
           <span>Total Honoraires HT</span>
           <span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
@@ -526,6 +535,14 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
       <Section key="repartition">
         <H2 template={t} newPage={newPage}>04. Répartition des Honoraires</H2>
         <div data-pdf-keep="true" style={{ marginTop: '6mm', width: '80mm' }}>
+          {d.remiseHonoraires > 0 && (<>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+              <span>Honoraires HT{d.partPcSeul !== null ? ` (PC seul, ${d.partPcSeul} %)` : ''}</span><span>{formatCurrency(d.montantHonorairesBrut)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+              <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+            </div>
+          </>)}
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
             <span>Total Honoraires HT</span><span style={{ fontWeight: 'bold' }}>{formatCurrency(d.montantHonorairesHT)}</span>
           </div>
@@ -998,6 +1015,11 @@ function TemplateEditorPanel({
 
 /** Les logos de cotraitants s'impriment à 13 mm de haut au plus : inutile de les garder plus grands. */
 const PARTNER_LOGO_MAX_W = 600;
+/** Bornes du zoom de l'aperçu (1 = taille réelle de la page A4 à l'écran). */
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 3;
+const ZOOM_STEP = 1.25;
+const clampZoom = (value: number): number => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, value));
 const PARTNER_LOGO_MAX_H = 300;
 
 interface ProposalExportModalProps {
@@ -1022,6 +1044,17 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
   const previewRef = useRef<HTMLDivElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
   const [pageCount, setPageCount] = useState(1);
+
+  // Zoom de l'aperçu. `null` = la page s'ajuste à la largeur de l'écran (jamais agrandie
+  // au-delà de sa taille réelle) ; un nombre = zoom choisi (boutons ou pincement).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scalerRef = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
+  const [fitScale, setFitScale] = useState(1);
+  const [flowSize, setFlowSize] = useState({ width: 0, height: 0 });
+  const scale = zoom ?? fitScale;
+  const scaleRef = useRef(scale);
+  scaleRef.current = scale;
 
   useEffect(() => {
     saveStoredTemplate(template);
@@ -1102,11 +1135,23 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     };
   }, [rawData, compressedLogo, identities, illustrations]);
 
+  // Le PDF est toujours capturé à l'échelle 1 : le zoom de l'aperçu n'y entre jamais.
+  const withFullScale = async <T,>(task: () => Promise<T>): Promise<T> => {
+    const scaler = scalerRef.current;
+    const previous = scaler?.style.transform ?? '';
+    if (scaler) scaler.style.transform = 'none';
+    try {
+      return await task();
+    } finally {
+      if (scaler) scaler.style.transform = previous;
+    }
+  };
+
   const handleExport = async () => {
     if (!previewRef.current) return;
     setIsGenerating(true);
     try {
-      await exportProposalPdf(previewRef.current, data);
+      await withFullScale(() => exportProposalPdf(previewRef.current!, data));
     } catch (err) {
       console.error('PDF Generation Error:', err);
       alert(t('proposal_export_modal_pdf_error'));
@@ -1121,7 +1166,7 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     if (!previewRef.current) return;
     setIsPreparingMail(true);
     try {
-      const { blob, filename } = await exportProposalPdf(previewRef.current, data, { download: false });
+      const { blob, filename } = await withFullScale(() => exportProposalPdf(previewRef.current!, data, { download: false }));
       setMailFile(new File([blob], filename, { type: 'application/pdf' }));
     } catch (err) {
       console.error('PDF Generation Error:', err);
@@ -1137,6 +1182,9 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     if (!flowRef.current) return;
     const pages = paginateFlow(flowRef.current);
     setPageCount(current => (current === pages ? current : pages));
+    // Taille réelle de la page (hors zoom) : elle fixe l'encombrement de l'aperçu zoomé.
+    const { offsetWidth: width, offsetHeight: height } = flowRef.current;
+    setFlowSize(current => (current.width === width && current.height === height ? current : { width, height }));
   };
   useLayoutEffect(repaginate);
   // Les polices peuvent arriver après le premier rendu et décaler les lignes.
@@ -1144,6 +1192,78 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     let alive = true;
     document.fonts?.ready.then(() => { if (alive) repaginate(); });
     return () => { alive = false; };
+  }, []);
+
+  // Ajustement à la largeur : suit la taille du conteneur (rotation, clavier, volet).
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container || !flowSize.width) return;
+    const update = () => {
+      const style = getComputedStyle(container);
+      const available = container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      if (available > 0) setFitScale(Math.min(1, available / flowSize.width));
+    };
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [flowSize.width]);
+
+  // Zoom en gardant fixe le point visé (centre du pincement, ou centre de l'écran).
+  const zoomAround = (nextZoom: number, clientX?: number, clientY?: number) => {
+    const container = scrollRef.current;
+    const next = clampZoom(nextZoom);
+    if (!container) { setZoom(next); return; }
+    const rect = container.getBoundingClientRect();
+    const px = (clientX ?? rect.left + rect.width / 2) - rect.left;
+    const py = (clientY ?? rect.top + rect.height / 2) - rect.top;
+    const ratio = next / scaleRef.current;
+    const left = (container.scrollLeft + px) * ratio - px;
+    const top = (container.scrollTop + py) * ratio - py;
+    setZoom(next);
+    // Le contenu change de taille au prochain rendu : on replace le défilement juste après.
+    requestAnimationFrame(() => { container.scrollLeft = left; container.scrollTop = top; });
+  };
+  const zoomAroundRef = useRef(zoomAround);
+  zoomAroundRef.current = zoomAround;
+
+  // Pincement à deux doigts et Ctrl + molette : le zoom natif du navigateur n'agrandit
+  // pas un document placé dans un panneau à défilement interne.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    let startDistance = 0;
+    let startScale = 1;
+    const distance = (touches: TouchList) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) { startDistance = distance(e.touches); startScale = scaleRef.current; }
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length !== 2 || !startDistance) return;
+      e.preventDefault();
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+      zoomAroundRef.current(startScale * (distance(e.touches) / startDistance), cx, cy);
+    };
+    const onTouchEnd = (e: TouchEvent) => { if (e.touches.length < 2) startDistance = 0; };
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      zoomAroundRef.current(scaleRef.current * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+    };
+    container.addEventListener('touchstart', onTouchStart, { passive: true });
+    container.addEventListener('touchmove', onTouchMove, { passive: false });
+    container.addEventListener('touchend', onTouchEnd, { passive: true });
+    container.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    container.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      container.removeEventListener('touchstart', onTouchStart);
+      container.removeEventListener('touchmove', onTouchMove);
+      container.removeEventListener('touchend', onTouchEnd);
+      container.removeEventListener('touchcancel', onTouchEnd);
+      container.removeEventListener('wheel', onWheel);
+    };
   }, []);
 
   const hasCover = template.pages.garde;
@@ -1158,8 +1278,8 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
   return (
     <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm">
       <div className="bg-white dark:bg-zinc-900 w-full h-full flex flex-col">
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="p-2 sm:p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
               onClick={() => setSidebarOpen(o => !o)}
@@ -1168,31 +1288,33 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
             >
               <IconLayoutSidebar size={20} />
             </button>
-            <div>
-              <h2 className="text-sm font-bold text-zinc-900 dark:text-white">Export PDF de la Proposition</h2>
-              <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider">{data.reference} | {data.indice} | {pageCount} page{pageCount > 1 ? 's' : ''}</p>
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold text-zinc-900 dark:text-white truncate">Export PDF de la Proposition</h2>
+              <p className="text-[0.6875rem] text-zinc-500 uppercase tracking-wider truncate">{data.reference} | {data.indice} | {pageCount} page{pageCount > 1 ? 's' : ''}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={handleSend}
+              aria-label={t('proposals_send_to_client')}
               disabled={isPreparingMail || isGenerating}
               className={intent === 'send'
-                ? 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
-                : 'flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
+                ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
             >
               <IconSend size={16} />
-              {isPreparingMail ? t('proposals_send_preparing') : t('proposals_send_to_client')}
+              <span className="hidden sm:inline">{isPreparingMail ? t('proposals_send_preparing') : t('proposals_send_to_client')}</span>
             </button>
             <button
               onClick={handleExport}
+              aria-label={t('proposals_export_pdf')}
               disabled={isGenerating || isPreparingMail}
               className={intent === 'send'
-                ? 'flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'
-                : 'flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'}
+                ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'
+                : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'}
             >
               <IconDownload size={16} />
-              {isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}
+              <span className="hidden sm:inline">{isGenerating ? t('proposals_export_generating') : t('proposals_export_pdf')}</span>
             </button>
             <button onClick={onClose} className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 rounded-lg transition-colors">
               <IconX size={20} />
@@ -1213,10 +1335,21 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
             onCloseMobile={() => setSidebarOpen(false)}
           />
 
-          <div className="flex-1 overflow-auto p-8 bg-zinc-100 dark:bg-zinc-950">
+          <div className="flex-1 relative min-w-0 bg-zinc-100 dark:bg-zinc-950">
+          <div ref={scrollRef} className="absolute inset-0 overflow-auto p-2 md:p-8" style={{ touchAction: 'pan-x pan-y' }}>
             <style dangerouslySetInnerHTML={{ __html: getPdfStyles() }} />
             <div ref={previewRef} className="flex flex-col items-center gap-6">
               <DensityContext.Provider value={DENSITY_TOKENS[template.layout.tableDensity]}>
+                {/* Enveloppe de zoom : elle prend la taille de la page zoomée (le défilement suit),
+                    la page à l'intérieur est réduite ou agrandie par `transform` (mise en page intacte). */}
+                <div
+                  style={{
+                    width: flowSize.width ? flowSize.width * scale : undefined,
+                    height: flowSize.height ? flowSize.height * scale : undefined,
+                    flexShrink: 0,
+                  }}
+                >
+                <div ref={scalerRef} style={{ transform: `scale(${scale})`, transformOrigin: 'top left', width: 'max-content' }}>
                 {/* L'ombre est sur l'enveloppe : jsPDF ne sait pas la dessiner. */}
                 <div style={{ boxShadow: '0 1px 8px rgba(0,0,0,0.25)' }}>
                   <div
@@ -1239,8 +1372,40 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
                     <PageChrome d={data} pageCount={pageCount} hasCover={hasCover} />
                   </div>
                 </div>
+                </div>
+                </div>
               </DensityContext.Provider>
             </div>
+          </div>
+          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-1 rounded-full bg-white/95 dark:bg-zinc-800/95 shadow-lg border border-zinc-200 dark:border-zinc-700 p-1">
+            <button
+              type="button"
+              onClick={() => zoomAround(scale / ZOOM_STEP)}
+              disabled={scale <= ZOOM_MIN}
+              className="p-2 rounded-full text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40"
+              aria-label="Dézoomer"
+            >
+              <IconZoomOut size={18} />
+            </button>
+            <button
+              type="button"
+              onClick={() => { setZoom(null); scrollRef.current?.scrollTo({ left: 0 }); }}
+              className="min-w-[3.25rem] px-1 py-1 rounded-full text-xs font-bold tabular-nums text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              aria-label="Ajuster la page à la largeur"
+              title="Ajuster à la largeur"
+            >
+              {Math.round(scale * 100)} %
+            </button>
+            <button
+              type="button"
+              onClick={() => zoomAround(scale * ZOOM_STEP)}
+              disabled={scale >= ZOOM_MAX}
+              className="p-2 rounded-full text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40"
+              aria-label="Zoomer"
+            >
+              <IconZoomIn size={18} />
+            </button>
+          </div>
           </div>
         </div>
       </div>

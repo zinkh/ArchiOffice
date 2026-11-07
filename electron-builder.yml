@@ -161,6 +161,12 @@ win:
   extraResources:
     - from: native/windows-drive/build/Release/archioffice-drive-cfapi.exe
       to: drive-windows/archioffice-drive-cfapi.exe
+    - from: native/windows-shell/build/Release
+      to: drive-shell
+      filter:
+        - "*.dll"
+        - "archioffice-shell-control.exe"
+        - "archioffice-shell-preview.exe"
   target:
     - target: nsis
       arch:
@@ -170,6 +176,7 @@ win:
   # public/icon-512.png (via `npx png-to-ico public/icon-512.png`).
   icon: electron/icon.ico
 nsis:
+  runAfterFinish: false
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, Suspense } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
+import { TURNSTILE_SITE_KEY, TurnstileWidget } from '../lib/turnstile';
 
 export default function ForgotPassword() {
+  const captchaEnabled = TURNSTILE_SITE_KEY !== '';
+  const [captchaToken, setCaptchaToken] = useState<string | undefined>();
+  const [captchaResetKey, setCaptchaResetKey] = useState(0);
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -13,12 +17,16 @@ export default function ForgotPassword() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (captchaEnabled && !captchaToken) {
+      setError('Veuillez valider la vérification de sécurité.');
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch('/api/public/forgot-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, captchaToken }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -27,6 +35,9 @@ export default function ForgotPassword() {
       setSent(true);
     } catch (err: any) {
       setError(err.message);
+      // Un jeton Turnstile n'est utilisable qu'une fois : on force un nouveau défi.
+      setCaptchaToken(undefined);
+      setCaptchaResetKey(k => k + 1);
     } finally {
       setLoading(false);
     }
@@ -69,12 +80,17 @@ export default function ForgotPassword() {
                 required
               />
             </div>
+            {captchaEnabled && (
+              <Suspense fallback={null}>
+                <TurnstileWidget key={captchaResetKey} onToken={setCaptchaToken} />
+              </Suspense>
+            )}
             {error && (
               <p className="text-sm text-red-500 text-center">{error}</p>
             )}
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (captchaEnabled && !captchaToken)}
               className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
             >
               {loading ? t('forgot_password_sending') : t('forgot_password_submit')}

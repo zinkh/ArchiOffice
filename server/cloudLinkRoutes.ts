@@ -19,6 +19,7 @@ import { createCloudSupabaseClient, restoreCloudSession } from './cloudSyncClien
 import { encryptForStorage, decryptFromStorage } from './ipcCrypto';
 import { runInitialImport, getImportJob } from './initialImport';
 import { pullTenantPlan } from './cloudTenantPlan';
+import { captchaTokenFrom, cloudSignInErrorMessage } from './turnstile';
 
 function accountResponse(account: LocalAccount) {
   return { access_token: signLocalJwt(account.userId), user: goTrueUserFromAccount(account) };
@@ -96,9 +97,13 @@ export function createCloudLinkRouter(
       return res.status(500).json({ error: err.message });
     }
 
-    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({ email, password });
+    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({
+      email,
+      password,
+      options: { captchaToken: captchaTokenFrom(req.body?.captchaToken) },
+    });
     if (authErr || !authData.session) {
-      return res.status(401).json({ error: authErr?.message || 'Identifiants invalides' });
+      return res.status(401).json({ error: cloudSignInErrorMessage(authErr?.message, 'Identifiants invalides') });
     }
     const { session } = authData;
     const cloudUserId = session.user.id;
@@ -236,9 +241,13 @@ export function createCloudLinkRouter(
       return res.status(500).json({ error: err.message });
     }
 
-    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({ email: state.email, password });
+    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({
+      email: state.email,
+      password,
+      options: { captchaToken: captchaTokenFrom(req.body?.captchaToken) },
+    });
     if (authErr || !authData.session) {
-      return res.status(401).json({ error: authErr?.message || 'Mot de passe incorrect' });
+      return res.status(401).json({ error: cloudSignInErrorMessage(authErr?.message, 'Mot de passe incorrect') });
     }
     // Un même email peut en théorie changer de compte cloud (suppression et
     // recréation) — s'assurer que c'est TOUJOURS le même cloudUserId avant

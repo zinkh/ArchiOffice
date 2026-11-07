@@ -287,3 +287,19 @@ export function prixPatch(ligne: Ligne, raw: string): Partial<Ligne> | null {
   if (!c.ok) return null;
   return { pourMemoire: undefined, prixUnitaire: c.valeur, prixTotal: propre(ligne.quantite * c.valeur) };
 }
+
+/**
+ * Saisie dans la case prix TOTAL : le total saisi fait foi et le prix unitaire s'en déduit
+ * (total / quantité), à la hausse comme à la baisse. Sans quantité, le prix unitaire ne peut pas
+ * se déduire : il reste ce qu'il était. Le P.U. garde sa précision complète (affiché à 2 décimales) pour que
+ * quantité x P.U. redonne exactement le total saisi. Mêmes `null` et « PM » que `prixPatch`.
+ */
+export function prixTotalPatch(ligne: Ligne, raw: string): Partial<Ligne> | null {
+  if (parsePrixSaisi(raw).pourMemoire) return { pourMemoire: true, prixUnitaire: 0, prixTotal: 0 };
+  if (ligne.children?.length) return null;
+  const c = calculerSaisie(raw);
+  if (!c.ok) return null;
+  const patch: Partial<Ligne> = { pourMemoire: undefined, prixTotal: c.valeur };
+  if (ligne.quantite > 0) patch.prixUnitaire = propre(c.valeur / ligne.quantite);
+  return patch;
+}

@@ -38,7 +38,7 @@ un répertoire surveillé par Nextcloud, kDrive ou un autre moteur de synchronis
 
 ## Périmètre
 
-- Un projet par session, 100 fichiers au plus, 50 Mio par fichier, 256 entrées
+- Un projet par session, sans plafond de nombre de documents, 50 Mio par fichier, catalogue JSON borné en octets
   au total. Un dépassement refuse le catalogue entier ; aucun oubli silencieux.
 - Catalogue figé au lancement, chemins nettoyés et suffixés par identifiant pour
   éviter les collisions et les chemins fournis par le serveur. Chaque fichier
@@ -225,7 +225,7 @@ Un échec réseau pendant l’ajout d’un nouveau projet conserve les projets s
 Le bouton de déconnexion reste utilisable si les préférences sont corrompues ; il
 peut effacer ces seules préférences, en conservant les manifestes et les fichiers.
 La limite de dix projets évite un nombre non borné de processus natifs ; les limites
-restent de 100 documents et 50 Mio par fichier pour chaque projet. Aucun projet
+restent de 50 Mio par fichier pour chaque projet, sans plafond de nombre de documents. Aucun projet
 n’est ajouté automatiquement depuis l’ensemble du cabinet.
 
 `multi-smoke.mjs` teste le véritable courtier et les jonctions Windows : deux

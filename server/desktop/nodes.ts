@@ -56,6 +56,9 @@ export interface DesktopNode {
   readOnlyReason: 'archived' | 'approved' | 'locked' | 'role' | null;
   status: string | null;
   conflictOf: string | null;
+  projectId?: string | null;
+  phase?: string | null;
+  documentType?: string | null;
 }
 
 export const INBOX_NAME = 'À classer';
@@ -209,6 +212,7 @@ function documentNode(
   const folderPath = project ? `${projectFolder(project)}/${phaseFolder(phaseCode(doc.phase))}` : INBOX_NAME;
   const version = doc.version ?? 1;
   return {
+    projectId: doc.project_id, phase: doc.phase ?? null, documentType: doc.doc_type ?? null,
     id: documentNodeId(doc.id), kind: 'file', parentId, name, path: `${folderPath}/${name}`,
     size: doc.size_bytes ?? null, mimeType: doc.mime_type ?? null, sha256: doc.content_sha256 ?? null,
     modifiedAt: doc.updated_at ?? doc.uploaded_at ?? null,

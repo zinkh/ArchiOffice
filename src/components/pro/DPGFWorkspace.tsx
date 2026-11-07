@@ -8,7 +8,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
-  IconSubtask, IconTag, IconFileText, IconListDetails,
+  IconSubtask, IconTag, IconFileText, IconListDetails, IconPercentage,
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
@@ -27,10 +27,11 @@ import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSel
 import { StatutBadges } from './StatutBadges';
 import { LigneDescriptionDialog } from './LigneDescriptionDialog';
 import { MetreDialog } from './MetreDialog';
-import { batimentsDuMetre, formuleCourante, prixPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
+import { batimentsDuMetre, formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
+import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
-import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
+import { clePourCible, trouvaillePourPosition, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
 import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
 import { localisationsConnues, localisationsDeLigne } from '../../lib/cctpImages';
 import {
@@ -68,6 +69,8 @@ interface DPGFWorkspaceProps {
   onDragStart?: (ligne: Ligne) => void;
   /** Trouvaille de la recherche à ouvrir et montrer. */
   searchTarget?: CibleRecherche | null;
+  /** Ouvre l'élément (lot, chapitre ou article) dans l'onglet CCTP. */
+  onOpenCctp?: (pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>) => void;
   showTree?: boolean;
   onToggleTree?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce DPGF (les lignes absentes deviennent des articles). */
@@ -80,7 +83,7 @@ const isTextField = (el: EventTarget | null) =>
     || (el instanceof HTMLInputElement && el.type !== 'checkbox'));
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
-  dpgf, onChange, projectName, onDropExternal, onDragStart, searchTarget,
+  dpgf, onChange, projectName, onDropExternal, onDragStart, searchTarget, onOpenCctp,
   showTree: showTreeProp, onToggleTree, onImportDocument, notify,
 }) => {
   const { settings } = useSettings();
@@ -107,6 +110,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showDecoupage, setShowDecoupage] = useState(false);
+  // Colonne « Marge % » (saisie du taux par article) : un choix d'affichage, propre à cet écran.
+  const [showMargeCol, setShowMargeCol] = useState(false);
   const [groupement, setGroupement] = useState<GroupementDpgf>('lot');
   // Chapitre visé par une insertion depuis la bibliothèque : le DPGF ne
   // sélectionnait que le lot, ce qui ne suffit pas à savoir où poser un article.
@@ -128,6 +133,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   // (la phase, conditionnelle ; la localisation suit la désignation). Sert à étendre le colSpan des lignes de totaux en pied de
   // tableau, qui ne connaissent pas ces colonnes autrement.
   const nbColsDecoupage = dpgf.multiPhases ? 1 : 0;
+  const nbColMarge = showMargeCol ? 1 : 0;
   // Plusieurs bâtiments : une colonne « Bâtiments » (cases à cocher) puis une
   // quantité par bâtiment, avant la quantité totale.
   const multiBat = !!dpgf.multiBatiments;
@@ -143,8 +149,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     buildFlatRows(dpgf.lots, { expandedLots, expandedChaps, expandedLignes });
 
   const rowKey = rowKeyOf;
+  // Les prix enregistrés sont toujours HORS marge. « Avec marge » n'est qu'un affichage : `vue` est une copie de
+  // même structure (mêmes indices) dont les prix sont majorés du taux de chaque article ; les modifications
+  // partent toujours de `dpgf`.
+  const avecMarge = !!dpgf.dpgfAvecMarge;
+  const vue = vueMarge(dpgf, avecMarge);
   // Totaux recalculés depuis les articles : le total enregistré peut dater.
-  const totaux = totauxDocument(dpgf.lots, dpgf.TVA);
+  const totaux = totauxDocument(vue.lots, dpgf.TVA);
+  // La liste mobile n'affiche pas la marge : ses sous-totaux restent ceux des prix de base qu'elle montre.
+  const totauxBase = avecMarge ? totauxDocument(dpgf.lots, dpgf.TVA) : totaux;
 
   // ── Mutate helpers ───────────────────────────────────────────────────────────
   const commitLots = (newLots: Lot[]) => {
@@ -165,7 +178,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const clearSelection = () => { setSelectedKeys(new Set()); setAnchorKey(null); };
 
   // Trouvaille choisie dans la recherche : dépliée, sélectionnée, puis montrée.
-  useCibleRecherche(searchTarget, c => {
+  const montrerCible = (c: CibleRecherche) => {
     setGroupement('lot');
     setEditingCell(null);
     setExpandedLots(prev => new Set([...prev, c.lotId]));
@@ -174,7 +187,16 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setSelectedLotId(c.lotId);
     if (c.chapId) setSelectedChapId(c.chapId);
     selectKeys([clePourCible(c)]);
-  });
+  };
+  useCibleRecherche(searchTarget, montrerCible);
+  // Clic dans la structure (arborescence de gauche) : même effet qu'une trouvaille, sans passer par la recherche.
+  const [cibleArbre, setCibleArbre] = useState<CibleRecherche | null>(null);
+  const nonceArbre = useRef(0);
+  useCibleRecherche(cibleArbre, montrerCible);
+  const montrerDansTableau = (pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>) => {
+    const t = trouvaillePourPosition(dpgf, pos);
+    if (t) setCibleArbre({ ...t, nonce: ++nonceArbre.current });
+  };
   const toggleKey = (rKey: string) => {
     setSelectedKeys(prev => {
       const next = new Set(prev);
@@ -210,6 +232,39 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const toggleLot = toggleIn(setExpandedLots);
   const toggleChap = toggleIn(setExpandedChaps);
   const toggleLigne = toggleIn(setExpandedLignes);
+  /** Articles et sous-articles de la structure : un clic ouvre l'article dans le tableau. */
+  const renderArbreLignes = (lignes: Ligne[], lotIdx: number, chapIdx: number, prefixe: number[], niveau: number): React.ReactNode =>
+    lignes.map((l, i) => {
+      if (l.cctpOnly) return null;
+      const chemin = [...prefixe, i];
+      const enfants = l.children ?? [];
+      return (
+        <div key={l.id}>
+          <div className="flex items-center" style={{ paddingLeft: `${niveau * 0.75 + 0.5}rem` }}>
+            <button
+              type="button"
+              aria-expanded={expandedLignes.has(l.id)}
+              aria-label={t('pro_toggle_lot', { numero: l.numero })}
+              className="shrink-0 w-5 h-6 inline-flex items-center justify-center"
+              style={{ color: 'var(--tblr-muted)', visibility: enfants.length ? 'visible' : 'hidden' }}
+              onClick={() => toggleLigne(l.id)}
+            >
+              {expandedLignes.has(l.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+            </button>
+            <button
+              type="button"
+              className="flex-1 min-w-0 flex items-center gap-1 pr-2 py-1 text-left text-xs hover:underline"
+              style={{ color: 'var(--tblr-muted)' }}
+              onClick={() => montrerDansTableau({ kind: 'ligne', lotIdx, chapIdx, lignePath: chemin })}
+            >
+              <span className="font-mono shrink-0">{l.numero}</span>
+              <span className="truncate">{l.designation}</span>
+            </button>
+          </div>
+          {enfants.length > 0 && expandedLignes.has(l.id) && renderArbreLignes(enfants, lotIdx, chapIdx, chemin, niveau + 1)}
+        </div>
+      );
+    });
 
   // ── Add ───────────────────────────────────────────────────────────────────────
   const addLot = () => {
@@ -403,10 +458,14 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
             return patch ? { ...ligne, ...patch } : ligne;
           }
           if (field === 'prixTotal') {
-            const saisi = parsePrixSaisi(value);
-            if (saisi.pourMemoire) return { ...ligne, pourMemoire: true, prixUnitaire: 0, prixTotal: 0 };
-            const { pourMemoire: _pm, ...sansPm } = ligne;
-            return { ...sansPm, prixTotal: saisi.valeur };
+            // Le total saisi fait foi et le prix unitaire s'en déduit (total / quantité). « PM » : pour mémoire.
+            const patch = prixTotalPatch(ligne, value);
+            return patch ? { ...ligne, ...patch } : ligne;
+          }
+          if (field === 'tauxMarge') {
+            // Taux de marge de l'article, en % de son prix de base. Vide ou 0 : pas de marge.
+            const patch = margePatch(ligne, value);
+            return patch ? { ...ligne, ...patch } : ligne;
           }
           if (field === 'tva') {
             // Vide : le poste suit le taux général du document. 0 reste un taux (exonéré).
@@ -823,6 +882,16 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       kind: 'button', id: 'dpgf-decoupage', label: t('pro_buildings_phases'), icon: <IconBuildingCommunity size={16} />,
       pressed: showDecoupage, badge: !!(dpgf.multiBatiments || dpgf.multiPhases), onClick: () => setShowDecoupage(v => !v),
     },
+    {
+      // Prix finaux avec ou sans marge (affichage et exports) ; la colonne sert à saisir le taux de chaque article.
+      kind: 'menu', id: 'dpgf-marge', label: avecMarge ? t('pro_prices_final') : t('pro_prices_base'), icon: <IconPercentage size={16} />,
+      entries: [
+        { id: 'dpgf-prix-base', label: t('pro_prices_base'), checked: !avecMarge, onClick: () => onChange({ ...dpgf, dpgfAvecMarge: false }) },
+        { id: 'dpgf-prix-final', label: t('pro_prices_final'), checked: avecMarge, onClick: () => onChange({ ...dpgf, dpgfAvecMarge: true }) },
+        { id: 'dpgf-prix-sep', separator: true },
+        { id: 'dpgf-marge-col', label: t('pro_margin_show_col'), checked: showMargeCol, onClick: () => setShowMargeCol(v => !v) },
+      ],
+    },
   ]);
 
   const selectionLabel = t('pro_selection_count', { count: selection.length });
@@ -874,6 +943,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           designation={descriptionCible.ligne.designation}
           valeur={descriptionCible.ligne.cctpDescription ?? ''}
           onSave={texte => enregistrerDescription(descriptionCible.key, texte)}
+          onOpenCctp={onOpenCctp ? () => {
+            const k = parseRowKey(descriptionCible.key);
+            if (k?.kind === 'ligne') { onOpenCctp({ kind: 'ligne', lotIdx: k.lotIdx, chapIdx: k.chapIdx, lignePath: k.lignePath }); setDescriptionKey(null); }
+          } : undefined}
           onClose={() => setDescriptionKey(null)}
         />
       )}
@@ -919,7 +992,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 
       {/* Main workspace */}
       {groupement !== 'lot' ? (
-        <DpgfGroupedView dpgf={dpgf} groupement={groupement} />
+        <DpgfGroupedView dpgf={vue} groupement={groupement} />
       ) : (
       <div className="flex flex-1 overflow-hidden">
 
@@ -963,21 +1036,30 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   </button>
                 </div>
                 {expandedLots.has(lot.id) && lot.chapitres.map((chap, ci) => chap.cctpOnly ? null : (
-                  <button
-                    key={chap.id}
-                    type="button"
-                    className="w-full flex items-center gap-1 pl-7 pr-2 py-1 text-left text-xs hover:underline"
-                    style={{ color: 'var(--tblr-muted)' }}
-                    onClick={() => {
-                      setSelectedLotId(lot.id);
-                      setSelectedChapId(chap.id);
-                      setExpandedChaps(prev => new Set([...prev, chap.id]));
-                      selectKeys([`chap-${li}-${ci}`]);
-                    }}
-                  >
-                    <span className="font-mono shrink-0">{chap.numero}</span>
-                    <span className="truncate">{chap.titre}</span>
-                  </button>
+                  <div key={chap.id}>
+                    <div className="flex items-center pl-4">
+                      <button
+                        type="button"
+                        aria-expanded={expandedChaps.has(chap.id)}
+                        aria-label={t('pro_toggle_lot', { numero: chap.numero })}
+                        className="shrink-0 w-5 h-6 inline-flex items-center justify-center"
+                        style={{ color: 'var(--tblr-muted)', visibility: chap.lignes.length ? 'visible' : 'hidden' }}
+                        onClick={() => toggleChap(chap.id)}
+                      >
+                        {expandedChaps.has(chap.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex-1 min-w-0 flex items-center gap-1 pr-2 py-1 text-left text-xs hover:underline"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onClick={() => montrerDansTableau({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
+                      >
+                        <span className="font-mono shrink-0">{chap.numero}</span>
+                        <span className="truncate">{chap.titre}</span>
+                      </button>
+                    </div>
+                    {expandedChaps.has(chap.id) && renderArbreLignes(chap.lignes, li, ci, [], 2)}
+                  </div>
                 ))}
               </div>
             ))}
@@ -1027,7 +1109,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                     </div>
                   );
                 } : undefined}
-                sousTotaux={totaux.sousTotaux}
+                sousTotaux={totauxBase.sousTotaux}
                 selected={selectedKeys}
                 onToggleSelect={toggleKey}
                 expandedLots={expandedLots}
@@ -1064,6 +1146,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   <th className="px-2 py-2 text-right font-semibold w-24">{multiBat ? t('pro_col_quantity_total') : t('pro_col_quantity')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-28">{t('pro_col_unit_price')}</th>
                   <th className="px-2 py-2 text-right font-semibold w-32">{t('pro_col_total')}</th>
+                  {showMargeCol && <th className="px-2 py-2 text-right font-semibold w-20" title={t('pro_margin_hint')}>{t('pro_margin_col')}</th>}
                   <th className="px-2 py-2 text-right font-semibold w-20" title={t('pro_col_vat_hint')}>{t('pro_col_vat')}</th>
                   {dpgf.multiPhases && <th className="px-1 py-2 text-center font-semibold w-14">{t('pro_col_phase')}</th>}
                   <th className="w-10"><span className="sr-only">{t('pro_col_actions')}</span></th>
@@ -1102,6 +1185,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 text-right font-mono tabular-nums">
                           {formatCurrency(totaux.sousTotaux[row.lotIdx])}
                         </td>
+                        {showMargeCol && <td />}
                         <td />
                         {dpgf.multiPhases && (
                           <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
@@ -1142,10 +1226,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         <td className="px-2 py-1 font-mono text-xs font-normal" style={{ color: 'var(--tblr-muted)' }}>
                           <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} {...cellProps} />
                         </td>
-                        <td className="px-2 py-1" colSpan={multiBat ? 3 : 7}>
+                        <td className="px-2 py-1" colSpan={multiBat ? 3 : 7 + nbColMarge}>
                           <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} {...cellProps} />
                         </td>
-                        {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 4} /></>}
+                        {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 4 + nbColMarge} /></>}
                         {dpgf.multiPhases && (
                           <td className="px-1 py-1" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-1 justify-center">
@@ -1166,6 +1250,12 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   const l = row.ligne!;
                   const hasChildren = !!(l.children && l.children.length > 0);
                   const indentPx = (row.depth - 2) * 16;
+                  // Montants affichés : ceux de `vue` (marge comprise si demandée), aux mêmes indices que `l`.
+                  const lv = avecMarge ? (ligneAtPath(vue.lots[row.lotIdx]?.chapitres[row.chapIdx!]?.lignes ?? [], row.lignePath!) ?? l) : l;
+                  // Prix finaux : lecture seule, on modifie les prix dans l'affichage « Sans marge ».
+                  const prixProps = avecMarge
+                    ? { ...cellProps, onStartEdit: () => {}, titleHint: t('pro_prices_final_readonly') }
+                    : cellProps;
 
                   return (
                     <tr
@@ -1281,17 +1371,25 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         )}
                       </td>
                       <td className="px-2 py-0.5">
-                        <EditableCell rKey={rKey} field="prixUnitaire" value={l.prixUnitaire} numeric pm={!!l.pourMemoire && !hasChildren} {...cellProps} />
+                        <EditableCell rKey={rKey} field="prixUnitaire" value={lv.prixUnitaire} numeric pm={!!l.pourMemoire && !hasChildren} {...prixProps} />
                       </td>
                       <td className="px-2 py-0.5 text-right font-mono tabular-nums">
                         {hasChildren ? (
                           <span className="px-1 py-0.5 text-sm" style={{ color: 'var(--tblr-muted)' }}>
-                            {l.pourMemoire ? 'PM' : formatCurrency(estHorsBase(l.nature) ? sumLigneNature(l, l.nature, true) : sumLigne(l))}
+                            {l.pourMemoire ? 'PM' : formatCurrency(estHorsBase(l.nature) ? sumLigneNature(lv, l.nature, true) : sumLigne(lv))}
                           </span>
                         ) : (
-                          <EditableCell rKey={rKey} field="prixTotal" value={l.prixTotal} numeric pm={!!l.pourMemoire} {...cellProps} />
+                          <EditableCell rKey={rKey} field="prixTotal" value={lv.prixTotal} numeric pm={!!l.pourMemoire} {...prixProps} />
                         )}
                       </td>
+                      {showMargeCol && (
+                        <td className="px-2 py-0.5">
+                          {/* Un article à sous-articles n'a pas de taux propre : la marge se pose sur les sous-articles. */}
+                          {hasChildren || l.pourMemoire ? null : (
+                            <EditableCell rKey={rKey} field="tauxMarge" value={tauxMargeDe(l)} numeric maxDecimals={3} label={`${t('pro_margin_col')} ${l.numero}`} titleHint={t('pro_margin_hint')} className="text-xs" {...cellProps} />
+                          )}
+                        </td>
+                      )}
                       <td className="px-2 py-0.5">
                         <EditableCell rKey={rKey} field="tva" value={l.tva ?? ''} numeric showZero maxDecimals={3} label={t('pro_col_vat_of', { numero: l.numero })} className="text-xs" {...cellProps} />
                       </td>
@@ -1315,24 +1413,24 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 <tr className="border-t-2" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                   <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-2 text-left text-sm font-semibold">{t('pro_total_ht')}</th>
                   <td className="px-2 py-2 text-right font-mono font-semibold tabular-nums">{formatCurrency(totaux.totalHT)}</td>
-                  <td colSpan={nbColsDecoupage + 2} />
+                  <td colSpan={nbColsDecoupage + 2 + nbColMarge} />
                 </tr>
                 {NATURES_HORS_BASE.filter(n => totaux.horsBase[n].nb > 0).map(n => (
                   <tr key={n} style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                     <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t(`pro_total_${n}_ht`)}</th>
                     <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.horsBase[n].totalHT)}</td>
-                    <td colSpan={nbColsDecoupage + 2} />
+                    <td colSpan={nbColsDecoupage + 2 + nbColMarge} />
                   </tr>
                 ))}
                 <tr style={{ background: 'var(--tblr-surface-2)', color: 'var(--tblr-muted)' }}>
                   <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-1.5 text-left text-sm font-normal">{t('pro_vat_rate', { rate: dpgf.TVA })}</th>
                   <td className="px-2 py-1.5 text-right font-mono text-sm tabular-nums">{formatCurrency(totaux.montantTVA)}</td>
-                  <td colSpan={nbColsDecoupage + 2} />
+                  <td colSpan={nbColsDecoupage + 2 + nbColMarge} />
                 </tr>
                 <tr className="border-t" style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface-2)' }}>
                   <th scope="row" colSpan={8 + nbColsBat} className="px-4 py-2 text-left font-bold">{t('pro_total_ttc')}</th>
                   <td className="px-2 py-2 text-right font-mono font-bold tabular-nums">{formatCurrency(totaux.totalTTC)}</td>
-                  <td colSpan={nbColsDecoupage + 2} />
+                  <td colSpan={nbColsDecoupage + 2 + nbColMarge} />
                 </tr>
               </tbody>
             </table>

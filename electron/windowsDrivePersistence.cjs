@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
@@ -20,10 +21,10 @@ function createPersistentWindowsDrive(options) {
   async function readSnapshot(identity,projectId) {
     try {
       const file=snapshotPath(identity,projectId);const stat=await fs.lstat(file);
-      if(!stat.isFile()||stat.isSymbolicLink()||stat.size>512*1024)throw new Error('Invalid snapshot manifest');
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size>MAX_CATALOG_BYTES)throw new Error('Invalid snapshot manifest');
       const saved=JSON.parse(await fs.readFile(file,'utf8'));
       if(!same(saved.identity,identity)||saved.projectId!==projectId||typeof saved.directory!=='string'
-        ||path.dirname(saved.directory)!==path.resolve(root)||!Array.isArray(saved.catalog)||saved.catalog.length>256
+        ||path.dirname(saved.directory)!==path.resolve(root)||!Array.isArray(saved.catalog)||Buffer.byteLength(JSON.stringify(saved.catalog))>MAX_CATALOG_BYTES
         ||typeof saved.rootKey!=='string'||!/^[a-f0-9]{64}$/.test(saved.rootKey))throw new Error('Invalid snapshot manifest');
       await noLinks(root,saved.directory);return saved;
     } catch(error) {
@@ -36,9 +37,10 @@ function createPersistentWindowsDrive(options) {
     }
   }
   async function atomicJson(file,data) {
+    const json=JSON.stringify(data);if(Buffer.byteLength(json)>MAX_CATALOG_BYTES)throw new Error('Snapshot exceeds memory budget');
     const temporary=file+'.tmp';
     await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});
-    await fs.writeFile(temporary,JSON.stringify(data),{mode:0o600});
+    await fs.writeFile(temporary,json,{mode:0o600});
     await fs.rename(temporary,file);
   }
   async function read() {
@@ -152,7 +154,7 @@ function createPersistentWindowsDrive(options) {
       return {status:'opened'};
     } catch { return {status:'error'}; }
   }
-  return { start, open, disconnect, resume, shutdown, enableEditing, verify:()=>preview.verify(), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
+  return { lock:key=>preview.lock(key),pin:key=>preview.pin(key),availability:()=>preview.availability(),start, open, disconnect, resume, shutdown, enableEditing, verify:except=>preview.verify(except), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
     status:()=>({...preview.status(),letter:'A:',error:lastError,configured}) };
 }
 module.exports = { createPersistentWindowsDrive };

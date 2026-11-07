@@ -107,6 +107,7 @@ import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import { CompanyAutocomplete } from '../components/CompanyAutocomplete';
 import ChantierModule from '../components/ChantierModule';
 import MilestoneGantt from '../components/MilestoneGantt';
+import { changedMilestones, persistMilestones } from '../lib/milestoneSchedule';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedPhoneCalls from '../components/phoneCalls/LinkedPhoneCalls';
 import { ProTab } from '../components/pro/ProTab';
@@ -3737,17 +3738,12 @@ export default function ProjectDetail() {
                               startDate={new Date(project.start_date)}
                               endDate={new Date(project.end_date)}
                               onUpdate={(updated) => {
+                                const changed = changedMilestones(milestones, updated);
                                 setMilestones(updated);
-                                const changed = updated.find(m => {
-                                  const orig = milestones.find(o => o.id === m.id);
-                                  return orig && (orig.duration_days !== m.duration_days || JSON.stringify(orig.dependencies) !== JSON.stringify(m.dependencies));
-                                });
-                                if (changed) {
-                                  fetch(`/api/milestones/${changed.id}`, {
-                                    method: 'PUT',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify(changed),
-                                  }).catch(console.error);
+                                if (changed.length > 0) {
+                                  persistMilestones(changed).then(failed => {
+                                    if (failed.length > 0) console.error('Milestones save failed:', failed.map(m => m.id));
+                                  });
                                 }
                               }}
                             />

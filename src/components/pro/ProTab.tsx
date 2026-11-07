@@ -21,7 +21,7 @@ import type { LigneImportee } from '../../lib/bpuImport';
 import { useSettings } from '../../hooks/useSettings';
 import {
   IconLayoutColumns, IconX, IconChevronDown, IconLayoutSidebar, IconPrinter,
-  IconChecklist, IconFileImport, IconCamera, IconHistory,
+  IconChecklist, IconFileImport, IconCamera, IconHistory, IconArrowBackUp, IconArrowForwardUp,
 } from '@tabler/icons-react';
 import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
@@ -31,10 +31,11 @@ import { loadDPGF, saveDPGF, figerVersion } from '../../lib/dpgfDocument';
 import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
 import { ProToolbar } from './toolbar/ProToolbar';
 import { ProSearch } from './toolbar/ProSearch';
-import type { CibleRecherche } from '../../lib/proRecherche';
+import { trouvaillePourPosition, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
 import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, type ToolbarRegistry } from './toolbar/toolbarState';
 import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
+import { useDocHistory } from '../../hooks/useDocHistory';
 import { apiFetch } from '../../lib/api';
 import { useUser } from '../../UserContext';
 import { validateProDocument } from '../../lib/proValidation';
@@ -273,6 +274,18 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
     titleQueue.current = operation;
     return operation;
   };
+  // Annuler / rétablir (Ctrl+Z) : le document du CCTP, du DPGF et de l'estimation est UN seul arbre, donc UN seul
+  // historique, alimenté par `editDpgf` (les modifications faites par l'utilisateur). Les synchronisations
+  // automatiques avec la liste des lots (`setDpgf` direct) n'y entrent pas : les annuler serait aussitôt défait.
+  const historiqueDpgf = useDocHistory<DPGF>(projectId);
+  const dpgfCourant = useRef<DPGF | null>(null);
+  dpgfCourant.current = dpgf;
+  /** Pose le document et répercute un titre de lot modifié sur la liste des lots du projet. */
+  const appliquerDpgf = (next: DPGF) => {
+    const changes = dpgf ? titresModifies(dpgf, next) : [];
+    setDpgf(next);
+    for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+  };
   const editDpgf = (next: DPGF) => {
     const beforeIds = new Set<string>();
     collectLigneIds(dpgf, beforeIds);
@@ -281,10 +294,43 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
       method: 'POST',
       body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
     }).catch(() => {});
-    const changes = dpgf ? titresModifies(dpgf, next) : [];
-    setDpgf(next);
-    if (!changes.length) return;
+    historiqueDpgf.enregistrer(dpgf, next);
+    appliquerDpgf(next);
+  };
+  // Une annulation ne renvoie rien à la bibliothèque d'ouvrages (elle ne l'a pas enrichie par défaut) : elle
+  // restaure le document et, au besoin, le titre des lots.
+  const annulerDpgf = () => {
+    const cible = historiqueDpgf.annuler(dpgfCourant.current);
+    if (!cible) return;
+    appliquerDpgf(cible);
+    showToast(t('pro_undo_done'), 'success');
+  };
+  const retablirDpgf = () => {
+    const cible = historiqueDpgf.retablir(dpgfCourant.current);
+    if (!cible) return;
+    appliquerDpgf(cible);
+    showToast(t('pro_redo_done'), 'success');
+  };
+  // Même principe pour le BPU et le DQE (un seul document, `bpu_data`) : un historique alimenté par `editBpu`.
+  const historiqueBpu = useDocHistory<BPU>(projectId);
+  const bpuCourant = useRef<BPU | null>(null);
+  bpuCourant.current = bpu;
+  const appliquerBpu = (next: BPU) => {
+    const changes = bpu ? titresModifies(bpu, next) : [];
+    setBpu(next);
     for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+  };
+  const annulerBpu = () => {
+    const cible = historiqueBpu.annuler(bpuCourant.current);
+    if (!cible) return;
+    appliquerBpu(cible);
+    showToast(t('pro_undo_done'), 'success');
+  };
+  const retablirBpu = () => {
+    const cible = historiqueBpu.retablir(bpuCourant.current);
+    if (!cible) return;
+    appliquerBpu(cible);
+    showToast(t('pro_redo_done'), 'success');
   };
   const editBpu = (next: BPU) => {
     const beforeIds = new Set<string>();
@@ -294,10 +340,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
       method: 'POST',
       body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
     }).catch(() => {});
-    const changes = bpu ? titresModifies(bpu, next) : [];
-    setBpu(next);
-    if (!changes.length) return;
-    for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
+    historiqueBpu.enregistrer(bpu, next);
+    appliquerBpu(next);
   };
 
   const displayedRightDpgf = rightProjectId === projectId ? dpgf : rightDpgf;
@@ -586,6 +630,30 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
+  // Ctrl+Z annule, Ctrl+Maj+Z ou Ctrl+Y rétablit, sur le document à l'écran : celui du CCTP, du DPGF et de
+  // l'estimation, ou celui du BPU et du DQE. Dans un champ de saisie, c'est l'annulation du champ lui-même qui
+  // joue : on n'y touche pas.
+  const documentAnnulable = activeSubTab !== 'LOTS';
+  const historiqueActif = isBpuTab ? historiqueBpu : historiqueDpgf;
+  const annulerActif = isBpuTab ? annulerBpu : annulerDpgf;
+  const retablirActif = isBpuTab ? retablirBpu : retablirDpgf;
+  const annulationRef = useRef<{ actif: boolean; annuler: () => void; retablir: () => void }>({ actif: false, annuler: annulerActif, retablir: retablirActif });
+  annulationRef.current = { actif: documentAnnulable, annuler: annulerActif, retablir: retablirActif };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || !annulationRef.current.actif) return;
+      const touche = e.key.toLowerCase();
+      const refaire = touche === 'y' || (touche === 'z' && e.shiftKey);
+      if (touche !== 'z' && touche !== 'y') return;
+      const cible = e.target as HTMLElement | null;
+      if (cible?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+      e.preventDefault();
+      if (refaire) annulationRef.current.retablir(); else annulationRef.current.annuler();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
   // Menu « ⋯ » : ce qui concerne le dossier PRO plutôt que le document.
   const hasTree = activeSubTab !== 'LOTS';
   // Recherche : la trouvaille choisie est relue par l'atelier ouvert, qui la
@@ -593,7 +661,19 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   // à un changement d'onglet.
   const [cibleRecherche, setCibleRecherche] = useState<CibleRecherche | null>(null);
   const nonceRecherche = useRef(0);
-  useEffect(() => { setCibleRecherche(null); }, [activeSubTab]);
+  // Une cible posée par « Ouvrir dans le CCTP » doit survivre au changement d'onglet qu'elle provoque.
+  const garderCible = useRef(false);
+  useEffect(() => {
+    if (garderCible.current) { garderCible.current = false; return; }
+    setCibleRecherche(null);
+  }, [activeSubTab]);
+  const ouvrirDansCctp = (pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>) => {
+    const t = trouvaillePourPosition(dpgf, pos);
+    if (!t) return;
+    garderCible.current = activeSubTab !== 'CCTP';
+    setCibleRecherche({ ...t, nonce: ++nonceRecherche.current });
+    setActiveSubTab('CCTP');
+  };
   const docRecherche = activeSubTab === 'LOTS' ? null : isBpuTab ? bpu : dpgf;
   const cibleImportFichier: 'dpgf' | 'bpu' | null = isBpuTab ? 'bpu' : (activeSubTab === 'CCTP' || activeSubTab === 'DPGF') ? 'dpgf' : null;
   const dossierEntries: ToolbarMenuEntry[] = [
@@ -643,6 +723,23 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
       >
         <PillTabs tabs={TABS} activeId={activeSubTab} onChange={id => setActiveSubTab(id as SubTab)} ariaLabel={t('pro_tabs_label')} className="max-md:w-full" />
         <AutosaveIndicator status={indicatorStatus} onRetry={() => { void saveActive(); }} />
+        {documentAnnulable && (
+          <div className="inline-flex items-center gap-0.5" role="group" aria-label={t('pro_undo_group')}>
+            {[
+              { id: 'undo', label: t('pro_undo'), icon: <IconArrowBackUp size={16} aria-hidden />, onClick: annulerActif, disabled: !historiqueActif.peutAnnuler },
+              { id: 'redo', label: t('pro_redo'), icon: <IconArrowForwardUp size={16} aria-hidden />, onClick: retablirActif, disabled: !historiqueActif.peutRetablir },
+            ].map(b => (
+              <button
+                key={b.id} type="button" onClick={b.onClick} disabled={b.disabled}
+                aria-label={b.label} title={`${b.label} (${b.id === 'undo' ? 'Ctrl+Z' : 'Ctrl+Maj+Z'})`}
+                className="w-8 h-8 pointer-coarse:w-10 pointer-coarse:h-10 inline-flex items-center justify-center rounded hover:bg-[var(--tblr-surface-2)] disabled:opacity-40 disabled:pointer-events-none outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                style={{ color: 'var(--tblr-muted)' }}
+              >
+                {b.icon}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="ml-auto min-w-0">
           <ProToolbar
             items={activeSubTab === 'LOTS' ? [] : toolbar?.source.current ?? []}
@@ -662,7 +759,11 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
           />
         </div>
       </div>
-      {!isBpuTab && activeSubTab !== 'LOTS' && saveStatus === 'conflict' && <ProConflictBanner onResolve={resolveConflict} />}
+      {!isBpuTab && activeSubTab !== 'LOTS' && saveStatus === 'conflict' && <ProConflictBanner onResolve={async choice => {
+        await resolveConflict(choice);
+        // « Recharger » remplace le document par la version à jour : l'historique n'a plus de sens.
+        if (choice === 'reload') historiqueDpgf.vider();
+      }} />}
       {showExport && dpgf && (
         <ProExportDialog
           dpgf={dpgf}
@@ -690,6 +791,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
           // La restauration fait avancer la révision côté serveur : on relit (document ET révision), sinon
           // la sauvegarde suivante serait refusée comme un faux conflit.
           await dpgfDoc.reload();
+          // Le document vient d'être remplacé par une version figée : annuler y ramènerait de l'ancien.
+          historiqueDpgf.vider();
           setVersions(null);
           showToast(t('pro_versions_toast_restored', { label: v.label }), 'success');
         }}
@@ -833,6 +936,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
               ) : dpgf ? (
                 <DPGFWorkspace
                   searchTarget={cibleRecherche}
+                  onOpenCctp={ouvrirDansCctp}
                   dpgf={dpgf}
                   onChange={editDpgf}
                   notify={notify}
