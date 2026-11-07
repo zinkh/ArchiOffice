@@ -39,7 +39,7 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       if(msg?.type==='drive:status' && ['running','paused','stopped'].includes(msg.state))onStatus({state:msg.state,...Object.fromEntries(['pending','blocked','conflicts'].map(k=>[k,Number.isSafeInteger(msg[k])&&msg[k]>=0?msg[k]:0]))});
       if(msg?.type==='drive:working-result'||msg?.type==='drive:document-statuses-result') {
         const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
-        if(msg.error)p.reject(Object.assign(new Error('Drive working copy failed'),{code:msg.error.code}));else p.resolve(msg.result);
+        if(msg.error)p.reject(Object.assign(new Error('Drive working copy failed'),{code:msg.error.code,...([401,402,403,404].includes(msg.error.status)?{status:msg.error.status}:{})}));else p.resolve(msg.result);
       }
       if(msg?.type==='drive:enqueued'||msg?.type==='drive:retried') {const p=jobs.get(msg.requestId);if(!p)return;clearTimeout(p.timer);jobs.delete(msg.requestId);
         if(msg.error)p.reject(new Error('Drive enqueue failed'));else p.resolve(msg.type==='drive:retried'?{retried:Number.isSafeInteger(msg.result?.retried)?msg.result.retried:0}:{queued:true,jobId:msg.result?.jobId});}
@@ -75,8 +75,8 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:document-statuses',requestId,nodeIds});
     });},
     windowsPreview(action,input) {return new Promise((resolve,reject)=> {
-      if(!['catalog','hydrate','upload','shell-metadata'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
-      const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Preview timeout'));},action==='catalog'?300000:60000);
+      if(!['catalog','hydrate','upload','shellMetadata','shell-metadata'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
+      const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Preview timeout'));},['catalog','shellMetadata','shell-metadata'].includes(action)?300000:60000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:windows-preview',requestId,action,input});
     });},
     retryBlocked() {return new Promise((resolve,reject)=> {

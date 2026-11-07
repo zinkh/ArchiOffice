@@ -16,9 +16,9 @@ export function catalogReader(origin:string,tenantId:string,authorize:()=>Promis
     const response=await pinnedRequest(origin+'/api/desktop/v1'+route,{method:'GET',redirect:'manual',timeoutMs:30000,headers:{Authorization:`Bearer ${token}`,'X-Tenant-Id':tenantId}});
     const abort=()=>response.stream.destroy(new Error('Catalog cancelled'));signal?.addEventListener('abort',abort,{once:true});
     try {
-      signal?.throwIfAborted();if(response.status!==200)throw fail();let bytes=0;let text='';const decoder=new TextDecoder();
+      signal?.throwIfAborted();if(response.status!==200)throw Object.assign(fail(),{status:response.status});let bytes=0;let text='';const decoder=new TextDecoder();
       for await(const chunk of response.stream){bytes+=chunk.length;if(bytes>1024*1024)throw fail();text+=decoder.decode(chunk,{stream:true});}
-      text+=decoder.decode();return JSON.parse(text);
+      text+=decoder.decode();try{return JSON.parse(text);}catch{throw fail();}
     }finally{signal?.removeEventListener('abort',abort);response.stream.destroy();}
   };
 }

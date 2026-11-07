@@ -1,3 +1,4 @@
+const { createWindowsShellCatalog } = require('./windowsShellCatalog.cjs');
 const {createShellProjection,createShellPipe,createShellDocumentOpener}=require('./windowsShell.cjs');
 const { createWindowsMultiDrive } = require('./windowsDriveMulti.cjs');
 const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
@@ -372,6 +373,7 @@ function registerDataLocationIpc() {
 
 // Le coffre reste dans le serveur local ; le worker ne reçoit des jetons que par IPC.
 let windowsDrivePreview = null;
+let windowsShellCatalog = null;
 function startDriveAgent() {
   if (!['win32', 'darwin'].includes(process.platform) || !driveTrust.cloudOrigin || !Object.keys(driveTrust.publicKeys).length) return;
   const { cwd } = resolvePaths();
@@ -416,6 +418,11 @@ function startDriveAgent() {
     login:(enabled)=>{if(process.platform==='win32')app.setLoginItemSettings({openAtLogin:enabled});},
     enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   windowsDrivePreview.resume();
+  if(process.platform==='win32') {
+    windowsShellCatalog=createWindowsShellCatalog({drive:windowsDrivePreview,agent:driveAgent,vault:()=>requestVault(serverProcess),
+      namespaceRoot:path.join(app.getPath('userData'),'drive-windows-namespaces'),cacheRoot:path.join(app.getPath('userData'),'drive-shell-metadata')});
+    windowsShellCatalog.start();
+  }
   const shellControl=app.isPackaged?path.join(cwd,'drive-shell','archioffice-shell-control.exe'):path.join(cwd,'native','windows-shell','build','Release','archioffice-shell-control.exe');
   const runShell=(args)=>new Promise((resolve,reject)=>{const child=spawn(shellControl,args,{windowsHide:true,stdio:'ignore'});const timer=setTimeout(()=>{child.kill();reject(new Error('Shell control timeout'));},10000);child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',code=>{clearTimeout(timer);code===0?resolve():reject(new Error('Shell control failed'));});});
   if(process.platform==='win32'&&fs.existsSync(shellControl)) {
@@ -643,6 +650,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  void windowsShellCatalog?.stop();
   const oldShell=driveShell;driveShell=null;oldShell?.pipe.stop();if(oldShell?.address)void oldShell.control(['--clear-runtime',oldShell.address]).catch(()=>{});
   windowsDrivePreview?.shutdown();
   driveAgent?.stop();

@@ -1,3 +1,4 @@
+import { readShellMetadata } from './shellMetadata';
 import { windowsShellMetadata } from './windowsShellMetadata';
 import { queueWindowsEdit, type WindowsEditInput } from './windowsEdits';
 import { buildWindowsCatalog, catalogReader } from './windowsCatalog';
@@ -155,7 +156,7 @@ export function createAgentWorker(config: WorkerConfig) {
         const read=catalogReader(config.origin,expected.tenantId,authorize);const result=await windowsShellMetadata(projectId,route=>read(route,abort.signal));await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
       })();downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
-    windowsPreview(action: 'catalog' | 'hydrate', input: any) {
+    windowsPreview(action: 'catalog' | 'hydrate' | 'shellMetadata', input: any) {
       const task=(async()=> {
         if(stopped)throw new Error('Agent stopped');const ctx=await current();const expected={...ctx.session};
         const authorize=async()=> {
@@ -163,6 +164,15 @@ export function createAgentWorker(config: WorkerConfig) {
           if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)throw new Error('Identity changed');return active.token;
         };
         const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);
+        if(action==='shellMetadata') {
+          if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
+          const read=catalogReader(config.origin,expected.tenantId,authorize);
+          const result=await readShellMetadata(input.projectId,input.nodeIds,route=>read(route,abort.signal)).catch((error:any)=>{
+            if(error.code==='WINDOWS_CATALOG_REFUSED'&&error.status===undefined)error.code='WINDOWS_SHELL_METADATA_REFUSED';
+            throw error;
+          });
+          await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
+        }
         if(action==='catalog') {
           const read=catalogReader(config.origin,expected.tenantId,authorize);
           const entries=await buildWindowsCatalog(input.projectId,route=>read(route,abort.signal),id=>transport.metadata(id,abort.signal));
