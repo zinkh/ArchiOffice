@@ -152,7 +152,7 @@ function createPersistentWindowsDrive(options) {
       return {status:'opened'};
     } catch { return {status:'error'}; }
   }
-  return { start, open, disconnect, resume, shutdown, enableEditing, verify:()=>preview.verify(), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
+  return { availability:()=>preview.availability(),start, open, disconnect, resume, shutdown, enableEditing, verify:()=>preview.verify(), snapshot:async(projectId)=>readSnapshot(await vault(),projectId),
     status:()=>({...preview.status(),letter:'A:',error:lastError,configured}) };
 }
 module.exports = { createPersistentWindowsDrive };

@@ -285,6 +285,31 @@ int wmain(int argc,wchar_t** argv) {
         }
         emit("{\"type\":\"changes\",\"requestId\":\""+request+"\",\"keys\":["+keys+"]}");
       }
+      if(type==L"availability") {
+        auto request=winrt::to_string(message.GetNamedString(L"requestId"));
+        if(request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid availability request");
+        validateRoot(root,rootKey);JsonArray files;
+        for(auto const& entry:entries)if(!entry.folder) {
+          JsonObject item;item.SetNamedValue(L"key",JsonValue::CreateStringValue(winrt::to_hstring(entry.key)));
+          item.SetNamedValue(L"available",JsonValue::CreateNullValue());HANDLE handle=INVALID_HANDLE_VALUE;
+          try {
+            auto file=root/fs::path(entry.path);validateExisting(file,entry,editable);
+            handle=CreateFileW(file.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+            if(handle==INVALID_HANDLE_VALUE)winrt::throw_last_error();
+            BY_HANDLE_FILE_INFORMATION attributes{};LARGE_INTEGER size{};
+            if(!GetFileInformationByHandle(handle,&attributes)||!GetFileSizeEx(handle,&size))winrt::throw_last_error();
+            alignas(CF_PLACEHOLDER_STANDARD_INFO) BYTE buffer[sizeof(CF_PLACEHOLDER_STANDARD_INFO)+128]{};DWORD returned=0;
+            auto status=CfGetPlaceholderInfo(handle,CF_PLACEHOLDER_INFO_STANDARD,buffer,sizeof(buffer),&returned);
+            if(SUCCEEDED(status)) {
+              auto info=reinterpret_cast<CF_PLACEHOLDER_STANDARD_INFO*>(buffer);
+              item.SetNamedValue(L"available",JsonValue::CreateBooleanValue(info->OnDiskDataSize.QuadPart>=size.QuadPart));
+            }else if(editable&&!(attributes.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT))item.SetNamedValue(L"available",JsonValue::CreateBooleanValue(true));
+          }catch(...){}
+          if(handle!=INVALID_HANDLE_VALUE)CloseHandle(handle);files.Append(item);
+        }
+        JsonObject reply;reply.SetNamedValue(L"type",JsonValue::CreateStringValue(L"availability"));reply.SetNamedValue(L"requestId",JsonValue::CreateStringValue(winrt::to_hstring(request)));reply.SetNamedValue(L"files",files);
+        emit(winrt::to_string(reply.Stringify()));
+      }
       if(type==L"verify") {
         auto request=winrt::to_string(message.GetNamedString(L"requestId"));
         if(request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid verification request");

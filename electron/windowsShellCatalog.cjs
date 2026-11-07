@@ -110,6 +110,15 @@ function createWindowsShellCatalog({drive,agent,vault,namespaceRoot,cacheRoot,no
  }
  function start(){if(timer||stopped)return;void tick();timer=setInterval(()=>void tick(),10000);timer.unref();}
  async function stop(){stopped=true;clearInterval(timer);timer=null;await clear();}
- return {start,stop,tick,settle:()=>Promise.allSettled([...pending.values()])};
+ async function business(identity,snapshot) {
+  if(stopped||!same(await vault(),identity))throw fail();
+  const active=await drive.shellSnapshots();
+  if(!same(active.identity,identity)||!active.snapshots.some(s=>s.projectId===snapshot.projectId&&s.rootKey===snapshot.rootKey))throw fail();
+  const nodeIds=snapshot.catalog.filter(e=>!e.folder).map(e=>e.meta.nodeId);
+  const entry=await cached(identity,snapshot.projectId,nodeIds);refresh(identity,snapshot.projectId,nodeIds,entry.key);
+  if(stopped||!same(await vault(),identity))throw fail();
+  return entry.data?{...entry.data,identity,observedAt:entry.observedAt}:null;
+ }
+ return {business,start,stop,tick,settle:()=>Promise.allSettled([...pending.values()])};
 }
 module.exports={createWindowsShellCatalog,validateBusiness};

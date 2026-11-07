@@ -2,7 +2,7 @@ import crypto from 'node:crypto';import fs from 'node:fs/promises';import path f
 import {windowsShellMetadata} from '../server/desktop/agent/windowsShellMetadata';
 const {createShellProjection,createShellPipe,createShellDocumentOpener}=createRequire(import.meta.url)('../electron/windowsShell.cjs');
 const identity={userId:'u',tenantId:'t',deviceId:'d'};let temp:string,file:string,saved:any,options:any,projection:any,pipe:any;
-beforeEach(async()=>{temp=await fs.mkdtemp(path.join(os.tmpdir(),'drive-shell-'));const folder=path.join(temp,'project');await fs.mkdir(folder);file=path.join(folder,'_Plan.pdf');await fs.writeFile(file,'hello');saved={identity,projectId:'p',rootKey:'c'.repeat(64),directory:folder,catalog:[{path:'_VIP-TC-123456789abc',key:'d'.repeat(64),folder:true},{path:'_Plan.pdf',key:'a'.repeat(64),folder:false,meta:{nodeId:'doc:p',name:'Plan.pdf',version:2}}]};options={root:temp,vault:vi.fn().mockResolvedValue(identity),drive:{shellSnapshot:vi.fn(async()=>({identity,projects:[saved]}))},agent:{windowsPreview:vi.fn().mockResolvedValue({identity,projectName:'VIP-TC',files:[{nodeId:'doc:p',version:2,phase:'PRO',indice:'C',status:'approuve'}]})},shell:{openPath:vi.fn().mockResolvedValue('')},openDocument:vi.fn()};projection=createShellProjection(options);});
+beforeEach(async()=>{temp=await fs.mkdtemp(path.join(os.tmpdir(),'drive-shell-'));const folder=path.join(temp,'project');await fs.mkdir(folder);file=path.join(folder,'_Plan.pdf');await fs.writeFile(file,'hello');saved={identity,projectId:'p',rootKey:'c'.repeat(64),directory:folder,catalog:[{path:'_VIP-TC-123456789abc',key:'d'.repeat(64),folder:true},{path:'_Plan.pdf',key:'a'.repeat(64),folder:false,meta:{nodeId:'doc:p',name:'Plan.pdf',version:2}}]};options={root:temp,vault:vi.fn().mockResolvedValue(identity),drive:{shellSnapshot:vi.fn(async()=>({identity,projects:[saved]}))},agent:{windowsPreview:vi.fn().mockResolvedValue({identity,projectId:'p',name:'VIP-TC',documents:[{nodeId:'doc:p',projectId:'p',name:'Plan.pdf',remoteVersion:2,phase:'PRO',documentType:'PLAN',indice:'C',status:'approuve',permissions:{read:true,write:false,delete:false},readOnlyReason:'approved'}]})},shell:{openPath:vi.fn().mockResolvedValue('')},openDocument:vi.fn()};projection=createShellProjection(options);});
 afterEach(async()=>{pipe?.stop();pipe=null;await fs.rm(temp,{recursive:true,force:true});});
 const catalog=()=>projection.command('catalog',{});
 async function reference(){const result=await catalog();return {projectId:'p',key:'a'.repeat(64),revision:result.projects[0].revision};}
@@ -22,7 +22,7 @@ it('reads business metadata through a bounded project tree without file download
 });
 
 it('never attaches business properties from a different file version',async()=>{
- options.agent.windowsPreview.mockResolvedValue({identity,projectName:'VIP-TC',files:[{nodeId:'doc:p',version:3,phase:'APD',indice:'Z',status:'perime'}]});
+ options.agent.windowsPreview.mockResolvedValue({identity,projectId:'p',name:'VIP-TC',documents:[{nodeId:'doc:p',projectId:'p',name:'Plan.pdf',remoteVersion:3,phase:'APD',documentType:'PLAN',indice:'Z',status:'perime',permissions:{read:true,write:true,delete:false},readOnlyReason:null}]});
  await catalog();await new Promise(resolve=>setImmediate(resolve));expect((await catalog()).projects[0].rows[0]).toMatchObject({version:2,indice:'',status:''});
 });
 it('refuses executable files even when their opaque reference belongs to the mounted catalogue',async()=>{
@@ -43,4 +43,31 @@ it('coalesces creation of a missing desktop window',async()=>{
  let target:any=null;const window={isDestroyed:()=>false,isMinimized:()=>false,show:vi.fn(),focus:vi.fn(),loadURL:vi.fn()};
  const showWindow=vi.fn(async()=>{await new Promise(resolve=>setImmediate(resolve));target=window;});
  const open=createShellDocumentOpener({getWindow:()=>target,showWindow,origin:'http://127.0.0.1:3130'});await Promise.all([open({projectId:'p',documentId:'d'}),open({projectId:'p',documentId:'e'})]);expect(showWindow).toHaveBeenCalledOnce();expect(window.loadURL).toHaveBeenCalledTimes(2);
+});
+
+it('distinguishes business type, unclassified metadata, local content and conflicts',async()=>{
+ options.drive.shellAvailability=vi.fn(async()=>({identity,rootKey:saved.rootKey,files:[{key:'a'.repeat(64),available:true}]}));
+ options.agent.documentStatuses=vi.fn(async()=>({identity,documents:[{nodeId:'doc:p',state:'conflict'}]}));
+ await catalog();await new Promise(resolve=>setImmediate(resolve));let result=await catalog();
+ expect(result.projects[0].rows[0]).toMatchObject({type:'PLAN',fileType:'PDF',businessKnown:true,unclassified:false,available:true,transferState:'conflict'});
+ const response=await options.agent.windowsPreview();response.documents[0].documentType=null;options.agent.windowsPreview.mockResolvedValue(response);
+ projection=createShellProjection(options);await catalog();await new Promise(resolve=>setImmediate(resolve));result=await catalog();
+ expect(result.projects[0].rows[0]).toMatchObject({type:'',businessKnown:true,unclassified:true});
+});
+it('never treats an unavailable status or metadata as a conflict or an unclassified document',async()=>{
+ options.agent.windowsPreview.mockRejectedValue(new Error('offline'));await catalog();await new Promise(resolve=>setImmediate(resolve));const row=(await catalog()).projects[0].rows[0];
+ expect(row).toMatchObject({available:null,transferState:'',businessKnown:false,unclassified:false,type:'',fileType:'PDF'});
+});
+it('rejects a generation changed while availability was being read',async()=>{
+ options.drive.shellAvailability=vi.fn(async()=>{saved={...saved,rootKey:'e'.repeat(64)};return {identity,rootKey:saved.rootKey,files:[]};});
+ await expect(catalog()).rejects.toThrow('Catalogue changed');
+});
+it('reuses the shared business cache rather than starting a parallel cloud enrichment',async()=>{
+ const value=await options.agent.windowsPreview();options.agent.windowsPreview.mockClear();options.businessCatalog=vi.fn(async()=>value);
+ projection=createShellProjection(options);expect((await catalog()).projects[0].rows[0]).toMatchObject({type:'PLAN',businessKnown:true});
+ expect(options.businessCatalog).toHaveBeenCalledWith(identity,saved);expect(options.agent.windowsPreview).not.toHaveBeenCalled();
+});
+it('dates shared metadata and marks an older offline observation without inventing a new classification',async()=>{
+ const value=await options.agent.windowsPreview();options.now=()=>1800000000000;value.observedAt=1800000000000-120000;options.businessCatalog=async()=>value;
+ projection=createShellProjection(options);expect((await catalog()).projects[0].rows[0]).toMatchObject({observedAt:value.observedAt,metadataStale:true,type:'PLAN',unclassified:false});
 });
