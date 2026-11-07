@@ -2,12 +2,14 @@
 // No account, token, catalogue, sync state or document copy lives in this DLL.
 #include <windows.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <shlwapi.h>
 #include <commctrl.h>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <new>
+#include <cwchar>
 
 static const CLSID CLSID_Drive = {0x67b0f7be,0x5f65,0x4aef,{0x9d,0x4b,0xb1,0x33,0xa9,0x91,0xd9,0x11}};
 static const wchar_t* ClassId = L"{67B0F7BE-5F65-4AEF-9D4B-B133A991D911}";
@@ -20,6 +22,7 @@ class View final : public IShellView {
     HWND window = nullptr, navigation = nullptr, list = nullptr, properties = nullptr, location = nullptr;
     IShellBrowser* browser = nullptr;
     HFONT font = nullptr;
+    wchar_t windowClass[100]{};
     std::wstring directory = L"A:\\";
     std::vector<Entry> entries;
     int left = 190, right = 290, drag = 0;
@@ -28,8 +31,8 @@ class View final : public IShellView {
         RECT r{}; GetClientRect(window, &r);
         const int gap = scale(6), bar = scale(38);
         // Keep all panes reachable in narrow Explorer windows, with scrollable text/list.
-        int l = std::min(scale(left), std::max(60, r.right / 4));
-        int p = std::min(scale(right), std::max(80, r.right / 3));
+        int l = std::min(scale(left), std::max(60, static_cast<int>(r.right) / 4));
+        int p = std::min(scale(right), std::max(80, static_cast<int>(r.right) / 3));
         MoveWindow(location, scale(8), scale(5), std::max(0L,r.right-scale(16)),bar-scale(10),TRUE);
         MoveWindow(navigation,0,bar,l,std::max(0L,r.bottom-bar),TRUE);
         MoveWindow(list,l+gap,bar,std::max(0L,r.right-l-p-2*gap),std::max(0L,r.bottom-bar),TRUE);
@@ -168,8 +171,8 @@ class View final : public IShellView {
         return DefWindowProcW(hwnd,msg,wp,lp);
     }
 public:
-    View(){InterlockedIncrement(&objects);}
-    ~View(){DestroyViewWindow();if(browser)browser->Release();if(font)DeleteObject(font);InterlockedDecrement(&objects);}
+    View(){std::swprintf(windowClass,100,L"ArchiOfficeDrivePrototypeView-%p",static_cast<void*>(module));InterlockedIncrement(&objects);}
+    ~View(){DestroyViewWindow();InterlockedDecrement(&objects);}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out) override {
         if(!out)return E_POINTER; *out=nullptr;
         if(id==IID_IUnknown||id==IID_IOleWindow||id==IID_IShellView)*out=static_cast<IShellView*>(this);
@@ -202,9 +205,14 @@ public:
         HWND parent=nullptr;HRESULT hr=host->GetWindow(&parent);if(FAILED(hr))return hr;
         browser=host;browser->AddRef();
         INITCOMMONCONTROLSEX init{sizeof(init),ICC_LISTVIEW_CLASSES};InitCommonControlsEx(&init);
-        WNDCLASSW cls{};cls.lpfnWndProc=procedure;cls.hInstance=module;cls.lpszClassName=L"ArchiOfficeDrivePrototypeView";cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);RegisterClassW(&cls);
+        WNDCLASSW cls{};cls.lpfnWndProc=procedure;cls.hInstance=module;cls.lpszClassName=windowClass;cls.hCursor=LoadCursor(nullptr,IDC_ARROW);cls.hbrBackground=GetSysColorBrush(COLOR_BTNFACE);if(!RegisterClassW(&cls)) {
+            DWORD error=GetLastError();WNDCLASSW registered{};
+            if(error!=ERROR_CLASS_ALREADY_EXISTS || !GetClassInfoW(module,windowClass,&registered) || registered.lpfnWndProc!=procedure) {
+                DestroyViewWindow();return HRESULT_FROM_WIN32(error);
+            }
+        }
         window=CreateWindowExW(0,cls.lpszClassName,L"ArchiOffice Drive",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,parent,nullptr,module,this);
-        if(!window)return HRESULT_FROM_WIN32(GetLastError());
+        if(!window){DWORD error=GetLastError();DestroyViewWindow();return HRESULT_FROM_WIN32(error);}
         location=CreateWindowExW(0,L"STATIC",L"ArchiOffice Drive",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,0,0,0,0,window,nullptr,module,nullptr);
         navigation=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"Navigation",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LBS_NOTIFY,0,0,0,0,window,reinterpret_cast<HMENU>(101),module,nullptr);
         for(auto label:{L"Projets dans A:",L"Dossier parent",L"Actualiser (F5)"})SendMessageW(navigation,LB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
@@ -217,7 +225,16 @@ public:
         int column=0;for(auto label:{L"Document",L"Nature",L"Taille (octets)"}){LVCOLUMNW c{};c.mask=LVCF_TEXT|LVCF_WIDTH;c.pszText=const_cast<wchar_t*>(label);c.cx=scale(column==0?280:130);ListView_InsertColumn(list,column++,&c);}
         layout();load();*out=window;return S_OK;
     }
-    HRESULT STDMETHODCALLTYPE DestroyViewWindow() override{if(window){DestroyWindow(window);window=nullptr;}return S_OK;}
+    HRESULT STDMETHODCALLTYPE DestroyViewWindow() override{
+        if(window){DestroyWindow(window);window=nullptr;}
+        navigation=list=properties=location=nullptr;
+        // Fails harmlessly while another view of this module still has a window;
+        // the final window unregisters it before the final COM object is released.
+        UnregisterClassW(windowClass,module);
+        if(font){DeleteObject(font);font=nullptr;}
+        if(browser){auto old=browser;browser=nullptr;old->Release();}
+        return S_OK;
+    }
     HRESULT STDMETHODCALLTYPE GetCurrentInfo(LPFOLDERSETTINGS out) override{if(!out)return E_POINTER;out->ViewMode=FVM_DETAILS;out->fFlags=FWF_SINGLESEL;return S_OK;}
     HRESULT STDMETHODCALLTYPE AddPropertySheetPages(DWORD,LPFNSVADDPROPSHEETPAGE,LPARAM) override{return E_NOTIMPL;}
     HRESULT STDMETHODCALLTYPE SaveViewState() override{return S_OK;}
@@ -225,11 +242,11 @@ public:
     HRESULT STDMETHODCALLTYPE GetItemObject(UINT,REFIID,void** out) override{if(out)*out=nullptr;return E_NOINTERFACE;}
 };
 
-class Folder final : public IShellFolder, public IPersistFolder2 {
+class DriveFolder final : public IShellFolder, public IPersistFolder2 {
     LONG refs=1; PIDLIST_ABSOLUTE pidl=nullptr;
 public:
-    Folder(){InterlockedIncrement(&objects);}
-    ~Folder(){CoTaskMemFree(pidl);InterlockedDecrement(&objects);}
+    DriveFolder(){InterlockedIncrement(&objects);}
+    ~DriveFolder(){CoTaskMemFree(pidl);InterlockedDecrement(&objects);}
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out) override {
         if(!out)return E_POINTER;*out=nullptr;
         if(id==IID_IUnknown||id==IID_IShellFolder)*out=static_cast<IShellFolder*>(this);
@@ -269,7 +286,7 @@ public:
     ULONG STDMETHODCALLTYPE Release() override{ULONG n=InterlockedDecrement(&refs);if(!n)delete this;return n;}
     HRESULT STDMETHODCALLTYPE CreateInstance(IUnknown* outer,REFIID id,void** out) override{
         if(!out)return E_POINTER;*out=nullptr;if(outer)return CLASS_E_NOAGGREGATION;
-        auto folder=new(std::nothrow) Folder;if(!folder)return E_OUTOFMEMORY;auto hr=folder->QueryInterface(id,out);folder->Release();return hr;
+        auto folder=new(std::nothrow) DriveFolder;if(!folder)return E_OUTOFMEMORY;auto hr=folder->QueryInterface(id,out);folder->Release();return hr;
     }
     HRESULT STDMETHODCALLTYPE LockServer(BOOL lock) override{if(lock)InterlockedIncrement(&objects);else InterlockedDecrement(&objects);return S_OK;}
 };

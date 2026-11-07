@@ -8,10 +8,11 @@ static void require(bool condition,const char* message){if(!condition)throw std:
 class Host final:public IShellBrowser {
 public:
  HWND window;
+ LONG refs=1;
  explicit Host(HWND hwnd):window(hwnd){}
  HRESULT STDMETHODCALLTYPE QueryInterface(REFIID id,void** out) override{*out=nullptr;if(id!=IID_IUnknown&&id!=IID_IOleWindow&&id!=IID_IShellBrowser)return E_NOINTERFACE;*out=this;return S_OK;}
- ULONG STDMETHODCALLTYPE AddRef() override{return 2;}
- ULONG STDMETHODCALLTYPE Release() override{return 1;}
+ ULONG STDMETHODCALLTYPE AddRef() override{return ++refs;}
+ ULONG STDMETHODCALLTYPE Release() override{return --refs;}
  HRESULT STDMETHODCALLTYPE GetWindow(HWND* out) override{*out=window;return S_OK;}
  HRESULT STDMETHODCALLTYPE ContextSensitiveHelp(BOOL) override{return E_NOTIMPL;}
  HRESULT STDMETHODCALLTYPE InsertMenusSB(HMENU,LPOLEMENUGROUPWIDTHS) override{return E_NOTIMPL;}
@@ -52,8 +53,19 @@ int wmain(int argc,wchar_t** argv){
   require(SUCCEEDED(view->UIActivate(SVUIA_ACTIVATE_FOCUS)),"activate");require(GetFocus()==list,"document focus");
   MSG tab{};tab.message=WM_KEYDOWN;tab.wParam=VK_TAB;require(view->TranslateAccelerator(&tab)==S_OK,"tab navigation");require(GetFocus()!=list,"focus advanced");
   MSG refresh{};refresh.message=WM_KEYDOWN;refresh.wParam=VK_F5;require(view->TranslateAccelerator(&refresh)==S_OK,"refresh");
-  require(SUCCEEDED(view->DestroyViewWindow())&&!IsWindow(window),"window destruction");view->Release();DestroyWindow(parent);
-  require(unload()==S_OK,"no leaked COM objects");FreeLibrary(dll);CoUninitialize();
+  require(SUCCEEDED(view->DestroyViewWindow())&&!IsWindow(window),"window destruction");require(host.refs==1,"browser released on destruction");
+  require(SUCCEEDED(view->CreateViewWindow(nullptr,&settings,&host,&bounds,&window))&&IsWindow(window),"recreate same view");
+  require(host.refs==2,"browser retained once");
+  require(SUCCEEDED(view->DestroyViewWindow())&&host.refs==1,"second destruction");
+  view->Release();DestroyWindow(parent);
+  require(unload()==S_OK,"no leaked COM objects");
+  wchar_t className[100]{};swprintf_s(className,L"ArchiOfficeDrivePrototypeView-%p",static_cast<void*>(dll));
+  WNDCLASSW registered{};require(!GetClassInfoW(dll,className,&registered),"window class removed before unload");
+  FreeLibrary(dll);
+  dll=LoadLibraryW(argv[1]);require(dll!=nullptr,"reload DLL");
+  get=reinterpret_cast<HRESULT(__stdcall*)(REFCLSID,REFIID,void**)>(GetProcAddress(dll,"DllGetClassObject"));
+  factory=nullptr;require(SUCCEEDED(get(ClassId,IID_IClassFactory,reinterpret_cast<void**>(&factory))),"factory after reload");factory->Release();
+  FreeLibrary(dll);CoUninitialize();
   std::cout<<"IShellView: factory, persistence, three panes, resizing, keyboard and cleanup passed\n";return 0;
  } catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
 }
