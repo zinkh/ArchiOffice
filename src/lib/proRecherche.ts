@@ -177,6 +177,42 @@ export function rechercherDansDocument(doc: DocumentRecherche | null | undefined
     });
 }
 
+/**
+ * Cible (lot, chapitre ou article) à partir de sa position dans l'arbre, pour
+ * l'ouvrir dans un autre atelier sans passer par la recherche. Null si la
+ * position n'existe plus.
+ */
+export function trouvaillePourPosition(
+  doc: DocumentRecherche | null | undefined,
+  pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>,
+): Trouvaille | null {
+  const lot = doc?.lots[pos.lotIdx];
+  if (!lot) return null;
+  if (pos.kind === 'lot') {
+    return { id: lot.id, kind: 'lot', lotIdx: pos.lotIdx, lotId: lot.id, ancetresIds: [], numero: lot.numero, libelle: lot.titre, contexte: 'Lot', champ: 'designation' };
+  }
+  const chap = lot.chapitres[pos.chapIdx ?? -1];
+  if (!chap) return null;
+  const contexte = `${lot.numero} ${lot.titre}`.trim();
+  if (pos.kind === 'chapitre') {
+    return { id: chap.id, kind: 'chapitre', lotIdx: pos.lotIdx, chapIdx: pos.chapIdx, lotId: lot.id, chapId: chap.id, ancetresIds: [], numero: chap.numero, libelle: chap.titre, contexte, champ: 'designation' };
+  }
+  const chemin = pos.lignePath ?? [];
+  const ancetres: string[] = [];
+  let niveau: Ligne[] = chap.lignes;
+  let ligne: Ligne | undefined;
+  for (let i = 0; i < chemin.length; i++) {
+    ligne = niveau[chemin[i]];
+    if (!ligne) return null;
+    if (i < chemin.length - 1) { ancetres.push(ligne.id); niveau = ligne.children ?? []; }
+  }
+  if (!ligne) return null;
+  return {
+    id: ligne.id, kind: 'ligne', lotIdx: pos.lotIdx, chapIdx: pos.chapIdx, lignePath: chemin, lotId: lot.id, chapId: chap.id,
+    ancetresIds: ancetres, numero: ligne.numero, libelle: ligne.designation, contexte: `${contexte} › ${chap.numero} ${chap.titre}`.trim(), champ: 'designation',
+  };
+}
+
 /** Clé de ligne positionnelle (celle de `rowKey`, treeOps) d'une trouvaille : lot, chapitre ou article. */
 export const clePourCible = (c: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>): string =>
   c.kind === 'lot' ? `lot-${c.lotIdx}`

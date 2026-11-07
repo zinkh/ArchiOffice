@@ -441,6 +441,7 @@ export default {
   "pro_description_label": "Description technique de l'ouvrage",
   "pro_description_placeholder": "Décrivez l'ouvrage : matériaux, mise en œuvre, normes, performances attendues…",
   "pro_description_hint": "Ce texte est repris dans le CCTP. Ctrl+Entrée pour enregistrer.",
+  "pro_description_open_cctp": "Ouvrir dans le CCTP",
   "pro_description_save": "Enregistrer",
   "pro_description_edit": "Description de l'ouvrage",
   "pro_description_has": "Description saisie, cliquer pour la modifier",
