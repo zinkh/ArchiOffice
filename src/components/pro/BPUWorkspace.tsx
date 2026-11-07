@@ -33,6 +33,8 @@ import {
 } from './treeOps';
 import { montantEnLettres } from '../../lib/numberToFrenchWords';
 import { PriceLibraryPanel } from './PriceLibraryPanel';
+import { EditableCell as CelluleArticle } from './EditableCell';
+import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { formatCurrency } from '../../lib/utils';
@@ -423,6 +425,26 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
       mutateLots(lots => lots.map((l, i) => i === li ? { ...l, [field]: raw } : l));
     }
     setEditingCell(null);
+  };
+
+  /**
+   * Choisir un ouvrage de la bibliothèque dans la désignation (BPU et DQE, même document) : titre, lien avec la
+   * bibliothèque, et unité / prix / description seulement s'ils sont vides sur la ligne.
+   */
+  const appliquerArticleBibliotheque = (rKey: string, article: ArticleBibliotheque) => {
+    const parsed = parseRowKey(rKey);
+    if (parsed?.kind !== 'ligne') return;
+    const { lotIdx: li, chapIdx: ci, lignePath } = parsed;
+    mutateLots(lots => {
+      const next = [...lots];
+      const lot = { ...next[li] };
+      const chap = { ...lot.chapitres[ci] };
+      chap.lignes = mutateLigneAtPath([...chap.lignes], lignePath, (l: BPULigne) => ({ ...l, ...patchDepuisArticle(l, article) }));
+      lot.chapitres = [...lot.chapitres.slice(0, ci), chap, ...lot.chapitres.slice(ci + 1)];
+      next[li] = recomputeLot(lot);
+      return next;
+    });
+    marquerUtilise(article.id);
   };
 
   /** Applique un correctif à un article désigné par sa clé de ligne. */
@@ -1088,7 +1110,13 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                     <td className="px-2 py-0.5 text-xs text-zinc-400"><EditableCell rKey={rKey} field="numero" value={l.numero} /></td>
                     <td className="px-2 py-0.5">
                       <div className="flex items-center gap-2">
-                        <div className="flex-1 min-w-0"><EditableCell rKey={rKey} field="designation" value={l.designation} /></div>
+                        <div className="flex-1 min-w-0">
+                          <CelluleArticle
+                            rKey={rKey} field="designation" value={l.designation}
+                            editingCell={editingCell} onStartEdit={startEdit} onCommit={commitEdit} onCancel={cancelEdit}
+                            articles={{ onChoisir: a => appliquerArticleBibliotheque(rKey, a) }}
+                          />
+                        </div>
                         {nature !== 'base' && (
                           <span className={`px-1.5 py-0.5 rounded text-[0.6875rem] font-semibold shrink-0 ${NATURE_COLORS[nature]}`}>
                             {NATURE_LABELS[nature]}
