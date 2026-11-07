@@ -71,3 +71,14 @@ it('dates shared metadata and marks an older offline observation without inventi
  const value=await options.agent.windowsPreview();options.now=()=>1800000000000;value.observedAt=1800000000000-120000;options.businessCatalog=async()=>value;
  projection=createShellProjection(options);expect((await catalog()).projects[0].rows[0]).toMatchObject({observedAt:value.observedAt,metadataStale:true,type:'PLAN',unclassified:false});
 });
+it('binds preview bytes to the selected canonical generation and refuses a late generation change',async()=>{
+ options.businessCatalog=async()=>null;options.renderPreview=vi.fn().mockResolvedValue({status:'preview',width:1,height:1,pages:1,page:0,pixels:'AAAAAA=='});projection=createShellProjection(options);const ref=await reference();
+ expect(await projection.command('preview',{...ref,page:0})).toMatchObject({status:'preview'});expect(options.renderPreview).toHaveBeenCalledWith(file,0,undefined);
+ options.renderPreview.mockImplementation(async()=>{saved={...saved,rootKey:'e'.repeat(64)};return {status:'preview'};});await expect(projection.command('preview',ref)).rejects.toThrow('Stale generation');
+});
+it('returns only real version history, dates its cache, and invalidates it after a known denial',async()=>{
+ options.businessCatalog=async()=>null;options.agent.windowsPreview.mockResolvedValue({identity,versions:[{version:2,size:5,uploadedAt:'2026-11-07T10:00:00Z',description:'Réelle'}],total:1});projection=createShellProjection(options);const ref=await reference();
+ expect(await projection.command('versions',ref)).toMatchObject({status:'versions',stale:false,total:1});options.agent.windowsPreview.mockRejectedValue(new Error('offline'));
+ expect(await projection.command('versions',ref)).toMatchObject({status:'versions',stale:true,total:1});options.agent.windowsPreview.mockRejectedValue({status:403});await expect(projection.command('versions',ref)).rejects.toBeDefined();
+ options.agent.windowsPreview.mockRejectedValue(new Error('offline'));await expect(projection.command('versions',ref)).rejects.toThrow('offline');
+});

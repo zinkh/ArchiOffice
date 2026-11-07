@@ -52,10 +52,10 @@ process.on('message',async (msg:any)=> {
     try { const result=await worker.documentStatuses(msg.nodeIds);send({type:'drive:document-statuses-result',requestId:msg.requestId,result}); }
     catch {send({type:'drive:document-statuses-result',requestId:msg.requestId,error:{code:'DRIVE_STATUS_UNAVAILABLE'}});}
   }
-  if(msg?.type==='drive:windows-preview' && worker && ['catalog','hydrate','upload','shellMetadata','shell-metadata'].includes(msg.action) && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
+  if(msg?.type==='drive:windows-preview' && worker && ['catalog','hydrate','upload','shellMetadata','shellVersions','shell-metadata'].includes(msg.action) && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
     try {const result=msg.action==='shell-metadata'?await worker.shellMetadata(msg.input?.projectId):msg.action==='upload'?await worker.uploadWindowsEdit(msg.input):await worker.windowsPreview(msg.action,msg.input);send({type:'drive:working-result',requestId:msg.requestId,result});if(msg.action==='upload')void worker.tick();}
     catch(e:any) {send({type:'drive:working-result',requestId:msg.requestId,error:{
-      code:msg.action==='shellMetadata'&&e.code==='WINDOWS_SHELL_METADATA_REFUSED'?'WINDOWS_SHELL_METADATA_REFUSED':'WINDOWS_PREVIEW_REFUSED',
+      code:['shellMetadata','shellVersions'].includes(msg.action)&&e.code==='WINDOWS_SHELL_METADATA_REFUSED'?'WINDOWS_SHELL_METADATA_REFUSED':'WINDOWS_PREVIEW_REFUSED',
       ...([401,402,403,404].includes(e.status)?{status:e.status}:{})}});}
   }
   if(msg?.type==='drive:stop')void stop();
