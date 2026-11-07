@@ -25,7 +25,7 @@ function makeDocument(lotA: string, lotB: string) {
               id: 'lig-a1', numero: '1.1', designation: 'Semelles', unite: 'm3', quantite: 27.6, prixUnitaire: 100, prixTotal: PRIX_TOTAL, type: 'ouvrage', cctpDescription: 'Béton',
               articleTypeId: 'bibliotheque-secrete', genereParIa: 'llm', marqueur: { statut: 'en_cours' }, quantiteFormule: '=10+20',
               quantiteDetails: [
-                { id: 'q1', libelle: 'Façade Est', expression: '10', quantite: 10, note: 'note interne', batimentId: 'bat-secret' },
+                { id: 'q1', libelle: 'Façade Est', expression: '10', quantite: 10, note: 'note interne', batimentId: 'DX', phaseId: 'phase-secret' },
                 { id: 'q2', libelle: 'Façade Ouest', expression: '=4*5', quantite: 20 },
                 { id: 'q3', niveau: 'R+1', local: 'Chambre 2', quantite: -2.4 },
               ],
@@ -88,7 +88,7 @@ describe('vue CCTP : chiffres, fonctions pures', () => {
     const a1 = lignes(v, 0).find(l => l.id === 'lig-a1');
     expect(a1).toMatchObject({ quantite: 27.6, prixUnitaire: 100, prixTotal: PRIX_TOTAL, unite: 'm3' });
     expect(a1.quantiteDetails).toEqual([
-      { id: 'q1', libelle: 'Façade Est', expression: '10', quantite: 10, niveau: null, local: null },
+      { id: 'q1', libelle: 'Façade Est', expression: '10', quantite: 10, niveau: null, local: null }, // pas de bâtiment : l'article n'est pas réparti par bâtiment
       { id: 'q2', libelle: 'Façade Ouest', expression: '=4*5', quantite: 20, niveau: null, local: null },
       { id: 'q3', libelle: null, expression: null, quantite: -2.4, niveau: 'R+1', local: 'Chambre 2' },
     ]);
@@ -99,7 +99,7 @@ describe('vue CCTP : chiffres, fonctions pures', () => {
 
   it('ne laisse fuir aucun champ interne, ni totaux du document', () => {
     const json = JSON.stringify(guestDocumentView(doc, 'cctp', new Set(['A']), new Set(['A'])));
-    for (const interne of ['bibliotheque-secrete', 'llm', 'note interne', 'bat-secret', 'marqueur', 'incomplet', '=10+20', 'totalHT', '777777', 'quantiteFormule', 'articleTypeId']) {
+    for (const interne of ['bibliotheque-secrete', 'llm', 'note interne', 'phase-secret', 'marqueur', 'incomplet', '=10+20', 'totalHT', '777777', 'quantiteFormule', 'articleTypeId']) {
       expect(json, interne).not.toContain(interne);
     }
   });
@@ -126,7 +126,7 @@ describe('vue CCTP : chiffres, fonctions pures', () => {
     const a1 = lignes(sans, 0).find(l => l.id === 'lig-a1');
     expect(a1.quantiteDetails).toHaveLength(3);
     expect(JSON.stringify(sans)).not.toContain('note interne');
-    expect(JSON.stringify(sans)).not.toContain('bat-secret');
+    expect(JSON.stringify(sans)).not.toContain('phase-secret');
   });
 });
 

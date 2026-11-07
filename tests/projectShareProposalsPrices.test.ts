@@ -111,7 +111,7 @@ describe('chiffres : fonctions pures', () => {
     expect(blockedEdit(node('lig-a3'), 'prixUnitaire')).toBeNull();
     expect(blockedEdit(node('lig-a3'), 'quantite')).toBeNull();
     expect(blockedEdit(node('lig-a3'), 'unite')).toBeNull();
-    expect(blockedEdit(node('lig-a4'), 'quantite')).toContain('bâtiment');
+    expect(blockedEdit(node('lig-a4'), 'quantite')).toContain('bâtiment'); // sa quantité seule : par le métré par bâtiment
     expect(blockedEdit(node('lig-a5'), 'quantite')).toContain('article chiffré');
     // Un article qui a un métré : sa quantité se modifie par le métré ; son prix et son métré, eux, se proposent.
     const avecMetre = { type: 'ouvrage', quantiteDetails: [{ id: 'q', quantite: 1 }] };
@@ -120,7 +120,7 @@ describe('chiffres : fonctions pures', () => {
     expect(blockedEdit(avecMetre, 'metre')).toBeNull();
     // Le prix ne dépend pas de la composition de la quantité (bâtiments), le métré si.
     expect(blockedEdit(node('lig-a4'), 'prixUnitaire')).toBeNull();
-    expect(blockedEdit(node('lig-a4'), 'metre')).toContain('bâtiment');
+    expect(blockedEdit(node('lig-a4'), 'metre')).toBeNull(); // un métré par bâtiment se propose (voir projectShareMetreBatiments)
     expect(blockedEdit(node('lig-a5'), 'cctpDescription')).toBeNull(); // les textes n'ont pas ces restrictions
   });
 

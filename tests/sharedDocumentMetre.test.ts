@@ -127,3 +127,58 @@ describe('SharedDocument : chiffres et métré dans le CCTP', () => {
     expect(document.body.textContent).toContain('Limite atteinte');
   });
 });
+
+describe('SharedDocument : métré d\'un article réparti par bâtiment', () => {
+  const VUE_BATIMENTS = {
+    ...VUE,
+    multiBatiments: true,
+    batiments: [{ id: 'b1', code: 'DX', libelle: 'Bâtiment X', ordre: 1 }, { id: 'b2', code: 'DY', libelle: 'Bâtiment Y', ordre: 2 }],
+    lots: [{
+      ...VUE.lots[0],
+      chapitres: [{
+        ...VUE.lots[0].chapitres[0],
+        lignes: [{
+          id: 'a3', numero: '1.3', designation: 'Bardage', unite: 'm²', localisation: null, cctpDescription: null,
+          quantite: 30, prixUnitaire: 10, prixTotal: 300, pourMemoire: false, quantitesBatiments: { b1: 10, b2: 20 },
+          quantiteDetails: [
+            { id: 'q1', libelle: 'Façade Est', expression: '10', quantite: 10, niveau: null, local: null, batimentId: 'b1' },
+            { id: 'q2', libelle: 'Façade Ouest', expression: '=4*5', quantite: 20, niveau: null, local: null, batimentId: 'b2' },
+          ],
+        }],
+      }],
+    }],
+  };
+
+  beforeEach(() => {
+    apiFetch.mockImplementation(async (url: string, options?: { method?: string }) => {
+      if (options?.method === 'POST') return { id: 'p1' };
+      if (url.endsWith('/cctp')) return VUE_BATIMENTS;
+      return [];
+    });
+  });
+
+  it('ouvre le métré en arbre, une branche par bâtiment, et envoie le bâtiment de chaque ligne', async () => {
+    await monter(ECRITURE);
+    await act(async () => { boutons('shared_propose_metre')[0].click(); });
+    expect(document.querySelector('[data-testid="metre-branch-b1"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="metre-branch-b2"]')).not.toBeNull();
+
+    await act(async () => { (document.querySelector('[data-testid="metre-add-b2"]') as HTMLButtonElement).click(); });
+    await saisir(champ('pro_metre_aria_label {"n":3}'), 'Pignon');
+    await saisir(champ('pro_metre_aria_calc {"n":3}'), '5');
+    await act(async () => { boutonDialogue('shared_proposal_send').click(); });
+
+    const corps = JSON.parse(proposalCalls()[0][1].body);
+    expect(JSON.parse(corps.value)).toEqual([
+      { libelle: 'Façade Est', expression: '10', batimentId: 'b1' },
+      { libelle: 'Façade Ouest', expression: '=4*5', batimentId: 'b2' },
+      { libelle: 'Pignon', expression: '5', batimentId: 'b2' },
+    ]);
+  });
+
+  it('la quantité seule d\'un article par bâtiment n\'est pas proposée, le métré oui', async () => {
+    await monter(ECRITURE);
+    expect(boutons('shared_field_quantite')).toHaveLength(0);
+    expect(boutons('shared_propose_metre')).toHaveLength(1);
+  });
+});

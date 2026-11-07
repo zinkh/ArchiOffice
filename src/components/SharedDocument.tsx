@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../lib/api';
 import { texteBrut } from '../lib/cctpRichText';
-import { serialiserMetre } from '../lib/quantites';
+import { batimentsDuMetre, serialiserMetre } from '../lib/quantites';
 import { MetreDialog } from './pro/MetreDialog';
 import type { Ligne as LigneDocument } from '../types/dpgf';
 
@@ -22,12 +22,15 @@ interface Ligne {
   quantite?: number | null; prixUnitaire?: number | null; prixTotal?: number | null;
   pourMemoire?: boolean | null;
   /** Le métré de l'article (lignes libellées dont la somme est la quantité), champs autorisés seulement. */
-  quantiteDetails?: { id: string; libelle: string | null; expression: string | null; quantite: number; niveau: string | null; local: string | null }[];
+  quantiteDetails?: { id: string; libelle: string | null; expression: string | null; quantite: number; niveau: string | null; local: string | null; batimentId?: string | null }[];
+  /** Article réparti par bâtiment : la quantité de chaque bâtiment concerné. */
+  quantitesBatiments?: Record<string, number>;
   children?: Ligne[];
 }
 interface Chapitre { id: string; numero: string | null; titre: string | null; cctpDescription: string | null; lignes: Ligne[] }
 interface LotView { id: string; numero: string | null; titre: string | null; projectLotId: string; chapitres: Chapitre[] }
-interface DocView { titre: string | null; version: string | null; lots: LotView[] }
+interface BatimentView { id: string; code: string; libelle: string | null; ordre: number }
+interface DocView { titre: string | null; version: string | null; lots: LotView[]; multiBatiments?: boolean; batiments?: BatimentView[] }
 interface SharedComment {
   id: string; resourceKind: Mode; lotId: string; targetType: TargetType; targetId: string;
   body: string; authorKind: 'guest' | 'cabinet'; authorName: string | null; createdAt: string | null; resolvedAt: string | null;
@@ -52,6 +55,8 @@ interface NodeCtx {
   mode: Mode; comments: SharedComment[]; canCommentLot: (lot: LotView) => boolean;
   post: (target: { lotId: string; targetType: TargetType; targetId: string; parentId?: string }, body: string) => Promise<void>;
   proposals: Proposal[];
+  /** Les bâtiments de l'opération, quand elle en a plusieurs. */
+  batiments?: BatimentView[];
   /** Droit « écriture » (proposer) sur ce lot pour ce type de document, affaire non archivée. */
   canProposeKind: (lot: LotView, kind: Mode) => boolean;
   propose: (target: { lotId: string; targetType: TargetType; targetId: string; field: string }, value: string) => Promise<void>;
@@ -236,13 +241,17 @@ function ProposeMetre({ ctx, lot, ligne }: { ctx: NodeCtx; lot: LotView; ligne: 
     pourMemoire: !!ligne.pourMemoire, type: 'ouvrage',
     quantiteDetails: (ligne.quantiteDetails ?? []).map(d => ({
       id: d.id, libelle: d.libelle ?? undefined, expression: d.expression ?? undefined, niveau: d.niveau ?? undefined, local: d.local ?? undefined, quantite: d.quantite,
+      ...(d.batimentId ? { batimentId: d.batimentId } : {}),
     })),
+    ...(ligne.quantitesBatiments ? { quantitesBatiments: ligne.quantitesBatiments } : {}),
   };
+  // Un article réparti par bâtiment : le métré se compose par bâtiment, comme dans l'éditeur du cabinet.
+  const batiments = batimentsDuMetre({ multiBatiments: !!ctx.batiments?.length, batiments: ctx.batiments as any }, pour as any);
 
   const send = async (patch: Partial<LigneDocument>) => {
     setError(null);
     try {
-      await ctx.propose({ lotId: lot.projectLotId, targetType: 'ligne', targetId: ligne.id, field: 'metre' }, serialiserMetre(patch.quantiteDetails ?? []));
+      await ctx.propose({ lotId: lot.projectLotId, targetType: 'ligne', targetId: ligne.id, field: 'metre' }, serialiserMetre(patch.quantiteDetails ?? [], { parBatiment: !!batiments?.length }));
       setOpen(false);
     } catch (e: any) {
       // Rien n'est effacé : le métré saisi reste dans la fenêtre, y compris à la limite de propositions.
@@ -276,7 +285,7 @@ function ProposeMetre({ ctx, lot, ligne }: { ctx: NodeCtx; lot: LotView; ligne: 
       )}
       {open && (
         <MetreDialog
-          ligne={pour} onClose={() => setOpen(false)} onSave={send}
+          ligne={pour} batiments={batiments} onClose={() => setOpen(false)} onSave={send}
           applyLabel={t('shared_proposal_send')} erreur={error}
         />
       )}
@@ -386,6 +395,7 @@ export default function SharedDocument({ projectId, mode, grants, archived }: {
 
   const ctx: NodeCtx = {
     mode, comments, proposals,
+    batiments: doc?.multiBatiments ? doc.batiments : undefined,
     canProposeKind: (lot) => !archived && grants.some(g => documentGrant(g) && g.lotId === lot.projectLotId && g.access === 'write'),
     propose: async (target, value) => {
       await apiFetch(`/api/shared/projects/${projectId}/proposals`, { method: 'POST', body: JSON.stringify({ ...target, value }) });
