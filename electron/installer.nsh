@@ -26,6 +26,10 @@
     MessageBox MB_OK|MB_ICONSTOP "Impossible d’installer le runtime Microsoft Visual C++." /SD IDOK
     Abort
   ${EndIf}
+  ${If} $0 == 3010
+  ${OrIf} $0 == 1641
+    SetRebootFlag true
+  ${EndIf}
   DetailPrint "Enregistrement de l’espace documentaire ArchiOffice..."
   ExecWait '"$INSTDIR\resources\drive-shell\archioffice-shell-control.exe" --register-machine' $0
   ${If} $0 != 0

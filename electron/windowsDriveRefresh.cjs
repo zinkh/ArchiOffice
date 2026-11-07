@@ -57,7 +57,7 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   const catalog=catalogDetails({identity,entries:saved.catalog},identity).savedEntries;
   if(saved.rootKey!==hash([identity.userId,identity.tenantId,identity.deviceId,id,catalog]))throw fail('DRIVE_SNAPSHOT_INVALID');
   await noLinks(root,saved.directory);
-  return {identity:{userId:identity.userId,tenantId:identity.tenantId,deviceId:identity.deviceId},projectId:id,directory:saved.directory,catalog,rootKey:saved.rootKey,nativeReady:true};
+  return {identity:{userId:identity.userId,tenantId:identity.tenantId,deviceId:identity.deviceId},projectId:id,directory:saved.directory,catalog,rootKey:saved.rootKey,nativeReady:true,...(saved.editable===true?{editable:true}:{})};
  }
  function candidate(id,identity,operation,catalogOverride=null,old=false) {
   const files=names(identity,id,operation);
@@ -107,6 +107,7 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   const prepared=candidate(id,identity,token,{identity,entries:plan.entries});let journal=false,committed=false;
   try {
    const result=await prepared.start(id,{open:false});if(result.status!=='opened')throw fail(result.code||'DRIVE_UNAVAILABLE');
+   if(saved.editable===true){const enabled=await prepared.enableEditing(id);if(enabled.status!=='editing')throw fail(enabled.code||'DRIVE_UNAVAILABLE');}
    const next=await clean(await prepared.snapshot(id),identity,id);await authorize(identity,generation);
    if(!await verify())throw fail('DRIVE_LOCAL_CHANGES');
    await write(files.old,saved);
