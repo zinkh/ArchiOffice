@@ -117,6 +117,12 @@ jobs:
           VITE_SUPABASE_URL: http://127.0.0.1:3130
           VITE_SUPABASE_ANON_KEY: local-anon-key
           VITE_OFFLINE_MODE: 'true'
+          # Clé de site Cloudflare Turnstile (publique, variable de dépôt et non
+          # secret). Le lien au cloud, la reconnexion et la bascule du client
+          # relaient le jeton du widget à Supabase : sans cette clé, aucun widget
+          # ne s'affiche et ces connexions sont refusées dès que le captcha est
+          # actif côté Supabase. Vide = pas de captcha.
+          VITE_TURNSTILE_SITE_KEY: ${{ vars.VITE_TURNSTILE_SITE_KEY }}
 
       - name: Bundle server
         run: npm run build:server
