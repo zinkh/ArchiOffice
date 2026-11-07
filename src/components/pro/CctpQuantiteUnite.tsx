@@ -19,6 +19,12 @@ interface CctpQuantiteUniteProps {
   parBatiment?: boolean;
   /** Article portant des sous-articles : pas de quantité propre. */
   aDesEnfants?: boolean;
+  /** Libellé du lien quand l'article suit la quantité d'un autre poste : sa case n'est plus modifiable. */
+  liee?: string;
+  /** Ouvre le choix du poste suivi. Absent : pas de bouton (la fiche n'a pas de document sous la main). */
+  onLier?: () => void;
+  /** Métré ou quantités par bâtiment : l'article compose déjà sa quantité, il ne peut pas aussi en suivre une. */
+  lierImpossible?: boolean;
   /** Unités déjà utilisées dans le document, proposées en tête. */
   unitesConnues: string[];
   /** Saisie brute (nombre ou « =calcul »). Rend faux si elle est refusée : la saisie reste, avec une erreur. */
@@ -44,7 +50,7 @@ const texteNombre = (n: number) => (n ? String(n).replace('.', ',') : '');
  */
 export function CctpQuantiteUnite({
   quantite, unite, prixUnitaire, montant, pourMemoire, prixVisible, formule, lignesMetre, parBatiment, aDesEnfants,
-  unitesConnues, onQuantite, onUnite, onPrix, onDetailler,
+  liee, onLier, lierImpossible, unitesConnues, onQuantite, onUnite, onPrix, onDetailler,
 }: CctpQuantiteUniteProps) {
   const { t } = useTranslation();
   const [qDraft, setQDraft] = useState<string | null>(null);
@@ -91,8 +97,8 @@ export function CctpQuantiteUnite({
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex flex-col gap-1">
           <label htmlFor="cctp-quantite" className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('pro_cctp_quantity')}</label>
-          {parBatiment || aMetre ? (
-            <span id="cctp-quantite" className="px-2 py-1 text-sm font-mono tabular-nums text-right w-28" title={parBatiment ? t('pro_cctp_quantity_by_building') : undefined}>{formatQuantite(quantite)}</span>
+          {parBatiment || aMetre || liee ? (
+            <span id="cctp-quantite" className="px-2 py-1 text-sm font-mono tabular-nums text-right w-28" title={parBatiment ? t('pro_cctp_quantity_by_building') : liee}>{formatQuantite(quantite)}</span>
           ) : (
             <input
               id="cctp-quantite"
@@ -111,13 +117,26 @@ export function CctpQuantiteUnite({
             />
           )}
           {aMetre && <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('pro_metre_sum_of', { count: lignesMetre })}</span>}
-          <button
-            type="button" onClick={onDetailler}
-            className="self-start px-2.5 py-1 text-xs font-bold rounded-md border pointer-coarse:h-11"
-            style={{ borderColor: 'var(--tblr-text)' }}
-          >
-            {t('pro_metre_detail')}
-          </button>
+          {liee && <span className="max-w-[16rem] text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{liee}</span>}
+          {/* Un article qui suit un autre poste n'a pas de métré : sa quantité vient de ce poste. */}
+          {!liee && (
+            <button
+              type="button" onClick={onDetailler}
+              className="self-start px-2.5 py-1 text-xs font-bold rounded-md border pointer-coarse:h-11"
+              style={{ borderColor: 'var(--tblr-text)' }}
+            >
+              {t('pro_metre_detail')}
+            </button>
+          )}
+          {onLier && (
+            <button
+              type="button" onClick={onLier} disabled={!liee && lierImpossible}
+              className="self-start px-2.5 py-1 text-xs font-bold rounded-md border pointer-coarse:h-11 disabled:opacity-50"
+              style={{ borderColor: 'var(--tblr-text)' }}
+            >
+              {t('pro_link_menu')}
+            </button>
+          )}
         </div>
 
         <div className="flex flex-col gap-1">

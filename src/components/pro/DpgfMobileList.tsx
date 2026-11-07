@@ -126,7 +126,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
                 </div>
               ) : (
                 <div className="flex items-center gap-1 text-[0.8125rem] tabular-nums" style={{ color: 'var(--tblr-muted)' }}>
-                  {l.quantitesBatiments !== undefined
+                  {l.quantitesBatiments !== undefined || l.quantiteLiee
                     ? <span>{fmtQte(l.quantite)}</span>
                     : <div className="w-16"><EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric maxDecimals={DECIMALES_QUANTITE} label={t('pro_col_quantity')} {...cell} /></div>}
                   <span>{l.unite} ×</span>

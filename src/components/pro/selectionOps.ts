@@ -6,6 +6,7 @@
 import { NATURES_HORS_BASE, type Ligne, type NatureArticle, type NatureHorsBase } from '../../types/dpgf';
 import { MAX_ARTICLE_DEPTH, deleteLigneAtPath, insertLigneAtPath, mutateLigneAtPath, parseRowKey, recomputeLot, estHorsBase, renumeroterLignes, sousTotalNature, type LotLike, type ParsedRowKey } from './treeOps';
 import { ligneAtPath } from './hierarchyOps';
+import { indexerLignes } from '../../lib/quantitesLiees';
 
 type Parsed = NonNullable<ParsedRowKey>;
 
@@ -224,4 +225,41 @@ export function resumeSuppression(lots: LotLike[], keys: Iterable<string>): Resu
     }
   }
   return resume;
+}
+
+/** Un article supprimé qui servait de source à des articles restés dans le document. */
+export interface LienRompu { source: Ligne; suiveurs: Ligne[] }
+
+/**
+ * Les articles qui suivent la quantité d'un article SUPPRIMÉ (lui-même, ou emporté avec son chapitre, son lot ou
+ * son parent) sans être supprimés eux-mêmes. Ils gardent leur dernière quantité et redeviennent modifiables
+ * (`propagerLiens` retire le lien d'une source disparue) : la fenêtre de confirmation le dit avant de supprimer.
+ * Un suiveur supprimé avec sa source n'est pas compté.
+ */
+export function liensRompus(lots: LotLike[], keys: Iterable<string>): LienRompu[] {
+  const supprimes = new Set<string>();
+  const ajouter = (l: Ligne) => { supprimes.add(l.id); l.children?.forEach(ajouter); };
+  for (const s of parseSelection(keys)) {
+    const lot: any = lots[s.lotIdx];
+    if (!lot) continue;
+    if (s.kind === 'lot') lot.chapitres.forEach((c: any) => c.lignes.forEach(ajouter));
+    else if (s.kind === 'chapitre') lot.chapitres[s.chapIdx]?.lignes.forEach(ajouter);
+    else {
+      const l = ligneAtPath(lot.chapitres[s.chapIdx]?.lignes ?? [], s.lignePath);
+      if (l) ajouter(l as Ligne);
+    }
+  }
+  if (!supprimes.size) return [];
+  const index = indexerLignes(lots);
+  const parSource = new Map<string, LienRompu>();
+  index.forEach(l => {
+    const sourceId = l.quantiteLiee?.sourceId;
+    if (!sourceId || supprimes.has(l.id) || !supprimes.has(sourceId)) return;
+    const source = index.get(sourceId);
+    if (!source) return;
+    const entree = parSource.get(sourceId) ?? { source, suiveurs: [] };
+    entree.suiveurs.push(l);
+    parSource.set(sourceId, entree);
+  });
+  return [...parSource.values()];
 }

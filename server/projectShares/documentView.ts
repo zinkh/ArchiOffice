@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { recomputeLot } from '../../src/components/pro/treeOps';
 import { appliquerMetre, libelleDetail, MAX_LIGNES_METRE, validerMetre } from '../../src/lib/quantites';
+import { propagerLiens } from '../../src/lib/quantitesLiees';
 import type { Ligne, QuantiteDetail } from '../../src/types/dpgf';
 
 export type DocumentMode = 'cctp' | 'dpgf';
@@ -259,6 +260,10 @@ export function blockedEdit(node: Rec, field: string): string | null {
   if (field === 'quantite' && isRec(node.quantitesBatiments) && Object.keys(node.quantitesBatiments).length > 0) {
     return 'Quantité répartie par bâtiment : proposez plutôt un métré par bâtiment, ou modifiez-la dans le DPGF du cabinet.';
   }
+  // Un article qui suit la quantité d'un autre : elle se calcule, on ne la propose pas (proposer la source).
+  if ((field === 'quantite' || field === 'metre') && isRec(node.quantiteLiee)) {
+    return 'Quantité liée à un autre poste : elle se calcule à partir de ce poste, proposez la modification sur le poste suivi.';
+  }
   // Un article qui a un métré : sa quantité est la somme de ses lignes, elle se modifie par le métré.
   if (field === 'quantite' && Array.isArray(node.quantiteDetails) && node.quantiteDetails.length > 0) {
     return 'Quantité détaillée par un métré : proposez plutôt un métré modifié.';
@@ -421,7 +426,12 @@ export function recomputeAfterNumericChange(doc: Rec, projectLotId: string): voi
   const index = lots.findIndex(l => isRec(l) && l.projectLotId === projectLotId);
   if (index < 0) return;
   lots[index] = recomputeLot(lots[index] as any);
-  doc.totalHT = lots.reduce((sum: number, l: any) => sum + (Number(l?.sousTotal) || 0), 0);
+  // Les articles qui suivent la quantité d'un autre (`quantiteLiee`) suivent aussi cette modification, y compris
+  // dans un autre lot : sans cela, une quantité approuvée laisserait ses suiveurs périmés jusqu'au prochain
+  // enregistrement du cabinet.
+  const propages = propagerLiens(lots as any[]);
+  if (propages !== lots) doc.lots = propages;
+  doc.totalHT = (doc.lots as any[]).reduce((sum: number, l: any) => sum + (Number(l?.sousTotal) || 0), 0);
   doc.totalTTC = doc.totalHT * (1 + (Number(doc.TVA) || 0) / 100);
 }
 

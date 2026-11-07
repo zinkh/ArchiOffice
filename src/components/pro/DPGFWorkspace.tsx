@@ -8,7 +8,7 @@ import {
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconBuildingStore,
   IconBuildingCommunity, IconArrowUp, IconArrowDown,
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
-  IconSubtask, IconTag, IconFileText, IconListDetails, IconPercentage,
+  IconSubtask, IconTag, IconFileText, IconListDetails, IconPercentage, IconLink,
 } from '@tabler/icons-react';
 import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
@@ -27,8 +27,10 @@ import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSel
 import { StatutBadges } from './StatutBadges';
 import { LigneDescriptionDialog } from './LigneDescriptionDialog';
 import { MetreDialog } from './MetreDialog';
+import { LienQuantiteDialog } from './LienQuantiteDialog';
 import { marquerUtilise, patchChapitreDepuisClause, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
+import { coefficientDe, indexerLignes, propagerLiens } from '../../lib/quantitesLiees';
 import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
@@ -94,6 +96,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const [descriptionKey, setDescriptionKey] = useState<string | null>(null);
   // Article dont on détaille le métré (clé de ligne), pour la fenêtre « Détailler le métré ».
   const [metreKey, setMetreKey] = useState<string | null>(null);
+  // Article dont on choisit le poste dont il suit la quantité (clé de ligne), pour la fenêtre « Lier la quantité ».
+  const [lienKey, setLienKey] = useState<string | null>(null);
   const isMobile = useMediaQuery('(max-width: 767px)');
   // ── UI state ────────────────────────────────────────────────────────────────
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(dpgf.lots.map(l => l.id)));
@@ -162,12 +166,27 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 
   // ── Mutate helpers ───────────────────────────────────────────────────────────
   const commitLots = (newLots: Lot[]) => {
-    const totalHT = newLots.reduce((s, l) => s + l.sousTotal, 0);
-    onChange({ ...dpgf, lots: newLots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
+    // Les articles qui suivent la quantité d'un autre sont recalculés ici, au moment d'enregistrer.
+    const lots = propagerLiens(newLots);
+    const totalHT = lots.reduce((s, l) => s + l.sousTotal, 0);
+    onChange({ ...dpgf, lots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) });
   };
   const mutateLots = (fn: (lots: Lot[]) => Lot[]) => commitLots(fn(JSON.parse(JSON.stringify(dpgf.lots))));
 
   const recomputeLot = recomputeLotOp<Lot>;
+
+  // Quantités liées : de quel poste un article suit-il la quantité ? (index calculé une fois par rendu)
+  const lignesParId = indexerLignes(dpgf.lots);
+  const libelleLien = (l: Ligne): string => {
+    const lien = l.quantiteLiee;
+    if (!lien) return '';
+    const source = lignesParId.get(lien.sourceId);
+    const c = coefficientDe(lien);
+    return t('pro_link_badge', {
+      numero: source?.numero ?? '', designation: source?.designation ?? '',
+      coefficient: c !== 1 ? ` × ${String(c).replace('.', ',')}` : '',
+    });
+  };
 
   // ── Sélection ───────────────────────────────────────────────────────────────
   const selection = groupement === 'lot' ? parseSelection(selectedKeys) : [];
@@ -594,7 +613,16 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const l = ligneAtPath(dpgf.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
     return l ? { key: metreKey!, ligne: l as Ligne } : null;
   })();
-  /** Applique à un article ce que le métré change (quantité, prix total, lignes) ; le lot et les totaux suivent. */
+  const lienCible = (() => {
+    const k = lienKey ? parseRowKey(lienKey) : null;
+    if (k?.kind !== 'ligne') return null;
+    const l = ligneAtPath(dpgf.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
+    return l ? { key: lienKey!, ligne: l as Ligne } : null;
+  })();
+  /**
+   * Applique à un article ce que le métré (ou le lien de quantité) change : quantité, prix total, lignes ou lien.
+   * Le lot et les totaux suivent, et `commitLots` recalcule les articles qui suivent celui-ci.
+   */
   const appliquerMetre = (key: string, patch: Partial<Ligne>) => {
     const k = parseRowKey(key);
     if (k?.kind !== 'ligne') return;
@@ -772,10 +800,20 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const description: ToolbarMenuEntry[] = s.kind === 'ligne'
       ? [{ id: 'description', label: t('pro_description_edit'), icon: <IconFileText size={16} />, onClick: () => setDescriptionKey(rowKey(row)) }]
       : [];
-    const metre: ToolbarMenuEntry[] = s.kind === 'ligne' && !ligneAtPath(dpgf.lots[s.lotIdx]?.chapitres[s.chapIdx]?.lignes ?? [], s.lignePath)?.children?.length
+    const cible = s.kind === 'ligne' ? ligneAtPath(dpgf.lots[s.lotIdx]?.chapitres[s.chapIdx]?.lignes ?? [], s.lignePath) : undefined;
+    const sansEnfants = s.kind === 'ligne' && !cible?.children?.length;
+    // Un article qui suit un autre poste n'a pas de métré : sa quantité vient de ce poste.
+    const metre: ToolbarMenuEntry[] = sansEnfants && !cible?.quantiteLiee
       ? [{ id: 'metre', label: t('pro_metre_detail'), icon: <IconListDetails size={16} />, onClick: () => setMetreKey(rowKey(row)) }]
       : [];
-    return [...add, ...description, ...metre, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
+    // Un article à métré ou à quantités par bâtiment compose déjà sa quantité : il ne peut pas aussi en suivre une.
+    const lien: ToolbarMenuEntry[] = sansEnfants
+      ? [{
+        id: 'lien', label: t('pro_link_menu'), icon: <IconLink size={16} />, onClick: () => setLienKey(rowKey(row)),
+        disabled: !cible?.quantiteLiee && (!!cible?.quantiteDetails?.length || cible?.quantitesBatiments !== undefined),
+      }]
+      : [];
+    return [...add, ...description, ...metre, ...lien, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
   };
 
   // ── Raccourcis clavier du tableau ───────────────────────────────────────────
@@ -987,6 +1025,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           batiments={batimentsDuMetre(dpgf, metreCible.ligne)}
           onSave={patch => { appliquerMetre(metreCible.key, patch); setMetreKey(null); }}
           onClose={() => setMetreKey(null)}
+        />
+      )}
+      {lienCible && (
+        <LienQuantiteDialog
+          key={lienCible.key}
+          ligne={lienCible.ligne}
+          lots={dpgf.lots}
+          onSave={patch => appliquerMetre(lienCible.key, patch)}
+          onClose={() => setLienKey(null)}
         />
       )}
       {showDecoupage && (
@@ -1333,7 +1380,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                             <IconFileText size={14} aria-hidden />
                           </button>
                           {/* Métré : à côté de la description, aussi quand la quantité est répartie par bâtiment. Cerclé si l'article en a un. */}
-                          {!hasChildren && (
+                          {!hasChildren && !l.quantiteLiee && (
                             <button
                               type="button"
                               onClick={e => { e.stopPropagation(); setMetreKey(rKey); }}
@@ -1388,7 +1435,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{formatQuantite(l.quantite)}</span> : (
                           <div className="flex items-center gap-1">
                             <div className="flex-1 min-w-0">
-                              {l.quantiteDetails?.length
+                              {l.quantiteLiee
+                                // Quantité suivie : en lecture seule, un clic rouvre le lien (changer de poste, coefficient, détacher).
+                                ? <button
+                                    type="button"
+                                    onClick={e => { e.stopPropagation(); setLienKey(rKey); }}
+                                    title={libelleLien(l)} aria-label={`${t('pro_link_menu')} ${l.numero} : ${libelleLien(l)}`}
+                                    className="w-full inline-flex items-center justify-end gap-1 px-1 font-mono tabular-nums rounded outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+                                  >
+                                    <IconLink size={12} aria-hidden style={{ color: 'var(--tblr-muted)' }} />
+                                    {formatQuantite(l.quantite)}
+                                  </button>
+                                : l.quantiteDetails?.length
                                 // Un métré : la quantité en est la somme, elle se modifie dans la fenêtre du métré.
                                 ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_metre_sum_of', { count: l.quantiteDetails.length })}>{formatQuantite(l.quantite)}</span>
                                 : <EditableCell

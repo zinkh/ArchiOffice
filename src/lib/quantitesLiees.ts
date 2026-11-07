@@ -1,0 +1,209 @@
+// Quantités liées : un poste suit la quantité d'un autre (menuiserie et volets roulants, doublage et
+// peinture...), éventuellement multipliée par un coefficient.
+//
+// Fonctions pures, partagées par le CCTP, le DPGF, le BPU/DQE, l'estimation et le serveur (approbation d'une
+// proposition de confrère). Le lien vit sur l'article qui SUIT (`Ligne.quantiteLiee`) et désigne sa source par
+// son `id` : un identifiant est stable aux déplacements, aux renumérotations et aux copies de document, ce
+// qu'une clé positionnelle (lot, chapitre, chemin) ne garantit pas.
+//
+// Un seul sens : la source ignore ses suiveurs, on les retrouve par `suiveursDe`. `propagerLiens` est le seul
+// endroit où une quantité liée est calculée ; chaque écran l'appelle au moment d'enregistrer un changement.
+import { forEachLigne, recomputeLot, type LotLike } from '../components/pro/treeOps';
+import type { Ligne } from '../types/dpgf';
+
+/** Borne du coefficient, comme `VALEUR_MAX` de `quantites.ts` pour une quantité. */
+export const COEFFICIENT_MAX = 1e6;
+
+/** Un reste de calcul flottant (0,1 x 3 = 0.30000000000000004) n'est pas une quantité. */
+const propre = (n: number) => Number(n.toFixed(10));
+
+export interface LienQuantite {
+  sourceId: string;
+  /** Absent : 1 (la quantité est celle de la source). */
+  coefficient?: number;
+}
+
+/** Le coefficient d'un lien : 1 sans valeur valable. */
+export function coefficientDe(lien: LienQuantite | undefined): number {
+  const c = lien?.coefficient;
+  return typeof c === 'number' && Number.isFinite(c) && c > 0 && c <= COEFFICIENT_MAX ? c : 1;
+}
+
+/** Un article chiffrable sans sous-articles : seul un tel article porte une quantité qu'on peut suivre ou faire suivre. */
+const porteUneQuantite = (l: Ligne): boolean => l.type === 'ouvrage' && !l.children?.length;
+
+/** Une quantité qui vient d'ailleurs que de sa case (métré, bâtiments) ne peut pas aussi suivre un autre article. */
+const aSaPropreComposition = (l: Ligne): boolean => !!l.quantiteDetails?.length || l.quantitesBatiments !== undefined;
+
+function indexer(lots: readonly LotLike[]): Map<string, Ligne> {
+  const index = new Map<string, Ligne>();
+  forEachLigne(lots as LotLike[], (ligne: Ligne) => { index.set(ligne.id, ligne); });
+  return index;
+}
+
+/** Index id -> article de tout le document, sous-articles compris (une seule passe pour un affichage de tableau). */
+export const indexerLignes = indexer;
+
+/** L'article d'identifiant donné, sous-articles compris. */
+export const ligneParId = (lots: readonly LotLike[], id: string): Ligne | undefined => indexer(lots).get(id);
+
+/** Les articles qui suivent directement `sourceId`. */
+export function suiveursDe(lots: readonly LotLike[], sourceId: string): Ligne[] {
+  const suiveurs: Ligne[] = [];
+  forEachLigne(lots as LotLike[], (ligne: Ligne) => { if (ligne.quantiteLiee?.sourceId === sourceId) suiveurs.push(ligne); });
+  return suiveurs;
+}
+
+/** La chaîne de sources au-dessus d'un article (sa source, la source de sa source...), sans boucle infinie. */
+function chaineDeSources(index: Map<string, Ligne>, depart: Ligne): Ligne[] {
+  const chaine: Ligne[] = [];
+  const vus = new Set<string>([depart.id]);
+  let courant: Ligne | undefined = depart;
+  while (courant?.quantiteLiee) {
+    const source: Ligne | undefined = index.get(courant.quantiteLiee.sourceId);
+    if (!source || vus.has(source.id)) break;
+    vus.add(source.id);
+    chaine.push(source);
+    courant = source;
+  }
+  return chaine;
+}
+
+export type RefusLien = 'introuvable' | 'soi' | 'cycle' | 'source_invalide' | 'suiveur_invalide';
+
+/**
+ * Un article peut-il suivre cette source ? Refusé : un article inconnu, lui-même, une source qui le suit déjà
+ * (directement ou par une chaîne : A suit B qui suit A), une source qui n'est pas un ouvrage chiffrable ou qui
+ * porte des sous-articles, un suiveur à sous-articles, à métré ou à quantités par bâtiment (sa quantité vient
+ * déjà d'ailleurs).
+ */
+export function peutSuivre(
+  lots: readonly LotLike[], ligneId: string, sourceId: string,
+): { ok: true } | { ok: false; raison: RefusLien } {
+  const index = indexer(lots);
+  const ligne = index.get(ligneId);
+  const source = index.get(sourceId);
+  if (!ligne || !source) return { ok: false, raison: 'introuvable' };
+  if (ligne.id === source.id) return { ok: false, raison: 'soi' };
+  if (!porteUneQuantite(source)) return { ok: false, raison: 'source_invalide' };
+  if (!porteUneQuantite(ligne) || aSaPropreComposition(ligne)) return { ok: false, raison: 'suiveur_invalide' };
+  if (chaineDeSources(index, source).some(s => s.id === ligne.id)) return { ok: false, raison: 'cycle' };
+  return { ok: true };
+}
+
+export interface CandidatSource {
+  id: string;
+  numero: string;
+  designation: string;
+  unite: string;
+  quantite: number;
+  lotNumero: string;
+  lotTitre: string;
+}
+
+/**
+ * Les articles que `ligneId` peut suivre, dans l'ordre du document : tous les ouvrages chiffrables sauf lui-même
+ * et ceux qui le suivent (ils créeraient une boucle).
+ */
+export function candidatsSources(lots: readonly LotLike[], ligneId: string): CandidatSource[] {
+  const index = indexer(lots);
+  const candidats: CandidatSource[] = [];
+  forEachLigne(lots as LotLike[], (ligne: Ligne, _chap: unknown, lot: LotLike & { numero?: string; titre?: string }) => {
+    if (ligne.id === ligneId || !porteUneQuantite(ligne)) return;
+    if (chaineDeSources(index, ligne).some(s => s.id === ligneId)) return;
+    candidats.push({
+      id: ligne.id, numero: ligne.numero, designation: ligne.designation, unite: ligne.unite, quantite: ligne.quantite,
+      lotNumero: lot.numero ?? '', lotTitre: lot.titre ?? '',
+    });
+  });
+  return candidats;
+}
+
+/**
+ * Le correctif à fusionner dans l'article pour qu'il suive `source` : la quantité devient celle de la source
+ * multipliée par le coefficient, le prix total suit (0 pour mémoire) et la formule mémorisée s'efface.
+ * `null` si le coefficient n'est pas un nombre strictement positif dans la borne.
+ */
+export function lierPatch(ligne: Ligne, source: Ligne, coefficient = 1): Partial<Ligne> | null {
+  if (!Number.isFinite(coefficient) || coefficient <= 0 || coefficient > COEFFICIENT_MAX) return null;
+  const quantite = propre(source.quantite * coefficient);
+  return {
+    quantiteLiee: coefficient === 1 ? { sourceId: source.id } : { sourceId: source.id, coefficient },
+    quantite,
+    prixTotal: ligne.pourMemoire ? 0 : propre(quantite * ligne.prixUnitaire),
+    quantiteFormule: undefined,
+  };
+}
+
+/** Le correctif qui détache l'article de sa source : il garde la quantité qu'il a et redevient modifiable. */
+export const delierPatch = (): Partial<Ligne> => ({ quantiteLiee: undefined });
+
+/**
+ * Recalcule la quantité de chaque article qui en suit un autre, en cascade (la peinture suit le doublage, qui
+ * suit les cloisons), puis le sous-total des lots touchés. Rend le MÊME tableau quand rien ne change, pour qu'un
+ * appelant évite un enregistrement inutile.
+ *
+ * Un lien qui ne peut plus tenir est RETIRÉ et l'article garde sa dernière quantité (jamais remise à 0, jamais
+ * une valeur périmée qui se ferait passer pour calculée) : source supprimée, boucle (des données importées ou
+ * écrites par un outil), article devenu parent de sous-articles, ou portant un métré ou des quantités par bâtiment.
+ */
+export function propagerLiens<L extends LotLike>(lots: L[]): L[] {
+  const index = new Map<string, any>();
+  let aDesLiens = false;
+  forEachLigne(lots, (ligne: any) => { index.set(ligne.id, ligne); if (ligne.quantiteLiee) aDesLiens = true; });
+  if (!aDesLiens) return lots;
+
+  const memo = new Map<string, number | null>();
+  const enCours = new Set<string>();
+  const lienTient = (l: any): boolean => !!l.quantiteLiee && porteUneQuantite(l) && !aSaPropreComposition(l);
+
+  // Quantité finale d'un article, en suivant la chaîne jusqu'à une quantité propre ; `null` si elle ne tient pas.
+  const quantiteFinale = (ligne: any): number | null => {
+    if (!lienTient(ligne)) return ligne.quantite;
+    if (memo.has(ligne.id)) return memo.get(ligne.id)!;
+    if (enCours.has(ligne.id)) return null;
+    enCours.add(ligne.id);
+    const source = index.get(ligne.quantiteLiee.sourceId);
+    const qs = source && source !== ligne && porteUneQuantite(source) ? quantiteFinale(source) : null;
+    const quantite = qs === null ? null : propre(qs * coefficientDe(ligne.quantiteLiee));
+    enCours.delete(ligne.id);
+    memo.set(ligne.id, quantite);
+    return quantite;
+  };
+
+  // Seuls les suiveurs dont la source tient encore sont recalculés ; les autres perdent leur lien.
+  const resultats = new Map<string, number | null>();
+  index.forEach(ligne => { if (ligne.quantiteLiee) resultats.set(ligne.id, lienTient(ligne) ? quantiteFinale(ligne) : null); });
+
+  const refaireLigne = (l: any): any => {
+    let next = l;
+    if (l.children?.length) {
+      const enfants = l.children.map(refaireLigne);
+      if (enfants.some((e: any, i: number) => e !== l.children[i])) next = { ...next, children: enfants };
+    }
+    if (!resultats.has(l.id)) return next;
+    const quantite = resultats.get(l.id);
+    if (quantite === null || quantite === undefined) {
+      const { quantiteLiee: _perdu, ...reste } = next;
+      return reste;
+    }
+    const prixTotal = l.pourMemoire ? 0 : propre(quantite * l.prixUnitaire);
+    if (quantite === l.quantite && prixTotal === l.prixTotal) return next;
+    return { ...next, quantite, prixTotal, quantiteFormule: undefined };
+  };
+
+  let change = false;
+  const resultat = lots.map(lot => {
+    let lotChange = false;
+    const chapitres = lot.chapitres.map((chap: any) => {
+      const lignes = chap.lignes.map(refaireLigne);
+      if (!lignes.some((e: any, i: number) => e !== chap.lignes[i])) return chap;
+      lotChange = true;
+      return { ...chap, lignes };
+    });
+    if (!lotChange) return lot;
+    change = true;
+    return recomputeLot({ ...lot, chapitres });
+  });
+  return change ? resultat : lots;
+}

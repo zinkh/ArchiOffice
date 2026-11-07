@@ -246,7 +246,7 @@ export function metreEnTexte(json: string, unite = '', codes: Record<string, str
 
 /** La quantité d'un article vient-elle d'ailleurs que de sa propre case (métré, bâtiments, sous-articles) ? */
 const quantiteDerivee = (ligne: Ligne): boolean =>
-  !!ligne.quantiteDetails?.length || ligne.quantitesBatiments !== undefined || !!ligne.children?.length;
+  !!ligne.quantiteDetails?.length || ligne.quantitesBatiments !== undefined || !!ligne.children?.length || !!ligne.quantiteLiee;
 
 /**
  * Saisie dans la case quantité. Un calcul (« =10+20 ») est mémorisé : il sera réaffiché à la prochaine

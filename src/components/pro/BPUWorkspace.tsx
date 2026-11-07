@@ -8,7 +8,7 @@ import {
   IconChevronRight, IconChevronDown,
   IconArrowsMaximize, IconArrowsMinimize, IconLayoutSidebarLeftCollapse,
   IconRowInsertBottom, IconFolderPlus, IconStackPush, IconX,
-  IconBuildingStore,
+  IconBuildingStore, IconLink,
   IconArrowsExchange, IconAbc, IconScale, IconBuildingCommunity,
   IconPencil, IconFilter, IconArrowUp, IconArrowDown, IconArrowBarToLeft, IconArrowBarToRight, IconFileArrowRight,
 } from '@tabler/icons-react';
@@ -38,6 +38,9 @@ import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutoco
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { formatCurrency } from '../../lib/utils';
+import { coefficientDe, indexerLignes, propagerLiens } from '../../lib/quantitesLiees';
+import { LienQuantiteDialog } from './LienQuantiteDialog';
+import { ligneAtPath } from './hierarchyOps';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -102,7 +105,8 @@ const TYPE_MARCHE_LABELS: Record<string, string> = {
  * ne l'affiche pas, c'est ce qui distingue un bordereau d'un DPGF.
  */
 function recomputeBPU(bpu: BPU): BPU {
-  const lots = bpu.lots.map(l => recomputeLot(l));
+  // Les quantités liées (un article qui suit un autre) sont recalculées avant les totaux.
+  const lots = propagerLiens(bpu.lots.map(l => recomputeLot(l)));
   const totalHT = lots.reduce((s, l) => s + l.sousTotal, 0);
   return { ...bpu, lots, totalHT, totalTTC: totalHT * (1 + bpu.TVA / 100) };
 }
@@ -151,6 +155,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   const [selectedRowKeys, setSelectedRowKeys] = useState<Set<string>>(new Set());
   const [editingCell, setEditingCell] = useState<{ rowKey: string; field: string; value: string } | null>(null);
   const [clipboard, setClipboard] = useState<BPULigne[]>([]);
+  // Article dont on choisit le poste dont il suit la quantité (clé de ligne), pour la fenêtre « Lier la quantité ».
+  const [lienKey, setLienKey] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [dragSource, setDragSource] = useState<{ lotIdx: number; chapIdx: number; path: number[] } | null>(null);
   const [showMarche, setShowMarche] = useState(false);
@@ -394,6 +400,8 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             case 'localisation': return { ...ligne, localisation: raw };
             case 'prixUnitaireLettres': return { ...ligne, prixUnitaireLettres: raw };
             case 'quantite': {
+              // Un article qui suit la quantité d'un autre poste ne se saisit pas : elle vient de ce poste.
+              if (ligne.quantiteLiee) return ligne;
               const q = evalFormula(raw);
               return { ...ligne, quantite: q, prixTotal: q * ligne.prixUnitaire };
             }
@@ -733,9 +741,48 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     },
   ]);
 
+  // ── Quantités liées : un article suit la quantité d'un autre poste (colonne Quantité du DQE) ──
+  const lignesParId = indexerLignes(bpu.lots);
+  const libelleLien = (l: BPULigne): string => {
+    const lien = l.quantiteLiee;
+    if (!lien) return '';
+    const source = lignesParId.get(lien.sourceId);
+    const c = coefficientDe(lien);
+    return t('pro_link_badge', {
+      numero: source?.numero ?? '', designation: source?.designation ?? '',
+      coefficient: c !== 1 ? ` × ${String(c).replace('.', ',')}` : '',
+    });
+  };
+  const lienCible = (() => {
+    const k = lienKey ? parseRowKey(lienKey) : null;
+    if (k?.kind !== 'ligne') return null;
+    const l = ligneAtPath(bpu.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
+    return l ? { key: lienKey!, ligne: l as BPULigne } : null;
+  })();
+  /** Applique le lien (ou son retrait) à l'article ; `recomputeBPU` recalcule ensuite tous les articles qui suivent. */
+  const appliquerLien = (key: string, patch: Partial<BPULigne>) => {
+    const k = parseRowKey(key);
+    if (k?.kind !== 'ligne') return;
+    mutateLots(lots => {
+      const next = [...lots];
+      const lot = { ...next[k.lotIdx] };
+      const chap = { ...lot.chapitres[k.chapIdx] };
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, (l: BPULigne) => ({ ...l, ...patch }));
+      lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
+      next[k.lotIdx] = recomputeLot(lot);
+      return next;
+    });
+  };
+
   const selection = parseSelection(selectedRowKeys);
   const one = hierarchySelection;
   const onlyOne = selectionCount > 1 ? t('pro_selection_single_only') : undefined;
+  // Seul le DQE a une colonne Quantité ; un article à sous-articles, à métré ou par bâtiment ne peut pas en suivre une.
+  const ligneUnique = showQte && one?.kind === 'ligne'
+    ? ligneAtPath(bpu.lots[one.lotIdx]?.chapitres[one.chapIdx]?.lignes ?? [], one.lignePath) as BPULigne | undefined
+    : undefined;
+  const peutLier = !!ligneUnique && !ligneUnique.children?.length
+    && (!!ligneUnique.quantiteLiee || (!ligneUnique.quantiteDetails?.length && ligneUnique.quantitesBatiments === undefined));
   const hasLigneSelected = selection.some(s => s.kind === 'ligne');
   const pasteTarget = selection.at(-1) ?? null;
   const selectionActions: SelectionAction[] = [
@@ -747,6 +794,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     { id: 'copy', label: t('pro_copy'), icon: <IconCopy size={16} />, onClick: copySelected, disabled: !hasLigneSelected, hint: hasLigneSelected ? undefined : t('pro_copy_articles_only') },
     { id: 'paste', label: t('pro_paste'), icon: <IconClipboard size={16} />, iconOnly: true, onClick: pasteLigne, disabled: !clipboard.length || !pasteTarget || pasteTarget.kind === 'lot' },
     { id: 'to-library', label: t('pro_bpu_send_to_library'), icon: <IconFileArrowRight size={16} />, onClick: () => onPushToLibrary?.(selectedLignes()), disabled: !onPushToLibrary || !hasLigneSelected },
+    { id: 'lien', label: t('pro_link_menu'), icon: <IconLink size={16} />, groupStart: true, onClick: () => { if (selectedRowKeys.size === 1) setLienKey([...selectedRowKeys][0]); }, disabled: !peutLier, hint: onlyOne },
     { id: 'ms-set', label: 'Marché subséquent', icon: <IconStackPush size={16} />, groupStart: true, onClick: () => setMsSelection(prochainCodeMs()), disabled: !selection.some(s => s.kind === 'chapitre'), hint: 'Sélectionnez un chapitre' },
     { id: 'ms-unset', label: 'Accord-cadre', icon: <IconArrowBarToLeft size={16} />, onClick: () => setMsSelection(undefined), disabled: !selection.some(s => s.kind === 'chapitre'), hint: 'Sélectionnez un chapitre' },
     { id: 'delete', label: t('pro_delete'), icon: <IconTrash size={16} />, danger: true, mobile: true, groupStart: true, onClick: deleteSelected, disabled: !selectionCount },
@@ -1127,7 +1175,18 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
                     <td className="px-2 py-0.5 text-center text-xs"><EditableCell rKey={rKey} field="unite" value={l.unite} className="text-center" /></td>
                     {showQte && (
                       <td className="px-1 py-0.5">
-                        {hasChildren ? null : <EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric />}
+                        {hasChildren ? null : l.quantiteLiee ? (
+                          // Quantité suivie : en lecture seule, un clic rouvre le lien (changer de poste, coefficient, détacher).
+                          <button
+                            type="button"
+                            onClick={e => { e.stopPropagation(); setLienKey(rKey); }}
+                            title={libelleLien(l)} aria-label={`${t('pro_link_menu')} ${l.numero} : ${libelleLien(l)}`}
+                            className="w-full inline-flex items-center justify-end gap-1 px-1 font-mono tabular-nums rounded outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                          >
+                            <IconLink size={12} aria-hidden />
+                            {formatQuantite(l.quantite)}
+                          </button>
+                        ) : <EditableCell rKey={rKey} field="quantite" value={l.quantite} numeric />}
                       </td>
                     )}
                     <td className="px-1 py-0.5">
@@ -1249,6 +1308,15 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
             onInsert={insererDepuisBibliotheque}
             canInsert={!!selectedChap}
             hintCible="Sélectionnez d’abord un chapitre dans le bordereau"
+          />
+        )}
+        {lienCible && (
+          <LienQuantiteDialog
+            key={lienCible.key}
+            ligne={lienCible.ligne}
+            lots={bpu.lots}
+            onSave={patch => appliquerLien(lienCible.key, patch)}
+            onClose={() => setLienKey(null)}
           />
         )}
       </div>

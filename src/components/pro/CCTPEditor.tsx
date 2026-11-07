@@ -44,6 +44,8 @@ import { MetreDialog } from './MetreDialog';
 import { TitreArticleCctp } from './TitreArticleCctp';
 import { marquerUtilise, patchChapitreDepuisClause, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
+import { coefficientDe, indexerLignes, propagerLiens } from '../../lib/quantitesLiees';
+import { LienQuantiteDialog } from './LienQuantiteDialog';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
@@ -136,6 +138,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const [showExportLibrary, setShowExportLibrary] = useState(false);
   const [showDraft, setShowDraft] = useState(false);
   const [showMetre, setShowMetre] = useState(false);
+  // Choix du poste dont l'article sélectionné suit la quantité.
+  const [showLien, setShowLien] = useState(false);
   // Chapitre visé par une insertion : celui sélectionné, ou celui de
   // l'article sélectionné — on écrit rarement un CCTP en repartant du titre.
   const chapitreVise = selection && selection.kind !== 'lot'
@@ -146,6 +150,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const mutateDPGF = (fn: (d: DPGF) => void) => {
     const copy: DPGF = JSON.parse(JSON.stringify(dpgf));
     fn(copy);
+    // Les articles qui suivent la quantité d'un autre sont recalculés avec leurs totaux.
+    const lots = propagerLiens(copy.lots);
+    if (lots !== copy.lots) {
+      copy.lots = lots;
+      copy.totalHT = lots.reduce((sum, l) => sum + l.sousTotal, 0);
+      copy.totalTTC = copy.totalHT * (1 + copy.TVA / 100);
+    }
     onChange(copy);
   };
 
@@ -290,6 +301,18 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   const ligneSelectionnee = (): Ligne | null => selection && selection.kind === 'ligne'
     ? ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath) ?? null
     : null;
+
+  /** De quel poste l'article suit-il la quantité ? Texte du lien, ou `undefined` s'il ne suit rien. */
+  const libelleLien = (l: Ligne): string | undefined => {
+    const lien = l.quantiteLiee;
+    if (!lien) return undefined;
+    const source = indexerLignes(dpgf.lots).get(lien.sourceId);
+    const c = coefficientDe(lien);
+    return t('pro_link_badge', {
+      numero: source?.numero ?? '', designation: source?.designation ?? '',
+      coefficient: c !== 1 ? ` × ${String(c).replace('.', ',')}` : '',
+    });
+  };
 
   const appliquerALigne = (patch: Partial<Ligne> | null): boolean => {
     if (!patch || !selection || selection.kind !== 'ligne') return false;
@@ -776,6 +799,13 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         ) : null;
       })()}
 
+      {showLien && (() => {
+        const l = ligneSelectionnee();
+        return l ? (
+          <LienQuantiteDialog key={l.id} ligne={l} lots={dpgf.lots} onClose={() => setShowLien(false)} onSave={patch => { appliquerALigne(patch); }} />
+        ) : null;
+      })()}
+
       {showDraft && selection && selData && (
         <CctpDraftPosteDialog
           projectId={dpgf.projectId}
@@ -1131,6 +1161,9 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                         lignesMetre={l.quantiteDetails?.length}
                         parBatiment={l.quantitesBatiments !== undefined}
                         aDesEnfants={!!l.children?.length}
+                        liee={libelleLien(l)}
+                        lierImpossible={!!l.quantiteDetails?.length || l.quantitesBatiments !== undefined}
+                        onLier={() => setShowLien(true)}
                         unitesConnues={unitesConnues}
                         onQuantite={saisie => appliquerALigne(quantitePatch(l, saisie))}
                         onUnite={u => appliquerALigne({ unite: u })}
