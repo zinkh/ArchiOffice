@@ -3203,6 +3203,8 @@ export default {
       "task_list_col_progress": "Progress",
       "project_tasks_tab": "TASKS",
       "project_tab_bar_label": "Project sections",
+      "project_tabs_collapse": "Collapse the tabs",
+      "project_tabs_expand": "Expand the tabs",
       "project_tab_picker_open": "Change section: {{current}}",
       "project_tab_picker_title": "Go to section",
       "project_chantier_more": "More",

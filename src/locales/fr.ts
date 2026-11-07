@@ -3353,6 +3353,8 @@ export default {
       "task_list_col_progress": "Avancement",
       "project_tasks_tab": "TÂCHES",
       "project_tab_bar_label": "Sections de l'affaire",
+      "project_tabs_collapse": "Replier les onglets",
+      "project_tabs_expand": "Déplier les onglets",
       "project_tab_picker_open": "Changer de section : {{current}}",
       "project_tab_picker_title": "Aller à la section",
       "project_chantier_more": "Plus",
