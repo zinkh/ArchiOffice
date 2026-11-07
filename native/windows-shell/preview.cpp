@@ -40,7 +40,7 @@ int render(wchar_t const* input,unsigned page){
  Rect rectangle(0,0,width,height);BitmapData data{};if(output.LockBits(&rectangle,ImageLockModeRead,PixelFormat32bppARGB,&data)!=Ok)return 2;
  _setmode(_fileno(stdout),_O_BINARY);std::cout.write("AOP1",4);for(unsigned value:{width,height,pages,page})std::cout.write(reinterpret_cast<char*>(&value),4);
  for(unsigned y=0;y<height;y++)std::cout.write(static_cast<char*>(data.Scan0)+static_cast<ptrdiff_t>(y)*data.Stride,static_cast<std::streamsize>(width)*4);
- output.UnlockBits(&data);return std::cout.good()?0:2;
+ output.UnlockBits(&data);std::cout.flush();return std::cout.good()?0:2;
 }
 int wmain(int argc,wchar_t** argv){
  if(argc!=3)return 2;ULONG_PTR token=0;GdiplusStartupInput startup;if(GdiplusStartup(&token,&startup,nullptr)!=Ok)return 2;
