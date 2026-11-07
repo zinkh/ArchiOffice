@@ -6,6 +6,7 @@ on:
     paths:
       - 'electron/**'
       - 'native/windows-drive/**'
+      - 'native/windows-shell/**'
       - 'server/desktop/**'
       - 'src/components/WindowsDrivePreview.tsx'
       - '.github/workflows/build-windows.yml'
@@ -46,7 +47,7 @@ jobs:
         run: npm install --legacy-peer-deps
 
       - name: Verify Drive edit snapshots on Windows
-        run: npx vitest run tests/driveWindowsEditScanner.test.ts tests/driveWindowsEdits.test.ts tests/driveTransferQueue.test.ts tests/driveWorkingCopies.test.ts
+        run: npx vitest run tests/driveWindowsEditScanner.test.ts tests/driveWindowsEdits.test.ts tests/driveTransferQueue.test.ts tests/driveWorkingCopies.test.ts tests/driveWindowsShell.test.ts
 
       # electron-builder takes the version from package.json, never from the
       # git tag: with package.json left at 1.0.3, the v1.0.4 and v1.0.5 tag
@@ -103,6 +104,12 @@ jobs:
 
       - name: Compile CFAPI preview provider
         run: cmake --build native/windows-drive/build --config Release
+
+      - name: Configure Explorer extension
+        run: cmake -S native/windows-shell -B native/windows-shell/build -A x64 -DSHELL_BUILD_ID=${{ github.sha }}
+
+      - name: Compile Explorer extension
+        run: cmake --build native/windows-shell/build --config Release
 
       - name: Build SPA (offline desktop build)
         run: npm run build

@@ -170,9 +170,14 @@ function createWindowsMultiDrive(options) {
    const snapshot=await project.snapshot(id);if(!snapshot||!same(snapshot.identity,active))throw failure('DRIVE_UNAVAILABLE');snapshots.push(snapshot);
   }
   if(generation!==epoch||!namespace.status().active||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
-  return {identity:active,directory:namespace.directory(active),snapshots};
+  async function shellSnapshot() {
+  const generation=epoch;await getStatus();if(!identity||!namespace.status().active)throw failure('DRIVE_UNAVAILABLE');const active={...identity};const snapshots=[];
+  for(const [id,project] of projects){if(!project.status().active)throw failure('DRIVE_UNAVAILABLE');const saved=await project.snapshot(id);if(!saved)throw failure('DRIVE_SNAPSHOT_INVALID');snapshots.push(saved);}
+  if(generation!==epoch||!same(await vault(),active)||!namespace.status().active)throw failure('DRIVE_UNAVAILABLE');return {identity:active,projects:snapshots};
  }
- return {shellSnapshots,start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
+ return {identity:active,directory:namespace.directory(active),snapshots};
+ }
+ return {shellSnapshot,shellSnapshots,start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
   enableEditing:id=>refreshAction(async()=>{if(!validId(id)||!identity||!same(await vault(),identity)||!projects.has(id))throw failure('DRIVE_UNAVAILABLE');refresh.clear();return projects.get(id).enableEditing(id);}),
   checkCatalog:id=>refreshAction(()=>refresh.check(id)),refreshCatalog:(id,token)=>refreshAction(()=>refresh.apply(id,token)),
   openPrevious:id=>refreshAction(()=>refresh.previous(id))};

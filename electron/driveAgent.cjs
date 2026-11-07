@@ -75,8 +75,8 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:document-statuses',requestId,nodeIds});
     });},
     windowsPreview(action,input) {return new Promise((resolve,reject)=> {
-      if(!['catalog','hydrate','upload','shellMetadata'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
-      const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Preview timeout'));},['catalog','shellMetadata'].includes(action)?300000:60000);
+      if(!['catalog','hydrate','upload','shellMetadata','shell-metadata'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
+      const requestId=crypto.randomUUID();const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Preview timeout'));},['catalog','shellMetadata','shell-metadata'].includes(action)?300000:60000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:windows-preview',requestId,action,input});
     });},
     retryBlocked() {return new Promise((resolve,reject)=> {

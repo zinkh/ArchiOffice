@@ -161,6 +161,11 @@ win:
   extraResources:
     - from: native/windows-drive/build/Release/archioffice-drive-cfapi.exe
       to: drive-windows/archioffice-drive-cfapi.exe
+    - from: native/windows-shell/build/Release
+      to: drive-shell
+      filter:
+        - "*.dll"
+        - "archioffice-shell-control.exe"
   target:
     - target: nsis
       arch:
