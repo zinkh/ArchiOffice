@@ -8,9 +8,9 @@ const text=(v,max=240)=>typeof v==='string'?v.slice(0,max):'';
 const cleanName=v=>path.win32.basename(v).replace(/^_/,'').replace(/-[a-f0-9]{12}(?=\.|$)/,'');
 /** Local projection only. Every command resolves its opaque key again against
  * the currently mounted manifest, never a path or document URL from Explorer. */
-function createShellProjection({drive,agent,vault,root,shell,openDocument,businessCatalog,now=Date.now}) {
- let owner=null;let loading=0;const metadata=new Map();
- async function snapshot(){const value=await drive.shellSnapshot();const active=await vault();if(!same(value.identity,active)||!Array.isArray(value.projects)||value.projects.length>10)throw new Error('Access refused');const id=hash(value.identity);if(owner!==id){owner=id;metadata.clear();}return value;}
+function createShellProjection({drive,agent,vault,root,shell,openDocument,businessCatalog,renderPreview,now=Date.now}) {
+ let owner=null;let loading=0;const metadata=new Map();const histories=new Map();
+ async function snapshot(){const value=await drive.shellSnapshot();const active=await vault();if(!same(value.identity,active)||!Array.isArray(value.projects)||value.projects.length>10)throw new Error('Access refused');const id=hash(value.identity);if(owner!==id){owner=id;metadata.clear();histories.clear();}return value;}
  function enrich(saved,identity){
   const key=hash([identity,saved.projectId,saved.rootKey]);let cached=metadata.get(key);
   if(!cached){cached={at:-Infinity,data:null,pending:false};metadata.set(key,cached);}
@@ -54,15 +54,30 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
  }
  async function command(action,input,signal){
   const alive=()=>signal?.throwIfAborted();alive();
-  if(!['catalog','open','document'].includes(action))throw new Error('Invalid action');if(action==='catalog'){const value=await catalog();alive();return value;}
+  if(!['catalog','open','document','preview','versions'].includes(action))throw new Error('Invalid action');if(action==='catalog'){const value=await catalog();alive();return value;}
   if(typeof input.projectId!=='string'||!/^[a-zA-Z0-9_-]{1,200}$/.test(input.projectId)||!/^[a-f0-9]{64}$/.test(input.key)||!/^[a-f0-9]{64}$/.test(input.revision))throw new Error('Invalid reference');
   const snap=await snapshot();const saved=snap.projects.find(p=>p.projectId===input.projectId);
   if(!saved||hash([saved.rootKey,saved.directory])!==input.revision)throw new Error('Stale generation');
   const entry=saved.catalog.find(e=>!e.folder&&e.key===input.key);if(!entry||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(entry.meta?.nodeId))throw new Error('Unknown file');
   const latest=async()=>{const next=await snapshot();const current=next.projects.find(p=>p.projectId===saved.projectId);if(!same(snap.identity,next.identity)||!current||hash([current.rootKey,current.directory])!==input.revision)throw new Error('Stale generation');};
+  if(action==='versions') {
+   const cacheKey=hash([snap.identity,saved.projectId,entry.key,input.revision]);let result,stale=false;
+   try {
+    result=await agent.windowsPreview('shellVersions',{identity:snap.identity,projectId:saved.projectId,nodeId:entry.meta.nodeId},signal);
+    if(!same(result?.identity,snap.identity)||!Array.isArray(result.versions)||result.versions.length>50||!Number.isSafeInteger(result.total)||result.total<result.versions.length)throw Object.assign(new Error('Versions refused'),{code:'WINDOWS_SHELL_METADATA_REFUSED'});
+    const seen=new Set();for(const v of result.versions){if(!Number.isSafeInteger(v.version)||v.version<1||seen.has(v.version)||!(v.size===null||Number.isSafeInteger(v.size)&&v.size>=0)||!(v.uploadedAt===null||typeof v.uploadedAt==='string'&&v.uploadedAt.length<=80)||!(v.description===null||typeof v.description==='string'&&v.description.length<=512))throw Object.assign(new Error('Versions refused'),{code:'WINDOWS_SHELL_METADATA_REFUSED'});seen.add(v.version);}
+    result={versions:result.versions.map(v=>({version:v.version,size:v.size,uploadedAt:v.uploadedAt,description:v.description})),total:result.total,observedAt:now()};
+    await latest();alive();histories.delete(cacheKey);histories.set(cacheKey,result);while(histories.size>100)histories.delete(histories.keys().next().value);
+   }catch(error){if([401,402,403,404].includes(error.status)||error.code==='WINDOWS_SHELL_METADATA_REFUSED'){histories.delete(cacheKey);throw error;}result=histories.get(cacheKey);if(!result)throw error;stale=true;}
+   await latest();alive();return {status:'versions',...result,stale};
+  }
   if(action==='document'){await latest();alive();await openDocument({projectId:saved.projectId,documentId:entry.meta.nodeId.slice(4)});return {status:'opened'};}
   const file=path.join(saved.directory,...entry.path.split('\\'));await noLinks(root,file);const stat=await fs.lstat(file);
   if(!stat.isFile()||stat.size>50*1024*1024||!isSafeToOpen(file))throw new Error('File refused');await latest();alive();
+  if(action==='preview') {
+   if(!renderPreview)return {status:'unavailable'};
+   const result=await renderPreview(file,input.page??0,signal);await latest();alive();return result;
+  }
   if(await shell.openPath(file))throw new Error('Open failed');return {status:'opened'};
  }
  return {command};
@@ -86,7 +101,7 @@ function createShellDocumentOpener({getWindow,showWindow,origin}) {
 function createShellPipe({projection,address='\\\\.\\pipe\\ArchiOffice.DriveShell.'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex')}) {
  let server=null;const clients=new Set();let stopped=false;
  async function start(){if(server)return {address,token};server=net.createServer(socket=>{
-  if(stopped||clients.size>=8){socket.destroy();return;}clients.add(socket);const cancel=new AbortController();socket.setTimeout(10000,()=>socket.destroy());let data='',done=false;
+  if(stopped||clients.size>=8){socket.destroy();return;}clients.add(socket);const cancel=new AbortController();socket.setTimeout(25000,()=>socket.destroy());let data='',done=false;
   socket.on('error',()=>{});socket.on('close',()=>{clients.delete(socket);cancel.abort();});socket.on('data',bytes=>{
    if(done){socket.destroy();return;}data+=bytes.toString('utf8');if(Buffer.byteLength(data)>8192){socket.destroy();return;}const end=data.indexOf('\n');if(end<0)return;done=true;
    void(async()=>{try{if(data.slice(end+1).trim())throw Error();const msg=JSON.parse(data.slice(0,end));if(msg.format!==1||typeof msg.token!=='string'||msg.token.length!==token.length||!crypto.timingSafeEqual(Buffer.from(msg.token),Buffer.from(token)))throw Error();

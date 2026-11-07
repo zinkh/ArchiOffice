@@ -51,7 +51,8 @@ jobs:
           path: |
             native/windows-shell/build/Release/*.dll
             native/windows-shell/build/Release/archioffice-shell-control.exe
-            native/windows-shell/build/shell-prototype*.png
+            native/windows-shell/build/Release/archioffice-shell-preview.exe
+            native/windows-shell/build/shell-*.png
       - uses: actions/upload-artifact@v7
         if: always()
         with:

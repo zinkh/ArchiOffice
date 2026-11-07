@@ -1,4 +1,4 @@
-# ArchiOffice Drive — liste documentaire Explorer, lots 3 et 4
+# ArchiOffice Drive — liste documentaire Explorer, lots 3 à 5
 
 Vue native Windows x64 enregistrée dans **Ce PC → ArchiOffice Drive**, séparée du lecteur A: et du fournisseur CFAPI existant. Le client ArchiOffice doit être ouvert et A: actif. Les projets déjà montés sont les seuls proposés.
 
@@ -14,6 +14,45 @@ Vue native Windows x64 enregistrée dans **Ce PC → ArchiOffice Drive**, sépar
 - « Ouvrir dans ArchiOffice » ouvre Documents sur le projet et met le document en évidence après vérification de sa présence dans les données chargées.
 
 Le catalogue local est relu toutes les cinq secondes. Une réponse identique ne reconstruit pas la vue ; un changement conserve la sélection, les branches repliées et les positions de défilement. L’enrichissement métier réutilise le cache local isolé par utilisateur/cabinet/appareil/projet du lot 2 et ses API VFS authentifiées, sans télécharger les fichiers. Sa lecture distante se renouvelle au plus une fois par minute. Les propriétés affichent la date de l’observation et signalent une donnée en cache dont l’actualisation est en attente. Il ne s’applique qu’à une version identique à celle du manifeste monté. Cette vue ne rafraîchit pas automatiquement les fichiers de A: : la commande existante de mise à jour du catalogue conserve ce rôle.
+
+## Panneau de droite (lot 5)
+
+Les onglets **Propriétés**, **Aperçu** et **Versions** suivent la sélection sans
+ouvrir de page du client. Une sélection multiple affiche son résumé et ne lance
+aucun aperçu ni consultation arbitraire du premier document.
+
+- PDF : aperçu ajusté au panneau et navigation page précédente/suivante.
+- Images : PNG, JPEG, GIF, BMP et TIFF ; seule la première image des formats animés
+  ou multi-images est affichée. L’aperçu est une image de lecture, sans annotation.
+- DWG, IFC, RVT et autres formats : message d’aperçu indisponible et commande
+  Ouvrir conservée pour le logiciel habituel. Les fichiers protégés, illisibles,
+  trop complexes ou indisponibles hors connexion affichent un état adapté.
+- Versions : au plus les cinquante dernières lignes réellement retournées par
+  ArchiOffice, triées par version décroissante, avec date, taille et description
+  disponibles. Le nombre total et la date d’observation sont affichés. Aucun
+  enregistrement historique n’est inventé pour combler une version absente.
+
+Le rendu lit un instantané temporaire du fichier canonique de A: dans le cache
+privé du client. La création de cet instantané peut déclencher l’hydratation CFAPI
+existante si le contenu n’est pas encore local ; elle ne modifie pas le fichier de
+travail et ne crée pas une deuxième copie éditable. Une modification pendant la
+copie ou le rendu refuse l’image. L’instantané est nettoyé à la fin de la demande ;
+un arrêt brutal peut laisser un résidu dans le cache privé de prévisualisation.
+
+Le processus séparé `archioffice-shell-preview.exe` utilise Windows.Data.Pdf et
+GDI+ pour produire un raster borné à 512 × 640 pixels. La DLL Explorer ne reçoit
+que ces pixels et les compteurs de page, sans chemin de disque ni jeton cloud,
+et n’héberge aucun décodeur PDF ou image. La limite de contenu reste 50 Mio ; les
+images sources sont limitées à 64 mégapixels. Un échec ne bloque pas les propriétés
+ni les commandes existantes. L’ouverture normale reste le parcours pour une
+lecture haute résolution, la modification et l’annotation.
+
+Les requêtes du panneau sont indépendantes du chargement du catalogue. La
+sélection, le numéro de page et la génération sont contrôlés avant affichage ;
+une réponse tardive est ignorée. Un changement rapide annule la requête précédente
+et coalesce les demandes. L’historique déjà lu peut être réaffiché en cache pendant
+la session, avec sa date et un libellé explicite ; un refus connu l’invalide. Il
+reste séparé de la version du catalogue A: et de l’état d’envoi.
 
 ## Liste documentaire et présentation (lot 4)
 
@@ -71,7 +110,7 @@ vue, sans nouvelle racine CFAPI ni second moteur de synchronisation.
 
 ## Séparation des responsabilités
 
-Le composant COM ne fait aucun appel HTTP. Des tâches natives en arrière-plan dialoguent avec un pipe local aléatoire et authentifié par un secret éphémère ; les E/S sont bornées à cinq secondes. Les jetons cloud restent dans le client. Les messages Explorer contiennent exclusivement des identifiants et des métadonnées d’affichage.
+Le composant COM ne fait aucun appel HTTP. Des tâches natives en arrière-plan dialoguent avec un pipe local aléatoire et authentifié par un secret éphémère ; les E/S sont bornées à vingt secondes pour les aperçus, douze secondes pour les versions et cinq secondes pour les autres demandes. Les jetons cloud restent dans le client. Les messages Explorer contiennent exclusivement des identifiants et des métadonnées d’affichage.
 
 Le broker vérifie l’identité utilisateur/cabinet/poste, l’activation du montage et la génération du catalogue. Il refuse les chemins fournis par le demandeur, les liens symboliques, les types dangereux et les ouvertures après déconnexion de la requête. Les actions recontrôlent l’identité juste avant leur effet ; le prochain rafraîchissement vide une vue dont l’accès est refusé. Les autorisations hors ligne existantes gardent leur durée de validité.
 
@@ -103,7 +142,7 @@ dans explorer.exe sur un poste réel.
 
 ## Limites de cette étape
 
-Pas d’aperçu PDF, recherche dans le contenu des fichiers, édition des propriétés, action de classement, résolution de conflits ni déploiement automatique de la version de test. L’arbre métier appartient à la vue personnalisée ; le volet Windows standard n’énumère pas les projets comme des sous-dossiers Shell. Les limites existantes du montage restent dix projets, cent fichiers par projet, cinquante Mio par fichier.
+Pas de recherche dans le contenu des fichiers, édition des propriétés, action de classement, résolution de conflits ni déploiement automatique de la version de test. L’arbre métier appartient à la vue personnalisée ; le volet Windows standard n’énumère pas les projets comme des sous-dossiers Shell. Les limites existantes du montage restent dix projets, cent fichiers par projet, cinquante Mio par fichier.
 
 ## Réception Windows 11 avec les documents du cabinet
 
@@ -124,3 +163,11 @@ de la présentation et l’ouverture du bon document après le tri. Sélectionne
 plusieurs lignes avec Ctrl/Maj, actualiser, puis vérifier que les commandes
 d’ouverture restent désactivées jusqu’à la sélection d’un seul document. Changer
 de cabinet et vérifier que les préférences et la sélection ne sont pas mélangées.
+
+Pour le lot 5, sélectionner un PDF de VIP-TC et vérifier ses pages, puis une image
+et un DWG/IFC/RVT. Comparer les versions au client ArchiOffice. Changer rapidement
+de document, filtrer la sélection, couper le réseau puis changer de cabinet :
+aucune image ni historique de l’ancienne sélection ne doit rester affiché. Tester
+les trois onglets et le clavier en fenêtre étroite. Les essais automatisés utilisent
+un PDF de deux pages et une image synthétique avec le vrai moteur de rendu Windows ;
+ils ne remplacent pas cette réception sur Windows 11 avec vos fichiers réels.

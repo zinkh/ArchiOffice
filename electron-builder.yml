@@ -166,6 +166,7 @@ win:
       filter:
         - "*.dll"
         - "archioffice-shell-control.exe"
+        - "archioffice-shell-preview.exe"
   target:
     - target: nsis
       arch:

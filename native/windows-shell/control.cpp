@@ -102,7 +102,17 @@ void smoke(wchar_t const* destination){
  int restoredOrder[ColumnCount]{};ListView_GetColumnOrderArray(list,ColumnCount,restoredOrder);
  if(ListView_GetColumnWidth(list,1)!=140||restoredOrder[1]!=4)throw std::runtime_error("presentation did not persist across recreation");
  ListView_GetItemText(list,0,4,version,40);if(std::wstring(version)!=L"12")throw std::runtime_error("sort preference did not persist");
- selectPlan(list);SendMessageW(child,WM_COMMAND,101,0);settled(child);SendMessageW(child,WM_COMMAND,102,0);settled(child);
+ selectPlan(list);
+ auto tabs=GetDlgItem(child,220),canvas=GetDlgItem(child,224);accessibleName(tabs,L"Propriétés, aperçu et versions");
+ auto selectTab=[&](int index){TabCtrl_SetCurSel(tabs,index);NMHDR notify{};notify.hwndFrom=tabs;notify.code=TCN_SELCHANGE;SendMessageW(child,WM_NOTIFY,220,reinterpret_cast<LPARAM>(&notify));};
+ auto waitText=[&](HWND target,wchar_t const* expected){wchar_t text[8192]{};for(int n=0;n<200;n++){pump(50);GetWindowTextW(target,text,8192);if(std::wstring(text).find(expected)!=std::wstring::npos)return;}throw std::runtime_error("selected document panel did not load: expected "+winrt::to_string(expected)+", received "+winrt::to_string(text));};
+ selectTab(1);waitText(canvas,L"Aperçu de la page 1");if(!IsWindowEnabled(GetDlgItem(child,222)))throw std::runtime_error("PDF page navigation unavailable");
+ auto previewImage=fs::path(destination);previewImage.replace_filename(L"shell-preview-pdf.png");screenshot(child,previewImage.c_str());
+ SendMessageW(child,WM_COMMAND,222,0);waitText(canvas,L"Aperçu de la page 2");
+ selectTab(2);waitText(GetDlgItem(child,223),L"Version 12");
+ LVFINDINFOW notice{};notice.flags=LVFI_STRING;notice.psz=L"Notice.docx";int noticeIndex=ListView_FindItem(list,-1,&notice);ListView_SetItemState(list,-1,0,LVIS_SELECTED);ListView_SetItemState(list,noticeIndex,LVIS_SELECTED,LVIS_SELECTED);
+ selectTab(1);waitText(canvas,L"Aperçu indisponible pour ce format");
+ selectPlan(list);selectTab(0);SendMessageW(child,WM_COMMAND,101,0);settled(child);SendMessageW(child,WM_COMMAND,102,0);settled(child);
  // The test broker invalidates its identity after the document action.
  view->Refresh();for(int n=0;n<120&&ListView_GetItemCount(list);n++)pump(50);if(ListView_GetItemCount(list)!=0)throw std::runtime_error("stale identity retained");
  view->Refresh();check(view->DestroyViewWindow());
@@ -117,4 +127,4 @@ int wmain(int argc,wchar_t** argv){try{
  else if(action==L"--clear-runtime"&&argc==3){if(read(HKEY_CURRENT_USER,RuntimeKey,L"Pipe")==argv[2]){HKEY key;if(RegOpenKeyExW(HKEY_CURRENT_USER,RuntimeKey,0,KEY_SET_VALUE,&key)==ERROR_SUCCESS){RegDeleteValueW(key,L"Pipe");RegDeleteValueW(key,L"Token");RegCloseKey(key);}}}
  else if(action==L"--open"){auto args=std::wstring(L"shell:::")+ShellGuid;if(reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",L"explorer.exe",args.c_str(),nullptr,SW_SHOWNORMAL))<=32)throw std::runtime_error("Explorer unavailable");}
  else if(action==L"--smoke"&&argc==3)smoke(argv[2]);else return 2;CoUninitialize();return 0;
- }catch(...){std::cerr<<"ArchiOffice Shell operation unavailable."<<std::endl;return 1;}}
+ }catch(std::exception const& error){std::cerr<<error.what()<<std::endl;return 1;}catch(...){std::cerr<<"ArchiOffice Shell operation unavailable."<<std::endl;return 1;}}
