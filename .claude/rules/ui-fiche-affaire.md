@@ -162,6 +162,8 @@ traduites. Quatre règles à garder :
   certificats de paiement ». Les montants de l'aperçu et de la fiche complète
   sont en lecture seule dès qu'un contrat est rattaché, comme dans HONOS.
 
+**Onglets repliables, barre du PRO toujours visible** (`ProjectDetail.tsx`) : une flèche à droite des onglets (bureau seulement) replie les deux rangées (familles, puis missions : Infos, Tâches... Inspiration, Diag...) en une ligne qui rappelle l'onglet ouvert ; le choix est mémorisé (`localStorage` `projet:onglets-replies`) et ne touche jamais le sélecteur du téléphone. L'atelier PRO (`ProTab`) remplit la hauteur réellement disponible (`lg:h-full`, le panneau ne défile plus pour lui) au lieu de `100dvh - 200px` : l'en-tête et les onglets prenaient plus de 200 px, le bas débordait et la barre des sous-onglets et des actions du PRO sortait de l'écran. Sous `lg`, la hauteur fixe d'avant reste. Pas vérifié dans un navigateur.
+
 ### Fiche affaire sur téléphone et tablette
 
 Vérifiée en 390, 820 et 1366 px. Règles à garder :

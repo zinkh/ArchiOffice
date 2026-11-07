@@ -704,7 +704,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
 
   return (
     <ProToolbarContext.Provider value={toolbarRegistry}>
-    <div id="printable-pro" className="flex flex-col" style={{ height: 'calc(100dvh - 200px)', minHeight: 500 }}>
+    <div id="printable-pro" className="flex flex-col h-[calc(100dvh-200px)] min-h-[500px] lg:h-full lg:min-h-[28rem]">
 
       {/* Print decorations — invisible on screen, fixed header/footer + QR when printing */}
       {(dpgf || bpu) && (
