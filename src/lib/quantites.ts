@@ -218,10 +218,12 @@ export function appliquerMetre(
  * La valeur qu'un confrère envoie pour proposer un métré : la liste JSON de ses lignes, libellé et calcul
  * seulement (le serveur la valide et la met en forme canonique). Les lignes entièrement vides sont ignorées.
  */
-export function serialiserMetre(lignes: readonly QuantiteDetail[]): string {
+export function serialiserMetre(lignes: readonly QuantiteDetail[], options: OptionsMetre = {}): string {
   return JSON.stringify(lignes.filter(d => !estLigneVide(d)).map(d => ({
     libelle: libelleDetail(d),
     expression: (d.expression ?? (d.quantite ? String(d.quantite).replace('.', ',') : '')).trim(),
+    // Le bâtiment n'est envoyé que pour un article réparti par bâtiment (le serveur le refuse ailleurs).
+    ...(options.parBatiment && d.batimentId ? { batimentId: d.batimentId } : {}),
   })));
 }
 
@@ -229,13 +231,13 @@ export function serialiserMetre(lignes: readonly QuantiteDetail[]): string {
  * Un métré proposé (liste JSON de { libelle, expression }) en lignes lisibles et son total, pour la boîte
  * des propositions du cabinet. Vide pour « aucun métré » ; une valeur illisible est rendue telle quelle.
  */
-export function metreEnTexte(json: string, unite = ''): string {
+export function metreEnTexte(json: string, unite = '', codes: Record<string, string> = {}): string {
   let data: unknown;
   try { data = JSON.parse(json); } catch { return json; }
   if (!Array.isArray(data) || data.length === 0) return '';
-  const lignes = data.filter((d): d is { libelle?: unknown; expression?: unknown } => !!d && typeof d === 'object');
-  const lisibles = lignes.map(d => ({ libelle: String(d.libelle ?? ''), expression: String(d.expression ?? '') }));
-  const corps = lisibles.map(d => `${d.libelle || '·'} : ${d.expression || '0'}`);
+  const lignes = data.filter((d): d is { libelle?: unknown; expression?: unknown; batimentId?: unknown } => !!d && typeof d === 'object');
+  const lisibles = lignes.map(d => ({ libelle: String(d.libelle ?? ''), expression: String(d.expression ?? ''), batiment: d.batimentId ? String(d.batimentId) : '' }));
+  const corps = lisibles.map(d => `${d.batiment ? `[${codes[d.batiment] ?? d.batiment}] ` : ''}${d.libelle || '·'} : ${d.expression || '0'}`);
   const total = totalMetre(lisibles.map((d, i) => ({ id: String(i), libelle: d.libelle, expression: d.expression, quantite: 0 })));
   return [...corps, `Total : ${formatQuantite(total)}${unite ? ` ${unite}` : ''}`].join('\n');
 }

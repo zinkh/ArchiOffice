@@ -39,7 +39,7 @@ import { tenantMembershipsByUser } from '../tenantMemberships';
 import { notifyUsers } from '../push';
 import {
   FIELD_KIND, NUMERIC_FIELDS, PROPOSABLE_FIELDS, RECOMPUTE_FIELDS, REQUIRED_TEXT_FIELDS, applyFieldToNode, blockedEdit, findRawNode,
-  guestDocumentView, nodeLabels, parseDocument, parseMetreValue, parseNumberValue, readField, recomputeAfterNumericChange,
+  batimentCodes, guestDocumentView, metreForNode, nodeLabels, parseDocument, parseMetreValue, parseNumberValue, readField, recomputeAfterNumericChange,
   sameFieldValue, visibleNodes, type ProposableField, type ProposableTarget,
 } from '../projectShares/documentView';
 
@@ -179,7 +179,8 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
       const { share, grants } = found;
       const parsed = readProposalInput(req.body);
       if ('error' in parsed) return res.status(400).json({ error: parsed.error });
-      const { lotId, targetType, targetId, field, value } = parsed.input;
+      const { lotId, targetType, targetId, field } = parsed.input;
+      let value = parsed.input.value;
       const kind = FIELD_KIND[field];
       if (!allows(grants, kind, 'write', lotId)) {
         return res.status(403).json({ error: 'Vous n\'avez pas le droit de proposer cette modification sur ce lot.', code: 'SHARE_FORBIDDEN' });
@@ -201,6 +202,12 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
       if (targetType === 'ligne') {
         const blocked = blockedEdit(node, field);
         if (blocked) return res.status(400).json({ error: blocked, code: 'PROPOSAL_NOT_ALLOWED' });
+        if (field === 'metre') {
+          // Le métré se valide POUR cet article : un bâtiment connu par ligne s'il est réparti par bâtiment.
+          const contextual = metreForNode(row.doc, node, value);
+          if ('error' in contextual) return res.status(400).json({ error: contextual.error, code: 'PROPOSAL_NOT_ALLOWED' });
+          value = contextual.value;
+        }
       }
       let current: string;
       if (targetType === 'lot') {
@@ -315,6 +322,7 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
             leavesPourMemoire,
             guestEmail: emails.get(p.share_id) ?? null,
             targetLabel: labels.get(p.target_id) ?? null,
+            ...(p.field === 'metre' && doc ? { batimentCodes: batimentCodes(doc) } : {}),
             currentValue,
             // En attente mais le champ a changé depuis : l'approuver sera refusé.
             outdated: p.status === 'pending' && (currentValue === null || !sameFieldValue(p.field, currentValue, p.base_value)),
@@ -386,7 +394,8 @@ export function registerProjectShareProposalRoutes(app: Express, { supabaseAdmin
         // Garde-fou 1 : le champ doit toujours valoir ce que l'invité a vu, et l'article rester modifiable
         // (il a pu recevoir des sous-articles, passer pour mémoire ou être réparti par bâtiment entre-temps).
         if (!node || !sameFieldValue(proposal.field, readField(node, proposal.field), proposal.base_value)
-          || (proposal.target_type === 'ligne' && blockedEdit(node, proposal.field))) {
+          || (proposal.target_type === 'ligne' && blockedEdit(node, proposal.field))
+          || (proposal.field === 'metre' && 'error' in metreForNode(row.doc, node, proposal.proposed_value))) {
           await markOutdated(proposal, req.user.id, tenantId);
           return res.status(409).json(OUTDATED);
         }

@@ -287,8 +287,7 @@ qu'il n'est pas ajouté à cette liste. Le métré (`metre`) en fait partie.
 - **On ne propose que sur ce qu'on voit**, dans la vue du type de droit : une ligne `cctpOnly`
   n'a ni quantité ni prix, elle n'existe pas dans la vue DPGF (404).
 - **Refusés comme dans l'éditeur** (`blockedEdit`) : un article à sous-articles (il porte la
-  somme de ses enfants), à quantité répartie par bâtiment (`quantitesBatiments`), ou qui n'est pas
-  un ouvrage ; une quantité seule sur un article qui a un métré (`quantiteDetails`) ; un nombre négatif, non numérique,
+  somme de ses enfants), ou qui n'est pas un ouvrage ; la quantité SEULE d'un article réparti par bâtiment (`quantitesBatiments`, son métré par bâtiment se propose) ; une quantité seule sur un article qui a un métré (`quantiteDetails`) ; un nombre négatif, non numérique,
   à plus de 4 décimales ou au-delà de 1e9 (`parseNumberValue`, virgule admise).
 - **Article « pour mémoire »** : il PEUT recevoir une quantité, une unité et un prix. La
   quantité et l'unité le laissent « pour mémoire » (montant à 0, comme dans l'éditeur). Un
@@ -361,10 +360,10 @@ qu'il n'est pas ajouté à cette liste. Le métré (`metre`) en fait partie.
   l'approbation, `applyFieldToNode` reprend une ligne de même libellé avec son `id` et ses champs
   d'une ventilation d'avant (rien n'est perdu), puis `appliquerMetre` fixe quantité et montant
   comme l'éditeur ; une liste vide retire le métré et garde la quantité ; un article « pour
-  mémoire » garde un montant à 0. Refusé : article à sous-articles, quantité par bâtiment. Une
+  mémoire » garde un montant à 0. Refusé : article à sous-articles. Une
   quantité proposée seule sur un article qui a un métré est refusée (`blockedEdit` : elle se
   modifie par le métré) ; son PRIX et son unité se proposent, quelle que soit la composition de
-  la quantité. Côté écran : `ProposeMetre` rouvre la fenêtre de l'éditeur (`MetreDialog`) ; ce
+  la quantité. **Article réparti par bâtiment** (`quantitesBatiments`) : son métré se propose, chaque ligne portant un bâtiment (`{ libelle, expression, batimentId }`, `metreForNode` : bâtiment connu de l'opération sur chaque ligne, total de CHAQUE bâtiment positif ou nul, `validerMetre(..., {parBatiment})`) ; sur un autre article un `batimentId` est refusé. La vue du confrère porte pour cela les bâtiments de l'opération (`multiBatiments`, `batiments` : id, code, libellé, ordre), `quantitesBatiments` (des chiffres) et le `batimentId` des lignes du métré d'un article par bâtiment SEULEMENT (ailleurs c'est un reste de ventilation, jamais exposé). À l'approbation `appliquerMetre` fixe la quantité de chaque bâtiment (un bâtiment affecté sans ligne reste à 0), une ligne reprise garde son `id` et sa note et peut changer de bâtiment, et la proposition devient périmée si un bâtiment a disparu de l'opération entre-temps. La quantité seule d'un article par bâtiment reste refusée. Le cabinet lit `[DX] Façade Est : 10` (`batimentCodes`). Tests : `tests/projectShareMetreBatiments.test.ts`. Côté écran : `ProposeMetre` rouvre la fenêtre de l'éditeur (`MetreDialog`) ; ce
   que le confrère a saisi reste dans la fenêtre si l'envoi est refusé ; le cabinet lit le métré en
   lignes (`metreEnTexte`). Tests : `tests/projectShareMetre.test.ts`,
   `tests/sharedDocumentMetre.test.ts`.

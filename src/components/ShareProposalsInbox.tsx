@@ -15,6 +15,8 @@ interface Proposal {
   createdAt: string | null; outdated: boolean; drifted: boolean; limitReached: boolean; maxPending: number;
   /** Ce prix chiffrera un article « pour mémoire » : il entrera dans le total du lot. */
   leavesPourMemoire?: boolean;
+  /** Code de chaque bâtiment (identifiant vers code), pour lire un métré par bâtiment. */
+  batimentCodes?: Record<string, string>;
 }
 
 function ValueBox({ label, value, tone }: { label: string; value: string | null; tone?: 'proposed' }) {
@@ -28,7 +30,7 @@ function ValueBox({ label, value, tone }: { label: string; value: string | null;
 
 /** Une valeur proposée telle que le cabinet la lit : un métré (liste JSON) devient des lignes lisibles et un total. */
 const lisible = (p: Proposal, value: string | null): string | null =>
-  p.field === 'metre' && value !== null ? metreEnTexte(value) : value;
+  p.field === 'metre' && value !== null ? metreEnTexte(value, '', p.batimentCodes) : value;
 
 function describe(p: Proposal, lots: InboxLot[], t: (k: string, o?: any) => string): string {
   const lot = lots.find(l => l.id === p.lotId);

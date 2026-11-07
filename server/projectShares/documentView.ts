@@ -56,13 +56,33 @@ export function parseDocument(raw: unknown): Rec | null {
  */
 const CCTP_CHIFFRES_FIELDS = ['quantite', 'pourMemoire', 'prixUnitaire', 'prixTotal'] as const;
 
-/** Les champs d'une ligne de métré visibles d'un confrère (jamais la note interne, ni le bâtiment ou la phase). */
-const METRE_FIELDS = ['id', 'libelle', 'expression', 'quantite', 'niveau', 'local'] as const;
+/** Les champs d'une ligne de métré visibles d'un confrère (jamais la note interne, ni la phase). Le bâtiment l'est : c'est la branche d'un article réparti par bâtiment. */
+const METRE_FIELDS = ['id', 'libelle', 'expression', 'quantite', 'niveau', 'local', 'batimentId'] as const;
 
 /** Le métré d'un article, champ par champ ; absent quand l'article n'en a pas. */
 function viewMetre(ligne: Rec): Rec[] | undefined {
   if (!Array.isArray(ligne.quantiteDetails) || ligne.quantiteDetails.length === 0) return undefined;
-  return ligne.quantiteDetails.filter(isRec).map(d => pick(d, METRE_FIELDS));
+  // Le bâtiment d'une ligne n'a de sens que pour un article réparti par bâtiment : ailleurs c'est un reste de ventilation.
+  const garderBatiment = isRec(ligne.quantitesBatiments);
+  return ligne.quantiteDetails.filter(isRec).map(d => {
+    const out = pick(d, METRE_FIELDS);
+    if (!garderBatiment) delete out.batimentId;
+    return out;
+  });
+}
+
+/** Code de chaque bâtiment de l'opération, pour que le cabinet lise un métré par bâtiment. */
+export function batimentCodes(doc: Rec): Record<string, string> {
+  return Object.fromEntries((Array.isArray(doc.batiments) ? doc.batiments : []).filter(isRec).filter(b => typeof b.id === 'string').map(b => [b.id, String(b.code ?? b.id)]));
+}
+
+/** Les bâtiments de l'opération (identifiant, code, libellé, ordre), pour proposer un métré par bâtiment. */
+function viewBatiments(doc: Rec): Rec {
+  if (!doc.multiBatiments || !Array.isArray(doc.batiments)) return {};
+  return {
+    multiBatiments: true,
+    batiments: doc.batiments.filter(isRec).filter(b => typeof b.id === 'string').map(b => pick(b, ['id', 'code', 'libelle', 'ordre'])),
+  };
 }
 
 /**
@@ -80,6 +100,10 @@ function viewLigne(ligne: unknown, mode: DocumentMode, avecChiffres = false): Re
   if (mode === 'dpgf' || chiffres) {
     const metre = viewMetre(ligne);
     if (metre) out.quantiteDetails = metre;
+    // Un article réparti par bâtiment : les bâtiments concernés et leur quantité (des chiffres, comme la quantité).
+    if (isRec(ligne.quantitesBatiments)) {
+      out.quantitesBatiments = Object.fromEntries(Object.entries(ligne.quantitesBatiments).filter(([, v]) => typeof v === 'number' && Number.isFinite(v)));
+    }
   }
   if (Array.isArray(ligne.children)) {
     out.children = ligne.children.map(c => viewLigne(c, mode, chiffres)).filter((c): c is Rec => !!c);
@@ -123,6 +147,7 @@ export function guestDocumentView(
     version: doc.version ?? null,
     statut: doc.statut ?? null,
     dateCreation: doc.dateCreation ?? null,
+    ...viewBatiments(doc),
     lots,
   };
 }
@@ -229,8 +254,10 @@ export function blockedEdit(node: Rec, field: string): string | null {
   }
   // L'unité et le prix ne dépendent pas de la façon dont la quantité est composée.
   if (field === 'unite' || field === 'prixUnitaire') return null;
-  if (isRec(node.quantitesBatiments) && Object.keys(node.quantitesBatiments).length > 0) {
-    return 'Quantité répartie par bâtiment : elle se modifie dans le DPGF du cabinet.';
+  // Une quantité par bâtiment est la somme de ses parts : sa quantité seule se modifie chez le cabinet, mais
+  // son MÉTRÉ se propose (chaque ligne porte un bâtiment, voir `metreForNode`).
+  if (field === 'quantite' && isRec(node.quantitesBatiments) && Object.keys(node.quantitesBatiments).length > 0) {
+    return 'Quantité répartie par bâtiment : proposez plutôt un métré par bâtiment, ou modifiez-la dans le DPGF du cabinet.';
   }
   // Un article qui a un métré : sa quantité est la somme de ses lignes, elle se modifie par le métré.
   if (field === 'quantite' && Array.isArray(node.quantiteDetails) && node.quantiteDetails.length > 0) {
@@ -245,12 +272,22 @@ export function sameFieldValue(field: string, a: string, b: string): boolean {
   return a === b;
 }
 
-/** Les lignes du métré d'un article telles que le confrère les voit : libellé et calcul, rien d'autre. */
-export function metreLines(node: Rec): { libelle: string; expression: string }[] {
-  return (Array.isArray(node.quantiteDetails) ? node.quantiteDetails : []).filter(isRec).map(d => ({
-    libelle: libelleDetail(d as unknown as QuantiteDetail),
-    expression: typeof d.expression === 'string' ? d.expression.trim() : (Number(d.quantite) ? String(d.quantite).replace('.', ',') : ''),
-  }));
+/** Un article réparti par bâtiment (`quantitesBatiments`, même vide) : son métré porte un bâtiment par ligne. */
+const parBatiment = (node: Rec): boolean => isRec(node.quantitesBatiments);
+
+export type LigneMetreProposee = { libelle: string; expression: string; batimentId?: string };
+
+/** Les lignes du métré d'un article telles que le confrère les voit : libellé et calcul, et le bâtiment pour un article par bâtiment. */
+export function metreLines(node: Rec): LigneMetreProposee[] {
+  const par = parBatiment(node);
+  return (Array.isArray(node.quantiteDetails) ? node.quantiteDetails : []).filter(isRec).map(d => {
+    const ligne: LigneMetreProposee = {
+      libelle: libelleDetail(d as unknown as QuantiteDetail),
+      expression: typeof d.expression === 'string' ? d.expression.trim() : (Number(d.quantite) ? String(d.quantite).replace('.', ',') : ''),
+    };
+    if (par && typeof d.batimentId === 'string' && d.batimentId) ligne.batimentId = d.batimentId;
+    return ligne;
+  });
 }
 
 /**
@@ -265,7 +302,7 @@ export function parseMetreValue(value: unknown): { value: string } | { error: st
   try { data = JSON.parse(value); } catch { return { error: 'Métré illisible.' }; }
   if (!Array.isArray(data)) return { error: 'Le métré proposé doit être une liste de lignes.' };
   if (data.length > MAX_LIGNES_METRE) return { error: `Un métré compte ${MAX_LIGNES_METRE} lignes au plus.` };
-  const lignes: { libelle: string; expression: string }[] = [];
+  const lignes: LigneMetreProposee[] = [];
   for (const brute of data) {
     if (!isRec(brute) || typeof brute.libelle !== 'string' || typeof brute.expression !== 'string') {
       return { error: 'Chaque ligne du métré a un libellé et un calcul.' };
@@ -274,7 +311,12 @@ export function parseMetreValue(value: unknown): { value: string } | { error: st
     const expression = brute.expression.trim();
     if (libelle.length > 200 || expression.length > 200) return { error: 'Une ligne du métré est trop longue (200 caractères au plus).' };
     if (!libelle && !expression) continue;
-    lignes.push({ libelle, expression });
+    const ligne: LigneMetreProposee = { libelle, expression };
+    if (brute.batimentId !== undefined && brute.batimentId !== null && brute.batimentId !== '') {
+      if (typeof brute.batimentId !== 'string' || brute.batimentId.length > 100) return { error: 'Bâtiment invalide sur une ligne du métré.' };
+      ligne.batimentId = brute.batimentId;
+    }
+    lignes.push(ligne);
   }
   const verdict = validerMetre(lignes.map((l, i) => ({ id: String(i), libelle: l.libelle, expression: l.expression, quantite: 0 })));
   if (!verdict.ok) {
@@ -285,6 +327,31 @@ export function parseMetreValue(value: unknown): { value: string } | { error: st
           : 'Une valeur ou le total du métré dépasse la limite autorisée.' };
   }
   return { value: JSON.stringify(lignes) };
+}
+
+/**
+ * Un métré proposé, validé POUR cet article. Un article réparti par bâtiment exige un bâtiment connu de
+ * l'opération sur chaque ligne et un total positif ou nul pour CHAQUE bâtiment (`validerMetre`, option
+ * `parBatiment`) ; un autre article n'a pas de bâtiment sur ses lignes. Rend la forme canonique ou l'erreur.
+ */
+export function metreForNode(doc: Rec, node: Rec, value: string): { value: string } | { error: string } {
+  const parsed = parseMetreValue(value);
+  if ('error' in parsed) return parsed;
+  const lignes = JSON.parse(parsed.value) as LigneMetreProposee[];
+  if (!parBatiment(node)) {
+    if (lignes.some(l => l.batimentId)) return { error: 'Cet article n\'est pas réparti par bâtiment : une ligne du métré n\'a pas de bâtiment.' };
+    return parsed;
+  }
+  const connus = new Set((doc.multiBatiments && Array.isArray(doc.batiments) ? doc.batiments : []).filter(isRec).map(b => String(b.id)));
+  for (let i = 0; i < lignes.length; i += 1) {
+    if (!lignes[i].batimentId) return { error: `Ligne ${i + 1} du métré : choisissez un bâtiment.` };
+    if (!connus.has(lignes[i].batimentId!)) return { error: `Ligne ${i + 1} du métré : bâtiment inconnu.` };
+  }
+  const verdict = validerMetre(lignes.map((l, i) => ({ id: String(i), libelle: l.libelle, expression: l.expression, quantite: 0, batimentId: l.batimentId })), { parBatiment: true });
+  if (!verdict.ok && verdict.erreur.type === 'batiment_negatif') {
+    return { error: 'Le total d\'un bâtiment ne peut pas être négatif.' };
+  }
+  return parsed;
 }
 
 /** La valeur d'un champ en texte canonique (une chaîne vide quand il est absent). */
@@ -315,15 +382,17 @@ export function applyFieldToNode(node: Rec, field: string, value: string): { lef
     // identifiant et les champs d'une ventilation d'avant (bâtiment, phase, niveau, local, note) :
     // rien n'est perdu. La quantité, le montant et la formule mémorisée suivent `appliquerMetre`, la
     // fonction même de l'éditeur.
-    const lignes = JSON.parse(value) as { libelle: string; expression: string }[];
+    const lignes = JSON.parse(value) as LigneMetreProposee[];
+    const par = parBatiment(node);
     const avant: QuantiteDetail[] = (Array.isArray(node.quantiteDetails) ? node.quantiteDetails : []).filter(isRec) as unknown as QuantiteDetail[];
     const reprises = new Set<number>();
     const details: QuantiteDetail[] = lignes.map(l => {
       const i = avant.findIndex((e, k) => !reprises.has(k) && libelleDetail(e) === l.libelle);
-      if (i >= 0) { reprises.add(i); return { ...avant[i], libelle: l.libelle, expression: l.expression }; }
-      return { id: `q_${randomUUID()}`, libelle: l.libelle, expression: l.expression, quantite: 0 };
+      const bat = par && l.batimentId ? { batimentId: l.batimentId } : {};
+      if (i >= 0) { reprises.add(i); return { ...avant[i], libelle: l.libelle, expression: l.expression, ...bat }; }
+      return { id: `q_${randomUUID()}`, libelle: l.libelle, expression: l.expression, quantite: 0, ...bat };
     });
-    const patch = appliquerMetre(node as unknown as Ligne, details);
+    const patch = appliquerMetre(node as unknown as Ligne, details, { parBatiment: par });
     if (!patch) throw new Error('Métré invalide : il aurait dû être refusé à la proposition.');
     for (const [cle, valeur] of Object.entries(patch)) {
       if (valeur === undefined) delete node[cle]; else node[cle] = valeur;
