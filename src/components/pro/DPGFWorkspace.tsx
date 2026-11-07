@@ -1,6 +1,6 @@
 import { chapitresParDefaut, numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { useTranslation } from 'react-i18next';
-import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, ligneAtPath, type HierarchySelection } from './hierarchyOps';
+import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, hierarchyKey, ligneAtPath, noeudSelectionne, type HierarchySelection } from './hierarchyOps';
 import React, { useState, useRef } from 'react';
 import {
   IconPlus, IconTrash, IconCopy, IconClipboard,
@@ -30,9 +30,10 @@ import { MetreDialog } from './MetreDialog';
 import { LienQuantiteDialog } from './LienQuantiteDialog';
 import { marquerUtilise, patchChapitreDepuisClause, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
-import { coefficientDe, indexerLignes, propagerLiens } from '../../lib/quantitesLiees';
+import { coefficientDe, indexerLignes, liensDeCopie, propagerLiens, type ModeLiens } from '../../lib/quantitesLiees';
 import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
+import { useChoisirLiensCopie } from './useChoisirLiensCopie';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import { clePourCible, trouvaillePourPosition, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
 import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
@@ -91,7 +92,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
 }) => {
   const { settings } = useSettings();
   const { t } = useTranslation();
-  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
+  const { confirmerSuppressionAvecLiens, dialog: confirmDialog } = useConfirmerSuppression();
+  // Copier, coller et dupliquer des articles dont la quantité en suit une autre : que deviennent ces liens ?
+  const { choisirLiens, dialog: liensDialog } = useChoisirLiensCopie();
   // Ouvrage dont on saisit la description technique (clé positionnelle de la ligne).
   const [descriptionKey, setDescriptionKey] = useState<string | null>(null);
   // Article dont on détaille le métré (clé de ligne), pour la fenêtre « Détailler le métré ».
@@ -563,14 +566,23 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   };
 
   // ── Opérations sur la sélection ─────────────────────────────────────────────
-  const changeHierarchy = (s: HierarchySelection, op: -1 | 1 | 'duplicate' | 'promote' | 'demote') => {
+  const changeHierarchy = async (s: HierarchySelection, op: -1 | 1 | 'duplicate' | 'promote' | 'demote') => {
+    // Dupliquer un article qui en suit un autre (ou le contient) : la fenêtre demande ce que deviennent les liens.
+    // Les autres opérations n'attendent rien : elles restent synchrones.
+    let liens: ModeLiens = 'tout';
+    if (op === 'duplicate') {
+      const choix = await choisirLiens(liensDeCopie([noeudSelectionne(dpgfRef.current.lots, s)]));
+      if (choix === null) return;
+      liens = choix;
+    }
+    const lots = dpgfRef.current.lots;
     const result = op === 'demote'
-      ? demoteHierarchy(dpgf.lots, s, () => crypto.randomUUID())
+      ? demoteHierarchy(lots, s, () => crypto.randomUUID())
       : op === 'duplicate'
-      ? duplicateHierarchy(dpgf.lots, s, () => crypto.randomUUID())
+      ? duplicateHierarchy(lots, s, () => crypto.randomUUID(), liens)
       : op === 'promote'
-      ? promoteHierarchy(dpgf.lots, s, () => crypto.randomUUID())
-      : moveHierarchy(dpgf.lots, s, op);
+      ? promoteHierarchy(lots, s, () => crypto.randomUUID())
+      : moveHierarchy(lots, s, op);
     commitLots(result.lots);
     selectKeys([hierarchyKey(result.selection)]);
     const selected = result.selection;
@@ -592,11 +604,15 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     notify?.(t('pro_copied', { count: lignes.length }));
   };
 
-  const pasteAt = (target: HierarchySelection | null) => {
-    const result = pasteLignes(dpgf.lots, target, clipboard, uid);
+  const pasteAt = async (target: HierarchySelection | null) => {
+    // Des articles copiés dont la quantité en suit une autre : la fenêtre demande ce que deviennent les liens.
+    const liens = await choisirLiens(liensDeCopie(clipboard));
+    if (liens === null) return;
+    const lots = dpgfRef.current.lots;
+    const result = pasteLignes(lots, target, clipboard, uid, liens);
     if (!result) return;
     commitLots(result.lots);
-    setExpandedLots(prev => new Set([...prev, dpgf.lots[target!.lotIdx].id]));
+    setExpandedLots(prev => new Set([...prev, lots[target!.lotIdx].id]));
     selectKeys(result.pasted.map(hierarchyKey));
   };
 
@@ -613,6 +629,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const l = ligneAtPath(dpgf.lots[k.lotIdx]?.chapitres[k.chapIdx]?.lignes ?? [], k.lignePath);
     return l ? { key: metreKey!, ligne: l as Ligne } : null;
   })();
+  /** Quantité d'un article qui suit un autre poste : en lecture seule, un clic rouvre le lien (poste, coefficient, détacher). */
+  const celluleQuantiteLiee = (l: Ligne, rKey: string) => (
+    <button
+      type="button"
+      onClick={e => { e.stopPropagation(); setLienKey(rKey); }}
+      title={libelleLien(l)} aria-label={`${t('pro_link_menu')} ${l.numero} : ${libelleLien(l)}`}
+      className="w-full inline-flex items-center justify-end gap-1 px-1 font-mono tabular-nums rounded outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
+    >
+      <IconLink size={12} aria-hidden style={{ color: 'var(--tblr-muted)' }} />
+      {formatQuantite(l.quantite)}
+    </button>
+  );
   const lienCible = (() => {
     const k = lienKey ? parseRowKey(lienKey) : null;
     if (k?.kind !== 'ligne') return null;
@@ -682,9 +710,12 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const removeSelection = async (sel: HierarchySelection[]) => {
     if (!sel.length) return;
     // Validation avant toute suppression : la fenêtre dit ce qui part avec la sélection.
-    if (!(await confirmerSuppression(dpgfRef.current.lots, sel.map(hierarchyKey)))) return;
+    // Quand des articles suivent la quantité de ce qu'on supprime, la fenêtre propose de les supprimer avec.
+    const cles = await confirmerSuppressionAvecLiens(dpgfRef.current.lots, sel.map(hierarchyKey));
+    if (!cles) return;
     const before = dpgfRef.current;
-    const nextLots = deleteSelection(before.lots, sel.map(hierarchyKey));
+    // Propagé d'avance : `commitLots` enregistre le même résultat, et « Annuler » compare à ce qui est enregistré.
+    const nextLots = propagerLiens(deleteSelection(before.lots, cles));
     commitLots(nextLots);
     clearSelection();
     setEditingCell(null);
@@ -810,7 +841,8 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const lien: ToolbarMenuEntry[] = sansEnfants
       ? [{
         id: 'lien', label: t('pro_link_menu'), icon: <IconLink size={16} />, onClick: () => setLienKey(rowKey(row)),
-        disabled: !cible?.quantiteLiee && (!!cible?.quantiteDetails?.length || cible?.quantitesBatiments !== undefined),
+        // Un métré fixe déjà la quantité ; un article par bâtiment peut suivre (la fenêtre n'offre alors que des sources par bâtiment).
+        disabled: !cible?.quantiteLiee && !!cible?.quantiteDetails?.length,
       }]
       : [];
     return [...add, ...description, ...metre, ...lien, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
@@ -1004,6 +1036,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   return (
     <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}>
       {confirmDialog}
+      {liensDialog}
       {descriptionCible && (
         <LigneDescriptionDialog
           key={descriptionCible.key}
@@ -1423,29 +1456,23 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         return (
                           <td key={b.id} className="px-2 py-0.5">
                             {b.id in quantites
-                              ? l.quantiteDetails?.length
-                                // Un métré : la quantité du bâtiment en est la somme de ses lignes.
-                                ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_metre_sum_of', { count: l.quantiteDetails.length })}>{formatQuantite(quantites[b.id])}</span>
+                              ? l.quantiteDetails?.length || l.quantiteLiee
+                                // Un métré : la quantité du bâtiment en est la somme de ses lignes. Un lien : la part
+                                // du bâtiment est celle du poste suivi.
+                                ? <span className="block text-right font-mono tabular-nums px-1" title={l.quantiteLiee ? libelleLien(l) : t('pro_metre_sum_of', { count: l.quantiteDetails!.length })}>{formatQuantite(quantites[b.id])}</span>
                                 : <EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric showZero label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} />
                               : <span className="block text-right px-1" style={{ color: 'var(--tblr-muted)' }} title={t('pro_building_not_assigned')}>·</span>}
                           </td>
                         );
                       })}
                       <td className="px-2 py-0.5">
-                        {l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{formatQuantite(l.quantite)}</span> : (
+                        {l.quantitesBatiments !== undefined && l.quantiteLiee ? celluleQuantiteLiee(l, rKey)
+                          : l.quantitesBatiments !== undefined ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_quantities_by_building')}>{formatQuantite(l.quantite)}</span> : (
                           <div className="flex items-center gap-1">
                             <div className="flex-1 min-w-0">
                               {l.quantiteLiee
                                 // Quantité suivie : en lecture seule, un clic rouvre le lien (changer de poste, coefficient, détacher).
-                                ? <button
-                                    type="button"
-                                    onClick={e => { e.stopPropagation(); setLienKey(rKey); }}
-                                    title={libelleLien(l)} aria-label={`${t('pro_link_menu')} ${l.numero} : ${libelleLien(l)}`}
-                                    className="w-full inline-flex items-center justify-end gap-1 px-1 font-mono tabular-nums rounded outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
-                                  >
-                                    <IconLink size={12} aria-hidden style={{ color: 'var(--tblr-muted)' }} />
-                                    {formatQuantite(l.quantite)}
-                                  </button>
+                                ? celluleQuantiteLiee(l, rKey)
                                 : l.quantiteDetails?.length
                                 // Un métré : la quantité en est la somme, elle se modifie dans la fenêtre du métré.
                                 ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_metre_sum_of', { count: l.quantiteDetails.length })}>{formatQuantite(l.quantite)}</span>

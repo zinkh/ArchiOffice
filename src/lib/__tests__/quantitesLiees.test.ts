@@ -2,7 +2,8 @@
 // coefficient ; les liens qui ne tiennent plus sont retirés sans perdre la quantité.
 import { describe, expect, it } from 'vitest';
 import {
-  candidatsSources, coefficientDe, delierPatch, lierPatch, ligneParId, peutSuivre, propagerLiens, suiveursDe,
+  adapterLiensCopie, candidatsSources, coefficientDe, delierPatch, fusionnerLiensDeCopie, lierPatch, ligneParId, liensDeCopie,
+  peutSuivre, propagerLiens, suiveursDe,
 } from '../quantitesLiees';
 import { quantitePatch } from '../quantites';
 import type { Chapitre, Ligne, Lot } from '../../types/dpgf';
@@ -169,7 +170,12 @@ describe('peutSuivre et candidatsSources', () => {
     expect(peutSuivre(lots, 'a', 'titre')).toEqual({ ok: false, raison: 'source_invalide' });
     expect(peutSuivre(lots, 'parent', 'a')).toEqual({ ok: false, raison: 'suiveur_invalide' });
     expect(peutSuivre(lots, 'metre', 'a')).toEqual({ ok: false, raison: 'suiveur_invalide' });
-    expect(peutSuivre(lots, 'bat', 'a')).toEqual({ ok: false, raison: 'suiveur_invalide' });
+  });
+
+  it('un article par bâtiment ne peut suivre qu\'une source par bâtiment', () => {
+    expect(peutSuivre(lots, 'bat', 'a')).toEqual({ ok: false, raison: 'batiments_incompatibles' });
+    const deux = [lot([ligne('s', { quantitesBatiments: { x: 4 } }), ligne('f', { quantitesBatiments: { x: 0 } })])];
+    expect(peutSuivre(deux, 'f', 's')).toEqual({ ok: true });
   });
 
   it('une source peut elle-même avoir un métré ou des bâtiments : seul le total compte', () => {
@@ -224,6 +230,151 @@ describe('lierPatch, delierPatch et suiveursDe', () => {
     expect(coefficientDe({ sourceId: 'a' })).toBe(1);
     expect(coefficientDe({ sourceId: 'a', coefficient: -3 })).toBe(1);
     expect(coefficientDe({ sourceId: 'a', coefficient: 2.5 })).toBe(2.5);
+  });
+});
+
+describe('liens par bâtiment', () => {
+  const source = () => ligne('s', { quantite: 30, quantitesBatiments: { x: 10, y: 20 } });
+
+  it('un suiveur par bâtiment suit sa source bâtiment par bâtiment, coefficient compris', () => {
+    const lots = [lot([source(), ligne('f', { quantite: 0, quantitesBatiments: { x: 0, y: 0 }, quantiteLiee: { sourceId: 's', coefficient: 0.5 } })])];
+    const f = lignesDe(propagerLiens(lots))[1];
+    expect(f.quantitesBatiments).toEqual({ x: 5, y: 10 });
+    expect(f.quantite).toBe(15);
+    expect(f.prixTotal).toBe(150);
+  });
+
+  it('ne suit que SES bâtiments : le total est la somme de ses parts', () => {
+    const lots = [lot([source(), ligne('f', { quantitesBatiments: { y: 0 }, quantiteLiee: { sourceId: 's' } })])];
+    const f = lignesDe(propagerLiens(lots))[1];
+    expect(f.quantitesBatiments).toEqual({ y: 20 });
+    expect(f.quantite).toBe(20);
+  });
+
+  it('un bâtiment que la source n\'a pas vaut 0', () => {
+    const lots = [lot([source(), ligne('f', { quantitesBatiments: { z: 7 }, quantiteLiee: { sourceId: 's' } })])];
+    const f = lignesDe(propagerLiens(lots))[1];
+    expect(f.quantitesBatiments).toEqual({ z: 0 });
+    expect(f.quantite).toBe(0);
+  });
+
+  it('un suiveur sans bâtiments suit le total d\'une source par bâtiment', () => {
+    const lots = [lot([source(), ligne('f', { quantiteLiee: { sourceId: 's', coefficient: 2 } })])];
+    const f = lignesDe(propagerLiens(lots))[1];
+    expect(f.quantite).toBe(60);
+    expect(f.quantitesBatiments).toBeUndefined();
+  });
+
+  it('suit une chaîne par bâtiment', () => {
+    const lots = [lot([
+      ligne('c', { quantitesBatiments: { x: 0, y: 0 }, quantiteLiee: { sourceId: 'b' } }),
+      ligne('b', { quantitesBatiments: { x: 0, y: 0 }, quantiteLiee: { sourceId: 's', coefficient: 2 } }),
+      source(),
+    ])];
+    const [c, b] = lignesDe(propagerLiens(lots));
+    expect(b.quantitesBatiments).toEqual({ x: 20, y: 40 });
+    expect(c.quantitesBatiments).toEqual({ x: 20, y: 40 });
+    expect(c.quantite).toBe(60);
+  });
+
+  it('une source qui n\'est plus par bâtiment défait le lien et garde les parts du suiveur', () => {
+    const lots = [lot([ligne('s', { quantite: 30 }), ligne('f', { quantite: 9, quantitesBatiments: { x: 4, y: 5 }, quantiteLiee: { sourceId: 's' } })])];
+    const f = lignesDe(propagerLiens(lots))[1];
+    expect(f.quantiteLiee).toBeUndefined();
+    expect(f.quantitesBatiments).toEqual({ x: 4, y: 5 });
+    expect(f.quantite).toBe(9);
+  });
+
+  it('rend le même tableau quand les parts sont déjà justes', () => {
+    const juste = [lot([source(), ligne('f', { quantite: 30, prixTotal: 300, quantitesBatiments: { x: 10, y: 20 }, quantiteLiee: { sourceId: 's' } })])];
+    expect(propagerLiens(juste)).toBe(juste);
+  });
+
+  it('lierPatch donne à un article par bâtiment la part de la source pour chacun de ses bâtiments', () => {
+    const patch = lierPatch(ligne('f', { quantitesBatiments: { x: 0, y: 0 } }), source(), 0.5)!;
+    expect(patch.quantitesBatiments).toEqual({ x: 5, y: 10 });
+    expect(patch.quantite).toBe(15);
+  });
+
+  it('lierPatch refuse un article par bâtiment sur une source qui n\'en a pas', () => {
+    expect(lierPatch(ligne('f', { quantitesBatiments: { x: 0 } }), ligne('s', { quantite: 3 }))).toBeNull();
+  });
+
+  it('un article par bâtiment ne se voit proposer que des sources par bâtiment', () => {
+    const lots = [lot([source(), ligne('p', { quantite: 1 }), ligne('f', { quantitesBatiments: { x: 0 } })])];
+    expect(candidatsSources(lots, 'f').map(c => c.id)).toEqual(['s']);
+    expect(candidatsSources(lots, 'p').map(c => c.id)).toEqual(['s', 'f']);
+  });
+});
+
+describe('liens et copie', () => {
+  const arbre = (): Lot[] => [lot([
+    ligne('a', { quantite: 5 }),
+    ligne('b', { quantiteLiee: { sourceId: 'a' } }),
+    ligne('x', { quantiteLiee: { sourceId: 'exterieur' } }),
+  ])];
+
+  it('compte les liens entre articles copiés et vers un article resté en place', () => {
+    const liens = liensDeCopie(arbre()[0].chapitres);
+    expect(liens.suiveurs.map(s => s.id)).toEqual(['b', 'x']);
+    expect(liens.internes).toBe(1);
+    expect(liens.externes).toBe(1);
+  });
+
+  it('un article copié seul est tourné vers l\'extérieur, sa source n\'étant pas copiée', () => {
+    const liens = liensDeCopie([arbre()[0].chapitres[0].lignes[1]]);
+    expect(liens).toMatchObject({ internes: 0, externes: 1 });
+  });
+
+  it('rien à signaler sans lien', () => {
+    expect(liensDeCopie([ligne('a')]).suiveurs).toEqual([]);
+  });
+
+  it('fusionne les liens de plusieurs copies', () => {
+    const f = fusionnerLiensDeCopie([liensDeCopie([arbre()[0]]), liensDeCopie([arbre()[0].chapitres[0].lignes[1]])]);
+    expect(f.internes + f.externes).toBe(f.suiveurs.length);
+    expect(f.suiveurs).toHaveLength(3);
+  });
+
+  const copies = () => {
+    const racines = structuredClone(arbre()[0].chapitres[0].lignes);
+    const correspondance = new Map([['a', 'a2'], ['b', 'b2'], ['x', 'x2']]);
+    racines.forEach(l => { l.id = correspondance.get(l.id)!; });
+    return { racines, correspondance };
+  };
+  const liens = (racines: Ligne[]) => racines.map(l => l.quantiteLiee?.sourceId);
+
+  it('« tout » : le lien interne suit la copie, le lien externe reste sur l\'original', () => {
+    const { racines, correspondance } = copies();
+    adapterLiensCopie(racines, correspondance, 'tout');
+    expect(liens(racines)).toEqual([undefined, 'a2', 'exterieur']);
+  });
+
+  it('« internes » : le lien externe est rompu', () => {
+    const { racines, correspondance } = copies();
+    adapterLiensCopie(racines, correspondance, 'internes');
+    expect(liens(racines)).toEqual([undefined, 'a2', undefined]);
+  });
+
+  it('« rompre » : plus aucun lien, les quantités sont gardées', () => {
+    const { racines, correspondance } = copies();
+    racines[1].quantite = 5;
+    adapterLiensCopie(racines, correspondance, 'rompre');
+    expect(liens(racines)).toEqual([undefined, undefined, undefined]);
+    expect(racines[1].quantite).toBe(5);
+  });
+
+  it('un coefficient est conservé quand le lien suit la copie', () => {
+    const racines = structuredClone(arbre()[0].chapitres[0].lignes);
+    racines[1].quantiteLiee = { sourceId: 'a', coefficient: 0.8 };
+    adapterLiensCopie(racines, new Map([['a', 'a2']]), 'tout');
+    expect(racines[1].quantiteLiee).toEqual({ sourceId: 'a2', coefficient: 0.8 });
+  });
+
+  it('descend dans les sous-articles et les chapitres', () => {
+    const l = lot([ligne('p', { children: [ligne('e', { quantiteLiee: { sourceId: 'a' } })] }), ligne('a')]);
+    adapterLiensCopie([l], new Map([['a', 'a2']]), 'tout');
+    expect(l.chapitres[0].lignes[0].children![0].quantiteLiee).toEqual({ sourceId: 'a2' });
   });
 });
 

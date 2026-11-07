@@ -15,6 +15,7 @@ import {
 import { useProToolbar } from './toolbar/toolbarState';
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
+import { useChoisirLiensCopie } from './useChoisirLiensCopie';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, totauxDocument } from './selectionOps';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import type { ProNotify } from './DPGFWorkspace';
@@ -38,9 +39,9 @@ import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutoco
 import { DecoupagePanel, SelecteursDecoupage } from './DecoupagePanel';
 import type { ArticleBibliotheque } from '../../types/library';
 import { formatCurrency } from '../../lib/utils';
-import { coefficientDe, indexerLignes, propagerLiens } from '../../lib/quantitesLiees';
+import { coefficientDe, indexerLignes, liensDeCopie, propagerLiens, type ModeLiens } from '../../lib/quantitesLiees';
 import { LienQuantiteDialog } from './LienQuantiteDialog';
-import { ligneAtPath } from './hierarchyOps';
+import { ligneAtPath, noeudSelectionne } from './hierarchyOps';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -140,7 +141,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   useEffect(() => { setColSet(mode); }, [mode]);
   const isMobile = useMediaQuery('(max-width: 767px)');
   const { t } = useTranslation();
-  const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
+  const { confirmerSuppressionAvecLiens, dialog: confirmDialog } = useConfirmerSuppression();
+  // Copier, coller et dupliquer des articles dont la quantité en suit une autre : que deviennent ces liens ?
+  const { choisirLiens, dialog: liensDialog } = useChoisirLiensCopie();
   const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set(bpu.lots.map(l => l.id)));
   const [expandedChaps, setExpandedChaps] = useState<Set<string>>(
     new Set(bpu.lots.flatMap(l => l.chapitres.map(c => c.id))),
@@ -346,8 +349,17 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     setExpandedLignes(prev => new Set([...prev, parent.id]));
   };
 
+  /** Supprime plusieurs éléments d'un coup (celui qu'on a demandé et les articles liés qu'on a choisi d'emporter). */
+  const supprimerCles = (cles: string[]) => {
+    const before = bpuRef.current;
+    onChange(recomputeBPU({ ...before, lots: deleteSelection(before.lots, cles) }));
+    setSelectedRowKeys(new Set());
+  };
+
   const deleteLigne = async (lotIdx: number, chapIdx: number, path: number[]) => {
-    if (!(await confirmerSuppression(bpuRef.current.lots, [`ligne-${lotIdx}-${chapIdx}-${path.join('-')}`]))) return;
+    const cles = await confirmerSuppressionAvecLiens(bpuRef.current.lots, [`ligne-${lotIdx}-${chapIdx}-${path.join('-')}`]);
+    if (!cles) return;
+    if (cles.length > 1) { supprimerCles(cles); return; }
     mutateLots(lots => {
       const next = [...lots];
       const lot = { ...next[lotIdx] };
@@ -360,7 +372,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   };
 
   const deleteChapitre = async (lotIdx: number, chapIdx: number) => {
-    if (!(await confirmerSuppression(bpuRef.current.lots, [`chap-${lotIdx}-${chapIdx}`]))) return;
+    const cles = await confirmerSuppressionAvecLiens(bpuRef.current.lots, [`chap-${lotIdx}-${chapIdx}`]);
+    if (!cles) return;
+    if (cles.length > 1) { supprimerCles(cles); return; }
     mutateLots(lots => {
       const next = [...lots];
       const lot = { ...next[lotIdx] };
@@ -371,7 +385,9 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   };
 
   const deleteLot = async (lotIdx: number) => {
-    if (!(await confirmerSuppression(bpuRef.current.lots, [`lot-${lotIdx}`]))) return;
+    const cles = await confirmerSuppressionAvecLiens(bpuRef.current.lots, [`lot-${lotIdx}`]);
+    if (!cles) return;
+    if (cles.length > 1) { supprimerCles(cles); return; }
     mutateLots(lots => lots.filter((_, i) => i !== lotIdx));
   };
 
@@ -544,23 +560,29 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
     notify?.(t('pro_copied', { count: lignes.length }));
   };
 
-  const pasteLigne = () => {
+  const pasteLigne = async () => {
     const target = parseSelection(selectedRowKeys).at(-1) ?? null;
-    const result = pasteLignes(bpu.lots, target, clipboard, newId);
+    // Des articles copiés dont la quantité en suit une autre : la fenêtre demande ce que deviennent les liens.
+    const liens = await choisirLiens(liensDeCopie(clipboard));
+    if (liens === null) return;
+    const base = bpuRef.current;
+    const result = pasteLignes(base.lots, target, clipboard, newId, liens);
     if (!result) return;
-    onChange(recomputeBPU({ ...bpu, lots: result.lots }));
+    onChange(recomputeBPU({ ...base, lots: result.lots }));
     setSelectedRowKeys(new Set(result.pasted.map(hierarchyKey)));
   };
 
   const deleteSelected = async () => {
     const keys = [...selectedRowKeys];
     if (!keys.length) return;
-    if (!(await confirmerSuppression(bpuRef.current.lots, keys))) return;
+    // Quand des articles suivent la quantité de ce qu'on supprime, la fenêtre propose de les supprimer avec.
+    const cles = await confirmerSuppressionAvecLiens(bpuRef.current.lots, keys);
+    if (!cles) return;
     const before = bpuRef.current;
-    const lots = deleteSelection(before.lots, keys);
+    const lots = deleteSelection(before.lots, cles);
     onChange(recomputeBPU({ ...before, lots }));
     setSelectedRowKeys(new Set());
-    notify?.(t('pro_deleted', { count: keys.length }), {
+    notify?.(t('pro_deleted', { count: cles.length }), {
       action: {
         label: t('pro_undo'),
         onClick: () => {
@@ -683,15 +705,24 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   // ── Ruban ───────────────────────────────────────────────────────────────────
   const selectionCount = selectedRowKeys.size;
   const hierarchySelection = selectedRowKeys.size === 1 ? parseRowKey([...selectedRowKeys][0]) : null;
-  const changeHierarchy = (direction?: -1 | 1 | 'duplicate' | 'demote') => {
+  const changeHierarchy = async (direction?: -1 | 1 | 'duplicate' | 'demote') => {
     if (!hierarchySelection) return;
+    // Dupliquer un article qui en suit un autre (ou le contient) : la fenêtre demande ce que deviennent les liens.
+    // Les autres opérations n'attendent rien : elles restent synchrones.
+    let liens: ModeLiens = 'tout';
+    if (direction === 'duplicate') {
+      const choix = await choisirLiens(liensDeCopie([noeudSelectionne(bpuRef.current.lots, hierarchySelection)]));
+      if (choix === null) return;
+      liens = choix;
+    }
+    const lotsActuels = bpuRef.current.lots;
     const result = direction === 'demote'
-      ? demoteHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
+      ? demoteHierarchy(lotsActuels, hierarchySelection, () => crypto.randomUUID())
       : direction === 'duplicate'
-      ? duplicateHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
+      ? duplicateHierarchy(lotsActuels, hierarchySelection, () => crypto.randomUUID(), liens)
       : direction === undefined
-      ? promoteHierarchy(bpu.lots, hierarchySelection, () => crypto.randomUUID())
-      : moveHierarchy(bpu.lots, hierarchySelection, direction);
+      ? promoteHierarchy(lotsActuels, hierarchySelection, () => crypto.randomUUID())
+      : moveHierarchy(lotsActuels, hierarchySelection, direction);
     mutateLots(() => result.lots);
     setSelectedRowKeys(new Set([hierarchyKey(result.selection)]));
     const selected = result.selection;
@@ -853,6 +884,7 @@ export const BPUWorkspace: React.FC<BPUWorkspaceProps> = ({
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       {confirmDialog}
+      {liensDialog}
 
       {/* ── Cadre du marché ──────────────────────────────────────────────── */}
       {showMarche && (

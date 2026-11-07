@@ -4,9 +4,9 @@
 // donc toujours la sélection du dernier élément vers le premier, et rendent un
 // arbre neuf sans toucher à celui reçu.
 import { NATURES_HORS_BASE, type Ligne, type NatureArticle, type NatureHorsBase } from '../../types/dpgf';
-import { MAX_ARTICLE_DEPTH, deleteLigneAtPath, insertLigneAtPath, mutateLigneAtPath, parseRowKey, recomputeLot, estHorsBase, renumeroterLignes, sousTotalNature, type LotLike, type ParsedRowKey } from './treeOps';
+import { MAX_ARTICLE_DEPTH, forEachLigne, deleteLigneAtPath, insertLigneAtPath, mutateLigneAtPath, parseRowKey, recomputeLot, estHorsBase, renumeroterLignes, sousTotalNature, type LotLike, type ParsedRowKey } from './treeOps';
 import { ligneAtPath } from './hierarchyOps';
-import { indexerLignes } from '../../lib/quantitesLiees';
+import { adapterLiensCopie, indexerLignes, type ModeLiens } from '../../lib/quantitesLiees';
 
 type Parsed = NonNullable<ParsedRowKey>;
 
@@ -82,8 +82,10 @@ function subtreeHeight(ligne: Ligne): number {
   return ligne.children?.length ? 1 + Math.max(...ligne.children.map(subtreeHeight)) : 0;
 }
 
-function withFreshIds<G extends Ligne>(ligne: G, newId: () => string): G {
-  return { ...ligne, id: newId(), children: ligne.children?.map(c => withFreshIds(c as G, newId)) ?? [] };
+function withFreshIds<G extends Ligne>(ligne: G, newId: () => string, correspondance?: Map<string, string>): G {
+  const id = newId();
+  correspondance?.set(ligne.id, id);
+  return { ...ligne, id, children: ligne.children?.map(c => withFreshIds(c as G, newId, correspondance)) ?? [] };
 }
 
 /**
@@ -92,7 +94,7 @@ function withFreshIds<G extends Ligne>(ligne: G, newId: () => string): G {
  * l'écran les sélectionne.
  */
 export function pasteLignes<L extends LotLike, G extends Ligne>(
-  lots: L[], target: Parsed | null, lignes: G[], newId: () => string,
+  lots: L[], target: Parsed | null, lignes: G[], newId: () => string, liens: ModeLiens = 'tout',
 ): { lots: L[]; pasted: Parsed[] } | null {
   if (!target || target.kind === 'lot' || !lignes.length) return null;
   const lot = lots[target.lotIdx];
@@ -109,8 +111,13 @@ export function pasteLignes<L extends LotLike, G extends Ligne>(
     start = target.lignePath[0] + 1;
   }
   let nextLignes = [...chap.lignes];
-  lignes.forEach((ligne, i) => {
-    nextLignes = insertLigneAtPath(nextLignes, parentPath, start + i, withFreshIds(ligne, newId));
+  // Chaque copie reçoit un identifiant neuf ; les liens de quantité suivent alors `liens` : un lien vers un article
+  // collé en même temps suit sa copie, un lien vers un article resté en place est gardé ou rompu.
+  const correspondance = new Map<string, string>();
+  const fraiches = lignes.map(ligne => withFreshIds(ligne, newId, correspondance));
+  adapterLiensCopie(fraiches, correspondance, liens);
+  fraiches.forEach((ligne, i) => {
+    nextLignes = insertLigneAtPath(nextLignes, parentPath, start + i, ligne);
   });
   nextLignes = renumeroterLignes(nextLignes, String(chap.numero || target.chapIdx + 1));
   const chapitres = [...lot.chapitres];
@@ -227,16 +234,8 @@ export function resumeSuppression(lots: LotLike[], keys: Iterable<string>): Resu
   return resume;
 }
 
-/** Un article supprimé qui servait de source à des articles restés dans le document. */
-export interface LienRompu { source: Ligne; suiveurs: Ligne[] }
-
-/**
- * Les articles qui suivent la quantité d'un article SUPPRIMÉ (lui-même, ou emporté avec son chapitre, son lot ou
- * son parent) sans être supprimés eux-mêmes. Ils gardent leur dernière quantité et redeviennent modifiables
- * (`propagerLiens` retire le lien d'une source disparue) : la fenêtre de confirmation le dit avant de supprimer.
- * Un suiveur supprimé avec sa source n'est pas compté.
- */
-export function liensRompus(lots: LotLike[], keys: Iterable<string>): LienRompu[] {
+/** Les identifiants de tous les articles qu'emporte la suppression de ces clés (sous-articles compris). */
+function idsSupprimes(lots: LotLike[], keys: Iterable<string>): Set<string> {
   const supprimes = new Set<string>();
   const ajouter = (l: Ligne) => { supprimes.add(l.id); l.children?.forEach(ajouter); };
   for (const s of parseSelection(keys)) {
@@ -249,6 +248,55 @@ export function liensRompus(lots: LotLike[], keys: Iterable<string>): LienRompu[
       if (l) ajouter(l as Ligne);
     }
   }
+  return supprimes;
+}
+
+/** La clé de ligne (`ligne-lot-chapitre-chemin`) d'un article, ou `undefined` s'il n'est pas dans l'arbre. */
+function cleDeLigne(lots: LotLike[], id: string): string | undefined {
+  let cle: string | undefined;
+  forEachLigne(lots, (ligne: Ligne, chap: unknown, lot: LotLike, path: number[]) => {
+    if (ligne.id === id) cle = `ligne-${lots.indexOf(lot)}-${lot.chapitres.indexOf(chap)}-${path.join('-')}`;
+  });
+  return cle;
+}
+
+/**
+ * Tous les articles à supprimer AUSSI pour que plus aucun article ne suive la quantité de ce qu'on supprime : les
+ * suiveurs, puis les suiveurs de ces suiveurs, jusqu'au bout de la chaîne. Rend les articles et leurs clés de
+ * ligne, à ajouter à la sélection (un parent supprimé emporte déjà ses sous-articles, `deleteSelection` accepte
+ * qu'un descendant et son parent soient sélectionnés ensemble).
+ */
+export function suiveursEnCascade(lots: LotLike[], keys: Iterable<string>): { lignes: Ligne[]; cles: string[] } {
+  const supprimes = idsSupprimes(lots, keys);
+  if (!supprimes.size) return { lignes: [], cles: [] };
+  const index = indexerLignes(lots);
+  const lignes: Ligne[] = [];
+  const ajouter = (l: Ligne) => { supprimes.add(l.id); l.children?.forEach(ajouter); };
+  let nouveau = true;
+  while (nouveau) {
+    nouveau = false;
+    index.forEach(l => {
+      const sourceId = l.quantiteLiee?.sourceId;
+      if (!sourceId || supprimes.has(l.id) || !supprimes.has(sourceId)) return;
+      lignes.push(l);
+      ajouter(l);
+      nouveau = true;
+    });
+  }
+  return { lignes, cles: lignes.map(l => cleDeLigne(lots, l.id)).filter((k): k is string => !!k) };
+}
+
+/** Un article supprimé qui servait de source à des articles restés dans le document. */
+export interface LienRompu { source: Ligne; suiveurs: Ligne[] }
+
+/**
+ * Les articles qui suivent la quantité d'un article SUPPRIMÉ (lui-même, ou emporté avec son chapitre, son lot ou
+ * son parent) sans être supprimés eux-mêmes. Ils gardent leur dernière quantité et redeviennent modifiables
+ * (`propagerLiens` retire le lien d'une source disparue) : la fenêtre de confirmation le dit avant de supprimer.
+ * Un suiveur supprimé avec sa source n'est pas compté.
+ */
+export function liensRompus(lots: LotLike[], keys: Iterable<string>): LienRompu[] {
+  const supprimes = idsSupprimes(lots, keys);
   if (!supprimes.size) return [];
   const index = indexerLignes(lots);
   const parSource = new Map<string, LienRompu>();

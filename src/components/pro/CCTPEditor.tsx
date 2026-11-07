@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, type HierarchySelection } from './hierarchyOps';
+import { canDemote, demoteHierarchy, duplicateHierarchy, canMove, moveHierarchy, promoteHierarchy, ligneAtPath, noeudSelectionne, type HierarchySelection } from './hierarchyOps';
 import { LotTitleInput } from './LotTitleInput';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -44,11 +44,12 @@ import { MetreDialog } from './MetreDialog';
 import { TitreArticleCctp } from './TitreArticleCctp';
 import { marquerUtilise, patchChapitreDepuisClause, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
-import { coefficientDe, indexerLignes, propagerLiens } from '../../lib/quantitesLiees';
+import { coefficientDe, fusionnerLiensDeCopie, indexerLignes, liensDeCopie, propagerLiens } from '../../lib/quantitesLiees';
 import { LienQuantiteDialog } from './LienQuantiteDialog';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
+import { useChoisirLiensCopie } from './useChoisirLiensCopie';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
-import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
+import { dupliquerSelection, modifierEnMasse, noeudsRacines, type PatchMasse } from './cctpBulkOps';
 import { CctpBulkEditDialog } from './CctpBulkEditDialog';
 import { ChampMarqueur, PastilleMarqueur } from './MarqueurRedaction';
 import { creerMarqueur } from '../../lib/marqueurRedaction';
@@ -89,6 +90,8 @@ type Selection = HierarchySelection;
 export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree: showTreeProp, onToggleTree, onDropExternal, projectName, contexte, notify, onImportDocument, searchTarget, auteur }) => {
   const { t } = useTranslation();
   const { confirmerSuppression, dialog: confirmDialog } = useConfirmerSuppression();
+  // Coller et dupliquer des articles dont la quantité en suit une autre : que deviennent ces liens ?
+  const { choisirLiens, dialog: liensDialog } = useChoisirLiensCopie();
   const isMobile = useMediaQuery('(max-width: 767px)');
   const [localShowTree, setLocalShowTree] = useState(true);
   const showTree = showTreeProp ?? localShowTree;
@@ -628,8 +631,10 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     notify?.(t('pro_cctp_copied', { count: lignes.length }), { type: 'success' });
   };
   const peutColler = presse.length > 0 && !!selection && selection.kind !== 'lot';
-  const coller = () => {
-    const r = pasteLignes(dpgf.lots, selection, presse, uid);
+  const coller = async () => {
+    const liens = await choisirLiens(liensDeCopie(presse));
+    if (liens === null) return;
+    const r = pasteLignes(dpgf.lots, selection, presse, uid, liens);
     if (!r) { notify?.(t('pro_cctp_paste_target'), { type: 'error' }); return; }
     onChange({ ...dpgf, lots: r.lots, ...totauxDe(r.lots) });
     const premier = r.pasted[0];
@@ -640,9 +645,18 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     }
     notify?.(t('pro_cctp_pasted', { count: r.pasted.length }), { type: 'success' });
   };
-  const dupliquer = () => {
-    if (!multi) { if (selection) applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid)); return; }
-    const r = dupliquerSelection(dpgf.lots, clesActives, uid);
+  const dupliquer = async () => {
+    if (!multi) {
+      if (!selection) return;
+      const liens = await choisirLiens(liensDeCopie([noeudSelectionne(dpgf.lots, selection)]));
+      if (liens === null) return;
+      applyHierarchy(duplicateHierarchy(dpgf.lots, selection, uid, liens));
+      return;
+    }
+    // Une copie par élément sélectionné : les liens se jugent copie par copie.
+    const liens = await choisirLiens(fusionnerLiensDeCopie(noeudsRacines(dpgf.lots, clesActives).map(n => liensDeCopie([n]))));
+    if (liens === null) return;
+    const r = dupliquerSelection(dpgf.lots, clesActives, uid, liens);
     onChange({ ...dpgf, lots: r.lots, ...totauxDe(r.lots) });
     setSelection(null);
     notify?.(t('pro_cctp_duplicated', { count: r.copies }), { type: 'success' });
@@ -779,6 +793,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
   return (
     <div className="flex flex-col h-full overflow-hidden bg-white dark:bg-zinc-900">
       {confirmDialog}
+      {liensDialog}
 
       {showGenerate && (
         <CctpGenerateDialog
@@ -1162,7 +1177,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                         parBatiment={l.quantitesBatiments !== undefined}
                         aDesEnfants={!!l.children?.length}
                         liee={libelleLien(l)}
-                        lierImpossible={!!l.quantiteDetails?.length || l.quantitesBatiments !== undefined}
+                        lierImpossible={!!l.quantiteDetails?.length}
                         onLier={() => setShowLien(true)}
                         unitesConnues={unitesConnues}
                         onQuantite={saisie => appliquerALigne(quantitePatch(l, saisie))}
