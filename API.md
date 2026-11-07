@@ -59,7 +59,7 @@ Omit the header and the server serves the user's **default** tenant (`profiles.t
 Endpoints are grouped by resource. Most resources follow a standard `GET (list) / GET :id / POST / PUT :id / DELETE :id` shape — those are collapsed into one line; anything with non-standard behavior is called out separately.
 
 ### Onboarding & account
-- `POST /api/public/register`, `POST /api/public/resend-confirmation`, `POST /api/public/forgot-password`, `GET /api/public/tenant/:slug` — signup flow, no auth required.
+- `POST /api/public/register`, `POST /api/public/resend-confirmation`, `POST /api/public/forgot-password`, `GET /api/public/tenant/:slug` — signup flow, no auth required. When `TURNSTILE_SECRET_KEY` is set, the three `POST` routes also require a Cloudflare Turnstile token in the body (`captchaToken`): `400` if it is missing or rejected, `503` if Cloudflare cannot be reached. Without the variable, no token is checked.
 - `POST /api/auth/google/token` — exchange a Google OAuth code for a session.
 - `GET /api/me` — current user's profile.
 - `GET /api/agency-setup/status`, `GET /api/agency-setup/search`, `POST /api/agency-setup/create`, `POST /api/agency-setup/join`, `DELETE /api/agency-setup/join` — attach an account to a new or existing agency. `create` and `join` also serve an account that already has one, to add a second.

@@ -1,11 +1,14 @@
 // Vérification serveur d'un jeton Cloudflare Turnstile.
 //
-// Les routes /api/public/register et /api/public/forgot-password fabriquent
-// leurs liens avec supabaseAdmin.auth.admin.generateLink : le captcha de
-// Supabase Auth ne s'y applique donc pas, et c'est ici que le jeton est vérifié.
+// Les routes /api/public/register, /api/public/forgot-password et
+// /api/public/resend-confirmation fabriquent leurs liens avec
+// supabaseAdmin.auth.admin.generateLink : le captcha de Supabase Auth ne s'y
+// applique donc pas, et c'est ici que le jeton est vérifié.
 //
 // Sans TURNSTILE_SECRET_KEY, la vérification est désactivée (instance sans
-// captcha, tests, client Electron) : le comportement antérieur est conservé.
+// captcha, tests) : le comportement antérieur est conservé. Le serveur local
+// du client Electron n'appelle pas verifyTurnstile : il relaie seulement le
+// jeton à Supabase Auth (captchaTokenFrom, plus bas).
 const SITEVERIFY_URL = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const VERIFY_TIMEOUT_MS = 5000;
 
