@@ -31,7 +31,7 @@ import { loadDPGF, saveDPGF, figerVersion } from '../../lib/dpgfDocument';
 import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
 import { ProToolbar } from './toolbar/ProToolbar';
 import { ProSearch } from './toolbar/ProSearch';
-import type { CibleRecherche } from '../../lib/proRecherche';
+import { trouvaillePourPosition, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
 import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, type ToolbarRegistry } from './toolbar/toolbarState';
 import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
@@ -661,7 +661,19 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   // à un changement d'onglet.
   const [cibleRecherche, setCibleRecherche] = useState<CibleRecherche | null>(null);
   const nonceRecherche = useRef(0);
-  useEffect(() => { setCibleRecherche(null); }, [activeSubTab]);
+  // Une cible posée par « Ouvrir dans le CCTP » doit survivre au changement d'onglet qu'elle provoque.
+  const garderCible = useRef(false);
+  useEffect(() => {
+    if (garderCible.current) { garderCible.current = false; return; }
+    setCibleRecherche(null);
+  }, [activeSubTab]);
+  const ouvrirDansCctp = (pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>) => {
+    const t = trouvaillePourPosition(dpgf, pos);
+    if (!t) return;
+    garderCible.current = activeSubTab !== 'CCTP';
+    setCibleRecherche({ ...t, nonce: ++nonceRecherche.current });
+    setActiveSubTab('CCTP');
+  };
   const docRecherche = activeSubTab === 'LOTS' ? null : isBpuTab ? bpu : dpgf;
   const cibleImportFichier: 'dpgf' | 'bpu' | null = isBpuTab ? 'bpu' : (activeSubTab === 'CCTP' || activeSubTab === 'DPGF') ? 'dpgf' : null;
   const dossierEntries: ToolbarMenuEntry[] = [
@@ -924,6 +936,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
               ) : dpgf ? (
                 <DPGFWorkspace
                   searchTarget={cibleRecherche}
+                  onOpenCctp={ouvrirDansCctp}
                   dpgf={dpgf}
                   onChange={editDpgf}
                   notify={notify}

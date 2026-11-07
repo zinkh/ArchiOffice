@@ -10,6 +10,8 @@ interface LigneDescriptionDialogProps {
   /** Texte technique actuel de l'ouvrage (`cctpDescription`). */
   valeur: string;
   onSave: (texte: string) => void;
+  /** Ouvre l'article dans l'onglet CCTP (la saisie en cours est enregistrée d'abord). */
+  onOpenCctp?: () => void;
   onClose: () => void;
 }
 
@@ -19,7 +21,7 @@ interface LigneDescriptionDialogProps {
  * quel dans l'éditeur du CCTP. Ctrl+Entrée enregistre ; fermer avec une saisie
  * non enregistrée demande confirmation.
  */
-export function LigneDescriptionDialog({ numero, designation, valeur, onSave, onClose }: LigneDescriptionDialogProps) {
+export function LigneDescriptionDialog({ numero, designation, valeur, onSave, onOpenCctp, onClose }: LigneDescriptionDialogProps) {
   const { t } = useTranslation();
   const [texte, setTexte] = useState(valeur);
   const champ = useRef<HTMLTextAreaElement>(null);
@@ -28,6 +30,10 @@ export function LigneDescriptionDialog({ numero, designation, valeur, onSave, on
   useEffect(() => { champ.current?.focus(); }, []);
 
   const enregistrer = () => { onSave(texte.trim() === '' ? '' : texte); onClose(); };
+  const ouvrirCctp = () => {
+    if (dirty) onSave(texte.trim() === '' ? '' : texte);
+    onOpenCctp?.();
+  };
 
   return (
     <AnimatePresence>
@@ -41,6 +47,11 @@ export function LigneDescriptionDialog({ numero, designation, valeur, onSave, on
         footer={(
           <div className="flex items-center justify-between gap-3 w-full">
             <span className="hidden sm:inline text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('pro_description_hint')}</span>
+            {onOpenCctp && (
+              <button type="button" className="text-xs underline" style={{ color: 'var(--tblr-primary)' }} onClick={ouvrirCctp}>
+                {t('pro_description_open_cctp')}
+              </button>
+            )}
             <div className="flex gap-2 ml-auto">
               <button type="button" className="btn" onClick={onClose}>{t('pro_undo')}</button>
               <button type="button" className="btn btn-primary" onClick={enregistrer} disabled={!dirty}>{t('pro_description_save')}</button>

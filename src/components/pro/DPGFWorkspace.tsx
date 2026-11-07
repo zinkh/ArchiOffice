@@ -31,7 +31,7 @@ import { formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQ
 import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
-import { clePourCible, type CibleRecherche } from '../../lib/proRecherche';
+import { clePourCible, trouvaillePourPosition, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
 import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
 import { localisationsConnues, localisationsDeLigne } from '../../lib/cctpImages';
 import {
@@ -69,6 +69,8 @@ interface DPGFWorkspaceProps {
   onDragStart?: (ligne: Ligne) => void;
   /** Trouvaille de la recherche à ouvrir et montrer. */
   searchTarget?: CibleRecherche | null;
+  /** Ouvre l'élément (lot, chapitre ou article) dans l'onglet CCTP. */
+  onOpenCctp?: (pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>) => void;
   showTree?: boolean;
   onToggleTree?: () => void;
   /** Ouvre l'import d'un fichier qui remplit ce DPGF (les lignes absentes deviennent des articles). */
@@ -81,7 +83,7 @@ const isTextField = (el: EventTarget | null) =>
     || (el instanceof HTMLInputElement && el.type !== 'checkbox'));
 
 export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
-  dpgf, onChange, projectName, onDropExternal, onDragStart, searchTarget,
+  dpgf, onChange, projectName, onDropExternal, onDragStart, searchTarget, onOpenCctp,
   showTree: showTreeProp, onToggleTree, onImportDocument, notify,
 }) => {
   const { settings } = useSettings();
@@ -176,7 +178,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const clearSelection = () => { setSelectedKeys(new Set()); setAnchorKey(null); };
 
   // Trouvaille choisie dans la recherche : dépliée, sélectionnée, puis montrée.
-  useCibleRecherche(searchTarget, c => {
+  const montrerCible = (c: CibleRecherche) => {
     setGroupement('lot');
     setEditingCell(null);
     setExpandedLots(prev => new Set([...prev, c.lotId]));
@@ -185,7 +187,16 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     setSelectedLotId(c.lotId);
     if (c.chapId) setSelectedChapId(c.chapId);
     selectKeys([clePourCible(c)]);
-  });
+  };
+  useCibleRecherche(searchTarget, montrerCible);
+  // Clic dans la structure (arborescence de gauche) : même effet qu'une trouvaille, sans passer par la recherche.
+  const [cibleArbre, setCibleArbre] = useState<CibleRecherche | null>(null);
+  const nonceArbre = useRef(0);
+  useCibleRecherche(cibleArbre, montrerCible);
+  const montrerDansTableau = (pos: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>) => {
+    const t = trouvaillePourPosition(dpgf, pos);
+    if (t) setCibleArbre({ ...t, nonce: ++nonceArbre.current });
+  };
   const toggleKey = (rKey: string) => {
     setSelectedKeys(prev => {
       const next = new Set(prev);
@@ -221,6 +232,39 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
   const toggleLot = toggleIn(setExpandedLots);
   const toggleChap = toggleIn(setExpandedChaps);
   const toggleLigne = toggleIn(setExpandedLignes);
+  /** Articles et sous-articles de la structure : un clic ouvre l'article dans le tableau. */
+  const renderArbreLignes = (lignes: Ligne[], lotIdx: number, chapIdx: number, prefixe: number[], niveau: number): React.ReactNode =>
+    lignes.map((l, i) => {
+      if (l.cctpOnly) return null;
+      const chemin = [...prefixe, i];
+      const enfants = l.children ?? [];
+      return (
+        <div key={l.id}>
+          <div className="flex items-center" style={{ paddingLeft: `${niveau * 0.75 + 0.5}rem` }}>
+            <button
+              type="button"
+              aria-expanded={expandedLignes.has(l.id)}
+              aria-label={t('pro_toggle_lot', { numero: l.numero })}
+              className="shrink-0 w-5 h-6 inline-flex items-center justify-center"
+              style={{ color: 'var(--tblr-muted)', visibility: enfants.length ? 'visible' : 'hidden' }}
+              onClick={() => toggleLigne(l.id)}
+            >
+              {expandedLignes.has(l.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+            </button>
+            <button
+              type="button"
+              className="flex-1 min-w-0 flex items-center gap-1 pr-2 py-1 text-left text-xs hover:underline"
+              style={{ color: 'var(--tblr-muted)' }}
+              onClick={() => montrerDansTableau({ kind: 'ligne', lotIdx, chapIdx, lignePath: chemin })}
+            >
+              <span className="font-mono shrink-0">{l.numero}</span>
+              <span className="truncate">{l.designation}</span>
+            </button>
+          </div>
+          {enfants.length > 0 && expandedLignes.has(l.id) && renderArbreLignes(enfants, lotIdx, chapIdx, chemin, niveau + 1)}
+        </div>
+      );
+    });
 
   // ── Add ───────────────────────────────────────────────────────────────────────
   const addLot = () => {
@@ -896,6 +940,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           designation={descriptionCible.ligne.designation}
           valeur={descriptionCible.ligne.cctpDescription ?? ''}
           onSave={texte => enregistrerDescription(descriptionCible.key, texte)}
+          onOpenCctp={onOpenCctp ? () => {
+            const k = parseRowKey(descriptionCible.key);
+            if (k?.kind === 'ligne') { onOpenCctp({ kind: 'ligne', lotIdx: k.lotIdx, chapIdx: k.chapIdx, lignePath: k.lignePath }); setDescriptionKey(null); }
+          } : undefined}
           onClose={() => setDescriptionKey(null)}
         />
       )}
@@ -984,21 +1032,30 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                   </button>
                 </div>
                 {expandedLots.has(lot.id) && lot.chapitres.map((chap, ci) => chap.cctpOnly ? null : (
-                  <button
-                    key={chap.id}
-                    type="button"
-                    className="w-full flex items-center gap-1 pl-7 pr-2 py-1 text-left text-xs hover:underline"
-                    style={{ color: 'var(--tblr-muted)' }}
-                    onClick={() => {
-                      setSelectedLotId(lot.id);
-                      setSelectedChapId(chap.id);
-                      setExpandedChaps(prev => new Set([...prev, chap.id]));
-                      selectKeys([`chap-${li}-${ci}`]);
-                    }}
-                  >
-                    <span className="font-mono shrink-0">{chap.numero}</span>
-                    <span className="truncate">{chap.titre}</span>
-                  </button>
+                  <div key={chap.id}>
+                    <div className="flex items-center pl-4">
+                      <button
+                        type="button"
+                        aria-expanded={expandedChaps.has(chap.id)}
+                        aria-label={t('pro_toggle_lot', { numero: chap.numero })}
+                        className="shrink-0 w-5 h-6 inline-flex items-center justify-center"
+                        style={{ color: 'var(--tblr-muted)', visibility: chap.lignes.length ? 'visible' : 'hidden' }}
+                        onClick={() => toggleChap(chap.id)}
+                      >
+                        {expandedChaps.has(chap.id) ? <IconChevronDown size={12} /> : <IconChevronRight size={12} />}
+                      </button>
+                      <button
+                        type="button"
+                        className="flex-1 min-w-0 flex items-center gap-1 pr-2 py-1 text-left text-xs hover:underline"
+                        style={{ color: 'var(--tblr-muted)' }}
+                        onClick={() => montrerDansTableau({ kind: 'chapitre', lotIdx: li, chapIdx: ci })}
+                      >
+                        <span className="font-mono shrink-0">{chap.numero}</span>
+                        <span className="truncate">{chap.titre}</span>
+                      </button>
+                    </div>
+                    {expandedChaps.has(chap.id) && renderArbreLignes(chap.lignes, li, ci, [], 2)}
+                  </div>
                 ))}
               </div>
             ))}

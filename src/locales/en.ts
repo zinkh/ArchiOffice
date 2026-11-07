@@ -442,6 +442,7 @@ export default {
   "pro_description_label": "Technical description of the item",
   "pro_description_placeholder": "Describe the item: materials, installation, standards, expected performance…",
   "pro_description_hint": "This text is reused in the CCTP. Ctrl+Enter to save.",
+  "pro_description_open_cctp": "Open in the CCTP",
   "pro_description_save": "Save",
   "pro_description_edit": "Item description",
   "pro_description_has": "Description entered, click to edit",
