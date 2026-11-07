@@ -3,22 +3,27 @@ import { useTranslation } from 'react-i18next';
 import type { ArticleBibliotheque } from '../../types/library';
 import { useRechercheArticles } from '../../hooks/useRechercheArticles';
 import { ListeArticlesBibliotheque } from './ListeArticlesBibliotheque';
+import type { DossierPropose } from '../../lib/bibliothequeAutocompletion';
 
 /**
  * Titre d'un article du CCTP, avec les ouvrages de la bibliothèque proposés pendant la saisie. Les propositions
  * n'apparaissent qu'une fois le titre modifié (ouvrir une fiche ne propose rien). Les flèches choisissent, Entrée
  * valide la proposition surlignée, Échap ferme la liste ; sans proposition surlignée le titre reste ce qui est tapé.
  */
-export function TitreArticleCctp({ value, onChange, onChoisir, className, placeholder }: {
+export function TitreArticleCctp({ value, onChange, onChoisir, className, placeholder, dossier = 'ouvrages', label }: {
   value: string; onChange: (titre: string) => void; onChoisir: (article: ArticleBibliotheque) => void;
   className?: string; placeholder?: string;
+  /** `clauses` pour un titre de chapitre (les clauses générales), `ouvrages` pour un article. */
+  dossier?: DossierPropose;
+  /** Nom du champ annoncé aux lecteurs d'écran (le titre d'un article par défaut). */
+  label?: string;
 }) {
   const { t } = useTranslation();
   const [modifie, setModifie] = useState(false);
   const [ferme, setFerme] = useState(false);
   const [actif, setActif] = useState(-1);
   const champ = useRef<HTMLInputElement>(null);
-  const propositions = useRechercheArticles(value, modifie && !ferme);
+  const propositions = useRechercheArticles(value, modifie && !ferme, dossier);
 
   const choisir = (a: ArticleBibliotheque) => { setFerme(true); setActif(-1); onChoisir(a); };
   return (
@@ -29,7 +34,7 @@ export function TitreArticleCctp({ value, onChange, onChoisir, className, placeh
         value={value}
         placeholder={placeholder}
         aria-autocomplete="list"
-        aria-label={t('pro_description_title_label')}
+        aria-label={label ?? t('pro_description_title_label')}
         onChange={e => { setModifie(true); setFerme(false); setActif(-1); onChange(e.target.value); }}
         onBlur={() => setFerme(true)}
         onKeyDown={e => {

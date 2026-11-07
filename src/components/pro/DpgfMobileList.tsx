@@ -6,6 +6,7 @@ import { formatCurrency } from '../../lib/utils';
 import { EditableCell, type EditingCell } from './EditableCell';
 import { DECIMALES_QUANTITE, formatQuantite } from '../../lib/quantiteFormat';
 import { rowKey, sumLigne, type FlatRow } from './treeOps';
+import type { ArticleBibliotheque } from '../../types/library';
 
 interface DpgfMobileListProps {
   rows: FlatRow<Lot, Chapitre, Ligne>[];
@@ -22,6 +23,8 @@ interface DpgfMobileListProps {
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
   onCommit: (v: string) => void;
   onCancel: () => void;
+  /** Choisir un ouvrage de la bibliothèque dans la désignation d'un article (auto-complétion). */
+  onChoisirArticle?: (rKey: string, article: ArticleBibliotheque) => void;
   /** Bâtiments et quantités par bâtiment de l'article, quand l'opération en compte plusieurs. */
   extra?: (row: FlatRow<Lot, Chapitre, Ligne>, rKey: string) => React.ReactNode;
 }
@@ -37,7 +40,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
   const { t } = useTranslation();
   const {
     rows, sousTotaux, selected, onToggleSelect, expandedLots, expandedChaps, expandedLignes,
-    onToggleLot, onToggleChap, onToggleLigne, editingCell, onStartEdit, onCommit, onCancel, extra,
+    onToggleLot, onToggleChap, onToggleLigne, editingCell, onStartEdit, onCommit, onCancel, onChoisirArticle, extra,
   } = props;
   const cell = { editingCell, onStartEdit, onCommit, onCancel, editOnClick: true };
 
@@ -108,7 +111,7 @@ export function DpgfMobileList(props: DpgfMobileListProps) {
               <div className="flex items-start gap-2">
                 <span className="font-mono text-[0.8125rem] pt-0.5 shrink-0" style={{ color: 'var(--tblr-muted)' }}>{l.numero}</span>
                 <div className="flex-1 min-w-0">
-                  <EditableCell rKey={rKey} field="designation" value={l.designation} label={t('pro_col_designation')} {...cell} />
+                  <EditableCell rKey={rKey} field="designation" value={l.designation} label={t('pro_col_designation')} articles={onChoisirArticle ? { onChoisir: a => onChoisirArticle(rKey, a) } : undefined} {...cell} />
                 </div>
                 {l.articleTypeId && <span className="shrink-0 text-[0.6875rem] font-semibold px-1.5 rounded" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>BIB</span>}
                 {l.genereParIa && <span className="shrink-0 text-[0.6875rem] font-semibold px-1.5 rounded border" style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-muted)' }}>IA</span>}

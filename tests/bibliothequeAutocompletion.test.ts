@@ -11,7 +11,7 @@ vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => k
 
 import { CellInput } from '../src/components/pro/EditableCell';
 import { TitreArticleCctp } from '../src/components/pro/TitreArticleCctp';
-import { patchDepuisArticle } from '../src/lib/bibliothequeAutocompletion';
+import { patchChapitreDepuisClause, patchDepuisArticle } from '../src/lib/bibliothequeAutocompletion';
 import type { Ligne } from '../src/types/dpgf';
 import type { ArticleBibliotheque } from '../src/types/library';
 
@@ -170,5 +170,39 @@ describe('TitreArticleCctp : titre d\'un article du CCTP', () => {
     await act(async () => { champ().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); });
     expect(onChoisir).toHaveBeenCalledWith(expect.objectContaining({ id: 'art1' }));
     expect(container.querySelector('[role="listbox"]')).toBeNull();
+  });
+});
+
+describe('clauses générales pour un titre de chapitre', () => {
+  const clause = article({ id: 'cl1', designation: 'Prescriptions générales', description: 'Les travaux respectent les DTU.', unite: null, prix_unitaire: 0 });
+
+  it('pose le titre et le texte quand le chapitre n\'en a pas', () => {
+    expect(patchChapitreDepuisClause({}, clause)).toEqual({ titre: 'Prescriptions générales', cctpDescription: 'Les travaux respectent les DTU.' });
+  });
+
+  it('ne remplace jamais un texte déjà rédigé', () => {
+    expect(patchChapitreDepuisClause({ cctpDescription: 'Mon texte' }, clause)).toEqual({ titre: 'Prescriptions générales' });
+  });
+
+  it('la saisie d\'un titre de chapitre cherche dans les clauses, jamais dans les ouvrages', async () => {
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    fetchJson.mockReset();
+    fetchJson.mockResolvedValue([clause]);
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    await act(async () => {
+      root.render(React.createElement(CellInput, { value: 'Chapitre', onCommit: vi.fn(), onCancel: vi.fn(), articles: { dossier: 'clauses', onChoisir: vi.fn() } }));
+    });
+    const champ = container.querySelector('input')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(champ, 'presc');
+      champ.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { await new Promise(r => setTimeout(r, 300)); });
+    expect(String(fetchJson.mock.calls[0][0])).toContain('dossier=clauses');
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
   });
 });

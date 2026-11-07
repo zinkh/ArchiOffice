@@ -42,7 +42,7 @@ import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPT
 import { CctpQuantiteUnite } from './CctpQuantiteUnite';
 import { MetreDialog } from './MetreDialog';
 import { TitreArticleCctp } from './TitreArticleCctp';
-import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
+import { marquerUtilise, patchChapitreDepuisClause, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
@@ -1091,10 +1091,20 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                       placeholder="Titre…"
                     />
                   ) : (
-                    <input
-                      type="text"
+                    // Un chapitre : les clauses générales de la bibliothèque sont proposées pendant la saisie du titre.
+                    <TitreArticleCctp
+                      key={`${selection.lotIdx}-${selection.chapIdx}`}
+                      dossier="clauses"
+                      label={t('pro_chapter_title_label')}
                       value={dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.titre ?? ''}
-                      onChange={e => updateName(e.target.value)}
+                      onChange={updateName}
+                      onChoisir={clause => {
+                        mutateDPGF(d => {
+                          const chap = d.lots[selection.lotIdx].chapitres[selection.chapIdx];
+                          Object.assign(chap, patchChapitreDepuisClause(chap, clause));
+                        });
+                        marquerUtilise(clause.id);
+                      }}
                       className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
                       placeholder="Titre…"
                     />

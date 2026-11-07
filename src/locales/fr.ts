@@ -442,6 +442,7 @@ export default {
   "pro_description_title_label": "Titre de l'article",
   "pro_description_title_required": "Le titre de l'article ne peut pas être vide.",
   "pro_library_suggest_label": "Ouvrages de la bibliothèque",
+  "pro_chapter_title_label": "Titre du chapitre",
   "pro_description_placeholder": "Décrivez l'ouvrage : matériaux, mise en œuvre, normes, performances attendues…",
   "pro_description_hint": "Ce texte est repris dans le CCTP. Ctrl+Entrée pour enregistrer.",
   "pro_description_open_cctp": "Ouvrir dans le CCTP",

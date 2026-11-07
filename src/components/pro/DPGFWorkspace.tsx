@@ -27,7 +27,7 @@ import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSel
 import { StatutBadges } from './StatutBadges';
 import { LigneDescriptionDialog } from './LigneDescriptionDialog';
 import { MetreDialog } from './MetreDialog';
-import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
+import { marquerUtilise, patchChapitreDepuisClause, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
 import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
@@ -623,6 +623,20 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     });
     marquerUtilise(article.id);
   };
+  /** Choisir une clause générale de la bibliothèque dans le titre d'un chapitre : titre, et texte seulement s'il est vide. */
+  const appliquerClauseChapitre = (key: string, clause: ArticleBibliotheque) => {
+    const k = parseRowKey(key);
+    if (k?.kind !== 'chapitre') return;
+    mutateLots(lots => {
+      const lot = { ...lots[k.lotIdx] };
+      const chap = lot.chapitres[k.chapIdx];
+      lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), { ...chap, ...patchChapitreDepuisClause(chap, clause) }, ...lot.chapitres.slice(k.chapIdx + 1)];
+      const next = [...lots];
+      next[k.lotIdx] = lot;
+      return next;
+    });
+    marquerUtilise(clause.id);
+  };
   const enregistrerDescription = (key: string, texte: string, designation?: string) => {
     const k = parseRowKey(key);
     if (k?.kind !== 'ligne') return;
@@ -1134,6 +1148,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                 onToggleLot={toggleLot}
                 onToggleChap={toggleChap}
                 onToggleLigne={toggleLigne}
+                onChoisirArticle={appliquerArticleBibliotheque}
                 {...cellProps}
               />
             ) : (
@@ -1243,7 +1258,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           <EditableCell rKey={rKey} field="numero" value={row.chapitre!.numero} {...cellProps} />
                         </td>
                         <td className="px-2 py-1" colSpan={multiBat ? 3 : 7 + nbColMarge}>
-                          <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} {...cellProps} />
+                          <EditableCell rKey={rKey} field="titre" value={row.chapitre!.titre} articles={{ dossier: 'clauses', onChoisir: c => appliquerClauseChapitre(rKey, c) }} {...cellProps} />
                         </td>
                         {multiBat && <>{batimentsCell(rKey, row.chapitre!.numero)}<td colSpan={batiments.length + 4 + nbColMarge} /></>}
                         {dpgf.multiPhases && (
