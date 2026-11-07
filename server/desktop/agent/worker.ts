@@ -1,3 +1,4 @@
+import { windowsShellMetadata } from './windowsShellMetadata';
 import { queueWindowsEdit, type WindowsEditInput } from './windowsEdits';
 import { buildWindowsCatalog, catalogReader } from './windowsCatalog';
 import path from 'node:path';
@@ -146,6 +147,13 @@ export function createAgentWorker(config: WorkerConfig) {
           }});
       });
       workingUploads=task.catch(()=>{});downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+    },
+    shellMetadata(projectId:string) {
+      const task=(async()=>{
+        if(stopped)throw new Error('Agent stopped');const ctx=await current();const expected={...ctx.session};
+        const authorize=async()=>{abort.signal.throwIfAborted();const active=await config.session();if(['userId','tenantId','deviceId'].some(k=>active[k as keyof AgentSession]!==expected[k as keyof AgentSession]))throw new Error('Identity changed');return active.token;};
+        const read=catalogReader(config.origin,expected.tenantId,authorize);const result=await windowsShellMetadata(projectId,route=>read(route,abort.signal));await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
+      })();downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
     windowsPreview(action: 'catalog' | 'hydrate', input: any) {
       const task=(async()=> {

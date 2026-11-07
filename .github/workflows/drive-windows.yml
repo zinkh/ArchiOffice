@@ -4,7 +4,9 @@ on:
     branches: [main]
     paths:
       - 'native/windows-drive/**'
+      - 'native/windows-shell/**'
       - 'electron/windowsDrive*.cjs'
+      - 'electron/windowsShell.cjs'
       - '.github/workflows/drive-windows.yml'
   workflow_dispatch:
 jobs:
@@ -36,6 +38,20 @@ jobs:
         run: node native/windows-drive/refresh-smoke.mjs
       - name: Edit existing documents and capture replace-saves
         run: node native/windows-drive/edit-smoke.mjs
+      - name: Configure Explorer extension
+        run: cmake -S native/windows-shell -B native/windows-shell/build -A x64 -DSHELL_BUILD_ID=${{ github.sha }}
+      - name: Compile Explorer extension
+        run: cmake --build native/windows-shell/build --config Release
+      - name: Exercise native Explorer view and local broker
+        run: node native/windows-shell/smoke.mjs
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-shell-prototype-x64
+          path: |
+            native/windows-shell/build/Release/*.dll
+            native/windows-shell/build/Release/archioffice-shell-control.exe
+            native/windows-shell/build/shell-prototype*.png
       - uses: actions/upload-artifact@v7
         if: always()
         with:

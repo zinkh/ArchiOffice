@@ -1,3 +1,4 @@
+const {createShellProjection,createShellPipe,createShellDocumentOpener}=require('./windowsShell.cjs');
 const { createWindowsMultiDrive } = require('./windowsDriveMulti.cjs');
 const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
 const path = require('path');
@@ -45,7 +46,7 @@ let serverProcess = null;
 let mainWindow = null;
 let splashWindow = null;
 let offlineStack = null;
-let driveAgent = null;
+let driveAgent = null;let driveShell=null;
 let driveTray = null;
 let driveInBackground = false;
 let driveStatus = { state: 'paused', pending: 0, blocked: 0, conflicts: 0 };
@@ -415,6 +416,16 @@ function startDriveAgent() {
     login:(enabled)=>{if(process.platform==='win32')app.setLoginItemSettings({openAtLogin:enabled});},
     enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   windowsDrivePreview.resume();
+  const shellControl=app.isPackaged?path.join(cwd,'drive-shell','archioffice-shell-control.exe'):path.join(cwd,'native','windows-shell','build','Release','archioffice-shell-control.exe');
+  const runShell=(args)=>new Promise((resolve,reject)=>{const child=spawn(shellControl,args,{windowsHide:true,stdio:'ignore'});const timer=setTimeout(()=>{child.kill();reject(new Error('Shell control timeout'));},10000);child.once('error',error=>{clearTimeout(timer);reject(error);});child.once('exit',code=>{clearTimeout(timer);code===0?resolve():reject(new Error('Shell control failed'));});});
+  if(process.platform==='win32'&&fs.existsSync(shellControl)) {
+    const projection=createShellProjection({drive:windowsDrivePreview,agent:driveAgent,vault:()=>requestVault(serverProcess),root:path.join(app.getPath('userData'),'drive-windows-preview'),shell,
+      openDocument:createShellDocumentOpener({getWindow:()=>mainWindow,showWindow:showMainWindow,origin:`http://127.0.0.1:${PORT}`})});
+    const pipe=createShellPipe({projection});const holder={pipe,address:null,control:runShell,ready:false};driveShell=holder;
+    void pipe.start().then(async endpoint=>{holder.address=endpoint.address;await runShell(['--runtime',endpoint.address,endpoint.token]);if(driveShell===holder)holder.ready=true;else {pipe.stop();await runShell(['--clear-runtime',endpoint.address]);}}).catch(()=>{pipe.stop();if(driveShell===holder)driveShell=null;log('[drive] Extension Explorer indisponible.');});
+  }
+  ipcMain.handle('desktop:drive-shell-open',async(event)=>{if(!trustedDriveSender(event))throw new Error('Accès refusé');try{if(!driveShell?.ready)throw new Error('Shell unavailable');await driveShell.control(['--open']);return {status:'opened'};}catch{return {status:'error'};}});
+
   ipcMain.handle('desktop:drive-windows-activate',async(event)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.activate();
   });
@@ -437,7 +448,7 @@ function startDriveAgent() {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.open();
   });
   ipcMain.handle('desktop:drive-windows-status',async(event)=> {
-    if(!trustedDriveSender(event))throw new Error('Accès refusé');const state=await windowsDrivePreview.getStatus();return {...state,appVersion:app.getVersion(),unavailableReason:process.platform!=='win32'?'platform':process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW==='0'?'disabled':!fs.existsSync(nativeExecutable)?'native_missing':null};
+    if(!trustedDriveSender(event))throw new Error('Accès refusé');const state=await windowsDrivePreview.getStatus();return {...state,appVersion:app.getVersion(),shellAvailable:!!driveShell?.ready,unavailableReason:process.platform!=='win32'?'platform':process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW==='0'?'disabled':!fs.existsSync(nativeExecutable)?'native_missing':null};
   });
   ipcMain.handle('desktop:drive-windows-start',async(event,projectId)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');
@@ -632,6 +643,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  const oldShell=driveShell;driveShell=null;oldShell?.pipe.stop();if(oldShell?.address)void oldShell.control(['--clear-runtime',oldShell.address]).catch(()=>{});
   windowsDrivePreview?.shutdown();
   driveAgent?.stop();
   if (driveTray && !driveTray.isDestroyed()) driveTray.destroy();

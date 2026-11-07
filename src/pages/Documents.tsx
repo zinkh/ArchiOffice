@@ -1,3 +1,4 @@
+import {useLocation} from 'react-router-dom';
 import { WindowsDrivePreview } from '../components/WindowsDrivePreview';
 import { useState, useEffect, useRef } from 'react';
 import { desktopBridge } from '../lib/desktopBridge';
@@ -71,6 +72,7 @@ const inputStyle = { background: 'var(--tblr-surface)', border: '1px solid var(-
 
 export default function Documents() {
   const { t } = useTranslation();
+  const location=useLocation();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const { currentUser, activeTenantId } = useUser();
@@ -254,6 +256,10 @@ export default function Documents() {
 
   const driveTransfers = useDriveDocumentStatuses(visibleDocs.map(doc => `doc:${doc.id}`),
     driveEnabled ? `${currentUser?.id}:${activeTenantId}` : null);
+
+  const linkedDocument=new URLSearchParams(location.search).get('document');
+  useEffect(()=>{const params=new URLSearchParams(location.search);const id=params.get('project'),doc=params.get('document');if(!id||!doc||!projects.some(p=>p.id===id)||!documents.some(d=>d.id===doc&&d.project_id===id))return;setActiveProject(id);setActivePhase(null);setFilterStatut('all');setExpandedProjects(previous=>new Set([...previous,id]));},[location.search,projects,documents]);
+  useEffect(()=>{if(linkedDocument&&visibleDocs.some(d=>d.id===linkedDocument))document.getElementById('document-row-'+linkedDocument)?.scrollIntoView?.({block:'center'});},[linkedDocument,activeProject,documents]);
 
   // Upload
   // Les fichiers partent un par un : un échec s'affiche sur sa ligne et n'arrête pas les suivants.
@@ -647,8 +653,10 @@ export default function Documents() {
                   return (
                     <tr
                       key={doc.id}
+                      id={"document-row-"+doc.id}
+                      aria-selected={linkedDocument===doc.id}
                       className="transition-colors"
-                      style={{ borderTop: '1px solid var(--tblr-border)', opacity: draggedDocId === doc.id ? 0.4 : isPerime ? 0.6 : 1 }}
+                      style={{ background:linkedDocument===doc.id?'var(--tblr-primary-lt)':undefined,borderTop: '1px solid var(--tblr-border)', opacity: draggedDocId === doc.id ? 0.4 : isPerime ? 0.6 : 1 }}
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5 cursor-grab" {...itemProps(doc.id, 'doc')}>

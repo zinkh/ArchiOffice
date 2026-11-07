@@ -5119,6 +5119,8 @@ export default {
   "windows_drive_disabled": "Drive is disabled in this application. Enable it in the Windows client configuration and restart ArchiOffice.",
   "windows_drive_install_required": "This installation does not provide a usable Drive component. Install the Windows version containing Drive and restart ArchiOffice. Merging on GitHub does not update the installed application.",
   "windows_drive_client_version": "Client version: {{version}}",
+  "windows_drive_shell_open": "Open document workspace",
+  "windows_drive_shell_opened": "Document workspace opened in Windows Explorer.",
   "windows_drive_explanation": "Find your added projects under This PC in A:, with on-demand downloads. Check their catalogs to review updates. You can enable editing of existing documents for each project. Your selection reconnects at Windows sign-in if authorization is valid.",
   "windows_drive_open": "Enable A: with this project",
   "windows_drive_preparing": "Connecting A: drive…",
