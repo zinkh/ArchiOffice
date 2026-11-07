@@ -442,6 +442,7 @@ export default {
   "pro_description_label": "Technical description of the item",
   "pro_description_title_label": "Item title",
   "pro_description_title_required": "The item title cannot be empty.",
+  "pro_library_suggest_label": "Library items",
   "pro_description_placeholder": "Describe the item: materials, installation, standards, expected performance…",
   "pro_description_hint": "This text is reused in the CCTP. Ctrl+Enter to save.",
   "pro_description_open_cctp": "Open in the CCTP",

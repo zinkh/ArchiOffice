@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { ArticleBibliotheque } from '../../types/library';
+import { useRechercheArticles } from '../../hooks/useRechercheArticles';
+import { ListeArticlesBibliotheque } from './ListeArticlesBibliotheque';
 
 export interface EditingCell {
   rowKey: string;
@@ -59,13 +62,16 @@ export function appliquerProposition(texte: string, proposition: string): string
 }
 
 export const CellInput = ({
-  value, onCommit, onCancel, className = '', label, suggestions,
+  value, onCommit, onCancel, className = '', label, suggestions, articles,
 }: {
   value: string; onCommit: (v: string) => void; onCancel: () => void; className?: string; label?: string;
   /** Valeurs proposées pendant la saisie ; plusieurs valeurs se séparent par des virgules. */
   suggestions?: string[];
+  /** Auto-complétion depuis la bibliothèque d'ouvrages (désignation d'un article) : choisir une proposition la pose et ferme la saisie. */
+  articles?: { onChoisir: (article: ArticleBibliotheque) => void };
 }) => {
   const [v, setV] = useState(value);
+  const choisi = useRef(false);
   const [actif, setActif] = useState(-1);
   const ref = useRef<HTMLInputElement>(null);
   // Échap retire le champ sans blur : la ligne glissable est alors rétablie ici.
@@ -79,7 +85,15 @@ export const CellInput = ({
     };
   }, []);
   const propositions = suggestions ? propositionsListe(v, suggestions) : [];
-  const rect = propositions.length ? ref.current?.getBoundingClientRect() : undefined;
+  // Les ouvrages ne sont cherchés qu'une fois le texte modifié : ouvrir la saisie ne propose rien.
+  const trouves = useRechercheArticles(v, !!articles && v !== value);
+  const nbListe = articles ? trouves.length : propositions.length;
+  const choisirArticle = (a: ArticleBibliotheque) => {
+    choisi.current = true; // le blur qui suit ne doit pas valider le texte tapé par-dessus l'article
+    articles?.onChoisir(a);
+    onCancel();
+  };
+  const rect = nbListe ? ref.current?.getBoundingClientRect() : undefined;
   const choisir = (proposition: string) => {
     setV(appliquerProposition(v, proposition) + ', ');
     setActif(-1);
@@ -97,20 +111,27 @@ export const CellInput = ({
         onMouseEnter={sansGlisserPendantSaisie.onMouseEnter}
         onMouseLeave={sansGlisserPendantSaisie.onMouseLeave}
         onFocus={e => { sansGlisserPendantSaisie.onFocus(e); e.target.select(); }}
-        onBlur={e => { sansGlisserPendantSaisie.onBlur(e); onCommit(v); }}
+        onBlur={e => { sansGlisserPendantSaisie.onBlur(e); if (!choisi.current) onCommit(v); }}
         onKeyDown={e => {
           // Les raccourcis du tableau (Tab, Suppr, Alt+flèches) ne doivent pas
           // agir sur la ligne pendant la saisie.
           e.stopPropagation();
-          if (propositions.length && e.key === 'ArrowDown') { e.preventDefault(); setActif(a => (a + 1) % propositions.length); return; }
-          if (propositions.length && e.key === 'ArrowUp') { e.preventDefault(); setActif(a => (a <= 0 ? propositions.length : a) - 1); return; }
+          if (nbListe && e.key === 'ArrowDown') { e.preventDefault(); setActif(a => (a + 1) % nbListe); return; }
+          if (nbListe && e.key === 'ArrowUp') { e.preventDefault(); setActif(a => (a <= 0 ? nbListe : a) - 1); return; }
+          if (e.key === 'Enter' && actif >= 0 && articles && trouves[actif]) { e.preventDefault(); choisirArticle(trouves[actif]); return; }
           if (e.key === 'Enter' && actif >= 0 && propositions[actif]) { e.preventDefault(); choisir(propositions[actif]); return; }
           if (e.key === 'Enter') { onCommit(v); e.currentTarget.blur(); }
           if (e.key === 'Escape') { onCancel(); }
         }}
         className={`w-full px-1 py-0 rounded outline-none text-sm font-mono border border-[var(--tblr-primary)] bg-[var(--tblr-surface)] text-[var(--tblr-text)] ${className}`}
       />
-      {rect && (
+      {rect && articles && (
+        <ListeArticlesBibliotheque
+          articles={trouves} actif={actif} onChoisir={choisirArticle} className="fixed"
+          style={{ top: rect.bottom + 2, left: rect.left, minWidth: Math.max(rect.width, 280) }}
+        />
+      )}
+      {rect && !articles && (
         // Position fixe : le tableau défile et couperait une liste posée dans la cellule.
         <ul
           role="listbox"
@@ -137,7 +158,7 @@ export const CellInput = ({
 };
 
 export const EditableCell = ({
-  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false, suggestions, maxDecimals = 2, editValue, titleHint,
+  rKey, field, value, editingCell, onStartEdit, onCommit, onCancel, numeric = false, className = '', editOnClick = false, label, showZero = false, pm = false, suggestions, articles, maxDecimals = 2, editValue, titleHint,
 }: {
   rKey: string; field: string; value: string | number; editingCell: EditingCell | null;
   onStartEdit: (rKey: string, field: string, value: string | number) => void;
@@ -152,6 +173,8 @@ export const EditableCell = ({
   pm?: boolean;
   /** Valeurs proposées pendant la saisie (liste séparée par des virgules). */
   suggestions?: string[];
+  /** Auto-complétion depuis la bibliothèque d'ouvrages (désignation d'un article). */
+  articles?: { onChoisir: (article: ArticleBibliotheque) => void };
   /** Décimales affichées au plus (2 par défaut ; une quantité n'est jamais arrondie à l'écran). */
   maxDecimals?: number;
   /** Texte de départ de la modification, à la place de la valeur affichée (la formule mémorisée d'une quantité). */
@@ -167,7 +190,7 @@ export const EditableCell = ({
     : String(value || '');
 
   if (isEditing) {
-    return <CellInput value={editingCell.value} onCommit={onCommit} onCancel={onCancel} className={className} label={label} suggestions={suggestions} />;
+    return <CellInput value={editingCell.value} onCommit={onCommit} onCancel={onCancel} className={className} label={label} suggestions={suggestions} articles={articles} />;
   }
   return (
     <div

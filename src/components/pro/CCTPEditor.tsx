@@ -41,6 +41,8 @@ import { ajouterClause, estClause } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey, recomputeLot } from './treeOps';
 import { CctpQuantiteUnite } from './CctpQuantiteUnite';
 import { MetreDialog } from './MetreDialog';
+import { TitreArticleCctp } from './TitreArticleCctp';
+import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
@@ -1073,17 +1075,30 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                 {selection && selection.kind === 'lot' ? (
                   <LotTitleInput value={dpgf.lots[selection.lotIdx].titre} onCommit={titre => mutateDPGF(d => { d.lots[selection.lotIdx].titre = titre; })} />
                 ) : selection ? (
-                  <input
-                    type="text"
-                    value={
-                      selection.kind === 'chapitre'
-                        ? dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.titre ?? ''
-                        : ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath)?.designation ?? ''
-                    }
-                    onChange={e => updateName(e.target.value)}
-                    className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
-                    placeholder="Titre…"
-                  />
+                  selection.kind === 'ligne' ? (
+                    // Un article : les ouvrages de la bibliothèque sont proposés pendant la saisie du titre.
+                    <TitreArticleCctp
+                      key={`${selection.lotIdx}-${selection.chapIdx}-${selection.lignePath.join('.')}`}
+                      value={ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath)?.designation ?? ''}
+                      onChange={updateName}
+                      onChoisir={article => {
+                        const l = ligneAtPath(dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.lignes ?? [], selection.lignePath);
+                        if (!l) return;
+                        appliquerALigne(patchDepuisArticle(l as Ligne, article));
+                        marquerUtilise(article.id);
+                      }}
+                      className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
+                      placeholder="Titre…"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.titre ?? ''}
+                      onChange={e => updateName(e.target.value)}
+                      className="text-xl font-bold w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-600 focus:border-blue-500 outline-none pb-1 text-zinc-900 dark:text-white transition-colors"
+                      placeholder="Titre…"
+                    />
+                  )
                 ) : null}
 
                 <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
