@@ -11,10 +11,16 @@ export interface ConfirmOptions {
   cancelLabel: string;
   /** `danger` pour une suppression : le focus part alors sur « Annuler ». */
   tone?: 'danger' | 'primary';
+  /**
+   * Choix supplémentaires, entre « Annuler » et la validation (qui reste le choix principal). Un choix se lit
+   * avec `choose()` : `confirm()` ne rend que vrai pour la validation, faux pour tout autre bouton.
+   */
+  alternatives?: { id: string; label: string }[];
 }
 
 interface PendingConfirm extends ConfirmOptions {
-  resolve: (confirmed: boolean) => void;
+  /** `confirm` pour la validation, `cancel` pour l'annulation, sinon l'identifiant de l'alternative choisie. */
+  resolve: (choice: string) => void;
 }
 
 /**
@@ -27,29 +33,35 @@ export function useConfirmDialog() {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
 
   const confirm = useCallback(
-    (opts: ConfirmOptions) => new Promise<boolean>(resolve => setPending({ ...opts, resolve })),
+    (opts: ConfirmOptions) => new Promise<boolean>(resolve => setPending({ ...opts, resolve: choice => resolve(choice === 'confirm') })),
     [],
   );
 
-  const close = useCallback((confirmed: boolean) => {
+  /** Comme `confirm`, mais rend le choix : `confirm`, `cancel` ou l'identifiant d'une alternative. */
+  const choose = useCallback(
+    (opts: ConfirmOptions) => new Promise<string>(resolve => setPending({ ...opts, resolve })),
+    [],
+  );
+
+  const close = useCallback((choice: string) => {
     setPending(prev => {
-      prev?.resolve(confirmed);
+      prev?.resolve(choice);
       return null;
     });
   }, []);
 
   const dialog = <ConfirmDialog pending={pending} onClose={close} />;
-  return { confirm, dialog };
+  return { confirm, choose, dialog };
 }
 
-function ConfirmDialog({ pending, onClose }: { pending: PendingConfirm | null; onClose: (confirmed: boolean) => void }) {
+function ConfirmDialog({ pending, onClose }: { pending: PendingConfirm | null; onClose: (choice: string) => void }) {
   const titleId = useId();
   const messageId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const isOpen = !!pending;
 
-  useEscapeKey(isOpen, () => onClose(false));
+  useEscapeKey(isOpen, () => onClose('cancel'));
 
   // Focus sur le choix sans risque : « Annuler » pour une suppression, la
   // validation sinon. L'élément qui avait le focus le retrouve à la fermeture.
@@ -76,7 +88,7 @@ function ConfirmDialog({ pending, onClose }: { pending: PendingConfirm | null; o
   return (
     <AnimatePresence>
       {pending && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => onClose(false)}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50" onClick={() => onClose('cancel')}>
           <motion.div
             ref={launchOriginRef}
             role="alertdialog"
@@ -95,20 +107,31 @@ function ConfirmDialog({ pending, onClose }: { pending: PendingConfirm | null; o
                 {pending.message}
               </div>
             )}
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button
                 ref={cancelRef}
                 type="button"
-                onClick={() => onClose(false)}
+                onClick={() => onClose('cancel')}
                 className="h-9 px-4 rounded-lg text-sm font-medium border transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
                 style={{ borderColor: 'var(--tblr-border)', color: 'var(--tblr-text)' }}
               >
                 {pending.cancelLabel}
               </button>
+              {pending.alternatives?.map(alternative => (
+                <button
+                  key={alternative.id}
+                  type="button"
+                  onClick={() => onClose(alternative.id)}
+                  className="h-9 px-4 rounded-lg text-sm font-medium border transition-colors hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                  style={{ borderColor: danger ? 'var(--tblr-danger)' : 'var(--tblr-border)', color: danger ? 'var(--tblr-danger)' : 'var(--tblr-text)' }}
+                >
+                  {alternative.label}
+                </button>
+              ))}
               <button
                 ref={confirmRef}
                 type="button"
-                onClick={() => onClose(true)}
+                onClick={() => onClose('confirm')}
                 className="h-9 px-4 rounded-lg text-sm font-semibold text-white transition-opacity hover:opacity-90 outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
                 style={{ background: danger ? 'var(--tblr-danger)' : 'var(--tblr-primary)' }}
               >

@@ -162,6 +162,12 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud {
   /** Quand elle existe, la quantité de la ligne est la somme de ces postes (le métré). */
   quantiteDetails?: QuantiteDetail[];
   /**
+   * Quantité suivie : l'article reprend la quantité d'un autre (`sourceId`, un `Ligne.id`) multipliée par le
+   * `coefficient` (1 si absent). Sa quantité ne se saisit plus, `propagerLiens` (src/lib/quantitesLiees.ts) la
+   * recalcule à chaque enregistrement. Un seul sens : la source ne porte rien.
+   */
+  quantiteLiee?: { sourceId: string; coefficient?: number };
+  /**
    * Formule tapée dans la case quantité (« =10+20 »), gardée pour la réafficher à la modification.
    * Elle ne vaut que tant qu'elle donne encore `quantite` (voir `formuleCourante`, src/lib/quantites.ts).
    */

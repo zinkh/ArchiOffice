@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { ArticleBibliotheque } from '../../types/library';
 import { useRechercheArticles } from '../../hooks/useRechercheArticles';
+import type { DossierPropose } from '../../lib/bibliothequeAutocompletion';
 import { ListeArticlesBibliotheque } from './ListeArticlesBibliotheque';
 
 export interface EditingCell {
@@ -68,7 +69,7 @@ export const CellInput = ({
   /** Valeurs proposées pendant la saisie ; plusieurs valeurs se séparent par des virgules. */
   suggestions?: string[];
   /** Auto-complétion depuis la bibliothèque d'ouvrages (désignation d'un article) : choisir une proposition la pose et ferme la saisie. */
-  articles?: { onChoisir: (article: ArticleBibliotheque) => void };
+  articles?: { onChoisir: (article: ArticleBibliotheque) => void; dossier?: DossierPropose };
 }) => {
   const [v, setV] = useState(value);
   const choisi = useRef(false);
@@ -86,7 +87,7 @@ export const CellInput = ({
   }, []);
   const propositions = suggestions ? propositionsListe(v, suggestions) : [];
   // Les ouvrages ne sont cherchés qu'une fois le texte modifié : ouvrir la saisie ne propose rien.
-  const trouves = useRechercheArticles(v, !!articles && v !== value);
+  const trouves = useRechercheArticles(v, !!articles && v !== value, articles?.dossier);
   const nbListe = articles ? trouves.length : propositions.length;
   const choisirArticle = (a: ArticleBibliotheque) => {
     choisi.current = true; // le blur qui suit ne doit pas valider le texte tapé par-dessus l'article
@@ -174,7 +175,7 @@ export const EditableCell = ({
   /** Valeurs proposées pendant la saisie (liste séparée par des virgules). */
   suggestions?: string[];
   /** Auto-complétion depuis la bibliothèque d'ouvrages (désignation d'un article). */
-  articles?: { onChoisir: (article: ArticleBibliotheque) => void };
+  articles?: { onChoisir: (article: ArticleBibliotheque) => void; dossier?: DossierPropose };
   /** Décimales affichées au plus (2 par défaut ; une quantité n'est jamais arrondie à l'écran). */
   maxDecimals?: number;
   /** Texte de départ de la modification, à la place de la valeur affichée (la formule mémorisée d'une quantité). */

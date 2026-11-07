@@ -1,19 +1,22 @@
 // Auto-complétion des articles du CCTP et du DPGF à partir de la bibliothèque d'ouvrages :
 // pendant la saisie du titre, les ouvrages qui le contiennent sont proposés ; en choisir un
 // reprend son unité, son prix et sa description technique, sans jamais écraser ce que la ligne a déjà.
-import type { Ligne } from '../types/dpgf';
+import type { Chapitre, Ligne } from '../types/dpgf';
 import type { ArticleBibliotheque } from '../types/library';
 
 /** Nombre de caractères tapés avant de chercher (en dessous, tout correspondrait). */
 export const MIN_CARACTERES_RECHERCHE = 2;
 export const MAX_PROPOSITIONS_ARTICLES = 8;
 
-/** Ouvrages de la bibliothèque (jamais les clauses générales) dont la désignation ou le code contient `q`. */
-export async function chercherArticles(q: string): Promise<ArticleBibliotheque[]> {
+/** Dossier de la bibliothèque proposé : les ouvrages (articles) ou les clauses générales (titres de chapitre). */
+export type DossierPropose = 'ouvrages' | 'clauses';
+
+/** Articles du dossier demandé (les ouvrages par défaut, jamais mêlés aux clauses) dont la désignation ou le code contient `q`. */
+export async function chercherArticles(q: string, dossier: DossierPropose = 'ouvrages'): Promise<ArticleBibliotheque[]> {
   // Chargé à la demande : ce module est tiré par la cellule d'édition, que des tests et des écrans purs importent
   // sans environnement Supabase (`lib/api` tire le client).
   const { fetchJson } = await import('./api');
-  const params = new URLSearchParams({ dossier: 'ouvrages', limit: String(MAX_PROPOSITIONS_ARTICLES), q: q.trim() });
+  const params = new URLSearchParams({ dossier, limit: String(MAX_PROPOSITIONS_ARTICLES), q: q.trim() });
   return fetchJson<ArticleBibliotheque[]>(`/api/price-library?${params}`);
 }
 
@@ -43,4 +46,14 @@ export function patchDepuisArticle(ligne: Ligne, article: ArticleBibliotheque): 
 /** Une ligne choisie compte comme un usage de l'article (tri par usage de la bibliothèque), au mieux. */
 export function marquerUtilise(articleId: string): void {
   void import('./api').then(({ apiFetch }) => apiFetch(`/api/price-library/${articleId}/used`, { method: 'POST' })).catch(() => {});
+}
+
+/**
+ * Ce que choisir une clause générale de la bibliothèque change sur un chapitre : son titre, et son texte technique
+ * seulement s'il est vide (un texte déjà rédigé n'est jamais remplacé).
+ */
+export function patchChapitreDepuisClause(chapitre: Pick<Chapitre, 'cctpDescription'>, clause: ArticleBibliotheque): Partial<Chapitre> {
+  const patch: Partial<Chapitre> = { titre: clause.designation };
+  if (!chapitre.cctpDescription?.trim() && clause.description?.trim()) patch.cctpDescription = clause.description;
+  return patch;
 }

@@ -123,6 +123,34 @@ describe('CctpQuantiteUnite', () => {
     expect([...container.querySelectorAll('button')].some(b => b.textContent === 'pro_metre_detail')).toBe(true);
   });
 
+  it('un article lié à un autre poste n\'a pas de case : la quantité, le lien, plus de métré, et le bouton pour le changer', async () => {
+    const onLier = vi.fn();
+    await monter({ liee: 'pro_link_badge Fenêtres', onLier, quantite: 8 });
+    expect(champ('cctp-quantite').tagName).toBe('SPAN');
+    expect(champ('cctp-quantite').textContent).toContain('8');
+    expect(container.textContent).toContain('pro_link_badge Fenêtres');
+    const boutons = [...container.querySelectorAll('button')].map(b => b.textContent);
+    expect(boutons).not.toContain('pro_metre_detail');
+    await act(async () => { [...container.querySelectorAll('button')].find(b => b.textContent === 'pro_link_menu')!.click(); });
+    expect(onLier).toHaveBeenCalled();
+  });
+
+  it('un article sans lien propose de lier, sauf s\'il a déjà un métré ou des bâtiments', async () => {
+    const onLier = vi.fn();
+    await monter({ onLier });
+    const lier = () => [...container.querySelectorAll('button')].find(b => b.textContent === 'pro_link_menu') as HTMLButtonElement;
+    expect(lier().disabled).toBe(false);
+    await act(async () => root.unmount());
+    container.remove();
+    await monter({ onLier, lierImpossible: true, lignesMetre: 2 });
+    expect(lier().disabled).toBe(true);
+  });
+
+  it('sans fonction pour lier (fiche sans document), aucun bouton de lien', async () => {
+    await monter();
+    expect([...container.querySelectorAll('button')].some(b => b.textContent === 'pro_link_menu')).toBe(false);
+  });
+
   it('un article à sous-articles n\'a pas de quantité propre', async () => {
     await monter({ aDesEnfants: true });
     expect(container.textContent).toContain('pro_cctp_quantity_parent');

@@ -21,6 +21,7 @@ import { useCibleRecherche } from '../../hooks/useCibleRecherche';
 import type { CibleRecherche } from '../../lib/proRecherche';
 import { MetreDialog } from './MetreDialog';
 import { quantitePatch, prixPatch, prixTotalPatch } from '../../lib/quantites';
+import { propagerLiens } from '../../lib/quantitesLiees';
 import { margePatch, vueMarge, tauxMargeDe } from '../../lib/marge';
 import { ligneAtPath } from './hierarchyOps';
 
@@ -60,7 +61,7 @@ function destAppend(doc: DPGF, lotIdx: number, chapIdx: number, ligne: import('.
 // Les sous-articles comptent : un parent porte la somme de ses enfants
 // (recomputeLot descend dans l'arbre, la somme à plat les ignorait).
 function recomputeDPGF(dpgf: DPGF): DPGF {
-  const newLots = dpgf.lots.map(lot => recomputeLot(lot));
+  const newLots = propagerLiens(dpgf.lots.map(lot => recomputeLot(lot)));
   const totalHT = newLots.reduce((s, l) => s + l.sousTotal, 0);
   return { ...dpgf, lots: newLots, totalHT, totalTTC: totalHT * (1 + dpgf.TVA / 100) };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes, resumeSuppression, totauxDocument } from '../src/components/pro/selectionOps';
+import { collectSelectedLignes, deleteSelection, liensRompus, parseSelection, pasteLignes, resumeSuppression, totauxDocument } from '../src/components/pro/selectionOps';
 import { foldForMobile, invokeToolbarAction, toolbarSignature, type ToolbarItem } from '../src/components/pro/toolbar/toolbarState';
 import type { Ligne, Lot } from '../src/types/dpgf';
 
@@ -134,5 +134,42 @@ describe("résumé d'une suppression", () => {
 
   it('ignore une clé inconnue', () => {
     expect(resumeSuppression(makeLots(), ['ligne-9-9-9', 'n'])).toEqual({ lots: 0, chapitres: 0, articles: 0 });
+  });
+});
+
+describe('liens de quantité rompus par une suppression', () => {
+  // `d` (lot 1, chapitre 2) suit `a` ; `e` (lot 2) suit `b1`, sous-article de `b`.
+  const avecLiens = (): Lot[] => {
+    const lots = makeLots();
+    lots[0].chapitres[1].lignes[0] = { ...lots[0].chapitres[1].lignes[0], quantiteLiee: { sourceId: 'a' } };
+    lots[1].chapitres[0].lignes[0] = { ...lots[1].chapitres[0].lignes[0], quantiteLiee: { sourceId: 'b1' } };
+    return lots;
+  };
+  const resume = (keys: string[]) => liensRompus(avecLiens(), keys).map(r => [r.source.id, r.suiveurs.map(s => s.id)]);
+
+  it('liste les articles qui suivent un article supprimé', () => {
+    expect(resume(['ligne-0-0-0'])).toEqual([['a', ['d']]]);
+  });
+
+  it('une source emportée avec son parent compte aussi, même dans un autre lot', () => {
+    expect(resume(['ligne-0-0-1'])).toEqual([['b1', ['e']]]);
+  });
+
+  it('un suiveur supprimé en même temps que sa source n\'est pas compté', () => {
+    expect(resume(['ligne-0-0-0', 'ligne-0-1-0'])).toEqual([]);
+  });
+
+  it('un chapitre ou un lot supprimé emporte ses sources, pas les suiveurs qui en font partie', () => {
+    expect(resume(['chap-0-0'])).toEqual([['a', ['d']], ['b1', ['e']]]);
+    expect(resume(['lot-0'])).toEqual([['b1', ['e']]]);
+  });
+
+  it('supprimer un suiveur seul ne prévient de rien', () => {
+    expect(resume(['ligne-0-1-0'])).toEqual([]);
+  });
+
+  it('sans lien dans le document, ou avec une clé inconnue, rien n\'est signalé', () => {
+    expect(liensRompus(makeLots(), ['ligne-0-0-0'])).toEqual([]);
+    expect(liensRompus(avecLiens(), ['ligne-9-9-9', 'n'])).toEqual([]);
   });
 });
