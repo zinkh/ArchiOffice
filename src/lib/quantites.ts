@@ -5,7 +5,7 @@
 // (`{ ok: false }`) au lieu de valoir 0, qui est une quantité (ou un prix) comme une autre.
 import { parsePrixSaisi } from '../components/pro/treeOps';
 import { formatQuantite } from './quantiteFormat';
-import type { Ligne, QuantiteDetail } from '../types/dpgf';
+import type { Batiment, Ligne, QuantiteDetail } from '../types/dpgf';
 
 export type Calcul = { ok: true; valeur: number } | { ok: false };
 
@@ -105,12 +105,33 @@ export function libelleDetail(d: QuantiteDetail): string {
 
 export type ErreurMetre =
   | { type: 'ligne_invalide'; index: number }
+  | { type: 'batiment_manquant'; index: number }
+  | { type: 'batiment_negatif'; batimentId: string }
   | { type: 'total_negatif' }
   | { type: 'trop_de_lignes' }
   | { type: 'hors_limites' };
 
-/** Un métré est valable si chaque ligne se calcule et que le total est compris entre 0 et la borne. */
-export function validerMetre(lignes: readonly QuantiteDetail[]): { ok: true; total: number } | { ok: false; erreur: ErreurMetre } {
+/** Options d'un métré. `parBatiment` : l'article ventile sa quantité par bâtiment, chaque ligne a donc le sien. */
+export interface OptionsMetre { parBatiment?: boolean }
+
+/** La somme des lignes de chaque bâtiment. Une ligne sans bâtiment n'entre dans aucun total. */
+export function totauxParBatiment(lignes: readonly QuantiteDetail[]): Record<string, number> {
+  const totaux: Record<string, number> = {};
+  for (const d of lignes) {
+    if (!d.batimentId) continue;
+    totaux[d.batimentId] = propre((totaux[d.batimentId] ?? 0) + valeurDetail(d));
+  }
+  return totaux;
+}
+
+/**
+ * Un métré est valable si chaque ligne se calcule et que le total est compris entre 0 et la borne.
+ * Pour un article par bâtiment : chaque ligne a un bâtiment et le total de CHAQUE bâtiment reste positif
+ * ou nul (une déduction ne peut pas creuser un bâtiment en négatif en s'équilibrant avec un autre).
+ */
+export function validerMetre(
+  lignes: readonly QuantiteDetail[], options: OptionsMetre = {},
+): { ok: true; total: number } | { ok: false; erreur: ErreurMetre } {
   if (lignes.length > MAX_LIGNES_METRE) return { ok: false, erreur: { type: 'trop_de_lignes' } };
   let total = 0;
   for (let index = 0; index < lignes.length; index += 1) {
@@ -125,12 +146,30 @@ export function validerMetre(lignes: readonly QuantiteDetail[]): { ok: true; tot
       valeur = d.quantite;
     }
     if (Math.abs(valeur) > VALEUR_MAX) return { ok: false, erreur: { type: 'hors_limites' } };
+    if (options.parBatiment && !d.batimentId) return { ok: false, erreur: { type: 'batiment_manquant', index } };
     total += valeur;
   }
   total = propre(total);
   if (total > VALEUR_MAX) return { ok: false, erreur: { type: 'hors_limites' } };
+  if (options.parBatiment) {
+    for (const [batimentId, somme] of Object.entries(totauxParBatiment(lignes))) {
+      if (somme < 0) return { ok: false, erreur: { type: 'batiment_negatif', batimentId } };
+    }
+  }
   if (total < 0) return { ok: false, erreur: { type: 'total_negatif' } };
   return { ok: true, total };
+}
+
+/**
+ * Les bâtiments que le métré d'un article propose : seulement un article réparti par bâtiment
+ * (`quantitesBatiments`) d'une opération à plusieurs bâtiments, dans l'ordre du projet. Sinon `undefined` :
+ * le métré reste celui d'un article sans bâtiment, comme avant.
+ */
+export function batimentsDuMetre(
+  doc: { multiBatiments?: boolean; batiments?: Batiment[] }, ligne: Ligne,
+): Batiment[] | undefined {
+  if (!doc.multiBatiments || ligne.quantitesBatiments === undefined || !doc.batiments?.length) return undefined;
+  return [...doc.batiments].sort((a, b) => a.ordre - b.ordre);
 }
 
 /** Une ligne sans libellé, sans note et sans valeur : elle n'est jamais enregistrée. */
@@ -145,10 +184,12 @@ export const estLigneVide = (d: QuantiteDetail): boolean =>
  * reste ce qu'elle était. `null` si le métré n'est pas valable : rien ne doit être appliqué.
  * Les champs d'une ventilation d'avant (bâtiment, phase, niveau, local, note) ne sont jamais effacés.
  */
-export function appliquerMetre(ligne: Ligne, lignes: readonly QuantiteDetail[]): Partial<Ligne> | null {
+export function appliquerMetre(
+  ligne: Ligne, lignes: readonly QuantiteDetail[], options: OptionsMetre = {},
+): Partial<Ligne> | null {
   const gardees = lignes.filter(d => !estLigneVide(d));
   if (!gardees.length) return { quantiteDetails: undefined, quantiteFormule: undefined };
-  const validation = validerMetre(gardees);
+  const validation = validerMetre(gardees, options);
   if (!validation.ok) return null;
   const details = gardees.map(d => {
     const copie: QuantiteDetail = { ...d, quantite: valeurDetail(d) };
@@ -156,12 +197,21 @@ export function appliquerMetre(ligne: Ligne, lignes: readonly QuantiteDetail[]):
     if (copie.libelle !== undefined) copie.libelle = copie.libelle.trim();
     return copie;
   });
-  return {
+  const patch: Partial<Ligne> = {
     quantiteDetails: details,
     quantite: validation.total,
     prixTotal: ligne.pourMemoire ? 0 : propre(validation.total * ligne.prixUnitaire),
     quantiteFormule: undefined,
   };
+  if (options.parBatiment) {
+    // La quantité de chaque bâtiment est la somme de ses lignes. Un bâtiment déjà affecté à l'article mais
+    // sans ligne reste à 0 (il n'est pas retiré) ; un bâtiment qui apparaît dans une ligne est ajouté.
+    const quantites: Record<string, number> = {};
+    for (const id of Object.keys(ligne.quantitesBatiments ?? {})) quantites[id] = 0;
+    Object.assign(quantites, totauxParBatiment(details));
+    patch.quantitesBatiments = quantites;
+  }
+  return patch;
 }
 
 /**

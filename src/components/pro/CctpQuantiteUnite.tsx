@@ -111,15 +111,13 @@ export function CctpQuantiteUnite({
             />
           )}
           {aMetre && <span className="text-[0.6875rem]" style={{ color: 'var(--tblr-muted)' }}>{t('pro_metre_sum_of', { count: lignesMetre })}</span>}
-          {!parBatiment && (
-            <button
-              type="button" onClick={onDetailler}
-              className="self-start px-2.5 py-1 text-xs font-bold rounded-md border pointer-coarse:h-11"
-              style={{ borderColor: 'var(--tblr-text)' }}
-            >
-              {t('pro_metre_detail')}
-            </button>
-          )}
+          <button
+            type="button" onClick={onDetailler}
+            className="self-start px-2.5 py-1 text-xs font-bold rounded-md border pointer-coarse:h-11"
+            style={{ borderColor: 'var(--tblr-text)' }}
+          >
+            {t('pro_metre_detail')}
+          </button>
         </div>
 
         <div className="flex flex-col gap-1">

@@ -117,10 +117,10 @@ describe('CctpQuantiteUnite', () => {
     expect(props.onDetailler).toHaveBeenCalled();
   });
 
-  it('une quantité par bâtiment n\'a ni case ni bouton de métré', async () => {
+  it('une quantité par bâtiment n\'a pas de case mais garde le bouton de métré', async () => {
     await monter({ parBatiment: true });
     expect(champ('cctp-quantite').tagName).toBe('SPAN');
-    expect([...container.querySelectorAll('button')].some(b => b.textContent === 'pro_metre_detail')).toBe(false);
+    expect([...container.querySelectorAll('button')].some(b => b.textContent === 'pro_metre_detail')).toBe(true);
   });
 
   it('un article à sous-articles n\'a pas de quantité propre', async () => {

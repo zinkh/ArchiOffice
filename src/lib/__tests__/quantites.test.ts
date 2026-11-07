@@ -2,8 +2,8 @@
 // la formule saisie est mémorisée, un métré est une liste de lignes dont la somme est la quantité.
 import { describe, expect, it } from 'vitest';
 import {
-  appliquerMetre, calculerSaisie, formuleCourante, libelleDetail, MAX_LIGNES_METRE, metreEnTexte, prixPatch, quantitePatch,
-  serialiserMetre, totalMetre, validerMetre,
+  appliquerMetre, batimentsDuMetre, calculerSaisie, formuleCourante, libelleDetail, MAX_LIGNES_METRE, metreEnTexte, prixPatch,
+  quantitePatch, serialiserMetre, totalMetre, totauxParBatiment, validerMetre,
 } from '../quantites';
 import type { Ligne, QuantiteDetail } from '../../types/dpgf';
 
@@ -177,6 +177,71 @@ describe('formuleCourante', () => {
     expect(formuleCourante(ligne({ quantite: 31, quantiteFormule: '=10+20' }))).toBeUndefined();
     expect(formuleCourante(ligne({ quantite: 30 }))).toBeUndefined();
     expect(formuleCourante(ligne({ quantite: 30, quantiteFormule: '=4*' }))).toBeUndefined();
+  });
+});
+
+describe('métré par bâtiment', () => {
+  const parBatiment = (surcharge: Partial<Ligne> = {}) => ligne({ quantitesBatiments: { DX: 0, DY: 0 }, quantite: 0, prixTotal: 0, ...surcharge } as Partial<Ligne>);
+  const lignesBat = [
+    detail('1', { libelle: 'Façade Est', expression: '10', quantite: 10, batimentId: 'DX' }),
+    detail('2', { libelle: 'Façade Ouest', expression: '=4*5', quantite: 20, batimentId: 'DY' }),
+    detail('3', { libelle: 'Déduction baie', expression: '-2,4', quantite: -2.4, batimentId: 'DX' }),
+  ];
+
+  it('totalise chaque bâtiment : les lignes sans bâtiment n\'y comptent pas', () => {
+    expect(totauxParBatiment(lignesBat)).toEqual({ DX: 7.6, DY: 20 });
+    expect(totauxParBatiment([detail('1', { expression: '5', quantite: 5 })])).toEqual({});
+  });
+
+  it('la quantité de chaque bâtiment est la somme de ses lignes, celle de l\'article la somme des bâtiments', () => {
+    const patch = appliquerMetre(parBatiment(), lignesBat, { parBatiment: true })!;
+    expect(patch.quantitesBatiments).toEqual({ DX: 7.6, DY: 20 });
+    expect(patch.quantite).toBe(27.6);
+    expect(patch.prixTotal).toBeCloseTo(1338.6, 6);
+    expect(patch.quantiteDetails![0]).toMatchObject({ libelle: 'Façade Est', batimentId: 'DX', expression: '10' });
+  });
+
+  it('un bâtiment affecté à l\'article mais sans ligne reste à 0, et un bâtiment nouveau s\'ajoute', () => {
+    const avant = parBatiment({ quantitesBatiments: { DX: 4, DY: 0, DZ: 6 }, quantite: 10 } as Partial<Ligne>);
+    const patch = appliquerMetre(avant, [detail('1', { expression: '5', quantite: 5, batimentId: 'DX' }), detail('2', { expression: '3', quantite: 3, batimentId: 'DW' })], { parBatiment: true })!;
+    expect(patch.quantitesBatiments).toEqual({ DX: 5, DY: 0, DZ: 0, DW: 3 });
+    expect(patch.quantite).toBe(8);
+  });
+
+  it('une ligne sans bâtiment est refusée et désignée', () => {
+    const sans = [lignesBat[0], detail('2', { libelle: 'Pignon', expression: '8', quantite: 8 })];
+    expect(validerMetre(sans, { parBatiment: true })).toEqual({ ok: false, erreur: { type: 'batiment_manquant', index: 1 } });
+    expect(appliquerMetre(parBatiment(), sans, { parBatiment: true })).toBeNull();
+  });
+
+  it('le total d\'un bâtiment doit rester positif ou nul, même si le total général l\'est', () => {
+    const deduction = [
+      detail('1', { expression: '-5', quantite: -5, batimentId: 'DX' }),
+      detail('2', { expression: '20', quantite: 20, batimentId: 'DY' }),
+    ];
+    expect(validerMetre(deduction, { parBatiment: true })).toEqual({ ok: false, erreur: { type: 'batiment_negatif', batimentId: 'DX' } });
+    expect(appliquerMetre(parBatiment(), deduction, { parBatiment: true })).toBeNull();
+  });
+
+  it('sans l\'option, rien ne change : le bâtiment d\'une ligne n\'est pas exigé et la répartition reste intacte', () => {
+    const patch = appliquerMetre(ligne(), lignesBat)!;
+    expect(patch).not.toHaveProperty('quantitesBatiments');
+    expect(validerMetre([detail('1', { expression: '5', quantite: 5 })])).toEqual({ ok: true, total: 5 });
+  });
+
+  it('sans aucune ligne, le métré est retiré et les quantités par bâtiment restent', () => {
+    const patch = appliquerMetre(parBatiment({ quantitesBatiments: { DX: 4, DY: 6 }, quantite: 10 } as Partial<Ligne>), [detail('1')], { parBatiment: true })!;
+    expect(patch.quantiteDetails).toBeUndefined();
+    expect(patch).not.toHaveProperty('quantitesBatiments');
+    expect(patch).not.toHaveProperty('quantite');
+  });
+
+  it('les bâtiments du métré : seulement pour un article réparti par bâtiment d\'une opération à plusieurs bâtiments', () => {
+    const doc = { multiBatiments: true, batiments: [{ id: 'DY', code: 'DY', libelle: 'Bât. Y', ordre: 2 }, { id: 'DX', code: 'DX', libelle: 'Bât. X', ordre: 1 }] };
+    expect(batimentsDuMetre(doc, parBatiment())!.map(b => b.id)).toEqual(['DX', 'DY']); // dans l'ordre du projet
+    expect(batimentsDuMetre(doc, ligne())).toBeUndefined(); // un seul bâtiment, régime d'avant
+    expect(batimentsDuMetre({ ...doc, multiBatiments: false }, parBatiment())).toBeUndefined();
+    expect(batimentsDuMetre({ multiBatiments: true }, parBatiment())).toBeUndefined(); // aucun bâtiment défini
   });
 });
 
