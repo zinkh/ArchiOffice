@@ -37,9 +37,10 @@ function createPersistentWindowsDrive(options) {
     }
   }
   async function atomicJson(file,data) {
+    const json=JSON.stringify(data);if(Buffer.byteLength(json)>MAX_CATALOG_BYTES)throw new Error('Snapshot exceeds memory budget');
     const temporary=file+'.tmp';
     await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});
-    await fs.writeFile(temporary,JSON.stringify(data),{mode:0o600});
+    await fs.writeFile(temporary,json,{mode:0o600});
     await fs.rename(temporary,file);
   }
   async function read() {

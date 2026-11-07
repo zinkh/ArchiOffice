@@ -45,7 +45,8 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   try{return JSON.parse(await fs.readFile(file,'utf8'));}catch{throw fail('DRIVE_SNAPSHOT_INVALID');}
  }
  async function write(file,value) {
-  await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});await fs.writeFile(file+'.tmp',JSON.stringify(value),{mode:0o600});await fs.rename(file+'.tmp',file);
+  const json=JSON.stringify(value);if(Buffer.byteLength(json)>MAX_CATALOG_BYTES)throw fail('DRIVE_SNAPSHOT_INVALID');
+  await fs.mkdir(path.dirname(file),{recursive:true,mode:0o700});await fs.writeFile(file+'.tmp',json,{mode:0o600});await fs.rename(file+'.tmp',file);
  }
  async function authorize(expected,generation=revision) {
   const active=await vault();if(generation!==revision||!same(active,expected))throw fail('DRIVE_UNAVAILABLE');return {userId:active.userId,tenantId:active.tenantId,deviceId:active.deviceId};
