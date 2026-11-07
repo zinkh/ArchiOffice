@@ -110,7 +110,7 @@ vue, sans nouvelle racine CFAPI ni second moteur de synchronisation.
 
 ## Séparation des responsabilités
 
-Le composant COM ne fait aucun appel HTTP. Des tâches natives en arrière-plan dialoguent avec un pipe local aléatoire et authentifié par un secret éphémère ; les E/S sont bornées à vingt secondes pour les aperçus, douze secondes pour les versions et cinq secondes pour les autres demandes. Les jetons cloud restent dans le client. Les messages Explorer contiennent exclusivement des identifiants et des métadonnées d’affichage.
+Le composant COM ne fait aucun appel HTTP. Des tâches natives en arrière-plan dialoguent avec un pipe local aléatoire et authentifié par un secret éphémère ; les E/S sont bornées à vingt secondes pour les aperçus, douze secondes pour les versions, cinq secondes pour le catalogue et les ouvertures, et cinq minutes au plus pour les commandes documentaires. Les jetons cloud restent dans le client. Les messages Explorer contiennent exclusivement des identifiants et des métadonnées d’affichage.
 
 Le broker vérifie l’identité utilisateur/cabinet/poste, l’activation du montage et la génération du catalogue. Il refuse les chemins fournis par le demandeur, les liens symboliques, les types dangereux et les ouvertures après déconnexion de la requête. Les actions recontrôlent l’identité juste avant leur effet ; le prochain rafraîchissement vide une vue dont l’accès est refusé. Les autorisations hors ligne existantes gardent leur durée de validité.
 

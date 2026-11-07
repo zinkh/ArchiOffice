@@ -68,7 +68,8 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
    if(action==='restart'){await drive.resolveConflict(saved.projectId,entry.key,saved.rootKey);return {status:'completed',message:'Version distante reprise. La copie locale est conservée dans les versions précédentes.'};}
    if(action==='recovery'){await drive.openPrevious(saved.projectId);return {status:'completed',message:'Copies précédentes ouvertes.'};}
    const name={actions:'shellActions',classify:'shellClassify',preserve:'shellPreserve',retry:'shellRetry'}[action];
-   const result=await agent.windowsPreview(name,{...adapter,...(action==='classify'?{phase:input.phase,docType:input.docType,baseVersion:input.baseVersion}:{})});
+   const payload={...adapter,...(action==='classify'?{phase:input.phase,docType:input.docType,baseVersion:input.baseVersion}:{})};
+   const result=action==='actions'?await agent.windowsPreview(name,payload,signal):await agent.windowsPreview(name,payload);
    await latest();alive();if(!same(result?.identity,snap.identity))throw new Error('Identity changed');
    if(action==='actions') {
     const doc=result.document;if(!doc||doc.nodeId!==entry.meta.nodeId||doc.projectId!==saved.projectId||doc.permissions?.read!==true||!Number.isSafeInteger(doc.remoteVersion))throw new Error('Invalid actions');

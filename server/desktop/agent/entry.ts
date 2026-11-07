@@ -55,7 +55,7 @@ process.on('message',async (msg:any)=> {
   }
   if(msg?.type==='drive:cancel-windows-preview'&&typeof msg.requestId==='string'){windowRequests.get(msg.requestId)?.abort();return;}
   if(msg?.type==='drive:windows-preview' && worker && ['catalog','hydrate','upload','shellMetadata','shellVersions','shell-metadata','shellActions','shellClassify','conflictProof','conflictReconcile','shellPreserve','shellRetry'].includes(msg.action) && /^[a-z0-9-]{1,100}$/.test(msg.requestId)) {
-    const cancellation=msg.action==='shellVersions'?new AbortController():undefined;if(cancellation)windowRequests.set(msg.requestId,cancellation);
+    const cancellation=['shellVersions','shellActions'].includes(msg.action)?new AbortController():undefined;if(cancellation)windowRequests.set(msg.requestId,cancellation);
     try {const result=msg.action==='shell-metadata'?await worker.shellMetadata(msg.input?.projectId):msg.action==='upload'?await worker.uploadWindowsEdit(msg.input):await worker.windowsPreview(msg.action,msg.input,cancellation?.signal);send({type:'drive:working-result',requestId:msg.requestId,result});if(['upload','shellPreserve','shellRetry'].includes(msg.action))void worker.tick();}
     catch(e:any) {send({type:'drive:working-result',requestId:msg.requestId,error:{
       code:['shellMetadata','shellVersions'].includes(msg.action)&&e.code==='WINDOWS_SHELL_METADATA_REFUSED'?'WINDOWS_SHELL_METADATA_REFUSED':'WINDOWS_PREVIEW_REFUSED',
