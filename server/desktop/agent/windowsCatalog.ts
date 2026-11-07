@@ -13,7 +13,7 @@ export function catalogReader(origin:string,tenantId:string,authorize:()=>Promis
   const url=new URL(origin);if(url.protocol!=='https:'||url.origin!==origin)throw fail();
   return async(route:string,signal?:AbortSignal)=> {
     signal?.throwIfAborted();const token=await authorize();
-    const response=await pinnedRequest(origin+'/api/desktop/v1'+route,{method:'GET',redirect:'manual',timeoutMs:30000,headers:{Authorization:`Bearer ${token}`,'X-Tenant-Id':tenantId}});
+    const response=await pinnedRequest(origin+'/api/desktop/v1'+route,{method:'GET',redirect:'manual',timeoutMs:30000,signal,headers:{Authorization:`Bearer ${token}`,'X-Tenant-Id':tenantId}});
     const abort=()=>response.stream.destroy(new Error('Catalog cancelled'));signal?.addEventListener('abort',abort,{once:true});
     try {
       signal?.throwIfAborted();if(response.status!==200)throw Object.assign(fail(),{status:response.status});let bytes=0;let text='';const decoder=new TextDecoder();

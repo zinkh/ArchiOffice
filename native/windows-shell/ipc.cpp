@@ -1,5 +1,6 @@
 #include "shell.hpp"
 #include <chrono>
+#include <algorithm>
 #include <stdexcept>
 #include <wincrypt.h>
 using namespace winrt::Windows::Data::Json;

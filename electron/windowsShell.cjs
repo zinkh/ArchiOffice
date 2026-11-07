@@ -63,11 +63,11 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
   if(action==='versions') {
    const cacheKey=hash([snap.identity,saved.projectId,entry.key,input.revision]);let result,stale=false;
    try {
-    result=await agent.windowsPreview('shellVersions',{identity:snap.identity,projectId:saved.projectId,nodeId:entry.meta.nodeId});
+    result=await agent.windowsPreview('shellVersions',{identity:snap.identity,projectId:saved.projectId,nodeId:entry.meta.nodeId},signal);
     if(!same(result?.identity,snap.identity)||!Array.isArray(result.versions)||result.versions.length>50||!Number.isSafeInteger(result.total)||result.total<result.versions.length)throw Object.assign(new Error('Versions refused'),{code:'WINDOWS_SHELL_METADATA_REFUSED'});
     const seen=new Set();for(const v of result.versions){if(!Number.isSafeInteger(v.version)||v.version<1||seen.has(v.version)||!(v.size===null||Number.isSafeInteger(v.size)&&v.size>=0)||!(v.uploadedAt===null||typeof v.uploadedAt==='string'&&v.uploadedAt.length<=80)||!(v.description===null||typeof v.description==='string'&&v.description.length<=512))throw Object.assign(new Error('Versions refused'),{code:'WINDOWS_SHELL_METADATA_REFUSED'});seen.add(v.version);}
     result={versions:result.versions.map(v=>({version:v.version,size:v.size,uploadedAt:v.uploadedAt,description:v.description})),total:result.total,observedAt:now()};
-    await latest();alive();histories.set(cacheKey,result);
+    await latest();alive();histories.delete(cacheKey);histories.set(cacheKey,result);while(histories.size>100)histories.delete(histories.keys().next().value);
    }catch(error){if([401,402,403,404].includes(error.status)||error.code==='WINDOWS_SHELL_METADATA_REFUSED'){histories.delete(cacheKey);throw error;}result=histories.get(cacheKey);if(!result)throw error;stale=true;}
    await latest();alive();return {status:'versions',...result,stale};
   }

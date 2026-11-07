@@ -157,24 +157,26 @@ export function createAgentWorker(config: WorkerConfig) {
         const read=catalogReader(config.origin,expected.tenantId,authorize);const result=await windowsShellMetadata(projectId,route=>read(route,abort.signal));await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
       })();downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
-    windowsPreview(action: 'catalog' | 'hydrate' | 'shellMetadata' | 'shellVersions', input: any) {
+    windowsPreview(action: 'catalog' | 'hydrate' | 'shellMetadata' | 'shellVersions', input: any, requestSignal?:AbortSignal) {
+      const local=new AbortController(),signal=local.signal;const cancel=()=>local.abort();
+      abort.signal.addEventListener('abort',cancel,{once:true});requestSignal?.addEventListener('abort',cancel,{once:true});if(abort.signal.aborted||requestSignal?.aborted)cancel();
       const task=(async()=> {
         if(stopped)throw new Error('Agent stopped');const ctx=await current();const expected={...ctx.session};
         const authorize=async()=> {
-          abort.signal.throwIfAborted();const active=await config.session();
+          signal.throwIfAborted();const active=await config.session();
           if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)throw new Error('Identity changed');return active.token;
         };
         const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);
         if(action==='shellVersions') {
           if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
           const read=catalogReader(config.origin,expected.tenantId,authorize);
-          const result=await readShellVersions(input.projectId,input.nodeId,route=>read(route,abort.signal)).catch((error:any)=>{if(error.code==='WINDOWS_CATALOG_REFUSED'&&error.status===undefined)error.code='WINDOWS_SHELL_METADATA_REFUSED';throw error;});
+          const result=await readShellVersions(input.projectId,input.nodeId,route=>read(route,signal)).catch((error:any)=>{if(error.code==='WINDOWS_CATALOG_REFUSED'&&error.status===undefined)error.code='WINDOWS_SHELL_METADATA_REFUSED';throw error;});
           await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
         }
         if(action==='shellMetadata') {
           if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
           const read=catalogReader(config.origin,expected.tenantId,authorize);
-          const result=await readShellMetadata(input.projectId,input.nodeIds,route=>read(route,abort.signal)).catch((error:any)=>{
+          const result=await readShellMetadata(input.projectId,input.nodeIds,route=>read(route,signal)).catch((error:any)=>{
             if(error.code==='WINDOWS_CATALOG_REFUSED'&&error.status===undefined)error.code='WINDOWS_SHELL_METADATA_REFUSED';
             throw error;
           });
@@ -182,16 +184,16 @@ export function createAgentWorker(config: WorkerConfig) {
         }
         if(action==='catalog') {
           const read=catalogReader(config.origin,expected.tenantId,authorize);
-          const entries=await buildWindowsCatalog(input.projectId,route=>read(route,abort.signal),id=>transport.metadata(id,abort.signal));
+          const entries=await buildWindowsCatalog(input.projectId,route=>read(route,signal),id=>transport.metadata(id,signal));
           await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},entries};
         }
         if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
         const meta:DownloadMetadata=input.meta;
         if(!meta||meta.size>50*1024*1024)throw new Error('Invalid preview file');
-        let cached=await ctx.cache.lookup(meta);if(!cached){await ctx.cache.hydrate(meta,transport,abort.signal);cached=await ctx.cache.lookup(meta);}
+        let cached=await ctx.cache.lookup(meta);if(!cached){await ctx.cache.hydrate(meta,transport,signal);cached=await ctx.cache.lookup(meta);}
         if(!cached)throw new Error('Cache unavailable');await authorize();return {file:cached.file};
       })();
-      downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
+      downloads.add(task);void task.finally(()=>{downloads.delete(task);abort.signal.removeEventListener('abort',cancel);requestSignal?.removeEventListener('abort',cancel);}).catch(()=>{});return task;
     },
     async documentStatuses(nodeIds: string[]) {
       if(stopped)throw new Error('Agent stopped');

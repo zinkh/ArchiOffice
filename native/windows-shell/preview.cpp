@@ -1,5 +1,7 @@
 // Isolated renderer: opens an immutable private input, emits bounded BGRA pixels.
 #include <windows.h>
+#include <objidl.h>
+#include <propidl.h>
 #include <gdiplus.h>
 #include <shcore.h>
 #include <winrt/Windows.Data.Pdf.h>
