@@ -1,5 +1,6 @@
 'use strict';
 const net=require('net');const crypto=require('crypto');const fs=require('fs/promises');const path=require('path');
+const {validateBusiness}=require('./windowsShellCatalog.cjs');
 const {noLinks}=require('./windowsDrive.cjs');const {isSafeToOpen}=require('./fileAccess.cjs');
 const hash=v=>crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const same=(a,b)=>a&&b&&['userId','tenantId','deviceId'].every(k=>a[k]===b[k]);
@@ -7,25 +8,49 @@ const text=(v,max=240)=>typeof v==='string'?v.slice(0,max):'';
 const cleanName=v=>path.win32.basename(v).replace(/^_/,'').replace(/-[a-f0-9]{12}(?=\.|$)/,'');
 /** Local projection only. Every command resolves its opaque key again against
  * the currently mounted manifest, never a path or document URL from Explorer. */
-function createShellProjection({drive,agent,vault,root,shell,openDocument,now=Date.now}) {
+function createShellProjection({drive,agent,vault,root,shell,openDocument,businessCatalog,now=Date.now}) {
  let owner=null;let loading=0;const metadata=new Map();
  async function snapshot(){const value=await drive.shellSnapshot();const active=await vault();if(!same(value.identity,active)||!Array.isArray(value.projects)||value.projects.length>10)throw new Error('Access refused');const id=hash(value.identity);if(owner!==id){owner=id;metadata.clear();}return value;}
  function enrich(saved,identity){
   const key=hash([identity,saved.projectId,saved.rootKey]);let cached=metadata.get(key);
   if(!cached){cached={at:-Infinity,data:null,pending:false};metadata.set(key,cached);}
   if(!cached.pending&&loading<2&&now()-cached.at>60000){const entry=cached;entry.pending=true;loading++;
-   void Promise.resolve().then(()=>agent.windowsPreview('shell-metadata',{projectId:saved.projectId})).then(value=>{if(owner===hash(identity)&&same(value?.identity,identity)&&Array.isArray(value.files)&&value.files.length<=100)entry.data=value;}).catch(()=>{}).finally(()=>{entry.pending=false;entry.at=now();loading--;});
+   const nodeIds=saved.catalog.filter(e=>!e.folder).map(e=>e.meta.nodeId);
+   void Promise.resolve().then(()=>agent.windowsPreview('shellMetadata',{identity,projectId:saved.projectId,nodeIds})).then(value=>{
+    if(owner===hash(identity))entry.data=validateBusiness(value,identity,saved.projectId,nodeIds);
+   }).catch(error=>{if([401,402,403,404].includes(error.status)||error.code==='WINDOWS_SHELL_METADATA_REFUSED')entry.data=null;}).finally(()=>{entry.pending=false;entry.at=now();loading--;});
   }return cached.data;
  }
  async function catalog(){
   const snap=await snapshot();const activeKeys=new Set(snap.projects.map(p=>hash([snap.identity,p.projectId,p.rootKey])));for(const key of metadata.keys())if(!activeKeys.has(key))metadata.delete(key);const projects=[];
-  for(const saved of snap.projects){const extra=enrich(saved,snap.identity);const revision=hash([saved.rootKey,saved.directory]);const files=saved.catalog.filter(e=>!e.folder);if(files.length>100)throw new Error('Invalid catalog');
+  for(const saved of snap.projects){
+   const files=saved.catalog.filter(e=>!e.folder);if(files.length>100)throw new Error('Invalid catalog');
+   let extra=null;
+   if(businessCatalog){const value=await businessCatalog(snap.identity,saved);if(value)extra=validateBusiness(value,snap.identity,saved.projectId,files.map(e=>e.meta.nodeId));}
+   else extra=enrich(saved,snap.identity);
+   const revision=hash([saved.rootKey,saved.directory]);const available=new Map(),transfers=new Map();
+   try {
+    const response=await drive.shellAvailability(saved.projectId);
+    if(!same(response.identity,snap.identity)||response.rootKey!==saved.rootKey||!Array.isArray(response.files)||response.files.length!==files.length)throw new Error('Availability refused');
+    const keys=new Set(files.map(e=>e.key));
+    for(const item of response.files){if(!keys.delete(item.key)||!(item.available===null||typeof item.available==='boolean'))throw new Error('Availability refused');available.set(item.key,item.available);}
+   }catch{available.clear();}
+   try {
+    const response=await agent.documentStatuses(files.map(e=>e.meta.nodeId));
+    if(!same(response.identity,snap.identity)||!Array.isArray(response.documents)||response.documents.length!==files.length)throw new Error('Transfers refused');
+    const ids=new Set(files.map(e=>e.meta.nodeId));
+    for(const item of response.documents){if(!ids.delete(item.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(item.state))throw new Error('Transfers refused');transfers.set(item.nodeId,item.state);}
+   }catch{transfers.clear();}
    const rows=files.map(e=>{const m=e.meta;if(!m||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!/^[a-f0-9]{64}$/.test(e.key)||!Number.isSafeInteger(m.version))throw new Error('Invalid catalog');
-    const detail=extra?.files.find(d=>d.nodeId===m.nodeId&&d.version===m.version);const parent=e.path.split('\\').slice(0,-1).at(-1);
-    return {key:e.key,name:text(m.name,512),phase:text(detail?.phase|| (e.path.split('\\').length>2?cleanName(parent):''),120),type:path.win32.extname(m.name).slice(1,15).toUpperCase(),indice:text(detail?.indice,24),version:m.version,status:text(detail?.status,40)};});
-   projects.push({id:saved.projectId,name:text(extra?.projectName||cleanName(saved.catalog[0]?.path||'Projet')),revision,rows});
+    const detail=extra?.documents.find(d=>d.nodeId===m.nodeId&&d.remoteVersion===m.version);const parent=e.path.split('\\').slice(0,-1).at(-1);
+    return {key:e.key,name:text(m.name,512),phase:text(detail?.phase|| (e.path.split('\\').length>2?cleanName(parent):''),120),
+     type:text(detail?.documentType,200),fileType:path.win32.extname(m.name).slice(1,15).toUpperCase(),indice:text(detail?.indice,200),version:m.version,status:text(detail?.status,200),
+     businessKnown:!!detail,unclassified:!!detail&&(!detail.phase||!detail.documentType),available:available.get(e.key)??null,transferState:transfers.get(m.nodeId)??''};});
+   projects.push({id:saved.projectId,name:text(extra?.name||cleanName(saved.catalog[0]?.path||'Projet')),revision,rows});
   }
-  if(!same(await vault(),snap.identity))throw new Error('Access refused');return {status:'ok',projects};
+  const fresh=await snapshot();
+  if(!same(fresh.identity,snap.identity)||JSON.stringify(fresh.projects.map(p=>[p.projectId,p.rootKey]))!==JSON.stringify(snap.projects.map(p=>[p.projectId,p.rootKey])))throw new Error('Catalogue changed');
+  return {status:'ok',scope:hash(snap.identity),projects};
  }
  async function command(action,input,signal){
   const alive=()=>signal?.throwIfAborted();alive();

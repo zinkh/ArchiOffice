@@ -1,4 +1,5 @@
 #include "shell.hpp"
+#include "navigation.hpp"
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -46,6 +47,9 @@ void accessibleName(HWND child,wchar_t const* expected){
 }
 void settled(HWND child){for(int n=0;n<120&&!IsWindowEnabled(GetDlgItem(child,100));n++)pump(50);if(!IsWindowEnabled(GetDlgItem(child,100)))throw std::runtime_error("request did not settle");}
 void smoke(wchar_t const* destination){
+ Project p;p.id=L"p";p.name=L"Projet";Document unknown;
+ if(matches(Filter{ViewKind::Offline},p,unknown)||matches(Filter{ViewKind::Unclassified},p,unknown)||matches(Filter{ViewKind::Conflict},p,unknown))throw std::runtime_error("unknown states were classified");
+
  winrt::com_ptr<IShellFolder> registered;check(CoCreateInstance(ShellClsid,nullptr,CLSCTX_INPROC_SERVER,IID_IShellFolder,registered.put_void()));registered=nullptr;
  auto library=LoadLibraryW(dllPath().c_str());if(!library)throw std::runtime_error("DLL load failed");auto get=reinterpret_cast<HRESULT(__stdcall*)(REFCLSID,REFIID,void**)>(GetProcAddress(library,"DllGetClassObject"));auto unload=reinterpret_cast<HRESULT(__stdcall*)()>(GetProcAddress(library,"DllCanUnloadNow"));if(!get||!unload)throw std::runtime_error("exports");
  winrt::com_ptr<IClassFactory> factory;check(get(ShellClsid,IID_IClassFactory,factory.put_void()));winrt::com_ptr<IShellFolder> folder;check(factory->CreateInstance(nullptr,IID_IShellFolder,folder.put_void()));winrt::com_ptr<IShellView> view;check(folder->CreateViewObject(nullptr,IID_IShellView,view.put_void()));
@@ -53,9 +57,23 @@ void smoke(wchar_t const* destination){
  auto list=GetDlgItem(child,202);auto details=GetDlgItem(child,203);for(int n=0;n<120&&ListView_GetItemCount(list)!=2;n++)pump(50);if(ListView_GetItemCount(list)!=2)throw std::runtime_error("catalog not loaded");ListView_SetItemState(list,0,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);pump(100);wchar_t buffer[8192];GetWindowTextW(details,buffer,8192);if(std::wstring(buffer).find(L"PROPRIÉTÉS")==std::wstring::npos||std::wstring(buffer).find(L"VIP-TC")==std::wstring::npos)throw std::runtime_error("properties missing");
 
  auto tree=GetDlgItem(child,201),refresh=GetDlgItem(child,100),open=GetDlgItem(child,101);
- accessibleName(tree,L"Projets et phases");accessibleName(list,L"Documents du projet");accessibleName(details,L"Propriétés du document, lecture seule");
+ accessibleName(tree,L"Navigation documentaire");accessibleName(list,L"Documents du projet");accessibleName(details,L"Propriétés du document, lecture seule");
  SetFocus(refresh);MSG tab{};tab.hwnd=refresh;tab.message=WM_KEYDOWN;tab.wParam=VK_TAB;view->TranslateAccelerator(&tab);if(GetFocus()!=open)throw std::runtime_error("Tab navigation failed");
  BYTE keys[256],original[256];GetKeyboardState(original);memcpy(keys,original,sizeof(keys));keys[VK_SHIFT]=0x80;SetKeyboardState(keys);tab.hwnd=open;view->TranslateAccelerator(&tab);SetKeyboardState(original);if(GetFocus()!=refresh)throw std::runtime_error("Shift Tab navigation failed");
+ auto search=GetDlgItem(child,210);accessibleName(search,L"Rechercher dans les documents montés");
+ auto rootNav=TreeView_GetRoot(tree),phaseNav=TreeView_GetNextSibling(tree,rootNav),typeNav=TreeView_GetNextSibling(tree,phaseNav),inboxNav=TreeView_GetNextSibling(tree,typeNav),offlineNav=TreeView_GetNextSibling(tree,inboxNav),conflictNav=TreeView_GetNextSibling(tree,offlineNav);
+ if(!conflictNav||TreeView_GetNextSibling(tree,conflictNav))throw std::runtime_error("six navigation views missing");
+ for(auto item:{TreeView_GetChild(tree,typeNav),inboxNav,offlineNav,conflictNav}){TreeView_SelectItem(tree,item);pump(30);if(ListView_GetItemCount(list)!=1)throw std::runtime_error("business navigation filter");}
+ TreeView_SelectItem(tree,TreeView_GetChild(tree,typeNav));SendMessageW(child,WM_COMMAND,101,0);settled(child);
+ TreeView_SelectItem(tree,TreeView_GetChild(tree,phaseNav));SendMessageW(child,WM_COMMAND,101,0);settled(child);
+ SendMessageW(child,WM_COMMAND,215,0);SetWindowTextW(search,L"pixerecourt plan");pump(250);if(ListView_GetItemCount(list)!=1)throw std::runtime_error("accent-insensitive combined search");
+ SetWindowTextW(search,L"introuvable");pump(250);if(ListView_GetItemCount(list)!=0||IsWindowEnabled(open))throw std::runtime_error("empty search still permits open");
+ SendMessageW(child,WM_COMMAND,215,0);
+ auto types=GetDlgItem(child,213),states=GetDlgItem(child,214);SendMessageW(types,CB_SETCURSEL,1,0);SendMessageW(child,WM_COMMAND,MAKEWPARAM(213,CBN_SELCHANGE),reinterpret_cast<LPARAM>(types));
+ if(ListView_GetItemCount(list)!=1)throw std::runtime_error("documentary type filter");
+ // Status choices are sorted: approuve first, en_cours second.
+ SendMessageW(states,CB_SETCURSEL,2,0);SendMessageW(child,WM_COMMAND,MAKEWPARAM(214,CBN_SELCHANGE),reinterpret_cast<LPARAM>(states));if(ListView_GetItemCount(list)!=0)throw std::runtime_error("filters are not combined");
+ SendMessageW(child,WM_COMMAND,215,0);if(ListView_GetItemCount(list)!=2)throw std::runtime_error("filter reset");
  screenshot(child,destination);
  auto root=TreeView_GetRoot(tree),project=TreeView_GetChild(tree,root);TreeView_Expand(tree,project,TVE_COLLAPSE);view->Refresh();settled(child);if(TreeView_GetRoot(tree)!=root||(TreeView_GetItemState(tree,project,TVIS_EXPANDED)&TVIS_EXPANDED))throw std::runtime_error("unchanged catalog reset navigation");
  MoveWindow(child,0,0,780,800,TRUE);pump(50);if(!IsWindowVisible(GetDlgItem(child,103)))throw std::runtime_error("narrow properties action missing");SendMessageW(child,WM_COMMAND,103,0);if(!IsWindowVisible(details)||IsWindowVisible(list))throw std::runtime_error("narrow properties unavailable");

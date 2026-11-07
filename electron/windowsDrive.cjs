@@ -86,6 +86,13 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
           while((newline=text.indexOf('\n'))>=0) {
             const frame=text.slice(0,newline);text=text.slice(newline+1);let msg;try{msg=JSON.parse(frame);}catch{fail();return;}
             if(msg.type==='ready'&&!ready){ready=true;clearTimeout(timeout);resolve();}
+            else if(msg.type==='availability') {
+              const request=state.verifications.get(msg.requestId);
+              if(!request||request.type!=='availability'||!Array.isArray(msg.files)||msg.files.length!==files.size){fail();return;}
+              const seen=new Set();
+              for(const item of msg.files)if(!files.has(item?.key)||seen.has(item.key)||!(item.available===null||typeof item.available==='boolean')){fail();return;}else seen.add(item.key);
+              clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.files);
+            }
             else if(msg.type==='changes') {
               const request=state.verifications.get(msg.requestId);
               if(!request||request.type!=='changes'||!Array.isArray(msg.keys)||msg.keys.length>100||new Set(msg.keys).size!==msg.keys.length||msg.keys.some(key=>!files.has(key))){fail();return;}
@@ -148,6 +155,6 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
     });
     if(mount!==state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');return result;
   }
-  return {start,stop,verify:()=>request('verify'),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
+  return {start,stop,availability:()=>request('availability'),verify:()=>request('verify'),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
 }
 module.exports={createWindowsPreview,noLinks,catalogDetails};
