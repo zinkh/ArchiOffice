@@ -11,7 +11,7 @@ function client(rpc: () => Promise<RpcResult>, versions: Array<{ size_bytes: num
     from: () => ({
       select: () => ({
         eq: () => ({
-          eq: async () => ({ data: versions, error: null }),
+          eq: () => ({order:()=>({range:async(start:number,end:number)=>({data:versions.slice(start,end+1),error:null})})}),
         }),
       }),
     }),
@@ -60,4 +60,9 @@ describe('tenantSupabaseStorageBytes', () => {
     const supabase = client(async () => { throw new Error('fetch failed'); }, versions);
     expect(await tenantSupabaseStorageBytes(supabase, 'tenant-1')).toBe(15 * MB);
   });
+});
+
+it('sums every version over multiple PostgREST pages instead of stopping at 1000',async()=>{
+ const all=Array.from({length:2501},()=>({size_bytes:2}));
+ expect(await tenantSupabaseStorageBytes(client(async()=>({data:null,error:null}),all),'tenant-1')).toBe(5002);
 });

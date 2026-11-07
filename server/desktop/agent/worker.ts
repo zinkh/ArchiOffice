@@ -1,3 +1,5 @@
+import {windowsConflictTarget,conflictFor,proveWindowsConflict,publicTransferError,preserveWindowsConflict} from './shellActions';
+import {MAX_CATALOG_BYTES} from './catalogBudget';
 import { readShellVersions } from './shellVersions';
 import { readShellMetadata } from './shellMetadata';
 import { windowsShellMetadata } from './windowsShellMetadata';
@@ -157,7 +159,7 @@ export function createAgentWorker(config: WorkerConfig) {
         const read=catalogReader(config.origin,expected.tenantId,authorize);const result=await windowsShellMetadata(projectId,route=>read(route,abort.signal));await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
       })();downloads.add(task);void task.finally(()=>downloads.delete(task)).catch(()=>{});return task;
     },
-    windowsPreview(action: 'catalog' | 'hydrate' | 'shellMetadata' | 'shellVersions', input: any, requestSignal?:AbortSignal) {
+    windowsPreview(action: 'catalog' | 'hydrate' | 'shellMetadata' | 'shellVersions' | 'shellActions' | 'shellClassify' | 'conflictProof' | 'conflictReconcile' | 'shellPreserve' | 'shellRetry', input: any, requestSignal?:AbortSignal) {
       const local=new AbortController(),signal=local.signal;const cancel=()=>local.abort();
       abort.signal.addEventListener('abort',cancel,{once:true});requestSignal?.addEventListener('abort',cancel,{once:true});if(abort.signal.aborted||requestSignal?.aborted)cancel();
       const task=(async()=> {
@@ -167,6 +169,31 @@ export function createAgentWorker(config: WorkerConfig) {
           if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)throw new Error('Identity changed');return active.token;
         };
         const transport=createDownloadTransport(config.origin,expected.tenantId,authorize);
+        if(['shellActions','shellClassify','conflictProof','conflictReconcile','shellPreserve','shellRetry'].includes(action)) {
+          if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
+          const read=catalogReader(config.origin,expected.tenantId,authorize);
+          if(action==='conflictReconcile') {
+            const sourceId=crypto.createHash('sha256').update(JSON.stringify(['windows',input.rootKey,input.key])).digest('hex');
+            const {source}=await conflictFor(ctx.queue,input.nodeId,sourceId);if(source.id!==input.conflictId)throw new Error('Conflict changed');
+            await authorize();await ctx.queue.reconcileConflict(source.id,input.version);return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},ok:true};
+          }
+          if(action==='conflictProof'){await authorize();const proof=await proveWindowsConflict(path.join(path.dirname(config.root),'drive-windows-preview'),expected,input,ctx.queue);await authorize();return {...proof,identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId}};}
+          if(action==='shellPreserve'||action==='shellRetry') {
+            const target=await windowsConflictTarget(path.join(path.dirname(config.root),'drive-windows-preview'),expected,input);const jobs=await ctx.queue.list();
+            const source=jobs.find(j=>j.sourceId===target.sourceId&&'documentId' in j.target&&j.target.documentId===target.nodeId&&j.reconciledVersion===undefined&&(action==='shellPreserve'?j.state==='conflict':j.state==='blocked'||j.state==='retry'));
+            if(!source)throw Object.assign(new Error('No matching transfer'),{code:'CONFLICT_REQUIRED'});await authorize();
+            if(action==='shellPreserve')await preserveWindowsConflict(path.join(path.dirname(config.root),'drive-windows-preview'),expected,input,ctx.queue,authorize);else await ctx.queue.retry(source.id);
+            return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},ok:true};
+          }
+          const data=await readShellMetadata(input.projectId,[input.nodeId],route=>read(route,signal));const doc=data.documents[0];
+          if(action==='shellClassify') {
+            if(!doc.permissions.write)throw Object.assign(new Error('Read only'),{status:403});
+            if(!Number.isSafeInteger(input.baseVersion)||input.baseVersion!==doc.remoteVersion||!['phase','docType'].every(k=>input[k]===null||typeof input[k]==='string'&&input[k].length<=60&&!/[\x00-\x1f\x7f]/.test(input[k])))throw Object.assign(new Error('Stale classification'),{status:409});
+            await authorize();await read('/nodes/'+encodeURIComponent(input.nodeId),signal,{phase:input.phase,docType:input.docType,baseVersion:input.baseVersion});await authorize();
+            return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},ok:true};
+          }
+          await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},document:doc};
+        }
         if(action==='shellVersions') {
           if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
           const read=catalogReader(config.origin,expected.tenantId,authorize);
@@ -197,16 +224,17 @@ export function createAgentWorker(config: WorkerConfig) {
     },
     async documentStatuses(nodeIds: string[]) {
       if(stopped)throw new Error('Agent stopped');
-      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)
+      if(!Array.isArray(nodeIds)||Buffer.byteLength(JSON.stringify(nodeIds))>MAX_CATALOG_BYTES||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)
         throw Object.assign(new Error('Invalid documents'),{code:'INVALID_DOCUMENTS'});
       const ctx=await current();const expected={...ctx.session};
       const jobs=await ctx.queue.listPersisted();
+      const byDocument=new Map<string,typeof jobs>();for(const job of jobs){if('documentId' in job.target){const id=job.target.documentId;const list=byDocument.get(id)||[];list.push(job);byDocument.set(id,list);}}
       const documents:DriveDocumentStatus[]=nodeIds.map(nodeId=> {
-        const matching=jobs.filter(j=>'documentId' in j.target&&j.target.documentId===nodeId);
+        const matching=byDocument.get(nodeId)||[];
         const conflict=matching.find(j=>j.state==='conflict'&&j.reconciledVersion===undefined);
         if(conflict) {
-          const copy=jobs.find(j=>j.conflictSourceId===conflict.id);
-          return {nodeId,state:'conflict',...(copy ? {preservation:copy.state==='done'?'done':copy.state==='blocked'||copy.state==='conflict'?'blocked':'pending'} : {})};
+          const copies=jobs.filter(j=>j.conflictSourceId===conflict.id);const copy=copies.find(j=>j.state!=='done')||copies.at(-1);
+          return {nodeId,state:'conflict',...(publicTransferError(conflict)?{errorCode:publicTransferError(conflict)}:{}),...(copy ? {preservation:copy.state==='done'?'done':copy.state==='blocked'||copy.state==='conflict'?'blocked':'pending'} : {})};
         }
         const pending=matching.find(j=>j.state!=='done'&&j.reconciledVersion===undefined);
         const job=conflict||pending||matching.at(-1);
@@ -216,7 +244,7 @@ export function createAgentWorker(config: WorkerConfig) {
           if(job.result?.node.id!==nodeId||!Number.isSafeInteger(job.result.version)||job.result.version<1)throw new Error('Invalid completed upload');
           return {nodeId,state:'uploaded',version:job.result.version};
         }
-        return {nodeId,state:job.state};
+        return {nodeId,state:job.state,...(publicTransferError(job)?{errorCode:publicTransferError(job)}:{})};
       });
       const active=await config.session();abort.signal.throwIfAborted();
       if(active.userId!==expected.userId||active.tenantId!==expected.tenantId||active.deviceId!==expected.deviceId)

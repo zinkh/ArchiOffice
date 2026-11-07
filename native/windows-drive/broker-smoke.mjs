@@ -8,6 +8,7 @@ const temporary=await fs.mkdtemp(path.join(os.tmpdir(),'archioffice-broker-'));
 const executable=path.resolve('native/windows-drive/build/Release/archioffice-drive-cfapi.exe');
 const identity={userId:'test-user',tenantId:'test-tenant',deviceId:'test-device'};
 const bytes=Buffer.from('ArchiOffice CFAPI broker integration: accès vérifié.');
+const bulk=Array.from({length:1001},(_,i)=>({path:'_Project\\_Bulk'+i+'.txt',key:hash(['bulk',i]),folder:false,size:0,meta:{nodeId:'doc:bulk'+i,version:1,size:0,name:'Bulk'+i+'.txt',sha256:null}}));
 const meta={nodeId:'doc:example',version:1,size:bytes.length,name:'Example.txt',sha256:crypto.createHash('sha256').update(bytes).digest('hex')};
 const cacheRoot=path.join(temporary,'cache');const file=path.join(cacheRoot,hash([identity.userId,identity.tenantId]),'downloads',hash([identity.userId,identity.tenantId,meta.nodeId,meta.version])+'.cache');
 await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,bytes);
@@ -17,7 +18,7 @@ const preview=createWindowsPreview({
  agent:{windowsPreview:async(action,input)=> {
    if(action==='catalog')return {identity,entries:[{path:'_Project',key:'b'.repeat(64),folder:true,size:0},
     {path:'_Project\\_Example.txt',key:'a'.repeat(64),folder:false,size:bytes.length,meta},
-    {path:'_Project\\_Denied.txt',key:'c'.repeat(64),folder:false,size:1,meta:{...meta,nodeId:'doc:denied',size:1}}]};
+    {path:'_Project\\_Denied.txt',key:'c'.repeat(64),folder:false,size:1,meta:{...meta,nodeId:'doc:denied',size:1}},...bulk]};
    requests++;assert.deepEqual(input.identity,identity);if(input.meta.nodeId==='doc:denied')throw new Error('Permission denied');return {file};
  }},
  vault:async()=>identity,root:path.join(temporary,'preview'),cacheRoot,executable,
@@ -27,8 +28,8 @@ const preview=createWindowsPreview({
 try {
  assert.deepEqual(await preview.start('project'),{status:'opened'});assert.equal(directory,'A:\\');
  directory=path.join(temporary,'preview',(await fs.readdir(path.join(temporary,'preview')))[0]);
- const before=await preview.availability();assert.equal(before.length,2);assert.ok(before.every(item=>typeof item.available==='boolean'||item.available===null));
- assert.deepEqual(await fs.readFile(path.join('A:\\','_Project','_Example.txt')),bytes);const after=await preview.availability();assert.equal(after.find(item=>item.key==='a'.repeat(64)).available,true);assert.ok(requests>0);
+ const before=await preview.availability();assert.equal(before.length,1003);assert.equal((await fs.readdir(path.join(directory,'_Project'))).length,1003);assert.ok(before.every(item=>typeof item.available==='boolean'||item.available===null));
+ assert.equal(await preview.pin('a'.repeat(64)),true);assert.deepEqual(await fs.readFile(path.join('A:\\','_Project','_Example.txt')),bytes);const after=await preview.availability();assert.equal(after.find(item=>item.key==='a'.repeat(64)).available,true);assert.ok(requests>0);
  await assert.rejects(fs.readFile(path.join('A:\\','_Project','_Denied.txt')));
  preview.stop();assert.equal(await exited,0);
  assert.deepEqual(await fs.readFile(path.join(directory,'_Project','_Example.txt')),bytes);

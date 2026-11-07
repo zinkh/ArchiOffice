@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const net=require('net');const crypto=require('crypto');const fs=require('fs/promises');const path=require('path');
 const {validateBusiness}=require('./windowsShellCatalog.cjs');
 const {noLinks}=require('./windowsDrive.cjs');const {isSafeToOpen}=require('./fileAccess.cjs');
@@ -8,7 +9,7 @@ const text=(v,max=240)=>typeof v==='string'?v.slice(0,max):'';
 const cleanName=v=>path.win32.basename(v).replace(/^_/,'').replace(/-[a-f0-9]{12}(?=\.|$)/,'');
 /** Local projection only. Every command resolves its opaque key again against
  * the currently mounted manifest, never a path or document URL from Explorer. */
-function createShellProjection({drive,agent,vault,root,shell,openDocument,businessCatalog,renderPreview,now=Date.now}) {
+function createShellProjection({drive,agent,vault,root,shell,openDocument,businessCatalog,renderPreview,invalidateMetadata=()=>{},now=Date.now}) {
  let owner=null;let loading=0;const metadata=new Map();const histories=new Map();
  async function snapshot(){const value=await drive.shellSnapshot();const active=await vault();if(!same(value.identity,active)||!Array.isArray(value.projects)||value.projects.length>10)throw new Error('Access refused');const id=hash(value.identity);if(owner!==id){owner=id;metadata.clear();histories.clear();}return value;}
  function enrich(saved,identity){
@@ -24,7 +25,7 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
  async function catalog(){
   const snap=await snapshot();const activeKeys=new Set(snap.projects.map(p=>hash([snap.identity,p.projectId,p.rootKey])));for(const key of metadata.keys())if(!activeKeys.has(key))metadata.delete(key);const projects=[];
   for(const saved of snap.projects){
-   const files=saved.catalog.filter(e=>!e.folder);if(files.length>100)throw new Error('Invalid catalog');
+   const files=saved.catalog.filter(e=>!e.folder);
    let extra=null;
    if(businessCatalog){const value=await businessCatalog(snap.identity,saved);if(value)extra={...validateBusiness(value,snap.identity,saved.projectId,files.map(e=>e.meta.nodeId)),observedAt:Number.isSafeInteger(value.observedAt)&&value.observedAt>0&&value.observedAt<=now()?value.observedAt:null};}
    else extra=enrich(saved,snap.identity);
@@ -39,13 +40,14 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
     const response=await agent.documentStatuses(files.map(e=>e.meta.nodeId));
     if(!same(response.identity,snap.identity)||!Array.isArray(response.documents)||response.documents.length!==files.length)throw new Error('Transfers refused');
     const ids=new Set(files.map(e=>e.meta.nodeId));
-    for(const item of response.documents){if(!ids.delete(item.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(item.state))throw new Error('Transfers refused');transfers.set(item.nodeId,item.state);}
+    for(const item of response.documents){if(!ids.delete(item.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(item.state))throw new Error('Transfers refused');transfers.set(item.nodeId,item);}
    }catch{transfers.clear();}
+   const business=new Map(extra?.documents.map(d=>[d.nodeId,d])||[]);
    const rows=files.map(e=>{const m=e.meta;if(!m||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!/^[a-f0-9]{64}$/.test(e.key)||!Number.isSafeInteger(m.version))throw new Error('Invalid catalog');
-    const detail=extra?.documents.find(d=>d.nodeId===m.nodeId&&d.remoteVersion===m.version);const parent=e.path.split('\\').slice(0,-1).at(-1);
+    const known=business.get(m.nodeId);const detail=known?.remoteVersion===m.version?known:null;const parent=e.path.split('\\').slice(0,-1).at(-1);
     return {key:e.key,name:text(m.name,512),phase:text(detail?.phase|| (e.path.split('\\').length>2?cleanName(parent):''),120),
      type:text(detail?.documentType,200),fileType:path.win32.extname(m.name).slice(1,15).toUpperCase(),indice:text(detail?.indice,200),version:m.version,status:text(detail?.status,200),
-     observedAt:detail?extra.observedAt??null:null,metadataStale:!detail||!extra.observedAt||now()-extra.observedAt>60000,businessKnown:!!detail,unclassified:!!detail&&(!detail.phase||!detail.documentType),available:available.get(e.key)??null,transferState:transfers.get(m.nodeId)??''};});
+     observedAt:detail?extra.observedAt??null:null,metadataStale:!detail||!extra.observedAt||now()-extra.observedAt>60000,businessKnown:!!detail,unclassified:!!detail&&(!detail.phase||!detail.documentType),available:available.get(e.key)??null,transferState:transfers.get(m.nodeId)?.state??'',errorCode:text(transfers.get(m.nodeId)?.errorCode,64),preservation:text(transfers.get(m.nodeId)?.preservation,16),writable:detail?.permissions.write===true,readOnlyReason:text(detail?.readOnlyReason,200)};});
    projects.push({id:saved.projectId,name:text(extra?.name||cleanName(saved.catalog[0]?.path||'Projet')),revision,rows});
   }
   const fresh=await snapshot();
@@ -54,12 +56,28 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
  }
  async function command(action,input,signal){
   const alive=()=>signal?.throwIfAborted();alive();
-  if(!['catalog','open','document','preview','versions'].includes(action))throw new Error('Invalid action');if(action==='catalog'){const value=await catalog();alive();return value;}
+  if(!['catalog','open','document','preview','versions','actions','classify','offline','preserve','restart','retry','recovery'].includes(action))throw new Error('Invalid action');if(action==='catalog'){const value=await catalog();alive();return value;}
   if(typeof input.projectId!=='string'||!/^[a-zA-Z0-9_-]{1,200}$/.test(input.projectId)||!/^[a-f0-9]{64}$/.test(input.key)||!/^[a-f0-9]{64}$/.test(input.revision))throw new Error('Invalid reference');
   const snap=await snapshot();const saved=snap.projects.find(p=>p.projectId===input.projectId);
   if(!saved||hash([saved.rootKey,saved.directory])!==input.revision)throw new Error('Stale generation');
   const entry=saved.catalog.find(e=>!e.folder&&e.key===input.key);if(!entry||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(entry.meta?.nodeId))throw new Error('Unknown file');
   const latest=async()=>{const next=await snapshot();const current=next.projects.find(p=>p.projectId===saved.projectId);if(!same(snap.identity,next.identity)||!current||hash([current.rootKey,current.directory])!==input.revision)throw new Error('Stale generation');};
+  const adapter={identity:snap.identity,projectId:saved.projectId,rootKey:saved.rootKey,key:entry.key,nodeId:entry.meta.nodeId};
+  if(['actions','classify','preserve','retry','restart','recovery'].includes(action)) {
+   await latest();alive();
+   if(action==='restart'){await drive.resolveConflict(saved.projectId,entry.key,saved.rootKey);return {status:'completed',message:'Version distante reprise. La copie locale est conservée dans les versions précédentes.'};}
+   if(action==='recovery'){await drive.openPrevious(saved.projectId);return {status:'completed',message:'Copies précédentes ouvertes.'};}
+   const name={actions:'shellActions',classify:'shellClassify',preserve:'shellPreserve',retry:'shellRetry'}[action];
+   const payload={...adapter,...(action==='classify'?{phase:input.phase,docType:input.docType,baseVersion:input.baseVersion}:{})};
+   const result=action==='actions'?await agent.windowsPreview(name,payload,signal):await agent.windowsPreview(name,payload);
+   await latest();alive();if(!same(result?.identity,snap.identity))throw new Error('Identity changed');
+   if(action==='actions') {
+    const doc=result.document;if(!doc||doc.nodeId!==entry.meta.nodeId||doc.projectId!==saved.projectId||doc.permissions?.read!==true||!Number.isSafeInteger(doc.remoteVersion))throw new Error('Invalid actions');
+    return {status:'actions',phase:text(doc.phase,60),docType:text(doc.documentType,60),version:doc.remoteVersion,writable:doc.permissions.write===true,reason:text(doc.readOnlyReason,200)};
+   }
+   if(result.ok!==true)throw new Error('Action refused');if(action==='classify'){metadata.clear();invalidateMetadata(saved.projectId);}
+   return {status:'completed',message:action==='classify'?'Classement enregistré. Actualisation des propriétés en cours.':action==='preserve'?'Conservation demandée. Attendez la fin de l’envoi avant de reprendre la version distante.':'Nouvel envoi demandé.'};
+  }
   if(action==='versions') {
    const cacheKey=hash([snap.identity,saved.projectId,entry.key,input.revision]);let result,stale=false;
    try {
@@ -74,6 +92,7 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
   if(action==='document'){await latest();alive();await openDocument({projectId:saved.projectId,documentId:entry.meta.nodeId.slice(4)});return {status:'opened'};}
   const file=path.join(saved.directory,...entry.path.split('\\'));await noLinks(root,file);const stat=await fs.lstat(file);
   if(!stat.isFile()||stat.size>50*1024*1024||!isSafeToOpen(file))throw new Error('File refused');await latest();alive();
+  if(action==='offline'){await drive.shellPin(saved.projectId,entry.key);let size=0;const stream=require('fs').createReadStream(file,{signal});for await(const bytes of stream){size+=bytes.length;if(size>50*1024*1024){stream.destroy();throw new Error('File refused');}}await latest();alive();return {status:'completed',message:'Document disponible hors ligne sur ce poste.'};}
   if(action==='preview') {
    if(!renderPreview)return {status:'unavailable'};
    const result=await renderPreview(file,input.page??0,signal);await latest();alive();return result;
@@ -101,12 +120,12 @@ function createShellDocumentOpener({getWindow,showWindow,origin}) {
 function createShellPipe({projection,address='\\\\.\\pipe\\ArchiOffice.DriveShell.'+crypto.randomUUID(),token=crypto.randomBytes(32).toString('hex')}) {
  let server=null;const clients=new Set();let stopped=false;
  async function start(){if(server)return {address,token};server=net.createServer(socket=>{
-  if(stopped||clients.size>=8){socket.destroy();return;}clients.add(socket);const cancel=new AbortController();socket.setTimeout(25000,()=>socket.destroy());let data='',done=false;
+  if(stopped||clients.size>=8){socket.destroy();return;}clients.add(socket);const cancel=new AbortController();socket.setTimeout(310000,()=>socket.destroy());let data='',done=false;
   socket.on('error',()=>{});socket.on('close',()=>{clients.delete(socket);cancel.abort();});socket.on('data',bytes=>{
    if(done){socket.destroy();return;}data+=bytes.toString('utf8');if(Buffer.byteLength(data)>8192){socket.destroy();return;}const end=data.indexOf('\n');if(end<0)return;done=true;
    void(async()=>{try{if(data.slice(end+1).trim())throw Error();const msg=JSON.parse(data.slice(0,end));if(msg.format!==1||typeof msg.token!=='string'||msg.token.length!==token.length||!crypto.timingSafeEqual(Buffer.from(msg.token),Buffer.from(token)))throw Error();
-    const value=await projection.command(msg.action,msg,cancel.signal);const frame=JSON.stringify(value)+'\n';if(Buffer.byteLength(frame)>2*1024*1024)throw Error();if(!stopped&&!socket.destroyed)socket.end(frame);
-   }catch{if(!socket.destroyed)socket.end('{"status":"unavailable"}\n');}})();
+    const value=await projection.command(msg.action,msg,cancel.signal);const frame=JSON.stringify(value)+'\n';if(Buffer.byteLength(frame)>(msg.action==='catalog'?MAX_CATALOG_BYTES:2*1024*1024))throw Error();if(!stopped&&!socket.destroyed)socket.end(frame);
+   }catch(error){const message=error.code==='CONFLICT_PRESERVATION_REQUIRED'?'Conservez la copie locale et attendez la fin de son envoi.':error.code==='SOURCE_CHANGED'?'Le fichier a changé depuis sa conservation. Conservez aussi les dernières modifications.':error.status===409?'Le document a changé. Actualisez avant de recommencer.':error.status===403?'Vos droits ne permettent pas cette modification.':'Action indisponible. Vérifiez les droits, la connexion et les modifications locales, puis réessayez.';if(!socket.destroyed)socket.end(JSON.stringify({status:'unavailable',message})+'\n');}})();
   });
  });await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(address,resolve);});return {address,token};}
  function stop(){stopped=true;for(const socket of clients)socket.destroy();server?.close();server=null;}

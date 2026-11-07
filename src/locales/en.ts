@@ -5134,7 +5134,7 @@ export default {
   "documents_drag_hint": "Drag a document (long-press on touch) onto a project or phase in the tree to file it.",
   "documents_moved": "Document filed.",
   "documents_move_failed": "Filing failed.",
-  "windows_drive_choose_project": "Choose a project in Documents to add it to A:. Prototype limits: ten projects, 100 documents per project and 50 MiB per file.",
+  "windows_drive_choose_project": "Choose a project in Documents to add it to A:. Document capacity depends on your agency’s storage allowance. The prototype still supports ten projects and 50 MiB per file.",
   "windows_drive_opened": "A: is open with your added projects. Your selection will reconnect when ArchiOffice starts. Use Documents to add another project, access current remote versions, edit and upload files.",
   "windows_drive_stopped": "A: disconnected; reconnection and automatic startup disabled. Downloaded copies remain in ArchiOffice local application data.",
   "windows_drive_error": "A: drive or the project addition is unavailable. Check Drive authorization, connection and project limits, then try again in Documents.",

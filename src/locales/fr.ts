@@ -5284,7 +5284,7 @@ export default {
   "documents_drag_hint": "Glissez un document (appui long au doigt) sur une affaire ou une phase de l'arborescence pour le classer.",
   "documents_moved": "Document classé.",
   "documents_move_failed": "Le classement a échoué.",
-  "windows_drive_choose_project": "Choisissez un projet dans Documents pour l’ajouter au lecteur A:. Limites du prototype : dix projets, 100 documents par projet et 50 Mio par fichier.",
+  "windows_drive_choose_project": "Choisissez un projet dans Documents pour l’ajouter au lecteur A:. Le nombre de documents dépend de l’espace de stockage de l’agence. Le prototype reste limité à dix projets et 50 Mio par fichier.",
   "windows_drive_opened": "Le lecteur A: est ouvert avec vos projets ajoutés. Leur sélection sera reconnectée au lancement d’ArchiOffice. Utilisez Documents pour ajouter un autre projet, consulter les versions distantes à jour, modifier et envoyer les fichiers.",
   "windows_drive_stopped": "Lecteur A: déconnecté ; reconnexion et démarrage automatique désactivés. Les copies téléchargées sont conservées dans les données locales d’ArchiOffice.",
   "windows_drive_error": "Le lecteur A: ou l’ajout du projet est indisponible. Vérifiez l’autorisation Drive, la connexion et les limites du projet, puis réessayez depuis Documents.",

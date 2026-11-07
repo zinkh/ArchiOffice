@@ -33,7 +33,7 @@ inline Catalog parseCatalog(const std::wstring& json,const std::wstring& root,do
  auto projects=data.GetNamedArray(L"projects");if(projects.Size()>10)throw std::runtime_error("Project limit");
  std::map<std::wstring,std::wstring> names;
  for(auto value:projects) {auto p=value.GetObject();auto id=std::wstring(p.GetNamedString(L"projectId"));if(!names.emplace(id,plain(p,L"name")).second)throw std::runtime_error("Duplicate project");}
- auto documents=data.GetNamedArray(L"documents");if(documents.Size()>1000)throw std::runtime_error("Document limit");Catalog result;
+ auto documents=data.GetNamedArray(L"documents");Catalog result;
  for(auto value:documents) {
   auto d=value.GetObject();std::wstring relative=d.GetNamedString(L"relativePath").c_str(),project=d.GetNamedString(L"projectId").c_str();
   if(relative.empty()||relative.size()>300||relative.front()!=L'_'||relative.find_first_of(L"/:\r\n")!=std::wstring::npos||!names.count(project))throw std::runtime_error("Invalid path");
@@ -79,7 +79,7 @@ inline Catalog readCatalog(const std::wstring& root) {
  HANDLE file=CreateFileW((root+L".shell.json").c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
  if(file==INVALID_HANDLE_VALUE)return {};
  BY_HANDLE_FILE_INFORMATION attributes{};LARGE_INTEGER size{};DWORD bytes=0;std::string json;
- bool valid=GetFileInformationByHandle(file,&attributes)&&!(attributes.dwFileAttributes&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))&&GetFileSizeEx(file,&size)&&size.QuadPart>0&&size.QuadPart<=8*1024*1024;
+ bool valid=GetFileInformationByHandle(file,&attributes)&&!(attributes.dwFileAttributes&(FILE_ATTRIBUTE_REPARSE_POINT|FILE_ATTRIBUTE_DIRECTORY))&&GetFileSizeEx(file,&size)&&size.QuadPart>0&&size.QuadPart<=64*1024*1024;
  if(valid){json.resize(static_cast<size_t>(size.QuadPart));valid=ReadFile(file,json.data(),static_cast<DWORD>(json.size()),&bytes,nullptr)&&bytes==json.size();}
  CloseHandle(file);if(!valid)return {};
  HRESULT initialized=RoInitialize(RO_INIT_SINGLETHREADED);Catalog result;

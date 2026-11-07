@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const fs=require('fs/promises');const path=require('path');const crypto=require('crypto');
 const {noLinks,catalogDetails}=require('./windowsDrive.cjs');
 const hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -22,12 +23,12 @@ function validateBusiness(result,identity,projectId,nodeIds) {
 /** Optional read-only projection. Never alters a CFAPI manifest or a work file.
  * The short display lease is renewed only while the mounted account is valid. */
 function createWindowsShellCatalog({drive,agent,vault,namespaceRoot,cacheRoot,now=Date.now}) {
- let stopped=false,busy=false,timer=null,lastFile=null;const memory=new Map(),pending=new Map();
+ let stopped=false,busy=false,timer=null,lastFile=null;const generations=new Map();const memory=new Map(),pending=new Map();
  async function atomic(file,value,root) {
   await fs.mkdir(root,{recursive:true,mode:0o700});await noLinks(root,root);
   try{await noLinks(root,file);}catch(error){if(error.code!=='ENOENT')throw error;}
   const temporary=file+'.'+crypto.randomUUID()+'.tmp';
-  try{const json=JSON.stringify(value);if(Buffer.byteLength(json)>8*1024*1024)throw fail();await fs.writeFile(temporary,json,{flag:'wx',mode:0o600});await fs.rename(temporary,file);}
+  try{const json=JSON.stringify(value);if(Buffer.byteLength(json)>MAX_CATALOG_BYTES)throw fail();await fs.writeFile(temporary,json,{flag:'wx',mode:0o600});await fs.rename(temporary,file);}
   finally{await fs.rm(temporary,{force:true}).catch(()=>{});}
  }
  async function clear() {
@@ -35,12 +36,12 @@ function createWindowsShellCatalog({drive,agent,vault,namespaceRoot,cacheRoot,no
   if(file){try{await noLinks(namespaceRoot,file);await fs.unlink(file);}catch{}}
  }
  async function cached(identity,projectId,nodeIds) {
-  const key=hash([identity.userId,identity.tenantId,identity.deviceId,projectId,nodeIds]);
+  const key=hash([identity.userId,identity.tenantId,identity.deviceId,projectId,nodeIds,generations.get(projectId)||0]);
   if(memory.has(key))return {key,...memory.get(key)};
   let item={data:null,observedAt:0,attemptedAt:0};
   const file=path.join(cacheRoot,key+'.json');
   try {
-   await noLinks(cacheRoot,file);const stat=await fs.lstat(file);if(!stat.isFile()||stat.size>1024*1024)throw fail();
+   await noLinks(cacheRoot,file);const stat=await fs.lstat(file);if(!stat.isFile()||stat.size>MAX_CATALOG_BYTES)throw fail();
    const saved=JSON.parse(await fs.readFile(file,'utf8'));
    if(!Number.isSafeInteger(saved.observedAt)||saved.observedAt>now()||saved.observedAt<1)throw fail();
    const data=validateBusiness(saved,identity,projectId,nodeIds);item={data,observedAt:saved.observedAt,attemptedAt:0};
@@ -119,6 +120,6 @@ function createWindowsShellCatalog({drive,agent,vault,namespaceRoot,cacheRoot,no
   if(stopped||!same(await vault(),identity))throw fail();
   return entry.data?{...entry.data,identity,observedAt:entry.observedAt}:null;
  }
- return {business,start,stop,tick,settle:()=>Promise.allSettled([...pending.values()])};
+ return {invalidate:projectId=>generations.set(projectId,(generations.get(projectId)||0)+1),business,start,stop,tick,settle:()=>Promise.allSettled([...pending.values()])};
 }
 module.exports={createWindowsShellCatalog,validateBusiness};

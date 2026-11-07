@@ -47,3 +47,9 @@ it('rejects a malformed native availability result without presenting it as offl
  child.stdin.on('data',(data:Buffer)=>{for(const line of data.toString().trim().split('\n')){const msg=JSON.parse(line);if(msg.type==='availability')queueMicrotask(()=>child.stdout.write(JSON.stringify({type:'availability',requestId:msg.requestId,files:[{key:'a'.repeat(64),available:'yes'}]})+'\n'));}});
  const preview=createWindowsPreview(config);try{await preview.start('p');await expect(preview.availability()).rejects.toThrow();}finally{preview.stop();}
 });
+
+it('passes 1001 document identities to the native provider without a document-count ceiling',async()=>{
+ const entries=Array.from({length:1001},(_,i)=>({path:'_Projet\\_Plan'+i+'.pdf',key:hash('doc:'+i),folder:false,size:5,meta:{...meta,nodeId:'doc:d'+i}}));
+ config.agent.windowsPreview.mockResolvedValue({identity,entries:[{path:'_Projet',key:hash('folder'),folder:true,size:0},...entries]});
+ const preview=createWindowsPreview(config);try{await preview.start('p');expect(frames.find(f=>f.type==='init').entries).toHaveLength(1002);}finally{preview.stop();}
+});

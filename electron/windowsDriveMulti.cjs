@@ -185,7 +185,8 @@ function createWindowsMultiDrive(options) {
   if(generation!==epoch||!before||!after||before.rootKey!==after.rootKey||!namespace.status().active||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');
   return {identity:active,rootKey:before.rootKey,files};
  }
- return {shellAvailability,shellSnapshot,shellSnapshots,start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
+ return {shellPin:async(id,key)=>{const active=identity,project=projects.get(id),generation=epoch;if(!active||!project||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');if(!await project.pin(key)||generation!==epoch||!same(await vault(),active))throw failure('DRIVE_UNAVAILABLE');},
+  resolveConflict:(id,key,rootKey)=>refreshAction(async()=>{const saved=await projects.get(id)?.snapshot(id);if(!saved||saved.rootKey!==rootKey)throw failure('DRIVE_REFRESH_STALE');const plan=await refresh.check(id,key);if(plan.status!=='update_available')throw failure('DRIVE_REFRESH_STALE');return refresh.apply(id,plan.token);}),shellAvailability,shellSnapshot,shellSnapshots,start:connect,activate:()=>connect(null,{allowEmpty:true}),open,remove,disconnect,resume,shutdown,status,getStatus,
   enableEditing:id=>refreshAction(async()=>{if(!validId(id)||!identity||!same(await vault(),identity)||!projects.has(id))throw failure('DRIVE_UNAVAILABLE');refresh.clear();return projects.get(id).enableEditing(id);}),
   checkCatalog:id=>refreshAction(()=>refresh.check(id)),refreshCatalog:(id,token)=>refreshAction(()=>refresh.apply(id,token)),
   openPrevious:id=>refreshAction(()=>refresh.previous(id))};

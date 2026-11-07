@@ -1,3 +1,4 @@
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 'use strict';
 const fs = require('fs/promises');
 const path = require('path');
@@ -33,13 +34,13 @@ async function openDriveWorking({ agent, vault, root, nodeId, shell }) {
 }
 /** Return only enumerated state and a version; no native paths or credentials. */
 async function driveDocumentStatuses({agent,vault,nodeIds}) {
-  if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)throw new Error('Invalid documents');
+  if(!Array.isArray(nodeIds)||Buffer.byteLength(JSON.stringify(nodeIds))>MAX_CATALOG_BYTES||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)throw new Error('Invalid documents');
   const result=await agent.documentStatuses(nodeIds);const active=await vault();
   if(!result?.identity||['userId','tenantId','deviceId'].some(k=>result.identity[k]!==active[k]))throw new Error('Identity changed');
   if(!Array.isArray(result.documents)||result.documents.length!==nodeIds.length)throw new Error('Invalid status response');
-  const seen=new Set();
+  const wanted=new Set(nodeIds);const seen=new Set();
   return result.documents.map(doc=> {
-    if(!doc||!nodeIds.includes(doc.nodeId)||seen.has(doc.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(doc.state))throw new Error('Invalid status response');
+    if(!doc||!wanted.has(doc.nodeId)||seen.has(doc.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(doc.state))throw new Error('Invalid status response');
     seen.add(doc.nodeId);
     if(doc.state==='uploaded'||doc.state==='reconciled') {
       if(!Number.isSafeInteger(doc.version)||doc.version<1)throw new Error('Invalid version');

@@ -1,3 +1,4 @@
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const crypto = require('crypto');
 
 // The worker gets platform/network variables only, never application secrets.
@@ -68,21 +69,21 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:`drive:${action}-working`,requestId,nodeId});
     });},
     documentStatuses(nodeIds) {return new Promise((resolve,reject)=> {
-      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
+      if(!Array.isArray(nodeIds)||Buffer.byteLength(JSON.stringify(nodeIds))>MAX_CATALOG_BYTES||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
       const requestId=crypto.randomUUID();
       const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive status timeout'));},30000);
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:'drive:document-statuses',requestId,nodeIds});
     });},
     windowsPreview(action,input,signal) {return new Promise((resolve,reject)=> {
-      if(!['catalog','hydrate','upload','shellMetadata','shellVersions','shell-metadata'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
-      if(signal&&action!=='shellVersions')return reject(new Error('Unsupported preview cancellation'));
+      if(!['catalog','hydrate','upload','shellMetadata','shellVersions','shell-metadata','shellActions','shellClassify','conflictProof','conflictReconcile','shellPreserve','shellRetry'].includes(action)||!child?.connected||stopped||jobs.size>=8)return reject(new Error('Preview unavailable'));
+      if(signal&&!['shellVersions','shellActions'].includes(action))return reject(new Error('Unsupported preview cancellation'));
       if(signal?.aborted)return reject(Object.assign(new Error('Preview cancelled'),{code:'ABORT_ERR'}));
       const requestId=crypto.randomUUID();
       const cleanup=()=>signal?.removeEventListener('abort',cancel);
-      const finish=error=>{if(!jobs.has(requestId))return;clearTimeout(timer);cleanup();jobs.delete(requestId);if(action==='shellVersions')sendToChild(child,{type:'drive:cancel-windows-preview',requestId});reject(error);};
+      const finish=error=>{if(!jobs.has(requestId))return;clearTimeout(timer);cleanup();jobs.delete(requestId);if(['shellVersions','shellActions'].includes(action))sendToChild(child,{type:'drive:cancel-windows-preview',requestId});reject(error);};
       const cancel=()=>finish(Object.assign(new Error('Preview cancelled'),{code:'ABORT_ERR'}));
-      const timer=setTimeout(()=>finish(new Error('Preview timeout')),['catalog','shellMetadata','shellVersions','shell-metadata'].includes(action)?300000:60000);
+      const timer=setTimeout(()=>finish(new Error('Preview timeout')),['catalog','shellMetadata','shellVersions','shell-metadata','shellActions','shellClassify','conflictProof','conflictReconcile','shellPreserve','shellRetry'].includes(action)?300000:60000);
       jobs.set(requestId,{resolve,reject,timer,cleanup});signal?.addEventListener('abort',cancel,{once:true});
       if(signal?.aborted)cancel();else sendToChild(child,{type:'drive:windows-preview',requestId,action,input});
     });},

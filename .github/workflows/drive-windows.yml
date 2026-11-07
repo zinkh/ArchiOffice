@@ -38,6 +38,8 @@ jobs:
         run: node native/windows-drive/refresh-smoke.mjs
       - name: Edit existing documents and capture replace-saves
         run: node native/windows-drive/edit-smoke.mjs
+      - name: Recover a preserved native conflict and save again
+        run: node native/windows-drive/conflict-smoke.mjs
       - name: Configure Explorer extension
         run: cmake -S native/windows-shell -B native/windows-shell/build -A x64 -DSHELL_BUILD_ID=${{ github.sha }}
       - name: Compile Explorer extension

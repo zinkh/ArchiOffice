@@ -1,3 +1,4 @@
+#include <set>
 // Experimental CFAPI provider with explicit per-project editing. Network, authentication and integrity
 // belong to the agent. The private parent pipe supplies verified cache paths.
 #define WIN32_NO_STATUS
@@ -38,7 +39,7 @@ void emit(std::string const& line) { std::lock_guard lock(outputMutex);std::cout
 void check(HRESULT hr) { if(FAILED(hr))winrt::throw_hresult(hr); }
 bool line(std::string& value) {
   value.clear();char c;
-  while(std::cin.get(c)) {if(c=='\n')return true;if(value.size()>=1024*1024)throw std::runtime_error("frame too large");value+=c;}
+  while(std::cin.get(c)) {if(c=='\n')return true;if(value.size()>=64*1024*1024)throw std::runtime_error("frame too large");value+=c;}
   return false;
 }
 bool hexKey(std::string const& key) {return key.size()==64&&key.find_first_not_of("0123456789abcdef")==std::string::npos;}
@@ -205,8 +206,8 @@ int wmain(int argc,wchar_t** argv) {
     fs::path root(std::wstring(init.GetNamedString(L"root")));if(!root.is_absolute()||!fs::is_directory(root)||(!resume&&!fs::is_empty(root)))throw std::runtime_error("fresh root required");
     // Refuse reparse points anywhere from the volume root down.
     fs::path current=root.root_path();for(auto const& part:root.relative_path()){current/=part;DWORD a=GetFileAttributesW(current.c_str());if(a==INVALID_FILE_ATTRIBUTES||(a&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("unsafe root");}
-    auto array=init.GetNamedArray(L"entries");if(array.Size()>256)throw std::runtime_error("too many entries");
-    std::vector<Entry> entries;std::map<std::wstring,bool> known;
+    auto array=init.GetNamedArray(L"entries");
+    std::vector<Entry> entries;std::map<std::wstring,bool> known;std::set<std::wstring> foldedPaths;
     for(auto const& value:array) {
       auto item=value.GetObject();Entry e{std::wstring(item.GetNamedString(L"path")),winrt::to_string(item.GetNamedString(L"key")),item.GetNamedBoolean(L"folder"),0};
       double size=item.GetNamedNumber(L"size");if(size<0||size>MaxFile||size!=static_cast<LONGLONG>(size)||!hexKey(e.key))throw std::runtime_error("invalid entry");e.size=static_cast<LONGLONG>(size);
@@ -214,7 +215,7 @@ int wmain(int argc,wchar_t** argv) {
       for(auto const& part:relative)if(!safePart(part.wstring()))throw std::runtime_error("invalid name");
       auto parent=relative.parent_path().wstring();if(!parent.empty()&&(!known.contains(parent)||!known.at(parent)))throw std::runtime_error("missing parent");
       auto folded=e.path;for(auto& c:folded)c=static_cast<wchar_t>(towlower(c));
-      for(auto const& prior:entries){auto f=prior.path;for(auto& c:f)c=static_cast<wchar_t>(towlower(c));if(f==folded)throw std::runtime_error("collision");}
+      if(!foldedPaths.insert(folded).second)throw std::runtime_error("collision");
       known.emplace(e.path,e.folder);entries.push_back(e);
     }
     CF_SYNC_REGISTRATION reg{};reg.StructSize=sizeof(reg);reg.ProviderName=L"ArchiOffice Drive Preview";reg.ProviderVersion=L"0.1";
@@ -310,11 +311,18 @@ int wmain(int argc,wchar_t** argv) {
         JsonObject reply;reply.SetNamedValue(L"type",JsonValue::CreateStringValue(L"availability"));reply.SetNamedValue(L"requestId",JsonValue::CreateStringValue(winrt::to_hstring(request)));reply.SetNamedValue(L"files",files);
         emit(winrt::to_string(reply.Stringify()));
       }
+      if(type==L"pin") {
+        auto id=winrt::to_string(message.GetNamedString(L"requestId")),key=winrt::to_string(message.GetNamedString(L"key"));bool valid=false;
+        auto entry=std::find_if(entries.begin(),entries.end(),[&](Entry const& e){return !e.folder&&e.key==key;});
+        if(id.size()!=36||entry==entries.end())throw std::runtime_error("invalid pin");
+        try{validateRoot(root,rootKey);validateExisting(root/fs::path(entry->path),*entry,editable);HANDLE file=CreateFileW((root/fs::path(entry->path)).c_str(),FILE_READ_DATA|FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);if(file!=INVALID_HANDLE_VALUE){valid=SUCCEEDED(CfSetPinState(file,CF_PIN_STATE_PINNED,CF_SET_PIN_FLAG_NONE,nullptr));CloseHandle(file);}}catch(...){}
+        emit("{\"type\":\"pinned\",\"requestId\":\""+id+"\",\"valid\":"+(valid?std::string("true"):std::string("false"))+"}");
+      }
       if(type==L"verify") {
         auto request=winrt::to_string(message.GetNamedString(L"requestId"));
         if(request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid verification request");
         bool valid=true;
-        try{validateRoot(root,rootKey);for(auto const& entry:entries)validateExisting(root/fs::path(entry.path),entry);}catch(...){valid=false;}
+        try{auto except=winrt::to_string(message.GetNamedString(L"except",L""));if(!except.empty()&&!hexKey(except))throw std::runtime_error("invalid exception");validateRoot(root,rootKey);for(auto const& entry:entries)validateExisting(root/fs::path(entry.path),entry,!entry.folder&&entry.key==except);}catch(...){valid=false;}
         emit("{\"type\":\"verified\",\"requestId\":\""+request+"\",\"valid\":"+(valid?std::string("true"):std::string("false"))+"}");
       }
       if(type==L"hydrated") {

@@ -176,6 +176,7 @@ win:
   # public/icon-512.png (via `npx png-to-ico public/icon-512.png`).
   icon: electron/icon.ico
 nsis:
+  runAfterFinish: false
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
