@@ -34,15 +34,15 @@ export async function checkCloudLinkStatus(): Promise<{ linked: boolean; importC
  * d'un poste déjà lié — voir server/cloudLinkRoutes.ts. Ne demande que le
  * mot de passe : l'email est déjà fixé par le lien existant.
  */
-export async function reconnectCloud(password: string): Promise<{ ok: true }> {
-  return apiFetch('/api/auth/cloud-link-reconnect', { method: 'POST', body: JSON.stringify({ password }) });
+export async function reconnectCloud(password: string, captchaToken?: string): Promise<{ ok: true }> {
+  return apiFetch('/api/auth/cloud-link-reconnect', { method: 'POST', body: JSON.stringify({ password, captchaToken }) });
 }
 
-export async function cloudLink(email: string, password: string, localPassword: string): Promise<LocalSession & { importJobId: string }> {
+export async function cloudLink(email: string, password: string, localPassword: string, captchaToken?: string): Promise<LocalSession & { importJobId: string }> {
   const res = await fetch('/api/auth/cloud-link', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, localPassword }),
+    body: JSON.stringify({ email, password, localPassword, captchaToken }),
   });
   const result = await parseJsonOrThrow(res);
   storeLocalSession({ access_token: result.access_token, user: result.user });
@@ -108,10 +108,10 @@ export async function triggerSyncNow(): Promise<void> {
  * server/localCloudUpgrade.ts. Requires an active local session (unlike
  * cloudLink() above, which runs before any session exists).
  */
-export async function upgradeToCloud(email: string, password: string): Promise<LocalSession & { exportJobId: string; importJobId: string }> {
+export async function upgradeToCloud(email: string, password: string, captchaToken?: string): Promise<LocalSession & { exportJobId: string; importJobId: string }> {
   const result = await apiFetch<LocalSession & { exportJobId: string; importJobId: string }>('/api/auth/cloud-link-upgrade', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, captchaToken }),
   });
   storeLocalSession({ access_token: result.access_token, user: result.user });
   return result;
