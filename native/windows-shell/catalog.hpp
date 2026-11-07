@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include <roapi.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <map>

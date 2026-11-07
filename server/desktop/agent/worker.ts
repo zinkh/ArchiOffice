@@ -159,7 +159,10 @@ export function createAgentWorker(config: WorkerConfig) {
         if(action==='shellMetadata') {
           if(!input.identity||['userId','tenantId','deviceId'].some(k=>input.identity[k]!==expected[k]))throw new Error('Identity changed');
           const read=catalogReader(config.origin,expected.tenantId,authorize);
-          const result=await readShellMetadata(input.projectId,input.nodeIds,route=>read(route,abort.signal));
+          const result=await readShellMetadata(input.projectId,input.nodeIds,route=>read(route,abort.signal)).catch((error:any)=>{
+            if(error.code==='WINDOWS_CATALOG_REFUSED'&&error.status===undefined)error.code='WINDOWS_SHELL_METADATA_REFUSED';
+            throw error;
+          });
           await authorize();return {identity:{userId:expected.userId,tenantId:expected.tenantId,deviceId:expected.deviceId},...result};
         }
         if(action==='catalog') {

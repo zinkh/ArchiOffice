@@ -63,7 +63,8 @@ function createWindowsShellCatalog({drive,agent,vault,namespaceRoot,cacheRoot,no
     // Transient network failure keeps an explicitly dated stale observation.
     if([401,402,403,404].includes(error.status)||error.code==='WINDOWS_SHELL_METADATA_REFUSED') {
      memory.set(key,{data:null,observedAt:0,attemptedAt:now()});
-     await fs.rm(path.join(cacheRoot,key+'.json'),{force:true}).catch(()=>{});
+     const file=path.join(cacheRoot,key+'.json');
+     try{await noLinks(cacheRoot,file);await fs.unlink(file);}catch{}
     }
    }
   })().finally(()=>pending.delete(key));pending.set(key,task);
