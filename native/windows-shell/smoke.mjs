@@ -17,5 +17,7 @@ await projection.command('catalog',{});await new Promise(resolve=>setImmediate(r
 try {
  endpoint=await pipe.start();await exec(control,['--register']);await exec(control,['--register']);await exec(control,['--runtime',endpoint.address,endpoint.token]);
  await exec(control,['--smoke',image],{timeout:60000});assert.ok(opened);assert.ok(document);assert.ok((await fs.stat(image)).size>10000);
+ active=identity;saved.catalog.push(...Array.from({length:1001},(_,i)=>({path:'_Bulk'+i+'.txt',key:crypto.createHash('sha256').update('bulk'+i).digest('hex'),folder:false,meta:{nodeId:'doc:bulk'+i,name:'Bulk'+i+'.txt',version:1,size:0,sha256:null}})));
+ await exec(control,['--large-smoke',image],{timeout:60000});console.log('Native Explorer list passed with 1003 documents.');
  console.log('Explorer shell passed: native three-pane view, catalogue, properties, canonical open, application action, identity invalidation and COM teardown.');
 }finally{pipe.stop();if(endpoint)await exec(control,['--clear-runtime',endpoint.address]).catch(()=>{});await exec(control,['--unregister']).catch(()=>{});const scope=crypto.createHash('sha256').update(JSON.stringify(identity)).digest('hex');await exec('reg.exe',['delete','HKCU\\Software\\ArchiOffice\\DriveShell\\Presentation\\'+scope,'/f']).catch(()=>{});await fs.rm(root,{recursive:true,force:true});}

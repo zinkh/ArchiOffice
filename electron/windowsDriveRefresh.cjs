@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const fs=require('fs/promises');const path=require('path');const crypto=require('crypto');
 const {catalogDetails,noLinks}=require('./windowsDrive.cjs');
 const {createPersistentWindowsDrive}=require('./windowsDrivePersistence.cjs');
@@ -40,7 +41,7 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
  };
  async function read(file) {
   let stat;try{stat=await fs.lstat(file);}catch(e){if(e.code==='ENOENT')return null;throw e;}
-  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>1024*1024)throw fail('DRIVE_SNAPSHOT_INVALID');
+  if(!stat.isFile()||stat.isSymbolicLink()||stat.size>MAX_CATALOG_BYTES)throw fail('DRIVE_SNAPSHOT_INVALID');
   try{return JSON.parse(await fs.readFile(file,'utf8'));}catch{throw fail('DRIVE_SNAPSHOT_INVALID');}
  }
  async function write(file,value) {
@@ -139,7 +140,7 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   const target=saved.directory;await noLinks(root,target);await authorize(identity);
   if(await shell.openPath(target))throw fail('DRIVE_UNAVAILABLE');return {status:'copies_shown'};
  }
- async function hasPrevious(id,identity) {for(const file of [names(identity,id,'').previous,names(identity,id,'').journal]){try{const stat=await fs.lstat(file);if(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>0&&stat.size<=1024*1024)return true;}catch{}}return false;}
+ async function hasPrevious(id,identity) {for(const file of [names(identity,id,'').previous,names(identity,id,'').journal]){try{const stat=await fs.lstat(file);if(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>0&&stat.size<=MAX_CATALOG_BYTES)return true;}catch{}}return false;}
  return {check,apply,recover,previous,hasPrevious,clear:()=>{revision++;plans.clear();}};
 }
 module.exports={createWindowsRefresh,normalizeCatalog};

@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const net=require('net');const crypto=require('crypto');const fs=require('fs/promises');const path=require('path');
 const {validateBusiness}=require('./windowsShellCatalog.cjs');
 const {noLinks}=require('./windowsDrive.cjs');const {isSafeToOpen}=require('./fileAccess.cjs');
@@ -24,7 +25,7 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
  async function catalog(){
   const snap=await snapshot();const activeKeys=new Set(snap.projects.map(p=>hash([snap.identity,p.projectId,p.rootKey])));for(const key of metadata.keys())if(!activeKeys.has(key))metadata.delete(key);const projects=[];
   for(const saved of snap.projects){
-   const files=saved.catalog.filter(e=>!e.folder);if(files.length>100)throw new Error('Invalid catalog');
+   const files=saved.catalog.filter(e=>!e.folder);
    let extra=null;
    if(businessCatalog){const value=await businessCatalog(snap.identity,saved);if(value)extra={...validateBusiness(value,snap.identity,saved.projectId,files.map(e=>e.meta.nodeId)),observedAt:Number.isSafeInteger(value.observedAt)&&value.observedAt>0&&value.observedAt<=now()?value.observedAt:null};}
    else extra=enrich(saved,snap.identity);
@@ -41,8 +42,9 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
     const ids=new Set(files.map(e=>e.meta.nodeId));
     for(const item of response.documents){if(!ids.delete(item.nodeId)||!['none','queued','uploading','retry','blocked','conflict','uploaded','reconciled'].includes(item.state))throw new Error('Transfers refused');transfers.set(item.nodeId,item.state);}
    }catch{transfers.clear();}
+   const business=new Map(extra?.documents.map(d=>[d.nodeId,d])||[]);
    const rows=files.map(e=>{const m=e.meta;if(!m||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(m.nodeId)||!/^[a-f0-9]{64}$/.test(e.key)||!Number.isSafeInteger(m.version))throw new Error('Invalid catalog');
-    const detail=extra?.documents.find(d=>d.nodeId===m.nodeId&&d.remoteVersion===m.version);const parent=e.path.split('\\').slice(0,-1).at(-1);
+    const known=business.get(m.nodeId);const detail=known?.remoteVersion===m.version?known:null;const parent=e.path.split('\\').slice(0,-1).at(-1);
     return {key:e.key,name:text(m.name,512),phase:text(detail?.phase|| (e.path.split('\\').length>2?cleanName(parent):''),120),
      type:text(detail?.documentType,200),fileType:path.win32.extname(m.name).slice(1,15).toUpperCase(),indice:text(detail?.indice,200),version:m.version,status:text(detail?.status,200),
      observedAt:detail?extra.observedAt??null:null,metadataStale:!detail||!extra.observedAt||now()-extra.observedAt>60000,businessKnown:!!detail,unclassified:!!detail&&(!detail.phase||!detail.documentType),available:available.get(e.key)??null,transferState:transfers.get(m.nodeId)??''};});
@@ -105,7 +107,7 @@ function createShellPipe({projection,address='\\\\.\\pipe\\ArchiOffice.DriveShel
   socket.on('error',()=>{});socket.on('close',()=>{clients.delete(socket);cancel.abort();});socket.on('data',bytes=>{
    if(done){socket.destroy();return;}data+=bytes.toString('utf8');if(Buffer.byteLength(data)>8192){socket.destroy();return;}const end=data.indexOf('\n');if(end<0)return;done=true;
    void(async()=>{try{if(data.slice(end+1).trim())throw Error();const msg=JSON.parse(data.slice(0,end));if(msg.format!==1||typeof msg.token!=='string'||msg.token.length!==token.length||!crypto.timingSafeEqual(Buffer.from(msg.token),Buffer.from(token)))throw Error();
-    const value=await projection.command(msg.action,msg,cancel.signal);const frame=JSON.stringify(value)+'\n';if(Buffer.byteLength(frame)>2*1024*1024)throw Error();if(!stopped&&!socket.destroyed)socket.end(frame);
+    const value=await projection.command(msg.action,msg,cancel.signal);const frame=JSON.stringify(value)+'\n';if(Buffer.byteLength(frame)>(msg.action==='catalog'?MAX_CATALOG_BYTES:2*1024*1024))throw Error();if(!stopped&&!socket.destroyed)socket.end(frame);
    }catch{if(!socket.destroyed)socket.end('{"status":"unavailable"}\n');}})();
   });
  });await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(address,resolve);});return {address,token};}

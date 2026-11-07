@@ -1,3 +1,4 @@
+import {PLAN_LIMITS} from '../src/lib/billing';
 // Dépôt par morceaux d'un client desktop (docs/desktop-sync-contract.md, section 8) :
 // ouverture contrôlée, reprise, empreinte, conflits, et surtout la règle de la section 8.4 :
 // un fichier CAO n'atteint JAMAIS Supabase Storage.
@@ -517,4 +518,25 @@ describe('Fonctions pures du dépôt', () => {
     expect(nextIndice('Z')).toBeNull();
     expect(nextIndice('AA')).toBeNull();
   });
+});
+
+describe('agency storage capacity instead of document counts',()=>{
+ it('creates a document after 101 existing documents while the agency has storage',async()=>{
+  const tenantId=makeTenant({plan:'starter'});const actor=await makeActor(app,tenantId);const projectId=seedProject(tenantId,'quota-many');
+  fakeSupabaseAdmin.seed('documents',Array.from({length:101},(_,i)=>({id:'existing-'+i,tenant_id:tenantId,project_id:projectId,name:'Existing.pdf'})));
+  const result=await upload(actor,{name:'Next.pdf',content:'%PDF-next',target:{create:{parentId:'prj:'+projectId}}});
+  expect(result.completed?.status).toBe(200);
+ });
+ it('refuses a new version at the shared agency byte quota and preserves the prior document',async()=>{
+  const tenantId=makeTenant({plan:'starter'});const actor=await makeActor(app,tenantId);const projectId=seedProject(tenantId,'quota-full');
+  const doc=seedDocument(tenantId,{project_id:projectId,id:'quota-original',version:1});
+  fakeSupabaseAdmin.seed('document_versions',[{id:'full-version',tenant_id:tenantId,document_id:'other-project-doc',version:1,storage_backend:'supabase',size_bytes:PLAN_LIMITS.starter.storage_mb*1024*1024}]);
+  const result=await upload(actor,{name:'Next.pdf',content:'%PDF-next',target:{documentId:doc.id},extra:{baseVersion:1}});
+  expect(result.completed?.status).toBe(402);expect(result.completed?.body.error).toContain('Limite de stockage atteinte');expect(documentRow(tenantId,doc.id).version).toBe(1);expect(supabaseUploads).toBe(0);
+ });
+ it('does not charge another agency storage against the active agency',async()=>{
+  const fullTenant=makeTenant({plan:'starter'});fakeSupabaseAdmin.seed('document_versions',[{id:'foreign-full',tenant_id:fullTenant,storage_backend:'supabase',size_bytes:PLAN_LIMITS.starter.storage_mb*1024*1024}]);
+  const tenantId=makeTenant({plan:'starter'});const actor=await makeActor(app,tenantId);const projectId=seedProject(tenantId,'quota-scoped');
+  const result=await upload(actor,{name:'Next.pdf',content:'%PDF-next',target:{create:{parentId:'prj:'+projectId}}});expect(result.completed?.status).toBe(200);
+ });
 });

@@ -171,3 +171,23 @@ aucune image ni historique de l’ancienne sélection ne doit rester affiché. T
 les trois onglets et le clavier en fenêtre étroite. Les essais automatisés utilisent
 un PDF de deux pages et une image synthétique avec le vrai moteur de rendu Windows ;
 ils ne remplacent pas cette réception sur Windows 11 avec vos fichiers réels.
+
+### Capacité documentaire et stockage de l’agence
+
+Le catalogue, les propriétés, les états de synchronisation et les manifestes de
+reconnexion acceptent plus de 100 documents par projet. Les listes distantes sont
+parcourues par pages de 100 avec détection des doublons et des cycles ; les lectures
+individuelles de métadonnées sont limitées à huit demandes simultanées.
+
+Le nombre de documents n’est pas un quota d’offre. Chaque dépôt et nouvelle version
+hébergé par ArchiOffice reste contrôlé par le quota de stockage de l’agence, partagé
+avec les autres projets et fichiers métier. Un stockage externe reste soumis à sa
+propre capacité et ses refus ne déclenchent aucun repli vers ArchiOffice. Un quota
+atteint bloque l’envoi, conserve la copie locale et permet une reprise après
+libération ou augmentation de l’espace. Il n’empêche pas de consulter les fichiers
+existants. Les versions conservées consomment également du stockage.
+
+Les protections de transport et de mémoire restent distinctes de ce quota : 64 Mio
+au plus pour un catalogue JSON/manifeste/trame native, 2 Mio pour une réponse d’aperçu,
+50 Mio par fichier et dix projets montés. Dépasser un budget technique refuse un
+catalogue entier ; aucun document n’est silencieusement tronqué.

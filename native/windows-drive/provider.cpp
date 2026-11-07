@@ -1,3 +1,4 @@
+#include <set>
 // Experimental CFAPI provider with explicit per-project editing. Network, authentication and integrity
 // belong to the agent. The private parent pipe supplies verified cache paths.
 #define WIN32_NO_STATUS
@@ -38,7 +39,7 @@ void emit(std::string const& line) { std::lock_guard lock(outputMutex);std::cout
 void check(HRESULT hr) { if(FAILED(hr))winrt::throw_hresult(hr); }
 bool line(std::string& value) {
   value.clear();char c;
-  while(std::cin.get(c)) {if(c=='\n')return true;if(value.size()>=1024*1024)throw std::runtime_error("frame too large");value+=c;}
+  while(std::cin.get(c)) {if(c=='\n')return true;if(value.size()>=64*1024*1024)throw std::runtime_error("frame too large");value+=c;}
   return false;
 }
 bool hexKey(std::string const& key) {return key.size()==64&&key.find_first_not_of("0123456789abcdef")==std::string::npos;}
@@ -205,8 +206,8 @@ int wmain(int argc,wchar_t** argv) {
     fs::path root(std::wstring(init.GetNamedString(L"root")));if(!root.is_absolute()||!fs::is_directory(root)||(!resume&&!fs::is_empty(root)))throw std::runtime_error("fresh root required");
     // Refuse reparse points anywhere from the volume root down.
     fs::path current=root.root_path();for(auto const& part:root.relative_path()){current/=part;DWORD a=GetFileAttributesW(current.c_str());if(a==INVALID_FILE_ATTRIBUTES||(a&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error("unsafe root");}
-    auto array=init.GetNamedArray(L"entries");if(array.Size()>256)throw std::runtime_error("too many entries");
-    std::vector<Entry> entries;std::map<std::wstring,bool> known;
+    auto array=init.GetNamedArray(L"entries");
+    std::vector<Entry> entries;std::map<std::wstring,bool> known;std::set<std::wstring> foldedPaths;
     for(auto const& value:array) {
       auto item=value.GetObject();Entry e{std::wstring(item.GetNamedString(L"path")),winrt::to_string(item.GetNamedString(L"key")),item.GetNamedBoolean(L"folder"),0};
       double size=item.GetNamedNumber(L"size");if(size<0||size>MaxFile||size!=static_cast<LONGLONG>(size)||!hexKey(e.key))throw std::runtime_error("invalid entry");e.size=static_cast<LONGLONG>(size);
@@ -214,7 +215,7 @@ int wmain(int argc,wchar_t** argv) {
       for(auto const& part:relative)if(!safePart(part.wstring()))throw std::runtime_error("invalid name");
       auto parent=relative.parent_path().wstring();if(!parent.empty()&&(!known.contains(parent)||!known.at(parent)))throw std::runtime_error("missing parent");
       auto folded=e.path;for(auto& c:folded)c=static_cast<wchar_t>(towlower(c));
-      for(auto const& prior:entries){auto f=prior.path;for(auto& c:f)c=static_cast<wchar_t>(towlower(c));if(f==folded)throw std::runtime_error("collision");}
+      if(!foldedPaths.insert(folded).second)throw std::runtime_error("collision");
       known.emplace(e.path,e.folder);entries.push_back(e);
     }
     CF_SYNC_REGISTRATION reg{};reg.StructSize=sizeof(reg);reg.ProviderName=L"ArchiOffice Drive Preview";reg.ProviderVersion=L"0.1";

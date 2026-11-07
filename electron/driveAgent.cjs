@@ -1,3 +1,4 @@
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const crypto = require('crypto');
 
 // The worker gets platform/network variables only, never application secrets.
@@ -68,7 +69,7 @@ function createDriveAgent({spawn,executable,entry,root,origin,getServer,onStatus
       jobs.set(requestId,{resolve,reject,timer});sendToChild(child,{type:`drive:${action}-working`,requestId,nodeId});
     });},
     documentStatuses(nodeIds) {return new Promise((resolve,reject)=> {
-      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
+      if(!Array.isArray(nodeIds)||Buffer.byteLength(JSON.stringify(nodeIds))>MAX_CATALOG_BYTES||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)return reject(new Error('Invalid documents'));
       if(!child?.connected||stopped||jobs.size>=8)return reject(new Error('Agent unavailable'));
       const requestId=crypto.randomUUID();
       const timer=setTimeout(()=>{jobs.delete(requestId);reject(new Error('Drive status timeout'));},30000);

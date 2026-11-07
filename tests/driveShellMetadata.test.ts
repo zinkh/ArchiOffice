@@ -16,6 +16,15 @@ it('preserves missing classifications rather than deriving them from filenames',
  expect(result.documents[0]).toMatchObject({phase:null,documentType:null,indice:null,status:null,remoteVersion:8});
 });
 it('bounds requests before any authenticated reads',async()=>{
- const read=reader();for(const ids of [['doc:d','doc:d'],Array.from({length:101},(_,i)=>'doc:d'+i),['../file']])await expect(readShellMetadata('p',ids,read)).rejects.toThrow();
+ const read=reader();for(const ids of [['doc:d','doc:d'],['../file']])await expect(readShellMetadata('p',ids,read)).rejects.toThrow();
  expect(read).not.toHaveBeenCalled();
+});
+
+it('reads more than 1000 business records with bounded concurrency and stable ordering',async()=>{
+ const ids=Array.from({length:1001},(_,i)=>'doc:d'+i);let active=0,peak=0;
+ const result=await readShellMetadata('p',ids,async route=>{
+  if(route==='/nodes/prj%3Ap')return project;
+  active++;peak=Math.max(peak,active);await new Promise(resolve=>setImmediate(resolve));active--;
+  return {...node,id:decodeURIComponent(route.slice('/nodes/'.length))};
+ });expect(result.documents.map(d=>d.nodeId)).toEqual(ids);expect(peak).toBeLessThanOrEqual(8);expect(peak).toBeGreaterThan(1);
 });

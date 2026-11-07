@@ -94,15 +94,16 @@ describe('Documents', () => {
     expect(res.status).toBe(400);
   });
 
-  it('enforces the plan\'s document quota', async () => {
-    const tenantId = makeTenant({ plan: 'trial' }); // trial allows only 10 documents
+  it('accepts documents beyond the old count quota when agency storage is available', async () => {
+    const tenantId = makeTenant({ plan: 'trial' });
     const { token } = makeUser(tenantId);
-    fakeSupabaseAdmin.seed('documents', Array.from({ length: 10 }, (_, i) => ({ id: `d${i}`, tenant_id: tenantId, name: `Doc ${i}` })));
+    fakeSupabaseAdmin.seed('documents', Array.from({ length: 101 }, (_, i) => ({ id: `d${i}`, tenant_id: tenantId, name: `Doc ${i}` })));
 
+    fakeSupabaseAdmin.seed('projects', [{id:'quota-count-project',tenant_id:tenantId}]);
     const res = await request(app).post('/api/documents').set(authHeader(token))
-      .field('project_id', 'p1').field('name', 'Trop')
-      .attach('file', Buffer.from('x'), 'x.pdf');
-    expect(res.status).toBe(402);
+      .field('project_id', 'quota-count-project').field('name', 'Nouveau')
+      .attach('file', Buffer.from('%PDF-fake'), 'x.pdf');
+    expect(res.status).toBe(201);
   });
 
   it('lists only the caller tenant\'s documents', async () => {

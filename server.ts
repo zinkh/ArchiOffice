@@ -682,7 +682,7 @@ export async function createApp() {
   }
 
   // Storage quota, checked in bytes rather than row count — the "documents"
-  // resource above is unlimited on the pro/enterprise tiers, but storage_mb
+  // resource above is unlimited on every active tier, but storage_mb
   // still caps total upload size on every tier.
   async function checkStorageQuota(tenantId: string, incomingBytes: number): Promise<void> {
     const { plan, is_expired } = await getTenantPlan(tenantId);
@@ -695,7 +695,8 @@ export async function createApp() {
     const usedBytes = await tenantSupabaseStorageBytes(supabaseAdmin, tenantId);
     const limitBytes = limits.storage_mb * 1024 * 1024;
     if (usedBytes + incomingBytes > limitBytes) {
-      const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo). Passez à un plan supérieur.`);
+      const err: any = new Error(`Limite de stockage atteinte (${limits.storage_mb} Mo pour votre agence). Libérez de l’espace ou augmentez votre stockage.`);
+      err.code = 'STORAGE_QUOTA_EXCEEDED';
       err.status = 402;
       throw err;
     }

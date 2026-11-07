@@ -102,7 +102,7 @@ La navigation interne n’alimente pas encore l’adresse et l’historique pré
 suivant de l’Explorateur. Pas de menu contextuel, renommage, suppression, glisser-
 déposer, sélection multiple ni miniatures. Les colonnes métier et leur
 mémorisation ne font pas partie de ce prototype. Les limites du moteur restent
-100 documents par projet, 50 Mio par fichier et dix projets sélectionnés.
+50 Mio par fichier et dix projets sélectionnés, sans plafond de nombre de documents.
 
 ## Mettre à jour et désinstaller
 

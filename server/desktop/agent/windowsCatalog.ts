@@ -1,3 +1,4 @@
+import {MAX_CATALOG_BYTES,mapCatalog} from './catalogBudget';
 import crypto from 'node:crypto';
 import type { DownloadMetadata } from './downloadTransport';
 import { pinnedRequest } from '../../externalStorage/pinnedHttp';
@@ -27,9 +28,9 @@ export async function buildWindowsCatalog(projectId:string,read:(route:string)=>
   if(!/^[a-zA-Z0-9_-]{1,200}$/.test(projectId))throw fail();
   const project=await read(`/nodes/${encodeURIComponent('prj:'+projectId)}`);
   if(project?.id!=='prj:'+projectId||project.kind!=='folder'||typeof project.name!=='string')throw fail();
-  const entries:WindowsCatalogEntry[]=[];const visited=new Set<string>();let files=0;
+  const entries:WindowsCatalogEntry[]=[];const visited=new Set<string>();let bytes=0;
   async function visit(node:any,parent:string,depth:number) {
-    if(depth>2||visited.has(node.id)||entries.length>=256||typeof node.id!=='string'||typeof node.name!=='string')throw fail();visited.add(node.id);
+    if(!node||depth>2||visited.has(node.id)||typeof node.id!=='string'||typeof node.name!=='string')throw fail();visited.add(node.id);
     const folder=node.kind==='folder';if(!folder&&node.kind!=='file')throw fail();
     if(folder&&node.id!==project.id&&!node.id.startsWith(`phase:${projectId}:`))throw fail();
     if(!folder&&!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(node.id))throw fail();
@@ -41,14 +42,19 @@ export async function buildWindowsCatalog(projectId:string,read:(route:string)=>
         const page=await read(`/nodes/${encodeURIComponent(node.id)}/children?limit=100${cursor?'&cursor='+encodeURIComponent(cursor):''}`);
         if(!Array.isArray(page?.nodes)||page.nodes.length>100||(page.nextCursor!==null&&typeof page.nextCursor!=='string'))throw fail();
         for(const child of page.nodes){if(child?.parentId!==node.id)throw fail();await visit(child,path,depth+1);}
-        cursor=page.nextCursor;if(cursor){if(cursors.has(cursor)||cursors.size>=3)throw fail();cursors.add(cursor);}
+        cursor=page.nextCursor;if(cursor){if(cursors.has(cursor))throw fail();cursors.add(cursor);}
       }while(cursor);
     }else {
-      if(++files>100)throw fail();const meta=await metadata(node.id);
+      entries.push({path,key,folder:false,size:0,meta:{nodeId:node.id} as DownloadMetadata});
+    }
+    bytes+=Buffer.byteLength(JSON.stringify(node));if(bytes>MAX_CATALOG_BYTES)throw fail();
+  }
+  await visit(project,'',0);
+  const completed=await mapCatalog(entries,async entry=>{
+    if(entry.folder)return entry;const meta=await metadata(entry.meta!.nodeId);const node={id:entry.meta!.nodeId};
       if(meta.nodeId!==node.id||!Number.isSafeInteger(meta.version)||meta.version<1||!Number.isSafeInteger(meta.size)||meta.size<0||meta.size>50*1024*1024
         ||(meta.sha256!==null&&!/^[a-f0-9]{64}$/.test(meta.sha256)))throw fail();
-      entries.push({path,key,folder:false,size:meta.size,meta});
-    }
-  }
-  await visit(project,'',0);return entries;
+      return {...entry,size:meta.size,meta};
+  });
+  if(Buffer.byteLength(JSON.stringify(completed))>MAX_CATALOG_BYTES)throw fail();return completed;
 }

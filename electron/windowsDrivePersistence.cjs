@@ -1,4 +1,5 @@
 'use strict';
+const {MAX_CATALOG_BYTES}=require('./driveProtocol.cjs');
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
@@ -20,10 +21,10 @@ function createPersistentWindowsDrive(options) {
   async function readSnapshot(identity,projectId) {
     try {
       const file=snapshotPath(identity,projectId);const stat=await fs.lstat(file);
-      if(!stat.isFile()||stat.isSymbolicLink()||stat.size>512*1024)throw new Error('Invalid snapshot manifest');
+      if(!stat.isFile()||stat.isSymbolicLink()||stat.size>MAX_CATALOG_BYTES)throw new Error('Invalid snapshot manifest');
       const saved=JSON.parse(await fs.readFile(file,'utf8'));
       if(!same(saved.identity,identity)||saved.projectId!==projectId||typeof saved.directory!=='string'
-        ||path.dirname(saved.directory)!==path.resolve(root)||!Array.isArray(saved.catalog)||saved.catalog.length>256
+        ||path.dirname(saved.directory)!==path.resolve(root)||!Array.isArray(saved.catalog)||Buffer.byteLength(JSON.stringify(saved.catalog))>MAX_CATALOG_BYTES
         ||typeof saved.rootKey!=='string'||!/^[a-f0-9]{64}$/.test(saved.rootKey))throw new Error('Invalid snapshot manifest');
       await noLinks(root,saved.directory);return saved;
     } catch(error) {

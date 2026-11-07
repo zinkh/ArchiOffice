@@ -1,3 +1,4 @@
+import {MAX_CATALOG_BYTES} from './catalogBudget';
 import { readShellVersions } from './shellVersions';
 import { readShellMetadata } from './shellMetadata';
 import { windowsShellMetadata } from './windowsShellMetadata';
@@ -197,12 +198,13 @@ export function createAgentWorker(config: WorkerConfig) {
     },
     async documentStatuses(nodeIds: string[]) {
       if(stopped)throw new Error('Agent stopped');
-      if(!Array.isArray(nodeIds)||nodeIds.length>100||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)
+      if(!Array.isArray(nodeIds)||Buffer.byteLength(JSON.stringify(nodeIds))>MAX_CATALOG_BYTES||nodeIds.some(id=>typeof id!=='string'||!/^doc:[a-zA-Z0-9_-]{1,200}$/.test(id))||new Set(nodeIds).size!==nodeIds.length)
         throw Object.assign(new Error('Invalid documents'),{code:'INVALID_DOCUMENTS'});
       const ctx=await current();const expected={...ctx.session};
       const jobs=await ctx.queue.listPersisted();
+      const byDocument=new Map<string,typeof jobs>();for(const job of jobs){if('documentId' in job.target){const id=job.target.documentId;const list=byDocument.get(id)||[];list.push(job);byDocument.set(id,list);}}
       const documents:DriveDocumentStatus[]=nodeIds.map(nodeId=> {
-        const matching=jobs.filter(j=>'documentId' in j.target&&j.target.documentId===nodeId);
+        const matching=byDocument.get(nodeId)||[];
         const conflict=matching.find(j=>j.state==='conflict'&&j.reconciledVersion===undefined);
         if(conflict) {
           const copy=jobs.find(j=>j.conflictSourceId===conflict.id);

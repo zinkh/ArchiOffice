@@ -82,3 +82,11 @@ it('returns only real version history, dates its cache, and invalidates it after
  expect(await projection.command('versions',ref)).toMatchObject({status:'versions',stale:true,total:1});options.agent.windowsPreview.mockRejectedValue({status:403});await expect(projection.command('versions',ref)).rejects.toBeDefined();
  options.agent.windowsPreview.mockRejectedValue(new Error('offline'));await expect(projection.command('versions',ref)).rejects.toThrow('offline');
 });
+
+it('projects 1001 mounted documents with matching properties and transfer states',async()=>{
+ const source=options.agent.windowsPreview.getMockImplementation();const original=await source();
+ saved.catalog=Array.from({length:1001},(_,i)=>({path:'_Plan'+i+'.pdf',key:crypto.createHash('sha256').update(String(i)).digest('hex'),folder:false,meta:{nodeId:'doc:d'+i,name:'Plan'+i+'.pdf',version:2}}));
+ options.agent.windowsPreview.mockResolvedValue({...original,documents:saved.catalog.map((e:any)=>({...original.documents[0],nodeId:e.meta.nodeId}))});
+ options.agent.documentStatuses=vi.fn(async(ids:string[])=>({identity,documents:ids.map(nodeId=>({nodeId,state:'none'}))}));
+ await catalog();await new Promise(resolve=>setImmediate(resolve));const result=await catalog();expect(result.projects[0].rows).toHaveLength(1001);expect(result.projects[0].rows[1000]).toMatchObject({indice:'C',transferState:'none'});
+});
