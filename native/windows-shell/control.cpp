@@ -1,5 +1,6 @@
 #include "shell.hpp"
 #include "navigation.hpp"
+#include "presentation.hpp"
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
@@ -46,7 +47,10 @@ void accessibleName(HWND child,wchar_t const* expected){
  winrt::com_ptr<IAccessible> accessible;check(AccessibleObjectFromWindow(child,static_cast<DWORD>(OBJID_CLIENT),IID_IAccessible,accessible.put_void()));VARIANT self;VariantInit(&self);self.vt=VT_I4;self.lVal=CHILDID_SELF;BSTR label=nullptr;check(accessible->get_accName(self,&label));std::wstring actual=label?label:L"";SysFreeString(label);if(actual!=expected)throw std::runtime_error("accessible control name missing");
 }
 void settled(HWND child){for(int n=0;n<120&&!IsWindowEnabled(GetDlgItem(child,100));n++)pump(50);if(!IsWindowEnabled(GetDlgItem(child,100)))throw std::runtime_error("request did not settle");}
+void selectPlan(HWND list){LVFINDINFOW find{};find.flags=LVFI_STRING;find.psz=L"Plan RDC.pdf";int row=ListView_FindItem(list,-1,&find);if(row<0)throw std::runtime_error("Plan missing");ListView_SetItemState(list,-1,0,LVIS_SELECTED|LVIS_FOCUSED);ListView_SetItemState(list,row,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);}
+void clickColumn(HWND child,HWND list,int column){NMLISTVIEW event{};event.hdr.hwndFrom=list;event.hdr.idFrom=202;event.hdr.code=LVN_COLUMNCLICK;event.iSubItem=column;SendMessageW(child,WM_NOTIFY,202,reinterpret_cast<LPARAM>(&event));}
 void smoke(wchar_t const* destination){
+ Presentation bad;bad.order[1]=bad.order[0];if(validPresentation(bad))throw std::runtime_error("duplicate column order accepted");bad=Presentation{};bad.widths[0]=-1;if(validPresentation(bad))throw std::runtime_error("invalid width accepted");
  Project p;p.id=L"p";p.name=L"Projet";Document unknown;
  if(matches(Filter{ViewKind::Offline},p,unknown)||matches(Filter{ViewKind::Unclassified},p,unknown)||matches(Filter{ViewKind::Conflict},p,unknown))throw std::runtime_error("unknown states were classified");
 
@@ -57,6 +61,19 @@ void smoke(wchar_t const* destination){
  auto list=GetDlgItem(child,202);auto details=GetDlgItem(child,203);for(int n=0;n<120&&ListView_GetItemCount(list)!=2;n++)pump(50);if(ListView_GetItemCount(list)!=2)throw std::runtime_error("catalog not loaded");ListView_SetItemState(list,0,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);pump(100);wchar_t buffer[8192];GetWindowTextW(details,buffer,8192);if(std::wstring(buffer).find(L"PROPRIÉTÉS")==std::wstring::npos||std::wstring(buffer).find(L"VIP-TC")==std::wstring::npos)throw std::runtime_error("properties missing");
 
  auto tree=GetDlgItem(child,201),refresh=GetDlgItem(child,100),open=GetDlgItem(child,101);
+ SendMessageW(child,WM_COMMAND,216,0);
+ if(Header_GetItemCount(ListView_GetHeader(list))!=ColumnCount)throw std::runtime_error("seven business columns missing");
+ wchar_t sync[100]{};ListView_GetItemText(list,0,6,sync,100);if(std::wstring(sync).empty())throw std::runtime_error("transfer state missing");
+ selectPlan(list);clickColumn(child,list,4);wchar_t version[40]{};ListView_GetItemText(list,0,4,version,40);if(std::wstring(version)!=L"2")throw std::runtime_error("ascending numeric version sort");
+ auto selectedRow=ListView_GetNextItem(list,-1,LVNI_SELECTED);wchar_t selectedName[100]{};ListView_GetItemText(list,selectedRow,0,selectedName,100);if(std::wstring(selectedName)!=L"Plan RDC.pdf")throw std::runtime_error("sort moved selection to wrong document");
+ clickColumn(child,list,4);ListView_GetItemText(list,0,4,version,40);if(std::wstring(version)!=L"12")throw std::runtime_error("descending numeric version sort");
+ SetFocus(list);BYTE multiKeys[256],savedKeys[256];GetKeyboardState(savedKeys);memcpy(multiKeys,savedKeys,sizeof(multiKeys));multiKeys[VK_CONTROL]=0x80;SetKeyboardState(multiKeys);MSG all{};all.hwnd=list;all.message=WM_KEYDOWN;all.wParam='A';view->TranslateAccelerator(&all);SetKeyboardState(savedKeys);
+ if(ListView_GetSelectedCount(list)!=2||IsWindowEnabled(open)||IsWindowEnabled(GetDlgItem(child,102)))throw std::runtime_error("ambiguous multi-selection action");
+ view->Refresh();settled(child);if(ListView_GetSelectedCount(list)!=2)throw std::runtime_error("refresh lost multi-selection");
+ selectPlan(list);
+ ListView_SetColumnWidth(list,1,140);int columnOrder[ColumnCount]={0,4,1,2,3,5,6};ListView_SetColumnOrderArray(list,ColumnCount,columnOrder);
+ NMHEADERW resized{};resized.hdr.hwndFrom=ListView_GetHeader(list);resized.hdr.code=HDN_ENDTRACKW;SendMessageW(child,WM_NOTIFY,0,reinterpret_cast<LPARAM>(&resized));pump(50);
+
  accessibleName(tree,L"Navigation documentaire");accessibleName(list,L"Documents du projet");accessibleName(details,L"Propriétés du document, lecture seule");
  SetFocus(refresh);MSG tab{};tab.hwnd=refresh;tab.message=WM_KEYDOWN;tab.wParam=VK_TAB;view->TranslateAccelerator(&tab);if(GetFocus()!=open)throw std::runtime_error("Tab navigation failed");
  BYTE keys[256],original[256];GetKeyboardState(original);memcpy(keys,original,sizeof(keys));keys[VK_SHIFT]=0x80;SetKeyboardState(keys);tab.hwnd=open;view->TranslateAccelerator(&tab);SetKeyboardState(original);if(GetFocus()!=refresh)throw std::runtime_error("Shift Tab navigation failed");
@@ -65,7 +82,7 @@ void smoke(wchar_t const* destination){
  if(!conflictNav||TreeView_GetNextSibling(tree,conflictNav))throw std::runtime_error("six navigation views missing");
  for(auto item:{TreeView_GetChild(tree,typeNav),inboxNav,offlineNav,conflictNav}){TreeView_SelectItem(tree,item);pump(30);if(ListView_GetItemCount(list)!=1)throw std::runtime_error("business navigation filter");}
  TreeView_SelectItem(tree,TreeView_GetChild(tree,typeNav));SendMessageW(child,WM_COMMAND,101,0);settled(child);
- TreeView_SelectItem(tree,TreeView_GetChild(tree,phaseNav));SendMessageW(child,WM_COMMAND,101,0);settled(child);
+ TreeView_SelectItem(tree,TreeView_GetChild(tree,phaseNav));selectPlan(list);SendMessageW(child,WM_COMMAND,101,0);settled(child);
  SendMessageW(child,WM_COMMAND,215,0);SetWindowTextW(search,L"pixerecourt plan");pump(250);if(ListView_GetItemCount(list)!=1)throw std::runtime_error("accent-insensitive combined search");
  SetWindowTextW(search,L"introuvable");pump(250);if(ListView_GetItemCount(list)!=0||IsWindowEnabled(open))throw std::runtime_error("empty search still permits open");
  SendMessageW(child,WM_COMMAND,215,0);
@@ -74,13 +91,18 @@ void smoke(wchar_t const* destination){
  // Status choices are sorted: approuve first, en_cours second.
  SendMessageW(states,CB_SETCURSEL,2,0);SendMessageW(child,WM_COMMAND,MAKEWPARAM(214,CBN_SELCHANGE),reinterpret_cast<LPARAM>(states));if(ListView_GetItemCount(list)!=0)throw std::runtime_error("filters are not combined");
  SendMessageW(child,WM_COMMAND,215,0);if(ListView_GetItemCount(list)!=2)throw std::runtime_error("filter reset");
- screenshot(child,destination);
+ selectPlan(list);screenshot(child,destination);
  auto root=TreeView_GetRoot(tree),project=TreeView_GetChild(tree,root);TreeView_Expand(tree,project,TVE_COLLAPSE);view->Refresh();settled(child);if(TreeView_GetRoot(tree)!=root||(TreeView_GetItemState(tree,project,TVIS_EXPANDED)&TVIS_EXPANDED))throw std::runtime_error("unchanged catalog reset navigation");
  MoveWindow(child,0,0,780,800,TRUE);pump(50);if(!IsWindowVisible(GetDlgItem(child,103)))throw std::runtime_error("narrow properties action missing");SendMessageW(child,WM_COMMAND,103,0);if(!IsWindowVisible(details)||IsWindowVisible(list))throw std::runtime_error("narrow properties unavailable");
  auto narrow=fs::path(destination);narrow.replace_filename(L"shell-prototype-narrow.png");screenshot(child,narrow.c_str());SendMessageW(child,WM_COMMAND,103,0);
  MoveWindow(parent,20,20,2000,1300,TRUE);MoveWindow(child,0,0,1920,1200,TRUE);SendMessageW(child,WM_DPICHANGED,MAKEWPARAM(144,144),0);pump(50);RECT button;GetClientRect(refresh,&button);if(button.right!=165||ListView_GetColumnWidth(list,0)!=390)throw std::runtime_error("DPI geometry not scaled");
  auto scaled=fs::path(destination);scaled.replace_filename(L"shell-prototype-dpi150.png");screenshot(child,scaled.c_str());SendMessageW(child,WM_DPICHANGED,MAKEWPARAM(96,96),0);MoveWindow(child,0,0,1280,800,TRUE);
- SendMessageW(child,WM_COMMAND,101,0);settled(child);SendMessageW(child,WM_COMMAND,102,0);settled(child);
+ // Recreate the same view with its account still active: widths/order/sort reload.
+ view->Refresh();check(view->DestroyViewWindow());check(view->CreateViewWindow(nullptr,&settings,&host,&rect,&child));settled(child);list=GetDlgItem(child,202);details=GetDlgItem(child,203);
+ int restoredOrder[ColumnCount]{};ListView_GetColumnOrderArray(list,ColumnCount,restoredOrder);
+ if(ListView_GetColumnWidth(list,1)!=140||restoredOrder[1]!=4)throw std::runtime_error("presentation did not persist across recreation");
+ ListView_GetItemText(list,0,4,version,40);if(std::wstring(version)!=L"12")throw std::runtime_error("sort preference did not persist");
+ selectPlan(list);SendMessageW(child,WM_COMMAND,101,0);settled(child);SendMessageW(child,WM_COMMAND,102,0);settled(child);
  // The test broker invalidates its identity after the document action.
  view->Refresh();for(int n=0;n<120&&ListView_GetItemCount(list);n++)pump(50);if(ListView_GetItemCount(list)!=0)throw std::runtime_error("stale identity retained");
  view->Refresh();check(view->DestroyViewWindow());

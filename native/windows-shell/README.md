@@ -1,4 +1,4 @@
-# ArchiOffice Drive — navigation documentaire Explorer, lot 3
+# ArchiOffice Drive — liste documentaire Explorer, lots 3 et 4
 
 Vue native Windows x64 enregistrée dans **Ce PC → ArchiOffice Drive**, séparée du lecteur A: et du fournisseur CFAPI existant. Le client ArchiOffice doit être ouvert et A: actif. Les projets déjà montés sont les seuls proposés.
 
@@ -8,12 +8,41 @@ Vue native Windows x64 enregistrée dans **Ce PC → ArchiOffice Drive**, sépar
 - Recherche sur nom, projet, phase, type documentaire, format, indice et statut : plusieurs mots se combinent avec ET, sans distinction de casse ni d’accents. Ctrl+F place le focus dans la recherche.
 - Filtres projet, phase, type documentaire et statut, combinables entre eux, avec la recherche et la vue choisie. « Effacer » remet tous les critères à zéro. Une valeur disparue du catalogue reste sélectionnée et signalée comme absente, sans élargissement silencieux des résultats.
 - Liste et propriétés en lecture seule. Les métadonnées restent liées à la version du manifeste : une observation d’une autre version ne classe pas arbitrairement le fichier monté.
-- Colonnes Document, Phase, Type documentaire, Indice, Version et Statut. Les champs absents restent indiqués par un tiret.
+- Sept colonnes : Document, Phase, Type documentaire, Indice, Version, Statut et Synchronisation. Les champs absents restent indiqués par un tiret.
 - Sélection par souris/clavier, ouverture par double-clic/Entrée, F5 ou bouton Actualiser. Les séparateurs sont déplaçables ; sous 850 unités logiques, le bouton Propriétés permet d’alterner avec la liste des documents. La géométrie, les colonnes et les polices suivent le DPI Windows.
 - « Ouvrir » résout un identifiant opaque dans le manifeste actif et ouvre le fichier physique canonique utilisé par A:, sans créer une seconde copie de travail.
 - « Ouvrir dans ArchiOffice » ouvre Documents sur le projet et met le document en évidence après vérification de sa présence dans les données chargées.
 
 Le catalogue local est relu toutes les cinq secondes. Une réponse identique ne reconstruit pas la vue ; un changement conserve la sélection, les branches repliées et les positions de défilement. L’enrichissement métier réutilise le cache local isolé par utilisateur/cabinet/appareil/projet du lot 2 et ses API VFS authentifiées, sans télécharger les fichiers. Sa lecture distante se renouvelle au plus une fois par minute. Les propriétés affichent la date de l’observation et signalent une donnée en cache dont l’actualisation est en attente. Il ne s’applique qu’à une version identique à celle du manifeste monté. Cette vue ne rafraîchit pas automatiquement les fichiers de A: : la commande existante de mise à jour du catalogue conserve ce rôle.
+
+## Liste documentaire et présentation (lot 4)
+
+Un clic sur un en-tête trie la liste ; un second inverse le sens. La flèche indique
+le tri actif. La version technique est triée numériquement, les textes de manière
+naturelle ; les valeurs métier absentes restent en fin de liste. Les colonnes sont
+redimensionnables et réordonnables par glisser-déposer. Les identifiants de colonnes
+restent stables après déplacement, et la sélection reste liée au document, pas au
+numéro de ligne résultant du tri.
+
+Les notions restent distinctes : **Indice** est l’indice métier, **Version** la
+version technique du catalogue A:, et **Synchronisation** l’état d’envoi suivi par
+l’agent. Le panneau de propriétés explicite ces libellés. « Dernier envoi accepté »
+ne garantit pas l’absence de retouches plus récentes ; un état inconnu est indiqué
+comme indisponible, jamais comme synchronisé.
+
+La sélection multiple utilise Ctrl/Maj et Ctrl+A dans la liste. Elle est conservée
+lors d’un tri ou d’une actualisation dans le même cabinet, pour les documents
+encore visibles. Les propriétés montrent un résumé et les commandes d’ouverture
+sont désactivées lorsque plusieurs documents sont sélectionnés : aucune action
+n’est appliquée arbitrairement au premier fichier.
+
+L’ordre et la largeur des colonnes, le tri et les séparateurs sont mémorisés par
+compte/cabinet/poste dans les préférences utilisateur Windows. Les dimensions sont
+stockées en unités logiques et restent adaptées au changement de DPI. Aucun nom
+de fichier, identifiant de document, sélection ou texte de recherche n’y est
+conservé. Des préférences absentes ou invalides ramènent aux valeurs par défaut.
+Le bouton **Présentation par défaut** rétablit cette présentation sans effacer les
+critères de recherche ; **Effacer** agit sur les critères sans modifier le tri.
 
 ## Sens des vues et périmètre
 
@@ -66,14 +95,17 @@ L’installateur enregistre le CLSID sous HKLM après installation du runtime VC
 Sur Windows, `node native/windows-shell/smoke.mjs` instancie la vraie classe COM dans un hôte IShellBrowser, exerce les contrôles Win32 et le broker livré avec des fichiers synthétiques, capture `build/shell-prototype.png`, ouvre le fichier canonique, appelle le lien applicatif, invalide l’identité et vérifie la libération COM. Les contrôles reçoivent des noms accessibles MSAA ; le test vérifie ces noms et le parcours Tab/Maj+Tab. Il capture aussi une fenêtre étroite et simule un changement à 150 % pour vérifier les dimensions. Le maintien d’une branche repliée après un catalogue inchangé est vérifié. L’enregistrement est répété puis retiré. Le workflow Windows conserve DLL, outil et capture ; le workflow installateur produit le NSIS de test. Le test d’hôte exerce aussi les six vues, la recherche insensible aux accents,
 les filtres combinés, le cas sans résultat, l’effacement des critères et l’ouverture
 du même fichier depuis plusieurs classements. Le test du courtier CFAPI mesure la
-disponibilité avant/après hydratation. Le test d’hôte ne remplace pas une recette
+disponibilité avant/après hydratation. Le test vérifie aussi le tri numérique (versions 2/12), la sélection après tri,
+Ctrl+A sans ouverture ambiguë, la conservation après actualisation, le déplacement
+des colonnes et le rechargement des préférences après recréation de la vue.
+Le test d’hôte ne remplace pas une recette
 dans explorer.exe sur un poste réel.
 
 ## Limites de cette étape
 
 Pas d’aperçu PDF, recherche dans le contenu des fichiers, édition des propriétés, action de classement, résolution de conflits ni déploiement automatique de la version de test. L’arbre métier appartient à la vue personnalisée ; le volet Windows standard n’énumère pas les projets comme des sous-dossiers Shell. Les limites existantes du montage restent dix projets, cent fichiers par projet, cinquante Mio par fichier.
 
-## Réception avec les documents du cabinet
+## Réception Windows 11 avec les documents du cabinet
 
 Dans VIP-TC monté dans A:, retrouver un même document depuis Par projet, Par phase
 et Par type, puis vérifier que les trois ouvertures ciblent le même fichier.
@@ -84,3 +116,11 @@ Couper le réseau, changer de cabinet, redimensionner à 780 puis 1280 unités e
 parcourir recherche/filtres/arbre/liste/propriétés avec Tab et Maj+Tab.
 La résolution des conflits et l’activation explicite du hors-ligne restent les
 actions des lots suivants.
+
+Pour le lot 4, vérifier les sept colonnes contre les données ArchiOffice. Trier
+les versions et les indices séparément ; déplacer la colonne Version, la
+redimensionner, changer de DPI puis fermer et rouvrir la vue. Vérifier le retour
+de la présentation et l’ouverture du bon document après le tri. Sélectionner
+plusieurs lignes avec Ctrl/Maj, actualiser, puis vérifier que les commandes
+d’ouverture restent désactivées jusqu’à la sélection d’un seul document. Changer
+de cabinet et vérifier que les préférences et la sélection ne sont pas mélangées.
