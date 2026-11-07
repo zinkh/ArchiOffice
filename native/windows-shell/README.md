@@ -1,13 +1,16 @@
-# ArchiOffice Drive : prototype Shell Windows (lot 1)
+# ArchiOffice Drive : prototype Shell Windows (lots 1 et 2)
 
 Extension COM x64 native avec `IShellFolder`, `IPersistFolder2` et une vue
 `IShellView` hébergée par l’Explorateur. Trois volets : navigation, documents,
-propriétés. Aucun serveur web ni fenêtre Electron ne remplace l’Explorateur.
+propriétés. Le lot 2 raccorde les métadonnées métier via le client et l’agent
+existants. Aucun serveur web ni fenêtre Electron ne remplace l’Explorateur.
 
 ## Installer et ouvrir
 
 Prérequis : Windows 11 x64, client ArchiOffice et lecteur A: activé avec vos
-projets réels. Télécharger l’artefact **ArchiOffice-Drive-Shell-prototype-x64** du
+projets réels. Le client de test et le serveur doivent inclure le raccordement
+du lot 2 pour afficher les propriétés métier ; avec un client ou serveur antérieur,
+la vue locale fonctionne et indique les métadonnées indisponibles. Télécharger l’artefact **ArchiOffice-Drive-Shell-prototype-x64** du
 workflow **Windows Shell prototype**, puis extraire tous ses fichiers ensemble.
 Dans PowerShell x64, sous le même compte que l’Explorateur, sans élévation :
 
@@ -42,9 +45,53 @@ ne sont pas prises en charge par cette première version.
 - Glisser les séparateurs entre les volets pour ajuster leur largeur.
 - Propriétés : nom, emplacement, nature, taille et date locale de modification.
 
-Le lot 1 n’affiche aucun indice, version ou état de synchronisation supposé.
-Le raccordement du catalogue et de l’identité cabinet est le lot 2 ; les vues par
-phase/type, recherche, métadonnées métier et aperçus PDF/images viennent ensuite.
+Le panneau de droite affiche les propriétés métier réellement disponibles :
+projet, nom, phase, type documentaire, indice, statut, droits et date de lecture.
+Les champs absents restent « Non renseigné ». Les droits affichés sont une
+observation serveur ; les commandes continuent d’appliquer les contrôles existants.
+Les vues par phase/type, la recherche et les aperçus PDF/images viennent ensuite.
+
+### Catalogue métier de lecture (lot 2)
+
+Le courtier relit les manifestes des projets actuellement montés, avec contrôle
+d’identité et de leur empreinte, sans changer leur format ni leurs chemins.
+L’agent interroge les routes desktop existantes avec le cabinet actif. Le serveur
+fournit `projectId`, `phase` et `documentType` à partir des documents existants ;
+aucune table ou migration n’est ajoutée. Les métadonnées métier et les permissions
+restent séparées des métadonnées CFAPI utilisées pour hydrater les fichiers.
+
+Le client écrit atomiquement un fichier `<racine-identité>.shell.json`, **à côté**
+de la racine exposée dans A:, jamais à l’intérieur. Il ne contient ni jeton, ni
+URL de stockage, ni copie de document. La DLL vérifie la racine, l’empreinte
+d’identité, le format et un bail d’affichage de 25 secondes. Le client renouvelle
+cette projection environ toutes les dix secondes après contrôle du coffre et
+des projets montés ; la vue la relit toutes les cinq secondes. Un changement de
+racine recharge la navigation, sans conserver la sélection de l’ancien cabinet.
+Une projection expirée ou invalide masque les propriétés métier. Ces délais ne
+promettent pas une révocation instantanée des octets déjà hydratés dans A:.
+
+Les métadonnées serveur sont relues au plus une fois par minute et par sélection
+de documents. Une panne réseau conserve une observation datée dans un cache
+privé par utilisateur/cabinet/appareil/projet/sélection ; elle est marquée ancienne
+après une minute. Un refus connu (401/402/403/404) ou une réponse incohérente
+invalide les informations métier en cache. Le cache ne permet pas d’activer
+Drive sans autorisation locale valide. L’état d’envoi est relu dans la file locale
+existante et n’est pas repris d’un ancien état en cache.
+
+Les trois notions sont affichées séparément :
+
+- **Indice métier** : valeur `indice` observée dans ArchiOffice.
+- **Version du catalogue A:** : version inscrite dans le manifeste de cette
+  génération, qui ne change pas implicitement après un envoi.
+- **Version distante observée** : dernière version lue sur le serveur. Elle ne
+  signifie pas que le fichier de A: a été remplacé.
+- **État d’envoi** : état suivi par l’agent. « Dernier envoi accepté » ne garantit
+  pas l’absence de retouches locales plus récentes.
+
+Le catalogue distant ne remplace jamais les fichiers, même si la phase, le type,
+l’indice ou la version distante changent. Le renouvellement volontaire du
+catalogue A: reste le parcours existant. Pas de nouvelles actions documentaires
+ni d’écriture depuis l’extension dans ce lot.
 La navigation interne n’alimente pas encore l’adresse et l’historique précédent/
 suivant de l’Explorateur. Pas de menu contextuel, renommage, suppression, glisser-
 déposer, sélection multiple ni miniatures. Les colonnes métier et leur
@@ -80,7 +127,10 @@ native/windows-shell/build/Release/archioffice-shell-smoke.exe native/windows-sh
 
 Le test natif héberge la véritable DLL et vérifie la fabrique COM, le PIDL,
 les trois contrôles, le redimensionnement (640/1200/1920), le clavier et la
-libération des objets. Il ne monte ni ne modifie A:. La CI Windows vérifie aussi
+libération des objets. Il vérifie aussi le rejet des projections expirées,
+étrangères ou malformées, ainsi que la lecture native d’une fixture synthétique
+produite par le véritable module de projection Electron. Il ne monte ni ne
+modifie A:. La CI Windows vérifie aussi
 l’installation utilisateur, l’activation COM enregistrée et la suppression des
 clés. Ces tests ne prouvent pas que Windows 11 choisira cette vue dans son
 Explorateur ; la réception manuelle ci-dessous reste une condition de passage.
@@ -96,6 +146,11 @@ résultat et captures. Ne pas annoncer le jalon validé sans ces observations.
       fenêtre séparée. Noter toute substitution par une vue Windows standard.
 - [ ] Parcourir VIP-TC, puis son dossier de phase ; sélectionner quelques vrais
       fichiers, vérifier noms, tailles, dates et emplacements contre A:.
+- [ ] Comparer phase, type, indice et statut aux données ArchiOffice ; distinguer
+      version du catalogue, version distante et état d’envoi.
+- [ ] Couper le réseau : métadonnées datées du même cabinet ; aucun état d’envoi
+      inventé. Refuser le coffre ou changer de cabinet : propriétés masquées au
+      plus tard à l’expiration du bail et à la relecture de la vue.
 - [ ] Ouvrir un document, l’enregistrer avec l’édition existante activée ; vérifier
       la nouvelle version et l’état d’envoi **dans ArchiOffice** à ce stade.
 - [ ] Tester Entrée, flèches, Tab/Maj+Tab, Retour arrière, Alt+Haut, F5, focus.

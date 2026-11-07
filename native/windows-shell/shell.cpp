@@ -1,5 +1,5 @@
 // Experimental per-user namespace. A: remains the only source of file content.
-// No account, token, catalogue, sync state or document copy lives in this DLL.
+// The DLL reads a leased business projection, never credentials or document copies.
 #include <windows.h>
 #include <shlobj.h>
 #include <shellapi.h>
@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <new>
 #include <cwchar>
+#include "catalog.hpp"
 
 static const CLSID CLSID_Drive = {0x67b0f7be,0x5f65,0x4aef,{0x9d,0x4b,0xb1,0x33,0xa9,0x91,0xd9,0x11}};
 static const wchar_t* ClassId = L"{67B0F7BE-5F65-4AEF-9D4B-B133A991D911}";
@@ -25,6 +26,8 @@ class View final : public IShellView {
     wchar_t windowClass[100]{};
     std::wstring directory = L"A:\\";
     std::vector<Entry> entries;
+    archioffice::Catalog catalog;
+    std::wstring driveRoot,viewRoot;
     int left = 190, right = 290, drag = 0;
     int scale(int value) const { return MulDiv(value, window ? GetDpiForWindow(window) : 96, 96); }
     void layout() {
@@ -42,10 +45,17 @@ class View final : public IShellView {
     std::wstring childPath(int index) const {
         return directory + entries[static_cast<size_t>(index)].name;
     }
+    void metadata() {
+        catalog.clear();
+        if(driveAvailable())catalog=archioffice::readCatalog(driveRoot);
+    }
     void details() {
+        if(!driveAvailable()||driveRoot!=viewRoot) {
+            catalog.clear();SetWindowTextW(properties,L"Connexion du lecteur modifiée. Appuyez sur F5 pour recharger cette vue.");return;
+        }
         int index = ListView_GetNextItem(list,-1,LVNI_SELECTED);
         if(index < 0 || static_cast<size_t>(index) >= entries.size()) {
-            SetWindowTextW(properties,L"Propriétés\r\n\r\nSélectionnez un document.\r\n\r\nLes fichiers proviennent du lecteur A: existant.\r\n\r\nLes métadonnées métier et les aperçus seront raccordés dans les lots suivants."); return;
+            SetWindowTextW(properties,L"Propriétés\r\n\r\nSélectionnez un document.\r\n\r\nLes fichiers proviennent du lecteur A: existant.\r\n\r\nLes propriétés métier disponibles s’affichent à la sélection. Les aperçus seront ajoutés ensuite."); return;
         }
         const auto& e = entries[static_cast<size_t>(index)];
         std::wstring text = L"Propriétés\r\n\r\n" + e.name + L"\r\n\r\nEmplacement\r\n" + childPath(index);
@@ -59,10 +69,14 @@ class View final : public IShellView {
             GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT,TIME_NOSECONDS,&local,nullptr,hour,80);
             text += L"\r\n\r\nModifié sur le poste\r\n" + std::wstring(date) + L" " + hour;
         }
-        text += L"\r\n\r\nIndice métier, version technique et état d’envoi : non fournis par cette vue prototype.\r\n\r\nAperçu : prévu dans un lot ultérieur.";
+        auto found=catalog.find(directory.substr(3)+e.name);
+        if(found!=catalog.end())text+=L"\r\n\r\n"+found->second.properties;
+        else if(!(e.attributes&FILE_ATTRIBUTE_DIRECTORY))text+=L"\r\n\r\nCatalogue métier indisponible. Activez le client compatible ou attendez son actualisation.";
+        text+=L"\r\n\r\nAperçu : prévu dans un lot ultérieur.";
         SetWindowTextW(properties,text.c_str());
     }
-    bool driveAvailable() const {
+    bool driveAvailable() {
+        driveRoot.clear();
         // Match the broker-owned per-account namespace, never an unrelated A:.
         wchar_t target[32768]{};
         if(!QueryDosDeviceW(L"A:",target,32768)) return false;
@@ -72,10 +86,11 @@ class View final : public IShellView {
         CoTaskMemFree(roaming);
         std::wstring actual=target;
         if(actual.size()!=prefix.size()+64 || _wcsnicmp(actual.c_str(),prefix.c_str(),prefix.size())!=0) return false;
-        return actual.find_first_not_of(L"0123456789abcdef",prefix.size())==std::wstring::npos;
+        if(actual.find_first_not_of(L"0123456789abcdef",prefix.size())!=std::wstring::npos)return false;
+        driveRoot=actual.substr(4);return true;
     }
     void load() {
-        ListView_DeleteAllItems(list); entries.clear();
+        ListView_DeleteAllItems(list); entries.clear();metadata();viewRoot=driveRoot;
         SetWindowTextW(location,(L"ArchiOffice Drive  /  " + directory).c_str());
         EnableWindow(navigation,TRUE);
         if(!driveAvailable()) {
@@ -111,7 +126,7 @@ class View final : public IShellView {
         if(directory.size()>3) { directory.pop_back(); auto slash=directory.find_last_of(L'\\'); directory.resize(slash+1); load(); }
     }
     void open() {
-        if(!driveAvailable()){load();return;}
+        if(!driveAvailable()||driveRoot!=viewRoot){directory=L"A:\\";load();return;}
         int i=ListView_GetNextItem(list,-1,LVNI_SELECTED);
         if(i<0 || static_cast<size_t>(i)>=entries.size()) return;
         auto file=childPath(i);
@@ -128,6 +143,10 @@ class View final : public IShellView {
         if(msg==WM_NCCREATE) { self=static_cast<View*>(reinterpret_cast<CREATESTRUCTW*>(lp)->lpCreateParams); self->window=hwnd; SetWindowLongPtrW(hwnd,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self)); }
         if(!self) return DefWindowProcW(hwnd,msg,wp,lp);
         switch(msg) {
+        case WM_TIMER:
+            self->metadata();
+            if(self->driveRoot!=self->viewRoot){self->directory=L"A:\\";self->load();}else self->details();
+            return 0;
         case WM_SIZE: self->layout(); return 0;
         case WM_SETFOCUS: SetFocus(self->list); return 0;
         case WM_DPICHANGED_AFTERPARENT: self->layout(); return 0;
@@ -223,7 +242,7 @@ public:
         NONCLIENTMETRICSW metrics{sizeof(metrics)};if(SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0))font=CreateFontIndirectW(&metrics.lfMessageFont);
         for(HWND control:{location,navigation,list,properties})SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(font?font:GetStockObject(DEFAULT_GUI_FONT)),TRUE);
         int column=0;for(auto label:{L"Document",L"Nature",L"Taille (octets)"}){LVCOLUMNW c{};c.mask=LVCF_TEXT|LVCF_WIDTH;c.pszText=const_cast<wchar_t*>(label);c.cx=scale(column==0?280:130);ListView_InsertColumn(list,column++,&c);}
-        layout();load();*out=window;return S_OK;
+        layout();load();SetTimer(window,1,5000,nullptr);*out=window;return S_OK;
     }
     HRESULT STDMETHODCALLTYPE DestroyViewWindow() override{
         if(window){DestroyWindow(window);window=nullptr;}

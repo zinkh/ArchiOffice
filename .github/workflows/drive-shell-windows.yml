@@ -4,6 +4,9 @@ on:
     branches: [main]
     paths:
       - 'native/windows-shell/**'
+      - 'electron/windowsShellCatalog.cjs'
+      - 'server/desktop/agent/shellMetadata.ts'
+      - 'tests/driveShell*.test.ts'
       - '.github/workflows/drive-shell-windows.yml'
   workflow_dispatch:
 permissions:
@@ -14,12 +17,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
       - name: Configure x64 Shell extension
         run: cmake -S native/windows-shell -B native/windows-shell/build -A x64
       - name: Compile extension and native host test
         run: cmake --build native/windows-shell/build --config Release
       - name: Exercise IShellView contract without changing A
-        run: native/windows-shell/build/Release/archioffice-shell-smoke.exe native/windows-shell/build/Release/archioffice-drive-shell.dll
+        shell: pwsh
+        run: |
+          $root = node native/windows-shell/catalog-fixture.mjs "$env:RUNNER_TEMP/shell-catalog"
+          native/windows-shell/build/Release/archioffice-shell-smoke.exe native/windows-shell/build/Release/archioffice-drive-shell.dll "$root"
       - name: Verify per-user installation, COM activation and removal
         shell: pwsh
         run: |

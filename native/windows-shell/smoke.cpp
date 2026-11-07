@@ -3,8 +3,31 @@
 #include <commctrl.h>
 #include <stdexcept>
 #include <iostream>
+#include "catalog.hpp"
 static const CLSID ClassId={0x67b0f7be,0x5f65,0x4aef,{0x9d,0x4b,0xb1,0x33,0xa9,0x91,0xd9,0x11}};
 static void require(bool condition,const char* message){if(!condition)throw std::runtime_error(message);}
+static void metadataContract() {
+ using namespace winrt::Windows::Data::Json;
+ const double now=1800000000000.0;const std::wstring root=L"C:\\cache\\"+std::wstring(64,L'a');
+ auto data=JsonObject::Parse(LR"({"schema":1,"projects":[{"projectId":"p","name":"VIP-TC"}],"documents":[]})");
+ data.SetNamedValue(L"namespace",JsonValue::CreateStringValue(root));data.SetNamedValue(L"identityKey",JsonValue::CreateStringValue(std::wstring(64,L'a')));
+ data.SetNamedValue(L"expiresAt",JsonValue::CreateNumberValue(now+25000));
+ auto document=JsonObject::Parse(LR"({"relativePath":"_VIP\\_APD\\_Plan.pdf","nodeId":"doc:d","projectId":"p","catalogVersion":3,"observedAt":1799999999000,"stale":false,"transferState":"queued","business":{"nodeId":"doc:d","projectId":"p","name":"Plan.pdf","phase":"APD","documentType":"PLAN","indice":"C","remoteVersion":8,"status":"en_cours","readOnlyReason":null,"permissions":{"read":true,"write":false,"delete":false}}})");
+ auto documents=data.GetNamedArray(L"documents");documents.Append(document);
+ auto parsed=archioffice::parseCatalog(std::wstring(data.Stringify()),root,now);
+ require(parsed.size()==1,"one business document");
+ const auto& properties=parsed.begin()->second.properties;
+ require(properties.find(L"Indice métier\r\nC")!=std::wstring::npos,"business index");
+ require(properties.find(L"Version du catalogue A:\r\n3")!=std::wstring::npos&&properties.find(L"Version distante observée\r\n8")!=std::wstring::npos,"distinct versions");
+ auto refused=[&](const std::wstring& input,const std::wstring& expectedRoot,double time){bool caught=false;try{archioffice::parseCatalog(input,expectedRoot,time);}catch(...){caught=true;}require(caught,"invalid metadata rejected");};
+ refused(std::wstring(data.Stringify()),root,now+26000);
+ refused(std::wstring(data.Stringify()),L"C:\\cache\\"+std::wstring(64,L'b'),now);
+ documents.Append(document);refused(std::wstring(data.Stringify()),root,now);documents.RemoveAtEnd();
+ document.SetNamedValue(L"relativePath",JsonValue::CreateStringValue(L"_VIP\\..\\private.pdf"));refused(std::wstring(data.Stringify()),root,now);
+ document.SetNamedValue(L"relativePath",JsonValue::CreateStringValue(L"_VIP\\_APD\\_Plan.pdf"));
+ document.GetNamedObject(L"business").GetNamedObject(L"permissions").SetNamedValue(L"read",JsonValue::CreateBooleanValue(false));
+ refused(std::wstring(data.Stringify()),root,now);
+}
 class Host final:public IShellBrowser {
 public:
  HWND window;
@@ -31,7 +54,10 @@ public:
 };
 int wmain(int argc,wchar_t** argv){
  try {
-  require(argc==2,"Pass the DLL path");require(SUCCEEDED(CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED)),"COM init");
+  require(argc==2||argc==3,"Pass the DLL path and optional catalog root");require(SUCCEEDED(RoInitialize(RO_INIT_SINGLETHREADED)),"WinRT init");
+  metadataContract();
+  if(argc==3){auto catalog=archioffice::readCatalog(argv[2]);require(catalog.size()==1,"shipping broker JSON read by native parser");
+    require(catalog.begin()->second.properties.find(L"Indice métier\r\nC")!=std::wstring::npos,"producer business index");}
   auto dll=LoadLibraryW(argv[1]);require(dll!=nullptr,"DLL load");
   auto get=reinterpret_cast<HRESULT(__stdcall*)(REFCLSID,REFIID,void**)>(GetProcAddress(dll,"DllGetClassObject"));
   auto unload=reinterpret_cast<HRESULT(__stdcall*)()>(GetProcAddress(dll,"DllCanUnloadNow"));require(get&&unload,"exports");
@@ -65,7 +91,7 @@ int wmain(int argc,wchar_t** argv){
   dll=LoadLibraryW(argv[1]);require(dll!=nullptr,"reload DLL");
   get=reinterpret_cast<HRESULT(__stdcall*)(REFCLSID,REFIID,void**)>(GetProcAddress(dll,"DllGetClassObject"));
   factory=nullptr;require(SUCCEEDED(get(ClassId,IID_IClassFactory,reinterpret_cast<void**>(&factory))),"factory after reload");factory->Release();
-  FreeLibrary(dll);CoUninitialize();
+  FreeLibrary(dll);RoUninitialize();
   std::cout<<"IShellView: factory, persistence, three panes, resizing, keyboard and cleanup passed\n";return 0;
- } catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
+ } catch(const winrt::hresult_error& e){std::cerr<<"WinRT failure "<<std::hex<<static_cast<unsigned long>(e.code())<<"\n";return 1;} catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}
 }

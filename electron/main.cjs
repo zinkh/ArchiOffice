@@ -1,3 +1,4 @@
+const { createWindowsShellCatalog } = require('./windowsShellCatalog.cjs');
 const { createWindowsMultiDrive } = require('./windowsDriveMulti.cjs');
 const { app, BrowserWindow, Menu, safeStorage, ipcMain, Notification, dialog, shell, Tray, nativeImage } = require('electron');
 const path = require('path');
@@ -371,6 +372,7 @@ function registerDataLocationIpc() {
 
 // Le coffre reste dans le serveur local ; le worker ne reçoit des jetons que par IPC.
 let windowsDrivePreview = null;
+let windowsShellCatalog = null;
 function startDriveAgent() {
   if (!['win32', 'darwin'].includes(process.platform) || !driveTrust.cloudOrigin || !Object.keys(driveTrust.publicKeys).length) return;
   const { cwd } = resolvePaths();
@@ -415,6 +417,11 @@ function startDriveAgent() {
     login:(enabled)=>{if(process.platform==='win32')app.setLoginItemSettings({openAtLogin:enabled});},
     enabled:()=>process.platform==='win32'&&process.env.ARCHIOFFICE_DRIVE_WINDOWS_PREVIEW!=='0'&&fs.existsSync(nativeExecutable)});
   windowsDrivePreview.resume();
+  if(process.platform==='win32') {
+    windowsShellCatalog=createWindowsShellCatalog({drive:windowsDrivePreview,agent:driveAgent,vault:()=>requestVault(serverProcess),
+      namespaceRoot:path.join(app.getPath('userData'),'drive-windows-namespaces'),cacheRoot:path.join(app.getPath('userData'),'drive-shell-metadata')});
+    windowsShellCatalog.start();
+  }
   ipcMain.handle('desktop:drive-windows-activate',async(event)=> {
     if(!trustedDriveSender(event))throw new Error('Accès refusé');return windowsDrivePreview.activate();
   });
@@ -632,6 +639,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  void windowsShellCatalog?.stop();
   windowsDrivePreview?.shutdown();
   driveAgent?.stop();
   if (driveTray && !driveTray.isDestroyed()) driveTray.destroy();
