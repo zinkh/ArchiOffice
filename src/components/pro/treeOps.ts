@@ -408,6 +408,24 @@ export function collectLigneIds(doc: { lots?: { chapitres?: { lignes?: any[] }[]
  * une désignation — ce sont les articles nouvellement ajoutés à envoyer à la
  * bibliothèque de prix du cabinet.
  */
+/** Désignations posées par défaut à la création d'une ligne : jamais un ouvrage à garder dans la bibliothèque. */
+const DESIGNATIONS_PAR_DEFAUT = new Set(['nouvel article', 'nouvel ouvrage']);
+
+/**
+ * Parmi les lignes nouvellement créées, celles qui valent d'entrer d'elles-mêmes dans la bibliothèque d'ouvrages :
+ * une vraie désignation (pas celle posée par défaut) ET au moins un prix ou une unité. Une ligne vide, ou chiffrée
+ * à zéro sans unité (création manuelle, copier-coller, génération par l'IA), n'est qu'un brouillon : l'y envoyer
+ * remplissait la bibliothèque d'articles vides. L'envoi explicite (« Envoyer vers la bibliothèque ») reste possible
+ * pour n'importe quelle ligne.
+ */
+export function lignesPourBibliotheque<T extends { designation?: string; unite?: string; prixUnitaire?: number }>(lignes: T[]): T[] {
+  return lignes.filter(l => {
+    const designation = (l.designation ?? '').trim().toLowerCase();
+    if (!designation || DESIGNATIONS_PAR_DEFAUT.has(designation)) return false;
+    return Number(l.prixUnitaire) > 0 || (l.unite ?? '').trim() !== '';
+  });
+}
+
 export function collectNouvellesLignes(
   next: { lots?: { chapitres?: { lignes?: any[] }[] }[] } | null | undefined,
   beforeIds: Set<string>,

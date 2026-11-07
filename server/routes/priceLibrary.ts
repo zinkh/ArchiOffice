@@ -29,6 +29,9 @@ const CLASSEMENT = ['sfb_code', 'dtu_code', 'corps_etat_code', 'naf_code'] as co
 const ORIGINES = ['reference', 'saisie', 'bpu', 'offre', 'import'];
 
 /** Clé de dédoublonnage : sans elle la bibliothèque se remplit de quasi-doublons. */
+/** Désignations posées par défaut à la création d'une ligne : jamais un ouvrage à garder. */
+const DESIGNATIONS_PAR_DEFAUT = new Set(['nouvel article', 'nouvel ouvrage']);
+
 const dedupKey = (designation: string, unite: string) =>
   `${(designation || '').trim().toLowerCase()}|${(unite || '').trim().toLowerCase()}`;
 
@@ -219,11 +222,19 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
       // Deux articles identiques dans le même envoi ne doivent pas produire
       // deux lignes : le premier gagne, la clé est marquée au passage.
       const seen = new Set<string>();
+      let ecartes = 0;
 
       for (const item of items) {
         const designation = String(item?.designation ?? '').trim();
         if (!designation) continue;
         const unite = String(item?.unite ?? '').trim();
+        // Une création automatique (sans `explicite`) n'enrichit la bibliothèque qu'avec un ouvrage renseigné :
+        // une désignation posée par défaut, ou ni prix, ni unité, ni description, n'est qu'un brouillon.
+        if (item?.explicite !== true) {
+          const brouillon = DESIGNATIONS_PAR_DEFAUT.has(designation.toLowerCase())
+            || (!(Number(item?.prix_unitaire) > 0) && !unite && !String(item?.description ?? '').trim());
+          if (brouillon) { ecartes += 1; continue; }
+        }
         const key = dedupKey(designation, unite);
         if (seen.has(key)) continue;
         seen.add(key);
@@ -290,7 +301,7 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
         console.error('[POST /api/price-library/bulk] historique de prix', e);
       }
 
-      res.status(201).json({ created: toInsert.length, updated: toUpdate.length, prixRemontes });
+      res.status(201).json({ created: toInsert.length, updated: toUpdate.length, prixRemontes, ...(ecartes ? { ecartes } : {}) });
     } catch (e: any) {
       console.error('[POST /api/price-library/bulk]', e);
       res.status(500).json({ error: 'Failed to save price library items: ' + e.message });
@@ -301,6 +312,8 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
     try {
       const tenantId = await getTenantId(req.user.id);
       const { designation, unite, prix_unitaire, categorie, code, lot_type, description, notes, date_prix, favori } = req.body;
+      // Une désignation vide ferait un article vide : un PUT qui l'efface est refusé (comme à la création).
+      if (designation !== undefined && !String(designation ?? '').trim()) return res.status(400).json({ error: 'La désignation est obligatoire' });
       const patch: Record<string, any> = {
         designation, unite, prix_unitaire,
         categorie: nullIfBlank(categorie), code: nullIfBlank(code), lot_type: nullIfBlank(lot_type),

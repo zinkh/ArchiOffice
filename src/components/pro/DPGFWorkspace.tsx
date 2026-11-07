@@ -607,13 +607,13 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       return next;
     });
   };
-  const enregistrerDescription = (key: string, texte: string) => {
+  const enregistrerDescription = (key: string, texte: string, designation?: string) => {
     const k = parseRowKey(key);
     if (k?.kind !== 'ligne') return;
     mutateLots(lots => {
       const lot = { ...lots[k.lotIdx] };
       const chap = { ...lot.chapitres[k.chapIdx] };
-      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, cctpDescription: texte }));
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, cctpDescription: texte, ...(designation ? { designation } : {}) }));
       lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
       const next = [...lots];
       next[k.lotIdx] = lot;
@@ -942,7 +942,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           numero={descriptionCible.ligne.numero}
           designation={descriptionCible.ligne.designation}
           valeur={descriptionCible.ligne.cctpDescription ?? ''}
-          onSave={texte => enregistrerDescription(descriptionCible.key, texte)}
+          onSave={(texte, designation) => enregistrerDescription(descriptionCible.key, texte, designation)}
           onOpenCctp={onOpenCctp ? () => {
             const k = parseRowKey(descriptionCible.key);
             if (k?.kind === 'ligne') { onOpenCctp({ kind: 'ligne', lotIdx: k.lotIdx, chapIdx: k.chapIdx, lignePath: k.lignePath }); setDescriptionKey(null); }

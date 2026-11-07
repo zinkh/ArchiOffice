@@ -42,7 +42,7 @@ import { validateProDocument } from '../../lib/proValidation';
 import { useConfirmDialog } from '../ui/ConfirmDialog';
 import { useToastWithUndo } from '../../hooks/useToastWithUndo';
 import { Toast } from '../ui/Toast';
-import { collectLigneIds, collectNouvellesLignes } from './treeOps';
+import { collectLigneIds, collectNouvellesLignes, lignesPourBibliotheque } from './treeOps';
 import { VersionsDialog } from './VersionsDialog';
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -289,7 +289,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   const editDpgf = (next: DPGF) => {
     const beforeIds = new Set<string>();
     collectLigneIds(dpgf, beforeIds);
-    const added = collectNouvellesLignes(next, beforeIds);
+    const added = lignesPourBibliotheque(collectNouvellesLignes(next, beforeIds));
     if (added.length) void apiFetch('/api/price-library/bulk', {
       method: 'POST',
       body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
@@ -335,7 +335,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   const editBpu = (next: BPU) => {
     const beforeIds = new Set<string>();
     collectLigneIds(bpu, beforeIds);
-    const added = collectNouvellesLignes(next, beforeIds);
+    const added = lignesPourBibliotheque(collectNouvellesLignes(next, beforeIds));
     if (added.length) void apiFetch('/api/price-library/bulk', {
       method: 'POST',
       body: JSON.stringify({ items: added.map(x => ({ code: x.numero, designation: x.designation, unite: x.unite, prix_unitaire: x.prixUnitaire, source: `projet:${projectId}` })) }),
@@ -490,7 +490,7 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
         body: JSON.stringify({
           items: lignes.map(l => ({
             code: l.numero, designation: l.designation, unite: l.unite,
-            prix_unitaire: l.prixUnitaire, source: `projet:${projectId}`,
+            prix_unitaire: l.prixUnitaire, source: `projet:${projectId}`, explicite: true,
           })),
         }),
       });
