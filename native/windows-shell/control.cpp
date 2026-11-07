@@ -83,6 +83,9 @@ void smoke(wchar_t const* destination){
  SendMessageW(child,WM_COMMAND,101,0);settled(child);SendMessageW(child,WM_COMMAND,102,0);settled(child);
  // The test broker invalidates its identity after the document action.
  view->Refresh();for(int n=0;n<120&&ListView_GetItemCount(list);n++)pump(50);if(ListView_GetItemCount(list)!=0)throw std::runtime_error("stale identity retained");
+ view->Refresh();check(view->DestroyViewWindow());
+ check(view->CreateViewWindow(nullptr,&settings,&host,&rect,&child));settled(child);
+ if(ListView_GetItemCount(GetDlgItem(child,202))!=0)throw std::runtime_error("recreated view retained old data");
  check(view->DestroyViewWindow());DestroyWindow(parent);view=nullptr;folder=nullptr;factory=nullptr;pump(100);if(unload()!=S_OK)throw std::runtime_error("COM objects not released");FreeLibrary(library);
 }
 int wmain(int argc,wchar_t** argv){try{
