@@ -26,7 +26,7 @@ function createShellPreviewRenderer({spawn,executable,root,environment=process.e
    signal?.throwIfAborted();if(!sameFile(before,await fs.lstat(file)))throw new Error('Preview source changed');
    if(frame.length<20||frame.subarray(0,4).toString()!=='AOP1')throw new Error('Invalid preview frame');
    const width=frame.readUInt32LE(4),height=frame.readUInt32LE(8),pages=frame.readUInt32LE(12),current=frame.readUInt32LE(16);
-   if(!width||width>512||!height||height>640||!pages||pages>10000||current!==page||current>=pages||frame.length!==20+width*height*4)throw new Error('Invalid preview dimensions');
+   if(!width||width>512||!height||height>640||!pages||pages>10000||current!==page||current>=pages||frame.length!==20+width*height*4)throw new Error('Invalid preview dimensions: '+JSON.stringify({width,height,pages,current,page,bytes:frame.length}));
    return {status:'preview',width,height,pages,page:current,pixels:frame.subarray(20).toString('base64')};
   }finally{await fs.rm(temporary,{recursive:true,force:true,maxRetries:5,retryDelay:100}).catch(()=>{});}
  };
