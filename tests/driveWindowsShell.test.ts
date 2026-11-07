@@ -67,3 +67,7 @@ it('reuses the shared business cache rather than starting a parallel cloud enric
  projection=createShellProjection(options);expect((await catalog()).projects[0].rows[0]).toMatchObject({type:'PLAN',businessKnown:true});
  expect(options.businessCatalog).toHaveBeenCalledWith(identity,saved);expect(options.agent.windowsPreview).not.toHaveBeenCalled();
 });
+it('dates shared metadata and marks an older offline observation without inventing a new classification',async()=>{
+ const value=await options.agent.windowsPreview();options.now=()=>1800000000000;value.observedAt=1800000000000-120000;options.businessCatalog=async()=>value;
+ projection=createShellProjection(options);expect((await catalog()).projects[0].rows[0]).toMatchObject({observedAt:value.observedAt,metadataStale:true,type:'PLAN',unclassified:false});
+});

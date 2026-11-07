@@ -67,6 +67,8 @@ class View final:public IShellView,public IFolderView {
  void buttons(){bool valid=!busy&&ListView_GetNextItem(list,-1,LVNI_SELECTED)>=0;EnableWindow(refresh,!busy);EnableWindow(open,valid);EnableWindow(document,valid);}
  void selection(){int selected=ListView_GetNextItem(list,-1,LVNI_SELECTED);if(selected<0||selected>=static_cast<int>(visible.size())){SetWindowTextW(details,L"Sélectionnez un document pour afficher ses propriétés.");buttons();return;}auto [p,d]=visible[selected];auto const& project=projects[p];auto const& doc=project.rows[d];selectedKey=doc.key;
   auto content=doc.name+L"\r\n\r\nPROPRIÉTÉS\r\n\r\nProjet\r\n"+project.name+L"\r\n\r\nPhase\r\n"+(doc.phase.empty()?L"—":doc.phase)+L"\r\n\r\nType documentaire\r\n"+(doc.type.empty()?L"Non renseigné ou indisponible":doc.type)+L"\r\n\r\nFormat\r\n"+doc.fileType+L"\r\n\r\nIndice\r\n"+(doc.indice.empty()?L"—":doc.indice)+L"\r\n\r\nVersion\r\n"+std::to_wstring(doc.version)+L"\r\n\r\nStatut documentaire\r\n"+status(doc.status);
+  if(doc.businessKnown){content+=L"\r\n\r\nMétadonnées observées le\r\n"+(doc.metadataDate.empty()?std::wstring(L"Date indisponible"):doc.metadataDate);if(doc.metadataStale)content+=L"\r\nInformations en cache, actualisation en attente.";}
+  content+=L"\r\n\r\nDisponibilité locale\r\n"+std::wstring(doc.available==1?L"Contenu entièrement présent":doc.available==0?L"Contenu à télécharger":L"Indisponible");
   SetWindowTextW(details,content.c_str());buttons();
  }
  void fill(bool preserveScroll=false){int top=preserveScroll?ListView_GetTopIndex(list):0;building=true;ListView_DeleteAllItems(list);visible.clear();int restore=-1;

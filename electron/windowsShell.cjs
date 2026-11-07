@@ -17,7 +17,7 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
   if(!cached.pending&&loading<2&&now()-cached.at>60000){const entry=cached;entry.pending=true;loading++;
    const nodeIds=saved.catalog.filter(e=>!e.folder).map(e=>e.meta.nodeId);
    void Promise.resolve().then(()=>agent.windowsPreview('shellMetadata',{identity,projectId:saved.projectId,nodeIds})).then(value=>{
-    if(owner===hash(identity))entry.data=validateBusiness(value,identity,saved.projectId,nodeIds);
+    if(owner===hash(identity))entry.data={...validateBusiness(value,identity,saved.projectId,nodeIds),observedAt:now()};
    }).catch(error=>{if([401,402,403,404].includes(error.status)||error.code==='WINDOWS_SHELL_METADATA_REFUSED')entry.data=null;}).finally(()=>{entry.pending=false;entry.at=now();loading--;});
   }return cached.data;
  }
@@ -26,7 +26,7 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
   for(const saved of snap.projects){
    const files=saved.catalog.filter(e=>!e.folder);if(files.length>100)throw new Error('Invalid catalog');
    let extra=null;
-   if(businessCatalog){const value=await businessCatalog(snap.identity,saved);if(value)extra=validateBusiness(value,snap.identity,saved.projectId,files.map(e=>e.meta.nodeId));}
+   if(businessCatalog){const value=await businessCatalog(snap.identity,saved);if(value)extra={...validateBusiness(value,snap.identity,saved.projectId,files.map(e=>e.meta.nodeId)),observedAt:Number.isSafeInteger(value.observedAt)&&value.observedAt>0&&value.observedAt<=now()?value.observedAt:null};}
    else extra=enrich(saved,snap.identity);
    const revision=hash([saved.rootKey,saved.directory]);const available=new Map(),transfers=new Map();
    try {
@@ -45,7 +45,7 @@ function createShellProjection({drive,agent,vault,root,shell,openDocument,busine
     const detail=extra?.documents.find(d=>d.nodeId===m.nodeId&&d.remoteVersion===m.version);const parent=e.path.split('\\').slice(0,-1).at(-1);
     return {key:e.key,name:text(m.name,512),phase:text(detail?.phase|| (e.path.split('\\').length>2?cleanName(parent):''),120),
      type:text(detail?.documentType,200),fileType:path.win32.extname(m.name).slice(1,15).toUpperCase(),indice:text(detail?.indice,200),version:m.version,status:text(detail?.status,200),
-     businessKnown:!!detail,unclassified:!!detail&&(!detail.phase||!detail.documentType),available:available.get(e.key)??null,transferState:transfers.get(m.nodeId)??''};});
+     observedAt:detail?extra.observedAt??null:null,metadataStale:!detail||!extra.observedAt||now()-extra.observedAt>60000,businessKnown:!!detail,unclassified:!!detail&&(!detail.phase||!detail.documentType),available:available.get(e.key)??null,transferState:transfers.get(m.nodeId)??''};});
    projects.push({id:saved.projectId,name:text(extra?.name||cleanName(saved.catalog[0]?.path||'Projet')),revision,rows});
   }
   const fresh=await snapshot();

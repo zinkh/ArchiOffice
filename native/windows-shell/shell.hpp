@@ -18,7 +18,7 @@ inline constexpr wchar_t ViewClass[]=L"ArchiOfficeDriveShellView";
 inline constexpr UINT ResultMessage=WM_APP+94;
 extern HINSTANCE moduleInstance;
 extern std::atomic<long> objectCount;
-struct Document {std::wstring key,name,phase,type,fileType,indice,status,transferState;int version=0,available=-1;bool businessKnown=false,unclassified=false;bool operator==(Document const&)const=default;};
+struct Document {std::wstring key,name,phase,type,fileType,indice,status,transferState,metadataDate;int version=0,available=-1;bool businessKnown=false,unclassified=false,metadataStale=true;bool operator==(Document const&)const=default;};
 struct Project {std::wstring id,name,revision;std::vector<Document> rows;bool operator==(Project const&)const=default;};
 struct Reply {bool ok=false;std::wstring message,scope;std::vector<Project> projects;};
 Reply request(std::wstring action,std::wstring project=L"",std::wstring key=L"",std::wstring revision=L"");
