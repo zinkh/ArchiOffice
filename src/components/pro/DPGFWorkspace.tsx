@@ -27,6 +27,7 @@ import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSel
 import { StatutBadges } from './StatutBadges';
 import { LigneDescriptionDialog } from './LigneDescriptionDialog';
 import { MetreDialog } from './MetreDialog';
+import { marquerUtilise, patchDepuisArticle } from '../../lib/bibliothequeAutocompletion';
 import { batimentsDuMetre, formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
 import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
@@ -607,13 +608,28 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
       return next;
     });
   };
-  const enregistrerDescription = (key: string, texte: string) => {
+  /** Choisir un ouvrage de la bibliothèque dans la désignation : titre, lien, et unité / prix / description encore vides. */
+  const appliquerArticleBibliotheque = (key: string, article: ArticleBibliotheque) => {
     const k = parseRowKey(key);
     if (k?.kind !== 'ligne') return;
     mutateLots(lots => {
       const lot = { ...lots[k.lotIdx] };
       const chap = { ...lot.chapitres[k.chapIdx] };
-      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, cctpDescription: texte }));
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, ...patchDepuisArticle(l, article) }));
+      lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
+      const next = [...lots];
+      next[k.lotIdx] = recomputeLot(lot);
+      return next;
+    });
+    marquerUtilise(article.id);
+  };
+  const enregistrerDescription = (key: string, texte: string, designation?: string) => {
+    const k = parseRowKey(key);
+    if (k?.kind !== 'ligne') return;
+    mutateLots(lots => {
+      const lot = { ...lots[k.lotIdx] };
+      const chap = { ...lot.chapitres[k.chapIdx] };
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, cctpDescription: texte, ...(designation ? { designation } : {}) }));
       lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
       const next = [...lots];
       next[k.lotIdx] = lot;
@@ -942,7 +958,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           numero={descriptionCible.ligne.numero}
           designation={descriptionCible.ligne.designation}
           valeur={descriptionCible.ligne.cctpDescription ?? ''}
-          onSave={texte => enregistrerDescription(descriptionCible.key, texte)}
+          onSave={(texte, designation) => enregistrerDescription(descriptionCible.key, texte, designation)}
           onOpenCctp={onOpenCctp ? () => {
             const k = parseRowKey(descriptionCible.key);
             if (k?.kind === 'ligne') { onOpenCctp({ kind: 'ligne', lotIdx: k.lotIdx, chapIdx: k.chapIdx, lignePath: k.lignePath }); setDescriptionKey(null); }
@@ -1288,7 +1304,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                       <td className="px-2 py-0.5">
                         <div className="flex items-center gap-1.5">
                           <div className="flex-1 min-w-0">
-                            <EditableCell rKey={rKey} field="designation" value={l.designation} {...cellProps} />
+                            <EditableCell rKey={rKey} field="designation" value={l.designation} articles={{ onChoisir: a => appliquerArticleBibliotheque(rKey, a) }} {...cellProps} />
                           </div>
                           {/* Description technique de l'ouvrage : même texte que le CCTP. */}
                           <button
