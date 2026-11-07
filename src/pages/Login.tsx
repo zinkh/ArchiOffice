@@ -8,7 +8,8 @@ import { checkLocalStatus, localSetup, localSignIn } from '../lib/localAuth';
 import { checkCloudLinkStatus, cloudLink } from '../lib/cloudSync';
 import { ArchiOfficeLogo } from '../components/ArchiOfficeLogo';
 import { useUser } from '../UserContext';
-import { TURNSTILE_SITE_KEY, TurnstileWidget } from '../lib/turnstile';
+import { TURNSTILE_SITE_KEY, TurnstileWidget, useCaptcha } from '../lib/turnstile';
+import { TurnstileField } from '../components/TurnstileField';
 
 function getSubdomain(): string | null {
   const host = window.location.hostname;
@@ -172,17 +173,20 @@ function CloudLinkForm({ onBack }: { onBack: () => void }) {
   const [localPassword, setLocalPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const captcha = useCaptcha();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      const result = await cloudLink(email, password, localPassword);
+      const result = await cloudLink(email, password, localPassword, captcha.token);
       navigate(`/cloud-import-progress?jobId=${result.importJobId}`);
     } catch (err: any) {
       setError(err.message);
       setLoading(false);
+      // Un jeton Turnstile n'est utilisable qu'une fois : nouveau défi.
+      captcha.reset();
     }
   };
 
@@ -229,10 +233,11 @@ function CloudLinkForm({ onBack }: { onBack: () => void }) {
           />
           <p className="text-xs text-zinc-400 mt-1">{t('cloud_link_local_password_hint')}</p>
         </div>
+        <TurnstileField captcha={captcha} />
         {error && <p className="text-sm text-red-500 text-center">{error}</p>}
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || (captcha.enabled && !captcha.token)}
           className="w-full py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
         >
           {t('cloud_link_submit')}

@@ -11,6 +11,23 @@ const VERIFY_TIMEOUT_MS = 5000;
 
 export type TurnstileResult = { ok: true } | { ok: false; status: number; error: string };
 
+/**
+ * Jeton Turnstile à transmettre tel quel à Supabase Auth (`options.captchaToken`).
+ * Le client Electron relaie ici celui que le widget de l'interface a produit :
+ * c'est Supabase, et non ce serveur local, qui le vérifie auprès de Cloudflare.
+ */
+export function captchaTokenFrom(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 && value.length <= 2048 ? value : undefined;
+}
+
+/** Message utilisateur pour un échec de connexion cloud (le refus du captcha est traduit). */
+export function cloudSignInErrorMessage(message: string | undefined, fallback: string): string {
+  if (message && /captcha/i.test(message)) {
+    return 'Vérification de sécurité requise ou expirée. Validez-la de nouveau puis réessayez.';
+  }
+  return message || fallback;
+}
+
 export function isTurnstileEnabled(): boolean {
   return !!process.env.TURNSTILE_SECRET_KEY;
 }

@@ -25,6 +25,7 @@ import {
 } from './offlineAccount';
 import { readCloudLinkState, writeCloudLinkState, writeEncryptedCloudSession, CloudLinkState } from './cloudLinkState';
 import { createCloudSupabaseClient } from './cloudSyncClient';
+import { captchaTokenFrom, cloudSignInErrorMessage } from './turnstile';
 import { encryptForStorage } from './ipcCrypto';
 import { runInitialExport, getExportJob } from './initialExport';
 import { runInitialImport, getImportJob } from './initialImport';
@@ -86,9 +87,13 @@ export function createLocalCloudUpgradeRouter(
       return res.status(500).json({ error: err.message });
     }
 
-    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({ email, password });
+    const { data: authData, error: authErr } = await cloudClient.auth.signInWithPassword({
+      email,
+      password,
+      options: { captchaToken: captchaTokenFrom(req.body?.captchaToken) },
+    });
     if (authErr || !authData.session) {
-      return res.status(401).json({ error: authErr?.message || 'Identifiants invalides' });
+      return res.status(401).json({ error: cloudSignInErrorMessage(authErr?.message, 'Identifiants invalides') });
     }
     const { session } = authData;
     const cloudUserId = session.user.id;

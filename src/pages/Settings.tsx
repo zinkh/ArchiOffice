@@ -20,6 +20,8 @@ import { apiFetch } from '../lib/api';
 import { getAccessToken, isOfflineBuild } from '../lib/authToken';
 import { checkCloudLinkStatus, upgradeToCloud, retryImport, reconnectCloud } from '../lib/cloudSync';
 import { CloudReconnectForm } from '../components/CloudReconnectForm';
+import { TurnstileField } from '../components/TurnstileField';
+import { useCaptcha } from '../lib/turnstile';
 import { desktopBridge } from '../lib/desktopBridge';
 import { changeLanguageLazy } from '../i18n';
 import EmailTemplatesSettings from '../components/EmailTemplatesSettings';
@@ -460,6 +462,9 @@ export default function Settings() {
   const [cloudUpgradeConfirmed, setCloudUpgradeConfirmed] = useState(false);
   const [isUpgradingToCloud, setIsUpgradingToCloud] = useState(false);
   const [cloudUpgradeError, setCloudUpgradeError] = useState<string | null>(null);
+  // Défi Turnstile partagé par la reconnexion et la bascule vers le cloud
+  // (jamais affichés ensemble) : voir server/localCloudUpgrade.ts.
+  const cloudCaptcha = useCaptcha();
 
   // Chorus Pro
   const [chorusProStatus, setChorusProStatus] = useState<{ connected: boolean; sandbox?: boolean } | null>(null);
@@ -1010,7 +1015,8 @@ export default function Settings() {
     setCloudReconnectError(null);
     setIsReconnectingCloud(true);
     try {
-      await reconnectCloud(cloudReconnectPassword);
+      await reconnectCloud(cloudReconnectPassword, cloudCaptcha.token);
+      cloudCaptcha.reset();
       setCloudReconnectPassword('');
       setShowCloudReconnectForm(false);
       // La session cloud est rétablie — enchaîner directement sur la relance
@@ -1019,6 +1025,8 @@ export default function Settings() {
       await handleRetryCloudImport();
     } catch (err: any) {
       setCloudReconnectError(err?.message || 'Échec de la reconnexion.');
+      // Un jeton Turnstile n'est utilisable qu'une fois : nouveau défi.
+      cloudCaptcha.reset();
     } finally {
       setIsReconnectingCloud(false);
     }
@@ -1030,10 +1038,12 @@ export default function Settings() {
     setCloudUpgradeError(null);
     setIsUpgradingToCloud(true);
     try {
-      const result = await upgradeToCloud(cloudUpgradeEmail, cloudUpgradePassword);
+      const result = await upgradeToCloud(cloudUpgradeEmail, cloudUpgradePassword, cloudCaptcha.token);
       navigate(`/cloud-import-progress?phase=export&exportJobId=${result.exportJobId}&importJobId=${result.importJobId}`);
     } catch (err: any) {
       setCloudUpgradeError(err?.message || 'Échec de la bascule vers le cloud.');
+      // Un jeton Turnstile n'est utilisable qu'une fois : nouveau défi.
+      cloudCaptcha.reset();
       setIsUpgradingToCloud(false);
     }
   };
@@ -3186,11 +3196,12 @@ export default function Settings() {
                       autoFocus
                     />
                   </div>
+                  <TurnstileField captcha={cloudCaptcha} />
                   {cloudReconnectError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudReconnectError}</p>}
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={isReconnectingCloud}
+                      disabled={isReconnectingCloud || (cloudCaptcha.enabled && !cloudCaptcha.token)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
                       style={{ background: 'var(--tblr-warning, #f59f00)' }}
                     >
@@ -3264,6 +3275,8 @@ export default function Settings() {
                   busy={isReconnectingCloud}
                   onPasswordChange={setCloudReconnectPassword}
                   onSubmit={handleReconnectCloud}
+                  captcha={<TurnstileField captcha={cloudCaptcha} />}
+                  canSubmit={!cloudCaptcha.enabled || !!cloudCaptcha.token}
                   onCancel={() => { setShowCloudReconnectForm(false); setCloudReconnectPassword(''); setCloudReconnectError(null); }}
                 />
               )}
@@ -3324,11 +3337,12 @@ export default function Settings() {
                     Toutes les données de ce poste seront envoyées vers ce compte cloud. Cette action ne peut pas être
                     annulée depuis l'application.
                   </label>
+                  <TurnstileField captcha={cloudCaptcha} />
                   {cloudUpgradeError && <p className="text-xs" style={{ color: 'var(--tblr-danger)' }}>{cloudUpgradeError}</p>}
                   <div className="flex items-center gap-2">
                     <button
                       type="submit"
-                      disabled={isUpgradingToCloud || !cloudUpgradeConfirmed}
+                      disabled={isUpgradingToCloud || !cloudUpgradeConfirmed || (cloudCaptcha.enabled && !cloudCaptcha.token)}
                       className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-colors disabled:opacity-50"
                       style={{ background: 'var(--tblr-primary)' }}
                     >
