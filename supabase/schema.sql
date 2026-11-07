@@ -815,7 +815,8 @@ CREATE TABLE IF NOT EXISTS lignes_ouvrages (
 CREATE TABLE IF NOT EXISTS articles_type (
   id TEXT PRIMARY KEY,
   tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE NOT NULL,
-  designation TEXT, unite TEXT, prix_unitaire NUMERIC, categorie TEXT
+  designation TEXT, unite TEXT, prix_unitaire NUMERIC, categorie TEXT,
+  associes JSONB NOT NULL DEFAULT '[]'::jsonb  -- postes associés (migrate_articles_associes.sql)
 );
 
 CREATE TABLE IF NOT EXISTS project_members (

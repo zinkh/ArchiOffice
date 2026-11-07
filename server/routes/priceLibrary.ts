@@ -13,6 +13,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { ecrireObservations } from '../articlePrices';
 import { CATEGORIE_CLAUSES, cleClause, dossierValide } from '../../src/lib/bibliothequeClauses';
+import { nettoyerAssocies } from '../../src/lib/postesAssocies';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -59,6 +60,10 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
       if (dossier === 'clauses') query = query.eq('categorie', CATEGORIE_CLAUSES);
       else if (dossier === 'ouvrages') query = query.or(`categorie.is.null,categorie.neq.${CATEGORIE_CLAUSES}`);
       if (categorie) query = query.eq('categorie', categorie);
+      // Fiches précises (postes associés à proposer) : la liste d'identifiants est bornée.
+      if (typeof req.query.ids === 'string' && req.query.ids.trim()) {
+        query = query.in('id', req.query.ids.split(',').map((s: string) => s.trim()).filter(Boolean).slice(0, MAX_LIMIT));
+      }
       if (lot_type) query = query.eq('lot_type', lot_type);
       if (origine) query = query.eq('origine', origine);
       // Filtres de classement. Le corps d'état est le plus large des trois et
@@ -175,6 +180,7 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
         origine,
         created_by: req.user.id,
         usage_count: 0,
+        associes: nettoyerAssocies(req.body?.associes),
       };
       for (const col of CLASSEMENT) row[col] = nullIfBlank(req.body?.[col]);
 
@@ -325,6 +331,8 @@ export function registerPriceLibraryRoutes(app: Express, { supabaseAdmin, getTen
       for (const col of CLASSEMENT) {
         if (col in req.body) patch[col] = nullIfBlank(req.body[col]);
       }
+      // Même règle pour les postes associés : absents du PUT, ils restent tels quels.
+      if ('associes' in req.body) patch.associes = nettoyerAssocies(req.body.associes, req.params.id);
       const { data, error } = await tenantScopedFrom(supabaseAdmin, tenantId, 'articles_type')
         .update(patch).eq('id', req.params.id).select().single();
       if (error) throw error;
