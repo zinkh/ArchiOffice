@@ -193,6 +193,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify installed Explorer registration, reinstall and uninstall
+        shell: pwsh
+        run: ./native/windows-shell/installer-smoke.ps1
+
       # Size report of the unpacked app, largest first, to see what actually
       # weighs on the user's disk before trimming anything else.
       - name: Report installed size breakdown

@@ -14,7 +14,7 @@ it('keeps the mounted catalogue usable when metadata enrichment is unavailable',
 it('protects the local pipe with a bounded authenticated protocol',async(context)=>{
  const address=process.platform==='win32'?'\\\\.\\pipe\\ArchiOffice.DriveShell.'+crypto.randomUUID():path.join(temp,'pipe');const command=vi.fn().mockResolvedValue({status:'ok',projects:[]});pipe=createShellPipe({address,token:'a'.repeat(64),projection:{command}});try{await pipe.start();}catch(error:any){if(process.platform!=='win32'&&error.code==='EPERM')context.skip('Local sockets blocked by sandbox; exercised on Windows CI');throw error;}
  const send=(token:string)=>new Promise<string>((resolve,reject)=>{const socket=net.createConnection(address);let result='';socket.on('connect',()=>socket.write(JSON.stringify({format:1,token,action:'catalog'})+'\n'));socket.on('data',v=>result+=v);socket.on('end',()=>resolve(result));socket.on('error',reject);});
- expect(JSON.parse(await send('b'.repeat(64)))).toEqual({status:'unavailable'});expect(command).not.toHaveBeenCalled();expect(JSON.parse(await send('a'.repeat(64)))).toMatchObject({status:'ok'});expect(command).toHaveBeenCalledTimes(1);
+ expect(JSON.parse(await send('b'.repeat(64)))).toMatchObject({status:'unavailable'});expect(command).not.toHaveBeenCalled();expect(JSON.parse(await send('a'.repeat(64)))).toMatchObject({status:'ok'});expect(command).toHaveBeenCalledTimes(1);
 });
 it('reads business metadata through a bounded project tree without file downloads',async()=>{
  const read=vi.fn(async(route:string):Promise<any>=>route==='/nodes/prj%3Ap'?{id:'prj:p',kind:'folder',name:'VIP-TC'}:route.includes('phase%3Ap%3APRO')?{nodes:[{id:'doc:p',parentId:'phase:p:PRO',kind:'file',version:2,indice:'C',status:'approuve'}],nextCursor:null}:{nodes:[{id:'phase:p:PRO',parentId:'prj:p',kind:'folder',name:'PRO'}],nextCursor:null});
@@ -89,4 +89,17 @@ it('projects 1001 mounted documents with matching properties and transfer states
  options.agent.windowsPreview.mockResolvedValue({...original,documents:saved.catalog.map((e:any)=>({...original.documents[0],nodeId:e.meta.nodeId}))});
  options.agent.documentStatuses=vi.fn(async(ids:string[])=>({identity,documents:ids.map(nodeId=>({nodeId,state:'none'}))}));
  await catalog();await new Promise(resolve=>setImmediate(resolve));const result=await catalog();expect(result.projects[0].rows).toHaveLength(1001);expect(result.projects[0].rows[1000]).toMatchObject({indice:'C',transferState:'none'});
+});
+
+it('binds classification, preservation and retries to the mounted document and current identity',async()=>{
+ const ref=await reference();options.agent.windowsPreview.mockResolvedValue({identity,ok:true});
+ await projection.command('classify',{...ref,phase:'APD',docType:'PLAN',baseVersion:2});expect(options.agent.windowsPreview).toHaveBeenLastCalledWith('shellClassify',expect.objectContaining({projectId:'p',rootKey:saved.rootKey,key:ref.key,nodeId:'doc:p',phase:'APD',docType:'PLAN',baseVersion:2}));
+ await projection.command('preserve',ref);expect(options.agent.windowsPreview).toHaveBeenLastCalledWith('shellPreserve',expect.objectContaining({nodeId:'doc:p'}));
+ await projection.command('retry',ref);expect(options.agent.windowsPreview).toHaveBeenLastCalledWith('shellRetry',expect.objectContaining({nodeId:'doc:p'}));
+ options.agent.windowsPreview.mockResolvedValue({identity:{...identity,tenantId:'foreign'},ok:true});await expect(projection.command('preserve',ref)).rejects.toThrow();
+});
+it('hydrates the canonical A: file for offline use and delegates only the selected generation for recovery',async()=>{
+ const ref=await reference();options.drive.shellPin=vi.fn().mockResolvedValue(undefined);options.drive.resolveConflict=vi.fn().mockResolvedValue({status:'refreshed'});options.drive.openPrevious=vi.fn().mockResolvedValue({status:'copies_shown'});
+ expect(await projection.command('offline',ref)).toMatchObject({status:'completed'});expect(options.drive.shellPin).toHaveBeenCalledWith('p',ref.key);
+ await projection.command('restart',ref);expect(options.drive.resolveConflict).toHaveBeenCalledWith('p',ref.key,saved.rootKey);await projection.command('recovery',ref);expect(options.drive.openPrevious).toHaveBeenCalledWith('p');
 });

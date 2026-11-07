@@ -311,11 +311,18 @@ int wmain(int argc,wchar_t** argv) {
         JsonObject reply;reply.SetNamedValue(L"type",JsonValue::CreateStringValue(L"availability"));reply.SetNamedValue(L"requestId",JsonValue::CreateStringValue(winrt::to_hstring(request)));reply.SetNamedValue(L"files",files);
         emit(winrt::to_string(reply.Stringify()));
       }
+      if(type==L"pin") {
+        auto id=winrt::to_string(message.GetNamedString(L"requestId")),key=winrt::to_string(message.GetNamedString(L"key"));bool valid=false;
+        auto entry=std::find_if(entries.begin(),entries.end(),[&](Entry const& e){return !e.folder&&e.key==key;});
+        if(id.size()!=36||entry==entries.end())throw std::runtime_error("invalid pin");
+        try{validateRoot(root,rootKey);validateExisting(root/fs::path(entry->path),*entry,editable);HANDLE file=CreateFileW((root/fs::path(entry->path)).c_str(),FILE_READ_DATA|FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);if(file!=INVALID_HANDLE_VALUE){valid=SUCCEEDED(CfSetPinState(file,CF_PIN_STATE_PINNED,CF_SET_PIN_FLAG_NONE,nullptr));CloseHandle(file);}}catch(...){}
+        emit("{\"type\":\"pinned\",\"requestId\":\""+id+"\",\"valid\":"+(valid?std::string("true"):std::string("false"))+"}");
+      }
       if(type==L"verify") {
         auto request=winrt::to_string(message.GetNamedString(L"requestId"));
         if(request.size()!=36||request.find_first_not_of("0123456789abcdef-")!=std::string::npos)throw std::runtime_error("invalid verification request");
         bool valid=true;
-        try{validateRoot(root,rootKey);for(auto const& entry:entries)validateExisting(root/fs::path(entry.path),entry);}catch(...){valid=false;}
+        try{auto except=winrt::to_string(message.GetNamedString(L"except",L""));if(!except.empty()&&!hexKey(except))throw std::runtime_error("invalid exception");validateRoot(root,rootKey);for(auto const& entry:entries)validateExisting(root/fs::path(entry.path),entry,!entry.folder&&entry.key==except);}catch(...){valid=false;}
         emit("{\"type\":\"verified\",\"requestId\":\""+request+"\",\"valid\":"+(valid?std::string("true"):std::string("false"))+"}");
       }
       if(type==L"hydrated") {

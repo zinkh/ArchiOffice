@@ -29,7 +29,7 @@ try {
  assert.deepEqual(await preview.start('project'),{status:'opened'});assert.equal(directory,'A:\\');
  directory=path.join(temporary,'preview',(await fs.readdir(path.join(temporary,'preview')))[0]);
  const before=await preview.availability();assert.equal(before.length,1003);assert.equal((await fs.readdir(path.join(directory,'_Project'))).length,1003);assert.ok(before.every(item=>typeof item.available==='boolean'||item.available===null));
- assert.deepEqual(await fs.readFile(path.join('A:\\','_Project','_Example.txt')),bytes);const after=await preview.availability();assert.equal(after.find(item=>item.key==='a'.repeat(64)).available,true);assert.ok(requests>0);
+ assert.equal(await preview.pin('a'.repeat(64)),true);assert.deepEqual(await fs.readFile(path.join('A:\\','_Project','_Example.txt')),bytes);const after=await preview.availability();assert.equal(after.find(item=>item.key==='a'.repeat(64)).available,true);assert.ok(requests>0);
  await assert.rejects(fs.readFile(path.join('A:\\','_Project','_Denied.txt')));
  preview.stop();assert.equal(await exited,0);
  assert.deepEqual(await fs.readFile(path.join(directory,'_Project','_Example.txt')),bytes);

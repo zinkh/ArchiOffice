@@ -98,9 +98,9 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
               if(!request||request.type!=='changes'||!Array.isArray(msg.keys)||msg.keys.length>files.size||new Set(msg.keys).size!==msg.keys.length||msg.keys.some(key=>!files.has(key))){fail();return;}
               clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.keys);
             }
-            else if(msg.type==='verified'||msg.type==='locked') {
+            else if(msg.type==='verified'||msg.type==='locked'||msg.type==='pinned') {
               const request=state.verifications.get(msg.requestId);
-              if(!request||request.type!==(msg.type==='locked'?'lock':'verify')||typeof msg.valid!=='boolean'){fail();return;}
+              if(!request||request.type!==(msg.type==='locked'?'lock':msg.type==='pinned'?'pin':'verify')||typeof msg.valid!=='boolean'){fail();return;}
               clearTimeout(request.timer);state.verifications.delete(msg.requestId);request.resolve(msg.valid);
             }
             else if(msg.type==='error'){
@@ -155,6 +155,7 @@ function createWindowsPreview({spawn,agent,vault,root,cacheRoot,executable,shell
     });
     if(mount!==state||state.stopped||!same(await vault(),state.identity))throw new Error('Access refused');return result;
   }
-  return {start,stop,availability:()=>request('availability'),verify:()=>request('verify'),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
+  async function lock(key){const state=mount,id=crypto.randomUUID();const release=()=>{if(state&&!state.stopped)state.child.stdin.write(JSON.stringify({type:'unlock',requestId:id})+'\n');};try{if(!await request('lock',{key},id,state))throw new Error('File busy');return release;}catch(error){release();throw error;}}
+  return {start,stop,lock,pin:key=>request('pin',{key}),availability:()=>request('availability'),verify:(except)=>request('verify',except?{except}:{}),status:()=>({enabled:available(),active:!!mount,...(mount?.edits?{edits:mount.edits.status()}:{})})};
 }
 module.exports={createWindowsPreview,noLinks,catalogDetails};

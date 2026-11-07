@@ -113,6 +113,7 @@ void smoke(wchar_t const* destination,bool large=false){
  selectTab(2);waitText(GetDlgItem(child,223),L"Version 12");
  LVFINDINFOW notice{};notice.flags=LVFI_STRING;notice.psz=L"Notice.docx";int noticeIndex=ListView_FindItem(list,-1,&notice);ListView_SetItemState(list,-1,0,LVIS_SELECTED);ListView_SetItemState(list,noticeIndex,LVIS_SELECTED,LVIS_SELECTED);
  selectTab(1);waitText(canvas,L"Aperçu indisponible pour ce format");
+ selectTab(3);for(int n=0;n<120&&!IsWindowEnabled(GetDlgItem(child,232));n++)pump(50);if(!IsWindowEnabled(GetDlgItem(child,232)))throw std::runtime_error("classification unavailable for writable document");SetWindowTextW(GetDlgItem(child,230),L"APD");SetWindowTextW(GetDlgItem(child,231),L"NOTICE");SendMessageW(child,WM_COMMAND,232,0);settled(child);SendMessageW(child,WM_COMMAND,233,0);settled(child);
  selectPlan(list);selectTab(0);SendMessageW(child,WM_COMMAND,101,0);settled(child);SendMessageW(child,WM_COMMAND,102,0);settled(child);
  // The test broker invalidates its identity after the document action.
  view->Refresh();for(int n=0;n<120&&ListView_GetItemCount(list);n++)pump(50);if(ListView_GetItemCount(list)!=0)throw std::runtime_error("stale identity retained");

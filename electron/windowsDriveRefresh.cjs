@@ -69,15 +69,17 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   const identity=await authorize(getIdentity());const project=getProject(id);const saved=await clean(await project.snapshot(id),identity,id);
   return {identity,project,saved};
  }
- async function check(id) {
+ async function check(id,conflictKey=null) {
   const generation=revision;
   const {identity,project,saved}=await context(id);const files=names(identity,id,'');
   if(await read(files.journal))throw fail('DRIVE_REFRESH_INTERRUPTED');
-  if(!await project.verify())throw fail('DRIVE_LOCAL_CHANGES');
+  const conflict=conflictKey?await agent.windowsPreview('conflictProof',{identity,projectId:id,rootKey:saved.rootKey,key:conflictKey}):null;
+  if(conflict&&(!same(conflict.identity,identity)||conflict.key!==conflictKey))throw fail('DRIVE_SNAPSHOT_INVALID');
+  if(!await project.verify(conflictKey))throw fail('DRIVE_LOCAL_CHANGES');
   const catalog=await agent.windowsPreview('catalog',{projectId:id});await authorize(identity,generation);
   const normalized=normalizeCatalog(saved,catalog,identity);
   if(!normalized.changed){plans.delete(id);return {status:'up_to_date'};}
-  const token=crypto.randomUUID();plans.set(id,{token,identity,saved,...normalized,expires:Date.now()+5*60*1000});
+  const token=crypto.randomUUID();plans.set(id,{token,identity,saved,conflict,...normalized,expires:Date.now()+5*60*1000});
   return {status:'update_available',token,...normalized.summary};
  }
  async function finish(record,ready,previousProject,generation=revision) {
@@ -85,6 +87,7 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   await authorize(identity,generation);await write(files.previous,previous);
   await namespace.retarget(identity,previous,next,operation);await authorize(identity,generation);
   await write(files.current,next);
+  if(record.conflict){const target=next.catalog.find(e=>!e.folder&&e.key===record.conflict.key);if(!target)throw fail('DRIVE_SNAPSHOT_INVALID');await agent.windowsPreview('conflictReconcile',{identity,projectId:id,rootKey:previous.rootKey,...record.conflict,version:target.meta.version});await authorize(identity,generation);}
   setProject(id,ready);if(previousProject&&previousProject!==ready)previousProject.shutdown();onArchive(id);plans.delete(id);
   // The pointer and namespace are committed. A cleanup failure leaves an
   // idempotent journal to finalize at next startup, never an ambiguous result.
@@ -96,18 +99,21 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   const {identity,project,saved}=await context(id);
   if(!same(plan.identity,identity)||saved.rootKey!==plan.saved.rootKey||saved.directory!==plan.saved.directory)throw fail('DRIVE_REFRESH_STALE');
   const files=names(identity,id,token);if(await read(files.journal))throw fail('DRIVE_REFRESH_INTERRUPTED');
+  const release=plan.conflict?await project.lock(plan.conflict.key):null;try{
+  const verify=async()=>{if(plan.conflict){const proof=await agent.windowsPreview('conflictProof',{identity,projectId:id,rootKey:saved.rootKey,key:plan.conflict.key});if(!same(proof.identity,identity)||proof.sha256!==plan.conflict.sha256||proof.conflictId!==plan.conflict.conflictId)throw fail('DRIVE_LOCAL_CHANGES');}return project.verify(plan.conflict?.key);};
   const remote=await agent.windowsPreview('catalog',{projectId:id});await authorize(identity,generation);
   if(normalizeCatalog(saved,remote,identity).digest!==plan.digest)throw fail('DRIVE_REFRESH_STALE');
-  if(!await project.verify())throw fail('DRIVE_LOCAL_CHANGES');
+  if(!await verify())throw fail('DRIVE_LOCAL_CHANGES');
   const prepared=candidate(id,identity,token,{identity,entries:plan.entries});let journal=false,committed=false;
   try {
    const result=await prepared.start(id,{open:false});if(result.status!=='opened')throw fail(result.code||'DRIVE_UNAVAILABLE');
    const next=await clean(await prepared.snapshot(id),identity,id);await authorize(identity,generation);
-   if(!await project.verify())throw fail('DRIVE_LOCAL_CHANGES');
+   if(!await verify())throw fail('DRIVE_LOCAL_CHANGES');
    await write(files.old,saved);
-   const record={version:1,identity,projectId:id,operation:token,previous:saved,next};await write(files.journal,record);journal=true;
+   const record={version:1,identity,projectId:id,operation:token,previous:saved,next,...(plan.conflict?{conflict:plan.conflict}:{})};await write(files.journal,record);journal=true;
    await finish(record,prepared,project,generation);committed=true;return {status:'refreshed'};
   }catch(error){if(!committed)prepared.shutdown();if(journal)throw fail('DRIVE_REFRESH_INTERRUPTED');throw error;}
+  }finally{release?.();}
  }
  async function recover(id,identity) {
   const generation=revision;
@@ -117,7 +123,7 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
   const current=await clean(await read(files.current),identity,id);
   if(current.rootKey!==previous.rootKey&&current.rootKey!==next.rootKey)throw fail('DRIVE_SNAPSHOT_INVALID');
   await authorize(identity,generation);
-  let ready=getProject(id),oldVerifier=null;
+  let ready=getProject(id),oldVerifier=null,release=null;
   if(!ready||!ready.status().active||(await ready.snapshot(id))?.rootKey!==next.rootKey) {
    const stored=await read(files.candidate);if(stored){const checked=await clean(stored,identity,id);if(checked.rootKey!==next.rootKey||checked.directory!==next.directory)throw fail('DRIVE_SNAPSHOT_INVALID');}else await write(files.candidate,next);
    ready=candidate(id,identity,record.operation);
@@ -128,11 +134,12 @@ function createWindowsRefresh({options,namespace,getProject,setProject,getIdenti
     const oldFile=await read(files.old);if(!oldFile)await write(files.old,previous);else if((await clean(oldFile,identity,id)).rootKey!==previous.rootKey)throw fail('DRIVE_SNAPSHOT_INVALID');
     oldVerifier=getProject(id);
     if(!oldVerifier||!oldVerifier.status().active||(await oldVerifier.snapshot(id))?.rootKey!==previous.rootKey){oldVerifier=candidate(id,identity,record.operation,null,true);const result=await oldVerifier.start(id,{open:false});if(result.status!=='opened')throw fail('DRIVE_LOCAL_CHANGES');}
-    if(!await oldVerifier.verify())throw fail('DRIVE_LOCAL_CHANGES');
+    if(record.conflict){release=await oldVerifier.lock(record.conflict.key);const proof=await agent.windowsPreview('conflictProof',{identity,projectId:id,rootKey:previous.rootKey,key:record.conflict.key});if(!same(proof.identity,identity)||proof.sha256!==record.conflict.sha256||proof.conflictId!==record.conflict.conflictId)throw fail('DRIVE_LOCAL_CHANGES');}
+    if(!await oldVerifier.verify(record.conflict?.key))throw fail('DRIVE_LOCAL_CHANGES');
    }
    await finish({...record,previous,next},ready,oldVerifier||getProject(id),generation);return ready;
   }catch(error){if(getProject(id)!==ready)ready.shutdown();throw error;}
-  finally{if(oldVerifier&&oldVerifier!==getProject(id))oldVerifier.shutdown();}
+  finally{release?.();if(oldVerifier&&oldVerifier!==getProject(id))oldVerifier.shutdown();}
  }
  async function previous(id) {
   if(!validId(id))throw fail('DRIVE_UNAVAILABLE');const grant=getIdentity()||await vault();const identity=await authorize(grant);

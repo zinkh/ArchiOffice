@@ -23,7 +23,7 @@ std::wstring observedDate(double n){
 }
 std::wstring field(JsonObject const& value,wchar_t const* name,size_t limit){auto s=std::wstring(value.GetNamedString(name));if(s.size()>limit)throw std::runtime_error("field");return s;}
 }
-Reply request(std::wstring action,std::wstring project,std::wstring key,std::wstring revision,int page,std::atomic<bool>* cancelled){
+Reply request(std::wstring action,std::wstring project,std::wstring key,std::wstring revision,int page,std::atomic<bool>* cancelled,std::wstring phase,std::wstring type,int baseVersion){
  Reply reply;try{
   auto address=setting(L"Pipe"),token=setting(L"Token");std::wstring prefix=L"\\\\.\\pipe\\ArchiOffice.DriveShell.";
   if(!address.starts_with(prefix)||address.size()!=prefix.size()+36||address.substr(prefix.size()).find_first_not_of(L"0123456789abcdef-")!=std::wstring::npos||token.size()!=64||token.find_first_not_of(L"0123456789abcdef")!=std::wstring::npos)throw std::runtime_error("endpoint");
@@ -33,9 +33,13 @@ Reply request(std::wstring action,std::wstring project,std::wstring key,std::wst
   JsonObject input;input.SetNamedValue(L"format",JsonValue::CreateNumberValue(1));input.SetNamedValue(L"token",JsonValue::CreateStringValue(token));input.SetNamedValue(L"action",JsonValue::CreateStringValue(action));
   input.SetNamedValue(L"projectId",JsonValue::CreateStringValue(project));input.SetNamedValue(L"key",JsonValue::CreateStringValue(key));input.SetNamedValue(L"revision",JsonValue::CreateStringValue(revision));
   input.SetNamedValue(L"page",JsonValue::CreateNumberValue(page));
-  auto data=winrt::to_string(input.Stringify())+"\n";auto deadline=GetTickCount64()+(action==L"preview"?20000:action==L"versions"?12000:5000);DWORD count=0;transfer(pipe.value,true,data.data(),static_cast<DWORD>(data.size()),count,deadline,cancelled);if(count!=data.size())throw std::runtime_error("write");
+  if(action==L"classify"){input.SetNamedValue(L"phase",JsonValue::CreateStringValue(phase));input.SetNamedValue(L"docType",JsonValue::CreateStringValue(type));input.SetNamedValue(L"baseVersion",JsonValue::CreateNumberValue(baseVersion));}
+  auto data=winrt::to_string(input.Stringify())+"\n";auto deadline=GetTickCount64()+(action==L"preview"?20000:action==L"versions"?12000:action==L"catalog"||action==L"open"||action==L"document"?5000:300000);DWORD count=0;transfer(pipe.value,true,data.data(),static_cast<DWORD>(data.size()),count,deadline,cancelled);if(count!=data.size())throw std::runtime_error("write");
   std::string response;char buffer[16384];while(response.find('\n')==std::string::npos){transfer(pipe.value,false,buffer,sizeof(buffer),count,deadline,cancelled);if(!count)throw std::runtime_error("eof");response.append(buffer,count);if(response.size()>(action==L"catalog"?64*1024*1024:2*1024*1024))throw std::runtime_error("response size");}
   auto value=JsonObject::Parse(winrt::to_hstring(response.substr(0,response.find('\n'))));auto status=value.GetNamedString(L"status");
+  if(action==L"actions"){if(status!=L"actions"){reply.message=std::wstring(value.GetNamedString(L"message",L"Actions indisponibles."));return reply;}reply.phase=field(value,L"phase",60);reply.docType=field(value,L"docType",60);reply.version=static_cast<int>(value.GetNamedNumber(L"version"));reply.writable=value.GetNamedBoolean(L"writable");reply.message=field(value,L"reason",200);reply.ok=true;return reply;}
+  if(status==L"completed"){reply.ok=true;reply.message=field(value,L"message",512);return reply;}
+  if(status==L"unavailable"){reply.message=std::wstring(value.GetNamedString(L"message",L"Action indisponible. Actualisez puis réessayez."));return reply;}
   if(action==L"preview"){
    if(status!=L"preview"){reply.message=status==L"unsupported"?L"Aperçu indisponible pour ce format. Utilisez Ouvrir pour son logiciel habituel.":L"Aperçu indisponible. Vérifiez le fichier et la connexion, puis réessayez.";return reply;}
    auto number=[&](wchar_t const* key,int max){double n=value.GetNamedNumber(key);if(n<0||n>max||n!=static_cast<int>(n))throw std::runtime_error("preview bounds");return static_cast<int>(n);};
@@ -61,6 +65,7 @@ Reply request(std::wstring action,std::wstring project,std::wstring key,std::wst
   if(status!=L"ok")throw std::runtime_error("access refused");reply.scope=field(value,L"scope",64);if(reply.scope.size()!=64||reply.scope.find_first_not_of(L"0123456789abcdef")!=std::wstring::npos)throw std::runtime_error("scope");auto projects=value.GetNamedArray(L"projects");if(projects.Size()>10)throw std::runtime_error("projects");
   for(auto const& item:projects){auto p=item.GetObject();Project entry;entry.id=field(p,L"id",200);entry.name=field(p,L"name",240);entry.revision=field(p,L"revision",64);auto rows=p.GetNamedArray(L"rows");if(!valid(entry.id,200)||entry.revision.size()!=64)throw std::runtime_error("catalog");
    for(auto const& itemRow:rows){auto d=itemRow.GetObject();Document doc;doc.key=field(d,L"key",64);doc.name=field(d,L"name",512);doc.phase=field(d,L"phase",120);doc.type=field(d,L"type",200);doc.fileType=field(d,L"fileType",20);doc.indice=field(d,L"indice",200);doc.status=field(d,L"status",200);doc.transferState=field(d,L"transferState",40);
+    doc.errorCode=std::wstring(d.GetNamedString(L"errorCode",L""));doc.preservation=std::wstring(d.GetNamedString(L"preservation",L""));doc.readOnlyReason=std::wstring(d.GetNamedString(L"readOnlyReason",L""));doc.writable=d.GetNamedBoolean(L"writable",false);
     doc.metadataStale=d.GetNamedBoolean(L"metadataStale");auto observed=d.GetNamedValue(L"observedAt");
     if(observed.ValueType()==JsonValueType::Number){double n=observed.GetNumber();if(n<1||n>9007199254740991.0)throw std::runtime_error("metadata date");ULARGE_INTEGER stamp{};stamp.QuadPart=static_cast<ULONGLONG>(n)*10000ULL+116444736000000000ULL;FILETIME utc{stamp.LowPart,stamp.HighPart},local{};SYSTEMTIME time{};wchar_t date[80]{},hour[80]{};if(FileTimeToLocalFileTime(&utc,&local)&&FileTimeToSystemTime(&local,&time)){GetDateFormatEx(LOCALE_NAME_USER_DEFAULT,DATE_SHORTDATE,&time,nullptr,date,80,nullptr);GetTimeFormatEx(LOCALE_NAME_USER_DEFAULT,TIME_NOSECONDS,&time,nullptr,hour,80);doc.metadataDate=std::wstring(date)+L" "+hour;}}
     else if(observed.ValueType()!=JsonValueType::Null)throw std::runtime_error("metadata date");

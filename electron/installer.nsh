@@ -18,15 +18,26 @@
 ; this macro executes — plain ExecWait inherits that, no special-casing needed.
 !macro customInstall
   DetailPrint "Installation du runtime Microsoft Visual C++ (requis par PostgREST et Drive)..."
-  ExecWait '"$INSTDIR\resources\vc_redist.x64.exe" /install /quiet /norestart'
+  ExecWait '"$INSTDIR\resources\vc_redist.x64.exe" /install /quiet /norestart' $0
+  ${If} $0 != 0
+  ${AndIf} $0 != 1638
+  ${AndIf} $0 != 3010
+  ${AndIf} $0 != 1641
+    MessageBox MB_OK|MB_ICONSTOP "Impossible d’installer le runtime Microsoft Visual C++." /SD IDOK
+    Abort
+  ${EndIf}
   DetailPrint "Enregistrement de l’espace documentaire ArchiOffice..."
   ExecWait '"$INSTDIR\resources\drive-shell\archioffice-shell-control.exe" --register-machine' $0
   ${If} $0 != 0
-    MessageBox MB_OK|MB_ICONSTOP "Impossible d’enregistrer l’espace documentaire ArchiOffice."
+    MessageBox MB_OK|MB_ICONSTOP "Impossible d’enregistrer l’espace documentaire ArchiOffice." /SD IDOK
     Abort
   ${EndIf}
 !macroend
 
 !macro customUnInstall
-  ExecWait '"$INSTDIR\resources\drive-shell\archioffice-shell-control.exe" --unregister-machine'
+  ExecWait '"$INSTDIR\resources\drive-shell\archioffice-shell-control.exe" --unregister-machine' $0
+  ${If} $0 != 0
+    MessageBox MB_OK|MB_ICONSTOP "Impossible de retirer l’espace documentaire. Fermez les fenêtres Explorer puis réessayez." /SD IDOK
+    Abort
+  ${EndIf}
 !macroend
