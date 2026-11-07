@@ -230,9 +230,9 @@ public:
                 DestroyViewWindow();return HRESULT_FROM_WIN32(error);
             }
         }
-        window=CreateWindowExW(0,cls.lpszClassName,L"ArchiOffice Drive",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,parent,nullptr,module,this);
+        window=CreateWindowExW(0,cls.lpszClassName,L"ArchiOffice Drive (prototype catalogue)",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,parent,nullptr,module,this);
         if(!window){DWORD error=GetLastError();DestroyViewWindow();return HRESULT_FROM_WIN32(error);}
-        location=CreateWindowExW(0,L"STATIC",L"ArchiOffice Drive",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,0,0,0,0,window,nullptr,module,nullptr);
+        location=CreateWindowExW(0,L"STATIC",L"ArchiOffice Drive (prototype catalogue)",WS_CHILD|WS_VISIBLE|SS_PATHELLIPSIS,0,0,0,0,window,nullptr,module,nullptr);
         navigation=CreateWindowExW(WS_EX_CLIENTEDGE,L"LISTBOX",L"Navigation",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LBS_NOTIFY,0,0,0,0,window,reinterpret_cast<HMENU>(101),module,nullptr);
         for(auto label:{L"Projets dans A:",L"Dossier parent",L"Actualiser (F5)"})SendMessageW(navigation,LB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
         list=CreateWindowExW(WS_EX_CLIENTEDGE,WC_LISTVIEWW,L"Documents",WS_CHILD|WS_VISIBLE|WS_TABSTOP|LVS_REPORT|LVS_SINGLESEL|LVS_SHOWSELALWAYS,0,0,0,0,window,nullptr,module,nullptr);
@@ -291,7 +291,7 @@ public:
     HRESULT STDMETHODCALLTYPE GetAttributesOf(UINT count,PCUITEMID_CHILD_ARRAY,SFGAOF* flags) override{if(!flags)return E_POINTER;if(count)return E_INVALIDARG;*flags&=SFGAO_FOLDER|SFGAO_BROWSABLE;return S_OK;}
     HRESULT STDMETHODCALLTYPE GetUIObjectOf(HWND,UINT,PCUITEMID_CHILD_ARRAY,REFIID,UINT*,void** out) override{if(out)*out=nullptr;return E_NOINTERFACE;}
     HRESULT STDMETHODCALLTYPE GetDisplayNameOf(PCUITEMID_CHILD,SHGDNF flags,STRRET* out) override{
-        if(!out)return E_POINTER;std::wstring name=flags&SHGDN_FORPARSING?std::wstring(L"::")+ClassId:L"ArchiOffice Drive";
+        if(!out)return E_POINTER;std::wstring name=flags&SHGDN_FORPARSING?std::wstring(L"::")+ClassId:L"ArchiOffice Drive (prototype catalogue)";
         out->uType=STRRET_WSTR;return SHStrDupW(name.c_str(),&out->pOleStr);
     }
     HRESULT STDMETHODCALLTYPE SetNameOf(HWND,PCUITEMID_CHILD,LPCWSTR,SHGDNF,PITEMID_CHILD* out) override{if(out)*out=nullptr;return E_ACCESSDENIED;}
@@ -323,13 +323,13 @@ extern "C" HRESULT __stdcall DllUnregisterServer(){
 }
 extern "C" HRESULT __stdcall DllRegisterServer(){
     wchar_t file[32768]{};DWORD n=GetModuleFileNameW(module,file,32768);if(!n||n>=32768)return E_FAIL;
-    auto key=classKey();LSTATUS result=stringValue(key,nullptr,L"ArchiOffice Drive");
+    auto key=classKey();LSTATUS result=stringValue(key,nullptr,L"ArchiOffice Drive (prototype catalogue)");
     auto check=[&](LSTATUS code){if(result==ERROR_SUCCESS)result=code;};
     check(stringValue(key+L"\\InprocServer32",nullptr,file));check(stringValue(key+L"\\InprocServer32",L"ThreadingModel",L"Apartment"));
     DWORD pinned=1,attributes=SFGAO_FOLDER|SFGAO_BROWSABLE;
     check(value(key,L"System.IsPinnedToNameSpaceTree",REG_DWORD,&pinned,sizeof(pinned)));
     check(value(key+L"\\ShellFolder",L"Attributes",REG_DWORD,&attributes,sizeof(attributes)));
-    check(stringValue(namespaceKey(),nullptr,L"ArchiOffice Drive"));
+    check(stringValue(namespaceKey(),nullptr,L"ArchiOffice Drive (prototype catalogue)"));
     if(result!=ERROR_SUCCESS){DllUnregisterServer();return HRESULT_FROM_WIN32(result);}
     SHChangeNotify(SHCNE_ASSOCCHANGED,SHCNF_IDLIST,nullptr,nullptr);return S_OK;
 }

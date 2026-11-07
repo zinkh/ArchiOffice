@@ -3,7 +3,7 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'native/windows-shell/**'
+      - 'native/windows-shell-lab/**'
       - 'electron/windowsShellCatalog.cjs'
       - 'server/desktop/agent/shellMetadata.ts'
       - 'tests/driveShell*.test.ts'
@@ -21,22 +21,22 @@ jobs:
         with:
           node-version: '22'
       - name: Configure x64 Shell extension
-        run: cmake -S native/windows-shell -B native/windows-shell/build -A x64
+        run: cmake -S native/windows-shell-lab -B native/windows-shell-lab/build -A x64
       - name: Compile extension and native host test
-        run: cmake --build native/windows-shell/build --config Release
+        run: cmake --build native/windows-shell-lab/build --config Release
       - name: Exercise IShellView contract without changing A
         shell: pwsh
         run: |
-          $root = node native/windows-shell/catalog-fixture.mjs "$env:RUNNER_TEMP/shell-catalog"
-          native/windows-shell/build/Release/archioffice-shell-smoke.exe native/windows-shell/build/Release/archioffice-drive-shell.dll "$root"
+          $root = node native/windows-shell-lab/catalog-fixture.mjs "$env:RUNNER_TEMP/shell-catalog"
+          native/windows-shell-lab/build/Release/archioffice-shell-smoke.exe native/windows-shell-lab/build/Release/archioffice-drive-shell.dll "$root"
       - name: Verify per-user installation, COM activation and removal
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $stage = Join-Path $env:RUNNER_TEMP 'drive-shell-package'
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item native/windows-shell/build/Release/archioffice-drive-shell.dll $stage
-          Copy-Item native/windows-shell/install.ps1 $stage
+          Copy-Item native/windows-shell-lab/build/Release/archioffice-drive-shell.dll $stage
+          Copy-Item native/windows-shell-lab/install.ps1 $stage
           & "$stage/install.ps1"
           try {
             $clsid = '{67B0F7BE-5F65-4AEF-9D4B-B133A991D911}'
@@ -52,10 +52,10 @@ jobs:
       - name: Assemble opt-in prototype
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path native/windows-shell/package -Force | Out-Null
-          Copy-Item native/windows-shell/build/Release/archioffice-drive-shell.dll native/windows-shell/package/
-          Copy-Item native/windows-shell/install.ps1,native/windows-shell/README.md native/windows-shell/package/
+          New-Item -ItemType Directory -Path native/windows-shell-lab/package -Force | Out-Null
+          Copy-Item native/windows-shell-lab/build/Release/archioffice-drive-shell.dll native/windows-shell-lab/package/
+          Copy-Item native/windows-shell-lab/install.ps1,native/windows-shell-lab/README.md native/windows-shell-lab/package/
       - uses: actions/upload-artifact@v7
         with:
           name: ArchiOffice-Drive-Shell-prototype-x64
-          path: native/windows-shell/package/
+          path: native/windows-shell-lab/package/

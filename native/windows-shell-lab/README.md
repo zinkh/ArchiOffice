@@ -1,4 +1,9 @@
-# ArchiOffice Drive : prototype Shell Windows (lots 1 et 2)
+# ArchiOffice Drive : prototype catalogue Shell (lots 1 et 2)
+
+Ce prototype catalogue est installé explicitement et possède son propre CLSID.
+L’espace documentaire intégré au client et à l’installateur reste dans
+`native/windows-shell`. Son entrée habituelle est distincte de cette vue
+expérimentale, affichée comme « ArchiOffice Drive (prototype catalogue) ».
 
 Extension COM x64 native avec `IShellFolder`, `IPersistFolder2` et une vue
 `IShellView` hébergée par l’Explorateur. Trois volets : navigation, documents,
@@ -121,9 +126,9 @@ au cycle NSIS et aux mises à jour générales appartient au lot 8.
 Visual Studio Build Tools C++ et Windows SDK, x64 :
 
 ```powershell
-cmake -S native/windows-shell -B native/windows-shell/build -A x64
-cmake --build native/windows-shell/build --config Release
-native/windows-shell/build/Release/archioffice-shell-smoke.exe native/windows-shell/build/Release/archioffice-drive-shell.dll
+cmake -S native/windows-shell-lab -B native/windows-shell-lab/build -A x64
+cmake --build native/windows-shell-lab/build --config Release
+native/windows-shell-lab/build/Release/archioffice-shell-smoke.exe native/windows-shell-lab/build/Release/archioffice-drive-shell.dll
 ```
 
 Le test natif héberge la véritable DLL et vérifie la fabrique COM, le PIDL,
