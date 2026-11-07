@@ -41,7 +41,7 @@ import { ajouterClause, estClause } from '../../lib/bibliothequeClauses';
 import { takeLigneAtPath, insertLigneAtPath, renumeroterLignes, MAX_ARTICLE_DEPTH, childNumber, addChildToLigneAtPath, parseRowKey, recomputeLot } from './treeOps';
 import { CctpQuantiteUnite } from './CctpQuantiteUnite';
 import { MetreDialog } from './MetreDialog';
-import { formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
+import { batimentsDuMetre, formuleCourante, prixPatch, quantitePatch } from '../../lib/quantites';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } from './selectionOps';
 import { dupliquerSelection, modifierEnMasse, type PatchMasse } from './cctpBulkOps';
@@ -770,7 +770,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       {showMetre && (() => {
         const l = ligneSelectionnee();
         return l ? (
-          <MetreDialog key={l.id} ligne={l} onClose={() => setShowMetre(false)} onSave={patch => { appliquerALigne(patch); setShowMetre(false); }} />
+          <MetreDialog key={l.id} ligne={l} batiments={batimentsDuMetre(dpgf, l)} onClose={() => setShowMetre(false)} onSave={patch => { appliquerALigne(patch); setShowMetre(false); }} />
         ) : null;
       })()}
 

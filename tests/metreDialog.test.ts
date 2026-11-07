@@ -5,7 +5,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MetreDialog } from '../src/components/pro/MetreDialog';
-import type { Ligne, QuantiteDetail } from '../src/types/dpgf';
+import type { Batiment, Ligne, QuantiteDetail } from '../src/types/dpgf';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string, o?: Record<string, unknown>) => (o && 'n' in o ? `${key} ${o.n}` : key) }),
@@ -24,14 +24,14 @@ let root: Root;
 let container: HTMLDivElement;
 afterEach(async () => { if (root) await act(async () => root.unmount()); container?.remove(); vi.unstubAllGlobals(); });
 
-async function ouvrir(ligne: Ligne) {
+async function ouvrir(ligne: Ligne, batiments?: Batiment[]) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   const onSave = vi.fn();
   const onClose = vi.fn();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  await act(async () => { root.render(React.createElement(MetreDialog, { ligne, onSave, onClose })); });
+  await act(async () => { root.render(React.createElement(MetreDialog, { ligne, onSave, onClose, batiments })); });
   return { onSave, onClose };
 }
 
@@ -125,5 +125,108 @@ describe('MetreDialog', () => {
     await act(async () => { container.querySelector('[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     expect(onClose).toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
+  });
+});
+
+describe('MetreDialog : article réparti par bâtiment', () => {
+  const batiments: Batiment[] = [
+    { id: 'DX', code: 'DX', libelle: 'Bâtiment X', ordre: 1 },
+    { id: 'DY', code: 'DY', libelle: 'Bâtiment Y', ordre: 2 },
+  ];
+  const parBatiment = (surcharge: Partial<Ligne> = {}) => article({
+    quantitesBatiments: { DX: 7.6, DY: 20, DZ: 0 }, quantite: 27.6, ...surcharge,
+  } as Partial<Ligne>);
+  const select = (label: string) => [...document.querySelectorAll<HTMLSelectElement>('select')].find(s => s.getAttribute('aria-label') === label)!;
+  const totalBatiment = (id: string) => container.querySelector(`[data-testid="metre-total-${id}"]`)?.textContent ?? '';
+  async function choisir(el: HTMLSelectElement, valeur: string) {
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, valeur);
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  const branche = (id: string) => container.querySelector<HTMLElement>(`[data-testid="metre-branch-${id}"]`);
+
+  it('repart des quantités par bâtiment : une branche par bâtiment qui en a, avec ses lignes', async () => {
+    await ouvrir(parBatiment(), batiments);
+    expect(branche('DX')!.contains(champ('pro_metre_aria_calc 1'))).toBe(true);
+    expect(champ('pro_metre_aria_calc 1').value).toBe('7,6');
+    expect(branche('DY')!.contains(champ('pro_metre_aria_calc 2'))).toBe(true);
+    expect(champ('pro_metre_aria_calc 2').value).toBe('20');
+    expect(branche('DZ')).toBeNull(); // DZ n'est pas un bâtiment du projet : pas de branche
+    expect(champ('pro_metre_aria_calc 3')).toBeNull();
+    expect(total()).toContain('27,60');
+  });
+
+  it('une branche se replie et son total reste visible', async () => {
+    await ouvrir(parBatiment(), batiments);
+    await act(async () => { bouton('pro_metre_aria_collapse').click(); });
+    expect(champ('pro_metre_aria_calc 1')).toBeNull();
+    expect(totalBatiment('DX')).toContain('7,60');
+  });
+
+  it('montre le total de chaque bâtiment', async () => {
+    await ouvrir(parBatiment(), batiments);
+    expect(totalBatiment('DX')).toContain('7,60');
+    expect(totalBatiment('DY')).toContain('20,00');
+    await saisir(champ('pro_metre_aria_calc 1'), '=10-2,4');
+    expect(totalBatiment('DX')).toContain('7,60');
+    await saisir(champ('pro_metre_aria_calc 1'), '12');
+    expect(totalBatiment('DX')).toContain('12,00');
+    expect(total()).toContain('32,00');
+  });
+
+  it('un article sans bâtiments proposés n\'a ni colonne ni totaux par bâtiment', async () => {
+    await ouvrir(article({ quantite: 12 }));
+    expect(select('pro_metre_aria_building 1')).toBeUndefined();
+    expect(container.querySelector('[data-testid^="metre-total-"]')).toBeNull();
+  });
+
+  it('une nouvelle ligne est ajoutée dans la branche où l\'on clique', async () => {
+    await ouvrir(parBatiment(), batiments);
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-testid="metre-add-DX"]')!.click(); });
+    expect(branche('DX')!.contains(champ('pro_metre_aria_calc 3'))).toBe(true);
+  });
+
+  it('on ajoute une branche pour un bâtiment qui n\'en a pas encore', async () => {
+    const trois: Batiment[] = [...batiments, { id: 'DW', code: 'DW', libelle: 'Bâtiment W', ordre: 3 }];
+    await ouvrir(parBatiment(), trois);
+    expect(branche('DW')).toBeNull();
+    await choisir(select('pro_metre_add_building'), 'DW');
+    expect(branche('DW')!.contains(champ('pro_metre_aria_calc 3'))).toBe(true);
+  });
+
+  it('une ligne sans bâtiment est signalée, empêche d\'appliquer, et s\'affecte depuis sa branche', async () => {
+    const sans: QuantiteDetail[] = [{ id: 'q1', libelle: 'A', expression: '10', quantite: 10 }];
+    await ouvrir(article({ quantitesBatiments: { DX: 1, DY: 1 }, quantite: 2, quantiteDetails: sans } as Partial<Ligne>), batiments);
+    expect(container.textContent).toContain('pro_metre_error_building 1');
+    expect((bouton('pro_metre_apply') as HTMLButtonElement).disabled).toBe(true);
+    await choisir(select('pro_metre_aria_building 1'), 'DY');
+    expect((bouton('pro_metre_apply') as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('le total d\'un bâtiment ne peut pas être négatif, même si le total général ne l\'est pas', async () => {
+    await ouvrir(parBatiment(), batiments);
+    await saisir(champ('pro_metre_aria_calc 1'), '-5');
+    expect(container.textContent).toContain('pro_metre_error_building_negative');
+    expect((bouton('pro_metre_apply') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('appliquer envoie les quantités par bâtiment, la quantité somme et le bâtiment de chaque ligne', async () => {
+    const { onSave } = await ouvrir(parBatiment(), batiments);
+    await saisir(champ('pro_metre_aria_calc 1'), '12');
+    await act(async () => { bouton('pro_metre_apply').click(); });
+    const patch = onSave.mock.calls[0][0];
+    expect(patch.quantitesBatiments).toEqual({ DX: 12, DY: 20, DZ: 0 }); // DZ affecté, sans ligne : reste à 0
+    expect(patch.quantite).toBe(32);
+    expect(patch.quantiteDetails.map((d: any) => [d.batimentId, d.expression])).toEqual([['DX', '12'], ['DY', '20']]);
+  });
+
+  it('un métré existant garde ses lignes ; une ligne d\'avant sans bâtiment reprend l\'unique bâtiment de l\'article', async () => {
+    const avant: QuantiteDetail[] = [{ id: 'q1', libelle: 'Façade', expression: '10', quantite: 10 }];
+    const { onSave } = await ouvrir(article({ quantitesBatiments: { DX: 10 }, quantite: 10, quantiteDetails: avant } as Partial<Ligne>), batiments);
+    expect(branche('DX')!.contains(champ('pro_metre_aria_calc 1'))).toBe(true);
+    await act(async () => { bouton('pro_metre_apply').click(); });
+    expect(onSave.mock.calls[0][0].quantitesBatiments).toEqual({ DX: 10 });
   });
 });

@@ -27,7 +27,7 @@ import { appliquerStatutLignes, collectSelectedLignes, deleteSelection, parseSel
 import { StatutBadges } from './StatutBadges';
 import { LigneDescriptionDialog } from './LigneDescriptionDialog';
 import { MetreDialog } from './MetreDialog';
-import { formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
+import { batimentsDuMetre, formuleCourante, prixPatch, prixTotalPatch, quantitePatch, texteSaisieQuantite } from '../../lib/quantites';
 import { margePatch, tauxMargeDe, vueMarge } from '../../lib/marge';
 import { useConfirmerSuppression } from './useConfirmerSuppression';
 import { useCibleRecherche } from '../../hooks/useCibleRecherche';
@@ -742,7 +742,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     const description: ToolbarMenuEntry[] = s.kind === 'ligne'
       ? [{ id: 'description', label: t('pro_description_edit'), icon: <IconFileText size={16} />, onClick: () => setDescriptionKey(rowKey(row)) }]
       : [];
-    return [...add, ...description, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
+    const metre: ToolbarMenuEntry[] = s.kind === 'ligne' && !ligneAtPath(dpgf.lots[s.lotIdx]?.chapitres[s.chapIdx]?.lignes ?? [], s.lignePath)?.children?.length
+      ? [{ id: 'metre', label: t('pro_metre_detail'), icon: <IconListDetails size={16} />, onClick: () => setMetreKey(rowKey(row)) }]
+      : [];
+    return [...add, ...description, ...metre, ...statut, { id: 'sep', separator: true }, ...selectionActions([s]).filter(a => !a.menu)];
   };
 
   // ── Raccourcis clavier du tableau ───────────────────────────────────────────
@@ -951,6 +954,7 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
         <MetreDialog
           key={metreCible.key}
           ligne={metreCible.ligne}
+          batiments={batimentsDuMetre(dpgf, metreCible.ligne)}
           onSave={patch => { appliquerMetre(metreCible.key, patch); setMetreKey(null); }}
           onClose={() => setMetreKey(null)}
         />
@@ -1297,6 +1301,18 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                           >
                             <IconFileText size={14} aria-hidden />
                           </button>
+                          {/* Métré : à côté de la description, aussi quand la quantité est répartie par bâtiment. Cerclé si l'article en a un. */}
+                          {!hasChildren && (
+                            <button
+                              type="button"
+                              onClick={e => { e.stopPropagation(); setMetreKey(rKey); }}
+                              aria-label={`${t('pro_metre_detail')} ${l.numero}`} title={t('pro_metre_detail')}
+                              className={`shrink-0 w-6 h-6 pointer-coarse:w-10 pointer-coarse:h-10 inline-flex items-center justify-center rounded outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)] ${l.quantiteDetails?.length ? 'border' : 'hover:bg-[var(--tblr-surface-2)] opacity-0 group-hover:opacity-60 focus-visible:opacity-100 pointer-coarse:opacity-60'}`}
+                              style={{ color: l.quantiteDetails?.length ? 'var(--tblr-text)' : 'var(--tblr-muted)', borderColor: 'var(--tblr-text)' }}
+                            >
+                              <IconListDetails size={14} aria-hidden />
+                            </button>
+                          )}
                           {/* Repère de provenance : cet article vient de la
                               bibliothèque du cabinet, c'est aussi lui qui permettra
                               au prix d'une offre d'y remonter. */}
@@ -1329,7 +1345,10 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                         return (
                           <td key={b.id} className="px-2 py-0.5">
                             {b.id in quantites
-                              ? <EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric showZero label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} />
+                              ? l.quantiteDetails?.length
+                                // Un métré : la quantité du bâtiment en est la somme de ses lignes.
+                                ? <span className="block text-right font-mono tabular-nums px-1" title={t('pro_metre_sum_of', { count: l.quantiteDetails.length })}>{formatQuantite(quantites[b.id])}</span>
+                                : <EditableCell rKey={rKey} field={`qb:${b.id}`} value={quantites[b.id]} numeric showZero label={t('pro_col_quantity_of', { code: b.code })} {...cellProps} />
                               : <span className="block text-right px-1" style={{ color: 'var(--tblr-muted)' }} title={t('pro_building_not_assigned')}>·</span>}
                           </td>
                         );
@@ -1348,17 +1367,6 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
                                     {...cellProps}
                                   />}
                             </div>
-                            {!hasChildren && (
-                              <button
-                                type="button"
-                                onClick={e => { e.stopPropagation(); setMetreKey(rKey); }}
-                                aria-label={t('pro_metre_detail')} title={t('pro_metre_detail')}
-                                className="shrink-0 w-6 h-6 pointer-coarse:w-10 pointer-coarse:h-10 inline-flex items-center justify-center rounded hover:bg-[var(--tblr-surface-2)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--tblr-primary)]"
-                                style={{ color: l.quantiteDetails?.length ? 'var(--tblr-text)' : 'var(--tblr-muted)' }}
-                              >
-                                <IconListDetails size={14} aria-hidden />
-                              </button>
-                            )}
                           </div>
                         )}
                       </td>
