@@ -46,7 +46,8 @@ ne sont pas prises en charge par cette première version.
 - Propriétés : nom, emplacement, nature, taille et date locale de modification.
 
 Le panneau de droite affiche les propriétés métier réellement disponibles :
-projet, nom, phase, type documentaire, indice, statut, droits et date de lecture.
+projet, nom, phase, type documentaire, indice, statut, autorisation de modification
+et date de lecture.
 Les champs absents restent « Non renseigné ». Les droits affichés sont une
 observation serveur ; les commandes continuent d’appliquer les contrôles existants.
 Les vues par phase/type, la recherche et les aperçus PDF/images viennent ensuite.
@@ -78,7 +79,7 @@ invalide les informations métier en cache. Le cache ne permet pas d’activer
 Drive sans autorisation locale valide. L’état d’envoi est relu dans la file locale
 existante et n’est pas repris d’un ancien état en cache.
 
-Les trois notions sont affichées séparément :
+Les notions suivantes sont affichées séparément :
 
 - **Indice métier** : valeur `indice` observée dans ArchiOffice.
 - **Version du catalogue A:** : version inscrite dans le manifeste de cette
