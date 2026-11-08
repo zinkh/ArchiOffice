@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RESERVE_COULEUR_NEUTRE, RESERVE_PALETTE, construireLegende, couleurDe, couleursParCle, hexVersRgb, responsableDe,
+  RESERVE_COULEUR_NEUTRE, RESERVE_PALETTE, construireLegende, couleurDe, couleursParCle, hexVersRgb, responsableDe, texteSurCouleur,
 } from '../reserveCouleurs';
 
 const r = (entreprises: string[], lots: string[] = []) => ({ entreprises: JSON.stringify(entreprises), lots: JSON.stringify(lots) });
@@ -50,6 +50,29 @@ describe('hexVersRgb', () => {
   });
   it('rend le gris neutre pour une valeur illisible', () => {
     expect(hexVersRgb('bleu')).toEqual(hexVersRgb(RESERVE_COULEUR_NEUTRE));
+  });
+});
+
+describe('texteSurCouleur', () => {
+  it('écrit en blanc sur un fond sombre', () => {
+    expect(texteSurCouleur('#1e3a8a')).toBe('#ffffff');
+    expect(texteSurCouleur('#1f2937')).toBe('#ffffff');
+  });
+  it('écrit en noir sur un fond clair', () => {
+    expect(texteSurCouleur('#f59e0b')).toBe('#111827');
+    expect(texteSurCouleur('#4ade80')).toBe('#111827');
+  });
+  it('est lisible sur toute la palette (contraste au moins 3 : 1)', () => {
+    const lum = (hex: string) => {
+      const [r, g, b] = hexVersRgb(hex).map(v => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    for (const fond of RESERVE_PALETTE) {
+      const l1 = lum(fond);
+      const l2 = lum(texteSurCouleur(fond));
+      const contraste = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      expect(contraste).toBeGreaterThanOrEqual(3);
+    }
   });
 });
 

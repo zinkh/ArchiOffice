@@ -216,9 +216,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       const x = r.x == null ? NaN : Number(r.x);
       const y = r.y == null ? NaN : Number(r.y);
       if (!r.plan_id || !Number.isFinite(x) || !Number.isFinite(y)) return [];
-      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title }];
+      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title, couleur: couleurDe(r, couleurs) }];
     })
-  ), [reserves]);
+  ), [reserves, couleurs]);
   const planMarkers = useMemo(() => (
     allMarkers.filter(m => m.planId === selectedPlanId).map(({ planId: _planId, ...m }) => m)
   ), [allMarkers, selectedPlanId]);

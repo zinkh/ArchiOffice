@@ -295,7 +295,9 @@ export async function exportReservesToPDF(
     const plan = r.plan_id ? planById.get(r.plan_id) : undefined;
     if (plan && r.x != null && r.y != null) {
       try {
-        const dataUrl = await renderPlanExcerpt(plan.file_url, r.x, r.y, String(r.number ?? ''));
+        const dataUrl = await renderPlanExcerpt(plan.file_url, r.x, r.y, String(r.number ?? ''), {
+          couleur: responsableDe(r) ? couleurDe(r, couleursTable) : undefined,
+        });
         thumbs.push({ dataUrl, width: 1, height: 1, caption: plan.name });
       } catch (err) {
         console.error('[reservesExport] Extrait de plan impossible :', err);
@@ -421,7 +423,10 @@ export async function exportReservesToPDF(
       progress(`Rendu du plan ${plan.name}…`);
       const markers = sorted
         .filter(r => r.plan_id === planId && r.x != null && r.y != null)
-        .map(r => ({ x: r.x as number, y: r.y as number, label: String(r.number ?? '') }));
+        .map(r => ({
+          x: r.x as number, y: r.y as number, label: String(r.number ?? ''),
+          couleur: responsableDe(r) ? couleurDe(r, couleursTable) : undefined,
+        }));
       let image: { dataUrl: string; width: number; height: number };
       try {
         image = await renderPlanWithMarkers(plan.file_url, markers);

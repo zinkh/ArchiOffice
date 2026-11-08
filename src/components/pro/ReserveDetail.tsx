@@ -38,7 +38,7 @@ interface ReserveDetailProps {
   /** Position choisie sur le plan avant la création (mode création seulement). */
   pendingPlan?: { planId: string | null; x?: number; y?: number } | null;
   /** Repères des réserves déjà posées (tous plans) : montrés sur le plan du sélecteur d'emplacement. */
-  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string }[];
+  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string; couleur?: string }[];
   onClose: () => void;
   onSaved: (reserve: ReserveLike) => void;
   onDeleted: (id: string) => void;
@@ -482,7 +482,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, co
             <div className="space-y-1">
               <label className={labelClass}>Repérage sur le plan</label>
               <div className="flex gap-3 items-start">
-                <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} className="w-40 h-40 object-cover shrink-0" />
+                <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} couleur={responsable ? couleurResponsable : undefined} className="w-40 h-40 object-cover shrink-0" />
                 <div className="text-xs text-[var(--tblr-muted)] space-y-2 pt-1">
                   <div className="flex items-center gap-1"><IconMapPin size={14} /> {plan.name}</div>
                   <button type="button" onClick={openPicker} className="px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg bg-[var(--tblr-surface-2)] text-[var(--tblr-text)] font-bold">Déplacer le repère</button>

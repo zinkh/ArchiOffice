@@ -235,7 +235,12 @@ l'enregistrement. **Export PDF** (`reservesExport.ts`, option `couleurs`) : lég
 liseré au bord de la cellule N° du récapitulatif, liseré sur le numéro de chaque fiche et pastille devant
 « En charge » (« Lot » à défaut). `ReserveDiffusionDialog` transmet la table de l'écran : un PDF filtré par
 lot ou envoyé à une seule entreprise garde les mêmes couleurs. La couleur est une donnée, elle reste en
-couleur dans une charte en gris. Aucune migration. Pas encore fait : couleur sur les repères du plan. Pas
+couleur dans une charte en gris. **Repères du plan** : `PlanAnnotator` (champ `couleur` d'un repère, rouge
+comme avant sans elle), l'extrait de plan de la fiche (`PlanExcerpt`, prop `couleur`), et dans le PDF le
+plan d'annexe et l'extrait de chaque fiche (`drawMarker`, `PlanMarker.couleur`, `renderPlanExcerpt`).
+Le numéro s'écrit en blanc ou en noir selon le fond (`texteSurCouleur`, contraste WCAG d'au moins 3 : 1
+sur toute la palette, testé) et un filet sombre garde visible une pastille claire sur le fond blanc d'un
+plan. Un repère sans responsable est gris à l'écran et reste sombre dans le PDF. Aucune migration. Pas
 vérifié dans un navigateur ni sur un PDF ouvert.
 
 **Extrait de plan.** Les repères sont stockés en pourcentage de la première

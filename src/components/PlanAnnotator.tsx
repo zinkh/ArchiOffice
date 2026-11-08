@@ -6,6 +6,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import { cn } from '../lib/utils';
 import { resolveSignedUrl } from '../lib/signedStorageUrl';
+import { texteSurCouleur } from '../lib/reserveCouleurs';
 
 // Self-hosted worker (bundled by Vite) instead of a public CDN, so the
 // annotator keeps working offline (Electron build) and isn't at the mercy
@@ -18,6 +19,8 @@ interface Marker {
   y: number;
   number?: number;
   title?: string;
+  /** `#rrggbb` : couleur du responsable. Sans elle, le repère reste rouge comme avant. */
+  couleur?: string;
 }
 
 interface PlanAnnotatorProps {
@@ -162,10 +165,15 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
                 onSelectMarker?.(marker.id);
               }}
               className={cn(
-                "absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shadow-lg cursor-pointer transition-transform hover:scale-110",
-                "bg-red-600 text-white border-2 border-white"
+                "absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shadow-lg cursor-pointer transition-transform hover:scale-110 border-2 border-white",
+                // Un filet sombre garde visible une pastille claire sur le fond blanc d'un plan.
+                marker.couleur ? "ring-1 ring-zinc-900/50" : "bg-red-600 text-white"
               )}
-              style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+              style={{
+                left: `${marker.x}%`,
+                top: `${marker.y}%`,
+                ...(marker.couleur ? { backgroundColor: marker.couleur, color: texteSurCouleur(marker.couleur) } : {}),
+              }}
               title={marker.title}
             >
               {marker.number || '?'}

@@ -31,6 +31,17 @@ export function hexVersRgb(hex: string): [number, number, number] {
 /** Couleur de repli : réserve sans entreprise ni lot. */
 export const RESERVE_COULEUR_NEUTRE = '#71717a';
 
+/** Blanc ou presque noir, selon ce qui contraste le mieux avec ce fond (luminance WCAG). */
+export function texteSurCouleur(hex: string): '#ffffff' | '#111827' {
+  const [r, g, b] = hexVersRgb(hex).map(v => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  // À luminance 0,179 le contraste est identique avec le blanc et avec le noir.
+  return luminance > 0.179 ? '#111827' : '#ffffff';
+}
+
 const norm = (s: string) => s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 
 type AvecResponsable = { entreprises?: unknown; lots?: unknown };

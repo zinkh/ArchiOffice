@@ -71,17 +71,17 @@ export function StatusSelect({ value, onChange, className }: { value: ReserveSta
  * lib/planRender.ts, mis en cache par plan). Rien n'est affiché tant que le
  * rendu n'est pas prêt, et rien du tout si le plan est illisible.
  */
-export function PlanExcerpt({ fileUrl, x, y, label, className }: { fileUrl: string; x: number; y: number; label: string; className?: string }) {
+export function PlanExcerpt({ fileUrl, x, y, label, className, couleur }: { fileUrl: string; x: number; y: number; label: string; className?: string; couleur?: string }) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
     setSrc(null); setFailed(false);
-    renderPlanExcerpt(fileUrl, x, y, label)
+    renderPlanExcerpt(fileUrl, x, y, label, { couleur })
       .then(url => { if (!cancelled) setSrc(url); })
       .catch(err => { console.error('[PlanExcerpt]', err); if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
-  }, [fileUrl, x, y, label]);
+  }, [fileUrl, x, y, label, couleur]);
   if (failed) return null;
   if (!src) {
     return <div className={cn('animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-800', className)} aria-label="Extrait de plan en cours de rendu" />;

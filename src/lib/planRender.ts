@@ -9,6 +9,7 @@
 import { pdfjs } from 'react-pdf';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { resolveSignedUrl } from './signedStorageUrl';
+import { texteSurCouleur } from './reserveCouleurs';
 
 // Même worker auto-hébergé que PlanAnnotator : ce module peut être chargé
 // sans lui (export lancé depuis une liste sans plan affiché).
@@ -73,22 +74,34 @@ export interface PlanMarker {
   x: number;
   y: number;
   label: string;
+  /** `#rrggbb` : couleur du responsable de la réserve. Sans elle, la pastille sombre d'origine. */
+  couleur?: string;
 }
 
+const COULEUR_REPERE_DEFAUT = '#1f2937';
+
 /**
- * Dessine un repère numéroté : une pastille sombre à bord blanc, le numéro en
- * blanc — lisible sur un plan quel que soit le fond, sans couleur vive.
+ * Dessine un repère numéroté : une pastille à bord blanc et filet sombre, le numéro en blanc ou en
+ * noir selon la couleur (lisible sur un plan quel que soit le fond). La couleur est celle du
+ * responsable de la réserve ; sans elle, la pastille sombre d'origine.
  */
-export function drawMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, label: string, radius: number) {
+export function drawMarker(ctx: CanvasRenderingContext2D, cx: number, cy: number, label: string, radius: number, couleur: string = COULEUR_REPERE_DEFAUT) {
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-  ctx.fillStyle = '#1f2937';
+  ctx.fillStyle = couleur;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.5, radius * 0.18);
+  const bord = Math.max(1.5, radius * 0.18);
+  ctx.lineWidth = bord;
   ctx.strokeStyle = '#ffffff';
   ctx.stroke();
-  ctx.fillStyle = '#ffffff';
+  // Filet sombre à l'extérieur : une pastille claire reste visible sur le fond blanc d'un plan.
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius + bord / 2, 0, Math.PI * 2);
+  ctx.lineWidth = Math.max(1, radius * 0.06);
+  ctx.strokeStyle = 'rgba(17, 24, 39, 0.55)';
+  ctx.stroke();
+  ctx.fillStyle = texteSurCouleur(couleur);
   ctx.font = `bold ${Math.round(radius * (label.length > 2 ? 0.85 : 1.1))}px Helvetica, Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -106,7 +119,7 @@ export async function renderPlanWithMarkers(fileUrl: string, markers: PlanMarker
   ctx.drawImage(source, 0, 0);
   const radius = Math.max(10, Math.round(source.width / 90));
   for (const m of markers) {
-    drawMarker(ctx, (m.x / 100) * source.width, (m.y / 100) * source.height, m.label, radius);
+    drawMarker(ctx, (m.x / 100) * source.width, (m.y / 100) * source.height, m.label, radius, m.couleur);
   }
   return { dataUrl: canvas.toDataURL('image/jpeg', 0.85), width: canvas.width, height: canvas.height };
 }
@@ -116,7 +129,7 @@ export async function renderPlanWithMarkers(fileUrl: string, markers: PlanMarker
  * de la largeur du plan), le repère dessiné au centre. Sert la fiche d'une
  * réserve et sa vignette dans l'export.
  */
-export async function renderPlanExcerpt(fileUrl: string, x: number, y: number, label: string, opts: { windowPct?: number; size?: number } = {}): Promise<string> {
+export async function renderPlanExcerpt(fileUrl: string, x: number, y: number, label: string, opts: { windowPct?: number; size?: number; couleur?: string } = {}): Promise<string> {
   const source = await renderPlanToCanvas(fileUrl);
   const windowPct = opts.windowPct ?? 22;
   const size = opts.size ?? 600;
@@ -138,7 +151,7 @@ export async function renderPlanExcerpt(fileUrl: string, x: number, y: number, l
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
   const scale = canvas.width / sw;
-  drawMarker(ctx, (cx - sx) * scale, (cy - sy) * scale, label, Math.max(14, size / 22));
+  drawMarker(ctx, (cx - sx) * scale, (cy - sy) * scale, label, Math.max(14, size / 22), opts.couleur);
   ctx.strokeStyle = '#9ca3af';
   ctx.lineWidth = 2;
   ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
