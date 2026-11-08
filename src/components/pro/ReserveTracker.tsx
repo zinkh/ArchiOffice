@@ -807,6 +807,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           title={title}
           projectId={projectId}
           reserves={reserves}
+          couleurs={couleurs}
           plans={plans}
           project={project}
           settings={settings}
@@ -824,6 +825,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           reserve={creating ? null : openReserve}
           plans={plans}
           lotsList={lotsList}
+          couleurs={couleurs}
           existingMarkers={allMarkers}
           pendingPlan={creating ? { planId: selectedPlanId, x: annotationCoords?.x, y: annotationCoords?.y } : null}
           onClose={() => { setCreating(false); setOpenReserveId(null); }}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  RESERVE_COULEUR_NEUTRE, RESERVE_PALETTE, construireLegende, couleurDe, couleursParCle, responsableDe,
+  RESERVE_COULEUR_NEUTRE, RESERVE_PALETTE, construireLegende, couleurDe, couleursParCle, hexVersRgb, responsableDe,
 } from '../reserveCouleurs';
 
 const r = (entreprises: string[], lots: string[] = []) => ({ entreprises: JSON.stringify(entreprises), lots: JSON.stringify(lots) });
@@ -32,9 +32,24 @@ describe('construireLegende', () => {
     const b = couleursParCle(construireLegende([r(['B']), r(['A'])]));
     expect([...a.entries()].sort()).toEqual([...b.entries()].sort());
   });
-  it('boucle sur la palette au-delà de douze', () => {
-    const l = construireLegende(Array.from({ length: 13 }, (_, i) => r([`Ent ${String(i).padStart(2, '0')}`])));
-    expect(l[12].couleur).toBe(RESERVE_PALETTE[0]);
+  it('compte trente teintes toutes différentes', () => {
+    expect(RESERVE_PALETTE).toHaveLength(30);
+    expect(new Set(RESERVE_PALETTE).size).toBe(30);
+  });
+  it('donne trente couleurs distinctes à trente responsables puis boucle', () => {
+    const n = RESERVE_PALETTE.length;
+    const l = construireLegende(Array.from({ length: n + 1 }, (_, i) => r([`Ent ${String(i).padStart(2, '0')}`])));
+    expect(new Set(l.slice(0, n).map(x => x.couleur)).size).toBe(n);
+    expect(l[n].couleur).toBe(RESERVE_PALETTE[0]);
+  });
+});
+
+describe('hexVersRgb', () => {
+  it('convertit #rrggbb en composantes', () => {
+    expect(hexVersRgb('#2563eb')).toEqual([37, 99, 235]);
+  });
+  it('rend le gris neutre pour une valeur illisible', () => {
+    expect(hexVersRgb('bleu')).toEqual(hexVersRgb(RESERVE_COULEUR_NEUTRE));
   });
 });
 
