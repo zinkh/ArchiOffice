@@ -66,7 +66,7 @@ class View final:public IShellView,public IFolderView {
   place(heading,16,10,std::max(100,width-32),28);
   ShowWindow(properties,detailWidth?SW_HIDE:SW_SHOW);SetWindowTextW(properties,propertiesMode?L"Documents":L"Propriétés");
   int x=16,y=46;struct Button{HWND window;int width;};
-  for(auto button:{Button{refresh,104},Button{open,84},Button{document,196},Button{properties,112},Button{defaults,214}}){if(button.window==properties&&detailWidth)continue;if(x+button.width>width-16&&x>16){x=16;y+=36;}place(button.window,x,y,button.width,30);x+=button.width+6;}
+  for(auto button:{Button{refresh,110},Button{open,84},Button{document,196},Button{properties,112},Button{defaults,214}}){if(button.window==properties&&detailWidth)continue;if(x+button.width>width-16&&x>16){x=16;y+=36;}place(button.window,x,y,button.width,30);x+=button.width+6;}
   int searchY=y+40;place(search,16,searchY,std::max(80,width-152),28);place(reset,std::max(104,width-126),searchY,110,28);
   int columns=width>=1000?4:2,filterY=searchY+36,cell=(width-32-(columns-1)*8)/columns;
   HWND choices[]={projectFilter,phaseFilter,typeFilter,statusFilter};for(int i=0;i<4;i++)place(choices[i],16+(i%columns)*(cell+8),filterY+(i/columns)*36,cell,210);
