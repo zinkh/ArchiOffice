@@ -126,6 +126,7 @@ import { registerProjectRoutes } from "./server/routes/projects";
 import { registerPlanRoutes } from "./server/routes/plans";
 import { registerDocumentRoutes } from "./server/routes/documents";
 import { registerDesktopSyncRoutes } from "./server/routes/desktopSync";
+import { registerDesktopAiRoutes } from "./server/routes/desktopAi";
 import { registerKnowledgeSharingRoutes } from "./server/routes/knowledgeSharing";
 import { registerInspirationRoutes } from "./server/routes/inspirations";
 import { registerTaskRoutes } from "./server/routes/tasks";
@@ -198,6 +199,9 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 dotenv.config();
+
+// Relais IA du poste de bureau, branché au démarrage quand OFFLINE_MODE est actif.
+let desktopAiRelay: { refreshCapabilities(): Promise<void> } | null = null;
 
 // Builds and fully configures the Express app (all middleware + all ~340
 // routes) without binding a port — the production entry point (startServer(),
@@ -377,6 +381,24 @@ export async function createApp() {
     const { createLocalAuthRouter } = await import('./server/localAuthRoutes');
     app.use('/api/auth', createLocalAuthRouter(supabaseAdmin));
 
+    // IA réservée aux abonnés payants : le poste ne détient aucune clé, ses appels
+    // de modèle sont relayés vers le serveur en ligne qui vérifie l'abonnement et
+    // facture le cabinet (server/desktop/aiRelayClient.ts, routes/desktopAi.ts).
+    // Le solde de crédits rendu par le serveur en ligne est recopié dans la base
+    // locale, que les contrôles de crédit existants continuent de lire.
+    const { createDesktopAiRelay } = await import('./server/desktop/aiRelayClient');
+    const { setLlmRelay } = await import('@zinkh/archioffice-agents/server/llm');
+    const aiRelay = createDesktopAiRelay({
+      onBalance: async (tenantId, balance, billingMode) => {
+        await supabaseAdmin.from('tenants').update({
+          ai_credit_balance_eur_cents: balance,
+          ...(billingMode ? { agent_billing_mode: billingMode } : {}),
+        }).eq('id', tenantId);
+      },
+    });
+    setLlmRelay(aiRelay);
+    desktopAiRelay = aiRelay;
+
     // Mounts the background sync engine (server/cloudSync.ts) and its
     // /api/sync status/trigger routes for the rest of this process's life.
     // Called once at boot below when already linked, and live from three
@@ -522,6 +544,8 @@ export async function createApp() {
   // credit the tenant — a plain read-then-write here let exactly that
   // happen (security audit finding).
   async function maybeRefreshMonthlyCredits(tenantId: string, plan: string): Promise<void> {
+    // Poste de bureau : le solde local n'est qu'un miroir du cabinet en ligne.
+    if (process.env.OFFLINE_MODE === 'true') return;
     const included = PLAN_AI_MONTHLY_CREDIT_CENTS[plan] ?? 0;
     await supabaseAdmin.rpc('refresh_monthly_ai_credits', { p_tenant_id: tenantId, p_amount_cents: included });
   }
@@ -536,7 +560,14 @@ export async function createApp() {
   // charges the (small) difference after the fact rather than blocking it.
   const RESERVE_MAX_OUTPUT_TOKENS = 16000;
 
+  // Poste de bureau (OFFLINE_MODE) : l'IA est relayée vers le serveur en ligne,
+  // qui réserve, règle et enregistre les crédits du cabinet (routes/desktopAi.ts).
+  // Les fonctions de crédit ci-dessous n'ont donc rien à débiter localement :
+  // un second débit sur la copie locale serait un double comptage.
+  const billedByCloud = process.env.OFFLINE_MODE === 'true';
+
   async function estimateReserveCents(provider: string, model: string, inputTokens: number, audioInputTokens = 0): Promise<number> {
+    if (billedByCloud) return 0;
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
     return priceEurCents(provider, model, inputTokens, RESERVE_MAX_OUTPUT_TOKENS, audioInputTokens);
   }
@@ -551,6 +582,7 @@ export async function createApp() {
   // cover the reservation — the caller must 402 without ever invoking the
   // model.
   async function reserveAiCredit(tenantId: string, estimateCents: number): Promise<boolean> {
+    if (billedByCloud) return true;
     const { data } = await supabaseAdmin.rpc('reserve_ai_credit', { p_tenant_id: tenantId, p_amount_cents: estimateCents });
     return !!data;
   }
@@ -563,6 +595,7 @@ export async function createApp() {
   // gets) — using it here would leave a 1-cent phantom charge on a call
   // that never ran at all.
   async function refundAiCredit(tenantId: string, cents: number): Promise<void> {
+    if (billedByCloud) return;
     await supabaseAdmin.rpc('settle_ai_credit', { p_tenant_id: tenantId, p_delta_cents: cents });
   }
 
@@ -580,6 +613,7 @@ export async function createApp() {
     inputTokens: number; outputTokens: number;
     audioInputTokens?: number;
   }): Promise<{ newBalance: number; costCents: number }> {
+    if (billedByCloud) return { newBalance: 0, costCents: 0 };
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
     const audioInputTokens = params.audioInputTokens ?? 0;
     const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
@@ -615,6 +649,7 @@ export async function createApp() {
     // facturent à un autre tarif que le texte. Absent sur un appel texte.
     audioInputTokens?: number;
   }): Promise<{ newBalance: number; costCents: number }> {
+    if (billedByCloud) return { newBalance: 0, costCents: 0 };
     const { priceEurCents } = await import('@zinkh/archioffice-agents/server/llm');
     const audioInputTokens = params.audioInputTokens ?? 0;
     const costCents = priceEurCents(params.provider, params.model, params.inputTokens, params.outputTokens, audioInputTokens);
@@ -1211,6 +1246,7 @@ export async function createApp() {
   registerPlanRoutes(app, { supabaseAdmin, getTenantId, storeBusinessFile, removeBusinessFile });
   registerDocumentRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, relocateBusinessFile, requireRole });
   // Synchronisation desktop (Explorateur Windows, Finder macOS) : /api/desktop/v1.
+  registerDesktopAiRoutes(app, { supabaseAdmin, getTenantId, maybeRefreshMonthlyCredits, reserveAiCredit, refundAiCredit, estimateReserveCents, settleAiCredit });
   registerDesktopSyncRoutes(app, { supabaseAdmin, getTenantId, getUserName, logActivity, checkQuota, storeBusinessFile, removeBusinessFile, getSystemRole });
   // Client de bureau seulement (répond 404 ailleurs) : ouverture d'un fichier dans
   // l'Explorateur et migration vers l'arborescence lisible.
@@ -1441,6 +1477,10 @@ async function startServer() {
     console.log(`Server running on http://localhost:${PORT}`);
     if (process.env.OFFLINE_MODE === 'true') {
       ensureStorageBuckets();
+      // Fournisseur actif et solde du cabinet en ligne, puis à intervalle régulier
+      // (une recharge faite sur le site doit se retrouver ici sans nouvel appel IA).
+      void desktopAiRelay?.refreshCapabilities();
+      setInterval(() => void desktopAiRelay?.refreshCapabilities(), 10 * 60 * 1000).unref();
     }
     // Veille RSS des appels d'offres — sondage périodique (server/tenderRssPoller.ts).
     // Démarré ici (pas plus tôt) car en mode offline, supabaseAdmin boucle sur le
