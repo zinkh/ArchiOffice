@@ -124,7 +124,20 @@ export interface MarquableNoeud {
   marqueur?: MarqueurRedaction;
 }
 
-export interface Ligne extends DecoupageNoeud, MarquableNoeud {
+/**
+ * Dernière modification du contenu d'un lot, d'un chapitre ou d'un article (texte, désignation, quantité,
+ * prix...). Posée par `estamperModifications` (src/lib/modifications.ts) : le serveur fait foi, à l'enregistrement,
+ * avec SA date et le nom de la personne connectée (« Agent IA » pour un agent). Jamais saisie ni exposée aux
+ * confrères. Absente d'un élément jamais modifié depuis la mise en place : l'indicateur n'affiche alors rien.
+ */
+export interface ModifiableNoeud {
+  /** Date ISO de la dernière modification. */
+  modifieLe?: string;
+  /** Nom de la personne (ou « Agent IA ») qui l'a faite. */
+  modifiePar?: string;
+}
+
+export interface Ligne extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   /** Quantités propres à chaque bâtiment ; une table vide signifie sans affectation. */
   quantitesBatiments?: Record<string, number>;
   id: string;
@@ -204,7 +217,7 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud {
   cctpDescription?: string;
 }
 
-export interface Chapitre extends DecoupageNoeud, MarquableNoeud {
+export interface Chapitre extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   id: string;
   numero: string;
   titre: string;
@@ -213,7 +226,7 @@ export interface Chapitre extends DecoupageNoeud, MarquableNoeud {
   cctpDescription?: string;
 }
 
-export interface Lot extends DecoupageNoeud, MarquableNoeud {
+export interface Lot extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   id: string;
   numero: string;
   titre: string;

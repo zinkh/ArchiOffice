@@ -27,7 +27,9 @@ import { PillTabs, PillTabItem } from '../ui/PillTabs';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { AutosaveIndicator } from '../projectDetail/AutosaveIndicator';
 import { ProConflictBanner } from './ProConflictBanner';
-import { loadDPGF, saveDPGF, figerVersion } from '../../lib/dpgfDocument';
+import { loadDPGF, saveDPGF, figerVersion, instantaneAutomatique, signalEnregistrement } from '../../lib/dpgfDocument';
+import { ProDraftBanner, ProSaveFailingBanner } from './ProSaveBanners';
+import { estamperModifications } from '../../lib/modifications';
 import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
 import { ProToolbar } from './toolbar/ProToolbar';
 import { ProSearch } from './toolbar/ProSearch';
@@ -93,7 +95,7 @@ const bpuLsKey = (projectId: string) => `archioffice_bpu_${projectId}`;
 const loadBpuRow = (projectId: string) => loadProDoc<BPURow>(`/api/projects/${projectId}/bpu`);
 
 const saveBpu = async (projectId: string, document: BPU): Promise<void> => {
-  await apiFetch(`/api/projects/${projectId}/bpu`, { method: 'PUT', body: JSON.stringify({ document }) });
+  await apiFetch(`/api/projects/${projectId}/bpu`, { method: 'PUT', body: JSON.stringify({ document }), signal: signalEnregistrement() });
 };
 
 // ── component ─────────────────────────────────────────────────────────────────
@@ -125,6 +127,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   const backupRemote = useCallback((key: string) => figerVersion(key, t('pro_conflict_backup_stored')), [t]);
   const dpgfDoc = useAutosavedDoc<DPGF>({
     key: projectId, load: loadDPGF, save: saveDPGF, empty: EMPTY_DPGF, lsKey: dpgfLsKey, backupLocal, backupRemote,
+    // Une copie du document affiché dans l'historique toutes les 10 minutes, enregistrée ou non.
+    snapshot: instantaneAutomatique,
   });
   const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave, resolveConflict } = dpgfDoc;
 
@@ -278,7 +282,10 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
     setDpgf(next);
     for (const change of changes) void renameLot(change.id, change.titre).catch(() => {});
   };
-  const editDpgf = (next: DPGF) => {
+  const editDpgf = (editee: DPGF) => {
+    // Date et auteur de la dernière modification de chaque élément, affichés tout de suite ; le serveur les
+    // pose pour de bon à l'enregistrement (sa date, la personne authentifiée) et les relit au chargement.
+    const next = estamperModifications(dpgf, editee, currentUser?.name?.trim() || 'Équipe', new Date().toISOString());
     const beforeIds = new Set<string>();
     collectLigneIds(dpgf, beforeIds);
     const added = lignesPourBibliotheque(collectNouvellesLignes(next, beforeIds));
@@ -603,9 +610,12 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   // à « idle » deux secondes après un enregistrement : un document chargé et
   // sans modification en attente est enregistré, on le dit.
   const activeSaveStatus = isBpuTab ? bpuSaveStatus : saveStatus;
+  const activeDoc = isBpuTab ? bpuDoc : dpgfDoc;
   const activeLoaded = isBpuTab ? !bpuLoading && !!bpu : !dpgfLoading && !!dpgf;
+  // « Enregistré » ne se dit que quand rien n'attend : une saisie dans le délai avant envoi est « en attente ».
   const indicatorStatus: AutosaveStatus = activeSubTab === 'LOTS' || !activeLoaded ? 'idle'
-    : activeSaveStatus === 'idle' ? 'saved' : activeSaveStatus === 'conflict' ? 'error' : activeSaveStatus;
+    : activeSaveStatus === 'idle' ? (activeDoc.dirty ? 'pending' : 'saved')
+    : activeSaveStatus === 'conflict' ? 'error' : activeSaveStatus;
   const saveActive = isBpuTab ? handleBpuSave : handleSave;
 
   // Ctrl+S (⌘+S) enregistre tout de suite le document à l'écran.
@@ -765,6 +775,21 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
         // « Recharger » remplace le document par la version à jour : l'historique n'a plus de sens.
         if (choice === 'reload') historiqueDpgf.vider();
       }} />}
+      {activeSubTab !== 'LOTS' && activeLoaded && activeDoc.recovered && (
+        <ProDraftBanner
+          enregistreLe={activeDoc.recovered.enregistreLe}
+          historique={!isBpuTab}
+          onRestore={async () => {
+            await activeDoc.restoreRecovered();
+            // La saisie reprise remplace le document à l'écran : l'ancien « annuler » ne décrit plus rien.
+            (isBpuTab ? historiqueBpu : historiqueDpgf).vider();
+          }}
+          onDiscard={activeDoc.discardRecovered}
+        />
+      )}
+      {activeSubTab !== 'LOTS' && activeLoaded && activeSaveStatus === 'error' && activeDoc.failingSince !== null && (
+        <ProSaveFailingBanner failingSince={activeDoc.failingSince} lastError={activeDoc.lastError} onRetry={saveActive} />
+      )}
       {showExport && dpgf && (
         <ProExportDialog
           dpgf={dpgf}

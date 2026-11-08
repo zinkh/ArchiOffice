@@ -83,7 +83,8 @@ export default function PlanningChantierTab({ project, lots, settings, showToast
       const v = version.current;
       setEtat('envoi');
       try {
-        await apiFetch(base, { method: 'PUT', body: JSON.stringify(dernier.current), keepalive: true });
+        // Le délai coupe une requête qui ne répond jamais : sans lui la chaîne d'écritures reste bloquée.
+        await apiFetch(base, { method: 'PUT', body: JSON.stringify(dernier.current), keepalive: true, signal: AbortSignal.timeout(30_000) });
         enregistree.current = v;
         setEtat(version.current === v ? 'ok' : 'envoi');
       } catch {
