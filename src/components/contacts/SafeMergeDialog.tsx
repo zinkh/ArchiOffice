@@ -59,7 +59,7 @@ export function SafeMergeDialog({ onClose, onDone }: Props) {
   };
 
   return (
-    <ModalShell title={t('contacts_safe_merge_title')} subtitle={t('contacts_safe_merge_subtitle')} onClose={onClose} busy={busy} size="md"
+    <ModalShell title={t('contacts_safe_merge_title')} subtitle={t('contacts_safe_merge_subtitle')} onClose={onClose} busy={busy} size="md" bodyClassName="p-4 sm:p-6"
       footer={(
         <div className="flex justify-end gap-2">
           <button type="button" className="btn btn-secondary" onClick={onClose} disabled={busy}>{t('btn_cancel')}</button>

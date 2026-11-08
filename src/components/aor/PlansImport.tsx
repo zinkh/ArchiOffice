@@ -161,6 +161,7 @@ export function PlansImportDialog({ projectId, category, initialFiles, existingN
         busy={envoi}
         dirty={dirty && Object.keys(etats).length === 0}
         size="lg"
+        bodyClassName="p-4 sm:p-6"
         footer={(
           <div className="flex items-center justify-between gap-3 w-full">
             <button type="button" className="btn" onClick={() => inputRef.current?.click()} disabled={envoi}>

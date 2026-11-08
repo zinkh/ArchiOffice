@@ -79,6 +79,7 @@ export function LienQuantiteDialog({ ligne, lots, onSave, onClose }: LienQuantit
         onClose={onClose}
         dirty={!inchange && choisi !== null && choisi !== (lienActuel?.sourceId ?? null)}
         size="lg"
+        bodyClassName="p-4 sm:p-6"
         footer={(
           <div className="flex items-center justify-between gap-3 w-full">
             {lienActuel ? (
