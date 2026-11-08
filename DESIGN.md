@@ -253,7 +253,7 @@ Des angles à peine adoucis : l'outil est précis, pas moelleux.
 
 ### Adaptation native Windows
 
-Arbre, tableau et champ de propriétés gardent les formes fournies par Windows. Les rayons web ne sont pas redessinés sur ces contrôles. Les boutons de la barre d'actions (Actualiser, Ouvrir, Ouvrir dans ArchiOffice, Propriétés, Présentation par défaut, Effacer) sont dessinés à plat, à la manière des commandes d'Outlook : pictogramme Segoe MDL2 Assets, texte d'accent bleu (#005FB8 en clair, #63A8FF en sombre), grisé quand ils sont inactifs, sans fond ni relief, avec le rectangle de focus Windows. La vue suit le thème clair ou sombre de Windows.
+Arbre, tableau et champ de propriétés gardent les formes fournies par Windows. Les rayons web ne sont pas redessinés sur ces contrôles. Les boutons de la barre d'actions (Actualiser, Ouvrir, Ouvrir dans ArchiOffice, Propriétés, Présentation par défaut, Effacer) sont dessinés à plat, à la manière des commandes d'Outlook : pictogramme Segoe Fluent Icons (Segoe MDL2 Assets sur Windows 10), texte d'accent bleu (#005FB8 en clair, #63A8FF en sombre), grisé quand ils sont inactifs, sans fond ni relief, avec le rectangle de focus Windows. La vue suit le thème clair ou sombre de Windows.
 
 ## Components
 

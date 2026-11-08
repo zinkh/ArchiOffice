@@ -50,8 +50,8 @@ class View final:public IShellView,public IFolderView {
   for(auto child:{tree,list,details,note,refresh,open,document,properties,search,projectFilter,phaseFilter,typeFilter,statusFilter,reset,defaults,tabs,actionsLabel,phaseEdit,typeEdit,saveClass,offline,preserve,restart,retry,recovery,history,previousPage,nextPage,pageLabel})SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
   SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),TRUE);
   auto previousIcon=iconFont,previousBig=bigIconFont;
-  iconFont=CreateFontW(-MulDiv(10,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe MDL2 Assets");
-  bigIconFont=CreateFontW(-MulDiv(26,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe MDL2 Assets");
+  iconFont=CreateFontW(-MulDiv(10,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,iconFace());
+  bigIconFont=CreateFontW(-MulDiv(26,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,iconFace());
   if(previousIcon)DeleteObject(previousIcon);if(previousBig)DeleteObject(previousBig);
   if(previous)DeleteObject(previous);if(previousTitle)DeleteObject(previousTitle);
   applyPresentation();TreeView_SetItemHeight(tree,px(25));
@@ -148,6 +148,12 @@ class View final:public IShellView,public IFolderView {
   sortArrow();caption();
  }
  void sortArrow(){auto header=ListView_GetHeader(list);for(int i=0;i<ColumnCount;i++){HDITEMW item{};item.mask=HDI_FORMAT;if(Header_GetItem(header,i,&item)){item.fmt&=~(HDF_SORTUP|HDF_SORTDOWN);if(i==presentation.sort)item.fmt|=presentation.ascending?HDF_SORTUP:HDF_SORTDOWN;Header_SetItem(header,i,&item);}}}
+ // Police des pictogrammes : Segoe Fluent Icons (Windows 11) si elle est installée, sinon Segoe MDL2 Assets (Windows 10). Les codes sont identiques.
+ static int CALLBACK faceFound(LOGFONTW const*,TEXTMETRICW const*,DWORD,LPARAM found){*reinterpret_cast<bool*>(found)=true;return 0;}
+ static wchar_t const* iconFace(){
+  static wchar_t const* face=[]{LOGFONTW query{};query.lfCharSet=DEFAULT_CHARSET;wcscpy_s(query.lfFaceName,L"Segoe Fluent Icons");bool found=false;auto dc=GetDC(nullptr);EnumFontFamiliesExW(dc,&query,faceFound,reinterpret_cast<LPARAM>(&found),0);ReleaseDC(nullptr,dc);return found?L"Segoe Fluent Icons":iconFace();}();
+  return face;
+ }
  static bool systemDark(){DWORD light=1,size=sizeof(light);RegGetValueW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",L"AppsUseLightTheme",RRF_RT_REG_DWORD,nullptr,&light,&size);return light==0;}
  // Suit le thème clair ou sombre de Windows : couleurs, fond et thème visuel des contrôles communs.
  void applyTheme(){
