@@ -11,6 +11,7 @@ const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const { startOfflineDataStack } = require('./pgBootstrap.cjs');
 const { resolveDataLocation } = require('./dataLocation.cjs');
+const { loadUserEnv } = require('./userEnv.cjs');
 const { resolveStorageFile, isSafeToOpen } = require('./fileAccess.cjs');
 const { createAppMenu } = require('./menu.cjs');
 const { createDriveAgent, requestVault } = require('./driveAgent.cjs');
@@ -233,6 +234,7 @@ async function startServer() {
     cwd,
     env: {
       ...process.env,
+      ...loadUserEnv(app.getPath('userData'), log),
       PORT,
       NODE_ENV: 'production',
       ELECTRON_RUN_AS_NODE: '1',
