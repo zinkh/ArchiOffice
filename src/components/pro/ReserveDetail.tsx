@@ -15,6 +15,7 @@ import { queuedJsonRequest, enqueueMultipartRequest, discardPendingWrite, OFFLIN
 import { prepareSitePhoto } from '../../lib/sitePhoto';
 import { keepLocalCopy } from '../../lib/localPhotoCopy';
 import { PlanAnnotator } from '../PlanAnnotator';
+import { responsableDe, couleurDe, RESERVE_COULEUR_NEUTRE } from '../../lib/reserveCouleurs';
 import { useReserveOptions } from './useReserveOptions';
 import { photoEntityFor, previewUrlFor, releasePreviewUrl } from '../../lib/reservePhotoQueue';
 import type { Plan, ReservePhoto } from '../../types';
@@ -32,10 +33,12 @@ interface ReserveDetailProps {
   reserve: ReserveLike | null;
   plans: Plan[];
   lotsList?: LotOption[];
+  /** Couleur de chaque entreprise ou lot (clé `responsableDe`), calculée sur toutes les réserves de l'affaire. */
+  couleurs?: Map<string, string>;
   /** Position choisie sur le plan avant la création (mode création seulement). */
   pendingPlan?: { planId: string | null; x?: number; y?: number } | null;
   /** Repères des réserves déjà posées (tous plans) : montrés sur le plan du sélecteur d'emplacement. */
-  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string }[];
+  existingMarkers?: { id: string; planId: string; x: number; y: number; number?: number; title?: string; couleur?: string }[];
   onClose: () => void;
   onSaved: (reserve: ReserveLike) => void;
   onDeleted: (id: string) => void;
@@ -90,7 +93,7 @@ const labelClass = 'text-[0.6875rem] font-bold text-[var(--tblr-muted)] uppercas
  * puis envoyées une à une une fois la réserve créée (il faut son id pour les
  * rattacher) ; en modification, chaque photo part immédiatement.
  */
-export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pendingPlan, existingMarkers, onClose, onSaved, onDeleted, onConvertedToGpa }: ReserveDetailProps) {
+export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, couleurs, pendingPlan, existingMarkers, onClose, onSaved, onDeleted, onConvertedToGpa }: ReserveDetailProps) {
   const { t } = useTranslation();
   const isNew = !reserve;
   const [form, setForm] = useState<FormState>(() => formFromReserve(reserve));
@@ -145,6 +148,10 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
 
   // Mêmes lots (triés par numéro) et entreprises (lots + marchés) que les actions en masse du suivi.
   const { lotOptions, entrepriseOptions } = useReserveOptions(projectId, lotsList);
+  // La couleur suit la saisie : changer l'entreprise ou le lot dans la fiche change la pastille tout de suite.
+  const responsableEnCours = { entreprises: form.entreprises, lots: form.lots };
+  const responsable = responsableDe(responsableEnCours);
+  const couleurResponsable = couleurDe(responsableEnCours, couleurs ?? new Map());
   // Une valeur déjà enregistrée qui ne figure plus dans les lots du projet
   // reste sélectionnable : la retirer silencieusement perdrait une donnée.
   const withCurrent = (options: { value: string; label: string }[], current: string[]) => [
@@ -475,7 +482,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
             <div className="space-y-1">
               <label className={labelClass}>Repérage sur le plan</label>
               <div className="flex gap-3 items-start">
-                <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} className="w-40 h-40 object-cover shrink-0" />
+                <PlanExcerpt fileUrl={plan.file_url} x={planX} y={planY} label={String(reserve?.number ?? '+')} couleur={responsable ? couleurResponsable : undefined} className="w-40 h-40 object-cover shrink-0" />
                 <div className="text-xs text-[var(--tblr-muted)] space-y-2 pt-1">
                   <div className="flex items-center gap-1"><IconMapPin size={14} /> {plan.name}</div>
                   <button type="button" onClick={openPicker} className="px-3 py-1.5 pointer-coarse:min-h-11 rounded-lg bg-[var(--tblr-surface-2)] text-[var(--tblr-text)] font-bold">Déplacer le repère</button>
@@ -554,6 +561,16 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, pe
               />
             </div>
           </div>
+
+          {responsable && (
+            <p className="flex items-center gap-2 text-xs text-[var(--tblr-muted)]" data-testid="reserve-couleur">
+              <span aria-hidden className="inline-block h-3.5 w-3.5 shrink-0 rounded-full" style={{ backgroundColor: couleurResponsable }} />
+              <span>
+                Couleur de suivi : <strong className="text-[var(--tblr-text)]">{responsable.nom}</strong>
+                {couleurResponsable === RESERVE_COULEUR_NEUTRE && ' (couleur attribuée à l\'enregistrement)'}
+              </span>
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">

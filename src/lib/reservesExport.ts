@@ -10,6 +10,7 @@ import { drawAgencyHeader, drawAgencyFooters, loadLogoDataUrl } from './pdfLette
 import { renderPlanWithMarkers, renderPlanExcerpt, loadPhotoDataUrl } from './planRender';
 import type { Reserve, GpaReserve, Plan, ReservePhoto } from '../types';
 import { groupReservesByLot, type LotGroup, type LotRef } from './reserveDiffusion';
+import { construireLegende, couleursParCle, couleurDe, responsableDe, hexVersRgb } from './reserveCouleurs';
 
 type ReserveLike = Reserve | GpaReserve;
 
@@ -49,6 +50,11 @@ export interface ReservesExportOptions {
   scopeLabel?: string;
   /** « blob » : rend le PDF sans le télécharger (envoi par e-mail). Le Blob est rendu dans les deux cas. */
   output?: 'download' | 'blob';
+  /**
+   * Couleur de chaque entreprise ou lot, telle qu'à l'écran (calculée sur toutes les réserves de l'affaire).
+   * Sans elle, les couleurs sont attribuées sur les seules réserves imprimées.
+   */
+  couleurs?: Map<string, string>;
 }
 
 /** Nom du fichier PDF : titre, code et nom de l'opération, puis le suffixe (entreprise, lot...). */
@@ -125,6 +131,8 @@ export async function exportReservesToPDF(
   const groups: LotGroup<ReserveLike>[] = groupReservesByLot(reserves, opts.lots ?? [], allowed);
   const sorted = groups.flatMap(g => g.rows);
   const groupOfId = new Map(groups.flatMap(g => g.rows.map(r => [r.id, g] as const)));
+  // Couleur par responsable : celle de l'écran quand elle est fournie, pour qu'un PDF filtré par lot garde les mêmes couleurs.
+  const couleursTable = opts.couleurs ?? couleursParCle(construireLegende(reserves));
 
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const logo = await loadLogoDataUrl(settings.logoUrl);
@@ -183,9 +191,38 @@ export async function exportReservesToPDF(
   });
   y = (doc as any).lastAutoTable.finalY + 8;
 
+  // Légende des couleurs : une pastille par entreprise (à défaut par lot) avec son nombre de réserves.
+  const legendeExport = construireLegende(sorted).map(l => ({ ...l, couleur: couleursTable.get(l.cle) ?? l.couleur }));
+  if (legendeExport.length > 0) {
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(...GRIS_TEXTE);
+    doc.text('Légende des couleurs', MARGIN, y);
+    y += 5;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5);
+    let x = MARGIN;
+    for (const l of legendeExport) {
+      const texte = (doc.splitTextToSize(`${l.nom} (${l.total})`, contentW() - 6) as string[])[0];
+      const w = doc.getTextWidth(texte) + 9;
+      if (x > MARGIN && x + w > pageW() - MARGIN) { x = MARGIN; y += 5; }
+      if (y + 5 > pageH() - FOOTER_RESERVE) {
+        doc.addPage('a4', 'portrait');
+        y = drawAgencyHeader(doc, settings, letterhead);
+        x = MARGIN;
+      }
+      doc.setFillColor(...hexVersRgb(l.couleur));
+      doc.rect(x, y - 2.6, 3, 3, 'F');
+      doc.setTextColor(...GRIS_TEXTE);
+      doc.text(texte, x + 4.5, y);
+      x += w + 3;
+    }
+    y += 8;
+  }
+
   const planById = new Map(plans.map(p => [p.id, p]));
   const summaryBody: any[][] = [];
+  // Liseré de couleur au bord de la cellule « N° », une entrée par ligne du corps (null : ligne de lot ou sans responsable).
+  const rowColors: ([number, number, number] | null)[] = [];
   for (const g of groups) {
+    rowColors.push(null);
     summaryBody.push([{
       content: `${g.label} (${g.rows.length} réserve${g.rows.length > 1 ? 's' : ''})`,
       colSpan: 6,
@@ -194,6 +231,7 @@ export async function exportReservesToPDF(
     }]);
     for (const r of g.rows) {
       const retard = reserveIsOverdue(r);
+      rowColors.push(responsableDe(r) ? hexVersRgb(couleurDe(r, couleursTable)) : null);
       summaryBody.push([
         String(r.number ?? ''),
         r.title || '',
@@ -212,6 +250,13 @@ export async function exportReservesToPDF(
     headStyles: { fillColor: [60, 60, 60], textColor: 255, fontStyle: 'bold', fontSize: 8 },
     columnStyles: { 0: { cellWidth: 10, halign: 'right' }, 1: { cellWidth: 62 }, 4: { cellWidth: 24 }, 5: { cellWidth: 26, fontStyle: 'bold' } },
     margin: { left: MARGIN, right: MARGIN, bottom: FOOTER_RESERVE },
+    didDrawCell: (data: any) => {
+      if (data.section !== 'body' || data.column.index !== 0) return;
+      const couleur = rowColors[data.row.index];
+      if (!couleur) return;
+      doc.setFillColor(...couleur);
+      doc.rect(data.cell.x, data.cell.y, 1.8, data.cell.height, 'F');
+    },
   });
 
   // ── Une fiche par réserve ──────────────────────────────────────────────
@@ -250,7 +295,9 @@ export async function exportReservesToPDF(
     const plan = r.plan_id ? planById.get(r.plan_id) : undefined;
     if (plan && r.x != null && r.y != null) {
       try {
-        const dataUrl = await renderPlanExcerpt(plan.file_url, r.x, r.y, String(r.number ?? ''));
+        const dataUrl = await renderPlanExcerpt(plan.file_url, r.x, r.y, String(r.number ?? ''), {
+          couleur: responsableDe(r) ? couleurDe(r, couleursTable) : undefined,
+        });
         thumbs.push({ dataUrl, width: 1, height: 1, caption: plan.name });
       } catch (err) {
         console.error('[reservesExport] Extrait de plan impossible :', err);
@@ -284,9 +331,17 @@ export async function exportReservesToPDF(
       + thumbRows * (THUMB_H + 9) + 6;
     ensureRoom(Math.min(blockH, pageH() - FOOTER_RESERVE - 40));
 
-    // Numéro et intitulé
+    // Numéro et intitulé, avec le liseré de la couleur du responsable
+    const responsable = responsableDe(r);
+    const couleurFiche = responsable ? hexVersRgb(couleurDe(r, couleursTable)) : null;
+    // La pastille se pose sur la ligne qui nomme le responsable : l'entreprise, à défaut le lot.
+    const champCouleur = responsable?.kind === 'lot' ? 'Lot' : 'En charge';
     doc.setFillColor(...GRIS_FOND);
     doc.rect(MARGIN, y - 1, 14, 7, 'F');
+    if (couleurFiche) {
+      doc.setFillColor(...couleurFiche);
+      doc.rect(MARGIN, y - 1, 2.2, 7, 'F');
+    }
     doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...GRIS_TEXTE);
     doc.text(String(r.number ?? ''), MARGIN + 7, y + 4, { align: 'center' });
     doc.setFontSize(11);
@@ -301,6 +356,10 @@ export async function exportReservesToPDF(
       doc.text(`${label} :`, MARGIN + 2, y);
       doc.setFont('helvetica', label === 'Statut' ? 'bold' : 'normal'); doc.setTextColor(...GRIS_TEXTE);
       const lines = doc.splitTextToSize(value, contentW() - 36) as string[];
+      if (couleurFiche && label === champCouleur) {
+        doc.setFillColor(...couleurFiche);
+        doc.rect(MARGIN + 30.4, y - 2.6, 2.8, 2.8, 'F');
+      }
       doc.text(lines, MARGIN + 34, y);
       y += 4.6 * Math.max(1, lines.length);
     }
@@ -364,7 +423,10 @@ export async function exportReservesToPDF(
       progress(`Rendu du plan ${plan.name}…`);
       const markers = sorted
         .filter(r => r.plan_id === planId && r.x != null && r.y != null)
-        .map(r => ({ x: r.x as number, y: r.y as number, label: String(r.number ?? '') }));
+        .map(r => ({
+          x: r.x as number, y: r.y as number, label: String(r.number ?? ''),
+          couleur: responsableDe(r) ? couleurDe(r, couleursTable) : undefined,
+        }));
       let image: { dataUrl: string; width: number; height: number };
       try {
         image = await renderPlanWithMarkers(plan.file_url, markers);

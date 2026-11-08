@@ -21,6 +21,8 @@ interface Props {
   title: string;
   projectId: string;
   reserves: ReserveLike[];
+  /** Couleurs de l'écran (calculées sur toutes les réserves) : le PDF reprend les mêmes, même filtré par lot. */
+  couleurs?: Map<string, string>;
   plans: Plan[];
   project: ReservesExportProject;
   settings: AgencySettings;
@@ -53,7 +55,7 @@ const fmtDateHeure = (iso: string) => {
 const SECTION = 'text-xs font-bold uppercase tracking-wider text-[var(--tblr-muted)]';
 const BOUTON = 'inline-flex items-center justify-center gap-2 px-4 py-2 pointer-coarse:min-h-11 rounded-lg text-sm font-bold disabled:opacity-50';
 
-export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans, project, settings, lots, onClose }: Props) {
+export function ReserveDiffusionDialog({ kind, title, projectId, reserves, couleurs, plans, project, settings, lots, onClose }: Props) {
   const [scope, setScope] = useState<'all' | 'lots'>('all');
   const [chosenLots, setChosenLots] = useState<Set<string>>(new Set());
   const [recipients, setRecipients] = useState<RecipientsResponse | null>(null);
@@ -122,7 +124,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, plans
   }, [projectId, kind, scope, chosenLots]);
 
   const exportOptions = (extra: Record<string, unknown> = {}) => ({
-    title, lots, allowedLots: lotsArg, scopeLabel, content, ...extra,
+    title, lots, allowedLots: lotsArg, scopeLabel, content, couleurs, ...extra,
   });
   const nothingToPrint = !content.liste && !content.details && !content.plans;
   const toggleContent = (key: keyof ReservesExportContent) => setContent(prev => ({ ...prev, [key]: !prev[key] }));

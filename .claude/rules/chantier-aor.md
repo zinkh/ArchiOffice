@@ -222,6 +222,27 @@ dans l'export PDF. `PUT` ne l'écrit que si le corps la porte (`normalizeReponse
 `server/reservePhotos.ts`) : un changement de statut depuis la liste ne l'efface pas ; une instance non
 migrée répond 503. Test : `tests/reserveReponse.test.ts`.
 
+**Couleur par responsable** (`src/lib/reserveCouleurs.ts`, testé). Chaque réserve porte la couleur de son
+entreprise en charge, à défaut de son premier lot, gris neutre sans l'un ni l'autre (`responsableDe`). Les
+couleurs sont attribuées dans l'ordre alphabétique des responsables de TOUTES les réserves de l'affaire
+(`construireLegende`, 30 teintes, distinctes tant qu'il y a moins de trente responsables ; l'ordre des douze
+premières ne change jamais) : filtrer la liste ne change donc jamais une couleur, mais l'arrivée d'une
+nouvelle entreprise peut décaler les suivantes. Affichée par une légende au-dessus de la liste (une pastille
+d'entreprise filtre), un liseré à gauche des cartes mobiles et des lignes du tableau, et un point sur
+l'en-tête de chaque groupe. **Fiche** (`ReserveDetail`, prop `couleurs`) : pastille « Couleur de suivi »
+sous les lots et entreprises, qui suit la saisie ; un responsable pas encore connu est gris jusqu'à
+l'enregistrement. **Export PDF** (`reservesExport.ts`, option `couleurs`) : légende sur la page de garde,
+liseré au bord de la cellule N° du récapitulatif, liseré sur le numéro de chaque fiche et pastille devant
+« En charge » (« Lot » à défaut). `ReserveDiffusionDialog` transmet la table de l'écran : un PDF filtré par
+lot ou envoyé à une seule entreprise garde les mêmes couleurs. La couleur est une donnée, elle reste en
+couleur dans une charte en gris. **Repères du plan** : `PlanAnnotator` (champ `couleur` d'un repère, rouge
+comme avant sans elle), l'extrait de plan de la fiche (`PlanExcerpt`, prop `couleur`), et dans le PDF le
+plan d'annexe et l'extrait de chaque fiche (`drawMarker`, `PlanMarker.couleur`, `renderPlanExcerpt`).
+Le numéro s'écrit en blanc ou en noir selon le fond (`texteSurCouleur`, contraste WCAG d'au moins 3 : 1
+sur toute la palette, testé) et un filet sombre garde visible une pastille claire sur le fond blanc d'un
+plan. Un repère sans responsable est gris à l'écran et reste sombre dans le PDF. Aucune migration. Pas
+vérifié dans un navigateur ni sur un PDF ouvert.
+
 **Extrait de plan.** Les repères sont stockés en pourcentage de la première
 page du plan (`x`/`y`, PlanAnnotator). `src/lib/planRender.ts` rend cette
 page (pdf.js, ou `<img>` pour un plan image) sur un canvas mis en cache par

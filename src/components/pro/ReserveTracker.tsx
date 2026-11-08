@@ -43,6 +43,7 @@ import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
 import { ReserveDiffusionDialog } from './ReserveDiffusionDialog';
 import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+import { construireLegende, couleursParCle, couleurDe } from '../../lib/reserveCouleurs';
 // Sélection multiple : les mêmes composants que le DPGF et le BPU (barre d'actions et menus à cocher).
 import { SelectionBar, type SelectionAction } from './toolbar/SelectionBar';
 import type { ToolbarMenuEntry } from './toolbar/toolbarState';
@@ -182,6 +183,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     return [...names].sort((a, b) => a.localeCompare(b, 'fr'));
   }, [reserves]);
 
+  // Une couleur par entreprise (à défaut par lot) responsable, calculée sur TOUTES les réserves :
+  // filtrer la liste ne change jamais la couleur d'une entreprise.
+  const legende = useMemo(() => construireLegende(reserves), [reserves]);
+  const couleurs = useMemo(() => couleursParCle(legende), [legende]);
+
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return reserves.filter(r => {
@@ -210,9 +216,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
       const x = r.x == null ? NaN : Number(r.x);
       const y = r.y == null ? NaN : Number(r.y);
       if (!r.plan_id || !Number.isFinite(x) || !Number.isFinite(y)) return [];
-      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title }];
+      return [{ id: r.id, planId: String(r.plan_id), x, y, number: r.number, title: r.title, couleur: couleurDe(r, couleurs) }];
     })
-  ), [reserves]);
+  ), [reserves, couleurs]);
   const planMarkers = useMemo(() => (
     allMarkers.filter(m => m.planId === selectedPlanId).map(({ planId: _planId, ...m }) => m)
   ), [allMarkers, selectedPlanId]);
@@ -564,6 +570,40 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           </div>
           <span className="text-xs text-[var(--tblr-muted)] font-medium">{visible.length} / {reserves.length}</span>
         </div>
+        {legende.length > 0 && (
+          <ul
+            aria-label="Légende des couleurs par entreprise ou lot"
+            className="flex flex-wrap gap-x-4 gap-y-1.5 px-4 py-2 border-b border-[var(--tblr-border)] text-xs list-none m-0"
+          >
+            {legende.map(l => {
+              const actif = l.kind === 'entreprise' && entrepriseFilter === l.nom;
+              const contenu = (
+                <>
+                  <span aria-hidden className="inline-block h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: l.couleur }} />
+                  <span className="truncate max-w-[12rem]">{l.nom}</span>
+                  <span className="text-[var(--tblr-muted)]">({l.total})</span>
+                </>
+              );
+              return (
+                <li key={l.cle}>
+                  {l.kind === 'entreprise' ? (
+                    <button
+                      type="button"
+                      onClick={() => setEntrepriseFilter(actif ? '' : l.nom)}
+                      aria-pressed={actif}
+                      title={actif ? 'Retirer le filtre' : `Filtrer : ${l.nom}`}
+                      className={cn('inline-flex items-center gap-1.5 rounded-full px-1.5 py-0.5 pointer-coarse:min-h-8', actif && 'bg-zinc-200 dark:bg-zinc-700 font-semibold')}
+                    >
+                      {contenu}
+                    </button>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-1.5 py-0.5" title="Lot (aucune entreprise désignée)">{contenu}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
         {bulkNotice && (
           <div role="status" className={cn('px-4 py-2 text-xs font-medium border-b border-[var(--tblr-border)]', bulkNotice.error ? 'text-red-700 bg-red-50 dark:bg-red-950/20' : 'text-[var(--tblr-text)] bg-[var(--tblr-surface-2)]')}>
             {bulkNotice.text}
@@ -580,7 +620,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
             return (
               // Le statut est un <select> : il ne peut pas vivre dans le <button> qui ouvre la fiche
               // (contrôles imbriqués) et sa pastille, large comme la plus longue option, débordait de la carte.
-              <div key={res.id} className={cn('px-3 py-3', retard > 0 && 'bg-red-50/40 dark:bg-red-950/10')}>
+              <div
+                key={res.id}
+                className={cn('px-3 py-3 border-l-4', retard > 0 && 'bg-red-50/40 dark:bg-red-950/10')}
+                style={{ borderLeftColor: couleurDe(res, couleurs) }}
+              >
               <button
                 type="button"
                 onClick={() => setOpenReserveId(res.id)}
@@ -665,6 +709,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                       <td colSpan={10} className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           {expanded ? <IconChevronDown size={14} className="text-[var(--tblr-muted)]" /> : <IconChevronRight size={14} className="text-[var(--tblr-muted)]" />}
+                          {groupRows[0] && (
+                            <span aria-hidden className="inline-block h-3 w-3 shrink-0 rounded-full" style={{ backgroundColor: couleurDe(groupRows[0], couleurs) }} />
+                          )}
                           <span className="font-bold text-[var(--tblr-text)] uppercase tracking-wider text-[0.6875rem]">{groupKey}</span>
                           <span className="text-[0.6875rem] text-[var(--tblr-muted)] font-normal">({groupTotal} réserve{groupTotal > 1 ? 's' : ''})</span>
                         </div>
@@ -678,7 +725,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                           onClick={() => setOpenReserveId(res.id)}
                           className={cn('transition-colors group cursor-pointer', retard > 0 ? 'bg-red-50/30 dark:bg-red-950/10 hover:bg-red-50/50' : 'hover:bg-[var(--tblr-surface-2)]')}
                         >
-                          <td className="pl-4 pr-1 py-3 w-8" onClick={e => e.stopPropagation()}>{selectCell(res)}</td>
+                          <td
+                            className="pl-4 pr-1 py-3 w-8"
+                            style={{ boxShadow: `inset 4px 0 0 ${couleurDe(res, couleurs)}` }}
+                            onClick={e => e.stopPropagation()}
+                          >{selectCell(res)}</td>
                           <td className="px-4 py-3 font-mono text-[0.6875rem] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
                           <td className="px-4 py-3">
@@ -756,6 +807,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           title={title}
           projectId={projectId}
           reserves={reserves}
+          couleurs={couleurs}
           plans={plans}
           project={project}
           settings={settings}
@@ -773,6 +825,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
           reserve={creating ? null : openReserve}
           plans={plans}
           lotsList={lotsList}
+          couleurs={couleurs}
           existingMarkers={allMarkers}
           pendingPlan={creating ? { planId: selectedPlanId, x: annotationCoords?.x, y: annotationCoords?.y } : null}
           onClose={() => { setCreating(false); setOpenReserveId(null); }}
