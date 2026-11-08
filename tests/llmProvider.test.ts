@@ -673,3 +673,17 @@ describe('describeLlmSelection — precedence', () => {
     expect(p.model).toBe(DEFAULT_ANTHROPIC_MODEL);
   });
 });
+
+describe('IA réservée aux abonnés (client Electron)', () => {
+  afterEach(() => {
+    delete process.env.OFFLINE_MODE;
+    delete process.env.MISTRAL_API_KEY;
+  });
+
+  it('refuse toute résolution de fournisseur en mode hors ligne, même avec une clé', () => {
+    process.env.OFFLINE_MODE = 'true';
+    process.env.MISTRAL_API_KEY = 'cle-factice';
+    expect(() => resolveLlmProvider({ provider: 'mistral' })).toThrow(/réservées aux abonnés payants/);
+    expect(() => resolveLlmProvider({ provider: 'mistral', apiKey: 'autre' })).toThrow(LlmNotConfiguredError);
+  });
+});

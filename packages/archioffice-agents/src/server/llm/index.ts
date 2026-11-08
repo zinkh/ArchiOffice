@@ -120,7 +120,23 @@ export function describeLlmSelection(opts: ResolveLlmOptions = {}): {
   };
 }
 
+/**
+ * Le client Electron (OFFLINE_MODE) ne sert jamais l'IA depuis le poste :
+ * ces fonctions sont réservées aux abonnés payants, et un abonnement ne se
+ * prouve que côté serveur en ligne (jamais par un plan ou une clé locale).
+ * Aucune clé n'est donc lue ni acceptée sur le poste de travail.
+ */
+export const DESKTOP_AI_PAID_ONLY_MESSAGE =
+  "Les fonctionnalités IA ne sont pas disponibles dans l'application de bureau : elles sont réservées aux abonnés payants.";
+
+function assertAiAvailable(): void {
+  if (process.env.OFFLINE_MODE === 'true') {
+    throw new LlmNotConfiguredError(DESKTOP_AI_PAID_ONLY_MESSAGE);
+  }
+}
+
 export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  assertAiAvailable();
   const { provider: providerId, model } = describeLlmSelection(opts);
   const def = PROVIDERS[providerId];
   if (!def) {
@@ -161,6 +177,7 @@ export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
  * au fournisseur pour lequel elle a été saisie.
  */
 export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  assertAiAvailable();
   const active = describeLlmSelection(opts);
   const def = PROVIDERS[active.provider];
   const hasKey = !!(opts.apiKey || (def && process.env[def.envKey]));
@@ -189,6 +206,7 @@ export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmP
  * le chat dans /admin.
  */
 export function resolveSpeechProvider(opts: ResolveLlmOptions = {}): LlmProvider {
+  assertAiAvailable();
   const apiKey = opts.provider === 'gemini' ? opts.apiKey : undefined;
   if (!apiKey && !process.env.GEMINI_API_KEY) {
     throw new LlmNotConfiguredError(
