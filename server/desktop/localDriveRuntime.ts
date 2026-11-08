@@ -45,6 +45,8 @@ function configuredOrigin(): string | null {
   } catch { return null; }
 }
 const origin = configuredOrigin();
+/** Origine HTTPS du service en ligne livrée avec le client (jamais fournie par une requête). */
+export const cloudServiceOrigin: string | null = origin;
 const trustedKeys: Record<string, string> = trust.publicKeys;
 const keysValid = Object.keys(trustedKeys).length > 0 && Object.entries(trustedKeys).every(([kid, pem]) => {
   try { return /^[a-zA-Z0-9_-]{1,64}$/.test(kid) && crypto.createPublicKey(pem).asymmetricKeyType === 'ed25519'; }

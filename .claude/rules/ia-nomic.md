@@ -49,6 +49,26 @@ API keys are never part of this. They stay in the environment, and `PUT /api/adm
 1. **A model absent from `MODEL_CATALOG` cannot run.** `resolveLlmProvider()` refuses it, because running a model we can't price means billing a tenant an invented amount. Adding a model means adding its real cost.
 2. **Cost is a fact, margin is a knob.** Per-token cost differs ~10x between Gemini Flash and Claude Opus, so it lives per model in the catalogue; `AI_PRICE_MARKUP` is the single commercial lever on top. Every usage row records `provider` and `model` so a charge can be read back with the rate that produced it.
 
+### IA du client Electron : relayée vers le serveur en ligne, réservée aux abonnés payants
+
+Le poste de bureau (`OFFLINE_MODE`) ne détient **aucune clé d'IA** et n'en lit aucune (ni `.env`, ni variable : ne pas en ajouter). Ses appels de modèle sont relayés :
+
+| Côté | Fichier | Rôle |
+|---|---|---|
+| Poste | `llm/relay.ts` (paquet agents) | `createRelayProvider()` : un `LlmProvider` qui sérialise chat, dictée et voix en JSON (Buffer en base64) |
+| Poste | `llm/index.ts` | `setLlmRelay()` ; en `OFFLINE_MODE`, `resolveLlmProvider`, `resolveTranscriptionProvider` et `resolveSpeechProvider` rendent le relais, ou refusent (`DESKTOP_AI_PAID_ONLY_MESSAGE`) s'il n'est pas branché |
+| Poste | `server/desktop/aiRelayClient.ts` | session cloud de la personne (celle de la synchronisation et de Drive), origine du service de `electron/driveTrust.json`, `X-Tenant-Id` du cabinet lié |
+| En ligne | `server/routes/desktopAi.ts` | `POST /api/desktop/v1/ai/{chat,transcribe,speak}`, `GET .../capabilities` |
+
+Le serveur en ligne **relit l'abonnement en base** (`hasActiveDriveSubscription` : plan payant, période non échue, cabinet non suspendu ; jamais le plan envoyé par le poste), choisit le fournisseur du cabinet avec SES clés, puis réserve, appelle et règle les crédits (`reserveAiCredit` → `settleAiCredit`, remboursement si le fournisseur échoue). Refus : 402 `AI_SUBSCRIPTION_REQUIRED` (essai ou plan échu), 402 `NO_TOKENS`, 503 si le fournisseur actif ne sait pas transcrire ou parler.
+
+Points à ne pas défaire :
+
+- **Un seul débit, côté en ligne.** Sur le poste, `reserveAiCredit`, `settleAiCredit`, `deductAiCredit`, `refundAiCredit`, `estimateReserveCents` et `maybeRefreshMonthlyCredits` (`server.ts`, `billedByCloud`) ne débitent rien : un second débit sur la copie locale serait un double comptage.
+- **Le solde local est un miroir.** Les garde-fous existants lisent `tenants.ai_credit_balance_eur_cents` / `agent_billing_mode` en local ; le relais les recopie depuis la réponse de chaque appel et depuis `GET .../capabilities` (au démarrage puis toutes les 10 minutes).
+- **Capacités en cache.** `resolveLlmProvider` est synchrone : `supportsWebSearch` vient du dernier fournisseur annoncé par le serveur en ligne (faux tant qu'il n'a pas répondu), `supportsVision` est vrai par défaut (les trois adaptateurs le sont).
+- **Limites connues** : toute IA relayée est enregistrée côté en ligne sous le type d'usage `agent` (pas `suggest_articles`, `cctp_generation`, etc.), parce que `LlmProvider.chat()` ne porte pas le type d'appel ; corps limité à 10 Mo (`express.json`) ; une session cloud expirée ou l'absence de connexion donne un 503 explicite. Les appels Mistral directs de `server/rag/` et `server/knowledge/` ne passent PAS par ce relais.
+
 ### Nomic : lecture des plans et génération du CCTP
 
 Nomic n'a **pas d'API de chat** : ce n'est pas un quatrième fournisseur de

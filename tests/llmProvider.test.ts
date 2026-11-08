@@ -22,7 +22,7 @@ import { createGeminiProvider, DEFAULT_GEMINI_MODEL } from '../packages/archioff
 import { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from '../packages/archioffice-agents/src/server/llm/anthropic';
 import { createMistralProvider, DEFAULT_MISTRAL_MODEL } from '../packages/archioffice-agents/src/server/llm/mistral';
 import { priceEurCents, isPricedModel, listPricedModels } from '../packages/archioffice-agents/src/server/llm/pricing';
-import { resolveLlmProvider, describeLlmSelection, LlmNotConfiguredError } from '../packages/archioffice-agents/src/server/llm/index';
+import { resolveLlmProvider, resolveTranscriptionProvider, resolveSpeechProvider, setLlmRelay, describeLlmSelection, LlmNotConfiguredError } from '../packages/archioffice-agents/src/server/llm/index';
 import type { LlmMessage, LlmToolDef } from '../packages/archioffice-agents/src/server/llm/types';
 
 function mockResponse(over: Record<string, any> = {}) {
@@ -678,12 +678,34 @@ describe('IA réservée aux abonnés (client Electron)', () => {
   afterEach(() => {
     delete process.env.OFFLINE_MODE;
     delete process.env.MISTRAL_API_KEY;
+    setLlmRelay(null);
   });
 
-  it('refuse toute résolution de fournisseur en mode hors ligne, même avec une clé', () => {
+  it('refuse toute résolution de fournisseur sans relais, même avec une clé', () => {
     process.env.OFFLINE_MODE = 'true';
     process.env.MISTRAL_API_KEY = 'cle-factice';
     expect(() => resolveLlmProvider({ provider: 'mistral' })).toThrow(/réservées aux abonnés payants/);
     expect(() => resolveLlmProvider({ provider: 'mistral', apiKey: 'autre' })).toThrow(LlmNotConfiguredError);
+  });
+
+  it('relaie chat, dictée et voix vers le serveur en ligne, images en base64', async () => {
+    process.env.OFFLINE_MODE = 'true';
+    const call = vi.fn(async (operation: string, _payload: Record<string, unknown>) => {
+      if (operation === 'chat') return { text: 'bonjour', toolCalls: [], usage: { inputTokens: 3, outputTokens: 2 }, raw: { blocs: 1 } };
+      if (operation === 'transcribe') return { text: 'dictée', usage: { inputTokens: 1, outputTokens: 1, audioInputTokens: 9 } };
+      return { audio: { mimeType: 'audio/wav', data: Buffer.from('RIFF').toString('base64') }, usage: { inputTokens: 1, outputTokens: 0 } };
+    });
+    setLlmRelay({ capabilities: () => ({ provider: 'mistral', model: 'm', supportsVision: true, supportsWebSearch: false }), call });
+
+    const provider = resolveLlmProvider();
+    expect(provider.id).toBe('mistral');
+    const chat = await provider.chat({ messages: [{ role: 'user', content: 'x', images: [{ data: Buffer.from('png'), mimeType: 'image/png' }] }] });
+    expect(chat).toMatchObject({ text: 'bonjour', usage: { inputTokens: 3, outputTokens: 2 }, raw: { blocs: 1 } });
+    expect((call.mock.calls[0][1] as any).messages[0].images[0].data).toBe(Buffer.from('png').toString('base64'));
+
+    const heard = await resolveTranscriptionProvider().transcribe!({ audio: { data: Buffer.from('abc'), mimeType: 'audio/webm' } });
+    expect(heard.usage.audioInputTokens).toBe(9);
+    const spoken = await resolveSpeechProvider().speak!({ text: 'salut' });
+    expect(spoken.audio.data.toString()).toBe('RIFF');
   });
 });

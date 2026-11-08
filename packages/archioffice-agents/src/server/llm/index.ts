@@ -14,6 +14,7 @@ import { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js
 import { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
 import { isPricedModel, MODEL_CATALOG } from './pricing.js';
 import { LlmNotConfiguredError, type LlmProvider } from './types.js';
+import { createRelayProvider, type LlmRelay } from './relay.js';
 
 export interface ResolveLlmOptions {
   /** Provider key: 'gemini', 'anthropic' or 'mistral'. Defaults to the
@@ -121,22 +122,33 @@ export function describeLlmSelection(opts: ResolveLlmOptions = {}): {
 }
 
 /**
- * Le client Electron (OFFLINE_MODE) ne sert jamais l'IA depuis le poste :
- * ces fonctions sont réservées aux abonnés payants, et un abonnement ne se
- * prouve que côté serveur en ligne (jamais par un plan ou une clé locale).
- * Aucune clé n'est donc lue ni acceptée sur le poste de travail.
+ * Le client Electron (OFFLINE_MODE) ne détient jamais de clé d'IA : ces
+ * fonctions sont réservées aux abonnés payants, et un abonnement ne se prouve
+ * que côté serveur en ligne (jamais par un plan ou une clé locale). L'hôte y
+ * branche donc un relais (setLlmRelay) qui envoie chaque appel au serveur en
+ * ligne ; sans relais, l'appel est refusé.
  */
 export const DESKTOP_AI_PAID_ONLY_MESSAGE =
   "Les fonctionnalités IA ne sont pas disponibles dans l'application de bureau : elles sont réservées aux abonnés payants.";
 
-function assertAiAvailable(): void {
-  if (process.env.OFFLINE_MODE === 'true') {
-    throw new LlmNotConfiguredError(DESKTOP_AI_PAID_ONLY_MESSAGE);
-  }
+let activeRelay: LlmRelay | null = null;
+
+/** Branche (ou retire, avec null) le relais vers le serveur en ligne. */
+export function setLlmRelay(relay: LlmRelay | null): void {
+  activeRelay = relay;
+}
+
+/** En mode poste de bureau : le fournisseur relais, ou un refus. Rend null
+ *  hors de ce mode (le chemin normal, avec clés d'environnement, s'applique). */
+function desktopRelayProvider(): LlmProvider | null {
+  if (process.env.OFFLINE_MODE !== 'true') return null;
+  if (!activeRelay) throw new LlmNotConfiguredError(DESKTOP_AI_PAID_ONLY_MESSAGE);
+  return createRelayProvider(activeRelay);
 }
 
 export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
-  assertAiAvailable();
+  const relayed = desktopRelayProvider();
+  if (relayed) return relayed;
   const { provider: providerId, model } = describeLlmSelection(opts);
   const def = PROVIDERS[providerId];
   if (!def) {
@@ -177,7 +189,8 @@ export function resolveLlmProvider(opts: ResolveLlmOptions = {}): LlmProvider {
  * au fournisseur pour lequel elle a été saisie.
  */
 export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmProvider {
-  assertAiAvailable();
+  const relayed = desktopRelayProvider();
+  if (relayed) return relayed;
   const active = describeLlmSelection(opts);
   const def = PROVIDERS[active.provider];
   const hasKey = !!(opts.apiKey || (def && process.env[def.envKey]));
@@ -206,7 +219,8 @@ export function resolveTranscriptionProvider(opts: ResolveLlmOptions = {}): LlmP
  * le chat dans /admin.
  */
 export function resolveSpeechProvider(opts: ResolveLlmOptions = {}): LlmProvider {
-  assertAiAvailable();
+  const relayed = desktopRelayProvider();
+  if (relayed) return relayed;
   const apiKey = opts.provider === 'gemini' ? opts.apiKey : undefined;
   if (!apiKey && !process.env.GEMINI_API_KEY) {
     throw new LlmNotConfiguredError(
@@ -216,6 +230,7 @@ export function resolveSpeechProvider(opts: ResolveLlmOptions = {}): LlmProvider
   return resolveLlmProvider({ provider: 'gemini', model: DEFAULT_GEMINI_TTS_MODEL, apiKey });
 }
 
+export { decodeChatParams, type LlmRelay, type LlmRelayCapabilities, type LlmRelayOperation } from './relay.js';
 export { createGeminiProvider, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_TTS_MODEL } from './gemini.js';
 export { createAnthropicProvider, DEFAULT_ANTHROPIC_MODEL } from './anthropic.js';
 export { createMistralProvider, DEFAULT_MISTRAL_MODEL } from './mistral.js';
