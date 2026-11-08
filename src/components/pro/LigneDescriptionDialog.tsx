@@ -51,6 +51,7 @@ export function LigneDescriptionDialog({ numero, designation, valeur, onSave, on
         onClose={onClose}
         dirty={dirty}
         size="lg"
+        bodyClassName="p-4 sm:p-6"
         footer={(
           <div className="flex items-center justify-between gap-3 w-full">
             <span className="hidden sm:inline text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('pro_description_hint')}</span>
