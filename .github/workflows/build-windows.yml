@@ -140,8 +140,12 @@ jobs:
 
           # Confirmed asset naming as of PostgREST v14.14: postgrest-vX.Y-windows-x86-64.zip
           # (verified from this workflow's own diagnostic output, not guessed).
-          asset_url=$(echo "$release_json" | jq -r '[.assets[].browser_download_url
-            | select(test("windows"; "i") and test("x86.?64"; "i") and (test("\\.zip$") or test("\\.tar\\.xz$")))][0] // empty')
+          asset=$(echo "$release_json" | jq -c '[.assets[]
+            | select(.browser_download_url | test("windows"; "i") and test("x86.?64"; "i") and (test("\\.zip$") or test("\\.tar\\.xz$")))][0] // empty')
+          asset_url=$(echo "$asset" | jq -r '.browser_download_url // empty')
+          # URL d'API de l'asset : téléchargement authentifié, sans la limitation
+          # des accès anonymes au CDN des releases.
+          asset_api_url=$(echo "$asset" | jq -r '.url // empty')
 
           if [ -z "$asset_url" ]; then
             echo "::error::Could not find a Windows x86-64 PostgREST release asset. Raw API response below — inspect it, check https://github.com/PostgREST/postgrest/releases, and fix this step's jq filter."
@@ -149,8 +153,32 @@ jobs:
             exit 1
           fi
 
+          # Une réponse d'erreur ou un transfert coupé s'enregistrait comme si c'était
+          # l'archive, puis unzip échouait sans rien dire du contenu reçu. On échoue
+          # sur un code HTTP d'erreur (-f), on vérifie l'archive avant de l'utiliser
+          # et on recommence quelques fois, en montrant ce qui a été reçu.
           echo "Downloading $asset_url"
-          curl -sSL -o postgrest_archive "$asset_url"
+          downloaded=0
+          for attempt in 1 2 3 4 5; do
+            rm -f postgrest_archive
+            if curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+                 -o postgrest_archive "${asset_api_url:-$asset_url}" \
+               && case "$asset_url" in
+                    *.zip) unzip -tq postgrest_archive >/dev/null ;;
+                    *.tar.xz) tar -tJf postgrest_archive >/dev/null ;;
+                  esac; then
+              downloaded=1
+              break
+            fi
+            echo "::warning::PostgREST download attempt $attempt/5 failed. First bytes received:"
+            head -c 300 postgrest_archive 2>/dev/null | cat -v || true
+            echo
+            sleep $((attempt * 5))
+          done
+          if [ "$downloaded" -ne 1 ]; then
+            echo "::error::Could not download a valid PostgREST archive after 5 attempts ($asset_url)."
+            exit 1
+          fi
           case "$asset_url" in
             *.zip) unzip -o postgrest_archive -d vendor/postgrest ;;
             *.tar.xz) tar -xJf postgrest_archive -C vendor/postgrest ;;
