@@ -213,6 +213,30 @@ export function trouvaillePourPosition(
   };
 }
 
+/**
+ * Cible d'un article à partir de son identifiant (stable aux déplacements, contrairement
+ * à une position), pour le rapport de contrôle. Null si l'article n'existe plus.
+ */
+export function trouvaillePourId(doc: DocumentRecherche | null | undefined, articleId: string): Trouvaille | null {
+  if (!doc) return null;
+  const trouve = (lignes: Ligne[], prefixe: number[]): number[] | null => {
+    for (let i = 0; i < lignes.length; i++) {
+      if (lignes[i].id === articleId) return [...prefixe, i];
+      const dessous = lignes[i].children?.length ? trouve(lignes[i].children!, [...prefixe, i]) : null;
+      if (dessous) return dessous;
+    }
+    return null;
+  };
+  for (let lotIdx = 0; lotIdx < doc.lots.length; lotIdx++) {
+    const chapitres = doc.lots[lotIdx].chapitres;
+    for (let chapIdx = 0; chapIdx < chapitres.length; chapIdx++) {
+      const chemin = trouve(chapitres[chapIdx].lignes, []);
+      if (chemin) return trouvaillePourPosition(doc, { kind: 'ligne', lotIdx, chapIdx, lignePath: chemin });
+    }
+  }
+  return null;
+}
+
 /** Clé de ligne positionnelle (celle de `rowKey`, treeOps) d'une trouvaille : lot, chapitre ou article. */
 export const clePourCible = (c: Pick<Trouvaille, 'kind' | 'lotIdx' | 'chapIdx' | 'lignePath'>): string =>
   c.kind === 'lot' ? `lot-${c.lotIdx}`

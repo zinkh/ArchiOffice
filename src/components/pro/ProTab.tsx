@@ -33,7 +33,8 @@ import { estamperModifications } from '../../lib/modifications';
 import type { AutosaveStatus } from '../../hooks/useProjectAutosave';
 import { ProToolbar } from './toolbar/ProToolbar';
 import { ProSearch } from './toolbar/ProSearch';
-import { trouvaillePourPosition, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
+import { trouvaillePourPosition, trouvaillePourId, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
+import { ProControlPanel } from './ProControlPanel';
 import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, type ToolbarRegistry } from './toolbar/toolbarState';
 import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
@@ -132,26 +133,17 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
   const { doc: dpgf, setDoc: setDpgf, loading: dpgfLoading, saveStatus, saveNow: handleSave, resolveConflict } = dpgfDoc;
 
   // ── État du rapport de contrôle (remplace window.alert) ──────────────────
-  const [controleReport, setControleReport] = useState<{ errors: number; warnings: number; lines: string[] } | null>(null);
+  // Volet latéral : les anomalies sont recalculées par le volet à chaque modification du document.
+  const [controleOuvert, setControleOuvert] = useState(false);
 
   const controlerDossier = useCallback(() => {
     if (!dpgf) return;
-    const issues = validateProDocument(dpgf);
-    if (!issues.length) {
+    if (!validateProDocument(dpgf).length) {
       showToast(t('pro_control_toast_ok'), 'success');
       return;
     }
-    const errors = issues.filter(i => i.severity === 'error');
-    const warnings = issues.filter(i => i.severity === 'warning');
-    setControleReport({
-      errors: errors.length,
-      warnings: warnings.length,
-      lines: [
-        ...issues.slice(0, 40).map(i => `${i.severity === 'error' ? '⛔' : '⚠'} ${i.message}`),
-        ...(issues.length > 40 ? [`… et ${issues.length - 40} autre(s).`] : []),
-      ],
-    });
-  }, [dpgf, showToast]);
+    setControleOuvert(true);
+  }, [dpgf, showToast, t]);
 
   const creerInstantane = useCallback(async () => {
     if (!dpgf) return;
@@ -684,6 +676,15 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
     setCibleRecherche({ ...t, nonce: ++nonceRecherche.current });
     setActiveSubTab('CCTP');
   };
+  // Rapport de contrôle : ouvre l'article dans l'atelier affiché s'il montre le CCTP/DPGF (CCTP, DPGF, estimation), sinon dans le CCTP.
+  const allerALAnomalie = (articleId: string) => {
+    const t = trouvaillePourId(dpgf, articleId);
+    if (!t) return;
+    const atelierDocument = activeSubTab === 'CCTP' || activeSubTab === 'DPGF' || activeSubTab === 'ESTIMATION';
+    garderCible.current = !atelierDocument;
+    setCibleRecherche({ ...t, nonce: ++nonceRecherche.current });
+    if (!atelierDocument) setActiveSubTab('CCTP');
+  };
   const docRecherche = activeSubTab === 'LOTS' ? null : isBpuTab ? bpu : dpgf;
   const cibleImportFichier: 'dpgf' | 'bpu' | null = isBpuTab ? 'bpu' : (activeSubTab === 'CCTP' || activeSubTab === 'DPGF') ? 'dpgf' : null;
   const dossierEntries: ToolbarMenuEntry[] = [
@@ -869,36 +870,14 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
         </div>
       )}
 
-      {/* ── Rapport de contrôle (remplace window.alert) ─────────────────── */}
-      {controleReport && (
-        <div
-          className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-          onMouseDown={e => { if (e.target === e.currentTarget) setControleReport(null); }}
-        >
-          <div className="w-full max-w-2xl max-h-[80dvh] overflow-auto rounded-xl bg-white dark:bg-zinc-900 shadow-2xl">
-            <div className="flex items-center justify-between px-4 py-3 border-b">
-              <div>
-                <h3 className="font-semibold">{t('pro_control_title')}</h3>
-                <p className="text-xs text-zinc-500">
-                  {controleReport.errors > 0 && <span className="text-red-600 mr-2">⛔ {t('pro_control_errors', { count: controleReport.errors })}</span>}
-                  {controleReport.warnings > 0 && <span className="text-amber-600">⚠ {t('pro_control_warnings', { count: controleReport.warnings })}</span>}
-                </p>
-              </div>
-              <button
-                onClick={() => setControleReport(null)}
-                aria-label={t('pro_control_close')}
-                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-              >
-                <IconX size={18} />
-              </button>
-            </div>
-            <ul className="divide-y">
-              {controleReport.lines.map((line, i) => (
-                <li key={i} className="px-4 py-2 text-sm font-mono">{line}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
+      {/* ── Rapport de contrôle : volet à droite, classé par lot, chaque article mène à sa correction ── */}
+      {controleOuvert && dpgf && (
+        <ProControlPanel
+          dpgf={dpgf}
+          activeId={cibleRecherche?.id ?? null}
+          onGoTo={allerALAnomalie}
+          onClose={() => setControleOuvert(false)}
+        />
       )}
 
       {/* ── Toast global ────────────────────────────────────────────────── */}

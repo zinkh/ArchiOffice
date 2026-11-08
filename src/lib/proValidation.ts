@@ -48,7 +48,7 @@ export function validateProDocument(doc: DPGF): ProIssue[] {
     }
   });
   for (const [numero, lignes] of numeros) {
-    if (lignes.length > 1) issues.push({ severity: 'error', code: 'numero_duplique', message: `Numéro d'article dupliqué « ${numero} » (${lignes.length} occurrences).` });
+    if (lignes.length > 1) issues.push({ severity: 'error', code: 'numero_duplique', articleId: lignes[1].id, message: `Numéro d'article dupliqué « ${numero} » (${lignes.length} occurrences).` });
   }
   if (Math.abs(totalCalcule - Number(doc.totalHT || 0)) > 0.01) issues.push({ severity: 'error', code: 'total_incoherent', message: `Total HT enregistré (${doc.totalHT}) différent du total recalculé (${totalCalcule}).` });
   return issues;
