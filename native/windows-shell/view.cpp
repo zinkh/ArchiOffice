@@ -29,7 +29,7 @@ class View final:public IShellView,public IFolderView {
  HWND actionsLabel=nullptr,phaseEdit=nullptr,typeEdit=nullptr,saveClass=nullptr,offline=nullptr,preserve=nullptr,restart=nullptr,retry=nullptr,recovery=nullptr;int classificationVersion=0;bool actionWritable=false;
  HWND window=nullptr,tree=nullptr,list=nullptr,details=nullptr,heading=nullptr,note=nullptr,refresh=nullptr,open=nullptr,document=nullptr,properties=nullptr,search=nullptr,projectFilter=nullptr,phaseFilter=nullptr,typeFilter=nullptr,statusFilter=nullptr,reset=nullptr,defaults=nullptr,tabs=nullptr,preview=nullptr,history=nullptr,previousPage=nullptr,nextPage=nullptr,pageLabel=nullptr;
  HFONT font=nullptr,titleFont=nullptr;UINT dpi=96;int left=230,right=290,drag=0,splitLeft=230,splitRight=0;bool catalogLoaded=false,busy=false,building=false,propertiesMode=false;std::set<std::wstring> collapsedProjects;std::wstring completion;std::wstring action=L"catalog",focusKey,scope;std::set<std::wstring> selectedKeys;bool selectionInitialized=false;Filter filter;Presentation presentation;std::set<ViewKind> collapsedRoots;wchar_t className[100]{};
- bool darkMode=false;COLORREF backgroundColor=0,textColor=0,lineColor=0;HBRUSH backgroundBrush=nullptr;
+ bool darkMode=false;COLORREF backgroundColor=0,textColor=0,lineColor=0;HBRUSH backgroundBrush=nullptr;HFONT iconFont=nullptr,bigIconFont=nullptr;
  std::vector<std::wstring> projectOptions,phaseOptions,typeOptions,statusOptions;
  std::vector<Project> projects;std::vector<Filter> filters;std::vector<std::pair<int,int>> visible;std::shared_ptr<Async> async,detailAsync;
  bool detailBusy=false;int detailTab=0,previewPage=0,previewPages=0,previewWidth=0,previewHeight=0;
@@ -47,6 +47,10 @@ class View final:public IShellView,public IFolderView {
   titleFont=CreateFontW(-MulDiv(16,dpi,72),0,0,0,FW_SEMIBOLD,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe UI");
   for(auto child:{tree,list,details,note,refresh,open,document,properties,search,projectFilter,phaseFilter,typeFilter,statusFilter,reset,defaults,tabs,actionsLabel,phaseEdit,typeEdit,saveClass,offline,preserve,restart,retry,recovery,history,previousPage,nextPage,pageLabel})SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
   SendMessageW(heading,WM_SETFONT,reinterpret_cast<WPARAM>(titleFont),TRUE);
+  auto previousIcon=iconFont,previousBig=bigIconFont;
+  iconFont=CreateFontW(-MulDiv(10,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe MDL2 Assets");
+  bigIconFont=CreateFontW(-MulDiv(26,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH,L"Segoe MDL2 Assets");
+  if(previousIcon)DeleteObject(previousIcon);if(previousBig)DeleteObject(previousBig);
   if(previous)DeleteObject(previous);if(previousTitle)DeleteObject(previousTitle);
   applyPresentation();TreeView_SetItemHeight(tree,px(25));
  }
@@ -57,10 +61,10 @@ class View final:public IShellView,public IFolderView {
  void layout(){RECT r;GetClientRect(window,&r);int width=dip(r.right),height=dip(r.bottom);
   int treeWidth=std::min(left,std::max(100,width/3)),detailWidth=width>=850?std::min(right,width/3):0;
   splitLeft=treeWidth;splitRight=detailWidth?width-detailWidth:0;
-  place(heading,18,10,std::max(100,width-36),28);
+  place(heading,16,10,std::max(100,width-32),28);
   ShowWindow(properties,detailWidth?SW_HIDE:SW_SHOW);SetWindowTextW(properties,propertiesMode?L"Documents":L"Propriétés");
   int x=16,y=46;struct Button{HWND window;int width;};
-  for(auto button:{Button{refresh,110},Button{open,100},Button{document,190},Button{properties,125},Button{defaults,200}}){if(button.window==properties&&detailWidth)continue;if(x+button.width>width-16&&x>16){x=16;y+=36;}place(button.window,x,y,button.width,30);x+=button.width+10;}
+  for(auto button:{Button{refresh,104},Button{open,84},Button{document,196},Button{properties,112},Button{defaults,214}}){if(button.window==properties&&detailWidth)continue;if(x+button.width>width-16&&x>16){x=16;y+=36;}place(button.window,x,y,button.width,30);x+=button.width+6;}
   int searchY=y+40;place(search,16,searchY,std::max(80,width-152),28);place(reset,std::max(104,width-126),searchY,110,28);
   int columns=width>=1000?4:2,filterY=searchY+36,cell=(width-32-(columns-1)*8)/columns;
   HWND choices[]={projectFilter,phaseFilter,typeFilter,statusFilter};for(int i=0;i<4;i++)place(choices[i],16+(i%columns)*(cell+8),filterY+(i/columns)*36,cell,210);
@@ -130,7 +134,7 @@ class View final:public IShellView,public IFolderView {
   for(int p=0;p<static_cast<int>(projects.size());p++)for(int d=0;d<static_cast<int>(projects[p].rows.size());d++)if(matches(filter,projects[p],projects[p].rows[d]))visible.emplace_back(p,d);
   std::sort(visible.begin(),visible.end(),[&](auto const& a,auto const& b){auto const& left=projects[a.first].rows[a.second];auto const& right=projects[b.first].rows[b.second];int compared=compareDocument(left,right,presentation);if(compared)return compared<0;if(projects[a.first].id!=projects[b.first].id)return projects[a.first].id<projects[b.first].id;return left.key<right.key;});
   int first=-1,focused=-1;
-  for(int i=0;i<static_cast<int>(visible.size());i++){auto [p,d]=visible[i];auto const& doc=projects[p].rows[d];LVITEMW item{};item.mask=LVIF_TEXT;item.iItem=i;item.pszText=const_cast<wchar_t*>(doc.name.c_str());ListView_InsertItem(list,&item);
+  for(int i=0;i<static_cast<int>(visible.size());i++){auto [p,d]=visible[i];auto const& doc=projects[p].rows[d];LVITEMW item{};item.mask=LVIF_TEXT|LVIF_IMAGE;item.iItem=i;item.iImage=iconFor(doc.name);item.pszText=const_cast<wchar_t*>(doc.name.c_str());ListView_InsertItem(list,&item);
    std::wstring fields[]={doc.phase.empty()?L"—":doc.phase,doc.type.empty()?L"—":doc.type,doc.indice.empty()?L"—":doc.indice,std::to_wstring(doc.version),status(doc.status),transferLabel(doc.transferState)};
    for(int col=0;col<6;col++)ListView_SetItemText(list,i,col+1,fields[col].data());
    if(selectedKeys.contains(doc.key)){ListView_SetItemState(list,i,LVIS_SELECTED,LVIS_SELECTED);if(first<0)first=i;}if(doc.key==focusKey)focused=i;
@@ -155,6 +159,49 @@ class View final:public IShellView,public IFolderView {
   TreeView_SetBkColor(tree,backgroundColor);TreeView_SetTextColor(tree,textColor);TreeView_SetLineColor(tree,lineColor);
   ListView_SetBkColor(list,backgroundColor);ListView_SetTextBkColor(list,backgroundColor);ListView_SetTextColor(list,textColor);
   RedrawWindow(window,nullptr,nullptr,RDW_INVALIDATE|RDW_ERASE|RDW_ALLCHILDREN);
+ }
+ // Bouton à plat, texte d'accent et pictogramme, sans fond ni relief (barre d'actions et bouton Effacer).
+ LRESULT drawButton(DRAWITEMSTRUCT* item){
+  bool disabled=(item->itemState&ODS_DISABLED)!=0,pressed=(item->itemState&ODS_SELECTED)!=0;
+  FillRect(item->hDC,&item->rcItem,backgroundBrush);
+  if(pressed){auto shade=CreateSolidBrush(darkMode?RGB(55,55,55):RGB(229,241,251));FillRect(item->hDC,&item->rcItem,shade);DeleteObject(shade);}
+  wchar_t label[128]{};GetWindowTextW(item->hwndItem,label,128);
+  COLORREF accent=darkMode?RGB(99,168,255):RGB(0,95,184),muted=darkMode?RGB(120,120,120):RGB(140,140,140);
+  SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,disabled?muted:accent);
+  wchar_t const* glyph=nullptr;
+  switch(item->CtlID){case 100:glyph=L"\xE72C";break;case 101:glyph=L"\xE8E5";break;case 102:glyph=L"\xE8A7";break;case 103:glyph=L"\xE946";break;case 216:glyph=L"\xE713";break;case 215:glyph=L"\xE711";break;}
+  RECT area=item->rcItem;area.left+=px(8);
+  if(glyph){auto previous=SelectObject(item->hDC,iconFont);RECT icon=area;icon.right=icon.left+px(18);DrawTextW(item->hDC,glyph,-1,&icon,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX);SelectObject(item->hDC,previous);area.left+=px(24);}
+  auto previous=SelectObject(item->hDC,font);DrawTextW(item->hDC,label,-1,&area,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX|DT_END_ELLIPSIS);SelectObject(item->hDC,previous);
+  if(item->itemState&ODS_FOCUS){RECT focus=item->rcItem;InflateRect(&focus,-2,-2);DrawFocusRect(item->hDC,&focus);}
+  return TRUE;
+ }
+ // État vide du tableau : pictogramme et message centrés sous l'en-tête.
+ void drawEmpty(HDC dc){
+  RECT area{},header{};GetClientRect(list,&area);GetWindowRect(ListView_GetHeader(list),&header);area.top+=header.bottom-header.top;
+  bool filtered=!filter.query.empty()||!filter.value.empty();
+  std::wstring text=!catalogLoaded?L"Chargement des documents…":filtered?L"Aucun document ne correspond aux critères.":L"Aucun document pour le moment.\nSynchronisez un projet ou déposez des fichiers dans ce dossier.";
+  SetBkMode(dc,TRANSPARENT);SetTextColor(dc,darkMode?RGB(150,150,150):RGB(110,110,110));
+  auto previous=SelectObject(dc,font);
+  int width=std::max(100,static_cast<int>(area.right-area.left)-px(48));RECT measure{0,0,width,0};DrawTextW(dc,text.c_str(),-1,&measure,DT_CALCRECT|DT_WORDBREAK|DT_NOPREFIX|DT_CENTER);
+  int available=static_cast<int>(area.bottom-area.top),block=px(44)+px(10)+static_cast<int>(measure.bottom-measure.top),y=static_cast<int>(area.top)+std::max(px(12),(available-block)/2);
+  SelectObject(dc,bigIconFont);RECT icon{area.left,y,area.right,y+px(44)};DrawTextW(dc,L"\xE838",-1,&icon,DT_SINGLELINE|DT_CENTER|DT_VCENTER|DT_NOPREFIX);
+  SelectObject(dc,font);RECT message{area.left+px(24),y+px(54),area.right-px(24),area.bottom};DrawTextW(dc,text.c_str(),-1,&message,DT_WORDBREAK|DT_NOPREFIX|DT_CENTER);
+  SelectObject(dc,previous);
+ }
+ // Lignes alternées très discrètes et état vide ; la sélection reste celle du thème Explorateur.
+ LRESULT listDraw(NMLVCUSTOMDRAW* draw){
+  switch(draw->nmcd.dwDrawStage){
+   case CDDS_PREPAINT:return CDRF_NOTIFYITEMDRAW|CDRF_NOTIFYPOSTPAINT;
+   case CDDS_ITEMPREPAINT:if(!(draw->nmcd.uItemState&CDIS_SELECTED)&&draw->nmcd.dwItemSpec%2==1){draw->clrTextBk=darkMode?RGB(40,40,40):RGB(248,248,248);return CDRF_NEWFONT;}return CDRF_DODEFAULT;
+   case CDDS_POSTPAINT:if(ListView_GetItemCount(list)==0)drawEmpty(draw->nmcd.hdc);return CDRF_DODEFAULT;
+  }
+  return CDRF_DODEFAULT;
+ }
+ // Pictogramme du système selon l'extension du document.
+ static int iconFor(std::wstring const& name){
+  auto dot=name.rfind(L'.');std::wstring extension=dot==std::wstring::npos?L".":name.substr(dot);
+  SHFILEINFOW info{};SHGetFileInfoW(extension.c_str(),FILE_ATTRIBUTE_NORMAL,&info,sizeof(info),SHGFI_USEFILEATTRIBUTES|SHGFI_SYSICONINDEX|SHGFI_SMALLICON);return info.iIcon;
  }
  void applyPresentation(){for(int i=0;i<ColumnCount;i++)ListView_SetColumnWidth(list,i,px(presentation.widths[i]));ListView_SetColumnOrderArray(list,ColumnCount,presentation.order);sortArrow();}
  void capturePresentation(){if(!window||!IsWindow(list))return;for(int i=0;i<ColumnCount;i++)presentation.widths[i]=std::clamp(dip(ListView_GetColumnWidth(list,i)),45,1200);ListView_GetColumnOrderArray(list,ColumnCount,presentation.order);presentation.left=left;presentation.right=right;savePresentation(scope,presentation);}
@@ -212,13 +259,15 @@ class View final:public IShellView,public IFolderView {
    reset=control(L"BUTTON",L"Effacer",WS_TABSTOP,215);
    projectFilter=control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,211);phaseFilter=control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,212);typeFilter=control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,213);statusFilter=control(L"COMBOBOX",L"",WS_TABSTOP|CBS_DROPDOWNLIST|WS_VSCROLL,214);
    tree=control(WC_TREEVIEWW,L"",WS_TABSTOP|TVS_HASBUTTONS|TVS_LINESATROOT|TVS_FULLROWSELECT|TVS_SHOWSELALWAYS,201);list=control(WC_LISTVIEWW,L"",WS_TABSTOP|LVS_REPORT|LVS_SHOWSELALWAYS,202);ListView_SetExtendedListViewStyle(list,LVS_EX_FULLROWSELECT|LVS_EX_DOUBLEBUFFER|LVS_EX_LABELTIP|LVS_EX_HEADERDRAGDROP);
-   wchar_t const* columns[]={L"Document",L"Phase",L"Type",L"Indice",L"Version",L"Statut",L"Synchronisation"};for(int i=0;i<ColumnCount;i++){LVCOLUMNW c{};c.mask=LVCF_TEXT|LVCF_WIDTH;c.pszText=const_cast<wchar_t*>(columns[i]);c.cx=presentation.widths[i];ListView_InsertColumn(list,i,&c);}
+   wchar_t const* columns[]={L"Document",L"Phase",L"Type",L"Indice",L"Version",L"Statut",L"Synchronisation"};for(int i=0;i<ColumnCount;i++){LVCOLUMNW c{};c.mask=LVCF_TEXT|LVCF_WIDTH|LVCF_FMT;c.fmt=(i==3||i==4)?LVCFMT_RIGHT:LVCFMT_LEFT;c.pszText=const_cast<wchar_t*>(columns[i]);c.cx=presentation.widths[i];ListView_InsertColumn(list,i,&c);}
    tabs=control(WC_TABCONTROLW,L"",WS_TABSTOP,220);for(auto label:{L"Propriétés",L"Aperçu",L"Versions",L"Actions"}){TCITEMW item{};item.mask=TCIF_TEXT;item.pszText=const_cast<wchar_t*>(label);TabCtrl_InsertItem(tabs,TabCtrl_GetItemCount(tabs),&item);}
    preview=control(L"STATIC",L"Sélectionnez un document.",SS_OWNERDRAW,224);history=control(L"EDIT",L"Sélectionnez un document.",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,223);
    previousPage=control(L"BUTTON",L"Précéd.",WS_TABSTOP,221);nextPage=control(L"BUTTON",L"Suivant",WS_TABSTOP,222);pageLabel=control(L"STATIC",L"",SS_CENTER,225);
    actionsPane=control(L"STATIC",L"Actions du document",WS_VSCROLL|WS_CLIPCHILDREN,229);SetWindowLongPtrW(actionsPane,GWL_EXSTYLE,GetWindowLongPtrW(actionsPane,GWL_EXSTYLE)|WS_EX_CONTROLPARENT);SetWindowSubclass(actionsPane,paneProcedure,1,reinterpret_cast<DWORD_PTR>(this));
    actionsLabel=control(L"STATIC",L"Phase puis type documentaire",SS_LEFT);phaseEdit=control(L"EDIT",L"",ES_AUTOHSCROLL|WS_BORDER|WS_TABSTOP,230);typeEdit=control(L"EDIT",L"",ES_AUTOHSCROLL|WS_BORDER|WS_TABSTOP,231);SendMessageW(phaseEdit,EM_SETLIMITTEXT,60,0);SendMessageW(typeEdit,EM_SETLIMITTEXT,60,0);
    saveClass=control(L"BUTTON",L"Enregistrer le classement",WS_TABSTOP,232);offline=control(L"BUTTON",L"Disponible hors ligne",WS_TABSTOP,233);preserve=control(L"BUTTON",L"Conserver la copie locale",WS_TABSTOP,234);restart=control(L"BUTTON",L"Reprendre la version distante",WS_TABSTOP,235);retry=control(L"BUTTON",L"Réessayer l’envoi",WS_TABSTOP,236);recovery=control(L"BUTTON",L"Ouvrir les copies précédentes",WS_TABSTOP,237);for(auto child:{actionsLabel,phaseEdit,typeEdit,saveClass,offline,preserve,restart,retry,recovery})SetParent(child,actionsPane);for(auto child:{saveClass,offline,preserve,restart,retry,recovery})SetWindowLongPtrW(child,GWL_STYLE,GetWindowLongPtrW(child,GWL_STYLE)|BS_NOTIFY);
+   for(auto flat:{refresh,open,document,properties,defaults,reset})SetWindowLongPtrW(flat,GWL_STYLE,(GetWindowLongPtrW(flat,GWL_STYLE)&~static_cast<LONG_PTR>(BS_TYPEMASK))|BS_OWNERDRAW);
+   {SHFILEINFOW info{};auto images=reinterpret_cast<HIMAGELIST>(SHGetFileInfoW(L".",FILE_ATTRIBUTE_NORMAL,&info,sizeof(info),SHGFI_USEFILEATTRIBUTES|SHGFI_SYSICONINDEX|SHGFI_SMALLICON));if(images)ListView_SetImageList(list,images,LVSIL_SMALL);}
    name(phaseEdit,L"Phase du document");name(typeEdit,L"Type documentaire");
    details=control(L"EDIT",L"Sélectionnez un document pour afficher ses propriétés.",ES_MULTILINE|ES_READONLY|ES_AUTOVSCROLL|WS_VSCROLL|WS_TABSTOP,203);note=control(L"STATIC",L"",SS_LEFT);scale();name(previousPage,L"Page précédente");name(nextPage,L"Page suivante");name(tabs,L"Propriétés, aperçu, versions et actions");name(preview,L"Aperçu du document");name(history,L"Historique des versions, lecture seule");name(tree,L"Navigation documentaire");name(list,L"Documents du projet");name(details,L"Propriétés du document, lecture seule");name(search,L"Rechercher dans les documents montés");name(projectFilter,L"Filtrer par projet");name(phaseFilter,L"Filtrer par phase");name(typeFilter,L"Filtrer par type documentaire");name(statusFilter,L"Filtrer par statut");TreeView_SetExtendedStyle(tree,TVS_EX_DOUBLEBUFFER|TVS_EX_FADEINOUTEXPANDOS,TVS_EX_DOUBLEBUFFER|TVS_EX_FADEINOUTEXPANDOS);applyTheme();
    async=std::make_shared<Async>();async->window=window;async->serial=serial++;SetTimer(window,1,5000,nullptr);layout();rebuild();launch(L"catalog");return 0;}
@@ -242,7 +291,7 @@ class View final:public IShellView,public IFolderView {
    if(LOWORD(w)==221&&previewPage>0){--previewPage;clearPreview(L"Chargement de la page…");queueDetail();return 0;}
    if(LOWORD(w)==222&&previewPages&&previewPage+1<previewPages){++previewPage;clearPreview(L"Chargement de la page…");queueDetail();return 0;}
    if(LOWORD(w)==100){launch(L"catalog");queueDetail();}if(LOWORD(w)==101)launch(L"open");if(LOWORD(w)==102)launch(L"document");if(LOWORD(w)==103){propertiesMode=!propertiesMode;layout();SetFocus(propertiesMode?paneFocus():list);}return 0;
-  case WM_DRAWITEM:{auto item=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(item->CtlID!=224)break;FillRect(item->hDC,&item->rcItem,backgroundBrush);
+  case WM_DRAWITEM:{auto item=reinterpret_cast<DRAWITEMSTRUCT*>(l);if(item->CtlType==ODT_BUTTON)return drawButton(item);if(item->CtlID!=224)break;FillRect(item->hDC,&item->rcItem,backgroundBrush);
    if(previewPixels.empty()){auto rectangle=item->rcItem;InflateRect(&rectangle,-8,-8);SetBkMode(item->hDC,TRANSPARENT);SetTextColor(item->hDC,textColor);DrawTextW(item->hDC,previewMessage.c_str(),-1,&rectangle,DT_WORDBREAK|DT_NOPREFIX);}
    else{int width=item->rcItem.right,height=item->rcItem.bottom;double ratio=std::min(static_cast<double>(width)/previewWidth,static_cast<double>(height)/previewHeight);int w=std::max(1,static_cast<int>(previewWidth*ratio)),h=std::max(1,static_cast<int>(previewHeight*ratio));BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=previewWidth;info.bmiHeader.biHeight=-previewHeight;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;SetStretchBltMode(item->hDC,HALFTONE);StretchDIBits(item->hDC,(width-w)/2,(height-h)/2,w,h,0,0,previewWidth,previewHeight,previewPixels.data(),&info,DIB_RGB_COLORS,SRCCOPY);}return TRUE;}
   case DetailMessage:{if(!detailAsync||w!=detailAsync->serial)return 0;detailBusy=false;std::optional<Reply> reply;{std::lock_guard lock(detailAsync->mutex);reply=std::move(detailAsync->reply);detailAsync->reply.reset();}
@@ -251,6 +300,7 @@ class View final:public IShellView,public IFolderView {
    else{auto message=reply?reply->message:L"Document indisponible.";if(detailTab==1)clearPreview(message);else if(detailTab==3){actionWritable=false;SetWindowTextW(actionsLabel,message.c_str());}else SetWindowTextW(history,message.c_str());}pageButtons();buttons();return 0;}
   case PresentationMessage:capturePresentation();return 0;
   case WM_NOTIFY:{auto info=reinterpret_cast<NMHDR*>(l);
+   if(info->hwndFrom==list&&info->code==NM_CUSTOMDRAW)return listDraw(reinterpret_cast<NMLVCUSTOMDRAW*>(l));
    if(info->hwndFrom==tabs&&info->code==TCN_SELCHANGE){detailTab=TabCtrl_GetCurSel(tabs);queueDetail();layout();return 0;}
    if((info->hwndFrom==ListView_GetHeader(list)||info->hwndFrom==list)&&(info->code==HDN_ENDTRACKW||info->code==HDN_ENDDRAG))PostMessageW(window,PresentationMessage,0,0);
    if(info->hwndFrom==list&&info->code==LVN_COLUMNCLICK&&!building){auto column=reinterpret_cast<NMLISTVIEW*>(l)->iSubItem;if(column>=0&&column<ColumnCount){if(presentation.sort==column)presentation.ascending=!presentation.ascending;else{presentation.sort=column;presentation.ascending=1;}fill(true);savePresentation(scope,presentation);}return 0;}
@@ -287,7 +337,7 @@ public:
   *out=CreateWindowExW(WS_EX_CONTROLPARENT,className,L"ArchiOffice Drive",WS_CHILD|WS_VISIBLE|WS_CLIPCHILDREN,rect->left,rect->top,rect->right-rect->left,rect->bottom-rect->top,parent,nullptr,moduleInstance,this);if(!*out){auto error=HRESULT_FROM_WIN32(GetLastError());DestroyViewWindow();return error;}return S_OK;}
  HRESULT STDMETHODCALLTYPE DestroyViewWindow()override{capturePresentation();if(window)DestroyWindow(window);UnregisterClassW(className,moduleInstance);
   busy=false;catalogLoaded=false;projects.clear();visible.clear();filters.clear();filter={};selectedKeys.clear();focusKey.clear();selectionInitialized=false;scope.clear();async.reset();detailAsync.reset();detailBusy=false;detailTab=0;detailProject.clear();detailKey.clear();detailRevision.clear();requestedDetail.clear();completion.clear();actionWritable=false;classificationVersion=0;actionScroll=0;previewPixels.clear();previewPages=previewPage=0;
-  tree=list=details=heading=note=refresh=open=document=properties=search=projectFilter=phaseFilter=typeFilter=statusFilter=reset=defaults=nullptr,tabs=nullptr,preview=nullptr,history=nullptr,previousPage=nullptr,nextPage=nullptr,pageLabel=nullptr;if(font){DeleteObject(font);font=nullptr;}if(titleFont){DeleteObject(titleFont);titleFont=nullptr;}if(backgroundBrush){DeleteObject(backgroundBrush);backgroundBrush=nullptr;}if(browser){browser->Release();browser=nullptr;}return S_OK;}
+  tree=list=details=heading=note=refresh=open=document=properties=search=projectFilter=phaseFilter=typeFilter=statusFilter=reset=defaults=nullptr,tabs=nullptr,preview=nullptr,history=nullptr,previousPage=nullptr,nextPage=nullptr,pageLabel=nullptr;if(font){DeleteObject(font);font=nullptr;}if(titleFont){DeleteObject(titleFont);titleFont=nullptr;}if(backgroundBrush){DeleteObject(backgroundBrush);backgroundBrush=nullptr;}if(iconFont){DeleteObject(iconFont);iconFont=nullptr;}if(bigIconFont){DeleteObject(bigIconFont);bigIconFont=nullptr;}if(browser){browser->Release();browser=nullptr;}return S_OK;}
  HRESULT STDMETHODCALLTYPE GetCurrentInfo(LPFOLDERSETTINGS info)override{if(!info)return E_POINTER;info->ViewMode=FVM_DETAILS;info->fFlags=FWF_AUTOARRANGE;return S_OK;}
  HRESULT STDMETHODCALLTYPE AddPropertySheetPages(DWORD,LPFNSVADDPROPSHEETPAGE,LPARAM)override{return S_OK;}
  HRESULT STDMETHODCALLTYPE SaveViewState()override{return S_OK;}
