@@ -360,6 +360,8 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
         await apiFetch(`/api/projects/${projectId}/act`, {
           method: 'PUT',
           body: JSON.stringify({ consultation: c, act_phase: p }),
+          // Une requête qui ne répond jamais finit en échec (nouvel essai), au lieu de bloquer la chaîne d'écritures.
+          signal: AbortSignal.timeout(30_000),
         });
         setSaveError(false);
         // Une modification faite pendant l'écriture reste à enregistrer.
@@ -387,6 +389,15 @@ export default function ACTModule({ projectId, projectName, projectImageUrl, lot
     const timer = setTimeout(() => { void save(consultation, phase); }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
   }, [consultation, phase, dirty, loaded, retryTick, save]);
+
+  // Fermer ou recharger la page avec une saisie non envoyée (délai de 1,2 s, ou échec en cours de nouvel
+  // essai) : confirmation du navigateur. Le démontage ci-dessous ne s'exécute pas sur un rechargement.
+  useEffect(() => {
+    if (!dirty && !saveError) return;
+    const avertir = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', avertir);
+    return () => window.removeEventListener('beforeunload', avertir);
+  }, [dirty, saveError]);
 
   // Quitter l'onglet avant l'échéance du délai ne perd pas la dernière saisie.
   const latest = useRef({ consultation, phase, dirty, loaded, save });

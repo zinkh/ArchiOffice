@@ -66,6 +66,8 @@ export function useProjectAutosave<P extends ProjectLike>(
           headers: { 'Content-Type': 'application/json' },
           body,
           keepalive: !!opts.keepalive && body.length < KEEPALIVE_MAX_CHARS,
+          // Une requête qui ne répond jamais finit en échec (nouvel essai) au lieu de bloquer la chaîne d'écritures.
+          signal: AbortSignal.timeout(30_000),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         onSavedRef.current(snapshot);

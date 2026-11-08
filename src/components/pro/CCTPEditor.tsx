@@ -52,6 +52,7 @@ import { collectSelectedLignes, deleteSelection, parseSelection, pasteLignes } f
 import { dupliquerSelection, modifierEnMasse, noeudsRacines, type PatchMasse } from './cctpBulkOps';
 import { CctpBulkEditDialog } from './CctpBulkEditDialog';
 import { ChampMarqueur, PastilleMarqueur } from './MarqueurRedaction';
+import { IndicateurModification } from './IndicateurModification';
 import { creerMarqueur } from '../../lib/marqueurRedaction';
 import type { StatutRedaction } from '../../types/dpgf';
 
@@ -494,6 +495,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         label: 'Lot', name: `${lot.numero} — ${lot.titre}`, cctpOnly: false,
         description: (lot as any).cctpDescription ?? '', ligne: null,
         batimentId: lot.batimentId, phaseId: lot.phaseId, marqueur: lot.marqueur,
+        modifieLe: lot.modifieLe, modifiePar: lot.modifiePar,
       };
     }
     if (selection.kind === 'chapitre') {
@@ -503,6 +505,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
         label: 'Chapitre', name: `${chap.numero} — ${chap.titre}`, cctpOnly: !!chap.cctpOnly,
         description: chap.cctpDescription ?? '', ligne: null,
         batimentId: chap.batimentId, phaseId: chap.phaseId, marqueur: chap.marqueur,
+        modifieLe: chap.modifieLe, modifiePar: chap.modifiePar,
       };
     }
     const chap = dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx];
@@ -512,6 +515,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
       label: 'Article', name: `${ligne.numero} — ${ligne.designation}`, cctpOnly: !!ligne.cctpOnly,
       description: ligne.cctpDescription ?? '', ligne,
       batimentId: ligne.batimentId, phaseId: ligne.phaseId, marqueur: ligne.marqueur,
+      modifieLe: ligne.modifieLe, modifiePar: ligne.modifiePar,
     };
   };
 
@@ -934,6 +938,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                           </button>
                           <span className="font-medium text-zinc-400 text-xs mr-1">{chap.numero}</span>
                           <span className="truncate text-xs flex-1">{chap.titre || 'Sans titre'}</span>
+                          <IndicateurModification noeud={chap} compact />
                           <PastilleMarqueur marqueur={chap.marqueur} />
                           {chap.cctpOnly && (
                             <span className="shrink-0 ml-1 text-[0.6875rem] px-1 py-0.5 bg-violet-100 dark:bg-violet-900/40 text-violet-600 rounded font-bold uppercase">
@@ -979,6 +984,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                   />
                   <span className="font-medium text-zinc-400 text-[0.6875rem] mr-1 shrink-0">{ligne.numero}</span>
                                 <span className="truncate text-[0.6875rem] flex-1">{ligne.designation}</span>
+                                <IndicateurModification noeud={ligne} compact />
                                 <PastilleMarqueur marqueur={ligne.marqueur} />
                                 {/* Repère de provenance : article issu de la
                                     bibliothèque d'ouvrages du cabinet. */}
@@ -1155,6 +1161,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                     />
                   )
                 ) : null}
+
+                <IndicateurModification noeud={selData} />
 
                 <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
 
