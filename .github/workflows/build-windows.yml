@@ -214,7 +214,23 @@ jobs:
         shell: bash
         run: |
           if [ "$GITHUB_EVENT_NAME" = 'pull_request' ]; then
-            npx electron-builder --win --x64 --publish never
+            # electron-builder télécharge ses outils (Electron, NSIS, signature)
+            # depuis des serveurs distants qui répondent parfois en 5xx (504 vu en
+            # CI). Une pull request ne publie rien (--publish never) : recommencer
+            # est sans risque, et on ne retente que les erreurs réseau.
+            ok=0
+            for attempt in 1 2 3; do
+              if npx electron-builder --win --x64 --publish never 2>&1 | tee electron-builder.log; then
+                ok=1
+                break
+              fi
+              if ! grep -Eq 'Response code 5[0-9]{2}|ETIMEDOUT|ECONNRESET|EAI_AGAIN|socket hang up' electron-builder.log; then
+                break
+              fi
+              echo "::warning::electron-builder failed on a network error (attempt $attempt/3), retrying."
+              sleep $((attempt * 20))
+            done
+            [ "$ok" -eq 1 ]
           else
             npx electron-builder --win --x64 --publish onTagOrDraft
           fi
