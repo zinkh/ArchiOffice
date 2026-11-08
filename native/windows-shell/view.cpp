@@ -4,6 +4,8 @@
 #include "presentation.hpp"
 #include <cwchar>
 #include <uxtheme.h>
+#include <vsstyle.h>
+#include <vssym32.h>
 #include <windowsx.h>
 #include <mutex>
 #include <memory>
@@ -189,11 +191,35 @@ class View final:public IShellView,public IFolderView {
   SelectObject(dc,font);RECT message{area.left+px(24),y+px(54),area.right-px(24),area.bottom};DrawTextW(dc,text.c_str(),-1,&message,DT_WORDBREAK|DT_NOPREFIX|DT_CENTER);
   SelectObject(dc,previous);
  }
+ COLORREF stripeColor(size_t row)const{return row%2==1?(darkMode?RGB(40,40,40):RGB(248,248,248)):backgroundColor;}
+ void stripe(NMLVCUSTOMDRAW* draw)const{if(draw->nmcd.dwItemSpec%2==1&&!(draw->nmcd.uItemState&CDIS_SELECTED))draw->clrTextBk=stripeColor(draw->nmcd.dwItemSpec);}
+ // Colonne Synchronisation : pastille d'état colorée (Segoe MDL2 Assets) suivie du libellé, fond de sélection du thème conservé.
+ LRESULT drawSync(NMLVCUSTOMDRAW* draw){
+  auto row=static_cast<size_t>(draw->nmcd.dwItemSpec);if(row>=visible.size())return CDRF_DODEFAULT;
+  auto [p,d]=visible[row];auto const& state=projects[p].rows[d].transferState;
+  HDC dc=draw->nmcd.hdc;RECT cell=draw->nmcd.rc;
+  if(ListView_GetItemState(list,static_cast<int>(row),LVIS_SELECTED)){if(auto theme=OpenThemeData(list,L"ListView")){DrawThemeBackground(theme,dc,LVP_LISTITEM,GetFocus()==list?LISS_SELECTED:LISS_SELECTEDNOTFOCUS,&cell,nullptr);CloseThemeData(theme);}}
+  else{auto shade=CreateSolidBrush(stripeColor(row));FillRect(dc,&cell,shade);DeleteObject(shade);}
+  COLORREF muted=darkMode?RGB(150,150,150):RGB(110,110,110),good=darkMode?RGB(108,203,95):RGB(16,124,16),warn=darkMode?RGB(252,225,0):RGB(157,93,0),bad=darkMode?RGB(255,153,164):RGB(196,43,28),accent=darkMode?RGB(99,168,255):RGB(0,95,184);
+  wchar_t const* glyph=L"\xE897";COLORREF color=muted;
+  if(state==L"uploaded"||state==L"reconciled"){glyph=L"\xE73E";color=good;}
+  else if(state==L"uploading"){glyph=L"\xE895";color=accent;}
+  else if(state==L"queued"){glyph=L"\xE823";color=muted;}
+  else if(state==L"retry"){glyph=L"\xE72C";color=warn;}
+  else if(state==L"blocked"){glyph=L"\xE783";color=bad;}
+  else if(state==L"conflict"){glyph=L"\xE7BA";color=bad;}
+  else if(state==L"none"){glyph=L"\xE738";color=muted;}
+  SetBkMode(dc,TRANSPARENT);
+  RECT icon=cell;icon.left+=px(8);icon.right=icon.left+px(18);auto previous=SelectObject(dc,iconFont);SetTextColor(dc,color);DrawTextW(dc,glyph,-1,&icon,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX);
+  RECT text=cell;text.left+=px(32);text.right-=px(4);SelectObject(dc,font);SetTextColor(dc,textColor);auto label=transferLabel(state);DrawTextW(dc,label.c_str(),-1,&text,DT_SINGLELINE|DT_VCENTER|DT_LEFT|DT_NOPREFIX|DT_END_ELLIPSIS);
+  SelectObject(dc,previous);return CDRF_SKIPDEFAULT;
+ }
  // Lignes alternées très discrètes et état vide ; la sélection reste celle du thème Explorateur.
  LRESULT listDraw(NMLVCUSTOMDRAW* draw){
   switch(draw->nmcd.dwDrawStage){
    case CDDS_PREPAINT:return CDRF_NOTIFYITEMDRAW|CDRF_NOTIFYPOSTPAINT;
-   case CDDS_ITEMPREPAINT:if(!(draw->nmcd.uItemState&CDIS_SELECTED)&&draw->nmcd.dwItemSpec%2==1){draw->clrTextBk=darkMode?RGB(40,40,40):RGB(248,248,248);return CDRF_NEWFONT;}return CDRF_DODEFAULT;
+   case CDDS_ITEMPREPAINT:stripe(draw);return CDRF_NEWFONT|CDRF_NOTIFYSUBITEMDRAW;
+   case CDDS_ITEMPREPAINT|CDDS_SUBITEM:if(draw->iSubItem==6)return drawSync(draw);stripe(draw);return CDRF_NEWFONT;
    case CDDS_POSTPAINT:if(ListView_GetItemCount(list)==0)drawEmpty(draw->nmcd.hdc);return CDRF_DODEFAULT;
   }
   return CDRF_DODEFAULT;
