@@ -405,14 +405,17 @@ export async function loadCotraitantIdentities(
  * agents (packages/archioffice-agents/src/server/artifacts.ts).
  */
 export function drawAgencyFooters(pdf: any, settings: AgencySettings, opts: LetterheadOptions): void {
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
   const margin = opts.margin ?? 14;
   const total = pdf.internal.getNumberOfPages();
   const ligne = agencyFooterLine(settings);
 
   for (let p = 1; p <= total; p++) {
     pdf.setPage(p);
+    // Taille lue page par page, APRÈS setPage : un document qui mêle portrait et paysage (annexe de plans) a des
+    // pages de tailles différentes. Lue une seule fois avant la boucle, c'était celle de la dernière page, et le
+    // pied des pages portrait se dessinait à 210 mm au lieu de 297 mm, en plein milieu du contenu.
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
     if (p > 1 && !pagesAvecEntete.get(pdf)?.has(p)) drawCompactHeader(pdf, settings, opts);
     pdf.setDrawColor(...GRIS_FILET);
     pdf.setLineWidth(0.25);

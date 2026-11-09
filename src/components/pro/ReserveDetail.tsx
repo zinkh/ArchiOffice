@@ -162,7 +162,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, co
   const pickPlan = useMemo(() => plans.find(p => p.id === pickPlanId) || null, [plans, pickPlanId]);
 
   // Mêmes lots (triés par numéro) et entreprises (lots + marchés) que les actions en masse du suivi.
-  const { lotOptions, entrepriseOptions } = useReserveOptions(projectId, lotsList);
+  const { lotOptions, entrepriseOptions, entrepriseDuLot } = useReserveOptions(projectId, lotsList);
   // La couleur suit la saisie : changer l'entreprise ou le lot dans la fiche change la pastille tout de suite.
   const responsableEnCours = { entreprises: form.entreprises, lots: form.lots };
   const responsable = responsableDe(responsableEnCours);
@@ -175,6 +175,31 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, co
   ];
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm(prev => ({ ...prev, [key]: value }));
+
+  // Choisir un lot désigne son entreprise responsable. Retirer le lot retire cette entreprise SEULEMENT si elle
+  // a été ajoutée d'office pendant cette saisie (et qu'aucun autre lot retenu ne la porte) : une entreprise saisie
+  // à la main, ou déjà enregistrée sur la réserve, n'est jamais retirée en douce.
+  const nomNorm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
+  const entreprisesAuto = useRef(new Set<string>());
+  useEffect(() => { entreprisesAuto.current = new Set(); }, [reserve?.id]);
+  const changerLots = (lots: string[]) => {
+    let entreprises = form.entreprises;
+    for (const lot of lots.filter(l => !form.lots.includes(l))) {
+      const nom = entrepriseDuLot(lot);
+      if (nom && !entreprises.some(e => nomNorm(e) === nomNorm(nom))) {
+        entreprises = [...entreprises, nom];
+        entreprisesAuto.current.add(nomNorm(nom));
+      }
+    }
+    for (const lot of form.lots.filter(l => !lots.includes(l))) {
+      const nom = entrepriseDuLot(lot);
+      if (!nom || !entreprisesAuto.current.has(nomNorm(nom))) continue;
+      if (lots.some(l => { const autre = entrepriseDuLot(l); return !!autre && nomNorm(autre) === nomNorm(nom); })) continue;
+      entreprises = entreprises.filter(e => nomNorm(e) !== nomNorm(nom));
+      entreprisesAuto.current.delete(nomNorm(nom));
+    }
+    setForm(prev => ({ ...prev, lots, entreprises }));
+  };
 
   const reserveKind = apiBase === '/api/gpa-reserves' ? 'gpa' : 'opr';
   const entity = apiBase === '/api/gpa-reserves' ? 'gpaReserve' : 'reserve';
@@ -603,7 +628,7 @@ export function ReserveDetail({ apiBase, projectId, reserve, plans, lotsList, co
                 isMulti
                 options={withCurrent(lotOptions, form.lots)}
                 value={form.lots.map(v => ({ value: v, label: v }))}
-                onChange={(vals: any) => set('lots', (vals || []).map((v: any) => v.value))}
+                onChange={(vals: any) => changerLots((vals || []).map((v: any) => v.value))}
                 placeholder="Choisir…"
                 className="text-sm"
                 menuPortalTarget={document.body}

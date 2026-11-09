@@ -8,9 +8,10 @@ import type { Plan } from '../../types';
 import type { AgencySettings } from '../../lib/proposalExport';
 import { reservesPdfFilename, DEFAULT_RESERVES_CONTENT, type ReservesExportContent, type ReservesExportProject } from '../../lib/reservesExport';
 import {
-  LIBELLE_STATUT, SANS_LOT, lotLabel, orderedLotTitles, selectReserves,
+  LIBELLE_STATUT, SANS_LOT, estNonLevee, groupReservesByLot, lotLabel, orderedLotTitles, selectReserves,
   type ExportSend, type ExportStatus, type LotRef,
 } from '../../lib/reserveDiffusion';
+import { livrer, type FichierExporte } from '../../lib/exportSortie';
 import { parseJsonList } from '../../lib/jsonList';
 import { cn } from '../../lib/utils';
 import type { ReserveLike } from './reserveShared';
@@ -69,8 +70,23 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
   const [content, setContent] = useState<ReservesExportContent>({ ...DEFAULT_RESERVES_CONTENT });
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
+  // Réserves levées : incluses par défaut (comme avant), au PDF comme à la diffusion par e-mail.
+  const [inclureLevees, setInclureLevees] = useState(true);
+  // Export : un PDF indépendant par lot, réunis dans une archive ZIP.
+  const [parLot, setParLot] = useState(false);
+
   const lotsArg = useMemo(() => (scope === 'lots' ? [...chosenLots] : null), [scope, chosenLots]);
-  const scopeReserves = useMemo(() => selectReserves(reserves, lotsArg), [reserves, lotsArg]);
+  const perimetreReserves = useMemo(() => selectReserves(reserves, lotsArg), [reserves, lotsArg]);
+  const nbLevees = useMemo(() => perimetreReserves.filter(r => !estNonLevee(r)).length, [perimetreReserves]);
+  const scopeReserves = useMemo(
+    () => (inclureLevees ? perimetreReserves : perimetreReserves.filter(estNonLevee)),
+    [perimetreReserves, inclureLevees],
+  );
+  // Un groupe par lot, dans l'ordre des numéros de lot : une réserve de plusieurs lots n'est rangée que sous le premier.
+  const groupesParLot = useMemo(
+    () => groupReservesByLot(scopeReserves, lots, lotsArg ? new Set(lotsArg) : null),
+    [scopeReserves, lots, lotsArg],
+  );
 
   // Lots proposés : ceux de l'opération dans l'ordre des numéros, avec leur nombre de réserves ; « Sans lot » si besoin.
   const lotChoices = useMemo(() => {
@@ -102,7 +118,8 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
     if (scope === 'lots' && chosenLots.size === 0) { setRecipients(null); return; }
     let vivant = true;
     const lotsParam = lotsArg ? `&lots=${encodeURIComponent(JSON.stringify(lotsArg))}` : '';
-    apiFetch<{ reserve_count: number; intervenants: any[]; entreprises: any[] }>(`/api/projects/${projectId}/reserve-exports/recipients?kind=${kind}${lotsParam}`)
+    const leveesParam = inclureLevees ? '' : '&include_levees=0';
+    apiFetch<{ reserve_count: number; intervenants: any[]; entreprises: any[] }>(`/api/projects/${projectId}/reserve-exports/recipients?kind=${kind}${lotsParam}${leveesParam}`)
       .then(r => {
         if (!vivant) return;
         // Les réserves de chaque entreprise se déduisent de la liste (le serveur ne renvoie que leur nombre).
@@ -121,7 +138,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
     return () => { vivant = false; };
     // scopeReserves découle de reserves et lotsArg : seul le périmètre relance la lecture.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, kind, scope, chosenLots]);
+  }, [projectId, kind, scope, chosenLots, inclureLevees]);
 
   const exportOptions = (extra: Record<string, unknown> = {}) => ({
     title, lots, allowedLots: lotsArg, scopeLabel, content, couleurs, ...extra,
@@ -134,12 +151,35 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
     setBusy('Préparation…');
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
-      await exportReservesToPDF(scopeReserves, plans, project, settings, { ...exportOptions(), onProgress: setBusy });
+      let fichiers = 1;
+      if (parLot) {
+        // Un PDF par lot, chacun complet et indépendant (page de garde, fiches, plans de SES réserves), puis une
+        // archive ZIP : plusieurs téléchargements à la suite seraient bloqués par le navigateur.
+        const pdfs: FichierExporte[] = [];
+        for (let i = 0; i < groupesParLot.length; i++) {
+          const g = groupesParLot[i];
+          const etape = `Lot ${i + 1} / ${groupesParLot.length} : ${g.label}`;
+          setBusy(`${etape}…`);
+          const blob = await exportReservesToPDF(g.rows, plans, project, settings, {
+            ...exportOptions({ output: 'blob', allowedLots: [g.key], scopeLabel: `Lot : ${g.label}` }),
+            onProgress: (m: string) => setBusy(`${etape} · ${m}`),
+          } as any);
+          pdfs.push({ nom: reservesPdfFilename(title, project, g.label), blob });
+        }
+        await livrer(pdfs, reservesPdfFilename(title, project, 'par lot').replace(/\.pdf$/i, '.zip'));
+        fichiers = pdfs.length;
+      } else {
+        await exportReservesToPDF(scopeReserves, plans, project, settings, { ...exportOptions(), onProgress: setBusy });
+      }
       await apiFetch(`/api/projects/${projectId}/reserve-exports`, {
-        method: 'POST', body: JSON.stringify({ kind, channel: 'telechargement', lots: lotsArg }),
+        method: 'POST', body: JSON.stringify({ kind, channel: 'telechargement', lots: lotsArg, include_levees: inclureLevees }),
       }).catch(() => { /* le journal est un suivi : un échec ne doit pas faire perdre l'export */ });
       await loadJournal();
-      setMessage({ text: `PDF de ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''} téléchargé.` });
+      setMessage({
+        text: parLot
+          ? `${fichiers} PDF (un par lot, ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''}) ${fichiers > 1 ? 'téléchargés dans une archive ZIP' : 'téléchargé'}.`
+          : `PDF de ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''} téléchargé.`,
+      });
     } catch (err: any) {
       console.error('[ReserveDiffusionDialog] export', err);
       setMessage({ text: "L'export a échoué.", error: true });
@@ -162,7 +202,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
     try {
       const { exportReservesToPDF } = await import('../../lib/reservesExport');
       const entree = await apiFetch<JournalRow>(`/api/projects/${projectId}/reserve-exports`, {
-        method: 'POST', body: JSON.stringify({ kind, channel: 'mail', lots: lotsArg, note: note.trim() || null }),
+        method: 'POST', body: JSON.stringify({ kind, channel: 'mail', lots: lotsArg, note: note.trim() || null, include_levees: inclureLevees }),
       });
       for (let i = 0; i < choisis.length; i++) {
         const dest = choisis[i];
@@ -176,6 +216,7 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
           const body = new FormData();
           body.append('file', blob, reservesPdfFilename(title, project, dest.role === 'entreprise' ? dest.name : undefined));
           body.append('key', dest.key);
+          body.append('include_levees', inclureLevees ? '1' : '0');
           // Pas d'apiFetch : il imposerait un Content-Type JSON, or un envoi multipart laisse le navigateur poser sa limite.
           const headers = new Headers();
           const token = await getAccessToken();
@@ -276,6 +317,13 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
               ))}
             </div>
           )}
+          <label className="flex items-start gap-3 py-1.5 min-h-11 cursor-pointer">
+            <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--tblr-primary)]" checked={inclureLevees} disabled={!!busy} onChange={e => setInclureLevees(e.target.checked)} />
+            <span className="text-sm">
+              <span className="font-medium text-[var(--tblr-text)]">Inclure les réserves levées ({nbLevees})</span>
+              <span className="block text-xs text-[var(--tblr-muted)]">S'applique au PDF et à la diffusion par e-mail. Décoché, seules les réserves non levées sont reprises.</span>
+            </span>
+          </label>
           <p className="text-xs text-[var(--tblr-muted)]">Le PDF est classé par lot, dans l'ordre des numéros de lot.</p>
         </section>
 
@@ -299,8 +347,18 @@ export function ReserveDiffusionDialog({ kind, title, projectId, reserves, coule
             ))}
           </fieldset>
           {nothingToPrint && <p className="text-sm text-red-600">Cochez au moins un contenu.</p>}
+          <label className="flex items-start gap-3 py-1.5 min-h-11 cursor-pointer">
+            <input type="checkbox" className="mt-1 h-4 w-4 accent-[var(--tblr-primary)]" checked={parLot} disabled={!!busy} onChange={e => setParLot(e.target.checked)} />
+            <span className="text-sm">
+              <span className="font-medium text-[var(--tblr-text)]">Un fichier PDF indépendant par lot</span>
+              <span className="block text-xs text-[var(--tblr-muted)]">Chaque lot a son propre PDF (page de garde, fiches et plans de ses réserves). Les fichiers sont réunis dans une archive ZIP.</span>
+            </span>
+          </label>
           <button type="button" onClick={telecharger} disabled={!!busy || scopeVide || nothingToPrint || scopeReserves.length === 0} className={cn(BOUTON, 'border border-[var(--tblr-border)] text-[var(--tblr-text)]')}>
-            <IconDownload size={16} /> Télécharger le PDF ({scopeReserves.length})
+            <IconDownload size={16} />
+            {parLot
+              ? ` Télécharger un PDF par lot (${groupesParLot.length} fichier${groupesParLot.length > 1 ? 's' : ''}, ${scopeReserves.length} réserve${scopeReserves.length > 1 ? 's' : ''})`
+              : ` Télécharger le PDF (${scopeReserves.length})`}
           </button>
         </section>
 
