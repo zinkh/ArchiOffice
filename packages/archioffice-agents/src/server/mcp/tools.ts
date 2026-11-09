@@ -582,6 +582,9 @@ async function executeRichTool(baseUrl: string, auth: InternalAuth, name: string
 // par des opérations ciblées (ajout / modification / suppression de lignes)
 // que le serveur applique lui-même, sous verrou, en recalculant les totaux ;
 // le MCP n'envoie jamais le document entier.
+// De même manage_cctp (même scope) écrit les TEXTES du CCTP par opérations ciblées
+// (texte d'un lot, d'un chapitre ou d'un article, ajout d'articles) : remplacer un
+// texte existant exige une confirmation, jamais de quantité ni de prix.
 //
 // delete_document (ci-dessus) fait exception à dessein : retirer UNE pièce
 // jointe n'a pas les mêmes conséquences que supprimer la fiche elle-même,
