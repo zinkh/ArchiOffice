@@ -100,7 +100,7 @@ const fmtDateTime = (iso?: string | null) => {
 };
 
 export function reserveIsOverdue(r: ReserveLike, today = new Date()): number {
-  if (r.status === 'Levée' || r.status === 'Quitus Transmis' || !r.due_date) return 0;
+  if (r.status === 'Levée' || r.status === 'Quitus Transmis' || r.status === 'Pour mémoire' || !r.due_date) return 0;
   const t = new Date(today); t.setHours(0, 0, 0, 0);
   const d = new Date(r.due_date); d.setHours(0, 0, 0, 0);
   if (isNaN(d.getTime()) || d >= t) return 0;

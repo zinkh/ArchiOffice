@@ -4297,6 +4297,7 @@ export default {
       "reserve_status_refused_company": "Refusée par l'entreprise",
       "reserve_status_discharge_sent": "Quitus transmis",
       "reserve_status_lift_refused": "Levée refusée par la maîtrise d'œuvre",
+      "reserve_status_for_record": "Pour mémoire",
       "projectdetail_reserves_title": "Réserves",
       "projectdetail_reserves_gpa_title": "Réserves de parfait achèvement (GPA)",
       "projectdetail_reserves_gpa_short": "Réserves GPA",

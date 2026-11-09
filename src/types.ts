@@ -550,7 +550,7 @@ export interface Reserve {
   title: string;
   batiment: string;
   local: string;
-  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE';
+  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE' | 'Pour mémoire';
   lots: string; // JSON stringified array
   entreprises: string; // JSON stringified array
   created_at: string;
@@ -612,7 +612,7 @@ export interface GpaReserve {
   title: string;
   batiment: string;
   local: string;
-  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE';
+  status: 'A faire' | 'En cours' | 'Levée' | 'Refusée par l\'entreprise' | 'Quitus Transmis' | 'Levée refusée par le MOE' | 'Pour mémoire';
   lots: string; // JSON stringified array
   entreprises: string; // JSON stringified array
   created_at: string;

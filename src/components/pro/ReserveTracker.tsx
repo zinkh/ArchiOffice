@@ -45,7 +45,7 @@ import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
 import { ReserveDiffusionDialog } from './ReserveDiffusionDialog';
 import { ReservePlanView } from './ReservePlanView';
-import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed, isReserveForRecord } from './reserveShared';
 import { construireLegende, couleursParCle, couleurDe } from '../../lib/reserveCouleurs';
 import {
   SANS_LOT_FILTRE, choixDeLots, cleGroupe, correspondAuLot, libelleGroupe, numerosParLot, trierGroupes, trierParLot, voisine,
@@ -190,7 +190,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
     retard: reserves.filter(r => reserveOverdueDays(r) > 0).length,
     urgentes: reserves.filter(r => {
-      if (isReserveClosed(r) || !r.due_date) return false;
+      if (isReserveClosed(r) || isReserveForRecord(r) || !r.due_date) return false;
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const in7 = new Date(today.getTime() + 7 * 86400000);
       const due = new Date(r.due_date);
