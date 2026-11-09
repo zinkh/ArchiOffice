@@ -31,6 +31,12 @@ interface PlanAnnotatorProps {
   isAddingMode?: boolean;
   /** Not-yet-saved marker position (e.g. while filling out the "new reserve" form) — rendered distinctly from saved markers. */
   pendingMarker?: { x: number; y: number } | null;
+  /** Repère mis en avant (anneau bleu) et ramené au centre de la vue quand il change. */
+  selectedMarkerId?: string | null;
+  /** Le plan occupe toute la largeur disponible au lieu de sa taille d'origine (le zoom se compose avec). */
+  fitWidth?: boolean;
+  /** Marges réduites autour du plan : la vue par plan veut chaque pixel. */
+  compact?: boolean;
 }
 
 export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
@@ -40,12 +46,32 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
   onSelectMarker,
   isAddingMode = false,
   pendingMarker = null,
+  selectedMarkerId = null,
+  fitWidth = false,
+  compact = false,
 }) => {
   const [numPages, setNumPages] = useState<number | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
   const [scale, setScale] = useState(1.0);
   const [imgNaturalWidth, setImgNaturalWidth] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [viewportWidth, setViewportWidth] = useState(0);
+
+  // Largeur utile de la zone défilante, suivie quand la fenêtre ou le volet change de taille.
+  useEffect(() => {
+    if (!fitWidth) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setViewportWidth(el.clientWidth);
+    update();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fitWidth]);
+  const marges = compact ? 16 : 64;
+  const largeurAjustee = fitWidth && viewportWidth > marges ? Math.floor(viewportWidth - marges) : null;
 
   // Plan uploads accept any file type (see handlePlanUpload in ProjectDetail),
   // so a "plan" can be a scanned image rather than a PDF — fall back to a
@@ -68,6 +94,22 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
     return () => { cancelled = true; };
   }, [fileUrl]);
 
+  // Ramène le repère sélectionné au centre de la zone défilante. Le défilement est calculé à la main :
+  // scrollIntoView ferait aussi défiler la page entière quand le plan est dans un volet.
+  useEffect(() => {
+    if (!selectedMarkerId) return;
+    const zone = scrollRef.current;
+    const repere = containerRef.current?.querySelector<HTMLElement>(`[data-marker-id="${selectedMarkerId.replace(/"/g, '\\"')}"]`);
+    if (!zone || !repere) return;
+    const z = zone.getBoundingClientRect();
+    const m = repere.getBoundingClientRect();
+    zone.scrollTo({
+      left: zone.scrollLeft + (m.left - z.left) - zone.clientWidth / 2 + m.width / 2,
+      top: zone.scrollTop + (m.top - z.top) - zone.clientHeight / 2 + m.height / 2,
+      behavior: 'smooth',
+    });
+  }, [selectedMarkerId, numPages, imgNaturalWidth, resolvedUrl, largeurAjustee]);
+
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages);
   }
@@ -84,7 +126,7 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
 
   return (
     <div className="flex flex-col h-full bg-zinc-100 dark:bg-zinc-950 rounded-2xl overflow-hidden border border-zinc-200 dark:border-zinc-800">
-      <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-900">
+      <div className={cn('border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-900', compact ? 'px-3 py-2' : 'p-4')}>
         <div className="flex items-center gap-4">
           {isPdf && (
             <>
@@ -123,10 +165,11 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-auto p-8 flex justify-center items-start relative bg-zinc-200 dark:bg-zinc-900/50">
-        <div 
+      <div ref={scrollRef} className={cn('flex-1 min-h-0 overflow-auto flex items-start relative bg-zinc-200 dark:bg-zinc-900/50', compact ? 'p-2' : 'p-8')}>
+        {/* mx-auto plutôt que justify-center : un plan zoomé plus large que la zone reste atteignable à gauche. */}
+        <div
           ref={containerRef}
-          className="relative shadow-2xl bg-white dark:bg-zinc-900"
+          className="relative mx-auto shrink-0 shadow-2xl bg-white dark:bg-zinc-900"
           onClick={handleCanvasClick}
           style={{ cursor: isAddingMode ? 'crosshair' : 'default' }}
         >
@@ -142,6 +185,7 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
               <Page
                 pageNumber={pageNumber}
                 scale={scale}
+                width={largeurAjustee ?? undefined}
                 renderAnnotationLayer={false}
                 renderTextLayer={false}
               />
@@ -152,14 +196,17 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
               alt="Plan"
               draggable={false}
               onLoad={(e) => setImgNaturalWidth(e.currentTarget.naturalWidth)}
-              style={imgNaturalWidth ? { width: `${imgNaturalWidth * scale}px` } : undefined}
+              style={largeurAjustee ? { width: `${largeurAjustee * scale}px`, maxWidth: 'none' } : imgNaturalWidth ? { width: `${imgNaturalWidth * scale}px` } : undefined}
             />
           )}
 
           {/* Markers */}
-          {markers.map((marker) => (
+          {markers.map((marker) => {
+            const selectionne = marker.id === selectedMarkerId;
+            return (
             <div
               key={marker.id}
+              data-marker-id={marker.id}
               onClick={(e) => {
                 e.stopPropagation();
                 onSelectMarker?.(marker.id);
@@ -167,7 +214,8 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
               className={cn(
                 "absolute w-6 h-6 -ml-3 -mt-3 rounded-full flex items-center justify-center text-[0.6875rem] font-bold shadow-lg cursor-pointer transition-transform hover:scale-110 border-2 border-white",
                 // Un filet sombre garde visible une pastille claire sur le fond blanc d'un plan.
-                marker.couleur ? "ring-1 ring-zinc-900/50" : "bg-red-600 text-white"
+                selectionne ? "z-10 scale-125 ring-4 ring-blue-500" : marker.couleur ? "ring-1 ring-zinc-900/50" : "bg-red-600 text-white",
+                selectionne && !marker.couleur && "bg-red-600 text-white"
               )}
               style={{
                 left: `${marker.x}%`,
@@ -178,7 +226,8 @@ export const PlanAnnotator: React.FC<PlanAnnotatorProps> = ({
             >
               {marker.number || '?'}
             </div>
-          ))}
+            );
+          })}
 
           {pendingMarker && (
             <div

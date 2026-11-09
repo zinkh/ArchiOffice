@@ -2083,7 +2083,7 @@ export default function ProjectDetail() {
           />
         ) : (
           <div className={`lg:h-full overflow-visible ${activeTab === 'PRO' ? 'lg:overflow-hidden' : 'lg:overflow-y-auto'} ${(activeTab === 'PRO' || activeTab === 'INSPIRATION') ? 'p-0' : 'p-4 sm:p-6'}`}>
-            <div className={activeTab === 'PRO' ? 'w-full lg:h-full' : activeTab === 'INSPIRATION' || activeTab === 'DET' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
+            <div className={activeTab === 'PRO' ? 'w-full lg:h-full' : activeTab === 'INSPIRATION' || activeTab === 'DET' || activeTab === 'AOR' || activeTab === 'GPA' ? 'w-full space-y-8' : 'max-w-6xl mx-auto space-y-8 pb-20'}>
             {activeTab === 'INFOS' && showFullEditor && (
               <div className="flex items-center justify-between -mt-2 mb-2">
                 <button
