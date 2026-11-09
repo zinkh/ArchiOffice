@@ -57,6 +57,7 @@ export function StatusSelect({ value, onChange, className }: { value: ReserveSta
   return (
     <select
       className={cn('pill-select', statusPillClass(value), className)}
+      title={value}
       value={value}
       onClick={e => e.stopPropagation()}
       onChange={e => onChange(e.target.value as ReserveStatus)}
