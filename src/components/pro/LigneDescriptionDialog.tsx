@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { ModalShell } from '../ui/ModalShell';
+import type { FicheTechnique } from '../../types/dpgf';
+import { FichesTechniquesEditor } from './FichesTechniquesEditor';
 
 interface LigneDescriptionDialogProps {
   /** Numéro et désignation de l'ouvrage, rappelés dans le titre. */
@@ -11,6 +13,10 @@ interface LigneDescriptionDialogProps {
   valeur: string;
   /** Reçoit le texte technique et la désignation (le titre de l'article), éventuellement modifiée. */
   onSave: (texte: string, designation: string) => void;
+  /** Affaire et fiches techniques du poste ; les fiches s'enregistrent tout de suite (le fichier est déjà déposé). */
+  projectId?: string;
+  fiches?: FicheTechnique[];
+  onFichesChange?: (fiches: FicheTechnique[]) => void;
   /** Ouvre l'article dans l'onglet CCTP (la saisie en cours est enregistrée d'abord). */
   onOpenCctp?: () => void;
   onClose: () => void;
@@ -22,7 +28,7 @@ interface LigneDescriptionDialogProps {
  * quel dans l'éditeur du CCTP. Ctrl+Entrée enregistre ; fermer avec une saisie
  * non enregistrée demande confirmation.
  */
-export function LigneDescriptionDialog({ numero, designation, valeur, onSave, onOpenCctp, onClose }: LigneDescriptionDialogProps) {
+export function LigneDescriptionDialog({ numero, designation, valeur, onSave, projectId, fiches, onFichesChange, onOpenCctp, onClose }: LigneDescriptionDialogProps) {
   const { t } = useTranslation();
   const [texte, setTexte] = useState(valeur);
   const [titre, setTitre] = useState(designation);
@@ -91,6 +97,11 @@ export function LigneDescriptionDialog({ numero, designation, valeur, onSave, on
           className="w-full min-h-[14rem] px-3 py-2 text-sm leading-relaxed rounded border outline-none focus:ring-2 focus:ring-[var(--tblr-primary)]"
           style={{ borderColor: 'var(--tblr-border)', background: 'var(--tblr-surface)', color: 'var(--tblr-text)' }}
         />
+        {projectId && onFichesChange && (
+          <div className="mt-4">
+            <FichesTechniquesEditor projectId={projectId} fiches={fiches ?? []} onChange={onFichesChange} />
+          </div>
+        )}
       </ModalShell>
     </AnimatePresence>
   );

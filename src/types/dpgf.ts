@@ -81,6 +81,15 @@ export interface QuantiteDetail {
  * Le fichier est un document de l'affaire (catégorie « CCTP - illustrations ») :
  * l'article n'en garde que la référence, pas les octets.
  */
+export interface FicheTechnique {
+  id: string;
+  /** documents.id, pour retrouver la pièce dans l'onglet Documents. */
+  documentId?: string;
+  /** Référence de stockage, ouverte par URL signée. */
+  fileUrl: string;
+  nom: string;
+}
+
 export interface ImageArticle {
   id: string;
   /** documents.id, pour retrouver la pièce dans l'onglet Documents. */
@@ -166,6 +175,8 @@ export interface Ligne extends DecoupageNoeud, MarquableNoeud, ModifiableNoeud {
   localisation?: string;
   /** Illustrations du CCTP ; imprimées sous le texte de l'article. */
   images?: ImageArticle[];
+  /** Fiches techniques du poste (documents de l'affaire) ; leurs noms sont rappelés dans l'export du CCTP. */
+  fichesTechniques?: FicheTechnique[];
   /**
    * Moteur qui a proposé l'article (« Générer le CCTP » : IA de la plateforme
    * ou Nomic). Repère de provenance comme `articleTypeId` : un texte rédigé

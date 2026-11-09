@@ -22,6 +22,7 @@ import * as Sentry from '@sentry/node';
 import { createHash } from 'crypto';
 import { aiGenerationLimiter, cctpLotLimiter } from '../rateLimit';
 import { tenantScopedFrom } from '../tenantScopedFrom';
+import { CORRECTIONS_SYSTEM_PROMPT, construireTacheCorrections, normaliserArticles, normaliserCorrections } from '../proControlSuggest';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -549,6 +550,25 @@ ${JSON.stringify(CCTP_SCHEMA)}`;
       res.json({ texte });
     } catch (e: any) {
       handleError(e, res, 'POST /api/projects/:projectId/cctp/draft-poste');
+    }
+  });
+
+  // Contrôle de cohérence : propose des corrections de texte (unité, désignation,
+  // description) pour les articles signalés. Ne modifie jamais le document.
+  app.post('/api/projects/:projectId/pro/control/suggest', aiGenerationLimiter, async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { data: project } = await tenantScopedFrom(supabaseAdmin, tenantId, 'projects')
+        .select('id, name').eq('id', req.params.projectId).maybeSingle();
+      if (!project) return res.status(404).json({ error: 'Affaire introuvable.' });
+      const articles = normaliserArticles(req.body?.articles);
+      if (!articles.length) return res.status(400).json({ error: 'Aucun article à corriger.' });
+      const task = `Affaire : ${(project as any).name}.\n\n${construireTacheCorrections(articles)}`;
+      const out = await callModel(tenantId, req.user.id, '', '', task, CORRECTIONS_SYSTEM_PROMPT);
+      if ('error' in out) return res.status(out.status).json({ error: out.error, code: out.code });
+      res.json({ corrections: normaliserCorrections(parseJsonObject(out.text), articles) });
+    } catch (e: any) {
+      handleError(e, res, 'POST /api/projects/:projectId/pro/control/suggest');
     }
   });
 }
