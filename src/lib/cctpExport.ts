@@ -27,6 +27,8 @@ export interface CctpBloc {
   localisation?: string;
   /** Illustrations de l'article, imprimées sous son texte. */
   images?: ImageArticle[];
+  /** Noms des fiches techniques du poste, rappelés sous son titre. */
+  fiches?: string[];
   /** Bâtiments concernés (opération complète seulement). */
   batiments?: string[];
 }
@@ -98,6 +100,7 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
       niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription, n),
       localisation: texte(l.localisation, n) || undefined,
       images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
+      fiches: (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean).length ? (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean) : undefined,
       batiments: mention && !enfants && libelles(ids).length ? libelles(ids) : undefined,
     });
     if (enfants) articles(l.children!, niveau + 1, noeud, l.batimentId ?? herite);
@@ -253,6 +256,7 @@ export async function exportCctpPdf(doc: DPGF, opts: CctpExportOptions): Promise
     else { place(18); ecrire(`${b.numero}  ${b.titre}`, 10, 'bold', GRIS_TEXTE, retrait, 1); }
     if (b.batiments) ecrire(`Bâtiments concernés : ${b.batiments.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.localisation) ecrire(`Localisation : ${b.localisation}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
+    if (b.fiches) ecrire(`Fiches techniques : ${b.fiches.join(', ')}`, 8.5, 'italic', GRIS_DOUX, retrait, 1);
     if (b.texte) ecrireRiche(b.texte, 9.5, GRIS_TEXTE, retrait, 2.5);
     for (const illustration of b.images ?? []) {
       const img = images.get(illustration.fileUrl);
@@ -335,6 +339,7 @@ export async function exportCctpDocx(doc: DPGF, opts: CctpExportOptions): Promis
     }));
     if (b.batiments) mention(`Bâtiments concernés : ${b.batiments.join(', ')}`);
     if (b.localisation) mention(`Localisation : ${b.localisation}`);
+    if (b.fiches) mention(`Fiches techniques : ${b.fiches.join(', ')}`);
     for (const segments of paragraphesRiches(b.texte)) {
       const brut = segments.map(x => x.text).join('');
       if (!brut.trim()) continue;

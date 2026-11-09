@@ -23,6 +23,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
 import { remonterPrixOffre } from '../articlePrices';
 import { appliquerOperation, DpgfLignesError, type Operation } from '../dpgfLignes';
+import { appliquerOperationCctp, type OperationCctp } from '../cctpTextes';
 import { PAR_AGENT } from '../../src/lib/marqueurRedaction';
 import { LABEL_INSTANTANE_AUTO, estInstantaneAuto, instantaneTropRecent, instantanesAElaguer, MAX_INSTANTANES_AUTO } from '../../src/lib/instantanes';
 import { estamperModifications } from '../../src/lib/modifications';
@@ -184,6 +185,43 @@ export function registerDpgfRoutes(app: Express, { supabaseAdmin, getTenantId, g
       if (e instanceof DpgfLignesError) return res.status(e.status).json({ error: e.message });
       console.error('[POST /api/projects/:projectId/dpgf/lignes]', e);
       res.status(500).json({ error: "Échec de l'écriture dans le DPGF." });
+    }
+  });
+
+  // Écriture ciblée des TEXTES du CCTP (outil manage_cctp, agents et MCP) : texte d'un lot, d'un
+  // chapitre ou d'un article, ou ajout d'articles réservés au CCTP. Appliquée par
+  // server/cctpTextes.ts sous le même verrou et la même relecture que .../dpgf/lignes.
+  app.post('/api/projects/:projectId/cctp/textes', async (req: any, res: any) => {
+    try {
+      const tenantId = await getTenantId(req.user.id);
+      const { projectId } = req.params;
+      const { dry_run: aBlanc, par: _ignore, ...corps } = req.body ?? {};
+      const operation = { ...corps, par: PAR_AGENT };
+      const rapport = await sousVerrou(`${tenantId}:${projectId}`, async () => {
+        for (let essai = 0; essai < 3; essai++) {
+          const row = await loadRow(supabaseAdmin, tenantId, projectId);
+          if (!row) throw new DpgfLignesError("Ce projet n'a pas de DPGF/CCTP.", 404);
+          const lu = brut(row);
+          const avant = typeof row.data === 'string' ? JSON.parse(row.data) : row.data;
+          const { doc, rapport } = appliquerOperationCctp(avant, operation as OperationCctp);
+          if (aBlanc === true) return { ...rapport, dry_run: true };
+          const frais = await loadRow(supabaseAdmin, tenantId, projectId);
+          if (!frais || brut(frais) !== lu) continue;
+          const estampille = estamperModifications(avant, doc as any, PAR_AGENT, new Date().toISOString());
+          const { error } = await supabaseAdmin.from('dpgfs')
+            .update({ data: JSON.stringify(estampille) }).eq('id', row.id).eq('tenant_id', tenantId);
+          if (error) throw error;
+          const userName = await getUserName(tenantId, req.user.id, req.user.email);
+          logActivity(tenantId, req.user.id, userName, `CCTP : ${operation?.action} (outil agent)`, '', row.id, 'dpgf', 'Situations/DPGF');
+          return rapport;
+        }
+        throw new DpgfLignesError("Le CCTP a été modifié pendant l'opération : relance la demande.", 409);
+      });
+      res.json({ success: true, ...rapport });
+    } catch (e: any) {
+      if (e instanceof DpgfLignesError) return res.status(e.status).json({ error: e.message });
+      console.error('[POST /api/projects/:projectId/cctp/textes]', e);
+      res.status(500).json({ error: "Échec de l'écriture dans le CCTP." });
     }
   });
 

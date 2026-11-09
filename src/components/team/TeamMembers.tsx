@@ -17,9 +17,28 @@ function YouBadge() {
   return <span className="tblr-badge shrink-0" style={{ background: 'var(--tblr-primary-lt)', color: 'var(--tblr-primary)' }}>{t('team_you')}</span>;
 }
 
+function MemberActions({ member, currentUserId, onRevoke, onResetPassword }: {
+  member: UserProfile; currentUserId?: string; onRevoke: (id: string) => void; onResetPassword: (id: string) => void;
+}) {
+  const { t } = useTranslation();
+  const btn = cn('whitespace-nowrap text-[0.8125rem] font-medium hover:underline', FOCUS_RING);
+  return (
+    <div className="mt-1 flex flex-wrap justify-end gap-x-3 gap-y-1">
+      <button type="button" onClick={() => onResetPassword(member.id)} className={cn(btn, 'text-[var(--tblr-text)]')}>
+        {t('team_reset_password', 'Réinitialiser le mot de passe')}
+      </button>
+      {member.id !== currentUserId && (
+        <button type="button" onClick={() => onRevoke(member.id)} className={cn(btn, 'text-[var(--tblr-danger,#b91c1c)]')}>
+          {t('team_revoke', 'Révoquer l\'accès')}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Table({ members, ...rest }: MemberViewProps) {
   const { t } = useTranslation();
-  const { team, isAdmin, highlightId, currentUserId, memberRefs, onRoleChange, onManagerChange } = rest;
+  const { team, isAdmin, highlightId, currentUserId, memberRefs, onRoleChange, onManagerChange, onRevoke, onResetPassword } = rest;
   const th = cn(MONO_LABEL, 'bg-[var(--tblr-surface-2)] px-4 py-2.5 text-left');
 
   return (
@@ -31,7 +50,7 @@ function Table({ members, ...rest }: MemberViewProps) {
             <th scope="col" className={th}>{t('team_col_function')}</th>
             <th scope="col" className={cn(th, 'w-52')}>{t('team_col_access')}</th>
             <th scope="col" className={cn(th, 'w-56')}>{t('team_col_manager')}</th>
-            <th scope="col" className="w-36 bg-[var(--tblr-surface-2)] px-4"><span className="sr-only">{t('team_view_profile')}</span></th>
+            <th scope="col" className="w-64 bg-[var(--tblr-surface-2)] px-4"><span className="sr-only">{t('team_view_profile')}</span></th>
           </tr>
         </thead>
         <tbody>
@@ -76,6 +95,7 @@ function Table({ members, ...rest }: MemberViewProps) {
                   >
                     {t('team_view_profile')}
                   </Link>
+                  {isAdmin && <MemberActions member={member} currentUserId={currentUserId} onRevoke={onRevoke} onResetPassword={onResetPassword} />}
                 </td>
               </tr>
             );
@@ -87,7 +107,7 @@ function Table({ members, ...rest }: MemberViewProps) {
 }
 
 /** Une ligne de synthèse qui se déplie sur les réglages : une seule carte pour toute l'équipe. */
-function Row({ member, team, isAdmin, highlightId, currentUserId, memberRefs, onRoleChange, onManagerChange }: RowProps) {
+function Row({ member, team, isAdmin, highlightId, currentUserId, memberRefs, onRoleChange, onManagerChange, onRevoke, onResetPassword }: RowProps) {
   const { t } = useTranslation();
   const highlighted = member.id === highlightId;
   const [open, setOpen] = useState(highlighted);
@@ -142,6 +162,7 @@ function Row({ member, team, isAdmin, highlightId, currentUserId, memberRefs, on
               <Link to={`/profile/${member.id}`} className={cn('font-medium text-[var(--tblr-primary)] hover:underline', FOCUS_RING)}>
                 {t('team_view_profile')}
               </Link>
+              {isAdmin && <MemberActions member={member} currentUserId={currentUserId} onRevoke={onRevoke} onResetPassword={onResetPassword} />}
             </div>
           </motion.div>
         )}

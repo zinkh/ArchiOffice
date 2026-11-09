@@ -12,6 +12,7 @@ vi.mock('../src/components/pro/CctpExportLibraryDialog', () => ({ CctpExportLibr
 vi.mock('../src/components/pro/CctpDraftPosteDialog', () => ({ CctpDraftPosteDialog: () => null }));
 vi.mock('../src/components/pro/CctpBulkEditDialog', () => ({ CctpBulkEditDialog: () => null }));
 vi.mock('../src/components/SignedImage', () => ({ SignedImage: () => null }));
+vi.mock('../src/components/pro/FichesTechniquesEditor', () => ({ FichesTechniquesEditor: () => null }));
 vi.mock('../src/lib/cctpImagesUpload', () => ({ envoyerIllustration: async () => { throw new Error('non utilisé'); } }));
 vi.mock('../src/components/pro/DecoupagePanel', () => ({ DecoupagePanel: () => null, SelecteursDecoupage: () => null }));
 

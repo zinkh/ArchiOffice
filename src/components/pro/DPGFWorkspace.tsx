@@ -10,7 +10,7 @@ import {
   IconArrowBarToLeft, IconArrowBarToRight, IconDots, IconLayoutSidebarLeftCollapse,
   IconSubtask, IconTag, IconFileText, IconListDetails, IconPercentage, IconLink,
 } from '@tabler/icons-react';
-import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf } from '../../types/dpgf';
+import { DPGF, Lot, Chapitre, Ligne, NATURES_HORS_BASE, type GroupementDpgf, type FicheTechnique } from '../../types/dpgf';
 import { useSettings } from '../../hooks/useSettings';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { formatCurrency } from '../../lib/utils';
@@ -693,6 +693,20 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
     });
     marquerUtilise(clause.id);
   };
+  const enregistrerFiches = (key: string, fiches: FicheTechnique[]) => {
+    const k = parseRowKey(key);
+    if (k?.kind !== 'ligne') return;
+    mutateLots(lots => {
+      const lot = { ...lots[k.lotIdx] };
+      const chap = { ...lot.chapitres[k.chapIdx] };
+      chap.lignes = mutateLigneAtPath([...chap.lignes], k.lignePath, l => ({ ...l, fichesTechniques: fiches.length ? fiches : undefined }));
+      lot.chapitres = [...lot.chapitres.slice(0, k.chapIdx), chap, ...lot.chapitres.slice(k.chapIdx + 1)];
+      const next = [...lots];
+      next[k.lotIdx] = lot;
+      return next;
+    });
+  };
+
   const enregistrerDescription = (key: string, texte: string, designation?: string) => {
     const k = parseRowKey(key);
     if (k?.kind !== 'ligne') return;
@@ -1044,6 +1058,9 @@ export const DPGFWorkspace: React.FC<DPGFWorkspaceProps> = ({
           designation={descriptionCible.ligne.designation}
           valeur={descriptionCible.ligne.cctpDescription ?? ''}
           onSave={(texte, designation) => enregistrerDescription(descriptionCible.key, texte, designation)}
+          projectId={dpgf.projectId}
+          fiches={descriptionCible.ligne.fichesTechniques ?? []}
+          onFichesChange={fiches => enregistrerFiches(descriptionCible.key, fiches)}
           onOpenCctp={onOpenCctp ? () => {
             const k = parseRowKey(descriptionCible.key);
             if (k?.kind === 'ligne') { onOpenCctp({ kind: 'ligne', lotIdx: k.lotIdx, chapIdx: k.chapIdx, lignePath: k.lignePath }); setDescriptionKey(null); }

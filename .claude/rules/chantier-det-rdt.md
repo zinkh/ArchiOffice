@@ -295,3 +295,17 @@ multipart à `POST /api/reports/:reportId/diffuse` (`server/routes/siteReportDif
   suivi des destinataires n'est stocké (pas de migration) : la trace est le journal d'activité.
 - Hors ligne ou saisie en attente de synchronisation : la diffusion est refusée, le message
   partirait sans elle.
+
+### RDT : récapitulatif par lot, date de paiement, entreprise issue de l'ACT
+
+- **Récapitulatif des situations par lot** (`RecapSituationsLot.tsx`, calcul pur `src/lib/recapSituations.ts`,
+  `src/lib/__tests__/recapAttribution.test.ts`) : un tableau par marché avec, pour chaque situation, sa date, son cumul
+  admis, la période, le net à payer TTC du certificat, l'état, la **date de paiement**, le **reste à payer** (le net tant
+  qu'elle n'est pas payée, 0 ensuite) et la **retenue de garantie** du certificat ; total par lot (payé, reste à payer,
+  retenue cumulée). Les montants sont ceux de `calculerCertificat`, jamais recalculés.
+- **`situations.date_paiement`** (`supabase/migrate_situations_date_paiement.sql`, appliquée) : posée avec l'état `Payée`
+  (champ « Payée le » de `SituationDialog`, aujourd'hui par défaut côté serveur) et effacée par tout autre état.
+- **Entreprise d'un marché = attribution de l'ACT** (`src/lib/attributionMarche.ts`) : `act_data.consultation`
+  (`attributions` + `entreprises`) désigne l'entreprise et le montant de chaque lot. « Reprendre les lots », la fenêtre de
+  marché et l'affichage des marchés non signés la lisent avant `contact_name` du lot. Un marché signé garde l'entreprise de
+  l'acte ; accords-cadres et subséquents (titulaires propres) ne sont pas concernés.

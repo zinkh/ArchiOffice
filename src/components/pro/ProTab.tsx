@@ -35,6 +35,7 @@ import { ProToolbar } from './toolbar/ProToolbar';
 import { ProSearch } from './toolbar/ProSearch';
 import { trouvaillePourPosition, trouvaillePourId, type CibleRecherche, type Trouvaille } from '../../lib/proRecherche';
 import { ProControlPanel } from './ProControlPanel';
+import { appliquerCorrections } from '../../lib/proCorrections';
 import { ProToolbarContext, type ToolbarMenuEntry, type ToolbarRegistration, type ToolbarRegistry } from './toolbar/toolbarState';
 import type { ProNotify } from './DPGFWorkspace';
 import { useAutosavedDoc, loadProDoc } from '../../hooks/useAutosavedDoc';
@@ -874,6 +875,8 @@ export const ProTab: React.FC<ProTabProps> = ({ projectId, projectName, projectI
       {controleOuvert && dpgf && (
         <ProControlPanel
           dpgf={dpgf}
+          projectId={projectId}
+          onApplyCorrections={corrections => editDpgf(appliquerCorrections(dpgf, corrections))}
           activeId={cibleRecherche?.id ?? null}
           onGoTo={allerALAnomalie}
           onClose={() => setControleOuvert(false)}

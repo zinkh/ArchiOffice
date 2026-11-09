@@ -7,6 +7,7 @@ import { LigneDescriptionDialog } from '../src/components/pro/LigneDescriptionDi
 
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('motion/react', () => ({ AnimatePresence: ({ children }: any) => children }));
+vi.mock('../src/components/pro/FichesTechniquesEditor', () => ({ FichesTechniquesEditor: () => null }));
 vi.mock('../src/components/ui/ModalShell', () => ({
   ModalShell: ({ children, footer }: any) => React.createElement('div', { role: 'dialog' }, children, footer),
 }));

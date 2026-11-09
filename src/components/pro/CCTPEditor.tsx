@@ -34,6 +34,7 @@ import { numeroDeChapitre } from '../../lib/chapitresParDefaut';
 import { chargerEtatArbre, ouvertsSauf, repliesParmi, sauverEtatArbre } from '../../lib/cctpTreeState';
 import { appliquerCouleur, basculerBalise, contientMiseEnForme, type BaliseRiche, type EditionTexte } from '../../lib/cctpRichText';
 import { CctpRichPreview, CctpRichToolbar } from './CctpRichText';
+import { FichesTechniquesEditor } from './FichesTechniquesEditor';
 import { CctpExportLibraryDialog, type ResultatExport } from './CctpExportLibraryDialog';
 import { elementsAExporter } from './cctpExportOps';
 import { CctpDraftPosteDialog, type PosteARediger } from './CctpDraftPosteDialog';
@@ -465,6 +466,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     return {
       ...base, kind: 'article', titre: ligne.designation, numero: ligne.numero, chapitreTitre: chap.titre,
       unite: ligne.unite, localisation: ligne.localisation ?? '', voisins: freres.map(l => l.designation),
+      fiches: (ligne.fichesTechniques ?? []).map(f => ({ documentId: f.documentId, nom: f.nom })),
     };
   };
   // Un seul enregistrement : deux mutateDPGF successifs partent chacun du même
@@ -1167,7 +1169,8 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                 <ChampMarqueur marqueur={selData?.marqueur} onChange={poserMarqueur} />
 
                 {/* Quantité, unité et prix modifiables ici comme dans le DPGF ; le métré détaille la quantité. */}
-                {selection.kind === 'ligne' && (() => {
+                {/* Un poste réservé au CCTP (ou sous un chapitre réservé au CCTP) n'a ni unité, ni quantité, ni prix. */}
+                {selection.kind === 'ligne' && !isSelCctpOnly && !dpgf.lots[selection.lotIdx]?.chapitres[selection.chapIdx]?.cctpOnly && (() => {
                   const l = ligneSelectionnee();
                   if (!l) return null;
                   return (
@@ -1348,6 +1351,15 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
                     Les fichiers sont aussi rangés dans les documents de l'affaire (catégorie « CCTP - illustrations »).
                   </p>
                 </div>
+              )}
+
+              {/* Fiches techniques du poste (documents de l'affaire) */}
+              {selection.kind === 'ligne' && selData.ligne && (
+                <FichesTechniquesEditor
+                  projectId={dpgf.projectId}
+                  fiches={selData.ligne.fichesTechniques ?? []}
+                  onChange={fiches => mutateImages(l => { l.fichesTechniques = fiches.length ? fiches : undefined; })}
+                />
               )}
             </div>
           )}

@@ -610,3 +610,24 @@ priorités des tâches).
   un appel non traité ; une date absente ou illisible n'en est jamais un.
 - **Agents et MCP** : ressource `phone_calls` dans `AGENT_RESOURCES` (par défaut pour l'agent
   « secrétaire »), `called_at` posé par le serveur quand l'agent ne le fournit pas.
+
+### Gestion des membres : révocation et réinitialisation du mot de passe
+
+`POST /api/team/:id/revoke` (`server/routes/team.ts`, administrateurs, `tests/teamRevokeReset.test.ts`) **détache** le
+membre du cabinet (`removeMembership` : rôle, supérieur et accès tombent avec l'adhésion) et, **seulement s'il n'exerce
+nulle part ailleurs**, bloque son compte Supabase Auth (`ban_duration` de 100 ans : plus de connexion ni de
+renouvellement de session). Son profil et tout ce qu'il a produit sont conservés ; ceux dont il était le supérieur n'en ont
+plus. Refus : sa propre révocation (400), un membre d'un autre cabinet (404), le dernier administrateur (409
+`LAST_ADMIN`). **Rétablir** = le réinviter avec la même adresse (`POST /api/team`), qui lève le blocage avant de
+rattacher le compte existant (un échec de déblocage n'empêche pas le rattachement).
+
+`POST /api/team/:id/reset-password` envoie à un membre du cabinet un lien de récupération à usage unique
+(`generateLink({ type: 'recovery' })`, `/reset-password`) par `sendPlatformMail` : aucun mot de passe n'est choisi ni
+transmis, et le lien n'est **jamais renvoyé** à l'administrateur (`emailSent` / `emailError` seulement). Écran : actions
+« Réinitialiser le mot de passe » et « Révoquer l'accès » dans la liste de `/team` (`TeamMembers.tsx`, administrateurs).
+
+**Erreur « Database error saving new user »** : GoTrue insère dans `auth.users` avec `supabase_auth_admin`, dont le
+`search_path` n'a pas `public`. `handle_new_user()` écrivait `INSERT INTO profiles` sans schéma et faisait échouer la
+création du compte. `supabase/migrate_fix_handle_new_user_search_path.sql` qualifie `public.profiles`, fixe
+`SET search_path = public, pg_temp` et ne laisse plus une anomalie de profil bloquer la création (la route fait de toute
+façon un upsert du profil). **Toute fonction de trigger sur `auth.users` doit qualifier ses tables.**

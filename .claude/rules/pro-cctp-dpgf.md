@@ -511,3 +511,28 @@ entier** — route (`server/routes/specifications.ts`), entrée
 l'architecte, malgré les quelques lignes qu'elle portait encore : à la
 différence de `cctps` ci-dessus, la perte a été assumée plutôt que
 préservée par précaution.
+
+### Fiches techniques des postes, contrôle de cohérence, IA
+
+- **Fiches techniques** (`Ligne.fichesTechniques`, `FicheTechnique { id, documentId?, fileUrl, nom }`, jsonb du DPGF, aucune
+  migration) : un poste porte jusqu'à 20 fiches (fiche produit, avis technique, PV d'essai). Une fiche est un DOCUMENT de
+  l'affaire (catégorie « Fiches techniques », `POST /api/documents`) ou un document déjà présent, rattaché par sa
+  référence ; retirer une fiche ne supprime JAMAIS le document. `FichesTechniquesEditor.tsx` (fiche d'un article du CCTP et
+  fenêtre de description du DPGF), `src/lib/fichesTechniques.ts` (pur sauf l'envoi). L'export du CCTP rappelle « Fiches
+  techniques : … » sous l'article (noms seulement, `cctpExport.ts` n'importe volontairement pas `fichesTechniques.ts`, qui
+  tire le client Supabase). Absentes de la vue d'un confrère (liste blanche de `documentView.ts`).
+- **L'IA se sert des fiches** : `POST /api/projects/:id/cctp/draft-poste` accepte `fiche_document_ids` (5 au plus, articles
+  seulement). Seuls les documents de CETTE affaire sont lus (`extractKnowledgeDocText`), 8 000 caractères par fiche et
+  20 000 au total, injectés comme source prioritaire (« ne reprends que ce qui y figure »). La réponse porte
+  `fiches_ignorees` (illisibles). Case « Utiliser les fiches techniques du poste » cochée par défaut dans
+  `CctpDraftPosteDialog`.
+- **Poste réservé au CCTP** (`cctpOnly`, ou sous un chapitre `cctpOnly`) : aucune unité, quantité ni prix dans la fiche du
+  CCTP (`CctpQuantiteUnite` n'est pas rendu), et le contrôle de cohérence ne les exige pas. Les valeurs déjà saisies ne sont
+  jamais effacées.
+- **Contrôle de cohérence** (`validateProDocument`, `ProControlPanel`) : « bâtiment non affecté » suit la même règle que
+  `articlesSansBatiment` (liste `quantitesBatiments`, `batimentId` hérité de l'article parent, du chapitre puis du lot,
+  `batimentsIds` d'un lot ou chapitre, `''` = aucun sans héritage) ; seuls les articles feuilles chiffrables sont
+  contrôlés. Le rapport se replie **lot par lot** (« Tout replier / Tout déplier »). **Corrections IA** :
+  `POST /api/projects/:id/pro/control/suggest` (`server/proControlSuggest.ts`, testé via `tests/cctpTextes.test.ts` voisin)
+  propose seulement `unite`, `designation` et `cctpDescription`, jamais prix, quantité, bâtiment ni phase ; l'écran montre
+  avant/après et l'architecte applique ou écarte (`src/lib/proCorrections.ts`). Facturé comme `cctp_generation`.

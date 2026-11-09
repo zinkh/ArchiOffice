@@ -1,12 +1,19 @@
 import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { IconX, IconAlertTriangle, IconCircleX, IconChevronRight } from '@tabler/icons-react';
+import { IconX, IconAlertTriangle, IconCircleX, IconChevronRight, IconChevronDown, IconSparkles, IconLoader2 } from '@tabler/icons-react';
 import { validateProDocument, type ProIssue } from '../../lib/proValidation';
 import { trouvaillePourId } from '../../lib/proRecherche';
 import type { DPGF } from '../../types/dpgf';
+import { apiFetch } from '../../lib/api';
+import {
+  articlesASignaler, valeurActuelle, LIBELLE_CHAMP, MAX_ARTICLES_PAR_APPEL, type CorrectionIA,
+} from '../../lib/proCorrections';
 
 interface ProControlPanelProps {
   dpgf: DPGF;
+  projectId?: string;
+  /** Applique des corrections de texte proposées par l'IA (unité, désignation, description). */
+  onApplyCorrections?: (corrections: CorrectionIA[]) => void;
   onClose: () => void;
   /** Ouvre l'article dans l'atelier (le plus proche : CCTP, DPGF ou estimation affiché, sinon CCTP). */
   onGoTo: (articleId: string) => void;
@@ -25,9 +32,13 @@ const finDeMessage = (m: string) => (m.includes(' : ') ? m.split(' : ').slice(1)
  * article, recalculées à chaque modification du document (une anomalie corrigée
  * disparaît). Non bloquant : l'atelier reste utilisable à côté.
  */
-export const ProControlPanel: React.FC<ProControlPanelProps> = ({ dpgf, onClose, onGoTo, activeId }) => {
+export const ProControlPanel: React.FC<ProControlPanelProps> = ({ dpgf, projectId, onApplyCorrections, onClose, onGoTo, activeId }) => {
   const { t } = useTranslation();
   const [erreursSeulement, setErreursSeulement] = useState(false);
+  const [replies, setReplies] = useState<Set<string>>(new Set());
+  const [propositions, setPropositions] = useState<CorrectionIA[]>([]);
+  const [iaEnCours, setIaEnCours] = useState(false);
+  const [iaErreur, setIaErreur] = useState<string | null>(null);
 
   const issues = useMemo(() => validateProDocument(dpgf), [dpgf]);
   const erreurs = issues.filter(i => i.severity === 'error').length;
@@ -60,6 +71,48 @@ export const ProControlPanel: React.FC<ProControlPanelProps> = ({ dpgf, onClose,
     const lots = [...parLot.values()].sort((a, b) => (lotsOrdre.get(a.cle) ?? 0) - (lotsOrdre.get(b.cle) ?? 0));
     return document.articles.length ? [...lots, document] : lots;
   }, [issues, erreursSeulement, dpgf, t]);
+
+  const basculerLot = (cle: string) => setReplies(prev => {
+    const next = new Set(prev);
+    if (!next.delete(cle)) next.add(cle);
+    return next;
+  });
+  const toutReplier = groupes.length > 0 && groupes.some(g => !replies.has(g.cle));
+
+  const articlesCorrigeables = useMemo(() => articlesASignaler(dpgf, issues), [dpgf, issues]);
+  // Une proposition dont le champ vaut déjà la valeur proposée n'a plus lieu d'être.
+  const propositionsValides = useMemo(
+    () => propositions.filter(p => valeurActuelle(dpgf, p.articleId, p.champ) !== p.valeur),
+    [propositions, dpgf],
+  );
+
+  const proposerCorrections = async () => {
+    if (!projectId || !articlesCorrigeables.length) return;
+    setIaEnCours(true);
+    setIaErreur(null);
+    try {
+      const obtenues: CorrectionIA[] = [];
+      for (let i = 0; i < articlesCorrigeables.length; i += MAX_ARTICLES_PAR_APPEL) {
+        const lot = articlesCorrigeables.slice(i, i + MAX_ARTICLES_PAR_APPEL);
+        const r = await apiFetch<{ corrections: CorrectionIA[] }>(`/api/projects/${projectId}/pro/control/suggest`, {
+          method: 'POST', body: JSON.stringify({ articles: lot }),
+        });
+        obtenues.push(...(r.corrections ?? []));
+      }
+      setPropositions(obtenues);
+      if (!obtenues.length) setIaErreur(t('pro_control_ai_none', { defaultValue: "L'IA n'a rien de fiable à proposer pour ces anomalies." }));
+    } catch (e: any) {
+      setIaErreur(e?.message || t('pro_control_ai_failed', { defaultValue: 'La proposition de corrections a échoué.' }));
+    } finally {
+      setIaEnCours(false);
+    }
+  };
+
+  const appliquer = (liste: CorrectionIA[]) => {
+    if (!liste.length || !onApplyCorrections) return;
+    onApplyCorrections(liste);
+    setPropositions(prev => prev.filter(p => !liste.includes(p)));
+  };
 
   return (
     <aside
@@ -95,7 +148,52 @@ export const ProControlPanel: React.FC<ProControlPanelProps> = ({ dpgf, onClose,
             </button>
           ))}
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setReplies(toutReplier ? new Set(groupes.map(g => g.cle)) : new Set())}
+            disabled={groupes.length === 0}
+            className="px-2.5 py-1 rounded-md border hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50" style={{ borderColor: 'var(--tblr-border)' }}>
+            {toutReplier ? t('pro_control_collapse_all', { defaultValue: 'Tout replier' }) : t('pro_control_expand_all', { defaultValue: 'Tout déplier' })}
+          </button>
+          {projectId && onApplyCorrections && (
+            <button type="button" onClick={proposerCorrections} disabled={iaEnCours || articlesCorrigeables.length === 0}
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50" style={{ borderColor: 'var(--tblr-border)' }}>
+              {iaEnCours ? <IconLoader2 size={14} className="animate-spin" aria-hidden /> : <IconSparkles size={14} aria-hidden />}
+              {t('pro_control_ai_button', { defaultValue: 'Proposer des corrections (IA)' })}
+            </button>
+          )}
+        </div>
+        {iaErreur && <p role="alert" className="text-red-600">{iaErreur}</p>}
       </div>
+
+      {propositionsValides.length > 0 && (
+        <section aria-label={t('pro_control_ai_title', { defaultValue: 'Corrections proposées' })} className="border-b max-h-[40%] overflow-y-auto" style={{ borderColor: 'var(--tblr-border)' }}>
+          <div className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-1.5 text-xs font-semibold bg-zinc-100 dark:bg-zinc-800">
+            <span>{t('pro_control_ai_title', { defaultValue: 'Corrections proposées' })} ({propositionsValides.length})</span>
+            <span className="flex gap-3 font-normal">
+              <button type="button" className="underline" onClick={() => appliquer(propositionsValides)}>{t('pro_control_ai_apply_all', { defaultValue: 'Tout appliquer' })}</button>
+              <button type="button" className="underline" onClick={() => setPropositions([])}>{t('pro_control_ai_dismiss_all', { defaultValue: 'Tout écarter' })}</button>
+            </span>
+          </div>
+          <ul className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
+            {propositionsValides.map(p => {
+              const avant = valeurActuelle(dpgf, p.articleId, p.champ);
+              return (
+                <li key={`${p.articleId}|${p.champ}`} className="px-4 py-2 text-xs space-y-1">
+                  <p className="font-medium">{LIBELLE_CHAMP[p.champ]}</p>
+                  {avant && <p className="text-zinc-500 line-through whitespace-pre-wrap break-words">{avant.slice(0, 200)}</p>}
+                  <p className="whitespace-pre-wrap break-words">{p.valeur}</p>
+                  {p.explication && <p className="text-zinc-500">{p.explication}</p>}
+                  <div className="flex gap-3">
+                    <button type="button" className="underline" onClick={() => appliquer([p])}>{t('pro_control_ai_apply', { defaultValue: 'Appliquer' })}</button>
+                    <button type="button" className="underline" onClick={() => setPropositions(prev => prev.filter(x => x !== p))}>{t('pro_control_ai_dismiss', { defaultValue: 'Écarter' })}</button>
+                    <button type="button" className="underline" onClick={() => onGoTo(p.articleId)}>{t('pro_control_ai_open', { defaultValue: 'Ouvrir' })}</button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <div className="flex-1 overflow-y-auto">
         {groupes.length === 0 && (
@@ -103,14 +201,20 @@ export const ProControlPanel: React.FC<ProControlPanelProps> = ({ dpgf, onClose,
         )}
         {groupes.map(lot => (
           <section key={lot.cle} aria-label={lot.titre}>
-            <h4 className="sticky top-0 z-10 flex items-center justify-between gap-2 px-4 py-1.5 text-xs font-semibold uppercase tracking-wide border-b bg-zinc-100 dark:bg-zinc-800" style={{ borderColor: 'var(--tblr-border)' }}>
-              <span className="truncate">{lot.titre}</span>
-              <span className="shrink-0 font-normal normal-case flex gap-2">
-                {lot.erreurs > 0 && <span className="text-red-600">{lot.erreurs}</span>}
-                {lot.avertissements > 0 && <span className="text-amber-600">{lot.avertissements}</span>}
-              </span>
+            <h4 className="sticky top-0 z-10 text-xs font-semibold uppercase tracking-wide border-b bg-zinc-100 dark:bg-zinc-800" style={{ borderColor: 'var(--tblr-border)' }}>
+              <button type="button" onClick={() => basculerLot(lot.cle)} aria-expanded={!replies.has(lot.cle)}
+                className="w-full flex items-center justify-between gap-2 px-4 py-1.5 text-left uppercase">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {replies.has(lot.cle) ? <IconChevronRight size={14} aria-hidden /> : <IconChevronDown size={14} aria-hidden />}
+                  <span className="truncate">{lot.titre}</span>
+                </span>
+                <span className="shrink-0 font-normal normal-case flex gap-2">
+                  {lot.erreurs > 0 && <span className="text-red-600">{lot.erreurs}</span>}
+                  {lot.avertissements > 0 && <span className="text-amber-600">{lot.avertissements}</span>}
+                </span>
+              </button>
             </h4>
-            <ul className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
+            {!replies.has(lot.cle) && <ul className="divide-y" style={{ borderColor: 'var(--tblr-border)' }}>
               {lot.articles.map(article => {
                 const navigable = !article.id.startsWith('__');
                 const contenu = (
@@ -150,7 +254,7 @@ export const ProControlPanel: React.FC<ProControlPanelProps> = ({ dpgf, onClose,
                   </li>
                 );
               })}
-            </ul>
+            </ul>}
           </section>
         ))}
       </div>

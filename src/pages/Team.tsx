@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import { apiFetch } from '../lib/api';
 import { cn } from '../lib/utils';
 import { useTranslation } from 'react-i18next';
-import { getAllUsers, updateUserRole, updateUserManager, createUser, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
+import { getAllUsers, updateUserRole, updateUserManager, createUser, revokeUser, resetUserPassword, UserProfile, getJoinRequests, decideJoinRequest, JoinRequest } from '../services/userService';
 import { JOIN_REQUESTS_CHANGED } from '../components/Sidebar';
 import { useUser } from '../UserContext';
 import TeamHeader from '../components/team/TeamHeader';
@@ -181,6 +181,33 @@ export default function Team() {
     }
   };
 
+  const handleRevoke = async (id: string) => {
+    const target = team.find((m) => m.id === id);
+    if (!target) return;
+    if (!window.confirm(t('team_confirm_revoke', { name: target.name, defaultValue: 'Révoquer l\'accès de {{name}} ? Cette personne ne pourra plus se connecter au cabinet. Ses données sont conservées et vous pourrez la réinviter plus tard.' }))) return;
+    try {
+      await revokeUser(id);
+      setTeam((prev) => prev.filter((m) => m.id !== id));
+      setNotice({ kind: 'success', text: t('team_revoked', { name: target.name, defaultValue: 'Accès de {{name}} révoqué.' }) });
+    } catch (err: any) {
+      setNotice({ kind: 'error', text: err.message || t('team_revoke_failed', 'La révocation a échoué.') });
+    }
+  };
+
+  const handleResetPassword = async (id: string) => {
+    const target = team.find((m) => m.id === id);
+    if (!target) return;
+    if (!window.confirm(t('team_confirm_reset_password', { name: target.name, defaultValue: 'Envoyer à {{name}} un lien pour choisir un nouveau mot de passe ?' }))) return;
+    try {
+      const result = await resetUserPassword(id);
+      setNotice(result.emailSent
+        ? { kind: 'success', text: t('team_reset_password_sent', { name: target.name, defaultValue: 'Lien de réinitialisation envoyé à {{name}}.' }) }
+        : { kind: 'error', text: t('team_reset_password_not_sent', { error: result.emailError || '', defaultValue: 'Le lien n\'a pas pu être envoyé : {{error}}' }) });
+    } catch (err: any) {
+      setNotice({ kind: 'error', text: err.message || t('team_reset_password_failed', 'La réinitialisation a échoué.') });
+    }
+  };
+
   const closeNotice = useCallback(() => setNotice(null), []);
   const closeModal = useCallback(() => setIsModalOpen(false), []);
   const resetFilters = () => { setQuery(''); setRoleFilter('all'); };
@@ -194,6 +221,8 @@ export default function Team() {
     memberRefs,
     onRoleChange: handleRoleChange,
     onManagerChange: handleManagerChange,
+    onRevoke: handleRevoke,
+    onResetPassword: handleResetPassword,
   };
 
   let body: React.ReactNode;
