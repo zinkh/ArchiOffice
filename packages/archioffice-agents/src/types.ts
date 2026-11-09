@@ -271,7 +271,7 @@ export const AGENT_RESOURCES: AgentResourceDef[] = [
     knownFields: ['title', 'project_id', 'reception_id', 'batiment', 'local', 'status', 'lots', 'entreprises', 'due_date', 'description'],
     required: ['title', 'project_id'],
     defaults: { status: 'A faire' },
-    fields: 'title*, project_id*, reception_id, batiment, local, status (A faire/En cours/Levée/Refusée par l\'entreprise/Quitus Transmis/Levée refusée par le MOE), lots, entreprises, due_date, description. Réserves de la garantie de parfait achèvement, distinctes des réserves de réception (resource "reserves").' },
+    fields: 'title*, project_id*, reception_id, batiment, local, status (A faire/En cours/Levée/Refusée par l\'entreprise/Quitus Transmis/Levée refusée par le MOE/Pour mémoire), lots, entreprises, due_date, description. Réserves de la garantie de parfait achèvement, distinctes des réserves de réception (resource "reserves").' },
   { key: 'time_entries', label: 'Temps passés', basePath: '/api/time_entries', create: true, update: true, delete: true, list: true, identityField: 'description', mergeOnUpdate: true,
     knownFields: ['entry_date', 'start_time', 'end_time', 'project_id', 'description'],
     required: ['entry_date', 'start_time', 'end_time'],

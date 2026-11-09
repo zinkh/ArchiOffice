@@ -5602,6 +5602,7 @@ export default function ProjectDetail() {
                                             'Quitus Transmis': 'bg-green-200 text-green-800',
                                             "Refusée par l'entreprise": 'bg-orange-100 text-orange-700',
                                             'Levée refusée par le MOE': 'bg-purple-100 text-purple-700',
+                                            'Pour mémoire': 'bg-zinc-200 text-zinc-700',
                                           };
                                           return (
                                             <tr key={r.id} className={cn("transition-colors", isLevee ? "opacity-60" : "hover:bg-amber-50/60 dark:hover:bg-amber-900/10")}>

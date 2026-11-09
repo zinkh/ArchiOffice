@@ -45,7 +45,7 @@ import type { ReservesExportProject } from '../../lib/reservesExport';
 import { ReserveDetail, type LotOption } from './ReserveDetail';
 import { ReserveDiffusionDialog } from './ReserveDiffusionDialog';
 import { ReservePlanView } from './ReservePlanView';
-import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed } from './reserveShared';
+import { type ReserveLike, StatusSelect, ReservePhotoImage, RESERVE_STATUSES, parseJsonList, reserveOverdueDays, isReserveClosed, isReserveForRecord } from './reserveShared';
 import { construireLegende, couleursParCle, couleurDe } from '../../lib/reserveCouleurs';
 import {
   SANS_LOT_FILTRE, choixDeLots, cleGroupe, correspondAuLot, libelleGroupe, numerosParLot, trierGroupes, trierParLot, voisine,
@@ -190,7 +190,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
     ouvertes: reserves.filter(r => r.status === 'A faire' || r.status === 'En cours').length,
     retard: reserves.filter(r => reserveOverdueDays(r) > 0).length,
     urgentes: reserves.filter(r => {
-      if (isReserveClosed(r) || !r.due_date) return false;
+      if (isReserveClosed(r) || isReserveForRecord(r) || !r.due_date) return false;
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const in7 = new Date(today.getTime() + 7 * 86400000);
       const due = new Date(r.due_date);
@@ -780,11 +780,11 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                 </th>
                 <th className="px-4 py-3 text-left w-12">N°</th>
                 <th className="px-4 py-3 text-left w-16">Photo</th>
-                <th className="px-4 py-3 text-left">Intitulé</th>
-                <th className="px-4 py-3 text-left">Bâtiment / Local</th>
+                <th className="px-4 py-3 text-left min-w-[12rem]">Intitulé</th>
+                <th className="px-4 py-3 text-left hidden xl:table-cell">Bâtiment / Local</th>
                 <th className="px-2 py-3 text-center w-12" title="Repérage sur plan"><IconMapPin size={14} className="inline" aria-label="Repérage sur plan" /></th>
                 <th className="px-4 py-3 text-left">Statut</th>
-                <th className="px-4 py-3 text-left">Créé le</th>
+                <th className="px-4 py-3 text-left hidden lg:table-cell">Créé le</th>
                 <th className="px-4 py-3 text-left">Echéance / Retard</th>
                 <th className="px-4 py-3 text-right w-10"></th>
               </tr>
@@ -823,13 +823,17 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                           >{selectCell(res)}</td>
                           <td className="px-4 py-3 font-mono text-[0.6875rem] text-[var(--tblr-muted)]">#{res.number || '-'}</td>
                           <td className="px-4 py-2">{renderThumb(res, 'w-12 h-12')}</td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 min-w-[12rem]">
                             <div className="font-medium text-[var(--tblr-text)] flex items-center gap-1.5">
                               {res.title}
                               {res.pendingSync && (
                                 <span className="px-1.5 py-0.5 rounded text-[0.6875rem] font-bold flex-shrink-0 bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">en attente</span>
                               )}
                             </div>
+                            {/* La colonne Bâtiment / Local est masquée sous 1280 px : elle passe sous le titre. */}
+                            {(res.batiment || res.local) && (
+                              <div className="xl:hidden text-[0.6875rem] text-[var(--tblr-muted)] truncate">{[res.batiment, res.local].filter(Boolean).join(' / ')}</div>
+                            )}
                             {res.description && <div className="text-[0.6875rem] text-[var(--tblr-muted)] line-clamp-1">{res.description}</div>}
                             {res.reponse && (
                               <div className="flex items-start gap-1 text-[0.6875rem] text-[var(--tblr-text)] line-clamp-2" title={res.reponse}>
@@ -838,7 +842,7 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
+                          <td className="px-4 py-3 text-zinc-600 dark:text-zinc-300 hidden xl:table-cell">{[res.batiment, res.local].filter(Boolean).join(' / ') || '—'}</td>
                           <td className="px-2 py-3 text-center" onClick={e => e.stopPropagation()}>
                             {hasPlanMarker(res) && (
                               <button
@@ -852,8 +856,9 @@ export function ReserveTracker({ projectId, apiBase, title, shortTitle, reserves
                               </button>
                             )}
                           </td>
-                          <td className="px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} /></td>
-                          <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)]">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
+                          {/* Statut plafonné sous 1280 px : la pastille est large comme la plus longue option et écrasait le titre. */}
+                          <td className="px-2 xl:px-4 py-3"><StatusSelect value={res.status} onChange={s => changeStatus(res, s)} className="max-w-[7.5rem] xl:max-w-none" /></td>
+                          <td className="px-4 py-3 text-[0.6875rem] text-[var(--tblr-muted)] hidden lg:table-cell">{res.created_at ? new Date(res.created_at).toLocaleDateString('fr-FR') : ''}</td>
                           <td className="px-4 py-3">
                             <div className="space-y-0.5">
                               <div className={cn('text-xs font-medium', retard > 0 ? 'text-red-500' : 'text-zinc-600 dark:text-zinc-300')}>

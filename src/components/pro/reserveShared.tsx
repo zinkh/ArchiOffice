@@ -12,7 +12,7 @@ export type ReserveLike = Reserve | GpaReserve;
 export type ReserveStatus = ReserveLike['status'];
 
 export const RESERVE_STATUSES: ReserveStatus[] = [
-  'A faire', 'En cours', 'Levée', "Refusée par l'entreprise", 'Quitus Transmis', 'Levée refusée par le MOE',
+  'A faire', 'En cours', 'Levée', "Refusée par l'entreprise", 'Quitus Transmis', 'Levée refusée par le MOE', 'Pour mémoire',
 ];
 
 /** Clé i18n d'un statut : la valeur reste stockée en français, seul l'affichage se traduit. */
@@ -23,15 +23,19 @@ const RESERVE_STATUS_KEYS: Record<ReserveStatus, string> = {
   "Refusée par l'entreprise": 'reserve_status_refused_company',
   'Quitus Transmis': 'reserve_status_discharge_sent',
   'Levée refusée par le MOE': 'reserve_status_lift_refused',
+  'Pour mémoire': 'reserve_status_for_record',
 };
 export const reserveStatusKey = (status: string): string | null =>
   RESERVE_STATUS_KEYS[status as ReserveStatus] ?? null;
 
 export const isReserveClosed = (r: Pick<ReserveLike, 'status'>) => r.status === 'Levée' || r.status === 'Quitus Transmis';
 
-/** Jours de retard (0 si à l'heure ou levée). */
+/** Point noté au dossier, sans travaux à exécuter dans un délai : jamais en retard ni urgent, mais pas levé pour autant. */
+export const isReserveForRecord = (r: Pick<ReserveLike, 'status'>) => r.status === 'Pour mémoire';
+
+/** Jours de retard (0 si à l'heure, levée ou pour mémoire). */
 export function reserveOverdueDays(r: Pick<ReserveLike, 'status' | 'due_date'>): number {
-  if (isReserveClosed(r) || !r.due_date) return 0;
+  if (isReserveClosed(r) || isReserveForRecord(r) || !r.due_date) return 0;
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const due = new Date(r.due_date); due.setHours(0, 0, 0, 0);
   if (isNaN(due.getTime()) || due >= today) return 0;
@@ -46,6 +50,7 @@ export function statusPillClass(status: ReserveStatus): string {
     status === 'En cours' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
     status === "Refusée par l'entreprise" ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
     status === 'Levée refusée par le MOE' ? 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400' :
+    status === 'Pour mémoire' ? 'bg-zinc-200 text-zinc-700 dark:bg-zinc-700/50 dark:text-zinc-300' :
     'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
   );
 }
@@ -57,6 +62,7 @@ export function StatusSelect({ value, onChange, className }: { value: ReserveSta
   return (
     <select
       className={cn('pill-select', statusPillClass(value), className)}
+      title={value}
       value={value}
       onClick={e => e.stopPropagation()}
       onChange={e => onChange(e.target.value as ReserveStatus)}

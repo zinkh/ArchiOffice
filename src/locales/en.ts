@@ -4146,6 +4146,7 @@ export default {
       "reserve_status_lifted": "Lifted",
       "reserve_status_refused_company": "Refused by the company",
       "reserve_status_discharge_sent": "Discharge sent",
+      "reserve_status_for_record": "For the record",
       "reserve_status_lift_refused": "Lift refused by the design team",
       "projectdetail_reserves_title": "Snags",
       "projectdetail_reserves_gpa_title": "Defects liability snags",
