@@ -609,18 +609,30 @@ function ProtectedLayout() {
   // normal, page-level scrolling like every other route.
   const isFullBleedRoute = /^\/projects\/[^/]+$/.test(location.pathname) || /^\/agents\/[^/]+\/chat$/.test(location.pathname);
 
+  // Le cadre et <main> sont en `overflow: hidden` sur ces routes : personne ne doit les faire défiler. Mais un
+  // `scrollIntoView` (clic sur un onglet, recherche, repère) remonte jusqu'à eux et les décale, ce qui cache
+  // l'en-tête et laisse un vide en bas jusqu'au rechargement. On les ramène à zéro dès qu'ils bougent.
+  const resetStrayScroll = (e: React.UIEvent<HTMLElement>) => {
+    const el = e.currentTarget;
+    if (e.target === el && (el.scrollTop !== 0 || el.scrollLeft !== 0)) { el.scrollTop = 0; el.scrollLeft = 0; }
+  };
+
   return (
     <AgentChatProvider>
     <div
       className={cn('flex font-sans overflow-x-hidden', isFullBleedRoute ? 'min-h-dvh lg:h-dvh lg:overflow-hidden' : 'min-h-dvh')}
       style={{ background: 'var(--tblr-bg)', color: 'var(--tblr-text)' }}
+      onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
     >
       <Sidebar />
       <div className="flex-1 flex flex-col min-w-0 lg:min-h-0">
         <Header />
         <div className="md:hidden"><ProjectTabsBar variant="strip" /></div>
 
-        <main className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}>
+        <main
+          className={isFullBleedRoute ? 'flex-1 lg:min-h-0 flex flex-col lg:overflow-hidden' : 'flex-1 min-h-0 px-3 pt-4 pb-24 sm:px-6 sm:pt-6 md:pb-6 max-w-[1400px] w-full mx-auto'}
+          onScroll={isFullBleedRoute ? resetStrayScroll : undefined}
+        >
           <Outlet />
         </main>
 

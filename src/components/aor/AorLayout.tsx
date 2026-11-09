@@ -35,6 +35,23 @@ function ecrireOnglet(id: string) {
   try { localStorage.setItem(CLE_ONGLET, id); } catch { /* stockage indisponible */ }
 }
 
+/**
+ * Amène `cible` en haut de la zone qui défile réellement (overflow auto ou scroll), en respectant son
+ * `scroll-margin-top`. Pas de `scrollIntoView` : il fait aussi défiler les ancêtres en `overflow: hidden`, donc
+ * le cadre de l'application, dont l'en-tête disparaissait alors en laissant un vide en bas jusqu'au rechargement.
+ */
+function defilerVers(cible: HTMLElement, behavior: ScrollBehavior) {
+  let zone: HTMLElement | null = null;
+  for (let p = cible.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if ((o === 'auto' || o === 'scroll') && p.scrollHeight > p.clientHeight) { zone = p; break; }
+  }
+  const marge = parseFloat(getComputedStyle(cible).scrollMarginTop) || 0;
+  const ecart = cible.getBoundingClientRect().top - (zone ? zone.getBoundingClientRect().top : 0) - marge;
+  if (zone) zone.scrollTo({ top: zone.scrollTop + ecart, behavior });
+  else window.scrollTo({ top: window.scrollY + ecart, behavior });
+}
+
 function Compteur({ count, alert }: { count?: number | null; alert?: boolean }) {
   if (count == null) return null;
   return (
@@ -82,7 +99,7 @@ export function AorLayout({ sections }: { sections: AorSectionDef[] }) {
     requestAnimationFrame(() => {
       const sansMouvement = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
       const cible = bureau ? document.getElementById(`aor-${id}`) : document.getElementById('aor-barre');
-      cible?.scrollIntoView({ behavior: sansMouvement ? 'auto' : 'smooth', block: 'start' });
+      if (cible) defilerVers(cible, sansMouvement ? 'auto' : 'smooth');
     });
   }, [bureau]);
 
