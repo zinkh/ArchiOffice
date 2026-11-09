@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/api';
 
-export interface ReserveLotSource { id: string; lot_number?: string; lot_title: string; contact_name?: string }
+export interface ReserveLotSource { id: string; lot_number?: string; lot_title: string; contact_id?: string; contact_name?: string }
+
+const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase();
 
 /**
  * Lots et entreprises proposés pour une réserve, partagés par la fiche (ReserveDetail) et les actions
@@ -12,13 +14,16 @@ export interface ReserveLotSource { id: string; lot_number?: string; lot_title: 
  * du lot n'a souvent pas d'entreprise renseignée (elle se désigne par l'ACT puis le marché).
  */
 export function useReserveOptions(projectId: string, lotsList?: ReserveLotSource[]) {
-  const [marcheEntreprises, setMarcheEntreprises] = useState<string[]>([]);
+  const [marches, setMarches] = useState<{ nom: string; contactId?: string }[]>([]);
+  const marcheEntreprises = useMemo(() => marches.map(m => m.nom), [marches]);
   useEffect(() => {
     let vivant = true;
-    apiFetch<{ entreprise_nom?: string | null; type_marche?: string | null; statut?: string | null }[]>(`/api/marches-entreprises/${projectId}`)
+    apiFetch<{ entreprise_nom?: string | null; contact_id?: string | null; type_marche?: string | null; statut?: string | null }[]>(`/api/marches-entreprises/${projectId}`)
       .then(rows => {
         if (!vivant || !Array.isArray(rows)) return;
-        setMarcheEntreprises(rows.filter(r => r.entreprise_nom && r.type_marche !== 'subsequent' && r.statut !== 'resilie').map(r => r.entreprise_nom as string));
+        setMarches(rows
+          .filter(r => r.entreprise_nom && r.type_marche !== 'subsequent' && r.statut !== 'resilie')
+          .map(r => ({ nom: r.entreprise_nom as string, contactId: r.contact_id || undefined })));
       })
       .catch(() => { /* les entreprises des lots restent proposées */ });
     return () => { vivant = false; };
@@ -36,5 +41,18 @@ export function useReserveOptions(projectId: string, lotsList?: ReserveLotSource
       .map(nom => ({ value: nom, label: nom }));
   }, [lotsList, marcheEntreprises]);
 
-  return { lotOptions, entrepriseOptions };
+  /**
+   * L'entreprise responsable d'un lot, désigné par son intitulé : celle de la fiche du lot, à défaut l'entreprise
+   * du marché rattachée au même contact (la fiche du lot n'a souvent que l'identifiant du contact). `null` si aucune.
+   */
+  const entrepriseDuLot = useCallback((titre: string): string | null => {
+    const lot = (lotsList || []).find(l => l.lot_title === titre) ?? (lotsList || []).find(l => norm(l.lot_title) === norm(titre));
+    if (!lot) return null;
+    const nom = lot.contact_name?.trim();
+    if (nom) return nom;
+    if (lot.contact_id) return marches.find(m => m.contactId === lot.contact_id)?.nom ?? null;
+    return null;
+  }, [lotsList, marches]);
+
+  return { lotOptions, entrepriseOptions, entrepriseDuLot };
 }

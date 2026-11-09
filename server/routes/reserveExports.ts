@@ -17,7 +17,7 @@ import { handleDocumentUpload } from '../documentUpload';
 import { resolveEmailSender } from '../emailSender';
 import { sendViaAccount } from '../mailSend';
 import { combinedSendError, sendMailWithSenderFallback } from '../smtpSend';
-import { loadReserveContext, RESERVE_KINDS, RESERVE_TITLE, readKind, readLots, type ReserveKind } from '../reserveDiffusionContext';
+import { loadReserveContext, RESERVE_KINDS, RESERVE_TITLE, readIncludeLevees, readKind, readLots, type ReserveKind } from '../reserveDiffusionContext';
 import {
   buildReserveMail, statutDiffusion,
   type ExportSend, type ReserveRecipient,
@@ -34,8 +34,8 @@ const SMTP_TIMEOUT_MS = 15_000;
 const MAX_PDF_BYTES = 20 * 1024 * 1024;
 
 export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTenantId, getUserName, logActivity }: RouteDeps) {
-  const loadContext = (tenantId: string, projectId: string, kind: ReserveKind, lots: string[] | null) =>
-    loadReserveContext(supabaseAdmin, tenantId, projectId, kind, lots);
+  const loadContext = (tenantId: string, projectId: string, kind: ReserveKind, lots: string[] | null, inclureLevees = true) =>
+    loadReserveContext(supabaseAdmin, tenantId, projectId, kind, lots, inclureLevees);
 
   const parseExport = (row: any) => ({ ...row, lots: Array.isArray(row.lots) ? row.lots : [], sends: Array.isArray(row.sends) ? row.sends : [] });
 
@@ -62,7 +62,7 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
       const tenantId = await getTenantId(req.user.id);
       const kind = readKind(req.query.kind);
       if (!kind) return res.status(400).json({ error: 'Type de réserves inconnu.' });
-      const ctx = await loadContext(tenantId, req.params.projectId, kind, readLots(req.query.lots));
+      const ctx = await loadContext(tenantId, req.params.projectId, kind, readLots(req.query.lots), readIncludeLevees(req.query.include_levees));
       if (!ctx) return res.status(404).json({ error: 'Opération introuvable.' });
       const strip = (r: ReserveRecipient) => ({ key: r.key, role: r.role, name: r.name, detail: r.detail, email: r.email, reserve_count: r.reserveIds.length });
       res.json({
@@ -84,7 +84,7 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
       const channel = req.body?.channel === 'mail' ? 'mail' : req.body?.channel === 'telechargement' ? 'telechargement' : null;
       if (!kind || !channel) return res.status(400).json({ error: 'Export invalide.' });
       const lots = readLots(req.body?.lots);
-      const ctx = await loadContext(tenantId, req.params.projectId, kind, lots);
+      const ctx = await loadContext(tenantId, req.params.projectId, kind, lots, readIncludeLevees(req.body?.include_levees));
       if (!ctx) return res.status(404).json({ error: 'Opération introuvable.' });
       const userName = await getUserName(tenantId, req.user.id, req.user.email);
       const row = {
@@ -125,7 +125,9 @@ export function registerReserveExportRoutes(app: Express, { supabaseAdmin, getTe
       const kind = entry.kind as ReserveKind;
       if (!RESERVE_KINDS.includes(kind)) return res.status(400).json({ error: 'Type de réserves inconnu.' });
 
-      const ctx = await loadContext(tenantId, entry.project_id, kind, entry.scope === 'lots' ? entry.lots : null);
+      // Le périmètre (lots) est celui du journal ; l'inclusion des réserves levées n'y est pas conservée (pas de
+      // colonne), le client la renvoie à chaque envoi : elle ne change que les comptes du message, jamais le destinataire.
+      const ctx = await loadContext(tenantId, entry.project_id, kind, entry.scope === 'lots' ? entry.lots : null, readIncludeLevees(req.body?.include_levees));
       if (!ctx) return res.status(404).json({ error: 'Opération introuvable.' });
       const key = String(req.body?.key ?? '');
       const recipient = [...ctx.recipients.intervenants, ...ctx.recipients.entreprises].find(r => r.key === key);
