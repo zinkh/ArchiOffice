@@ -51,6 +51,8 @@ export interface SituationTravaux {
   avance_remboursement?: number | string | null;
   notes_moe?: string | null;
   date_certificat?: string | null;
+  /** Date de règlement du certificat (état Payée). */
+  date_paiement?: string | null;
   etat: EtatSituation | string;
   /** Simple : cumul saisi directement. Détaillé : déduit de l'avancement des lignes du DPGF. */
   mode_saisie?: ModeSaisie | string | null;

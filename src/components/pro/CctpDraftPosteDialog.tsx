@@ -21,6 +21,8 @@ export interface PosteARediger {
   texteExistant: string;
   /** Intitulés des postes du même niveau, pour ne pas les répéter. */
   voisins: string[];
+  /** Fiches techniques jointes au poste (documents de l'affaire) : l'IA peut s'en servir. */
+  fiches?: { documentId?: string; nom: string }[];
 }
 
 interface Props {
@@ -38,6 +40,9 @@ export const CctpDraftPosteDialog: React.FC<Props> = ({ projectId, poste, onClos
   const aDejaUnTexte = poste.texteExistant.trim().length > 0;
   const [instructions, setInstructions] = useState('');
   const [ameliorer, setAmeliorer] = useState(aDejaUnTexte);
+  const fichesUtilisables = (poste.fiches ?? []).filter(f => f.documentId);
+  const [utiliserFiches, setUtiliserFiches] = useState(true);
+  const [fichesNonLues, setFichesNonLues] = useState<string[]>([]);
   const [attente, setAttente] = useState(false);
   const [proposition, setProposition] = useState<string | null>(null);
   const [erreur, setErreur] = useState<string | null>(null);
@@ -47,15 +52,17 @@ export const CctpDraftPosteDialog: React.FC<Props> = ({ projectId, poste, onClos
     setAttente(true);
     setErreur(null);
     try {
-      const res = await apiFetch<{ texte: string }>(`/api/projects/${projectId}/cctp/draft-poste`, {
+      const res = await apiFetch<{ texte: string; fiches_ignorees?: string[] }>(`/api/projects/${projectId}/cctp/draft-poste`, {
         method: 'POST',
         body: JSON.stringify({
           kind: poste.kind, titre: poste.titre, numero: poste.numero, lot_titre: poste.lotTitre,
           chapitre_titre: poste.chapitreTitre, unite: poste.unite, localisation: poste.localisation,
           voisins: poste.voisins, instructions, ameliorer: ameliorer && aDejaUnTexte,
           texte_existant: poste.texteExistant,
+          fiche_document_ids: utiliserFiches ? fichesUtilisables.map(f => f.documentId) : [],
         }),
       });
+      setFichesNonLues(res.fiches_ignorees ?? []);
       setProposition(res.texte);
     } catch (e: any) {
       setErreur(e?.message || t('pro_cctp_draft_error'));
@@ -119,11 +126,24 @@ export const CctpDraftPosteDialog: React.FC<Props> = ({ projectId, poste, onClos
                 <span style={{ color: 'var(--tblr-text)' }}>{t('pro_cctp_draft_improve')}</span>
               </label>
             )}
+            {poste.kind === 'article' && fichesUtilisables.length > 0 && (
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" className="mt-1" checked={utiliserFiches} onChange={e => setUtiliserFiches(e.target.checked)} />
+                <span style={{ color: 'var(--tblr-text)' }}>
+                  {t('pro_cctp_draft_use_fiches', { count: fichesUtilisables.length, defaultValue: 'Utiliser les fiches techniques du poste ({{count}}) comme source' })}
+                </span>
+              </label>
+            )}
             <p className="text-xs" style={{ color: 'var(--tblr-muted)' }}>{t('pro_cctp_draft_cost_hint')}</p>
           </>
         ) : (
           <label className="block text-sm">
             <span className="block mb-1 font-medium" style={{ color: 'var(--tblr-text)' }}>{t('pro_cctp_draft_proposal')}</span>
+            {fichesNonLues.length > 0 && (
+              <span role="status" className="block mb-1 text-xs" style={{ color: 'var(--tblr-muted)' }}>
+                {t('pro_cctp_draft_fiches_unread', { names: fichesNonLues.join(', '), defaultValue: 'Fiche(s) illisible(s), non utilisée(s) : {{names}}' })}
+              </span>
+            )}
             <textarea
               rows={16} value={proposition} onChange={e => setProposition(e.target.value)}
               className={`${CHAMP} resize-y leading-relaxed`} style={STYLE_CHAMP}

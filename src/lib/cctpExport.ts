@@ -8,7 +8,6 @@
 // pagination « P1|2 », nuances de gris. jsPDF et docx sont chargés à la demande.
 import type { Batiment, DPGF, ImageArticle, Ligne } from '../types/dpgf';
 import { imagesDeLigne } from './cctpImages';
-import { nomsFiches } from './fichesTechniques';
 import { enregistrerPdf, type Sortie } from './exportSortie';
 import type { AgencySettings } from './proposalExport';
 import { partnerLogosParagraph } from './docxPartnerLogos';
@@ -101,7 +100,7 @@ export function cctpBlocs(doc: DPGF, batimentId?: string, contexte: ContexteCctp
       niveau, numero: l.numero, titre: l.designation, texte: texte(l.cctpDescription, n),
       localisation: texte(l.localisation, n) || undefined,
       images: imagesDeLigne(l).length ? imagesDeLigne(l) : undefined,
-      fiches: nomsFiches(l).length ? nomsFiches(l) : undefined,
+      fiches: (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean).length ? (l.fichesTechniques ?? []).map(f => f.nom).filter(Boolean) : undefined,
       batiments: mention && !enfants && libelles(ids).length ? libelles(ids) : undefined,
     });
     if (enfants) articles(l.children!, niveau + 1, noeud, l.batimentId ?? herite);

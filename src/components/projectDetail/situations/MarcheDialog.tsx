@@ -4,6 +4,7 @@ import type { ProjectLot } from '../../../types';
 import type { MarcheTravaux } from '../../../lib/certificatPaiement';
 import { num } from '../../../lib/certificatPaiement';
 import { DialogShell, Champ, inputClass, boutonPrincipal, boutonSecondaire } from './DialogShell';
+import { entrepriseAttribuee, type ConsultationAttribution, type EntrepriseAttribuee } from '../../../lib/attributionMarche';
 
 export interface MarcheForm {
   entreprise_nom: string;
@@ -28,12 +29,13 @@ export const montantLot = (lot: ProjectLot): number =>
   (lot.base_amount || 0) + (lot.options_amount || 0) + (lot.amendments_amount || 0);
 
 /** Corps envoyé à l'API, montants en nombres. */
-export function marcheDepuisLot(lot: ProjectLot): Record<string, unknown> {
+export function marcheDepuisLot(lot: ProjectLot, attribuee?: EntrepriseAttribuee | null): Record<string, unknown> {
   return {
-    entreprise_nom: lot.contact_name || '',
+    // L'entreprise retenue par l'attribution de l'ACT prime sur la fiche du lot.
+    entreprise_nom: attribuee?.nom || lot.contact_name || '',
     lot_numero: lot.lot_number || '',
     lot_titre: lot.lot_title || '',
-    montant_ht: montantLot(lot),
+    montant_ht: attribuee?.montant || montantLot(lot),
     tva_rate: 20,
     retenue_garantie_pct: 5,
   };
@@ -56,12 +58,14 @@ function formDepuisMarche(m: MarcheTravaux): MarcheForm {
 }
 
 export function MarcheDialog({
-  open, marche, lots, onClose, onSave,
+  open, marche, lots, consultation, onClose, onSave,
 }: {
   open: boolean;
   /** Absent : création. */
   marche: MarcheTravaux | null;
   lots: ProjectLot[];
+  /** Attribution de l'ACT : l'entreprise et le montant d'un lot en viennent. */
+  consultation?: ConsultationAttribution | null;
   onClose: () => void;
   onSave: (body: Record<string, unknown>) => Promise<void>;
 }) {
@@ -87,12 +91,14 @@ export function MarcheDialog({
     if (lotId === '') { setForm((f) => ({ ...f, lot_numero: '', lot_titre: '' })); return; }
     const lot = lots.find((l) => l.id === lotId);
     if (!lot) return;
+    const attribuee = entrepriseAttribuee(lot.id, consultation);
+    const montant = attribuee?.montant || montantLot(lot);
     setForm((f) => ({
       ...f,
       lot_numero: lot.lot_number || '',
       lot_titre: lot.lot_title || '',
-      entreprise_nom: lot.contact_name || f.entreprise_nom,
-      montant_ht: montantLot(lot) ? String(montantLot(lot)) : f.montant_ht,
+      entreprise_nom: attribuee?.nom || lot.contact_name || f.entreprise_nom,
+      montant_ht: montant ? String(montant) : f.montant_ht,
     }));
   };
 

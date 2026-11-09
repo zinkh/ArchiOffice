@@ -202,7 +202,11 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       if (existingProfile) {
         const existingId = (existingProfile as any).id;
         // Un accès révoqué (compte bloqué) est rétabli par la réinvitation.
-        await supabaseAdmin.auth.admin.updateUserById(existingId, { ban_duration: 'none' }).catch(() => {});
+        try {
+          await supabaseAdmin.auth.admin.updateUserById(existingId, { ban_duration: 'none' });
+        } catch (e: any) {
+          console.warn('[POST /api/team] déblocage du compte impossible :', e?.message);
+        }
         await addMembership(supabaseAdmin, {
           userId: existingId, tenantId, role: role || 'Member', systemRole: system_role || 'user',
           // Son cabinet d'ouverture de session ne bouge pas : il basculera

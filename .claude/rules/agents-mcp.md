@@ -626,3 +626,16 @@ Panneau (`AgentChat.tsx`) et page (`AgentChatPage.tsx`) partagent les mêmes bri
 - **« Nouvelle discussion »** (clé `agent_chat_clear`, bouton d'en-tête) **supprime** la conversation en cours après confirmation : l'historique des discussions n'existe pas encore (voir ROADMAP.md, « Saved conversation history »). Ne pas laisser croire à un archivage.
 - **Bouton « Arrêter »** (`ChatRequestStatus`) : petite pastille, zone de touche de 44 px par `before:-inset-2`.
 - **Le bouton flottant « Assistants IA » est masqué sur `/agents/:id/chat`** (il recouvrait l'envoi). Le panneau se tient 88 px au-dessus du bas, au-dessus de la pastille mobile de 60 px (`MobileShortcutBar`, boutons de 48 px).
+
+### Écriture des textes du CCTP par les agents et le MCP (`manage_cctp`)
+
+`manage_cctp` (`projectWorkTools.ts`, scope `projects`, donc aussi exposé au MCP) est le pendant de `manage_dpgf` pour le
+TEXTE du CCTP : client de `POST /api/projects/:id/cctp/textes` (`server/routes/dpgf.ts`), appliqué par
+`server/cctpTextes.ts` (pur, `tests/cctpTextes.test.ts`), même verrou et même relecture que `.../dpgf/lignes`.
+
+- **Actions** : `set_texte` et `append_texte` (cible `lot`, `chapitre` ou `article`, 20 000 caractères au plus, `[b]` pour le
+  gras), `add_articles` (jusqu'à 100, sans quantité ni prix ; dans un chapitre `cctpOnly` ou avec `cctp_only`, ni unité).
+- **Jamais de perte silencieuse** : `set_texte` sur un texte existant exige `remplacer: true` ; l'outil fait d'abord un
+  `dry_run` et renvoie `needs_confirmation` (ancien et nouveau texte) avant `confirm: true`. `append_texte` ajoute à la suite.
+- **Marqueur « en cours »** posé par une personne : 409, `forcer: true` seulement sur demande explicite.
+- Quantités et prix restent à `manage_dpgf` : cet outil n'en écrit jamais.

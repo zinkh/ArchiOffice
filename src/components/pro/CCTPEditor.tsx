@@ -466,6 +466,7 @@ export const CCTPEditor: React.FC<CCTPEditorProps> = ({ dpgf, onChange, showTree
     return {
       ...base, kind: 'article', titre: ligne.designation, numero: ligne.numero, chapitreTitre: chap.titre,
       unite: ligne.unite, localisation: ligne.localisation ?? '', voisins: freres.map(l => l.designation),
+      fiches: (ligne.fichesTechniques ?? []).map(f => ({ documentId: f.documentId, nom: f.nom })),
     };
   };
   // Un seul enregistrement : deux mutateDPGF successifs partent chacun du même
