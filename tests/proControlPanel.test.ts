@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from 'vitest';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../src/i18n';
+
+vi.mock('../src/lib/api', () => ({ apiFetch: async () => ({ corrections: [] }) }));
 import { ProControlPanel } from '../src/components/pro/ProControlPanel';
 import { trouvaillePourId } from '../src/lib/proRecherche';
 
