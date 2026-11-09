@@ -12,12 +12,16 @@ import { createTeamMemberSchema, updateTeamMemberRoleSchema } from '../../src/sc
 import { isSuperAdmin } from '../superAdminAuth';
 import { readMembershipSenderEmail } from '../emailSender';
 import { isValidEmail } from '../../src/lib/crDiffusion';
+import { sendPlatformMail } from '../mailer';
+
+const escapeHtml = (v: string) => String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
 import {
   addMembership,
   findMembership,
   listMembershipsWithTenants,
   listTenantAdminIds,
   listTenantMemberIds,
+  removeMembership,
   tenantMembershipsByUser,
   updateMembership,
 } from '../tenantMemberships';
@@ -197,6 +201,8 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
       // boîtes mail connectées, son profil.
       if (existingProfile) {
         const existingId = (existingProfile as any).id;
+        // Un accès révoqué (compte bloqué) est rétabli par la réinvitation.
+        await supabaseAdmin.auth.admin.updateUserById(existingId, { ban_duration: 'none' }).catch(() => {});
         await addMembership(supabaseAdmin, {
           userId: existingId, tenantId, role: role || 'Member', systemRole: system_role || 'user',
           // Son cabinet d'ouverture de session ne bouge pas : il basculera
@@ -351,6 +357,89 @@ export function registerTeamRoutes(app: Express, { supabaseAdmin, getTenantId, r
     } catch (e: any) {
       console.error("Error updating user manager:", e);
       res.status(e.status || 500).json({ error: e.status ? e.message : "Failed to update manager" });
+    }
+  });
+
+  // Révoquer l'accès d'un membre : il est détaché de CE cabinet (rôle,
+  // supérieur et accès tombent avec l'adhésion) et, s'il n'exerce nulle part
+  // ailleurs, son compte est aussi bloqué côté Supabase Auth, ce qui coupe
+  // les connexions et les renouvellements de session. Son profil et tout ce
+  // qu'il a produit (tâches, comptes rendus, journal) sont conservés ; la
+  // réinvitation avec la même adresse (POST /api/team) rétablit l'accès.
+  app.post("/api/team/:id/revoke", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { id } = req.params;
+      if (id === req.user.id) {
+        return res.status(400).json({ error: "Vous ne pouvez pas révoquer votre propre accès." });
+      }
+      const target = await findMembership(supabaseAdmin, id, tenantId);
+      if (!target) return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+      if (target.systemRole === 'admin') {
+        const adminIds = await listTenantAdminIds(supabaseAdmin, tenantId);
+        if (!adminIds.some((adminId) => adminId !== id)) {
+          return res.status(409).json({
+            error: "Un cabinet doit toujours compter au moins un administrateur. Nommez d'abord un autre administrateur.",
+            code: 'LAST_ADMIN',
+          });
+        }
+      }
+      const memberships = await listMembershipsWithTenants(supabaseAdmin, id);
+      const exclusive = memberships.every((m) => m.tenantId === tenantId);
+      await removeMembership(supabaseAdmin, id, tenantId);
+      // Les personnes dont la hiérarchie pointait sur lui n'ont plus de supérieur.
+      await supabaseAdmin.from('tenant_memberships').update({ manager_id: null }).eq('tenant_id', tenantId).eq('manager_id', id);
+      await supabaseAdmin.from('profiles').update({ manager_id: null }).eq('manager_id', id).eq('tenant_id', tenantId);
+      let accountBlocked = false;
+      if (exclusive) {
+        const { error: banErr } = await supabaseAdmin.auth.admin.updateUserById(id, { ban_duration: '876000h' });
+        if (banErr) console.error('[POST /api/team/:id/revoke] ban failed:', banErr.message);
+        else accountBlocked = true;
+      }
+      res.json({ success: true, accountBlocked });
+    } catch (e: any) {
+      console.error("[POST /api/team/:id/revoke]", e);
+      res.status(e.status || 500).json({ error: e.status ? e.message : "Échec de la révocation" });
+    }
+  });
+
+  // Envoie à un membre un lien à usage unique pour choisir un nouveau mot de
+  // passe. Aucun mot de passe ne transite ni n'est choisi par l'administrateur.
+  app.post("/api/team/:id/reset-password", async (req: any, res: any) => {
+    try {
+      const tenantId = await requireTenantAdmin(req.user.id);
+      const { id } = req.params;
+      if (!(await findMembership(supabaseAdmin, id, tenantId))) {
+        return res.status(404).json({ error: 'Membre introuvable dans ce cabinet' });
+      }
+      const { data: profile } = await supabaseAdmin.from('profiles').select('email, name').eq('id', id).maybeSingle();
+      const email = (profile as any)?.email;
+      if (!email) return res.status(400).json({ error: "Ce membre n'a pas d'adresse e-mail enregistrée." });
+
+      const appUrl = process.env.APP_URL || 'http://localhost:3000';
+      const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+        type: 'recovery', email, options: { redirectTo: `${appUrl}/reset-password` },
+      });
+      const actionLink = linkData?.properties?.action_link;
+      if (linkErr || !actionLink) {
+        return res.status(500).json({ error: linkErr?.message || "Le lien de réinitialisation n'a pas pu être généré." });
+      }
+      const { data: settings } = await supabaseAdmin.from('settings').select('*').eq('tenant_id', tenantId).maybeSingle();
+      const cabinetName = escapeHtml((settings as any)?.agency_name || 'ArchiOffice');
+      const sent = await sendPlatformMail(
+        email,
+        `Réinitialisation de votre mot de passe ArchiOffice`,
+        `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <p>Bonjour ${escapeHtml((profile as any)?.name || '')},</p>
+          <p>Un administrateur du cabinet <strong>${cabinetName}</strong> a demandé la réinitialisation de votre mot de passe ArchiOffice.</p>
+          <p style="margin: 24px 0;"><a href="${actionLink}" style="background:#111;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;">Choisir un nouveau mot de passe</a></p>
+          <p style="color: #666; font-size: 14px;">Ce lien est à usage unique. Si vous n'êtes pas à l'origine de cette demande, ignorez ce message.</p>
+        </div>`,
+      );
+      res.json({ success: true, emailSent: sent, emailError: sent ? null : "Configuration SMTP manquante ou envoi refusé." });
+    } catch (e: any) {
+      console.error("[POST /api/team/:id/reset-password]", e);
+      res.status(e.status || 500).json({ error: e.status ? e.message : "Échec de la réinitialisation" });
     }
   });
 
