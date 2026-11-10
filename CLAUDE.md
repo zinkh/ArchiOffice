@@ -17,14 +17,14 @@
 | Exports | jsPDF, docx, xlsx, file-saver, fast-xml-parser |
 | i18n | i18next + react-i18next |
 | Auth | Supabase Auth (JWT), ProtectedRoute wrapper |
-| Protocol | MCP server (`mcp-server.ts`) via better-sqlite3 |
+| Protocol | Remote MCP Streamable HTTP + OAuth (`packages/archioffice-agents/src/server/mcp/`); see MCP.md |
 
 ## Repository Layout
 
 ```
 /
 ├── server.ts            # Express backend (~5 000 lines) — API + static serving
-├── mcp-server.ts        # Model Context Protocol server (local SQLite)
+├── mcp-server.ts        # Legacy stdio/SQLite prototype; remote connector is in packages/
 ├── index.html           # Vite HTML entry point
 ├── vite.config.ts       # Vite config (path alias @/*, HMR toggle)
 ├── tsconfig.json        # TypeScript config (ES2022, ESNext, react-jsx)
