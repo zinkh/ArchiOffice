@@ -5,6 +5,7 @@
 // les deux doivent calculer exactement de la même façon, donc une seule
 // implémentation plutôt que deux qui dérivent avec le temps.
 import type { Contact } from '../types';
+import { listeTranches, tranchesActives, missionsDeTranche, type Tranche } from './tranches';
 import type { AgencySettings } from './proposalExport';
 import {
   ajouterFeuille, chargerLogo, enregistrerClasseur, nouveauClasseur, FORMAT_EURO,
@@ -18,10 +19,14 @@ export interface FeeDistributionMission {
   default_pct?: number;
   amount?: number;
   percentages: Record<string, number>;
+  /** Tranche de rattachement (voir ./tranches.ts) ; absent = tranche ferme. */
+  tranche_id?: string;
 }
 
 export interface FeeDistributionData {
   missions: FeeDistributionMission[];
+  /** Tranches fermes et conditionnelles ; absent = mode tranches désactivé. */
+  tranches?: import('./tranches').Tranche[];
 }
 
 export const DEFAULT_MISSIONS: Omit<FeeDistributionMission, 'amount' | 'percentages'>[] = [
@@ -193,9 +198,21 @@ export async function exportFeeDistributionToXlsx(
     // de base) attend la ligne du sous-total, connue seulement après la première catégorie.
     const lignesRelatives: number[] = [];
 
+    // Tranches : un groupe par tranche (titre + catégories), sinon un seul groupe sans titre.
+    const listeT = listeTranches(data);
+    const groupes: Array<{ tranche: Tranche | null; missions: any[] }> = tranchesActives(data)
+      ? listeT.map(tr => ({ tranche: tr, missions: missionsDeTranche(data.missions, tr, listeT) }))
+      : [{ tranche: null, missions: data.missions }];
+    const sousTotauxParType: Record<'ferme' | 'conditionnelle', number[]> = { ferme: [], conditionnelle: [] };
+
+    groupes.forEach((groupe) => {
+    if (groupe.tranche) {
+      const tr = groupe.tranche;
+      ecrire([`${tr.label} (${tr.type === 'conditionnelle' ? 'tranche conditionnelle' : 'tranche ferme'})${tr.condition ? ` : ${tr.condition}` : ''}`], { gras: true, fond: 'groupe' });
+    }
     categories.forEach((cat) => {
       ecrire([cat.label], { gras: true, fond: 'doux' });
-      const missions = data.missions.filter((m: any) => m.category === cat.category);
+      const missions = groupe.missions.filter((m: any) => m.category === cat.category);
       const startRow = ligne + 1;
 
       missions.forEach((m: any) => {
@@ -222,8 +239,9 @@ export async function exportFeeDistributionToXlsx(
       });
 
       const subRowIdx = ligne + 1;
-      if (cat.category === "Mission base") baseSubtotalRow = subRowIdx;
+      if (cat.category === "Mission base" && !baseSubtotalRow) baseSubtotalRow = subRowIdx;
       sousTotaux.push(subRowIdx);
+      if (groupe.tranche) sousTotauxParType[groupe.tranche.type].push(subRowIdx);
 
       const subRow: Cellule[] = [`Sous-total ${cat.label}`];
       subRow.push({ f: `SUM(B${startRow}:B${subRowIdx - 1})` });
@@ -238,6 +256,7 @@ export async function exportFeeDistributionToXlsx(
       ecrire(subRow, { gras: true, fond: 'groupe' });
       f.vide(); ligne++;
     });
+    });
 
     for (const row of lignesRelatives) {
       const cell = f.ws.getRow(row).getCell(3);
@@ -248,6 +267,13 @@ export async function exportFeeDistributionToXlsx(
     }
 
     const htSumFormula = sousTotaux.map(r => `B${r}`).join("+");
+    if (tranchesActives(data)) {
+      const somme = (rows: number[]) => (rows.length ? rows.map(r => `B${r}`).join("+") : "0");
+      f.total(["TOTAL TRANCHES FERMES HT", { f: somme(sousTotauxParType.ferme) }]); ligne++;
+      if (sousTotauxParType.conditionnelle.length > 0) {
+        f.total(["TOTAL TRANCHES CONDITIONNELLES HT", { f: somme(sousTotauxParType.conditionnelle) }]); ligne++;
+      }
+    }
     f.total(["TOTAL GENERAL HT", { f: htSumFormula }]); ligne++;
     const vat = vatRate || 20;
     f.ligne([`TVA (${vat}%)`, { f: `B${ligne}*${vat}/100` }]); ligne++;

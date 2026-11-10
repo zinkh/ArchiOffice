@@ -185,7 +185,8 @@ function GanttChart({ data }: { data: ProposalPdfData }) {
     let color = '#3b82f6';
     if (missionData?.categorie === 'execution') color = '#22c55e';
     if (missionData?.categorie === 'complementaire') color = '#f59e0b';
-    return { name: m.mission, x: toX(m.debutJours), width: Math.max(toX(m.dureeJours) - labelWidth, 3), color };
+    const conditionnelle = data.tranches.find(tr => tr.id === m.trancheId)?.type === 'conditionnelle';
+    return { name: conditionnelle ? `${m.mission} (cond.)` : m.mission, x: toX(m.debutJours), width: Math.max(toX(m.dureeJours) - labelWidth, 3), color };
   });
 
   return (
@@ -202,7 +203,7 @@ function GanttChart({ data }: { data: ProposalPdfData }) {
       {timeline.map((bar, i) => (
         <div key={i} style={{ position: 'relative', height: '6.5mm' }}>
           {/* Pas de `overflow: hidden` : jsPDF imprime le texte un peu plus bas que sa boîte et la rognerait. */}
-          <div style={{ position: 'absolute', top: '0.6mm', left: 0, whiteSpace: 'nowrap', fontSize: '6.5pt', lineHeight: 1.2, color: '#333' }}>{bar.name.substring(0, 25)}</div>
+          <div style={{ position: 'absolute', top: '0.6mm', left: 0, whiteSpace: 'nowrap', fontSize: '6.5pt', lineHeight: 1.2, color: '#333' }}>{bar.name.substring(0, 32)}</div>
           <div style={{ position: 'absolute', top: '1.2mm', left: percent(bar.x), width: percent(bar.width), height: '4mm', background: bar.color, borderRadius: '0.6mm' }} />
         </div>
       ))}
@@ -427,8 +428,46 @@ const renderSurfaces: SectionRenderer = (d, t, _ctx, newPage) => (
   </Section>
 );
 
+// Une mission répartie sur plusieurs tranches porte une ligne par tranche : la liste des
+// phases confiées n'en garde qu'une par désignation.
+function phasesUniques(missions: ProposalPdfData['missions']): ProposalPdfData['missions'] {
+  const vues = new Map<string, ProposalPdfData['missions'][number]>();
+  for (const m of missions) {
+    const cle = m.designation.trim().toLowerCase();
+    const deja = vues.get(cle);
+    vues.set(cle, deja ? { ...deja, montantHT: deja.montantHT + m.montantHT } : m);
+  }
+  return Array.from(vues.values());
+}
+
 const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
   const density = DENSITY_TOKENS[t.layout.tableDensity];
+  const renderCategories = (missionsPool: ProposalPdfData['missions'], keyPrefix: string) => (
+    <>
+              {(['base', 'execution', 'complementaire'] as const).map(cat => {
+                const catMissions = missionsPool.filter(m => m.categorie === cat);
+                if (catMissions.length === 0) return null;
+                const subtotal = catMissions.reduce((acc, m) => acc + m.montantHT, 0);
+                const catLabel = cat === 'base' ? 'Missions de Base' : cat === 'execution' ? "Missions d'Exécution" : 'Missions Complémentaires';
+                return (
+                  <React.Fragment key={`${keyPrefix}-${cat}`}>
+                    <tr data-pdf-keep-next="true" style={{ background: '#f1f5f9' }}><Td colSpan={3} style={{ fontWeight: 'bold' }}>{catLabel}</Td></tr>
+                    {catMissions.map(m => (
+                      <tr key={m.id} style={m.montantHT === 0 ? { color: '#999', fontStyle: 'italic' } : undefined}>
+                        <Td>{m.designation}</Td>
+                        <Td style={NOWRAP}>{formatPercent(m.relPct)}</Td>
+                        <Td style={NOWRAP}>{formatCurrency(m.montantHT)}</Td>
+                      </tr>
+                    ))}
+                    <tr style={{ fontWeight: 'bold' }}>
+                      <Td colSpan={2} style={{ textAlign: 'right' }}>Sous-total {catLabel.toLowerCase()}</Td>
+                      <Td style={NOWRAP}>{formatCurrency(subtotal)}</Td>
+                    </tr>
+                  </React.Fragment>
+                );
+              })}
+    </>
+  );
   return (
     <Section key="honoraires">
       <H2 template={t} newPage={newPage}>03. Étendue de la Mission & Honoraires</H2>
@@ -438,7 +477,7 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
           <div data-pdf-keep="true" style={{ marginBottom: density.tableMarginBottom }}>
             <P template={t}>Le Maître d'Ouvrage confie à l'Architecte une mission portant sur les phases suivantes :</P>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2mm', marginTop: '2mm' }}>
-              {d.missions.map(m => (
+              {phasesUniques(d.missions).map(m => (
                 <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '2mm', fontSize: '8pt', ...(m.montantHT === 0 ? { color: '#ccc', fontStyle: 'italic' } : {}) }}>
                   {/* Carré dessiné : ☑ et ☐ n'existent pas dans la police du PDF (ils sortent en « & »). */}
                   <span
@@ -468,28 +507,45 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
               </tr>
             </thead>
             <tbody>
-              {(['base', 'execution', 'complementaire'] as const).map(cat => {
-                const catMissions = d.missions.filter(m => m.categorie === cat);
-                if (catMissions.length === 0) return null;
-                const subtotal = catMissions.reduce((acc, m) => acc + m.montantHT, 0);
-                const catLabel = cat === 'base' ? 'Missions de Base' : cat === 'execution' ? "Missions d'Exécution" : 'Missions Complémentaires';
-                return (
-                  <React.Fragment key={cat}>
-                    <tr data-pdf-keep-next="true" style={{ background: '#f1f5f9' }}><Td colSpan={3} style={{ fontWeight: 'bold' }}>{catLabel}</Td></tr>
-                    {catMissions.map(m => (
-                      <tr key={m.id} style={m.montantHT === 0 ? { color: '#999', fontStyle: 'italic' } : undefined}>
-                        <Td>{m.designation}</Td>
-                        <Td style={NOWRAP}>{formatPercent(m.relPct)}</Td>
-                        <Td style={NOWRAP}>{formatCurrency(m.montantHT)}</Td>
+              {d.tranches.length > 0 ? (
+                <>
+                  {d.tranches.map(tr => {
+                    const lignes = d.missions.filter(m => (m.trancheId ?? d.tranches[0].id) === tr.id);
+                    const totalTr = lignes.reduce((acc, m) => acc + m.montantHT, 0);
+                    return (
+                      <React.Fragment key={tr.id}>
+                        <tr data-pdf-keep-next="true" style={{ background: '#e2e8f0' }}>
+                          <Td colSpan={3} style={{ fontWeight: 'bold', textTransform: 'uppercase' }}>
+                            {tr.label}{tr.type === 'conditionnelle' ? ' (tranche conditionnelle)' : ' (tranche ferme)'}
+                          </Td>
+                        </tr>
+                        {tr.type === 'conditionnelle' && tr.condition && (
+                          <tr data-pdf-keep-next="true"><Td colSpan={3} style={{ fontStyle: 'italic' }}>Condition d'affermissement : {tr.condition}</Td></tr>
+                        )}
+                        {renderCategories(lignes, tr.id)}
+                        <tr style={{ fontWeight: 'bold' }}>
+                          <Td colSpan={2} style={{ textAlign: 'right' }}>Total {tr.label}</Td>
+                          <Td style={NOWRAP}>{formatCurrency(totalTr)}</Td>
+                        </tr>
+                      </React.Fragment>
+                    );
+                  })}
+                  {d.totauxTranches && (
+                    <>
+                      <tr style={{ fontWeight: 'bold', background: '#f1f5f9' }}>
+                        <Td colSpan={2} style={{ textAlign: 'right' }}>Total tranches fermes HT</Td>
+                        <Td style={NOWRAP}>{formatCurrency(d.totauxTranches.ferme)}</Td>
                       </tr>
-                    ))}
-                    <tr style={{ fontWeight: 'bold' }}>
-                      <Td colSpan={2} style={{ textAlign: 'right' }}>Sous-total {catLabel.toLowerCase()}</Td>
-                      <Td style={NOWRAP}>{formatCurrency(subtotal)}</Td>
-                    </tr>
-                  </React.Fragment>
-                );
-              })}
+                      {d.tranches.some(x => x.type === 'conditionnelle') && (
+                        <tr style={{ fontWeight: 'bold', background: '#f1f5f9' }}>
+                          <Td colSpan={2} style={{ textAlign: 'right' }}>Total tranches conditionnelles HT</Td>
+                          <Td style={NOWRAP}>{formatCurrency(d.totauxTranches.conditionnel)}</Td>
+                        </tr>
+                      )}
+                    </>
+                  )}
+                </>
+              ) : renderCategories(d.missions, 'all')}
             </tbody>
           </Table>
         </>
@@ -502,6 +558,14 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
             <span>Remise</span><span>- {formatCurrency(d.remiseHonoraires)}</span>
+          </div>
+        </>)}
+        {d.totauxTranches && d.tranches.some(x => x.type === 'conditionnelle') && (<>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>dont tranches fermes</span><span>{formatCurrency(d.totauxTranches.ferme)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
+            <span>dont tranches conditionnelles</span><span>{formatCurrency(d.totauxTranches.conditionnel)}</span>
           </div>
         </>)}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
@@ -587,7 +651,12 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
         <tbody>
           {d.missions.map(m => (
             <tr key={m.id}>
-              <Td style={{ fontWeight: 'bold', ...tight }}>{m.designation}</Td>
+              <Td style={{ fontWeight: 'bold', ...tight }}>
+                {m.designation}
+                {d.tranches.length > 1 && (
+                  <span style={{ fontWeight: 'normal', fontSize: '0.85em' }}> ({d.tranches.find(tr => tr.id === m.trancheId)?.label ?? d.tranches[0].label})</span>
+                )}
+              </Td>
               <Td style={money}>{formatCurrency(m.montantHT)}</Td>
               <Td style={money}>{formatPercent(m.relPct)}</Td>
               {allIntervenants.map(name => {

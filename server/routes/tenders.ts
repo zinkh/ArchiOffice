@@ -6,6 +6,7 @@
 import type { Express } from 'express';
 import { tenantScopedFrom } from '../tenantScopedFrom';
 import { assertTenantEntity } from '../assertTenantEntity';
+import { erreurTranchesJson } from '../../src/lib/tranches';
 import { dispatchWebhookEvent } from '../webhookDispatch';
 
 async function assertSpecialtyContacts(supabaseAdmin: any, tenantId: string, specialties: any[] | undefined): Promise<boolean> {
@@ -75,6 +76,8 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
     try {
       const tenantId = await getTenantId(req.user.id);
       const { id: providedId, title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution, enveloppe_previsionnelle, groupement_retenu_list, honoraires_retenus_montant, fee_distribution, vat_rate, decimal_precision, exclusivite } = req.body;
+      const erreurTranches = erreurTranchesJson(fee_distribution);
+      if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
       if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
         return res.status(400).json({ error: "Mandataire introuvable pour ce cabinet." });
       }
@@ -129,6 +132,8 @@ export function registerTenderRoutes(app: Express, { supabaseAdmin, getTenantId,
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
       const { title, client, submission_deadline, status, value, notes, description, mandataire_id, type, surface, construction_cost, honoraires_percent, complexity_rate, base_fee_percent, miqcp_assessment, mandatory_visit, visit_date, withdrawal_deadline, archived, specialties_list, milestones_list, evaluation_criteria_list, ville_execution, enveloppe_previsionnelle, groupement_retenu_list, honoraires_retenus_montant, fee_distribution, vat_rate, decimal_precision, exclusivite } = req.body;
+      const erreurTranches = erreurTranchesJson(fee_distribution);
+      if (erreurTranches) return res.status(400).json({ error: `Tranches invalides : ${erreurTranches}` });
       if (mandataire_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', mandataire_id, tenantId))) {
         return res.status(400).json({ error: "Mandataire introuvable pour ce cabinet." });
       }
