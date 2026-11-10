@@ -97,6 +97,22 @@ Goal: starting a "Nouvelle discussion" with an agent should keep the previous on
 - **Retention and GDPR.** Define a retention period (and an owner-controlled "supprimer définitivement" per discussion). Archived conversations must be included in the tenant export and in the purge on tenant closure (`server/tenantExport.ts`, `server/tenantPurge.ts`).
 - **To check before building.** How `agent_conversations` and `agent_messages` are keyed today (one row per person and agent, which this would replace by many), and how the offline cache and the draft saved in `localStorage` per agent behave across several conversations.
 
+### MCP : édition des comptes-rendus de chantier — prévu
+
+⏳ Demandé le 10 novembre 2026. Étendre les outils MCP dédiés aux comptes-rendus DET au-delà de la création de brouillons et de l'ajout de contenu.
+
+- Lire et lister les comptes-rendus d'une affaire, puis lire le détail avec les identifiants stables des rubriques, observations, décisions et notes.
+- Modifier les champs du compte-rendu : date, numéro (unique dans l'affaire), météo, prochaine réunion et convocations, entreprises et présences.
+- Corriger une rubrique, une observation par lot, une décision ou une note existante ; modifier l'entreprise responsable, l'échéance et le statut. Ne changer que les champs explicitement fournis.
+- Retirer une entrée identifiée avec confirmation explicite, traçabilité et possibilité de récupération ; gérer l'ajout et le retrait des photos avec les mêmes contrôles d'accès.
+- Vérifier l'agence active, le projet, l'appartenance de chaque entrée au CR et les droits de la personne ; respecter les affaires archivées et les futurs droits des invités par atelier.
+- Protéger les modifications concurrentes par révision et refuser les écritures obsolètes ; rendre les reprises idempotentes.
+- Conserver la source, l'auteur et l'historique des changements ; présenter le résultat exact des champs modifiés.
+- Séparer l'édition de la diffusion : aucune modification ne doit envoyer le CR automatiquement. Définir un circuit explicite de correction/version pour un CR déjà diffusé.
+- Recette : correction ciblée sans perte des autres champs, refus inter-agences/inter-projets, conflits simultanés, numéros en doublon, suppression confirmée et récupération.
+
+Évolution à réaliser : les outils MCP connectés permettent actuellement la création et l'enrichissement de brouillons, pas leur édition complète.
+
 ### Confrère invité : tous les ateliers du projet — prévu
 
 ⏳ Demandé le 10 novembre 2026. Permettre au confrère invité d'utiliser tous les ateliers de l'affaire partagée : **ESQ, APS, APD, PRO, ACT, chantier / DET, AOR et réception, GPA**.
