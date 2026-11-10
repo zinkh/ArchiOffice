@@ -97,6 +97,19 @@ Goal: starting a "Nouvelle discussion" with an agent should keep the previous on
 - **Retention and GDPR.** Define a retention period (and an owner-controlled "supprimer définitivement" per discussion). Archived conversations must be included in the tenant export and in the purge on tenant closure (`server/tenantExport.ts`, `server/tenantPurge.ts`).
 - **To check before building.** How `agent_conversations` and `agent_messages` are keyed today (one row per person and agent, which this would replace by many), and how the offline cache and the draft saved in `localStorage` per agent behave across several conversations.
 
+### Confrère invité : tous les ateliers du projet — prévu
+
+⏳ Demandé le 10 novembre 2026. Permettre au confrère invité d'utiliser tous les ateliers de l'affaire partagée : **ESQ, APS, APD, PRO, ACT, chantier / DET, AOR et réception, GPA**.
+
+- Droits configurables par affaire et par atelier : lecture, contribution, création et modification selon les autorisations du cabinet.
+- Inclure la création et la modification des comptes-rendus de chantier, rubriques, observations et photos.
+- Étendre l'espace partagé et les contrôles serveur ; préserver les droits par lot et le circuit de propositions/validation du CCTP et DPGF.
+- Tracer l'auteur et protéger les modifications simultanées ; définir séparément les droits de validation, diffusion et signature.
+- Aucun accès aux autres projets ni aux ateliers non accordés, y compris par API. Respecter la révocation, la lecture seule des affaires archivées et les limites commerciales existantes des invités.
+- Recette : création/modification autorisées dans chaque atelier accordé et refus vérifié hors périmètre.
+
+Évolution à réaliser ; ces accès ne sont pas encore disponibles.
+
 ### Project sharing with a co-contractor (first slice shipped)
 
 Goal: share a project with a co-contractor (*cotraitant*) so they can work on it, and let the architect decide, item by item, what they may edit and what stays read-only.
