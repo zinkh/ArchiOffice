@@ -37,7 +37,7 @@ export const DEFAULT_MISSIONS: Omit<FeeDistributionMission, 'amount' | 'percenta
 ];
 
 export function defaultFeeDistribution(): FeeDistributionData {
-  return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+  return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: { architect: 100 } })) };
 }
 
 /**
@@ -60,24 +60,20 @@ export const DEFAULT_COTRAITANT_SHARES: Record<string, { architect: number; cotr
 };
 
 /**
- * Renseigne les parts encore vides (jamais saisies) quand un cotraitant est
- * présent : le premier reçoit sa part par défaut, l'architecte la sienne, les
- * suivants 0. Une part déjà saisie, même à 0, n'est jamais touchée. Renvoie
- * null quand il n'y a rien à compléter, pour ne pas déclencher de sauvegarde.
+ * Initialise les parts non renseignées : architecte 100 %, cotraitants 0 %.
+ * Toute valeur saisie, y compris 0, est conservée. Renvoie null sans changement.
  */
 export function applyDefaultCotraitantShares(
   missions: FeeDistributionMission[],
   contactIds: string[],
 ): FeeDistributionMission[] | null {
-  if (contactIds.length === 0) return null;
   let changed = false;
   const next = missions.map(m => {
-    const shares = DEFAULT_COTRAITANT_SHARES[m.id];
     const pct = { ...(m.percentages || {}) };
     let touched = false;
-    if (pct.architect === undefined && shares) { pct.architect = shares.architect; touched = true; }
-    contactIds.forEach((id, i) => {
-      if (pct[id] === undefined) { pct[id] = i === 0 && shares ? shares.cotraitant : 0; touched = true; }
+    if (pct.architect === undefined) { pct.architect = 100; touched = true; }
+    contactIds.forEach((id) => {
+      if (pct[id] === undefined) { pct[id] = 0; touched = true; }
     });
     if (!touched) return m;
     changed = true;
@@ -213,7 +209,7 @@ export async function exportFeeDistributionToXlsx(
         soldeFormula += "))/100";
         rowData.push({ f: soldeFormula });
 
-        rowData.push(m.percentages['architect'] || 0);
+        rowData.push(m.percentages?.['architect'] ?? 100);
         rowData.push({ f: `B${r}*E${r}/100` });
 
         selectedContacts.forEach((c, i) => {

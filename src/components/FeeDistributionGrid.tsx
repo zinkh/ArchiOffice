@@ -66,7 +66,7 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
         return JSON.parse(doc.fee_distribution);
       } catch (e) {}
     }
-    return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+    return { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: { architect: 100 } })) };
   }, [doc.fee_distribution]);
 
   React.useEffect(() => {
@@ -144,9 +144,7 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     updateMission(missionId, 'amount', (newRelPct * refAmount) / 100);
   };
 
-  // Un cotraitant qui apparaît reçoit, sur chaque mission, la part par défaut du
-  // tableau type du cabinet ; l'architecte prend le complément. Seules les parts
-  // jamais saisies sont complétées : une valeur déjà posée, même à 0, reste.
+  // Compléter uniquement les parts absentes, sans modifier les saisies manuelles.
   const contactIdsKey = selectedContacts.map((c: any) => c.id).join('|');
   React.useEffect(() => {
     const ids = contactIdsKey ? contactIdsKey.split('|') : [];
@@ -172,7 +170,7 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     const isBase = m.category === 'Mission base';
     const amt = m.amount || 0;
     const relPct = refAmount > 0 ? (amt / refAmount) * 100 : 0;
-    const archPct = m.percentages['architect'] || 0;
+    const archPct = m.percentages?.['architect'] ?? 100;
     const archAmt = amt * (archPct / 100);
     let sumPct = archPct;
     selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
@@ -222,12 +220,12 @@ export function FeeDistributionGrid({ doc, contacts, onChange, milestones, onMil
     const relEcart = label === 'Sous-total Base' && refAmount > 0 && Math.abs(relPct - 100) > 0.005;
     const totalSolde = missions.reduce((acc: number, m: any) => {
       const mAmt = m.amount || 0;
-      const archPct = m.percentages['architect'] || 0;
+      const archPct = m.percentages?.['architect'] ?? 100;
       let sumPct = archPct;
       selectedContacts.forEach((c: any) => { sumPct += (m.percentages[c.id] || 0); });
       return acc + mAmt * ((100 - sumPct) / 100);
     }, 0);
-    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages['architect'] || 0) / 100), 0);
+    const totalArchAmt = missions.reduce((acc: number, m: any) => acc + (m.amount || 0) * ((m.percentages?.['architect'] ?? 100) / 100), 0);
     return (
       <tr key={label}>
         <td style={totalStyle}>{totalLabels[label] ?? label}</td>

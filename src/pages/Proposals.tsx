@@ -240,7 +240,7 @@ export default function Proposals() {
       missions: DEFAULT_MISSIONS.map(m => ({ 
         ...m, 
         amount: m.default_pct ? (0 * (m.default_pct / 100)) : 0,
-        percentages: {} 
+        percentages: { architect: 100 } 
       })) 
     }),
     construction_cost: 0,
@@ -607,7 +607,7 @@ export default function Proposals() {
   };
 
   const handleLoadMiqcpPhaseRepartition = () => {
-    const currentData = newProposal.fee_distribution ? JSON.parse(newProposal.fee_distribution) : { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: {} })) };
+    const currentData = newProposal.fee_distribution ? JSON.parse(newProposal.fee_distribution) : { missions: DEFAULT_MISSIONS.map(m => ({ ...m, percentages: { architect: 100 } })) };
     const baseTotal = newProposal.amount || 0;
     const precision = newProposal.decimal_precision ?? 2;
     const missions = (currentData.missions || []).map((m: any) => {
