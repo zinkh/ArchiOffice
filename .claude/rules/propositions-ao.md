@@ -259,3 +259,33 @@ lecture seule sans `onUpdate`. Fiche affaire : chaque jalon modifié est réenre
 `persistMilestones`). Appel d'offres : le diagramme édite la liste du formulaire, enregistrée avec l'appel d'offres ; le serveur
 (`milestonesForInsert`, `server/routes/tenders.ts`) garde désormais durée et dépendances, reprend l'identifiant d'un jalon seulement s'il
 appartenait déjà à l'appel d'offres et réécrit les dépendances vers les identifiants enregistrés.
+
+### Tranches fermes et conditionnelles (propositions et appels d'offres)
+
+Même moteur pour les deux : `HonorairesSection.tsx` et `FeeDistributionGrid.tsx` (la grille de répartition des
+honoraires). **Aucune migration** : les tranches vivent dans le JSON `fee_distribution` déjà porté par `proposals` et
+`tenders` : `{ tranches: [{ id, label, type: 'ferme' | 'conditionnelle', condition? }], contrat_tranches?, missions: [{ ..., tranche_id }] }`.
+Logique pure et testée dans `src/lib/tranches.ts` (`src/lib/__tests__/tranches.test.ts`).
+
+- **Optionnel et rétrocompatible** : sans liste `tranches`, tout se comporte comme avant (tranche ferme implicite,
+  `listeTranches`). L'interrupteur « Découper en tranches » de la section Honoraires active le mode ; il ne se
+  désactive que sans tranche conditionnelle. Il reste toujours au moins une tranche ferme (`modifierTranche`,
+  `supprimerTranche` refusent sinon) ; supprimer une tranche renvoie ses missions dans la première tranche ferme.
+- **Répartir une mission sur plusieurs tranches** : duplication de la ligne (`dupliquerMissionSurTranche`, id
+  `<mission>__<tranche>`, montant à saisir, parts d'intervenants copiées). Le sélecteur ⇄ déplace la ligne, ⧉ la
+  duplique. Une mission à `tranche_id` absent ou inconnu compte en tranche ferme (`trancheDeMission`).
+- **Montants** : `proposals.amount` reste le **total toutes tranches** (lu par la MAF et les factures) ; `totauxParTranche`
+  donne le ferme, le conditionnel et le global, affichés dans la grille, l'Excel et le PDF.
+- **Planning** : `planifierCalendrierParTranches` (`proposalExport.ts`, utilisé par l'écran `ProposalGantt` et le PDF)
+  planifie chaque tranche comme un planning complet, la suivante démarrant à la fin de la précédente (la conditionnelle
+  après la ferme). Un jour de début réglé à la main (`proposals.planning`) reste absolu.
+- **Contrat MOE à l'acceptation** (`PUT /api/proposals/:id`) : `contrat_tranches` (`'ferme'` ou `'toutes'`, défaut
+  `toutes`, choisi sous la grille quand une conditionnelle existe) décide si le contrat reprend la tranche ferme seule
+  (montant du contrat = total ferme) ou toutes les tranches. Chaque mission du contrat porte sa `tranche` (libellé).
+- **Validation serveur** : `validerTranches` / `erreurTranchesJson` à l'enregistrement d'une proposition et d'un appel
+  d'offres (400 si type invalide, identifiants en double, mission rattachée à une tranche inconnue, aucune tranche
+  ferme). `tests/proposalTranches.test.ts`.
+- **Exports** : PDF de proposition groupé par tranche (titre, condition d'affermissement, total par tranche, totaux
+  ferme et conditionnel ; la liste des phases confiées ne répète pas une mission répartie sur plusieurs tranches) ;
+  Excel : un groupe par tranche et les lignes « TOTAL TRANCHES FERMES / CONDITIONNELLES HT » (formules).
+

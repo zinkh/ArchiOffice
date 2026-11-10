@@ -29,6 +29,7 @@ import { UrbanPlanningInfo } from '../components/UrbanPlanningInfo';
 import { HistoricalMonuments } from '../components/HistoricalMonuments';
 import { InfoPanelBoundary } from '../components/InfoPanelBoundary';
 import ProposalGantt from '../components/ProposalGantt';
+import { listeTranches, tranchesActives } from '../lib/tranches';
 import { MobileAccordionTable } from '../components/MobileAccordionTable';
 import CorrespondenceTab from '../components/CorrespondenceTab';
 import LinkedMeetings from '../components/LinkedMeetings';
@@ -631,7 +632,10 @@ export default function Proposals() {
   }), [newProposal.construction_cost, newProposal.base_fee_percent, newProposal.complexity_rate, newProposal.mission_scope, newProposal.scope_share_pct, newProposal.fee_rounding, newProposal.discount_mode, newProposal.discount_value, newProposal.vat_rate]);
   // Décomposition affichée : calculée depuis les facteurs ; à défaut (montant saisi à la main), depuis le montant.
   const ganttMissions = React.useMemo(() => {
-    try { return (JSON.parse(newProposal.fee_distribution || '{}').missions || []).map((m: any) => ({ id: m.id, name: m.name, category: m.category })); } catch { return []; }
+    try { return (JSON.parse(newProposal.fee_distribution || '{}').missions || []).map((m: any) => ({ id: m.id, name: m.name, category: m.category, tranche_id: m.tranche_id })); } catch { return []; }
+  }, [newProposal.fee_distribution]);
+  const ganttTranches = React.useMemo(() => {
+    try { return tranchesActives(JSON.parse(newProposal.fee_distribution || '{}')) ? listeTranches(JSON.parse(newProposal.fee_distribution || '{}')) : []; } catch { return []; }
   }, [newProposal.fee_distribution]);
   const feeBreakdown = React.useMemo(
     () => computeFees(feeInputs) ?? applyDiscountAndVat(newProposal.fee_gross ?? newProposal.amount ?? 0, feeInputs),
@@ -1641,6 +1645,7 @@ export default function Proposals() {
                     </h3>
                     <ProposalGantt
                       missions={ganttMissions}
+                      tranches={ganttTranches}
                       planning={newProposal.planning}
                       onChange={(planning) => setNewProposal(prev => ({ ...prev, planning }))}
                     />

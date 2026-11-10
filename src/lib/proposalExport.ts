@@ -11,6 +11,7 @@
 // src/components/ProposalExportModal.tsx, which is the only place that needs it.
 import { scopeShare } from './proposalFees';
 import { parsePlanning, type PlanningOverride } from './proposalPlanning';
+import { listeTranches, tranchesActives, trancheDeMission, totauxParTranche } from './tranches';
 import type { Proposal, ProposalSpecialty } from '../types';
 import { isErpOperation } from './erp';
 import { operationNature, surfaceExistante, surfaceRehabilitee, surfaceDePlancher, toSurface } from './proposalSurfaces';
@@ -60,6 +61,8 @@ export interface MissionLine {
   montantHT: number;
   relPct: number;
   intervenants: MissionIntervenant[];
+  /** Tranche de rattachement (absent : tranche ferme, ou propositions sans tranches). */
+  trancheId?: string;
 }
 
 export interface CalendrierItem {
@@ -72,6 +75,8 @@ export interface CalendrierItem {
   apres: string;
   /** Ids des missions avec lesquelles celle-ci est menée en parallèle (VISA, EXE, OPC). */
   avec: string[];
+  /** Tranche de la mission, quand la proposition est découpée en tranches. */
+  trancheId?: string;
 }
 
 type PhaseMop = 'det' | 'aor' | 'visa' | 'exe' | 'opc';
@@ -145,6 +150,48 @@ export function planifierCalendrier(
     });
   }
   return items;
+}
+
+/**
+ * Planning d'une proposition découpée en tranches : chaque tranche s'enchaîne comme un
+ * planning complet (phases parallèles comprises), la tranche suivante démarrant à la fin
+ * de la précédente (la conditionnelle après la ferme). Un jour de début réglé à la main
+ * reste absolu : il n'est jamais décalé. Sans tranches, identique à `planifierCalendrier`.
+ */
+export function planifierCalendrierParTranches(
+  missions: Array<{ id: string; designation: string; trancheId?: string }>,
+  tranches: Array<{ id: string; type: 'ferme' | 'conditionnelle' }>,
+  duree = DUREE_MISSION_PAR_DEFAUT_JOURS,
+  reglages: Record<string, PlanningOverride> = {},
+): CalendrierItem[] {
+  if (tranches.length <= 1) return planifierCalendrier(missions, duree, reglages);
+  const parDefaut = (tranches.find(t => t.type === 'ferme') ?? tranches[0]).id;
+  const connues = new Set(tranches.map(t => t.id));
+  const resultat: CalendrierItem[] = [];
+  let decalage = 0;
+  let derniereChaine = '';
+  for (const tranche of tranches) {
+    const lignes = missions.filter(m => {
+      const id = m.trancheId && connues.has(m.trancheId) ? m.trancheId : parDefaut;
+      return id === tranche.id;
+    });
+    if (lignes.length === 0) continue;
+    const items = planifierCalendrier(lignes, duree, reglages);
+    let fin = decalage;
+    items.forEach((item, i) => {
+      const manuel = reglages[lignes[i].id]?.debut !== undefined;
+      if (!manuel) item.debutJours += decalage;
+      // La première mission de la chaîne succède à la dernière de la tranche précédente.
+      if (!manuel && item.apres === '' && item.avec.length === 0 && derniereChaine) item.apres = derniereChaine;
+      item.trancheId = tranche.id;
+      fin = Math.max(fin, item.debutJours + item.dureeJours);
+    });
+    const chaine = items.filter(i => i.avec.length === 0);
+    if (chaine.length > 0) derniereChaine = chaine[chaine.length - 1].id;
+    resultat.push(...items);
+    decalage = fin;
+  }
+  return resultat;
 }
 
 const PROPOSAL_STATUS_LABELS_FR: Record<string, string> = {
@@ -226,6 +273,10 @@ export interface ProposalPdfData {
   /** Identité de chaque cotraitant (fiche contact), par identifiant de contact. Chargée à part. */
   cotraitantIdentites?: Record<string, CotraitantIdentityPdf>;
   missions: MissionLine[];
+  /** Tranches fermes et conditionnelles ; liste vide quand la proposition n'est pas découpée. */
+  tranches: Array<{ id: string; label: string; type: 'ferme' | 'conditionnelle'; condition: string }>;
+  /** Totaux HT par tranche (ferme, conditionnel, global) quand la proposition est découpée. */
+  totauxTranches: { ferme: number; conditionnel: number; global: number } | null;
   calendrier: CalendrierItem[];
   notes: string;
 
@@ -488,9 +539,13 @@ function buildIntervenants(mission: FeeDistributionMission, specialties: Proposa
 
 export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): ProposalPdfData {
   let missions: MissionLine[] = [];
+  let tranches: ProposalPdfData['tranches'] = [];
+  let totauxTranches: ProposalPdfData['totauxTranches'] = null;
   try {
     const feeData = JSON.parse(p.fee_distribution || '{}');
     if (Array.isArray(feeData.missions)) {
+      const liste = listeTranches(feeData);
+      const actives = tranchesActives(feeData);
       missions = feeData.missions.map((m: FeeDistributionMission) => ({
         id: m.id,
         designation: m.name || '',
@@ -498,7 +553,13 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
         montantHT: m.amount || 0,
         relPct: m.default_pct || 0,
         intervenants: buildIntervenants(m, p.specialties_list || []),
+        ...(actives ? { trancheId: trancheDeMission(m as { tranche_id?: string }, liste).id } : {}),
       }));
+      if (actives) {
+        tranches = liste.map(t => ({ id: t.id, label: t.label, type: t.type, condition: t.condition ?? '' }));
+        const t = totauxParTranche(feeData);
+        totauxTranches = { ferme: t.ferme, conditionnel: t.conditionnel, global: t.global };
+      }
     }
   } catch {
     // fee_distribution absent or malformed — sections relying on it render empty, not broken
@@ -581,7 +642,9 @@ export function mapProposalToPdfData(p: Proposal, settings: AgencySettings): Pro
       contactId: s.contact_id || undefined,
     })),
     missions,
-    calendrier: planifierCalendrier(missions, DUREE_MISSION_PAR_DEFAUT_JOURS, parsePlanning(p.planning).items),
+    tranches,
+    totauxTranches,
+    calendrier: planifierCalendrierParTranches(missions, tranches, DUREE_MISSION_PAR_DEFAUT_JOURS, parsePlanning(p.planning).items),
     notes: p.notes || '',
 
     agenceNom: settings.agencyName || '',
