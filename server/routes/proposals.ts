@@ -1,3 +1,4 @@
+import { stripProposalTracking, followUpDate } from '../../src/lib/proposalFollowUp';
 // Phase 7 extraction — moved out of server.ts's inline Proposals section
 // (the last domain of the deliberately-deferred core, alongside Invoices).
 // getNextDocNumber (auto-numbering, shared with notesHonoraires.ts and the
@@ -40,7 +41,7 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
   app.post("/api/proposals", validateBody(proposalSchema), async (req: any, res: any) => {
     try {
       const tenantId = await getTenantId(req.user.id);
-      const p = req.body;
+      const p = stripProposalTracking(req.body);
       const id = p.id || crypto.randomUUID();
       const created_at = new Date().toISOString();
       const { specialties_list, client_name: _cn, construction_cost_num: _ccn, ...proposalData } = p;
@@ -54,7 +55,7 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
       if (!proposalData.reference) {
         proposalData.reference = await getNextDocNumber(tenantId, 'num_prefix_devis', 'proposals', 'DEVIS');
       }
-      const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, amount: p.amount || 0, status: p.status || 'Draft' });
+      const { error: insErr } = await supabaseAdmin.from('proposals').insert({ ...proposalData, id, tenant_id: tenantId, created_at, ...(p.status === 'Sent' ? { sent_at: created_at, next_follow_up_at: followUpDate(created_at) } : {}), amount: p.amount || 0, status: p.status || 'Draft' });
       if (insErr) throw insErr;
       if (specialties_list && Array.isArray(specialties_list)) {
         const specs = specialties_list.map((spec: any) => ({ id: crypto.randomUUID(), proposal_id: id, tenant_id: tenantId, specialty_name: spec.specialty_name, contact_id: spec.contact_id || null }));
@@ -78,15 +79,23 @@ export function registerProposalRoutes(app: Express, { supabaseAdmin, getTenantI
     try {
       tenantId = await getTenantId(req.user.id);
       const { id } = req.params;
-      const p = req.body;
+      const p = stripProposalTracking(req.body);
 
       // Fetch old proposal to check status transition
-      const { data: oldProposal } = await supabaseAdmin.from('proposals').select('status').eq('id', id).eq('tenant_id', tenantId).single();
+      const { data: oldProposal } = await supabaseAdmin.from('proposals').select('*').eq('id', id).eq('tenant_id', tenantId).single();
 
+      if (!oldProposal) return res.status(404).json({ error: 'Proposition introuvable.' });
+      if (['creating', 'draft', 'unknown', 'inprogress'].includes(oldProposal.signature_status)) return res.status(409).json({ error: 'Terminez ou retirez la demande de signature avant de modifier la proposition.' });
+      if (oldProposal.archived_at) return res.status(409).json({ error: 'Restaurez cette proposition avant de la modifier.' });
       const { specialties_list, proposal_specialties: _ps, id: _pid, tenant_id: _tid, created_at: _ca, client_name: _cn, construction_cost_num: _ccn2, ...updateData } = p;
       if (updateData.client_id && !(await assertTenantEntity(supabaseAdmin, 'contacts', updateData.client_id, tenantId))) {
         return res.status(400).json({ error: "Client introuvable pour ce cabinet." });
       }
+      if (p.status === 'Sent' && oldProposal.status !== 'Sent') {
+        updateData.sent_at = oldProposal.sent_at || new Date().toISOString();
+        updateData.next_follow_up_at = followUpDate(updateData.sent_at);
+      }
+      if (p.status === 'Accepted' || p.status === 'Rejected') updateData.next_follow_up_at = null;
       const { error: updErr } = await supabaseAdmin.from('proposals').update(updateData).eq('id', id).eq('tenant_id', tenantId);
       if (updErr) throw updErr;
 

@@ -1,3 +1,5 @@
+import { ProposalFollowUp, updateProposalFollowUp } from '../components/proposal/ProposalFollowUp';
+import { proposalReminderDue, proposalArchiveDue } from '../lib/proposalFollowUp';
 import { contactPatchFromProposal, fillMissingClientFields } from '../lib/proposalClient';
 import * as React from 'react';
 import { useState, useEffect, useId, useMemo, useRef } from 'react';
@@ -182,11 +184,18 @@ export default function Proposals() {
   const [editingProposal, setEditingProposal] = useState<Proposal | null>(null);
   const [exportProposal, setExportProposal] = useState<Proposal | null>(null);
   // `send` : la fenêtre s'ouvre depuis « Envoyer au client » (l'envoi y est l'action principale).
-  const [exportIntent, setExportIntent] = useState<'export' | 'send'>('export');
-  const openExport = (p: Proposal, intent: 'export' | 'send') => { setExportIntent(intent); setExportProposal(p); };
+  const [exportIntent, setExportIntent] = useState<'export' | 'send' | 'sign'>('export');
+  const openExport = (p: Proposal, intent: 'export' | 'send' | 'sign') => { setExportIntent(intent); setExportProposal(p); };
   const clientEmailOf = (p: Proposal): string => {
     const contact = contacts.find(c => c.id === p.client_id);
     return p.email_client || contact?.email || contact?.email_work || '';
+  };
+  const [followUpProposal, setFollowUpProposal] = useState<Proposal | null>(null);
+  const [followUpView, setFollowUpView] = useState('active');
+  const mergeFollowUp = (updated: Proposal) => {
+    const merge = (p: Proposal) => p.id === updated.id ? { ...p, ...updated } : p;
+    setProposals(prev => prev.map(merge));
+    setFollowUpProposal(prev => prev ? merge(prev) : null);
   };
   const [searchQuery, setSearchQuery] = useState('');
   const initialProposalState: Partial<Proposal> = {
@@ -578,6 +587,10 @@ export default function Proposals() {
   };
 
   const filteredProposals = proposals.filter(p =>
+    followUpView === 'archived' ? !!p.archived_at :
+    followUpView === 'remind' ? proposalReminderDue(p) :
+    followUpView === 'archive_due' ? proposalArchiveDue(p) : !p.archived_at
+  ).filter(p =>
     p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.client_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     p.reference?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -757,8 +770,15 @@ export default function Proposals() {
         </div>
       </div>
 
-      <div className="flex items-center gap-4 p-4 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
-        <div className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-3 p-4 rounded-lg" style={{ background: 'var(--tblr-surface)', border: '1px solid var(--tblr-border)' }}>
+        <label htmlFor="proposal-follow-up-view" className="sr-only">{t('proposal_fu_view')}</label>
+        <select id="proposal-follow-up-view" className="form-control max-w-48" value={followUpView} onChange={e => setFollowUpView(e.target.value)}>
+          <option value="active">{t('proposal_fu_active')}</option>
+          <option value="remind">{t('proposal_fu_due')}</option>
+          <option value="archive_due">{t('proposal_fu_archive_due')}</option>
+          <option value="archived">{t('proposal_fu_archived')}</option>
+        </select>
+        <div className="relative flex-1 min-w-0">
           <IconSearch className="absolute left-3 top-1/2 -translate-y-1/2" size={18} style={{ color: 'var(--tblr-muted)' }} />
           <input
             type="text"
@@ -796,11 +816,12 @@ export default function Proposals() {
               )},
             ]}
             actions={p => (
-              <div className="flex gap-2">
-                <button onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
-                <button onClick={() => openExport(p, 'send')} title={t('proposals_send_to_client')} aria-label={t('proposals_send_to_client')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconSend size={15} /></button>
+              <div className="flex flex-wrap gap-2">
+                <button className="btn btn-secondary" onClick={() => setFollowUpProposal(p)}>{t('proposal_fu_title')}</button>
+                <button disabled={!!p.archived_at} onClick={() => handleEditClick(p)} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-muted)', background: 'var(--tblr-surface)' }}><IconEdit size={15} /></button>
+                <button disabled={!!p.archived_at} onClick={() => openExport(p, 'send')} title={t('proposals_send_to_client')} aria-label={t('proposals_send_to_client')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconSend size={15} /></button>
                 <button onClick={() => openExport(p, 'export')} title={t('prop_a_export_pdf')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-primary)', background: 'var(--tblr-primary-lt)' }}><IconFileTypePdf size={15} /></button>
-                {p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
+                {!p.archived_at && p.status !== 'Accepted' && <button onClick={() => handleUpdateStatus(p, 'Accepted')} className="p-1.5 rounded-lg" style={{ color: 'var(--tblr-success)', background: 'rgba(47,179,135,0.1)' }}><IconCircleCheck size={15} /></button>}
               </div>
             )}
           />
@@ -855,8 +876,9 @@ export default function Proposals() {
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button className="btn btn-secondary" onClick={() => setFollowUpProposal(proposal)}>{t('proposal_fu_title')}</button>
                       <button
-                        onClick={() => handleEditClick(proposal)}
+                        disabled={!!proposal.archived_at} onClick={() => handleEditClick(proposal)}
                         className="p-1.5 rounded-lg transition-colors"
                         style={{ color: 'var(--tblr-muted)' }}
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--tblr-surface-2)')}
@@ -876,7 +898,7 @@ export default function Proposals() {
                         <IconFileText size={20} />
                       </button>
                       <button
-                        onClick={() => openExport(proposal, 'send')}
+                        disabled={!!proposal.archived_at} onClick={() => openExport(proposal, 'send')}
                         className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                         title={t('proposals_send_to_client')}
                         aria-label={t('proposals_send_to_client')}
@@ -897,7 +919,7 @@ export default function Proposals() {
                       >
                         <IconContract size={20} />
                       </button>
-                      {proposal.status !== 'Accepted' && (
+                      {!proposal.archived_at && proposal.status !== 'Accepted' && (
                         <>
                           <button 
                             onClick={() => handleUpdateStatus(proposal, 'Accepted')}
@@ -1792,13 +1814,21 @@ export default function Proposals() {
         }}
       />
 
+      {followUpProposal && <ProposalFollowUp key={followUpProposal.id}
+        proposal={followUpProposal} email={clientEmailOf(followUpProposal)} onChange={mergeFollowUp}
+        onClose={() => setFollowUpProposal(null)}
+        onSign={() => { openExport(followUpProposal, 'sign'); setFollowUpProposal(null); }}
+      />}
       {exportProposal && (
         <ProposalExportModal
           proposal={exportProposal}
           intent={exportIntent}
           clientEmail={clientEmailOf(exportProposal)}
           // Un brouillon envoyé au client n'est plus un brouillon : il passe « Envoyée ».
-          onSent={() => { if (exportProposal.status === 'Draft') handleUpdateStatus(exportProposal, 'Sent'); }}
+          onSent={() => {
+            if (exportIntent === 'sign') { void fetchProposals(); return; }
+            void updateProposalFollowUp(exportProposal.id, 'sent').then(mergeFollowUp).catch(e => alert(e.message));
+          }}
           onClose={() => setExportProposal(null)}
         />
       )}

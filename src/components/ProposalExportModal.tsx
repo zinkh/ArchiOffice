@@ -1,3 +1,4 @@
+import { SendProposalSignature } from './proposal/SendProposalSignature';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -1030,7 +1031,7 @@ interface ProposalExportModalProps {
   /** Appelé quand le message a bien été envoyé au client. */
   onSent?: () => void;
   /** `send` : ouverte depuis « Envoyer au client », l'envoi est l'action principale. */
-  intent?: 'export' | 'send';
+  intent?: 'export' | 'send' | 'sign';
 }
 
 export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSent, intent = 'export' }: ProposalExportModalProps) {
@@ -1296,14 +1297,14 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={handleSend}
-              aria-label={t('proposals_send_to_client')}
+              aria-label={t(intent === 'sign' ? 'proposal_sign_send' : 'proposals_send_to_client')}
               disabled={isPreparingMail || isGenerating}
               className={intent === 'send'
                 ? 'flex items-center gap-2 px-2.5 sm:px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white rounded-lg text-sm font-bold transition'
                 : 'flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-60 rounded-lg text-sm font-bold transition'}
             >
               <IconSend size={16} />
-              <span className="hidden sm:inline">{isPreparingMail ? t('proposals_send_preparing') : t('proposals_send_to_client')}</span>
+              <span className="hidden sm:inline">{isPreparingMail ? t('proposals_send_preparing') : t(intent === 'sign' ? 'proposal_sign_send' : 'proposals_send_to_client')}</span>
             </button>
             <button
               onClick={handleExport}
@@ -1409,7 +1410,11 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
           </div>
         </div>
       </div>
-      {mailFile && (
+      {mailFile && intent === 'sign' && <SendProposalSignature
+        file={mailFile} proposalId={proposal.id} email={clientEmail} name={proposal.client_name || proposal.representant || ''}
+        onSent={() => { setMailFile(null); onSent?.(); }} onClose={() => setMailFile(null)}
+      />}
+      {mailFile && intent !== 'sign' && (
         <SendProposalMail
           file={mailFile}
           to={clientEmail}

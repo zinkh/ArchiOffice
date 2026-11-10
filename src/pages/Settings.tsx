@@ -1,3 +1,4 @@
+import { ZohoSignConnection, SignatureProviderSettings } from '../components/proposal/SignatureProviderSettings';
 import { DriveAccessPanel } from '../components/DriveAccessPanel';
 import { DeleteProjectCard } from '../components/settings/DeleteProjectCard';
 import React, { useState, useEffect, useRef } from 'react';
@@ -85,6 +86,16 @@ const PLUGIN_REGISTRY: PluginDef[] = [
     iconBg: 'bg-orange-50',
     iconColor: 'text-orange-600',
     iconLabel: 'ZI',
+  },
+  {
+    id: 'zoho_sign', name: 'Zoho Sign', vendor: 'Zoho Corporation',
+    description: 'Signature électronique des propositions avec le compte Zoho Sign du cabinet.',
+    category: 'compliance', status: 'active', iconBg: 'bg-[var(--tblr-primary-lt)]', iconColor: 'text-[var(--tblr-primary)]', iconLabel: 'ZS',
+  },
+  {
+    id: 'docuseal', name: 'DocuSeal', vendor: 'DocuSeal',
+    description: 'Signature électronique des propositions avec le compte DocuSeal du cabinet.',
+    category: 'compliance', status: 'active', iconBg: 'bg-[var(--tblr-primary-lt)]', iconColor: 'text-[var(--tblr-primary)]', iconLabel: 'DS',
   },
   {
     id: 'zoho_books',
@@ -1767,6 +1778,8 @@ export default function Settings() {
       </div>
     );
 
+    if (pluginId === 'zoho_sign') return <div className="space-y-5"><ZohoSignConnection /><SignatureProviderSettings plugin="zoho" /></div>;
+    if (pluginId === 'docuseal') return <SignatureProviderSettings plugin="docuseal" />;
     if (pluginId === 'zoho_books') return (
       <div className="space-y-4">
         {zohoBooksNotice && (
