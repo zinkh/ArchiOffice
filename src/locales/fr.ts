@@ -5295,6 +5295,7 @@ export default {
   "proposals_send_mail_subject": "Proposition d'honoraires {{reference}} - {{title}}",
   "proposals_send_mail_body": "Bonjour,\n\nVeuillez trouver ci-joint notre proposition {{reference}} relative à l'opération « {{title}} ».\n\nNous restons à votre disposition pour en discuter et répondre à vos questions.\n\nCordialement,",
   "proposals_export_generating": "Génération…",
+  "proposals_edit_from_export": "Modifier la proposition",
   "proposals_export_pdf": "Exporter PDF",
   "drive_access_intro": "Vérifiez l’accès de ce cabinet et gérez vos appareils de synchronisation.",
   "drive_access_refresh": "Vérifier à nouveau",

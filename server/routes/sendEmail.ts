@@ -20,6 +20,7 @@ import { tenantScopedFrom } from '../tenantScopedFrom';
 import { sendViaAccount } from '../mailSend';
 import { sanitizeEmailAttachments } from '../emailAttachments';
 import { resolveEmailSender } from '../emailSender';
+import { applyMailSignature } from '../mailSignature';
 
 export interface RouteDeps {
   supabaseAdmin: any;
@@ -29,7 +30,7 @@ export interface RouteDeps {
 export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenantId }: RouteDeps) {
   app.post("/api/send-email", sendEmailLimiter, async (req: any, res: any) => {
     try {
-      const { to, cc: ccField, subject, text, html } = req.body;
+      const { to, cc: ccField, subject } = req.body;
       const hasCrlf = (v: unknown): boolean =>
         Array.isArray(v) ? v.some(hasCrlf) : typeof v === 'string' && /[\r\n]/.test(v);
       if (hasCrlf(to) || hasCrlf(ccField) || hasCrlf(subject)) {
@@ -43,6 +44,10 @@ export function registerSendEmailRoutes(app: Express, { supabaseAdmin, getTenant
       const attachments = safe.attachments;
 
       const tenantId = await getTenantId(req.user.id);
+
+      // Signature personnelle de l'expéditeur, ajoutée à tout envoi (sauf si le corps la contient déjà).
+      const { data: signatureRow } = await supabaseAdmin.from('profiles').select('mail_signature').eq('id', req.user.id).maybeSingle();
+      const { text, html } = applyMailSignature({ text: req.body.text, html: req.body.html }, (signatureRow as any)?.mail_signature);
 
       if (!attachments.length) {
         const { data: defaultAccount } = await tenantScopedFrom(supabaseAdmin, tenantId, 'email_connections')

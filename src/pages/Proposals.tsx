@@ -1813,6 +1813,7 @@ export default function Proposals() {
           clientEmail={clientEmailOf(exportProposal)}
           // Un brouillon envoyé au client n'est plus un brouillon : il passe « Envoyée ».
           onSent={() => { if (exportProposal.status === 'Draft') handleUpdateStatus(exportProposal, 'Sent'); }}
+          onEdit={() => { const p = exportProposal; setExportProposal(null); handleEditClick(p); }}
           onClose={() => setExportProposal(null)}
         />
       )}

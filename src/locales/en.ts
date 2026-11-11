@@ -5145,6 +5145,7 @@ export default {
   "proposals_send_mail_subject": "Fee proposal {{reference}} - {{title}}",
   "proposals_send_mail_body": "Hello,\n\nPlease find attached our proposal {{reference}} for the project \"{{title}}\".\n\nWe remain at your disposal to discuss it and answer any questions.\n\nKind regards,",
   "proposals_export_generating": "Generating…",
+  "proposals_edit_from_export": "Edit proposal",
   "proposals_export_pdf": "Export PDF",
   "drive_access_intro": "Check this firm's access and manage your sync devices.",
   "drive_access_refresh": "Check again",

@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  IconX, IconDownload, IconSend, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
+  IconX, IconDownload, IconSend, IconEdit, IconSettings, IconLayout, IconLayoutRows, IconPalette, IconLetterCase, IconLayoutSidebar,
   IconZoomIn, IconZoomOut,
 } from '@tabler/icons-react';
 import type { Proposal, MafCostResult } from '../types';
@@ -279,7 +279,11 @@ const BADGE_COLORS: Record<string, { bg: string; fg: string }> = {
 // sur les pages. `newPage` dit si son titre doit s'ouvrir sur une page neuve
 // (réglage « saut de page entre les sections », et toujours la première section).
 
-interface SectionCtx { mafCost: MafCostResult | null }
+interface SectionCtx {
+  mafCost: MafCostResult | null;
+  /** Numéro du chapitre dans le document (« 01 »...) : recalculé selon les sections réellement imprimées. */
+  num?: string;
+}
 type SectionRenderer = (d: ProposalPdfData, t: ProposalTemplate, ctx: SectionCtx, newPage: boolean) => React.ReactNode;
 
 const renderGarde = (d: ProposalPdfData, t: ProposalTemplate): React.ReactNode => {
@@ -332,11 +336,11 @@ const renderGarde = (d: ProposalPdfData, t: ProposalTemplate): React.ReactNode =
   );
 };
 
-const renderObjet: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderObjet: SectionRenderer = (d, t, ctx, newPage) => {
   const missionsList = t.clauses.missionsText.split('\n').filter(Boolean);
   return (
     <Section key="objet">
-      <H2 template={t} newPage={newPage}>01. Objet de la Mission</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Objet de la Mission</H2>
       <H3>Désignation du Maître d'Ouvrage</H3>
       <Table>
         <tbody>
@@ -392,9 +396,9 @@ const renderObjet: SectionRenderer = (d, t, _ctx, newPage) => {
   );
 };
 
-const renderSurfaces: SectionRenderer = (d, t, _ctx, newPage) => (
+const renderSurfaces: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="surfaces">
-    <H2 template={t} newPage={newPage}>02. Surfaces & Programme</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Surfaces & Programme</H2>
     <H3>Tableau des Surfaces</H3>
     <Table>
       <thead><tr><Th template={t}>Désignation</Th><Th template={t}>Surface (m²)</Th></tr></thead>
@@ -470,7 +474,7 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
   );
   return (
     <Section key="honoraires">
-      <H2 template={t} newPage={newPage}>03. Étendue de la Mission & Honoraires</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Étendue de la Mission & Honoraires</H2>
 
       {t.detailLevel === 'detaille' && (
         <>
@@ -591,13 +595,13 @@ const renderHonoraires: SectionRenderer = (d, t, ctx, newPage) => {
   );
 };
 
-const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderRepartition: SectionRenderer = (d, t, ctx, newPage) => {
   const allIntervenants = Array.from(new Set(d.missions.flatMap(m => m.intervenants.map(i => i.nom))));
 
   if (t.detailLevel === 'court') {
     return (
       <Section key="repartition">
-        <H2 template={t} newPage={newPage}>04. Répartition des Honoraires</H2>
+        <H2 template={t} newPage={newPage}>{ctx.num}. Répartition des Honoraires</H2>
         <div data-pdf-keep="true" style={{ marginTop: '6mm', width: '80mm' }}>
           {d.remiseHonoraires > 0 && (<>
             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '1mm 0' }}>
@@ -633,7 +637,7 @@ const renderRepartition: SectionRenderer = (d, t, _ctx, newPage) => {
   const designationWidth = { ...head, width: '22%' };
   return (
     <Section key="repartition">
-      <H2 template={t} newPage={newPage}>04. Répartition des Honoraires</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Répartition des Honoraires</H2>
       {/* Mise en page automatique : des colonnes de largeur égale coupaient la désignation
           en pleine lettre et les montants en deux. Les montants ne se coupent plus. */}
       <Table style={{ fontSize, tableLayout: 'auto' }}>
@@ -728,9 +732,9 @@ function CotraitantsIdentityTable({ d, t }: { d: ProposalPdfData; t: ProposalTem
   );
 }
 
-const renderCotraitants: SectionRenderer = (d, t, _ctx, newPage) => (
+const renderCotraitants: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="cotraitants">
-    <H2 template={t} newPage={newPage}>05. Cotraitants & Spécialités</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Cotraitants & Spécialités</H2>
     <P template={t}>Pour la réalisation de cette mission, l'Architecte s'entoure des compétences suivantes :</P>
     {t.layout.cotraitantIdentity ? (
       <CotraitantsIdentityTable d={d} t={t} />
@@ -753,9 +757,9 @@ const renderCotraitants: SectionRenderer = (d, t, _ctx, newPage) => (
   </Section>
 );
 
-const renderCalendrier: SectionRenderer = (d, t, _ctx, newPage) => (
+const renderCalendrier: SectionRenderer = (d, t, ctx, newPage) => (
   <Section key="calendrier">
-    <H2 template={t} newPage={newPage}>06. Calendrier Prévisionnel</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Calendrier Prévisionnel</H2>
     <div data-pdf-keep="true" style={{ width: '100%', marginTop: '10mm' }}><GanttChart data={d} /></div>
     <H3 style={{ marginTop: '10mm' }}>Récapitulatif des Durées</H3>
     <Table>
@@ -781,17 +785,17 @@ const renderCalendrier: SectionRenderer = (d, t, _ctx, newPage) => (
 
 const renderMafCost: SectionRenderer = (_d, t, ctx, newPage) => (
   <Section key="mafCost">
-    <H2 template={t} newPage={newPage}>Coût Assurance MAF</H2>
+    <H2 template={t} newPage={newPage}>{ctx.num}. Coût Assurance MAF</H2>
     <div data-pdf-keep="true">{ctx.mafCost && <MafCostBadge result={ctx.mafCost} showDetails />}</div>
   </Section>
 );
 
-const renderSignatures: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderSignatures: SectionRenderer = (d, t, ctx, newPage) => {
   // Une note annexe est un paragraphe de plus : la pagination peut couper entre deux.
   const appendixBlocks = t.clauses.appendixNotes.split(/\n{2,}/).filter(block => block.trim());
   return (
     <Section key="signatures">
-      <H2 template={t} newPage={newPage}>07. Conditions Générales & Signatures</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Conditions Générales & Signatures</H2>
       <div data-pdf-keep="true" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10mm' }}>
         <div><H3>Modalités de Règlement</H3><P template={t} style={{ fontSize: '8pt' }}>{t.clauses.reglement}</P></div>
         <div><H3>Révision des Honoraires</H3><P template={t} style={{ fontSize: '8pt' }}>{t.clauses.revision}</P></div>
@@ -847,7 +851,7 @@ function IllustrationFigure({ image, maxHeightMm }: { image: IllustrationPdf; ma
 }
 
 /** Extraits de plan puis photos : les plans pleine largeur, les photos deux par ligne. */
-const renderIllustrations: SectionRenderer = (d, t, _ctx, newPage) => {
+const renderIllustrations: SectionRenderer = (d, t, ctx, newPage) => {
   const images = d.illustrations ?? [];
   const plans = images.filter(i => !i.isPhoto);
   const photos = images.filter(i => i.isPhoto);
@@ -855,7 +859,7 @@ const renderIllustrations: SectionRenderer = (d, t, _ctx, newPage) => {
   for (let i = 0; i < photos.length; i += 2) rows.push(photos.slice(i, i + 2));
   return (
     <Section key="illustrations">
-      <H2 template={t} newPage={newPage}>Plan et photos</H2>
+      <H2 template={t} newPage={newPage}>{ctx.num}. Plan et photos</H2>
       {plans.length > 0 && photos.length > 0 && <H3>Plan</H3>}
       {plans.map((image, i) => <IllustrationFigure key={`plan-${i}`} image={image} maxHeightMm={120} />)}
       {photos.length > 0 && plans.length > 0 && <H3>Photos</H3>}
@@ -1098,11 +1102,13 @@ interface ProposalExportModalProps {
   clientEmail?: string;
   /** Appelé quand le message a bien été envoyé au client. */
   onSent?: () => void;
+  /** Ferme l'export et rouvre la proposition en édition (bouton « Modifier la proposition »). */
+  onEdit?: () => void;
   /** `send` : ouverte depuis « Envoyer au client », l'envoi est l'action principale. */
   intent?: 'export' | 'send';
 }
 
-export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSent, intent = 'export' }: ProposalExportModalProps) {
+export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSent, onEdit, intent = 'export' }: ProposalExportModalProps) {
   const { t } = useTranslation();
   const { settings } = useSettings();
   const [template, setTemplate] = useState<ProposalTemplate>(() => loadStoredTemplate());
@@ -1342,7 +1348,10 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
     .filter(({ id }) => template.pages[id] && SECTION_AVAILABLE[id](data, sectionCtx))
     // La première section s'ouvre toujours en haut d'une page (derrière la garde) ;
     // les suivantes seulement si le réglage « saut de page entre sections » est actif.
-    .map(({ id }, index) => SECTION_RENDERERS[id](data, template, sectionCtx, index === 0 || template.layout.sectionBreaks));
+    // Les chapitres se renumérotent d'après les seules sections imprimées (01, 02, 03...).
+    .map(({ id }, index) => SECTION_RENDERERS[id](
+      data, template, { ...sectionCtx, num: String(index + 1).padStart(2, '0') }, index === 0 || template.layout.sectionBreaks,
+    ));
 
   return (
     <div className="fixed inset-0 z-50 flex bg-black/60 backdrop-blur-sm">
@@ -1363,6 +1372,17 @@ export function ProposalExportModal({ proposal, onClose, clientEmail = '', onSen
             </div>
           </div>
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            {onEdit && (
+              <button
+                onClick={onEdit}
+                aria-label={t('proposals_edit_from_export')}
+                disabled={isGenerating || isPreparingMail}
+                className="flex items-center gap-2 px-2.5 sm:px-4 py-2 border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-60 rounded-lg text-sm font-bold transition"
+              >
+                <IconEdit size={16} />
+                <span className="hidden sm:inline">{t('proposals_edit_from_export')}</span>
+              </button>
+            )}
             <button
               onClick={handleSend}
               aria-label={t('proposals_send_to_client')}
