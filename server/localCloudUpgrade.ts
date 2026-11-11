@@ -144,6 +144,12 @@ export function createLocalCloudUpgradeRouter(
     await pg.connect();
     try {
       await pg.query('BEGIN');
+      // Les clés étrangères composites (colonne, tenant_id) vers projects, contacts et
+      // contrats_moe (supabase/migrate_zz_tenant_composite_fks.sql) sont DEFERRABLE : le
+      // remappage ci-dessous réécrit tenant_id table par table, dans un ordre quelconque,
+      // et un état intermédiaire (parent déjà réécrit, enfants pas encore) est normal.
+      // Le contrôle se fait au COMMIT, sur l'état final, où tout est cohérent.
+      await pg.query('SET CONSTRAINTS ALL DEFERRED');
 
       if (cloudHasSettings) {
         await pg.query('DELETE FROM settings WHERE tenant_id = $1', [oldTenantId]);
